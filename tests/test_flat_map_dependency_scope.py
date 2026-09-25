@@ -1,0 +1,271 @@
+"""Dependency scoping for constants/typedefs (``extract/flat_map_dependency_scope``).
+
+Bug class: *a declaration kind that scoping forwards verbatim through its
+closing ``dataclasses.replace``* -- PR #1001 closed it for ``semantic_ir``;
+the flat ``constants``/``typedefs`` maps had the same hole, so a constant from
+an ``--exclude-header``-ed header gated a comparison. The invariants below are
+stated against an oracle computed independently of the implementation (a
+per-key re-derivation from the generated headers), over generated inputs.
+"""
+
+from __future__ import annotations
+
+import copy
+import pickle
+
+from hypothesis import given, settings, strategies as st
+
+from abicheck.extract.flat_map_dependency_scope import scope_flat_maps
+from abicheck.model import AbiSnapshot
+from abicheck.model.declaration_headers import (
+    HeaderAttributedMap,
+    attributed,
+    declaring_header,
+    declaring_header_set,
+    has_attribution,
+)
+from abicheck.model.fact import Fact
+from abicheck.model.identity import (
+    ScopePath,
+    entity_id_for_constant,
+    entity_id_for_typedef,
+)
+from abicheck.model.occurrence import OccurrenceId
+from abicheck.model.semantic_ir import (
+    CanonicalEntity,
+    SemanticIR,
+    semantic_ir_conflict_key,
+)
+
+DEP_HEADERS = ("/usr/include/dep.h", "/proj/excluded.h")
+OWN_HEADERS = ("/proj/api.h", "/proj/other.h")
+HEADERS = (*DEP_HEADERS, *OWN_HEADERS, "")  # "" = unknown origin
+
+
+def _is_dep(header: str | None) -> bool:
+    return header in DEP_HEADERS
+
+
+names = st.text(alphabet="abcxyz_", min_size=1, max_size=4)
+entries = st.dictionaries(names, st.sampled_from(HEADERS), max_size=8)
+
+
+def _snapshot(constants: dict[str, str], typedefs: dict[str, str]) -> AbiSnapshot:
+    c = attributed((k, "1", h) for k, h in constants.items())
+    t = attributed((k, "int", h) for k, h in typedefs.items())
+    return AbiSnapshot(
+        library="x",
+        version="1",
+        constants=c,
+        typedefs=t,
+        typedefs_qualified=attributed(
+            (f"ns::{k}", "int", h) for k, h in typedefs.items()
+        ),
+        constant_entity_ids={k: entity_id_for_constant(ScopePath(()), k) for k in c},
+        typedef_entity_ids={
+            f"ns::{k}": entity_id_for_typedef(ScopePath(()), k) for k in t
+        },
+    )
+
+
+def _ir(snap: AbiSnapshot) -> tuple[SemanticIR, dict[str, str]]:
+    occ = {
+        OccurrenceId(eid): CanonicalEntity(canonical_spelling=Fact.present("v"))
+        for eid in [
+            *snap.constant_entity_ids.values(),
+            *snap.typedef_entity_ids.values(),
+        ]
+    }
+    conflicts = {semantic_ir_conflict_key(o, "canonical_spelling"): "x" for o in occ}
+    return SemanticIR(occurrences=occ), conflicts
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    constants=entries,
+    typedefs=entries,
+    referenced=st.lists(names, max_size=4),
+    opaque=st.booleans(),
+)
+def test_scoping_matches_independent_oracle(constants, typedefs, referenced, opaque):
+    snap = _snapshot(constants, typedefs)
+    ir, conflicts = _ir(snap)
+    haystack = " ".join(f"{r} *" for r in referenced)
+    if opaque:
+        haystack += "\nexpr:0123456789abcdef"
+    out = scope_flat_maps(snap, _is_dep, haystack, ir, conflicts)
+
+    # Oracle: an entry survives when its header is not a dependency one or the
+    # kept surface names it; an opaque default keeps every constant.
+    want_c = {
+        k
+        for k, h in constants.items()
+        if h not in DEP_HEADERS or k in referenced or opaque
+    }
+    want_t = {k for k, h in typedefs.items() if h not in DEP_HEADERS or k in referenced}
+    assert set(out.constants) == want_c
+    assert set(out.typedefs) == want_t
+    assert set(out.typedefs_qualified) == {f"ns::{k}" for k in want_t}
+    # Sidecars follow their maps exactly.
+    assert set(out.constant_entity_ids) == want_c
+    assert set(out.typedef_entity_ids) == {f"ns::{k}" for k in want_t}
+    # The IR never holds a flat entity the flat maps dropped, and keeps every one they kept.
+    kept_ids = {*out.constant_entity_ids.values(), *out.typedef_entity_ids.values()}
+    assert out.semantic_ir is not None
+    assert {o.entity_id for o in out.semantic_ir.occurrences} == kept_ids
+    assert len(out.semantic_ir_conflicts) == len(out.semantic_ir.occurrences)
+    # Attribution survives scoping, so a second pass is idempotent.
+    assert has_attribution(out.constants)
+    again = scope_flat_maps(
+        _snapshot_from(out),
+        _is_dep,
+        haystack,
+        out.semantic_ir,
+        out.semantic_ir_conflicts,
+    )
+    assert again.constants == out.constants and again.typedefs == out.typedefs
+
+
+def _snapshot_from(out) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="x",
+        version="1",
+        constants=out.constants,
+        typedefs=out.typedefs,
+        typedefs_qualified=out.typedefs_qualified,
+        constant_entity_ids=out.constant_entity_ids,
+        typedef_entity_ids=out.typedef_entity_ids,
+    )
+
+
+@given(constants=entries, typedefs=entries)
+def test_unattributed_maps_pass_through_as_the_same_objects(constants, typedefs):
+    """A loaded snapshot has plain dicts: scoping must leave them exactly alone."""
+    snap = AbiSnapshot(
+        library="x",
+        version="1",
+        constants={k: "1" for k in constants},
+        typedefs={k: "int" for k in typedefs},
+    )
+    out = scope_flat_maps(snap, lambda _h: True, "", None, {})
+    assert out.constants is snap.constants
+    assert out.typedefs is snap.typedefs
+    assert out.typedefs_qualified is snap.typedefs_qualified
+
+
+@given(entries)
+def test_attributed_map_is_a_dict_and_survives_copy_and_pickle(headers):
+    m = attributed((k, "v", h) for k, h in headers.items())
+    assert m == {k: "v" for k in headers}
+    for clone in (copy.copy(m), copy.deepcopy(m), pickle.loads(pickle.dumps(m))):
+        assert isinstance(clone, HeaderAttributedMap)
+        assert clone == m
+        assert all(declaring_header(clone, k) == (h or "") for k, h in headers.items())
+
+
+def test_later_entry_wins_value_and_header_together():
+    m = attributed([("a", "1", "/x.h"), ("a", "2", "/y.h")])
+    assert m == {"a": "2"} and declaring_header(m, "a") == "/y.h"
+
+
+def test_tu_merge_keeps_attribution():
+    from abicheck.tu_merge import _merge_scalar_group
+
+    merged = _merge_scalar_group(
+        [
+            ("tu1", attributed([("A", "1", "/usr/include/dep.h")])),
+            ("tu2", attributed([("A", "1", "/proj/api.h"), ("B", "2", "/proj/api.h")])),
+            ("tu3", {"C": "3"}),
+        ],
+        kind="constant",
+    )
+    assert merged == {"A": "1", "B": "2", "C": "3"}
+    assert declaring_header_set(merged, "A") == ("/usr/include/dep.h", "/proj/api.h")
+    assert declaring_header(merged, "B") == "/proj/api.h"
+    assert declaring_header(merged, "C") == ""
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    tus=st.lists(
+        st.dictionaries(st.sampled_from("ABC"), st.sampled_from(HEADERS), max_size=3),
+        min_size=1,
+        max_size=4,
+    ),
+    order=st.randoms(use_true_random=False),
+)
+def test_tu_merge_scoping_keeps_any_non_dependency_sighting(tus, order):
+    """Codex review: first-TU-wins let a dependency TU drop a public name."""
+    from abicheck.tu_merge import _merge_scalar_group
+
+    sources = [
+        (f"tu{i}", attributed((k, "1", h) for k, h in tu.items()))
+        for i, tu in enumerate(tus)
+    ]
+    order.shuffle(sources)
+    merged = _merge_scalar_group(sources, kind="constant")
+    out = scope_flat_maps(
+        AbiSnapshot(library="x", version="1", constants=merged), _is_dep, "", None, {}
+    )
+    # Oracle: dropped iff every TU that declares the key saw it in a dependency.
+    want = {k for k in merged if not all(tu[k] in DEP_HEADERS for tu in tus if k in tu)}
+    assert set(out.constants) == want
+
+
+def test_references_from_defaults_and_enum_underlying_types_are_retained():
+    from abicheck.extract.flat_map_dependency_scope import kept_reference_text
+    from abicheck.model import EnumType, Function, Param, RecordType, TypeField
+
+    dep = "/usr/include/dep.h"
+    snap = AbiSnapshot(
+        library="x",
+        version="1",
+        constants=attributed(
+            [("DEP_MAX", "8", dep), ("DEP_FIELD", "2", dep), ("DEP_UNUSED", "3", dep)]
+        ),
+        typedefs=attributed([("dep_u8", "unsigned char", dep), ("dep_x", "int", dep)]),
+    )
+    text = kept_reference_text(
+        "",
+        [
+            Function(
+                name="f",
+                mangled="f",
+                return_type="void",
+                params=[Param(name="n", type="int", default="ns::DEP_MAX")],
+            )
+        ],
+        [
+            RecordType(
+                name="S",
+                kind="struct",
+                fields=[TypeField(name="a", type="int", default="DEP_FIELD + 1")],
+            )
+        ],
+        [EnumType(name="E", members=[], underlying_type="dep_u8")],
+    )
+    out = scope_flat_maps(snap, _is_dep, text, None, {})
+    assert set(out.constants) == {"DEP_MAX", "DEP_FIELD"}
+    assert set(out.typedefs) == {"dep_u8"}
+
+
+def test_opaque_fingerprint_only_matches_the_exact_shape():
+    snap = _snapshot({"D": "/usr/include/dep.h"}, {})
+    for text, kept in [
+        ("expr:0123456789abcdef", True),
+        ("ns::expr:0123456789abcdef", False),
+        ("expr:0123456789abcdeff", False),
+        ("expr:0123", False),
+    ]:
+        assert bool(scope_flat_maps(snap, _is_dep, text, None, {}).constants) is kept
+
+
+def test_dropped_entries_without_an_ir_or_matching_occurrence_leave_the_ir_alone():
+    snap = _snapshot({"DEP": "/usr/include/dep.h"}, {})
+    out = scope_flat_maps(snap, _is_dep, "", None, {})
+    assert out.constants == {} and out.semantic_ir is None
+
+    unrelated = SemanticIR(occurrences={})
+    out = scope_flat_maps(snap, _is_dep, "", unrelated, {"k": "v"})
+    assert out.constants == {}
+    assert out.semantic_ir is unrelated and out.semantic_ir_conflicts == {"k": "v"}
