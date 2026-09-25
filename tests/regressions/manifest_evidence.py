@@ -750,7 +750,10 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "the export table pairs it one-to-one with an exported variant "
             "family of the same owner and unqualified signature; the other "
             "observed variants are aliases, never competing exports; "
-            "anything ambiguous or unevidenced stays unresolved."
+            "anything ambiguous or unevidenced stays unresolved. An unchanged "
+            "declaration's graph node id never flips between two versions "
+            "because only the export table changed: the header AST's own "
+            "ctor/dtor manglings are identity evidence too."
         ),
         fixed_by=(1370,),
         seed_tests=(

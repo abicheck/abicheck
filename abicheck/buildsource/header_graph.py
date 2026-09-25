@@ -510,7 +510,19 @@ def build_header_only_graph(
     for h in header_paths or ():
         header_node(h)
 
-    ids = identities_for_snapshot(snapshot)
+    if ast_projection is None and ast_root is not None:
+        ast_projection = project_header_graph_ast(ast_root)
+        ast_root = None
+    # The header AST's own ctor/dtor manglings are identity evidence that does
+    # not depend on what the binary exports (model.snapshot_identity_table),
+    # so an unchanged declaration keeps one node id across versions.
+    ast_names = ast_projection.special_member_names if ast_projection else ()
+    ids = identities_for_snapshot(snapshot, ast_names=ast_names)
+    # A reader of the stored snapshot rebuilds the table from the export
+    # table alone (the AST is gone), so a member only the AST resolved keys
+    # there on its `unresolved://` placeholder: record that spelling as an
+    # alias of the node it resolved to here, so both land on one node.
+    table_ids = identities_for_snapshot(snapshot) if ast_names else ids
 
     def seed_decl(entity: Function | Variable, ident: GraphEntityIdentity) -> None:
         node_id = ident.node_id
@@ -557,15 +569,17 @@ def build_header_only_graph(
                 )
             )
 
-    for fn, ident in zip(snapshot.functions, ids.functions):
+    for fn, ident, table_ident in zip(
+        snapshot.functions, ids.functions, table_ids.functions
+    ):
+        if table_ident.node_id != ident.node_id:
+            register_identity_alias(graph, table_ident.node_id, ident.node_id)
         seed_decl(fn, ident)
     for var, ident in zip(snapshot.variables, ids.variables):
         seed_decl(var, ident)
 
     if ast_projection is not None:
         seed_ast_graph(graph, ast_projection, header_node, classify)
-    elif ast_root is not None:
-        seed_ast_graph(graph, project_header_graph_ast(ast_root), header_node, classify)
     else:
         _seed_flat_graph(graph, snapshot, header_node, ids)
 

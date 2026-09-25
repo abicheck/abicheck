@@ -99,7 +99,9 @@ def _identities(snap):
 # ---------------------------------------------------------------------------
 
 
-def _scenario(rng):
+def _scenario(rng, complete=None):
+    """*complete*, when given, collects every declared member's
+    complete-object spelling -- what a header AST would report."""
     scopes = [("ns", "W"), ("ns", "V"), ("other", "W"), ("W",), ("a", "b", "W")]
     functions, exports, expected = [], set(), {}
     for scope in rng.sample(scopes, rng.randint(1, 3)):
@@ -113,6 +115,8 @@ def _scenario(rng):
             codes = [_BUILTINS[p][1] for p in params]
             idx = len(functions)
             functions.append(_fn(_ctor_placeholder(scope, spellings), scope[-1]))
+            if complete is not None:
+                complete.append(_ctor(scope, codes))
             variants = rng.sample(["C1", "C2", "C3"], rng.randint(0, 2))
             names = {_ctor(scope, codes, v) for v in variants}
             exports |= names
@@ -123,6 +127,8 @@ def _scenario(rng):
                 )
         idx = len(functions)
         functions.append(_fn(f"~{'::'.join(scope)}", f"~{scope[-1]}"))
+        if complete is not None:
+            complete.append(_dtor(scope))
         variants = rng.sample(["D0", "D1", "D2"], rng.randint(0, 3))
         names = {_dtor(scope, v) for v in variants}
         exports |= names
@@ -304,3 +310,96 @@ class TestExportJoinOfSpecialMembers:
         )
         assert j.declaration("decl://_ZN2ns1WD1Ev").state is JoinState.MATCHED
         assert {r.state for r in j.join.right.values()} == {JoinState.MATCHED}
+
+
+# ---------------------------------------------------------------------------
+# Version symmetry: identity must not flip when only export evidence changes.
+# ---------------------------------------------------------------------------
+
+
+def _header_graph(functions, exports, *, ast_names, ast_edges=()):
+    from abicheck.buildsource.header_graph import build_header_only_graph
+    from abicheck.buildsource.header_graph_ast_projection import (
+        HeaderGraphAstProjection,
+    )
+
+    snap = _snap(functions, exports)
+    projection = HeaderGraphAstProjection(
+        type_edges=list(ast_edges), special_member_names=frozenset(ast_names)
+    )
+    graph = build_header_only_graph(
+        snap, ast_projection=projection, header_paths=["/inc/a.h"]
+    )
+    snap.surface_graph = graph
+    return snap, graph
+
+
+def _declared(functions):
+    for f in functions:
+        f.source_header = "/inc/a.h"
+    return functions
+
+
+@needs_demangler
+def test_export_evidence_change_never_flips_an_unchanged_members_identity():
+    """Generated version pairs: the declarations and the header AST are
+    identical, only which variants the binary exports differs (each side a
+    random subset). Every placeholder keeps one node id across the two
+    versions -- in the table rebuilt from each stored snapshot -- and the
+    graph diff reports no reachability change. Before the AST evidence, an
+    unchanged constructor whose ``C2`` export appeared in the new release
+    flipped from ``unresolved://`` to ``decl://`` and read as having entered
+    the public closure (oneDAL 2025.10 -> 2025.11, ``BatchBase``)."""
+    from abicheck.buildsource.source_graph_findings import (
+        diff_source_graph_findings,
+    )
+    from abicheck.buildsource.type_graph import TypeEdge
+    from abicheck.model.change_catalog.kinds import ChangeKind
+
+    flips = {}
+    for seed in range(40):
+        rng = random.Random(seed)
+        complete: list[str] = []
+        functions, exports, _ = _scenario(rng, complete)
+        # The AST's type pass also keys a node on the member (the premise of
+        # the original false finding: the old graph held it, unlinked).
+        edges = [TypeEdge(src=n, dst="int", kind="DECL_HAS_TYPE") for n in complete]
+        sides = []
+        for _ in range(2):
+            subset = {e for e in sorted(exports) if rng.random() < 0.5}
+            fns = _declared([_fn(f.mangled, f.name) for f in functions])
+            sides.append(
+                _header_graph(fns, subset, ast_names=complete, ast_edges=edges)
+            )
+        (old_snap, old_g), (new_snap, new_g) = sides
+        # What a reader of each stored snapshot sees: the table rebuilt from
+        # the export table, resolved through that side's persisted graph.
+        old_ids = [
+            old_g.resolve_node_id(i.node_id) for i in _identities(old_snap).functions
+        ]
+        new_ids = [
+            new_g.resolve_node_id(i.node_id) for i in _identities(new_snap).functions
+        ]
+        if old_ids != new_ids:
+            flips[seed] = ("table", old_ids, new_ids)
+        kinds = {c.kind for c in diff_source_graph_findings(old_g, new_g)}
+        if ChangeKind.PUBLIC_REACHABILITY_CHANGED in kinds:
+            flips[seed] = ("reachability", kinds)
+    assert flips == {}
+
+
+def test_without_ast_evidence_an_unexported_member_stays_unresolved():
+    snap, _graph = _header_graph(_declared([_fn("~ns::W", "~W")]), [], ast_names=())
+    assert _identities(snap).functions[0].node_id.startswith("unresolved://")
+
+
+def test_ast_evidence_alone_resolves_an_unexported_destructor():
+    snap, graph = _header_graph(
+        _declared([_fn("~ns::W", "~W")]), [], ast_names=["_ZN2ns1WD1Ev"]
+    )
+    assert "decl://_ZN2ns1WD1Ev" in {n.id for n in graph.nodes}
+    # The stored snapshot's export-only table keys it on the placeholder,
+    # which the graph records as an alias of the AST-resolved node.
+    table_id = _identities(snap).functions[0].node_id
+    assert table_id.startswith("unresolved://")
+    assert graph.resolve_node_id(table_id) == "decl://_ZN2ns1WD1Ev"
