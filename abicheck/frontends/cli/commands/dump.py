@@ -303,6 +303,7 @@ def dump_cmd(
     )
     from ....cli_dump_request import build_dump_request
     from ....dry_run import emit_dry_run, reject_dry_run_with_output
+    from ..ownership_config import dump_ownership_request
 
     # Phase 7f: already validated eagerly by the option's own callback.
     _prov = parse_provenance_tokens(provenance)
@@ -631,6 +632,7 @@ def dump_cmd(
         resolved_collect_mode=_resolved_collect_mode,
         compile_db_filter=compile_db_filter,
         build_config=build_config,
+        ownership=dump_ownership_request(config_path),
     )
     # `resolve_dump_request` runs no castxml/clang and writes nothing, so
     # hoisting it above the branch keeps `--dry-run` inside its own "cheap,

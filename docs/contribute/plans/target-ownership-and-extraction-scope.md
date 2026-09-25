@@ -378,7 +378,7 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
 |---|---|---|---|
 | **0 — Record the numbers** | Done: `scripts/bench_extraction_scope.py` produced M1–M4 for SVS and oneDAL. Every later phase reruns it and updates those tables. | S | none |
 | **1 — Classify and preview** (landed) | `extract/ownership.py`: one pure function, file path + rules → (owner, contract, rule id, diagnostics). Parse `scope.dependencies`/`private_*` in `build_config.py` (not yet applied). The preview output. Property tests: rule-order independence, most-specific-root wins, `-I` never grants ownership, a system prefix never beats an explicit root. | M | none — report only |
-| **2 — Persist** | ADR. `extraction_scope` field, per-entity facts, comparability rule, digest fields. `dependency_evidence` accepted but only `full`. | M | new refusal between differently-configured snapshots |
+| **2 — Persist** (landed, [ADR-075](../adr/075-target-ownership-and-extraction-scope.md)) | ADR. `extraction_scope` field, per-entity facts, comparability rule, digest fields. `dependency_evidence` accepted but only `full`. | M | new refusal between differently-configured snapshots |
 | **3 — `referenced` retention** | Apply the closure at parse time for both backends: the castxml parser (a linear seed-and-follow over the id map it already builds) and the clang streaming pruner (`dumper_clang_streaming.py`, which already skips system declarations at parse time). Same rule for the graph section. Gate: on SVS core and oneDAL, zero owned declarations lost against `full`, and the finding set on a real version pair unchanged except for dependency-internal kinds. | L | opt-in |
 | **4 — Prefilter accelerator** | Allow `--castxml-start <target namespaces>` only when Phase 1's classification, run on a cached full parse or on the first dump, shows zero owned declarations outside those namespaces. Otherwise ignore it with a diagnostic. Record `verified_lossless`. | S–M | opt-in |
 | **5 — Default** | Decide whether `referenced` becomes the default, using Phase 0 numbers on oneDAL and SVS. | S | possibly default |
@@ -402,6 +402,57 @@ One new snapshot field, `AbiSnapshot.extraction_scope` (schema bump):
 - Rule 7's diagnostic fires in one direction only: a target file declaring
   into a namespace named like a configured dependency. The other direction
   needs the target's namespaces, which no key states.
+
+### Phase 2 as landed
+
+- **ADR-075** decides the field, the per-entity facts, the comparability
+  table, the digest field and the `full`-only rule.
+- **Model**: `model/extraction_scope.py` (`ExtractionScope`,
+  `EntityOwnership`, `ownership_of`, `compare_extraction_scopes`), plus
+  `OwnershipRequest` in `model/ownership_rules.py`. `OwnershipRules` gained
+  `dependency_evidence`.
+- **One evaluation**: `extract/ownership_stamp.py` classifies every
+  function, variable, record and enum once, at
+  `workflows.input_resolution.resolve_input`'s single exit
+  (`workflows/ownership_request.classify_extracted`), for every snapshot
+  the run *extracted* from headers. A loaded snapshot is never restamped.
+  Target roots are always `public_header_dirs` plus the `-H` directories,
+  folded in that one place (`with_target_roots`), so the CLI, the typed API
+  (`InputSpec.ownership`) and a release member get the same roots.
+- **Found through a real dump, not the pure classifier**: castxml records
+  `lib::detail::hidden` as `hidden`, so `private_namespaces` never matched a
+  castxml function. The stamp now demangles linker names once per snapshot
+  (only when a namespace rule or dependency name can read the scope) and
+  classifies on the qualified name.
+- **Storage**: snapshot schema v52; `storage/extraction_scope_codec.py`
+  writes one interned `decisions` table and one index per declaration.
+  Declaration lists encode exactly as v51. A length mismatch on load leaves
+  that list unclassified rather than misattributed.
+- **Comparability**: `comparability.check_contracts_comparable` refuses per
+  ADR-075 D3; `confidence.compute_confidence` adds the report lines
+  (unrecorded baseline; differing rules under `full`, naming the moved
+  declarations).
+- **Digest**: `surface.ownership` (`DiffResult.extraction_scope_identity`),
+  report schema 5.4.
+- **Config**: `scope.dependency_evidence` (`full` only). The project config
+  reaches `InputSpec.ownership` in `dump` (`frontends/cli/ownership_config.py`)
+  and in `compare` (`cli_resolve`), with roots resolved against the project
+  root (`config_paths.project_root_for_config`).
+- **Retention untouched**: nothing is kept or dropped by these keys;
+  `dependency_scope`'s system-header filter is unchanged. So a toolchain
+  declaration only appears (classified `toolchain`) under
+  `--include-system-declarations`.
+- **Tests**: `tests/test_extraction_scope_storage.py` (v52 round trip,
+  pre-v52 migration, malformed and mismatched indices),
+  `tests/test_extraction_scope_comparability.py` (every pair of eight scope
+  variants against the ADR's table as an independent oracle, the gate, the
+  notes, an unchanged verdict), `tests/test_ownership_stamp_properties.py`
+  (hypothesis: decisions and fingerprint independent of rule, header and
+  declaration order, against an independent longest-root oracle),
+  `tests/test_extraction_scope_config.py`, and
+  `tests/test_ownership_dump_integration.py` (`integration`: the four
+  precedence properties through a real castxml `dump`, typed-API parity,
+  the CLI refusal and the unrecorded-baseline note).
 
 ## Tests
 

@@ -1000,7 +1000,13 @@ _ARTIFACT_NAMES = frozenset(
 #:        summary *does* now count only the observed subset and states the
 #:        inventory in its own ``; hygiene: ...`` clause -- text output,
 #:        not a machine contract.
-REPORT_SCHEMA_VERSION = "5.3"
+#: 5.4 -- additive ``effective_config_fields["surface.ownership"]`` (ADR-075
+#:        D4): the fingerprint of the ownership rules both sides'
+#:        declarations were classified under (``old=…|new=…`` when they
+#:        differ, ``""`` when neither side recorded one). As with 5.2, the
+#:        digest *value* changes for every run, since
+#:        ``EFFECTIVE_CONFIG_FIELD_KEYS`` is hashed positionally.
+REPORT_SCHEMA_VERSION = "5.4"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

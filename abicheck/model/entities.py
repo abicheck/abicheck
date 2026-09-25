@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from .extraction_scope import EntityOwnership
 from .fact import Fact, _Omitted, bridge_legacy_and_fact, resolved_fact_value
 from .identity import EntityId
 from .vocabulary import AccessLevel, ScopeOrigin
@@ -287,6 +288,14 @@ class RecordType:
     #   comparison -- reading it early would be acting on a value nothing
     #   has committed to the semantics of.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    # ADR-075 D2: owner/contract/rule id, stamped once by
+    # ``extract.ownership_stamp``. ``None`` is *unclassified* (a pre-v52
+    # snapshot, a hand-built declaration) -- read it through
+    # ``model.extraction_scope.ownership_of``, never directly. Persisted as
+    # an interned table (``storage/extraction_scope_codec.py``), not per entity.
+    ownership_fact: Fact[EntityOwnership] | None = field(
+        default=None, kw_only=True, compare=False, repr=False
+    )
 
     # ADR-063 Phase 5 (D7's first registered conversion): Fact[bool | None]
     # sibling of is_final, appended last per this file's own "append new
@@ -422,6 +431,14 @@ class EnumType:
     # is keyword-only, excluded from equality, and not yet readable by any
     # consumer.
     entity_id: EntityId | None = field(default=None, kw_only=True, compare=False)
+    # ADR-075 D2: owner/contract/rule id, stamped once by
+    # ``extract.ownership_stamp``. ``None`` is *unclassified* (a pre-v52
+    # snapshot, a hand-built declaration) -- read it through
+    # ``model.extraction_scope.ownership_of``, never directly. Persisted as
+    # an interned table (``storage/extraction_scope_codec.py``), not per entity.
+    ownership_fact: Fact[EntityOwnership] | None = field(
+        default=None, kw_only=True, compare=False, repr=False
+    )
 
     # ADR-063 Phase 5 (third batch): Fact[str | None] siblings for
     # EnumType's own case-(b) fields, mirroring RecordType.qualified_name_fact/
