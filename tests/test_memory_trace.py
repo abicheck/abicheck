@@ -323,7 +323,8 @@ class TestTheProbesThemselves:
 
     def test_a_dead_pid_reads_as_unavailable(self) -> None:
         assert memory_trace._smaps_rollup(2**30) == (None, None)
-        assert memory_trace._child_pids(2**30) == []
+        # "Cannot read" is None, never [] -- see the ppid-scan fallback below.
+        assert memory_trace._child_pids(2**30) is None
 
     def test_cgroup_reading_answers_a_pair_or_nones(self) -> None:
         """Whatever this host runs, both figures come back as ints or None.
@@ -586,3 +587,114 @@ class TestMarkIsAPhaseBoundary:
         memory_trace.reset_for_testing()
         memory_trace.mark("stage:done")
         assert not out.exists()
+
+
+@requires_proc
+@pytest.mark.parametrize("children_files", [True, False])
+def test_tree_walk_finds_grandchildren_with_or_without_children_files(
+    monkeypatch: pytest.MonkeyPatch, children_files: bool
+) -> None:
+    """A kernel without ``CONFIG_PROC_CHILDREN`` must still see the fan-out.
+
+    Without the ``/proc/*/stat`` parent scan, every lookup there read as "no
+    children" and a 10-process release fan-out reported ``tree_processes=1``.
+    The oracle is the process tree this test builds itself: a child that
+    spawns its own child, both of which must be found either way.
+    """
+    import subprocess
+
+    if not children_files:
+        monkeypatch.setattr(memory_trace, "_child_pids", lambda _pid: None)
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import subprocess,sys; c=subprocess.Popen([sys.executable,'-c',"
+            "'import sys; sys.stdin.read()'], stdin=subprocess.PIPE);"
+            "print(c.pid, flush=True); sys.stdin.read(); c.stdin.close(); c.wait()",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        grandchild = int(proc.stdout.readline())
+        pids = memory_trace._proc_tree_pids()
+        assert {os.getpid(), proc.pid, grandchild} <= set(pids)
+        assert len(pids) == len(set(pids))
+    finally:
+        assert proc.stdin is not None
+        proc.stdin.close()
+        proc.wait(10)
+
+
+def test_parent_map_parses_comm_with_spaces_and_parens(tmp_path: Path) -> None:
+    """``comm`` may contain ``) (``; the ppid is read after the LAST ``)``."""
+    stat = "4242 (evil) (name x) S 77 4242 4242 0 -1 4194560"
+    assert int(stat[stat.rindex(")") + 2 :].split()[1]) == 77
+    if Path("/proc/self/stat").exists():
+        parents = memory_trace._parent_map()
+        assert os.getpid() in parents.get(os.getppid(), [])
+
+
+@requires_proc
+def test_samples_carry_the_peak_rss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "trace.jsonl"
+    _enable(monkeypatch, path)
+    memory_trace.sample("x")
+    record = json.loads(path.read_text().splitlines()[-1])
+    peak, current = record["parent_rss_peak_bytes"], record["parent_rss_bytes"]
+    assert isinstance(peak, int) and peak >= current > 0
+
+
+def test_ast_intake_hook_is_installed_and_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from abicheck.storage import ast_size_observer
+
+    path = tmp_path / "trace.jsonl"
+    assert ast_size_observer._INTAKE_HOOK is memory_trace.mark
+    _enable(monkeypatch, path)
+    ast_size_observer.mark_ast_intake("ast.intake:start", backend="clang")
+    record = json.loads(path.read_text().splitlines()[-1])
+    assert record["event"] == "ast.intake:start"
+    assert record["attrs"] == {"backend": "clang"}
+
+
+def test_peak_rss_is_none_when_status_is_unreadable_or_lacks_vmhwm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+    import io
+
+    real_open = builtins.open
+
+    def _no_vmhwm(path, *a, **kw):  # type: ignore[no-untyped-def]
+        if str(path) == "/proc/self/status":
+            return io.StringIO("Name:\tx\nVmRSS:\t1 kB\n")
+        return real_open(path, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", _no_vmhwm)
+    assert memory_trace._self_rss_peak_bytes() is None
+
+    def _gone(path, *a, **kw):  # type: ignore[no-untyped-def]
+        if str(path) == "/proc/self/status":
+            raise OSError("gone")
+        return real_open(path, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", _gone)
+    assert memory_trace._self_rss_peak_bytes() is None
+
+
+def test_parent_scan_degrades_to_empty_without_proc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _no_proc(_path: str) -> list[str]:
+        raise OSError("no /proc")
+
+    monkeypatch.setattr(memory_trace.os, "listdir", _no_proc)
+    assert memory_trace._parent_map() == {}
+    assert memory_trace._read_ppid(str(2**30)) is None

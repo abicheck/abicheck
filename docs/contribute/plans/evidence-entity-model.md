@@ -100,7 +100,7 @@ Ordered by how many incorrect conclusions each phase prevents, not by size.
 | **0 — Evidence-class retag** (**landed**: `model/graph_evidence_class.py`'s `EdgeEvidenceClass`, `compare/surface_graph.py`'s `EDGE_EVIDENCE_CLASS`; the linker-name edge is now `declares_linker_name`/`derived`; builder edges were confirmed not persisted — production never writes them into `AbiSnapshot.surface_graph` — so no schema change) | Add an evidence-class attribute to the surface-graph edge kinds. Rename or retag the linker-name `exports` edge as `derived` (for example `declares_linker_name`). Keep the name `exports` free for a future observed join. Update `tests/test_compare_surface_graph.py`. No schema change unless graph edges are persisted; check first. | S | — |
 | **1 — Identity invariants** (**landed**: `model/graph_entity_identity.py` is the one node-id function for every declaration/type graph producer; see [Phase 1 — landed](#phase-1-landed)) | Small L2/L0/L1 fixtures stating I1 as property tests (the same declaration seen via castxml, clang, DWARF, and the export table → one node). Then route `surface_graph.py` and `header_graph.py` node IDs through `semantic_ir`/`EntityId`, with explicit alias and unresolved nodes. Migrate readers in the same PR as producers. | L | ADR-063 Phase 2/6 |
 | **2 — Explicit cross-layer joins** (**landed**: `compare/export_join.py`, `compare/debug_type_join.py`, vocabulary in `model/graph_join.py`; see [Phase 2 — landed](#phase-2-landed)) | An observed `exports` join (export table → entity, via `model/export_index.py`'s projection) and an L1 debug-type → entity join, each carrying I2 join states. Replaces the per-query reconciliation readers do today. | M–L | 1 |
-| **3 — Ownership in the graph** (decided by [ADR-075](../adr/075-target-ownership-and-extraction-scope.md) D5/D7) | Expose `model/release_surface.py` providers and contract inputs (public roots, namespace selection) as graph-level owner relations. Wiring, not new design. | M | 1 |
+| **3 — Ownership in the graph** (**landed**, [ADR-075](../adr/075-target-ownership-and-extraction-scope.md) D5/D7; see [Phase 3 — landed](#phase-3-landed)) | Expose `model/release_surface.py` providers and contract inputs (public roots, namespace selection) as graph-level owner relations. Wiring, not new design. | M | 1 |
 | **4 — Coverage-aware queries** (**landed**: `compare/edge_query.py`, vocabulary in `model/edge_coverage.py`, L5 pass table in `model/source_graph_coverage.py`; see [Phase 4 — landed](#phase-4-landed)) | A query API returning I4's three-valued answer per edge kind and scope, built on the existing per-pass coverage records and `Fact` statuses. | M | 0, 2 |
 | **5 — Measure, then decide materialization** (**landed**: measured in "Phase 5 measurements"; its Recommendations 2–4 landed as 5a–5d below) | Profile a real large-product (oneDAL-class) dump with `ABICHECK_MEMORY_TRACE` and `scripts/bench_release_memory.py`: snapshot vs. graph vs. index cost. Decide which views to persist, which to compute on demand, and whether to use compact tables or lazy section loading (storage v2 Phase 2). | S to measure; follow-up TBD | — (can run in parallel) |
 | **5a — Lazy graph-section loading** (**landed**) | storage-format-v2 Phase 2 A2.1 for the `graph` section: decoded on first read of `surface_graph` / `build_source.source_graph` (`model/lazy_graph.py`). A default compare still reads the graph; the L5 diff was deliberately not gated (ADR-062 D8 note). | S | 5 |
@@ -334,6 +334,130 @@ Join cost and states on the stored snapshots (old / new):
   context); unifying them with the I1 ids is a report-schema change.
 - The L4 `SOURCE_DECL_MAPS_TO_SYMBOL` link (`buildsource/source_link.py`)
   keeps its own matcher; it joins L4 source entities, not L2 declarations.
+
+## Phase 3 — landed
+
+Ownership as graph relations over the Phase 1 keys, on top of the
+target-ownership plan's Phase 2 (per-entity ownership recorded in the
+snapshot). Decided by ADR-075 D5/D7.
+
+### What landed
+
+- **Relations** (`compare/ownership_relations.py`), every entity endpoint an
+  I1 node id:
+
+  | Edge | From → to | Evidence class | Inputs / recompute rule |
+  |---|---|---|---|
+  | `owned_by` | declaration/type → `owner://<owner>` | `derived` | each entity's persisted `ownership_fact`; recomputed on demand, never persisted |
+  | `in_contract` | declaration/type → `contract://<contract>` | `derived` | same |
+  | `provided_by` | `binary_symbol://<platform>/<spelling>` (the Phase 2 node) → `release_member://<member>` | `resolved_join` | the release model's own `BundleExportIndex`; recomputed per release comparison, never persisted |
+
+  **Why `derived`.** Classification needs the declaring file as the frontend
+  saw it, the project root and castxml's `artificial` bit, so it runs once at
+  extraction and is *recorded* per entity. The edge only projects that record
+  onto the node id, so by I3 it is recomputed from the record; persisting it
+  would add a copy that can go stale and nothing else (Phase 5's rule). An
+  unclassified entity gets no edge and answers unknown.
+- **Graph**: the public-surface builder emits `owner`/`contract` nodes and
+  the two `derived` edges (`EDGE_EVIDENCE_CLASS`). Nothing new is persisted.
+- **Typed absence (Phase 4)**: `owned_by`/`in_contract` are queryable
+  through `compare/edge_query.py`. Their producer is the ownership stamp
+  (`ownership_stamp[classified_declarations]`): absence is `proven_absent`
+  only for an entity the stamp classified; an unclassified entity, a node two
+  entities disagree on, or a snapshot with no recorded extraction scope (a
+  binary-only or pre-v52 dump) answers `unknown`, and the report's
+  relationship-coverage section lists it.
+- **Contract inputs (I5)**: `CompatibilityEvaluationConfig.surface.ownership`
+  records the target roots (`-H` directories and `scope.public_header_dirs`,
+  each its own D7 field), the dependency roots, the private headers and
+  namespaces and `dependency_evidence`, with provenance
+  (`workflows/ownership_contract_inputs.py`), persisted in the
+  contract-context receipt when stated.
+- **Readers moved onto the relations**:
+
+  | Reader | Before | After |
+  |---|---|---|
+  | `buildsource.cross_source_checks._check_public_not_exported` (scalar, per member) | public-header `ScopeOrigin` only | also asks `in_contract`: a `private`/`external` declaration owes no export |
+  | `workflows.release_surface_acquisition.surface_from_snapshot` (release obligations) | same private predicate | the same `in_contract` query, so the scalar path, a one-member package and a release agree |
+  | `policy.release_contract_reconciliation.reconcile_side` (who provides an obligation) | `BundleExportIndex.providers` directly | the `provided_by` relation over that index; `BundleExportIndex.satisfies` deleted |
+  | `workflows.crosscheck_ownership` | run-scoped "release owns `public_not_exported`" | **unchanged, deliberately**: it holds no derivation of ownership or providers (it states which *level* answers a check), so there was nothing private to move. The attribution it defers to is now the `provided_by` relation above |
+
+- **Release classification**: member dumps and the acquired release surface
+  are classified under the one project config
+  (`workflows.ownership_request.project_ownership_scope`, a run-scoped
+  `ContextVar`, the mechanism `crosscheck_ownership` already uses), folded
+  into `SurfaceAcquisitionIdentity` (version 2).
+- **Found and fixed on the way**: the release surface was acquired with
+  `compare`'s default `lang="c++"` read as an explicit request, so a C header
+  tree was parsed as C++ while every member parsed it as C, and every C
+  declaration was listed under `missing_exports` by its C++ mangling. It now
+  follows the member rule (`tests/test_release_surface_language_rule.py`).
+- **Tests**: `tests/test_ownership_relations.py` (edges on I1 ids, unknown vs
+  unresolved, conflicting records, evidence classes, the obligation
+  predicate, provider relation keys, D7 provenance and receipt round trip,
+  a hypothesis order-independence property), and
+  `tests/test_release_ownership_integration.py` (`integration`, real
+  directory `compare`): the MKL/oneDAL shape with one member, with two, and
+  a one-member package matching the scalar path.
+
+### Measured on oneDAL
+
+Measured 2026-09-25 with `scripts/bench_graph_materialization.py`
+(`graph` variant, one repetition, 4 vCPU / 15 GiB host, cold caches),
+oneDAL 2025.10.0 -> 2025.11.0. Base is the ADR commit (#1364), candidate is
+this stack's head. One sample per row, so a difference under ~10% is noise.
+
+| Step | Base time | Candidate time | Base peak RSS | Candidate peak RSS |
+|---|---|---|---|---|
+| single `dump` OLD (`libonedal_core.so.3`) | 70.0 s | 78.6 s | 1041.8 MiB | 1042.4 MiB |
+| single `dump` NEW | 73.7 s | 77.9 s | 1042.1 MiB | 1046.5 MiB |
+| single `compare` | 77.1 s | 76.4 s | 691.9 MiB | 710.7 MiB |
+| release: 4 member dumps | 53.3-58.9 s | 53.3-55.0 s | 609-645 MiB | 611-646 MiB |
+| release `compare` (stored) | 42.7 s | 41.6 s | 589.8 MiB | 594.0 MiB |
+| release `compare` (live directory) | 201.1 s | 187.7 s | 1517.5 MiB | **1740.6 MiB** |
+
+Snapshot size: +0.2% single (127.94 -> 128.21 MB), +0.09% per release
+member (55.44 -> 55.49 MB) -- the `extraction_scope` block and its interned
+decision table.
+
+Per-owner counts, NEW single snapshot (the bench passes a header *file* and
+no `.abicheck.yml`, so there is no target root and nearly everything is
+`unresolved`, which is the ADR's documented answer, not a guess): functions
+13,818 unresolved / 4 toolchain; types 1,171 unresolved / 9 toolchain;
+enums 438 and variables 360 unresolved.
+
+Findings: the release reports (live and stored) are identical member by
+member, including all 7 `missing_exports` and 1,980 shared findings. The
+single-library compare drops exactly 4 `public_not_exported` findings --
+`__atomic_add_fetch`, `__atomic_load_n`, `__atomic_store_n`,
+`__atomic_sub_fetch`: compiler builtins now classified `toolchain/external`,
+which owe no export (ADR-075 D6). That is the documented fix; nothing else
+moved.
+
+The live-release peak RSS rose 15% (+223 MiB) in this single sample and is
+**not attributed**: the stored-release path, which runs the same
+reconciliation, did not move. It is recorded as a gap below, to be
+re-measured with `ABICHECK_MEMORY_TRACE` and three repetitions before it is
+called either a regression or noise.
+
+### Remaining documented gaps
+
+- The live-release RSS increase above is unexplained (one sample).
+- A release's member dumps never receive `lang_explicit` (pre-existing:
+  the fan-out passes only `lang` to `service.run_compare`), so under a stated
+  `compile.lang: c++` each member auto-detects an ambiguous header while the
+  release surface, which now does receive it, parses C++. The contract is
+  right; threading it to the members needs `run_compare` and the pairwise
+  fan-out to carry it (the latter is at its `no_growth` baseline).
+- `scope.private_namespaces` narrows the contract but is not merged into
+  `policy.internal_namespaces` (ADR-075 D7.1): that key scopes findings,
+  which is the retention phase's decision.
+- Ownership is recorded only for snapshots extracted through
+  `resolve_input` and the release surface. A snapshot built by any other
+  entry point, or a stored pre-v52 baseline, has none, so its readers fall
+  back to `ScopeOrigin`.
+- `provided_by` keys a release on one platform; a mixed-platform release
+  records `platform="mixed"`, whose node ids join no Phase 2 export node.
 
 ## Phase 4 — landed
 

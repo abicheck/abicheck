@@ -276,6 +276,7 @@ class TestReleaseNoPackStillResolvesProjectBackedConfig:
             "require_justification": False,
             "severity_preset": None,
             "pack_paths": (),
+            "headers": (),
         }
         application = resolve_release_pack_application(
             params,
@@ -313,6 +314,7 @@ class TestReleaseNoPackStillResolvesProjectBackedConfig:
             "require_justification": False,
             "severity_preset": None,
             "pack_paths": (),
+            "headers": (),
         }
         application = resolve_release_pack_application(
             params,

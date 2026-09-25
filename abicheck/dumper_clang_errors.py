@@ -32,12 +32,12 @@ import re
 import subprocess
 import tempfile
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, cast
 
 from . import deadline
 from .dumper_cache import (
-    _atomic_copy,
     ast_acquisition_active,
     ast_memoize_active,
 )
@@ -45,9 +45,10 @@ from .dumper_clang_streaming import load_pruned_clang_ast, streaming_prune_suppr
 from .errors import SnapshotError
 from .extract.env_flags import env_flag
 from .storage.acyclic_json import gc_paused
-from .storage.ast_size_observer import report_ast_size
+from .storage.ast_size_observer import mark_ast_intake, report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
 from .storage.json_chunked_write import _atomic_write_json
+from .storage.json_compact import CompactedAst, compacted_ast
 from .sycl_context import decode_and_select_frontend_context_from_path
 
 log = logging.getLogger(__name__)
@@ -628,11 +629,9 @@ def _parse_clang_ast_result(
     pathological header's AST dump can be hundreds of MB to multiple GB (P0
     SVS field report), and buffering that in a subprocess pipe capture on top
     of the dict this function builds would double peak memory for no reason.
-    The plain (non-DPC++) cache write below copies *ast_path* directly
-    (streamed, via :func:`_atomic_copy`) rather than re-serializing *root*
-    with ``json.dumps`` — same reasoning, plus it avoids a second (and
-    generally larger, due to whitespace/key-order differences) in-memory
-    encoding pass.
+    The plain (non-DPC++) path streams *ast_path* into a compact copy
+    (:func:`~abicheck.storage.json_compact.compacted_ast`) that is parsed
+    and then renamed into the cache, never re-serializing *root*.
 
     ``dpcpp_capable`` (ADR-050 D5, G32 Phase D) routes *ast_path* through
     :func:`abicheck.sycl_context.decode_and_select_frontend_context_from_path`
@@ -669,126 +668,133 @@ def _parse_clang_ast_result(
             f"clang produced no AST for the header(s) (exit {result.returncode}): "
             f"{result.stderr[:1000].strip()}"
         )
-    report_ast_size(ast_size)
     # A pathological header's AST can be hundreds of MB to multiple GB, so
     # loading and walking it costs real time on its own, on top of the
     # subprocess wall-clock run_bounded already bounded. Re-check here (before
     # sinking that cost) so a budget that expired while clang was still
     # exiting successfully doesn't silently run well past it (Codex review).
     deadline.check()
-    if dpcpp_capable:
-        selected = decode_and_select_frontend_context_from_path(
-            ast_path, result.stderr or "", frontend_context
-        )
-        root = selected.ast
-    else:
-        # The cold half of the derived-artifact mechanism (see
-        # `derived_ast.offer_derived_ast_source`). A final consumer that
-        # only needs a *derived* form of this AST -- today the header-graph
-        # projection -- reads the document from disk itself and never has a
-        # tree built, which is the point: the `json.load` below holds the
-        # whole document as one `str` while building ~1.5x its size in
-        # dicts from it, and that pair, not the tree alone, is the attach's
-        # measured peak. A warm run already skipped this via the cache
-        # entry; this is what makes the *first* run cheap too.
-        #
-        # Deliberately only in this branch: `dpcpp_capable` above is the
-        # concatenated multi-document stream case, where `ast_path` holds
-        # one document per -cc1 pass and selecting between them is
-        # `sycl_context`'s job, not something a single-document reader may
-        # be handed.
-        #
-        # The cache write below is unaffected -- it copies `ast_path`
-        # byte-for-byte and never touches `root` -- so skipping the parse
-        # still leaves a warm entry (and its sidecar) for the next run.
-        superseded = offer_derived_ast_source(ast_path)
-        if superseded is not None:
-            # Same order as the parsing path below: deadline-check, write
-            # the cache entry, deadline-check, return.
-            deadline.check()
-            if cache_write:
-                try:
-                    _atomic_copy(ast_path, cached)
-                except OSError:
-                    pass
-            deadline.check()
-            # Deliberately not a tree, and deliberately still typed as one:
-            # this is the same opaque marker `dumper_cache.load_cached_ast`
-            # already returns on its own derived-artifact path, and every
-            # caller branches on `DerivedAstArtifact.used` rather than on
-            # this value -- which is exactly why the marker is private to
-            # that module and has no type of its own to widen every AST
-            # return annotation with.
-            return cast("dict[str, Any]", superseded)
-        prune_enabled = _streaming_prune_enabled()
-        try:
-            # The collector is paused for the parse: the tree has no cycles,
-            # and letting it run over millions of fresh containers roughly
-            # doubled this step (`storage.acyclic_json`).
-            with (
-                open(ast_path, "rb") as fh,
-                gc_paused(),
-            ):  # bytes: json detects encoding
-                if prune_enabled:
-                    root, pruned_count = load_pruned_clang_ast(
-                        fh, header_roots=header_roots
-                    )
-                    if pruned_count:
-                        log.debug(
-                            "streaming pruner collapsed %d dependency-header "
-                            "function/variable subtree(s) during clang AST parse",
-                            pruned_count,
+    # Single-document path: read, offer and cache a compact ASCII copy of
+    # clang's output (`storage.json_compact`), ~30% of the bytes at 1 B/char.
+    with (
+        compacted_ast(ast_path, cached.parent if cache_write else None)
+        if not dpcpp_capable
+        else nullcontext(CompactedAst(ast_path, None))
+    ) as doc:
+        report_ast_size(doc.path.stat().st_size)  # what warm reads, too
+        if dpcpp_capable:
+            selected = decode_and_select_frontend_context_from_path(
+                ast_path, result.stderr or "", frontend_context
+            )
+            root = selected.ast
+        else:
+            # The cold half of the derived-artifact mechanism (see
+            # `derived_ast.offer_derived_ast_source`). A final consumer that
+            # only needs a *derived* form of this AST -- today the header-graph
+            # projection -- reads the document from disk itself and never has a
+            # tree built, which is the point: the `json.load` below holds the
+            # whole document as one `str` while building ~1.5x its size in
+            # dicts from it, and that pair, not the tree alone, is the attach's
+            # measured peak. A warm run already skipped this via the cache
+            # entry; this is what makes the *first* run cheap too.
+            #
+            # Deliberately only in this branch: `dpcpp_capable` above is the
+            # concatenated multi-document stream case, where `ast_path` holds
+            # one document per -cc1 pass and selecting between them is
+            # `sycl_context`'s job, not something a single-document reader may
+            # be handed.
+            #
+            # The cache write below is unaffected -- it publishes the compacted
+            # document and never touches `root` -- so skipping the parse still
+            # leaves a warm entry (and its sidecar) for the next run.
+            superseded = offer_derived_ast_source(doc.path)
+            if superseded is not None:
+                # Same order as the parsing path below: deadline-check, write
+                # the cache entry, deadline-check, return.
+                deadline.check()
+                if cache_write:
+                    try:
+                        doc.publish(cached)
+                    except OSError:
+                        pass
+                deadline.check()
+                # Deliberately not a tree, and deliberately still typed as one:
+                # this is the same opaque marker `dumper_cache.load_cached_ast`
+                # already returns on its own derived-artifact path, and every
+                # caller branches on `DerivedAstArtifact.used` rather than on
+                # this value -- which is exactly why the marker is private to
+                # that module and has no type of its own to widen every AST
+                # return annotation with.
+                return cast("dict[str, Any]", superseded)
+            prune_enabled = _streaming_prune_enabled()
+            try:
+                # GC paused: a tree has no cycles (`storage.acyclic_json`).
+                mark_ast_intake("ast.intake:start", backend="clang", source="new")
+                with (
+                    open(doc.path, "rb") as fh,
+                    gc_paused(),
+                ):  # bytes: json detects encoding
+                    if prune_enabled:
+                        root, pruned_count = load_pruned_clang_ast(
+                            fh, header_roots=header_roots
                         )
+                        if pruned_count:
+                            log.debug(
+                                "streaming pruner collapsed %d dependency-header "
+                                "function/variable subtree(s) during clang AST parse",
+                                pruned_count,
+                            )
+                    else:
+                        root = json.load(fh)
+                mark_ast_intake("ast.intake:done", backend="clang", bytes=ast_size)
+            except ValueError as exc:
+                # "Extra data" means a second top-level JSON value follows the
+                # first — a driver flag that runs more than one -cc1 pass for
+                # this one compile (each with its own -Xclang -ast-dump=json)
+                # writes each pass's full document to this same stdout stream,
+                # back-to-back with no separator. A bare -fsycl is the known
+                # case (device pass + host pass; handled by auto-appending
+                # -fsycl-host-only, see dumper._needs_sycl_host_only), but any
+                # other multi-target offload flag (e.g. -fopenmp-targets=) that
+                # this codebase does not yet special-case would fail the same
+                # way — naming the likely cause here turns a cryptic byte-offset
+                # error into an actionable one. dpcpp_capable=True routes around
+                # this branch entirely (handled above via sycl_context instead),
+                # so this hint only ever fires for a driver/flag combination this
+                # codebase doesn't already know how to route to a single pass.
+                hint = ""
+                if isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data":
+                    hint = (
+                        " -- this looks like more than one JSON document on stdout, "
+                        "which happens when a compiler flag makes clang run multiple "
+                        "-cc1 passes for one compile (e.g. a bare '-fsycl' without "
+                        "'-fsycl-host-only'/'-fsycl-device-only', or an OpenMP/CUDA "
+                        "offload target flag); pin a single compilation pass or set "
+                        "compile.frontend: castxml in .abicheck.yml"
+                    )
+                raise SnapshotError(
+                    f"clang AST output was not valid JSON: {exc}{hint}"
+                ) from exc
+        # json.load()/decode_frontend_contexts() above can itself consume the
+        # remaining budget on a multi-GB AST; re-check before the (also
+        # non-trivial) cache write so an expired deadline doesn't still complete
+        # it and hand the caller a result for downstream AST walking
+        # (CodeRabbit review, PR #591).
+        deadline.check()
+        if cache_write:
+            try:
+                if dpcpp_capable:
+                    _atomic_write_json(cached, root)
                 else:
-                    root = json.load(fh)
-        except ValueError as exc:
-            # "Extra data" means a second top-level JSON value follows the
-            # first — a driver flag that runs more than one -cc1 pass for
-            # this one compile (each with its own -Xclang -ast-dump=json)
-            # writes each pass's full document to this same stdout stream,
-            # back-to-back with no separator. A bare -fsycl is the known
-            # case (device pass + host pass; handled by auto-appending
-            # -fsycl-host-only, see dumper._needs_sycl_host_only), but any
-            # other multi-target offload flag (e.g. -fopenmp-targets=) that
-            # this codebase does not yet special-case would fail the same
-            # way — naming the likely cause here turns a cryptic byte-offset
-            # error into an actionable one. dpcpp_capable=True routes around
-            # this branch entirely (handled above via sycl_context instead),
-            # so this hint only ever fires for a driver/flag combination this
-            # codebase doesn't already know how to route to a single pass.
-            hint = ""
-            if isinstance(exc, json.JSONDecodeError) and exc.msg == "Extra data":
-                hint = (
-                    " -- this looks like more than one JSON document on stdout, "
-                    "which happens when a compiler flag makes clang run multiple "
-                    "-cc1 passes for one compile (e.g. a bare '-fsycl' without "
-                    "'-fsycl-host-only'/'-fsycl-device-only', or an OpenMP/CUDA "
-                    "offload target flag); pin a single compilation pass or set "
-                    "compile.frontend: castxml in .abicheck.yml"
-                )
-            raise SnapshotError(
-                f"clang AST output was not valid JSON: {exc}{hint}"
-            ) from exc
-    # json.load()/decode_frontend_contexts() above can itself consume the
-    # remaining budget on a multi-GB AST; re-check before the (also
-    # non-trivial) cache write so an expired deadline doesn't still complete
-    # it and hand the caller a result for downstream AST walking
-    # (CodeRabbit review, PR #591).
-    deadline.check()
-    if cache_write:
-        try:
-            if dpcpp_capable:
-                _atomic_write_json(cached, root)
-            else:
-                _atomic_copy(ast_path, cached)
-        except OSError:
-            pass
-    # After the cache write: the cache keeps clang's own (sticky) encoding,
-    # and every reader of the tree -- this one, or `load_cached_ast` on a
-    # later hit -- sees explicit locations. See that module for why the
-    # walker cannot track clang's sticky file itself.
-    from .extract.headers.clang.locations import materialize_locations
+                    doc.publish(cached)
+            except OSError:
+                pass
+        # After the cache write: the cache keeps clang's own (sticky) locations,
+        # and every reader of the tree -- this one, or `load_cached_ast` on a
+        # later hit -- sees explicit locations. See that module for why the
+        # walker cannot track clang's sticky file itself.
+        from .extract.headers.clang.locations import materialize_locations
 
-    materialize_locations(root)
-    deadline.check()
-    return root
+        materialize_locations(root)
+        deadline.check()
+        return root

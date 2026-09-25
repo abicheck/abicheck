@@ -16,6 +16,8 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.html_report import generate_html_report
 from abicheck.model import AbiSnapshot, Function, RecordType
 from abicheck.model.dwarf_facts import DwarfMetadata, StructLayout
+from abicheck.model.extraction_scope import ExtractionScope
+from abicheck.model.ownership_rules import OwnershipRules
 from abicheck.report.edge_coverage_section import (
     compute_edge_coverage_section,
     edge_coverage_section_from_mapping,
@@ -25,7 +27,7 @@ from tests.schema_validation import validate_instance
 
 
 def _snap(version, *, elf, from_headers=True, types=(), dwarf=None):
-    return AbiSnapshot(
+    snap = AbiSnapshot(
         library="libx.so",
         version=version,
         functions=[
@@ -37,6 +39,11 @@ def _snap(version, *, elf, from_headers=True, types=(), dwarf=None):
         from_headers=from_headers,
         dependency_scope="filtered",
     )
+    # A header dump records the scope its declarations were classified under
+    # (ADR-075), which is what lets an ownership absence be proven.
+    if from_headers:
+        snap.extraction_scope = ExtractionScope(OwnershipRules())
+    return snap
 
 
 def _read(*names):
@@ -103,13 +110,16 @@ def test_section_lists_only_the_unknown_relationships():
     assert section is not None
     got = {(r.side, r.edge_kind) for r in section.rows}
     # OLD: tables read, headers parsed, but no DWARF -> its one header type is
-    # unknown to the debug join. NEW loses every producer.
+    # unknown to the debug join. NEW loses every producer, including the
+    # ownership stamp: a binary-only dump records no extraction scope.
     assert got == {
         ("old", "debug_type_of"),
         ("new", "debug_type_of"),
         ("new", "exports"),
         ("new", "declares"),
         ("new", "references"),
+        ("new", "owned_by"),
+        ("new", "in_contract"),
     }
 
 
