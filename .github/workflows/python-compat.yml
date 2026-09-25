@@ -96,9 +96,23 @@ jobs:
         # A small, broad slice: root CLI surface, the core checker, snapshot
         # serialization, packaged policies, and real compiled example pairs
         # (gcc only, no castxml). The full suite is ci.yml's `unit-tests`.
+        #
+        # The tests must exercise the installed wheel, not the checkout:
+        # `-P` keeps the cwd off sys.path, `-o pythonpath=` drops the
+        # repo-root entry pyproject's pytest config adds, and importlib mode
+        # stops rootdir insertion. The origin test asserts that from inside
+        # the pytest process itself.
         run: |
-          "$RUNNER_TEMP/venv/bin/python" -m pytest -q --tb=short -r fE -n auto \
+          cat > "$RUNNER_TEMP/test_wheel_origin.py" <<'EOF'
+          import abicheck
+
+          def test_abicheck_is_imported_from_the_installed_wheel():
+              assert "site-packages" in abicheck.__file__, abicheck.__file__
+          EOF
+          "$RUNNER_TEMP/venv/bin/python" -P -m pytest -q --tb=short -r fE -n auto \
+            --import-mode=importlib -o pythonpath= \
             -m "not integration and not libabigail and not abicc and not slow" \
+            "$RUNNER_TEMP/test_wheel_origin.py" \
             tests/test_cli_root_surface.py \
             tests/test_checker.py \
             tests/test_serialization.py \
