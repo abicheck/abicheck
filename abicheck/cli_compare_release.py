@@ -790,6 +790,7 @@ def compare_release_cmd(
                 project_policy_overrides=project_policy_overrides,
                 env_matrix=env_matrix,
                 exclude_headers=exclude_headers,
+                lang_explicit=lang_explicit,
             )
 
             for key in matched_keys:
@@ -1050,6 +1051,7 @@ def compare_release_cmd(
                                 exclude_headers=exclude_headers,
                             ),
                             lang=lang,
+                            lang_explicit=lang_explicit,
                             depth=depth,
                         )
                         resolved = resolve_dump_request(dump_request)
