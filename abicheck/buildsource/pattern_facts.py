@@ -37,13 +37,15 @@ is the portable baseline (ADR-035 D2).
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+import threading
 from bisect import bisect_left
+from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -652,16 +654,33 @@ def _scan_one_file(path_str: str) -> tuple[list[PatternFact], bool]:
     return list(_scan_text_memo(text, path_str)), True
 
 
-@lru_cache(maxsize=1024)
+#: Content-digest -> facts memo for :func:`_scan_one_file`. Keyed on a
+#: SHA-256 of the text, never the text itself, so it retains only facts.
+_SCAN_MEMO: OrderedDict[tuple[str, str], tuple[PatternFact, ...]] = OrderedDict()
+_SCAN_MEMO_MAX = 4096
+_SCAN_MEMO_LOCK = threading.Lock()
+
+
 def _scan_text_memo(text: str, path: str) -> tuple[PatternFact, ...]:
     """:func:`scan_text`, memoized on the file's *content* and path.
 
     The compare-time pre-scan reads the same header tree once per side, per
     comparison pass, and -- in a release fan-out -- once per member, so one
-    process re-scanned identical text dozens of times. Keyed on the text
-    itself (not a stat), so an in-place edit can never serve stale facts.
+    process re-scanned identical text dozens of times. Keyed on a content
+    digest (not a stat), so an in-place edit can never serve stale facts.
     """
-    return tuple(scan_text(text, path=path))
+    key = (hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(), path)
+    with _SCAN_MEMO_LOCK:
+        hit = _SCAN_MEMO.get(key)
+        if hit is not None:
+            _SCAN_MEMO.move_to_end(key)
+            return hit
+    facts = tuple(scan_text(text, path=path))
+    with _SCAN_MEMO_LOCK:
+        _SCAN_MEMO[key] = facts
+        while len(_SCAN_MEMO) > _SCAN_MEMO_MAX:
+            _SCAN_MEMO.popitem(last=False)
+    return facts
 
 
 def _find_pattern_facts_serial(

@@ -796,5 +796,5 @@ def _cache_path(key: str, backend: str = "castxml") -> Path:
         )
         fallback.mkdir(parents=True, exist_ok=True)
         cache_dir = fallback
-    ast_cache_budget.enforce_once(cache_dir)
-    return cache_dir / f"{key}.{ext}"
+    ast_cache_budget.note_use(cache_dir, entry := cache_dir / f"{key}.{ext}")
+    return entry

@@ -14,7 +14,7 @@
   only return nothing. It was ~19% of a `libmkl_rt` scan.
 - The compare-time lexical pattern pre-scan blanks comments/strings by
   skipping uniform runs instead of one Python call per character, computes
-  line numbers by bisect, and memoizes per-file results on content, so a
+  line numbers by bisect, and memoizes per-file results on a content digest, so a
   release fan-out no longer re-scans the same headers once per member.
 
 ### Fixed
@@ -22,5 +22,6 @@
 - The castxml/clang header-AST disk caches (`~/.cache/abi_check/<backend>`)
   were unbounded (a profiled host held 57 GB). Each backend directory is now
   trimmed least-recently-used to `ABICHECK_AST_CACHE_MAX_BYTES` (default
-  16 GiB; `0` disables) once per process; entries touched in the last hour
-  are never evicted.
+  16 GiB; `0` disables), re-checked at most every five minutes per
+  directory. Each read or write stamps the entry's mtime, and entries used in
+  the last hour are never evicted.

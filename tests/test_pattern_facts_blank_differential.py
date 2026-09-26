@@ -96,3 +96,18 @@ def test_scan_text_line_numbers_match_a_rescan_from_zero(seed: int) -> None:
             expected.add((rule.kind, _oracle_line(blanked, m.start())))
     got = {(f.kind, f.line) for f in facts if f.kind in {r.kind for r in pf._RULES}}
     assert got == expected
+
+
+def test_scan_memo_retains_digests_not_text_and_stays_bounded(monkeypatch):
+    monkeypatch.setattr(pf, "_SCAN_MEMO", type(pf._SCAN_MEMO)())
+    monkeypatch.setattr(pf, "_SCAN_MEMO_MAX", 3)
+    texts = [f"#pragma pack(push, {i})\n" + "x" * 10_000 for i in range(5)]
+    for t in texts:
+        assert pf._scan_text_memo(t, "h.h") == tuple(pf.scan_text(t, "h.h"))
+    assert len(pf._SCAN_MEMO) == 3
+    for key in pf._SCAN_MEMO:
+        assert all(len(part) < 1000 for part in key)  # no source text kept
+    # A hit returns the same facts, and an edited file is never served stale.
+    assert pf._scan_text_memo(texts[-1], "h.h") == tuple(pf.scan_text(texts[-1], "h.h"))
+    edited = texts[-1].replace("pack", "pack ")
+    assert pf._scan_text_memo(edited, "h.h") == tuple(pf.scan_text(edited, "h.h"))

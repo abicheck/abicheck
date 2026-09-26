@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import random
+import time
 
 import pytest
 
@@ -89,3 +90,28 @@ def test_under_budget_disabled_and_foreign_files_are_untouched(tmp_path):
 def test_env_budget(monkeypatch, raw, expected):
     monkeypatch.setenv("ABICHECK_AST_CACHE_MAX_BYTES", raw)
     assert acb.configured_max_bytes() == expected
+
+
+def test_note_use_stamps_mtime_so_a_recent_read_is_protected(tmp_path):
+    entry = _entry(tmp_path, "a.xml", 100, age=9 * 3600)
+    acb._last_checked.clear()
+    acb.note_use(tmp_path, entry)
+    # The stamp is what protects it -- atime is never consulted for this.
+    assert time.time() - entry.stat().st_mtime < 60
+    assert acb.enforce_ast_cache_budget(tmp_path, max_bytes=1) == []
+    assert entry.exists()
+
+
+def test_note_use_rechecks_the_budget_after_the_interval(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(acb, "enforce_ast_cache_budget", lambda d: calls.append(d))
+    clock = [1000.0]
+    monkeypatch.setattr(acb.time, "monotonic", lambda: clock[0])
+    acb._last_checked.clear()
+    missing = tmp_path / "new.xml"  # not written yet: stamping must not raise
+    acb.note_use(tmp_path, missing)
+    acb.note_use(tmp_path, missing)
+    assert calls == [tmp_path]
+    clock[0] += acb.RECHECK_INTERVAL_SECONDS
+    acb.note_use(tmp_path, missing)
+    assert calls == [tmp_path, tmp_path]

@@ -23,9 +23,11 @@ backend directory back under a byte budget, least-recently-used first.
 
 The budget is ``ABICHECK_AST_CACHE_MAX_BYTES`` (bytes, per backend
 directory; ``0`` disables eviction), default :data:`DEFAULT_MAX_BYTES`.
-Entries modified within :data:`MIN_AGE_SECONDS` are never evicted, so a
-concurrent process's just-written (or just-read) entry cannot vanish under
-it; a reader that loses a race to an older entry simply re-parses.
+Every read or write stamps the entry's mtime (:func:`note_use`), and entries
+stamped within :data:`MIN_AGE_SECONDS` are never evicted, so a concurrent
+process's just-written or just-read entry cannot vanish under it; a reader
+that loses a race to an older entry simply re-parses. The budget is
+re-checked at most every :data:`RECHECK_INTERVAL_SECONDS` per directory.
 """
 
 from __future__ import annotations
@@ -43,7 +45,8 @@ __all__ = [
     "MIN_AGE_SECONDS",
     "configured_max_bytes",
     "enforce_ast_cache_budget",
-    "enforce_once",
+    "RECHECK_INTERVAL_SECONDS",
+    "note_use",
 ]
 
 log = logging.getLogger(__name__)
@@ -53,7 +56,9 @@ MIN_AGE_SECONDS: float = 3600.0
 _ENV = "ABICHECK_AST_CACHE_MAX_BYTES"
 _ENTRY_SUFFIXES = (".xml", ".json")
 
-_checked: set[Path] = set()
+RECHECK_INTERVAL_SECONDS: float = 300.0
+
+_last_checked: dict[Path, float] = {}
 _lock = threading.Lock()
 
 
@@ -130,10 +135,24 @@ def enforce_ast_cache_budget(
     return evicted
 
 
-def enforce_once(cache_dir: Path) -> None:
-    """Run :func:`enforce_ast_cache_budget` at most once per process per dir."""
+def note_use(cache_dir: Path, entry: Path) -> None:
+    """Record that *entry* is about to be read or written, and keep the budget.
+
+    Recency is stamped on the entry's mtime here rather than trusted to
+    ``atime``, which ``relatime``/``noatime`` mounts leave stale for up to a
+    day. The budget itself is re-checked whenever
+    :data:`RECHECK_INTERVAL_SECONDS` has passed for *cache_dir*, so a
+    long-lived process that keeps writing entries stays bounded rather than
+    being checked once at start-up.
+    """
+    try:
+        os.utime(entry)
+    except OSError:
+        pass  # not written yet, or read-only: nothing to stamp
+    current = time.monotonic()
     with _lock:
-        if cache_dir in _checked:
+        last = _last_checked.get(cache_dir)
+        if last is not None and current - last < RECHECK_INTERVAL_SECONDS:
             return
-        _checked.add(cache_dir)
+        _last_checked[cache_dir] = current
     enforce_ast_cache_budget(cache_dir)
