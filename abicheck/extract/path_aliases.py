@@ -136,8 +136,26 @@ def _is_native_absolute_spelling(s: str) -> bool:
     return _is_posix_absolute_spelling(s)
 
 
-@lru_cache(maxsize=8192)
+def _cwd_key(raw: str) -> str | None:
+    """The working directory a relative *raw* resolves against, else ``None``.
+
+    Part of both caches' keys below: a relative spelling's answer depends on
+    the directory it is resolved from, so caching it on the string alone
+    served one working directory's answer to another -- two comparisons run
+    from two directories in one process (a test session, a long-lived
+    service) that both spelled ``old/include`` shared the first one's alias.
+    """
+    return None if _is_absolute_spelling(raw) else os.getcwd()
+
+
 def canonical_spelling(raw: str) -> str | None:
+    """See :func:`_canonical_spelling` (cached per spelling *and*, for a
+    relative spelling, per working directory -- see :func:`_cwd_key`)."""
+    return _canonical_spelling(raw, _cwd_key(raw))
+
+
+@lru_cache(maxsize=8192)
+def _canonical_spelling(raw: str, _cwd: str | None) -> str | None:
     """A *conservative* canonical (symlink-resolved) spelling of *raw*, or
     ``None`` when obtaining one would be unsafe or meaningless.
 
@@ -296,8 +314,16 @@ def include_root_alias_segments(root: Path | str) -> list[tuple[str, ...]]:
     return dedup_segments([segments(s) for s in path_alias_spellings(absolutized)])
 
 
-@lru_cache(maxsize=8192)
 def source_header_alias_segments(source_header: str) -> tuple[tuple[str, ...], ...]:
+    """See :func:`_source_header_alias_segments`; keyed like
+    :func:`canonical_spelling` (see :func:`_cwd_key`)."""
+    return _source_header_alias_segments(source_header, _cwd_key(source_header))
+
+
+@lru_cache(maxsize=8192)
+def _source_header_alias_segments(
+    source_header: str, _cwd: str | None
+) -> tuple[tuple[str, ...], ...]:
     """Every segment spelling a declaration's own header may be matched as.
 
     The lexical segments always come first, so a stored, cross-machine, or
@@ -325,5 +351,5 @@ def clear_path_alias_caches() -> None:
     root sets; this exists so a test (or a long-lived process reconfiguring
     a tree between runs) can reset it explicitly.
     """
-    canonical_spelling.cache_clear()
-    source_header_alias_segments.cache_clear()
+    _canonical_spelling.cache_clear()
+    _source_header_alias_segments.cache_clear()

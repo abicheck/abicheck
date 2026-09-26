@@ -418,13 +418,9 @@ def test_source_depth_dumps_of_relocated_checkouts_compare_clean(
                 ]
             )
         )
-        for cmd in (["init", "-q"], ["add", "-A"]):
-            subprocess.run(["git", *cmd], cwd=root, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"],
-            cwd=root,
-            check=True,
-        )
+        # A checkout marker is all the ownership anchor looks for; no commit
+        # (which a signing or identity config on the host could refuse).
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
         out = f"{side.replace('/', '_')}.json"
         result = CliRunner().invoke(
             main,
