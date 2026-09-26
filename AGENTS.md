@@ -1065,6 +1065,12 @@ cover the surrounding first-party trees this file doesn't detail.
 ## Conventions
 
 - **Commits**: Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`)
+- **Commit signing**: sign commits when signing is configured. If signing fails for
+  an environmental reason (missing key, signing agent/server unavailable, a
+  sandbox that cannot reach the signer), retry once, then commit unsigned
+  (`git -c commit.gpgsign=false commit ...`) rather than blocking the work.
+  Never change the repository's or user's global git config to do so, and
+  say in your summary that the commit is unsigned.
 - **Branches**: `feat/<name>` or `fix/<name>`
 - **Python**: 3.11+ syntax, type annotations, `from __future__ import annotations`
 - **No line length limit** (ruff E501 ignored)
