@@ -42,6 +42,8 @@ import hashlib
 import json
 from typing import Any
 
+from ...model.graph_identity import checkout_stable_spelling
+
 #: Literal nodes whose ``value`` is a stable, human-meaningful constexpr value.
 _LITERAL_NODE_KINDS = frozenset(
     {
@@ -190,12 +192,17 @@ def _canonical(node: Any, amap: dict[str, str]) -> Any:
     for key in _FINGERPRINT_SCALAR_KEYS:
         if key in node:
             # A local declaration's own name becomes its placeholder.
-            out[key] = (
-                placeholder if key == "name" and placeholder is not None else node[key]
-            )
+            value = node[key]
+            if key == "name" and placeholder is not None:
+                value = placeholder
+            elif key == "name" and isinstance(value, str):
+                value = checkout_stable_spelling(value)
+            out[key] = value
     type_obj = node.get("type")
     if isinstance(type_obj, dict) and "qualType" in type_obj:
-        out["type"] = type_obj["qualType"]
+        # A lambda/unnamed type spells its header's absolute path; hash the
+        # checkout-stable form so a relocated checkout keeps the fingerprint.
+        out["type"] = checkout_stable_spelling(str(type_obj["qualType"]))
     # A DeclRefExpr stores the referenced entity (e.g. another constant) in
     # ``referencedDecl``; without its name a value change `kOld` -> `kNew` of the
     # same type would hash identically and the constexpr/default-arg change would
@@ -208,7 +215,7 @@ def _canonical(node: Any, amap: dict[str, str]) -> Any:
         if ref_placeholder is not None:
             out["ref"] = ref_placeholder
         elif ref.get("name"):
-            out["ref"] = ref["name"]
+            out["ref"] = checkout_stable_spelling(str(ref["name"]))
     inner = node.get("inner")
     if isinstance(inner, list):
         children = [_canonical(child, amap) for child in inner]
@@ -387,9 +394,13 @@ def _default_arg_repr(node: dict[str, Any]) -> str:
 
 
 def _signature(node: dict[str, Any]) -> str:
+    """The node's type spelling, checkout-stable (see
+    :func:`~abicheck.model.graph_identity.checkout_stable_spelling`): it keys
+    entity ids and signature hashes, which must not depend on where the
+    checkout lives."""
     type_obj = node.get("type")
     if isinstance(type_obj, dict):
-        return str(type_obj.get("qualType", ""))
+        return checkout_stable_spelling(str(type_obj.get("qualType", "")))
     return ""
 
 

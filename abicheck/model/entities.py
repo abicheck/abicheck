@@ -58,7 +58,7 @@ _OMITTED_RECORD_DEPRECATED: str | None = cast("str | None", _Omitted())
 _OMITTED_ENUM_DEPRECATED: str | None = cast("str | None", _Omitted())
 
 
-@dataclass
+@dataclass(slots=True)
 class TypeField:
     name: str
     type: str
@@ -394,7 +394,7 @@ class RecordType:
         return resolved_fact_value(self.virtual_bases_fact, [])
 
 
-@dataclass
+@dataclass(slots=True)
 class EnumMember:
     name: str
     value: int

@@ -53,7 +53,10 @@ def test_cold_parse_caches_compact_ascii_and_reports_its_size(tmp_path):
     assert json.loads(raw) == _DOC
     # The reported size is the document the warm path will read.
     assert sizes == [len(raw)]
-    assert sorted(p.name for p in cache.iterdir()) == ["entry.json"]
+    assert sorted(p.name for p in cache.iterdir()) == [
+        "entry.json",
+        "entry.json.sha256",
+    ]
 
 
 def test_derived_consumer_is_offered_the_compact_document(tmp_path, monkeypatch):

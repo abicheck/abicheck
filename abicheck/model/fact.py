@@ -75,8 +75,9 @@ capability).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field, replace
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from .availability import FactStatus
 
@@ -262,6 +263,13 @@ def sync_present_facts(obj: object, *field_names: str) -> None:
         setattr(obj, f"{name}_fact", Fact.present(getattr(obj, name)))
 
 
+_SHAREABLE_VALUE_TYPES = (type(None), bool, tuple)
+#: Bounded only because ``producer`` is an open string; in practice a
+#: handful of backends times six statuses times four values.
+_FLYWEIGHT_LIMIT = 4096
+_FLYWEIGHT: dict[tuple[object, ...], Fact[Any]] = {}
+
+
 @dataclass(frozen=True, slots=True)
 class Fact(Generic[T]):
     """A value paired with why we do or don't have it.
@@ -333,70 +341,78 @@ class Fact(Generic[T]):
         return default
 
     @classmethod
+    def _make(
+        cls,
+        status: FactStatus,
+        value: T | None,
+        diagnostics: tuple[str, ...],
+        producer: str | None,
+    ) -> Fact[T]:
+        """Construct a fact, sharing one instance per common valueless shape.
+
+        ``Fact`` is frozen and slotted, so an instance is never mutated and
+        two equal instances are interchangeable. A oneDAL-scale snapshot
+        holds ~287k facts with only ~8k distinct contents -- ``present(False)``,
+        ``not_collected()``, ``present(())``... -- so the common shapes
+        (no diagnostics; value ``None``, a ``bool``, or ``()``) are served
+        from one table instead of allocated per call. Keyed on the value's
+        type as well as the value, since ``False == 0`` and ``True == 1``.
+        """
+        if (
+            not diagnostics
+            and type(value) in _SHAREABLE_VALUE_TYPES
+            and (value is None or value is True or value is False or value == ())
+        ):
+            key = (cls, status, type(value), value, producer)
+            shared = _FLYWEIGHT.get(key)
+            if shared is None:
+                if producer is not None:
+                    producer = sys.intern(producer)
+                shared = cls(
+                    status=status, value=value, diagnostics=(), producer=producer
+                )
+                if len(_FLYWEIGHT) < _FLYWEIGHT_LIMIT:
+                    _FLYWEIGHT[key] = shared
+            return shared
+        return cls(
+            status=status, value=value, diagnostics=diagnostics, producer=producer
+        )
+
+    @classmethod
     def present(
         cls, value: T, *diagnostics: str, producer: str | None = None
     ) -> Fact[T]:
         """Usable evidence — including a confirmed-empty/None value."""
-        return cls(
-            status=FactStatus.PRESENT,
-            value=value,
-            diagnostics=diagnostics,
-            producer=producer,
-        )
+        return cls._make(FactStatus.PRESENT, value, diagnostics, producer)
 
     @classmethod
     def partial(
         cls, value: T, *diagnostics: str, producer: str | None = None
     ) -> Fact[T]:
         """Usable evidence covering only part of the requested scope."""
-        return cls(
-            status=FactStatus.PARTIAL,
-            value=value,
-            diagnostics=diagnostics,
-            producer=producer,
-        )
+        return cls._make(FactStatus.PARTIAL, value, diagnostics, producer)
 
     @classmethod
     def not_collected(cls, *diagnostics: str, producer: str | None = None) -> Fact[T]:
         """The producer was never invoked for this family."""
-        return cls(
-            status=FactStatus.NOT_COLLECTED,
-            value=None,
-            diagnostics=diagnostics,
-            producer=producer,
-        )
+        return cls._make(FactStatus.NOT_COLLECTED, None, diagnostics, producer)
 
     @classmethod
     def unsupported(cls, *diagnostics: str, producer: str | None = None) -> Fact[T]:
         """This producer cannot express this family at all."""
-        return cls(
-            status=FactStatus.UNSUPPORTED,
-            value=None,
-            diagnostics=diagnostics,
-            producer=producer,
-        )
+        return cls._make(FactStatus.UNSUPPORTED, None, diagnostics, producer)
 
     @classmethod
     def failed(
         cls, reason: str, *more_diagnostics: str, producer: str | None = None
     ) -> Fact[T]:
         """The producer was invoked and errored."""
-        return cls(
-            status=FactStatus.FAILED,
-            value=None,
-            diagnostics=(reason, *more_diagnostics),
-            producer=producer,
-        )
+        return cls._make(FactStatus.FAILED, None, (reason, *more_diagnostics), producer)
 
     @classmethod
     def not_applicable(cls, *diagnostics: str, producer: str | None = None) -> Fact[T]:
         """The family is meaningless for this artifact kind."""
-        return cls(
-            status=FactStatus.NOT_APPLICABLE,
-            value=None,
-            diagnostics=diagnostics,
-            producer=producer,
-        )
+        return cls._make(FactStatus.NOT_APPLICABLE, None, diagnostics, producer)
 
 
 def fact_confirmed_true(fact: Fact[bool | None] | None) -> bool:
