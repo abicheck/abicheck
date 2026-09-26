@@ -27,6 +27,7 @@ from typing import Any
 
 from .checker_types import Change
 from .compare import export_transition as _export_transition
+from .compare.edge_query import ObservedExportTable, observed_export_table
 from .compare.elf_only_demangle import (
     elf_only_demangled_name as _elf_only_demangled_name,
 )
@@ -381,14 +382,17 @@ def _var_added(mangled: str, v_new: Variable) -> list[Change]:
     ]
 
 
-def _observed_exports(snap: AbiSnapshot, types: frozenset[str]) -> frozenset[str]:
-    """The names *snap*'s own export table carries (empty when it has none).
+def _observed_exports(snap: AbiSnapshot, types: frozenset[str]) -> ObservedExportTable:
+    """The names *snap*'s own export table carries (empty when it has none),
+    with the table's ``exports`` coverage, so a reader can ask whether a
+    missing name is proven absent (``compare.edge_query``, I4).
 
     The removal paths cross-check against this rather than trusting a
     declaration's own, possibly legacy-bridged, ``binary_exported`` fact --
     see ``export_transition.surface_exit_is_evidence_gap``.
     """
-    return frozenset(
+    return observed_export_table(
+        snap,
         exported_symbol_names(
             getattr(snap, "elf", None),
             types,
@@ -396,7 +400,7 @@ def _observed_exports(snap: AbiSnapshot, types: frozenset[str]) -> frozenset[str
             filter_transitive_runtime_symbols=(
                 _should_filter_transitive_runtime_symbols(snap)
             ),
-        )
+        ),
     )
 
 

@@ -549,10 +549,18 @@ called either a regression or noise.
 - `scope.private_namespaces` narrows the contract but is not merged into
   `policy.internal_namespaces` (ADR-075 D7.1): that key scopes findings,
   which is the retention phase's decision.
-- Ownership is recorded only for snapshots extracted through
-  `resolve_input` and the release surface. A snapshot built by any other
-  entry point, or a stored pre-v52 baseline, has none, so its readers fall
-  back to `ScopeOrigin`.
+- ~~Ownership is recorded only for snapshots extracted through
+  `resolve_input` and the release surface.~~ **Fixed (B2):** the header-only
+  `dump` (and a typed `DumpRequest` with no path), both `compat` live dumps
+  (`compat.run_inputs.finish_live_compat_dump`) and `appcompat`'s dumps now
+  call `classify_extracted`. `tests/test_ownership_entry_points.py`
+  inventories every producer call site in `abicheck/` with how its result is
+  stamped (or why it needs none: binary-only, inner layer, `json.dump`), so a
+  new site fails until classified. A pre-v52 baseline still loads with no
+  scope and every decision unset -- `unknown`, never a guessed owner; the
+  readers' `ScopeOrigin` fallback stays, labelled as the weaker tier in the
+  `public_not_exported` coverage row (`OWNERSHIP_UNRECORDED_NOTE`) and as
+  `no_extraction_scope` on the graph's ownership coverage record.
 - ~~`provided_by` keys a release on one platform.~~ **Fixed (B3):**
   `BundleExportIndex.member_platforms` records each member's table kind and
   `ProviderRelations.edges()` keys every edge on its own member's
@@ -717,11 +725,28 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
   keeps the legacy edge-presence reading in `source_graph_covers` and
   `_dependency_kinds_covered`; the persisted `coverage.*.collected` summary
   (`SourceGraphSummary.finalize`) keeps it too.
-- `compare/debug_type_scope` does not consult per-side header coverage, so
-  a public type whose header failed to parse is silently not diffed (false
-  negative, not a false absent).
-- `export_transition`'s OLD-side suppression guard does not check OLD's
-  table was read (false-negative direction).
+- **A3, header coverage for the L1 type scope — fixed (PR A3).** The clang
+  `#error` retry's dropped headers were only logged. They are now recorded
+  (`ast_toolchain["header_parse_excluded"]`, `model/header_parse_coverage`,
+  with an AST-cache sidecar so a warm run keeps them); the header-AST
+  coverage record reads `partial` covering nothing; the dependency scope no
+  longer strips a DWARF type merely because no parsed header names it (it
+  drops only confirmed dependency types); and each such debug type answers
+  `unknown` in the "Relationship coverage" section. A type is therefore never
+  dropped silently. Kept as is: `debug_type_scope` still does not *diff* an
+  unnamed debug type (that would re-admit every internal type the scope
+  exists to remove); the answer is `unknown`, reported, not a diff. A snapshot
+  dumped before the record, and a castxml dump (castxml fails the whole parse
+  rather than dropping a header), read as complete, as before.
+- **A2, OLD-side suppression guard — fixed (PR A2).**
+  `export_transition.surface_exit_is_evidence_gap` read "not confirmed
+  exported" as "not exported", so an unread OLD table suppressed a real
+  export loss. The removal paths now pass the OLD table as
+  `edge_query.ObservedExportTable`; the guard suppresses only on its typed
+  `proven_absent` answer (or OLD's own confirmed-absent fact), and a bare
+  name set refuses on a `FAILED` fact. An OLD with no binary owes no table
+  and still suppresses. Tested by an OLD-table-state × caller-kind table and
+  through `checker.compare`.
 - **C1, schema enum — fixed (PR C1).** The producer was right: with no OLD
   snapshot, `schema_staleness_status` is `not_evaluated`, like every sibling
   context status. The schema enum (report schema 5.7) and the merge scale

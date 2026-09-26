@@ -848,7 +848,11 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "collapses failure into an empty result."
         ),
         fixed_by=(1384,),
-        seed_tests=("tests/test_export_table_read_absence.py",),
+        seed_tests=(
+            "tests/test_export_table_read_absence.py",
+            "tests/test_export_transition_old_side_read.py",
+            "tests/test_header_parse_coverage.py",
+        ),
         public_surfaces=("cli",),
         axes={
             "read_state": (
@@ -861,6 +865,30 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "producer": ("castxml", "clang", "dwarf"),
             "platform": ("elf", "pe", "macho"),
             "operand": ("live", "stored", "pre_v46_stored"),
+        },
+    ),
+    BugClass(
+        id="evidence.entry_point_skips_extraction_record",
+        invariant=(
+            "Every production path that returns a freshly extracted header "
+            "snapshot records its ownership (ADR-075 D1/D2) before any reader "
+            "sees it, and a snapshot that never recorded one reads unknown -- "
+            "never an owner guessed from ScopeOrigin. The inventory of "
+            "producer call sites is exhaustive and executable, so a new entry "
+            "point is classified before it ships."
+        ),
+        fixed_by=(1393,),
+        seed_tests=("tests/test_ownership_entry_points.py",),
+        axes={
+            "entry_point": (
+                "resolve_input",
+                "release_surface",
+                "header_only_dump",
+                "compat_dump",
+                "compat_check",
+                "appcompat",
+                "stored_pre_v52",
+            ),
         },
     ),
     BugClass(

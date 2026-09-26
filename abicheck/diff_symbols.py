@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Container, Mapping
 from typing import Any
 
 from .checker_types import Change
@@ -912,7 +912,7 @@ def _match_old_function(
     elf_only_mode: bool,
     params_unconfirmed: bool = False,
     is_llp64: bool = False,
-    old_exported_symbols: frozenset[str] = frozenset(),
+    old_exported_symbols: Container[str] = frozenset(),
 ) -> list[Change]:
     """Classify a single old function: matched by mangled, extern-C fallback, or removed.
 

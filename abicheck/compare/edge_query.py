@@ -69,7 +69,7 @@ from ..model.edge_coverage import (
     EdgeQueryResult,
     ProducerRun,
 )
-from ..model.export_index import read_export_platforms
+from ..model.export_index import read_export_platforms, snapshot_export_names
 from ..model.graph_join import (
     BINARY_SYMBOL_PREFIX,
     DEBUG_TYPE_PREFIX,
@@ -78,6 +78,7 @@ from ..model.graph_join import (
     JoinRecord,
     JoinState,
 )
+from ..model.header_parse_coverage import header_parse_excluded
 from ..model.source_graph_coverage import L5_EDGE_KINDS, pass_coverage_records
 from .debug_type_join import DebugTypeJoin, join_debug_types
 from .export_join import ExportJoin, join_exports
@@ -124,6 +125,8 @@ __all__ = [
     "export_table_covered",
     "header_coverage_record",
     "is_toolchain_symbol",
+    "ObservedExportTable",
+    "observed_export_table",
     "source_graph_covers",
 ]
 
@@ -227,6 +230,46 @@ def export_coverage_records(snap: AbiSnapshot) -> tuple[CoverageRecord, ...]:
     return tuple(out)
 
 
+@dataclass(frozen=True)
+class ObservedExportTable:
+    """A snapshot's export table as an I4 answer, not a bare name set.
+
+    ``in`` keeps the name-set reading its callers already use (*names*, the
+    caller's filtered projection). :meth:`answer` is the typed question a
+    reader drawing a conclusion from *absence* must ask: ``present``,
+    ``proven_absent`` only when a producer of ``exports`` covered every table
+    the snapshot owes (:func:`decide` over :func:`export_coverage_records`),
+    else ``unknown``. *owes_table* is ``False`` for a snapshot with no binary
+    at all -- a header-only dump, which had no export to lose.
+    """
+
+    names: frozenset[str]
+    table: frozenset[str]
+    records: tuple[CoverageRecord, ...]
+    owes_table: bool
+
+    def __contains__(self, spelling: object) -> bool:
+        return spelling in self.names
+
+    def answer(self, spelling: str) -> EdgeAnswer:
+        observed = spelling in self.names or spelling in self.table
+        return decide(observed, self.records, None)[0]
+
+
+def observed_export_table(
+    snap: AbiSnapshot, names: Iterable[str]
+) -> ObservedExportTable:
+    """*snap*'s export table with its ``exports`` coverage (see
+    :class:`ObservedExportTable`); *names* is the caller's own projection."""
+    records = export_coverage_records(snap)
+    return ObservedExportTable(
+        frozenset(names),
+        snapshot_export_names(snap),
+        records,
+        owes_table=bool(read_export_platforms(snap)) or snap.platform in _PLATFORMS,
+    )
+
+
 def export_table_covered(snap: AbiSnapshot, platform: str) -> bool:
     """Whether *snap*'s *platform* export table was read, so a spelling
     missing from it is proven absent (I4). The predicate every
@@ -261,7 +304,9 @@ def header_coverage_record(snap: AbiSnapshot, edge_kind: str) -> CoverageRecord:
     headers when they were filtered out (the default) or the scope was not
     recorded; ``not_run`` when *snap* has no header AST at all (a binary- or
     DWARF-only dump), or when ``from_headers`` was only inferred for a legacy
-    snapshot."""
+    snapshot; ``partial`` covering nothing when the parse dropped top-level
+    headers (``model.header_parse_coverage``), whose declarations are then
+    unknown rather than absent."""
     units = frozenset({UNIT_HEADERS, UNIT_DEPENDENCY_HEADERS})
     source = "AbiSnapshot.from_headers"
     if not snap.from_headers or snap.from_headers_inferred:
@@ -269,6 +314,15 @@ def header_coverage_record(snap: AbiSnapshot, edge_kind: str) -> CoverageRecord:
         return CoverageRecord(
             edge_kind, PRODUCER_HEADER_AST, ProducerRun.NOT_RUN, units,
             reason=reason, source=source,
+        )  # fmt: skip
+    if header_parse_excluded(snap):
+        # Evidence-entity-model gap A3: the header parse dropped top-level
+        # headers (clang's `#error` retry), so a declaration missing from the
+        # AST may simply live in one of them -- no header unit is covered.
+        return CoverageRecord(
+            edge_kind, PRODUCER_HEADER_AST, ProducerRun.PARTIAL, units,
+            covered=frozenset(), reason="header_parse_excluded",
+            source="AbiSnapshot.ast_toolchain",
         )  # fmt: skip
     if snap.dependency_scope == "full":
         return CoverageRecord(
