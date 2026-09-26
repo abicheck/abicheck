@@ -662,8 +662,8 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
 ### Remaining documented gaps
 
 - The structor placeholder gap above (export join; Phase 2 gaps owner).
-- **A1, export fact decided from the read — fixed (PR A1, see the
-  changelog).** `extract/surface_fact_producers` recorded
+- **A1, export fact decided from the read — fixed
+  ([#1384](https://github.com/abicheck/abicheck/pull/1384)).** `extract/surface_fact_producers` recorded
   `binary_exported_fact = present(False)` whenever a binary was supplied,
   even if its export set came back empty. The builders' shared tail
   (`extract/export_table_read.finish_binary_snapshot`) and snapshot load now

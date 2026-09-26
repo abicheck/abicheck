@@ -847,7 +847,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "while the table itself came back empty from a parse that "
             "collapses failure into an empty result."
         ),
-        fixed_by=(),
+        fixed_by=(1384,),
         seed_tests=("tests/test_export_table_read_absence.py",),
         public_surfaces=("cli",),
         axes={
