@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import itertools
+import os
 import subprocess
 import sys
 import textwrap
@@ -107,7 +108,9 @@ def test_two_in_process_passes_survive_like_mutmut_runs_them(
     suppression list, and two `pytest.main` calls in one process under
     `MUTANT_UNDER_TEST` -- mutmut's exact driving pattern. Before the fix the
     second pass failed with `differing_executors`."""
-    (tmp_path / "conftest.py").write_text(CONFTEST.read_text(encoding="utf-8"))
+    (tmp_path / "conftest.py").write_text(
+        CONFTEST.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     (tmp_path / "test_prop.py").write_text(
         textwrap.dedent(
             f"""
@@ -119,7 +122,8 @@ def test_two_in_process_passes_survive_like_mutmut_runs_them(
                 def test_it(self, x):
                     assert isinstance(x, int)
             """
-        )
+        ),
+        encoding="utf-8",
     )
     driver = textwrap.dedent(
         """
@@ -135,6 +139,9 @@ def test_two_in_process_passes_survive_like_mutmut_runs_them(
         cwd=tmp_path,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=120,
     )
     assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
