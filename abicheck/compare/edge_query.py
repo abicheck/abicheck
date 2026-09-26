@@ -79,7 +79,11 @@ from ..model.graph_join import (
     JoinState,
 )
 from ..model.header_parse_coverage import header_parse_excluded
-from ..model.source_graph_coverage import L5_EDGE_KINDS, pass_coverage_records
+from ..model.source_graph_coverage import (
+    L5_EDGE_KINDS,
+    graph_records_passes,
+    pass_coverage_records,
+)
 from .debug_type_join import DebugTypeJoin, join_debug_types
 from .export_join import ExportJoin, join_exports
 from .ownership_relations import (
@@ -746,11 +750,17 @@ def source_graph_covers(graph: SourceGraphSummary, edge_kind: str) -> bool:
     """Whether an *edge_kind* edge absent from *graph* is proven absent
     project-wide: the query over the whole project answers ``proven_absent``
     from *graph*'s own pass records (a narrowed, degraded or header-only
-    body-blind pass does not). A graph recording no pass flag at all (a
-    hand-built or pre-flag graph) keeps the legacy edge-presence reading
-    ``buildsource/source_graph_findings.py``'s other gates also fall back to
-    -- a documented gap of evidence-entity-model Phase 4."""
+    body-blind pass does not).
+
+    A graph recording no pass flag at all (a hand-built graph, or an L5 graph
+    stored before its producers stamped coverage --
+    ``model.source_graph_coverage.graph_records_passes``) answers ``False``:
+    its absences are ``unknown``, so a finding that rests on one is not
+    emitted, and the report's coverage section says ``pass_not_recorded``.
+    The legacy "an edge of this kind exists somewhere" reading is retired
+    (evidence-entity-model gap A5): edge presence proves presence, never
+    that the producer looked everywhere else."""
+    if not graph_records_passes(graph):
+        return False
     records = pass_coverage_records(graph, edge_kind)
-    if all(r.reason == "pass_not_recorded" for r in records):
-        return True
     return decide(False, records, None)[0] is EdgeAnswer.PROVEN_ABSENT

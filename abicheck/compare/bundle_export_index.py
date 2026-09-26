@@ -46,14 +46,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from ..model.export_index import (
-    build_raw_export_index_from_elf,
-    build_raw_export_index_from_macho,
-    build_raw_export_index_from_pe,
-    default_versioned_names,
-)
+from ..model.export_index import read_default_export_names
+
+if TYPE_CHECKING:
+    from ..model.snapshot import AbiSnapshot
 
 #: Sentinel distinguishing "this object has no such attribute" from an
 #: attribute whose value is a legitimate `None` ("observed, no export
@@ -97,16 +95,10 @@ def member_export_names(member: object) -> frozenset[str] | None:
         if projected is None:
             return None
         return frozenset(cast("Iterable[str]", projected))
-    elf = getattr(member, "elf", None)
-    if elf is not None:
-        return default_versioned_names(build_raw_export_index_from_elf(elf))
-    pe = getattr(member, "pe", None)
-    if pe is not None:
-        return default_versioned_names(build_raw_export_index_from_pe(pe))
-    macho = getattr(member, "macho", None)
-    if macho is not None:
-        return default_versioned_names(build_raw_export_index_from_macho(macho))
-    return None
+    # A block that was never parsed (a default or parse-failed one, no
+    # entries and no header fields) is an unread member, not one exporting
+    # nothing (evidence-entity-model gap A4).
+    return read_default_export_names(cast("AbiSnapshot", member))
 
 
 @dataclass(frozen=True)

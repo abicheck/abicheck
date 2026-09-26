@@ -24,6 +24,7 @@ lane covers them end-to-end.
 from __future__ import annotations
 
 import pytest
+from l5_graph_support import producers_ran_unless_flagged
 
 from abicheck.buildsource.adapters.base import derive_build_options
 from abicheck.buildsource.build_diff import diff_build_evidence
@@ -374,6 +375,7 @@ def _E(src: str, dst: str, kind: str, *, role: str = "") -> GraphEdge:
 
 
 def _graph_kinds(old, new) -> list[str]:
+    old, new = producers_ran_unless_flagged(old, new)
     return [c.kind.value for c in diff_source_graph_findings(old, new)]
 
 
@@ -423,6 +425,7 @@ def test_l5_internal_dep_skipped_without_baseline_call_coverage() -> None:
             _E("hdr", "pub", "SOURCE_DECLARES"),
             _E("pub", "intn", "DECL_CALLS_DECL"),
         ],
+        extractor_passes={"call_graph": True},  # only NEW ran the call pass
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds
@@ -732,6 +735,7 @@ def test_l5_internal_dep_skipped_on_collector_coverage_improvement() -> None:
             _E("hdr", "pub", "SOURCE_DECLARES"),
             _E("pub", "pub", "DECL_CALLS_DECL"),  # only the call-graph pass ran
         ],
+        extractor_passes={"call_graph": True},
     )
     new = SourceGraphSummary(
         nodes=nodes,
@@ -743,6 +747,7 @@ def test_l5_internal_dep_skipped_on_collector_coverage_improvement() -> None:
                 "pub", "priv_type", "DECL_HAS_TYPE"
             ),  # type-graph pass, new on this side
         ],
+        extractor_passes={"call_graph": True, "type_graph": True},
     )
     kinds = _graph_kinds(old, new)
     assert ChangeKind.PUBLIC_API_INTERNAL_DEPENDENCY_ADDED.value not in kinds

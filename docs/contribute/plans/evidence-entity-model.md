@@ -717,16 +717,32 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
   `PRESENT:False`, 4,265 `NOT_COLLECTED` per side on both; the same 5,078
   findings; dump 67.3/68.9 s -> 69.6/68.2 s at ~874 MiB, compare 71.6 ->
   72.1 s (noise). Its table is read, so nothing is withdrawn.
-- `compare/bundle_export_index.member_export_names` still counts a member
-  with an unparsed block as complete (release-surface owner).
-- L5: `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_DECLARES`,
-  `TARGET_HAS_PUBLIC_HEADER`, `TARGET_DEPENDS_ON` and
-  `BUILD_OPTION_AFFECTS_SYMBOL` producers stamp no coverage flag, so the
-  mapping-drift, public-reachability, generated-closure, build-option and
-  target-dependency findings still diff raw edge sets. An unflagged graph
-  keeps the legacy edge-presence reading in `source_graph_covers` and
-  `_dependency_kinds_covered`; the persisted `coverage.*.collected` summary
-  (`SourceGraphSummary.finalize`) keeps it too.
+- **A4, unread release member — fixed (PR A4).**
+  `bundle_export_index.member_export_names` and the compact
+  `BundleSignatureEvidence.export_names` projection now read through
+  `model.export_index.read_default_export_names`: a default or parse-failed
+  block is `None` (unread), so the member lands in
+  `members_without_exports`, coverage goes incomplete and its obligations are
+  `unresolved`, never `missing`. A parsed empty table stays complete.
+  Tested over platform × read state × full/compact evidence, and through the
+  release section's compute/render pair.
+- **A5, L5 producer coverage — fixed (PR A5).** The five producers now
+  stamp passes (`source_abi` — degraded when the L4 replay reports a
+  declaration family failed/partial — with a header-only
+  `header_declarations` counterpart for `SOURCE_DECLARES`; `build_targets`;
+  `build_options`), and the mapping-drift, public-reachability,
+  generated-closure, build-option and target-dependency findings require the
+  edge-lacking side's `proven_absent` (`edge_query.source_graph_covers`). The
+  legacy edge-presence reading is retired for flagged graphs in
+  `source_graph_covers`, `_dependency_kinds_covered` and
+  `SourceGraphSummary.finalize`'s `coverage.*.collected`. An unflagged graph
+  (hand-built, or stored before this change) keeps edge presence only as
+  evidence that a kind was collected at all; every *absence* on it is
+  `unknown`, shown in the coverage section, and `coverage.pass_flags_recorded`
+  says which reading applies. Consequence recorded, not hidden: a stored
+  baseline whose L5 graph predates this change reports none of those five
+  finding families until regenerated. No schema bump was needed (pass flags
+  already persist).
 - **A3, header coverage for the L1 type scope — fixed (PR A3).** The clang
   `#error` retry's dropped headers were only logged. They are now recorded
   (`ast_toolchain["header_parse_excluded"]`, `model/header_parse_coverage`,

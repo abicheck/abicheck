@@ -85,6 +85,7 @@ __all__ = [
     "default_versioned_names",
     "export_names_or_modeled_fallback",
     "platform_block_parsed",
+    "read_default_export_names",
     "read_export_platforms",
     "snapshot_export_table_state",
     "linked_export_names",
@@ -581,6 +582,28 @@ class ExportTableState(str, Enum):
     #: The table was read -- it holds an entry, or the binary's header was
     #: parsed and it genuinely exports nothing: ``ABSENT`` is an observation.
     READ = "read"
+
+
+def read_default_export_names(snap: AbiSnapshot) -> frozenset[str] | None:
+    """*snap*'s default-versioned export names from the table it carries, or
+    ``None`` when there is no table *or the table was not read*
+    (:func:`platform_block_parsed`: a default or parse-failed block with no
+    entries). ``None`` is "unknown", never "exports nothing" -- the reading a
+    release reconciliation needs to record an obligation as unresolved rather
+    than as a missing export (evidence-entity-model gap A4)."""
+    for platform, build in (
+        ("elf", build_raw_export_index_from_elf),
+        ("pe", build_raw_export_index_from_pe),
+        ("macho", build_raw_export_index_from_macho),
+    ):
+        meta = getattr(snap, platform, None)
+        if meta is None:
+            continue
+        index = build(meta)
+        if not index.entries and not platform_block_parsed(meta):
+            return None
+        return default_versioned_names(index)
+    return None
 
 
 def snapshot_export_table_state(snap: AbiSnapshot) -> ExportTableState:

@@ -3,7 +3,14 @@
   "degraded_passes": {},
   "edges": [],
   "external_graph_refs": [],
-  "extractor_passes": {},
+  "extractor_passes": {
+    "build_options": true,
+    "build_targets": true,
+    "call_graph": true,
+    "include_graph": true,
+    "source_abi": true,
+    "type_graph": true
+  },
   "graph_id": "sha256:bbabb1b2075b9054fc1015ef8759dc29f18cdfeea61e31013beba2a9b6e45706",
   "indexes": {
     "by_binary_symbol": {},

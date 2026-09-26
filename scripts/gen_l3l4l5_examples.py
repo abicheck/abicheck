@@ -71,6 +71,7 @@ from abicheck.buildsource.source_graph import (  # noqa: E402
     build_source_graph,
     mark_source_edges_extractor_coverage,
 )
+from abicheck.model.source_graph_coverage import PASS_EDGE_KINDS  # noqa: E402
 
 EXAMPLES = example_catalog.CASES_DIR
 
@@ -130,8 +131,17 @@ def _graph(
     *,
     extractor_passes: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
+    # A case models a real build whose producers all ran, so it says so: an
+    # unflagged graph answers every absence ``unknown`` (evidence-entity-model
+    # gap A5, ``compare.edge_query.source_graph_covers``). A case studying a
+    # specific pass state passes its own flags instead.
+    passes = (
+        dict(extractor_passes)
+        if extractor_passes is not None
+        else dict.fromkeys(PASS_EDGE_KINDS, True)
+    )
     return SourceGraphSummary(
-        nodes=nodes, edges=edges, extractor_passes=dict(extractor_passes or {})
+        nodes=nodes, edges=edges, extractor_passes=passes
     ).to_dict()
 
 

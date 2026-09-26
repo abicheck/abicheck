@@ -54,8 +54,12 @@ from ..model.source_graph import (
     _static_library_node_id,
     _version_script_node_id,
 )
+from ..model.source_graph_coverage import BUILD_OPTIONS_PASS, BUILD_TARGETS_PASS
 from .build_evidence import BuildEvidence, Confidence
-from .source_graph_build_source_abi import _augment_with_source_abi
+from .source_graph_build_source_abi import (
+    _augment_with_source_abi,
+    stamp_source_abi_pass,
+)
 
 if TYPE_CHECKING:
     from .source_abi import SourceAbiSurface
@@ -275,10 +279,15 @@ def build_source_graph(
             )
 
     _fold_link_provenance(graph, build)
+    # Gap A5: the build evidence was read, so an absent target edge is an
+    # observation, not a gap (`model.source_graph_coverage`).
+    graph.extractor_passes[BUILD_TARGETS_PASS] = True
 
     if source_abi is not None:
         _augment_with_source_abi(graph, source_abi, project_source_files(build))
+        stamp_source_abi_pass(graph, source_abi)
         _link_options_to_symbols(graph)
+        graph.extractor_passes[BUILD_OPTIONS_PASS] = True
 
     return graph.finalize()
 

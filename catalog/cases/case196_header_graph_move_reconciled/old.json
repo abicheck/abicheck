@@ -18,6 +18,7 @@
       "source_decl": 2,
       "target": 1
     },
+    "pass_flags_recorded": true,
     "reference_edges": {
       "collected": true,
       "count": 0
@@ -70,7 +71,10 @@
   ],
   "external_graph_refs": [],
   "extractor_passes": {
+    "build_options": true,
+    "build_targets": true,
     "call_graph": true,
+    "source_abi": true,
     "type_graph": true
   },
   "graph_id": "sha256:7b3960b2c1ce2aa012d9b5ef8ae36a2ceea696cda9141b0df37c580f75657b1d",
