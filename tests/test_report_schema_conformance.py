@@ -168,7 +168,6 @@ def test_assurance_vocabulary_matches_the_schema_enums() -> None:
     assert "schema_staleness_status" in enums
 
 
-@pytest.mark.xfail(strict=True, reason="gap C1")
 def test_audit_and_compare_share_one_assurance_shape() -> None:
     compare = _schema("compare_report")["properties"]["analysis_assurance"]
     audit = _schema("audit_report")["$defs"]["analysis_assurance"]
@@ -241,15 +240,7 @@ def test_live_modes_emit_schema_valid_reports(tmp_path: Path, mode: str) -> None
                 _validate(report, "compare_report")
 
 
-@pytest.mark.parametrize(
-    "mode",
-    [
-        pytest.param(
-            "no_baseline_stored", marks=pytest.mark.xfail(strict=True, reason="gap C1")
-        ),
-        "stored_pair",
-    ],
-)
+@pytest.mark.parametrize("mode", ["no_baseline_stored", "stored_pair"])
 def test_run_outcome_assurance_validates_against_the_assurance_shape(
     tmp_path: Path, mode: str
 ) -> None:

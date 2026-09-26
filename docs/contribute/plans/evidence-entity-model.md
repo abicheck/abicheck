@@ -683,9 +683,13 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
   negative, not a false absent).
 - `export_transition`'s OLD-side suppression guard does not check OLD's
   table was read (false-negative direction).
-- Unrelated, found while testing: a no-baseline compare report fails
-  schema validation on `analysis_assurance.schema_staleness_status`
-  (`not_evaluated` is not in the schema's enum).
+- **C1, schema enum — fixed (PR C1).** The producer was right: with no OLD
+  snapshot, `schema_staleness_status` is `not_evaluated`, like every sibling
+  context status. The schema enum (report schema 5.7) and the merge scale
+  gained it; `run_outcome.assurance` is now validated against the
+  `analysis_assurance` shape in the compare and audit (1.6) schemas.
+  `tests/test_report_schema_conformance.py` validates every compare mode's
+  report and checks enum-vs-producer vocabulary.
 
 ## Tests
 
