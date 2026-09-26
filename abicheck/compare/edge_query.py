@@ -69,7 +69,7 @@ from ..model.edge_coverage import (
     EdgeQueryResult,
     ProducerRun,
 )
-from ..model.export_index import build_raw_export_indexes
+from ..model.export_index import read_export_platforms
 from ..model.graph_join import (
     BINARY_SYMBOL_PREFIX,
     DEBUG_TYPE_PREFIX,
@@ -182,34 +182,19 @@ def decide(
 # ---------------------------------------------------------------------------
 
 
-def _table_read(meta: object) -> bool:
-    """Whether a platform block records that its binary was actually parsed.
-
-    A symbol list alone cannot say so: a default, header-only or
-    parse-failed ``ElfMetadata()`` and a library exporting nothing both
-    leave it empty. The header fields a real parse always sets are the
-    repository's existing capture signal (``compare/undeclared_exports.py``,
-    ``diff_platform_elf_dynamic``): ELF/PE ``machine``, Mach-O ``filetype``
-    or ``cpu_type``."""
-    return any(getattr(meta, attr, "") for attr in ("machine", "filetype", "cpu_type"))
-
-
 def export_coverage_records(snap: AbiSnapshot) -> tuple[CoverageRecord, ...]:
     """One record per export table *snap* owes: every table it carries, plus
     the one its own ``platform`` names.
 
     A carried table is ``ran`` when it holds an entry or its header fields
-    show the binary was parsed (:func:`_table_read`) -- a parsed library
+    show the binary was parsed (``model.export_index.read_export_platforms``,
+    the rule the export fact reads too) -- a parsed library
     that exports nothing is a real, covered empty table. A carried block
     with neither is ``failed``: a default or parse-failed platform block,
     which reading as "exports nothing" would prove every declaration
     unexported. A table owed but not carried is ``not_run``; no table owed
     at all is one ``not_run`` record."""
-    metas = {"elf": snap.elf, "pe": snap.pe, "macho": snap.macho}
-    carried: dict[str, bool] = {}
-    for index in build_raw_export_indexes(snap):
-        read = bool(index.entries) or _table_read(metas[index.platform])
-        carried[index.platform] = carried.get(index.platform, False) or read
+    carried = read_export_platforms(snap)
     owed = set(carried)
     if snap.platform in _PLATFORMS:
         owed.add(snap.platform)

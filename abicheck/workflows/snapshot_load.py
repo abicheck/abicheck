@@ -82,3 +82,17 @@ def backfill_python_ext_from_evidence(snap: AbiSnapshot, d: dict[str, Any]) -> N
             from ..python_ext import detect_python_extension
 
             snap.python_ext = detect_python_extension(snap)
+
+
+def reconcile_stored_export_absence(snap: AbiSnapshot) -> None:
+    """Apply the dump-time export-read rule to a loaded snapshot (gap A1).
+
+    A stored baseline written before the rule existed still carries
+    ``binary_exported_fact = PRESENT(False)`` against an empty (unread)
+    export table, and a pre-v46 one re-derives the same answer from
+    ``Visibility.HIDDEN``. Running the one rule here keeps a stored operand
+    and the live dump of the same binary agreeing.
+    """
+    from ..extract.export_table_read import reconcile_snapshot_export_absence
+
+    reconcile_snapshot_export_absence(snap)
