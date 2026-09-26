@@ -168,7 +168,7 @@ _AXIS_WORST_LAST: dict[str, tuple[str, ...]] = {
         "unknown",
         "not_collected",
     ),
-    "schema_staleness_status": ("clean", "degraded"),
+    "schema_staleness_status": ("clean", "degraded", "not_evaluated"),
 }
 
 

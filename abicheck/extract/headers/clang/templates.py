@@ -100,15 +100,14 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from .template_decl_walk import (
+    _SCOPE_NODE_KINDS as _SCOPE_NODE_KINDS,
+    ClassTemplateDecls as ClassTemplateDecls,
+    class_template_decls as class_template_decls,
+)
+
 #: Decl contexts we descend into, tracking the enclosing scope name so a
 #: namespace/class-qualified constant key is built (``ns::C::kLimit``).
-#: Shared with ``dumper_clang._ClangAstParser._walk``'s own public-surface
-#: qualified-name building and ``dumper_clang_expr.py``'s own scope
-#: tracking (both import it back from here) — kept as ONE definition
-#: rather than independently-drifting copies.
-_SCOPE_NODE_KINDS = frozenset(
-    {"NamespaceDecl", "CXXRecordDecl", "RecordDecl", "LinkageSpecDecl"}
-)
 
 #: Non-type template parameter types whose Clang JSON ``value`` (an
 #: evaluated integer, e.g. ``3``) is CONFIRMED to print identically to how a
@@ -260,7 +259,26 @@ def _register_template_param_metadata(
     node_ids.pop(qualname, None)
 
 
-def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | None]]:
+def _register_all(
+    decls: ClassTemplateDecls,
+    metadata: Callable[[str, dict[str, Any]], list[str | None]],
+) -> dict[str, list[str | None]]:
+    """One index over *decls*, with the conflicting-registration-is-ambiguous
+    discipline :func:`_register_template_param_metadata` applies."""
+    idx: dict[str, list[str | None]] = {}
+    ambiguous: set[str] = set()
+    node_ids: dict[str, str] = {}
+    for qualname, node in decls:
+        if qualname not in ambiguous:
+            _register_template_param_metadata(
+                idx, ambiguous, node_ids, qualname, node, metadata(qualname, node)
+            )
+    return idx
+
+
+def _index_template_param_kinds(
+    root: dict[str, Any], decls: ClassTemplateDecls | None = None
+) -> dict[str, list[str | None]]:
     """``qualified template name -> per-position param-kind list`` (see
     :func:`_template_param_kinds`) over every ``ClassTemplateDecl`` in the
     AST, scope-tracked the identical way :func:`build_specialization_index`
@@ -290,30 +308,10 @@ def _index_template_param_kinds(root: dict[str, Any]) -> dict[str, list[str | No
     negative) rather than trusting either candidate -- only an EXACTLY
     matching redeclaration is safe to keep.
     """
-    idx: dict[str, list[str | None]] = {}
-    ambiguous: set[str] = set()
-    node_ids: dict[str, str] = {}
-
-    def walk(node: Any, scope: tuple[str, ...]) -> None:
-        if not isinstance(node, dict):
-            return
-        kind = node.get("kind")
-        name = str(node.get("name") or "")
-        if (
-            kind == "ClassTemplateDecl"
-            and name
-            and (qualname := ("::".join((*scope, name)) if scope else name))
-            not in ambiguous
-        ):
-            _register_template_param_metadata(
-                idx, ambiguous, node_ids, qualname, node, _template_param_kinds(node)
-            )
-        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
-        for child in node.get("inner", []) or []:
-            walk(child, child_scope)
-
-    walk(root, ())
-    return idx
+    return _register_all(
+        decls if decls is not None else class_template_decls(root),
+        lambda _qualname, node: _template_param_kinds(node),
+    )
 
 
 def _template_param_defaults(class_template_decl: dict[str, Any]) -> list[str | None]:
@@ -353,7 +351,9 @@ def _template_param_defaults(class_template_decl: dict[str, Any]) -> list[str | 
 
 
 def _index_template_param_defaults(
-    root: dict[str, Any], names: Mapping[str, Sequence[str | None]] | None = None
+    root: dict[str, Any],
+    names: Mapping[str, Sequence[str | None]] | None = None,
+    decls: ClassTemplateDecls | None = None,
 ) -> dict[str, list[str | None]]:
     """``qualified template name -> per-position default-spelling list``
     (see :func:`_template_param_defaults`), scope-tracked identically to
@@ -399,45 +399,27 @@ def _index_template_param_defaults(
     Reusing that fully-merged result (passed in as *names* when already built)
     avoids re-deriving "which registration counts as authoritative" here.
     """
-    idx: dict[str, list[str | None]] = {}
-    ambiguous: set[str] = set()
-    node_ids: dict[str, str] = {}
-    tracked_names_by_qualname = names or _index_template_param_names(root)
+    decls = decls if decls is not None else class_template_decls(root)
+    tracked_names_by_qualname = names or _index_template_param_names(root, decls)
 
-    def walk(node: Any, scope: tuple[str, ...]) -> None:
-        if not isinstance(node, dict):
-            return
-        kind = node.get("kind")
-        name = str(node.get("name") or "")
-        if (
-            kind == "ClassTemplateDecl"
-            and name
-            and (qualname := ("::".join((*scope, name)) if scope else name))
-            not in ambiguous
-        ):
-            this_names = _template_param_names(node)
-            defaults = _template_param_defaults(node)
-            tracked_names = tracked_names_by_qualname.get(qualname)
-            if tracked_names is not None:
-                own_positions = {n: i for i, n in enumerate(this_names) if n}
-                defaults = [
-                    tracked_names[own_positions[d]]
-                    if d is not None
-                    and d in own_positions
-                    and own_positions[d] < len(tracked_names)
-                    and tracked_names[own_positions[d]]
-                    else d
-                    for d in defaults
-                ]
-            _register_template_param_metadata(
-                idx, ambiguous, node_ids, qualname, node, defaults
-            )
-        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
-        for child in node.get("inner", []) or []:
-            walk(child, child_scope)
+    def defaults_for(qualname: str, node: dict[str, Any]) -> list[str | None]:
+        this_names = _template_param_names(node)
+        defaults = _template_param_defaults(node)
+        tracked_names = tracked_names_by_qualname.get(qualname)
+        if tracked_names is not None:
+            own_positions = {n: i for i, n in enumerate(this_names) if n}
+            defaults = [
+                tracked_names[own_positions[d]]
+                if d is not None
+                and d in own_positions
+                and own_positions[d] < len(tracked_names)
+                and tracked_names[own_positions[d]]
+                else d
+                for d in defaults
+            ]
+        return defaults
 
-    walk(root, ())
-    return idx
+    return _register_all(decls, defaults_for)
 
 
 def _template_param_names(class_template_decl: dict[str, Any]) -> list[str | None]:
@@ -467,36 +449,18 @@ def _template_param_names(class_template_decl: dict[str, Any]) -> list[str | Non
     return names
 
 
-def _index_template_param_names(root: dict[str, Any]) -> dict[str, list[str | None]]:
+def _index_template_param_names(
+    root: dict[str, Any], decls: ClassTemplateDecls | None = None
+) -> dict[str, list[str | None]]:
     """``qualified template name -> per-position parameter-name list`` (see
     :func:`_template_param_names`), scope-tracked identically to
     :func:`_index_template_param_kinds`, including its same conflicting-
     registration-is-ambiguous discipline.
     """
-    idx: dict[str, list[str | None]] = {}
-    ambiguous: set[str] = set()
-    node_ids: dict[str, str] = {}
-
-    def walk(node: Any, scope: tuple[str, ...]) -> None:
-        if not isinstance(node, dict):
-            return
-        kind = node.get("kind")
-        name = str(node.get("name") or "")
-        if (
-            kind == "ClassTemplateDecl"
-            and name
-            and (qualname := ("::".join((*scope, name)) if scope else name))
-            not in ambiguous
-        ):
-            _register_template_param_metadata(
-                idx, ambiguous, node_ids, qualname, node, _template_param_names(node)
-            )
-        child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
-        for child in node.get("inner", []) or []:
-            walk(child, child_scope)
-
-    walk(root, ())
-    return idx
+    return _register_all(
+        decls if decls is not None else class_template_decls(root),
+        lambda _qualname, node: _template_param_names(node),
+    )
 
 
 def _specialization_spelling(
@@ -715,13 +679,21 @@ def build_specialization_index(
     ``record_index()`` use, so passing the same function through costs it
     nothing extra.
     """
+    decls: ClassTemplateDecls | None = None
+    if None in (
+        param_kinds_by_qualname,
+        param_names_by_qualname,
+        param_defaults_by_qualname,
+    ):
+        # One traversal feeds whichever indexes were not supplied.
+        decls = class_template_decls(root)
     if param_kinds_by_qualname is None:
-        param_kinds_by_qualname = _index_template_param_kinds(root)
+        param_kinds_by_qualname = _index_template_param_kinds(root, decls)
     if param_names_by_qualname is None:
-        param_names_by_qualname = _index_template_param_names(root)
+        param_names_by_qualname = _index_template_param_names(root, decls)
     if param_defaults_by_qualname is None:
         param_defaults_by_qualname = _index_template_param_defaults(
-            root, param_names_by_qualname
+            root, param_names_by_qualname, decls
         )
     idx: dict[str, dict[str, Any]] = {}
 

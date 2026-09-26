@@ -72,6 +72,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.env_limits",
     "abicheck.storage.ast_size_observer",
     "abicheck.storage.json_compact",
+    "abicheck.storage.cache_integrity",
 )
 
 

@@ -49,6 +49,8 @@ __all__ = ["materialize_locations"]
 def materialize_locations(root: _T) -> _T:
     """Fill every omitted ``file``/``line`` in *root*, in place, and return it.
 
+    Also drops each location's ``includedFrom`` (see the loop for why).
+
     Iterative, in document order (JSON object key order is preserved by
     :mod:`json`), so arbitrarily deep ASTs cannot hit the recursion limit.
     Idempotent; anything
@@ -75,6 +77,12 @@ def materialize_locations(root: _T) -> _T:
                     current_line = item["line"]
                 elif current_line is not None:
                     item["line"] = current_line
+                # `includedFrom` is a one-key dict clang attaches to roughly
+                # every location in an included header (1.29M of them on a
+                # oneDAL AST) and no reader of an L2 tree consults it; it
+                # never moves the writer state either, so dropping it here,
+                # once materialized, is invisible to every consumer.
+                item.pop("includedFrom", None)
                 continue
             stack.append(iter(item.values()))
         elif isinstance(item, list):

@@ -397,6 +397,14 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "under the superseded BASE+RAISES budget -- see this module's "
         "docstring.)"
     ),
+    "--performance-profile": _keep(
+        "The per-run override of .abicheck.yml's `performance.profile` "
+        "(the memory/speed trade-off). Like --budget, how much memory *this* "
+        "runner has is a property of the job, not of the library's "
+        "compatibility contract, so a project default plus a per-run "
+        "override is the right shape. It changes execution only -- never "
+        "the snapshots, findings, verdict or exit code."
+    ),
     "--diagnostic-comparison": _keep(
         "ADR-050 D2's sanctioned escape hatch, and the calibrated, bounded "
         "kind D5 explicitly permits: it never disables analysis, it "

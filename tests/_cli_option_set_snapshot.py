@@ -94,6 +94,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--no-scope-public-headers",
         "--output",
         "--pack",
+        "--performance-profile",
         "--policy",
         "--post-manifest",
         "--required-symbol",

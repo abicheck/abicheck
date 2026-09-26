@@ -38,12 +38,37 @@ import json
 import pytest
 
 from abicheck.model.declarations import Fact, Function, Param, Variable
-from abicheck.model.entities import EnumType, RecordType
+from abicheck.model.entities import EnumMember, EnumType, RecordType, TypeField
+from abicheck.model.identity import EntityId, EntityKind, Namespace, Record
+from abicheck.model.occurrence import OccurrenceId
+from abicheck.model.semantic_ir import CanonicalEntity
 
 #: Every type whose instance count scales with the size of a parsed library.
 #: A type added here without ``slots=True`` fails, which is the point: the
 #: next wide declaration dataclass should not quietly ship with a ``__dict__``.
-SLOTTED_TYPES = (Function, Param, Variable, RecordType, EnumType, Fact)
+SLOTTED_TYPES = (
+    Function,
+    Param,
+    Variable,
+    RecordType,
+    EnumType,
+    Fact,
+    # Identity / IR types: ~115k unslotted instances on a oneDAL-scale
+    # snapshot held 10.5 MiB of `__dict__` before these were slotted.
+    EntityId,
+    Namespace,
+    Record,
+    OccurrenceId,
+    CanonicalEntity,
+    TypeField,
+    EnumMember,
+)
+
+
+def _entity_id():
+    return EntityId(
+        scope=(Namespace("n"), Record("R")), kind=EntityKind.TYPE, leaf_name="S"
+    )
 
 
 def _make(cls):
@@ -60,6 +85,20 @@ def _make(cls):
         return EnumType(name="E")
     if cls is Fact:
         return Fact.unsupported()
+    if cls is EntityId:
+        return _entity_id()
+    if cls is Namespace:
+        return Namespace("n")
+    if cls is Record:
+        return Record("R")
+    if cls is OccurrenceId:
+        return OccurrenceId(entity_id=_entity_id(), disambiguator="d")
+    if cls is CanonicalEntity:
+        return CanonicalEntity(canonical_spelling=Fact.present("int"))
+    if cls is TypeField:
+        return TypeField(name="x", type="int")
+    if cls is EnumMember:
+        return EnumMember(name="A", value=1)
     raise AssertionError(f"no constructor for {cls!r}")
 
 
