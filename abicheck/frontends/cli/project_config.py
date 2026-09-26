@@ -39,7 +39,7 @@ import click
 if TYPE_CHECKING:
     from ...cli_helpers_compare import ResolvedCompareConfig
 
-__all__ = ["resolve_project_compare_config"]
+__all__ = ["enter_performance_profile", "resolve_project_compare_config"]
 
 
 def resolve_project_compare_config(
@@ -88,3 +88,35 @@ def resolve_project_compare_config(
         cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
     )
     return cfg_path, project_cfg, resolved_cfg, cfg_sha
+
+
+def enter_performance_profile(ctx: click.Context, explicit: str | None) -> None:
+    """Hold the run's performance profile for the rest of *ctx*
+    (``ctx.with_resource``), so every ``compare`` route -- scalar, release
+    fan-out, stored bundles, ``--no-baseline`` -- runs under it.
+
+    ``--performance-profile`` wins; otherwise the project config's
+    ``performance.profile`` (found by the same rule as every other setting,
+    :func:`resolve_project_compare_config`), otherwise the default. A config
+    that fails to load is left for the ordinary resolution to report -- it
+    is loaded again there, and exits 64 with its own message.
+    """
+    from ...config_paths import resolve_project_config
+    from ...model.performance import (
+        parse_performance_profile,
+        performance_profile_scope,
+    )
+    from ...workflows.extraction import load_build_config_with_digest
+
+    value = explicit
+    if value is None:
+        cfg_path = resolve_project_config(
+            ctx.params.get("config"), search_from=Path.cwd()
+        ).path
+        if cfg_path is not None:
+            try:
+                value = load_build_config_with_digest(cfg_path)[0].performance_profile
+            except (OSError, ValueError):
+                value = None
+    profile = None if value is None else parse_performance_profile(value)
+    ctx.with_resource(performance_profile_scope(profile))

@@ -1032,7 +1032,14 @@ _ARTIFACT_NAMES = frozenset(
 #:        replay reads both. Entities the old keys merged (two ODR-distinct
 #:        records sharing one name, identical unmangled overloads) are now
 #:        separate nodes, with unchanged replay decisions.
-REPORT_SCHEMA_VERSION = "5.6"
+#: 5.7 -- ``analysis_assurance.schema_staleness_status`` gains
+#:        ``not_evaluated``, which the producer has always emitted when there
+#:        is no OLD snapshot (a no-baseline audit) -- the value every sibling
+#:        ``*_context_status`` field already allowed; the enum simply omitted
+#:        it, so such a report failed validation. ``run_outcome.assurance`` is
+#:        now validated against that same ``analysis_assurance`` shape instead
+#:        of any object. No emitted value changes.
+REPORT_SCHEMA_VERSION = "5.7"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the
