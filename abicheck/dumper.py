@@ -84,7 +84,6 @@ from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
     _is_missing_cpp_stdlib_header_error,
     _parse_clang_ast_result,
-    retry_excluding_error_headers,
     run_clang_to_ast_file,
 )
 from .dumper_contract import (
@@ -181,6 +180,7 @@ from .extract.header_ast_backend import (
     lang_to_profile,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
+from .extract.headers.clang.error_header_retry import retry_excluding_error_headers
 from .extract.headers.clang.locations import materialize_locations
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed

@@ -21,9 +21,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.dumper_clang_errors import (
+from abicheck.dumper_clang_errors import _is_direct_include_guard_failure
+from abicheck.extract.headers.clang.error_header_retry import (
     _headers_failing_in_aggregate,
-    _is_direct_include_guard_failure,
     retry_excluding_error_headers,
 )
 
