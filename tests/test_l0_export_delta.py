@@ -22,6 +22,7 @@ from __future__ import annotations
 import itertools
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -189,6 +190,10 @@ def _build_lib(tmp_path, names: tuple[str, ...], tag: str):
 
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="the fast path reads ELF tables; gcc emits PE/Mach-O elsewhere",
+)
 def test_fast_path_never_skips_a_removal_the_real_probe_finds(tmp_path):
     """Oracle: the real symbols-only probe. Over every (old, new) pair of
     subsets of a small export set, whenever the fast path says nothing can be
