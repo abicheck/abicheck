@@ -264,3 +264,77 @@ def test_markdown_lists_are_bounded_and_state_the_remainder(
         )
     else:
         assert more == []
+
+
+def test_the_inferred_roots_reach_the_parse_without_castxml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unit-lane twin of the castxml test: the parser really receives
+    each `-H` directory as a search root."""
+    import abicheck.header_only_dump as header_only_dump
+    from abicheck.model.release_surface import SurfaceAcquisitionIdentity
+    from abicheck.workflows.release_surface_acquisition import (
+        acquire_release_surface,
+    )
+
+    hdr = tmp_path / "hdr"
+    hdr.mkdir()
+    (hdr / "a.h").write_text("int fa(int);\n", encoding="utf-8")
+    seen: dict[str, object] = {}
+
+    def _spy(**kwargs: object):
+        seen.update(kwargs)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(header_only_dump, "build_header_only_snapshot", _spy)
+    surface = acquire_release_surface(
+        SurfaceAcquisitionIdentity(header_dirs=(str(hdr),), lang="c"),
+        "new",
+        ledger=SurfaceAcquisitionLedger(),
+        headers=[hdr / "a.h"],
+        includes=[],
+        header_inputs=[hdr],
+        public_headers=[],
+        public_header_dirs=[hdr],
+    )
+    assert hdr in seen["extra_includes"]  # type: ignore[operator]
+    assert surface.resolvable is False and "stop" in (surface.unresolved_reason or "")
+
+
+def test_roots_on_two_drives_have_no_anchor(monkeypatch: pytest.MonkeyPatch) -> None:
+    import abicheck.workflows.ownership_request as mod
+
+    def _raise(_paths: object) -> str:
+        raise ValueError("different drives")
+
+    monkeypatch.setattr(mod.os.path, "commonpath", _raise)
+    assert mod.operand_anchor(["C:/a", "D:/b"]) is None
+    assert mod.operand_anchor([]) is None
+
+
+def test_markdown_states_coverage_warnings_and_acquisitions() -> None:
+    text = render_release_public_surface_markdown(
+        ReleasePublicSurfaceTerms(
+            sides={"new": {"surface_resolvable": False, "coverage_reason": "boom"}},
+            coverage_warnings=("no release-level export obligation was checked",),
+            acquisition={"acquisitions": 2, "reuses": 1},
+        )
+    )
+    assert "public surface unresolved — boom" in text
+    assert "- no release-level export obligation was checked" in text
+    assert "Header acquisitions: 2 (reused 1 time(s))." in text
+
+
+def test_an_incomplete_resolvable_side_keeps_its_own_warning() -> None:
+    from abicheck.model.release_surface import ReleasePublicSurface
+
+    rec = reconcile_release(
+        ReleasePublicSurface(acquisition_key="k", side="new", resolvable=True),
+        _index("new", complete=False),
+    )
+    assert rec.new.coverage_complete is False
+    assert any(
+        "reconciliation on the new side is incomplete" in w
+        for w in rec.coverage_warnings
+    )
+    assert not any("could not be acquired" in w for w in rec.coverage_warnings)
