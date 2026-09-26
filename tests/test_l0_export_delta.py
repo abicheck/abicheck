@@ -19,10 +19,21 @@
 
 from __future__ import annotations
 
+import itertools
+import shutil
+import subprocess
+from types import SimpleNamespace
+
+import pytest
+
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.errors import AbicheckError
-from abicheck.l0_export_delta import collect_l0_export_delta
+from abicheck.l0_export_delta import (
+    collect_l0_export_delta,
+    elf_exports_cannot_lose_symbol,
+)
+from abicheck.model.elf_facts import ElfSymbol, SymbolType
 
 
 def test_resolve_failure_returns_empty_tuple(monkeypatch, tmp_path):
@@ -118,3 +129,95 @@ def test_no_breaking_findings_returns_empty_tuple(monkeypatch, tmp_path):
     )
     result = collect_l0_export_delta(tmp_path / "old.so", tmp_path / "new.so", "c++")
     assert result == ()
+
+
+# ── elf_exports_cannot_lose_symbol: the fold's fast path ─────────────────────
+
+
+def _elf_snap(*symbols: ElfSymbol) -> SimpleNamespace:
+    return SimpleNamespace(elf=SimpleNamespace(symbols=list(symbols)))
+
+
+def test_fast_path_declines_without_captured_elf_tables():
+    """No table on either side is 'unknown', never 'nothing was lost'."""
+    sym = ElfSymbol(name="f")
+    assert not elf_exports_cannot_lose_symbol(SimpleNamespace(elf=None), _elf_snap(sym))
+    assert not elf_exports_cannot_lose_symbol(_elf_snap(sym), SimpleNamespace(elf=None))
+    assert not elf_exports_cannot_lose_symbol(_elf_snap(), _elf_snap(sym))
+    assert not elf_exports_cannot_lose_symbol(object(), object())
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"name": "g"},
+        {"sym_type": SymbolType.OBJECT},
+        {"version": "V2"},
+        {"is_default": False},
+        {"visibility": "hidden"},
+        {"origin_lib": "libdep.so"},
+    ],
+)
+def test_fast_path_declines_when_any_identity_field_of_an_old_symbol_changes(changed):
+    old = ElfSymbol(name="f", version="V1")
+    new = ElfSymbol(**{**old.__dict__, **changed})
+    assert not elf_exports_cannot_lose_symbol(_elf_snap(old), _elf_snap(new))
+    assert elf_exports_cannot_lose_symbol(_elf_snap(old), _elf_snap(old, new))
+
+
+def test_fast_path_ignores_size_and_alignment_and_additions():
+    old = ElfSymbol(name="f", size=8, value_alignment=8)
+    new = ElfSymbol(name="f", size=16, value_alignment=16)
+    assert elf_exports_cannot_lose_symbol(
+        _elf_snap(old), _elf_snap(new, ElfSymbol(name="extra"))
+    )
+
+
+_FUNCS = ("alpha", "beta", "gamma")
+
+
+def _build_lib(tmp_path, names: tuple[str, ...], tag: str):
+    src = tmp_path / f"{tag}.c"
+    src.write_text(
+        "".join(f"int {n}(void) {{ return 0; }}\n" for n in names)
+        + "int keep(void) { return 1; }\n"
+    )
+    out = tmp_path / f"lib{tag}.so"
+    subprocess.run(["gcc", "-shared", "-fPIC", "-o", str(out), str(src)], check=True)
+    return out
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+def test_fast_path_never_skips_a_removal_the_real_probe_finds(tmp_path):
+    """Oracle: the real symbols-only probe. Over every (old, new) pair of
+    subsets of a small export set, whenever the fast path says nothing can be
+    lost, the probe must find no ``func_removed_elf_only`` -- and the fast
+    path must say so for every pair where NEW is a superset of OLD, or it
+    saves nothing."""
+    from abicheck.workflows.input_resolution import resolve_input
+
+    subsets = [
+        c for r in range(len(_FUNCS) + 1) for c in itertools.combinations(_FUNCS, r)
+    ]
+    libs = {s: _build_lib(tmp_path, s, "l" + "".join(x[0] for x in s)) for s in subsets}
+    snaps = {
+        s: resolve_input(
+            p, [], [], version="", lang="c", symbols_only=True, notify=lambda _m: None
+        )
+        for s, p in libs.items()
+    }
+    skipped = 0
+    for old_set, new_set in itertools.product(subsets, repeat=2):
+        fast = elf_exports_cannot_lose_symbol(snaps[old_set], snaps[new_set])
+        if set(old_set) <= set(new_set):
+            assert fast, (old_set, new_set)
+        if fast:
+            skipped += 1
+            assert collect_l0_export_delta(libs[old_set], libs[new_set], "c") == ()
+        else:
+            assert collect_l0_export_delta(libs[old_set], libs[new_set], "c"), (
+                old_set,
+                new_set,
+            )
+    assert skipped >= len(subsets)  # vacuity guard

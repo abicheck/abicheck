@@ -522,7 +522,7 @@ def parse_function_element(
         el.tag == "Function"
         and mangled not in ctx.exported_dynamic
         and mangled not in ctx.exported_static
-        and name in (ctx.exported_dynamic | ctx.exported_static)
+        and (name in ctx.exported_dynamic or name in ctx.exported_static)
         and is_global_scope(ctx, el)
     ):
         mangled = name

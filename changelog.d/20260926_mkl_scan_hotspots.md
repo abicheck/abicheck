@@ -1,0 +1,26 @@
+### Performance
+
+- Header-AST parse no longer rebuilds the union of both ELF export tables
+  for every castxml `Function` element (`extract/headers/castxml/functions.py`,
+  and the same test in `dumper_castxml.py`) -- 36% of a `libmkl_rt` scan's
+  self time; measured single-library wall 5:15 -> 3:27 with byte-identical
+  findings.
+- `elf_symbol_filter.is_abi_relevant_elf_symbol` tests each prefix group with
+  one tuple-argument `startswith` and memoizes per name (was ~48 Python-level
+  calls per symbol, 2.39M calls on a 65k-export library).
+- `compare`'s L0 hard-removal fold skips its symbols-only re-resolve and second
+  unscoped compare when NEW's ELF table provably keeps every OLD symbol
+  (`l0_export_delta.elf_exports_cannot_lose_symbol`) -- the probe can then
+  only return nothing. It was ~19% of a `libmkl_rt` scan.
+- The compare-time lexical pattern pre-scan blanks comments/strings by
+  skipping uniform runs instead of one Python call per character, computes
+  line numbers by bisect, and memoizes per-file results on content, so a
+  release fan-out no longer re-scans the same headers once per member.
+
+### Fixed
+
+- The castxml/clang header-AST disk caches (`~/.cache/abi_check/<backend>`)
+  were unbounded (a profiled host held 57 GB). Each backend directory is now
+  trimmed least-recently-used to `ABICHECK_AST_CACHE_MAX_BYTES` (default
+  16 GiB; `0` disables) once per process; entries touched in the last hour
+  are never evicted.

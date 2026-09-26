@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline
-from .storage import ast_parse_exclusions, cache_integrity
+from .storage import ast_cache_budget, ast_parse_exclusions, cache_integrity
 from .storage.acyclic_json import gc_paused
 from .storage.ast_size_observer import mark_ast_intake, report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
@@ -771,8 +771,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
 
 
 def _cache_path(key: str, backend: str = "castxml") -> Path:
-    # One sub-directory + file extension per backend so castxml XML and clang
-    # JSON caches live side by side without clashing.
+    # One sub-directory + extension per backend: castxml XML and clang JSON coexist.
     ext = "json" if backend == "clang" else "xml"
     if sys.platform == "win32":
         local = os.environ.get("LOCALAPPDATA")
@@ -797,4 +796,5 @@ def _cache_path(key: str, backend: str = "castxml") -> Path:
         )
         fallback.mkdir(parents=True, exist_ok=True)
         cache_dir = fallback
+    ast_cache_budget.enforce_once(cache_dir)
     return cache_dir / f"{key}.{ext}"

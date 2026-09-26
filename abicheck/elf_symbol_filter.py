@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection
+from functools import lru_cache
 from typing import Any
 
 # Canonical stdlib/runtime RTTI prefixes (single source of truth in the
@@ -103,6 +104,12 @@ _STDLIB_PREFIXES = (
 )
 
 
+_TRANSITIVE_RUNTIME_PREFIXES: tuple[str, ...] = tuple(_STDLIB_PREFIXES) + tuple(
+    _STDLIB_RTTI_PREFIXES
+)
+
+
+@lru_cache(maxsize=1 << 18)
 def is_abi_relevant_elf_symbol(
     name: str,
     *,
@@ -134,18 +141,16 @@ def is_abi_relevant_elf_symbol(
     if name.startswith(("_ZTh", "_ZTv", "_ZTc")):
         return False
 
-    for prefix in _GCC_INTERNAL_PREFIXES:
-        if name.startswith(prefix):
-            return False
+    if name.startswith(_GCC_INTERNAL_PREFIXES):
+        return False
 
-    if filter_transitive_runtime_symbols:
-        for prefix in _STDLIB_PREFIXES:
-            if name.startswith(prefix):
-                return False
-
-        for prefix in _STDLIB_RTTI_PREFIXES:
-            if name.startswith(prefix):
-                return False
+    # One tuple-argument ``startswith`` per group: ``str.startswith`` scans a
+    # tuple in C, where the earlier per-prefix Python loops cost ~48 calls per
+    # symbol (169M calls on a 65k-export libmkl_rt scan).
+    if filter_transitive_runtime_symbols and name.startswith(
+        _TRANSITIVE_RUNTIME_PREFIXES
+    ):
+        return False
 
     # Private C symbols with __ as a namespace separator
     # (e.g. H5C__flush_marked_entries, MPI__send). C++ mangled names start

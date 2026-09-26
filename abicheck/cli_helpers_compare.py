@@ -803,7 +803,15 @@ def fold_l0_hard_removals(
     ):
         return extra_changes
 
-    from .l0_export_delta import collect_l0_export_delta
+    from .l0_export_delta import collect_l0_export_delta, elf_exports_cannot_lose_symbol
+
+    # Both snapshots were identity-checked against the binaries above, so
+    # their own ELF tables are the tables a symbols-only re-resolve would
+    # read. When NEW keeps every OLD dynamic symbol unchanged there is no
+    # removal to recover, and the re-resolve plus full unscoped compare
+    # (~19% of a libmkl_rt scan) is skipped.
+    if elf_exports_cannot_lose_symbol(old, new):
+        return extra_changes
 
     l0_hard_removals = collect_l0_export_delta(Path(old_path), Path(new_path), lang)
     return [*(extra_changes or []), *l0_hard_removals]

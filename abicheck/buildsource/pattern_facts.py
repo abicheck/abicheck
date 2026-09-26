@@ -39,22 +39,33 @@ from __future__ import annotations
 
 import os
 import re
+from bisect import bisect_left
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
-
-# Re-exported unchanged for importers that predate the discovery/scanning split
-# (``pattern_facts_files.py``'s own docstring): the file-walk half moved, the
-# public names did not.
 from .pattern_facts_files import (
     _DIRECT_ROOT_LICENCE,
     SOURCE_SUFFIXES as SOURCE_SUFFIXES,
     iter_source_files as iter_source_files,
     resolve_expected_source_inputs,
+)
+
+# Re-exported unchanged for importers that predate the discovery/scanning split
+# (``pattern_facts_files.py``'s own docstring): the file-walk half moved, the
+# public names did not.
+from .pattern_facts_lexer import (
+    _blank_comments_and_strings as _blank_comments_and_strings,
+    _blank_scan_block_comment as _blank_scan_block_comment,
+    _blank_scan_code as _blank_scan_code,
+    _blank_scan_line_comment as _blank_scan_line_comment,
+    _blank_scan_literal as _blank_scan_literal,
+    _is_digit_separator as _is_digit_separator,
+    _raw_string_end as _raw_string_end,
 )
 from .source_inputs import (
     SourceInput,
@@ -113,12 +124,6 @@ class _Rule:
     # the literal, so it scans the comment-blanked-but-string-preserved text.
     scan_strings: bool = False
 
-
-#: Hex-digit set used to tell a C++14 digit separator (`1'000`) from a
-#: char-literal opener in the comment/string blanker.
-_HEXDIGITS = frozenset("0123456789abcdefABCDEF")
-
-_RAW_STRING_PREFIXES = ("u8R", "uR", "UR", "LR", "R")
 
 #: Matches the body *inside* a ``__attribute__((...))`` list up to (but not
 #: across) its closing ``))``: a run of non-paren chars or nested paren groups
@@ -309,6 +314,7 @@ _TEMPLATE_RE = re.compile(r"(?P<extern>\bextern\s+)?\btemplate\b(?!\s*<)\s+")
 #: ``.`` / ``->`` / ``::`` access — i.e. a dependent-name disambiguator, not an
 #: explicit instantiation.
 _TEMPLATE_DISAMBIGUATOR_PREV = frozenset(".:>")
+_NEWLINE_RE = re.compile(r"\n")
 
 
 @dataclass(frozen=True)
@@ -509,176 +515,6 @@ class PatternFactsResult:
         }
 
 
-def _is_digit_separator(text: str, i: int) -> bool:
-    """True if the ``'`` at ``text[i]`` is a C++14 digit separator, not a literal.
-
-    A digit separator sits between two hex digits *inside a numeric literal*
-    (``1'000``, ``0xFF'FF``). A numeric literal always starts with a decimal
-    digit, so the maximal preceding identifier-run must begin with one — this
-    rejects a prefixed char literal whose prefix happens to end in a hex digit
-    (``u8'a'``, where the run is ``u8`` and starts with ``u``).
-    """
-    prev = text[i - 1] if i > 0 else ""
-    nxt = text[i + 1] if i + 1 < len(text) else ""
-    if prev not in _HEXDIGITS or nxt not in _HEXDIGITS:
-        return False
-    k = i - 1
-    while k >= 0 and (text[k].isalnum() or text[k] in "_'"):
-        k -= 1
-    token_start = text[k + 1] if k + 1 < i else ""
-    return token_start.isdigit()
-
-
-def _raw_string_end(text: str, quote_index: int) -> int:
-    """Return the closing quote offset for a C++ raw string, or ``-1``."""
-    prefix_start = -1
-    prefix = ""
-    for candidate in _RAW_STRING_PREFIXES:
-        start = quote_index - len(candidate)
-        if start >= 0 and text[start:quote_index] == candidate:
-            prefix_start = start
-            prefix = candidate
-            break
-    if prefix_start < 0:
-        return -1
-    if prefix_start > 0 and (
-        text[prefix_start - 1].isalnum() or text[prefix_start - 1] == "_"
-    ):
-        return -1
-    if prefix != "R" and not prefix.endswith("R"):
-        return -1
-
-    open_paren = text.find("(", quote_index + 1, quote_index + 18)
-    if open_paren < 0:
-        return -1
-    delimiter = text[quote_index + 1 : open_paren]
-    if any(ch.isspace() or ch in "()\\" for ch in delimiter):
-        return -1
-    close = ")" + delimiter + '"'
-    close_start = text.find(close, open_paren + 1)
-    if close_start < 0:
-        return -1
-    return close_start + len(close) - 1
-
-
-def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
-    """Replace comment (and optionally string/char-literal) *contents* with spaces.
-
-    Preserves every newline and the overall length so byte offsets (and thus
-    line numbers) are unchanged — the scan can then match only real code and
-    never trips on an ABI keyword mentioned inside a comment or string literal.
-    A single forward state machine handles ``//`` / ``/* */`` comments and
-    ``"..."`` / ``'...'`` literals with backslash escapes, plus C++ raw string
-    literals so embedded quotes do not desynchronize the scanner.
-
-    With ``blank_strings=False`` only comments are blanked and string/char
-    literals are preserved verbatim — needed for the ``extern "C"`` rule, whose
-    target *is* a string literal.
-    """
-    out: list[str] = []
-    i, n = 0, len(text)
-    state = "code"  # code | line_comment | block_comment | string | char
-    while i < n:
-        if state == "code":
-            i, state = _blank_scan_code(text, i, out)
-        elif state == "line_comment":
-            i, state = _blank_scan_line_comment(text, i, out)
-        elif state == "block_comment":
-            i, state = _blank_scan_block_comment(text, i, out)
-        else:  # string | char
-            i, state = _blank_scan_literal(text, i, out, state, blank_strings)
-    return "".join(out)
-
-
-def _blank_scan_code(text: str, i: int, out: list[str]) -> tuple[int, str]:
-    """One scanner step in the ``code`` state; returns ``(next_offset, next_state)``."""
-    ch = text[i]
-    nxt = text[i + 1] if i + 1 < len(text) else ""
-    if ch == "/" and nxt == "/":
-        out.append("  ")
-        return i + 2, "line_comment"
-    if ch == "/" and nxt == "*":
-        out.append("  ")
-        return i + 2, "block_comment"
-    if ch == '"':
-        raw_end = _raw_string_end(text, i)
-        if raw_end >= 0:
-            raw = text[i : raw_end + 1]
-            # Raw-string bodies are never code, even on the
-            # string-preserving path used by `_Pragma`/`extern "C"`.
-            out.append("".join("\n" if c == "\n" else " " for c in raw))
-            return raw_end + 1, "code"
-        out.append('"')
-        return i + 1, "string"
-    if ch == "'":
-        # Distinguish a C++14 digit separator (`1'000`, `0xFF'FF`) from a
-        # char-literal opener — misreading a literal as a separator (or
-        # vice-versa) would blank the rest of the file.
-        out.append("'")
-        if not _is_digit_separator(text, i):
-            return i + 1, "char"
-        return i + 1, "code"
-    out.append(ch)
-    return i + 1, "code"
-
-
-def _blank_scan_line_comment(text: str, i: int, out: list[str]) -> tuple[int, str]:
-    """One scanner step inside a ``//`` comment; returns ``(next_offset, next_state)``."""
-    ch = text[i]
-    if ch == "\n":
-        # A backslash immediately before the newline (optionally across
-        # a CRLF `\r`) splices the next physical line into the `//`
-        # comment via C/C++ line continuation, so stay in the comment.
-        prev = text[i - 1] if i > 0 else ""
-        prev2 = text[i - 2] if i > 1 else ""
-        spliced = prev == "\\" or (prev == "\r" and prev2 == "\\")
-        out.append("\n")
-        return i + 1, ("line_comment" if spliced else "code")
-    out.append(" ")
-    return i + 1, "line_comment"
-
-
-def _blank_scan_block_comment(text: str, i: int, out: list[str]) -> tuple[int, str]:
-    """One scanner step inside a ``/* */`` comment; returns ``(next_offset, next_state)``."""
-    ch = text[i]
-    nxt = text[i + 1] if i + 1 < len(text) else ""
-    if ch == "*" and nxt == "/":
-        out.append("  ")
-        return i + 2, "code"
-    out.append("\n" if ch == "\n" else " ")
-    return i + 1, "block_comment"
-
-
-def _blank_scan_literal(
-    text: str, i: int, out: list[str], state: str, blank_strings: bool
-) -> tuple[int, str]:
-    """One scanner step inside a string/char literal; returns ``(next_offset, next_state)``."""
-    ch = text[i]
-    nxt = text[i + 1] if i + 1 < len(text) else ""
-    quote = '"' if state == "string" else "'"
-    if ch == "\\":
-        # Keep the escape + escaped char verbatim when preserving strings,
-        # else blank both (newlines always survive for line accounting).
-        if not blank_strings:
-            out.append(ch + (nxt if nxt else ""))
-        else:
-            out.append("  " if nxt != "\n" else " \n")
-        return i + 2, state
-    if ch == quote:
-        out.append(quote)
-        return i + 1, "code"
-    if not blank_strings:
-        out.append(ch)
-    else:
-        out.append("\n" if ch == "\n" else " ")
-    return i + 1, state
-
-
-def _line_of(text: str, offset: int) -> int:
-    """1-based line number of ``offset`` within ``text``."""
-    return text.count("\n", 0, offset) + 1
-
-
 def _snippet(raw_lines: list[str], line: int) -> str:
     """The original (un-blanked) source line for a 1-based ``line`` number."""
     if 1 <= line <= len(raw_lines):
@@ -699,11 +535,17 @@ def scan_text(text: str, path: str = "") -> list[PatternFact]:
     code_with_strings = _blank_comments_and_strings(text, blank_strings=False)
     raw_lines = text.splitlines()
     facts: list[PatternFact] = []
+    # Newline offsets once, so each match's line is a bisect rather than a
+    # rescan from offset 0 (quadratic in a match-dense header).
+    newline_offsets = [m.start() for m in _NEWLINE_RE.finditer(blanked)]
+
+    def _line_of(offset: int) -> int:
+        return bisect_left(newline_offsets, offset) + 1
 
     for rule in _RULES:
         haystack = code_with_strings if rule.scan_strings else blanked
         for m in rule.regex.finditer(haystack):
-            line = _line_of(blanked, m.start())
+            line = _line_of(m.start())
             facts.append(
                 PatternFact(
                     kind=rule.kind,
@@ -731,7 +573,7 @@ def scan_text(text: str, path: str = "") -> list[PatternFact]:
                 j -= 1
             if j >= 0 and blanked[j] in _TEMPLATE_DISAMBIGUATOR_PREV:
                 continue
-        line = _line_of(blanked, m.start())
+        line = _line_of(m.start())
         facts.append(
             PatternFact(
                 kind=PatternKind.EXTERN_TEMPLATE
@@ -807,7 +649,19 @@ def _scan_one_file(path_str: str) -> tuple[list[PatternFact], bool]:
         text = Path(path_str).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return [], False
-    return scan_text(text, path=path_str), True
+    return list(_scan_text_memo(text, path_str)), True
+
+
+@lru_cache(maxsize=1024)
+def _scan_text_memo(text: str, path: str) -> tuple[PatternFact, ...]:
+    """:func:`scan_text`, memoized on the file's *content* and path.
+
+    The compare-time pre-scan reads the same header tree once per side, per
+    comparison pass, and -- in a release fan-out -- once per member, so one
+    process re-scanned identical text dozens of times. Keyed on the text
+    itself (not a stat), so an in-place edit can never serve stale facts.
+    """
+    return tuple(scan_text(text, path=path))
 
 
 def _find_pattern_facts_serial(
