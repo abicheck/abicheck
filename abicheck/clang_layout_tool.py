@@ -70,12 +70,10 @@ from .dumper import (
     _resolve_clang_langmode,
 )
 from .dumper_clang import _resolve_clang_bin
-from .dumper_clang_errors import (
-    _is_missing_cpp_stdlib_header_error,
-    retry_excluding_error_headers,
-)
+from .dumper_clang_errors import _is_missing_cpp_stdlib_header_error
 from .dumper_sysinc import _resolve_clang_system_includes
 from .errors import SnapshotError, ValidationError
+from .extract.headers.clang.error_header_retry import retry_excluding_error_headers
 from .header_utils import iter_directory_headers, resolve_inferred_header_roots
 from .model import AbiSnapshot, RecordType, replace_with_fact_sync
 from .name_classification import strip_anonymous_type_location
