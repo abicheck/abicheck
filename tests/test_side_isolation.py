@@ -228,16 +228,21 @@ def _ignores_sigterm_then(block):
     return fn
 
 
-@pytest.mark.xfail(strict=True, reason="unbounded reap: join() waits on SIGTERM alone")
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize("block", ["sleep", "send", "lock"])
 @pytest.mark.parametrize("position", [1, 2])
-def test_a_child_that_survives_sigterm_is_still_reaped(isolated, block, position):
+def test_a_child_that_survives_sigterm_is_still_reaped(
+    isolated, monkeypatch, block, position
+):
     """Bug class: an unbounded reap. Whatever state a later sibling is in
     when an earlier side fails, the run returns the
     failure and leaves no child behind. Oracle: ``active_children()``, not
     anything ``run_isolated`` itself reports."""
     import time
+
+    import abicheck.workflows.side_isolation as iso
+
+    monkeypatch.setattr(iso, "_TERMINATE_GRACE_SECONDS", 0.5)
 
     def boom():
         time.sleep(0.2)  # let the stubborn sibling install its disposition
