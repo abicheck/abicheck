@@ -38,6 +38,14 @@ from pathlib import Path
 
 from . import cache_integrity
 
+__all__ = [
+    "DEFAULT_MAX_BYTES",
+    "MIN_AGE_SECONDS",
+    "configured_max_bytes",
+    "enforce_ast_cache_budget",
+    "enforce_once",
+]
+
 log = logging.getLogger(__name__)
 
 DEFAULT_MAX_BYTES: int = 16 * 1024**3

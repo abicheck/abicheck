@@ -74,6 +74,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.ast_parse_exclusions",
     "abicheck.storage.json_compact",
     "abicheck.storage.cache_integrity",
+    "abicheck.storage.ast_cache_budget",
 )
 
 
