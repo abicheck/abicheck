@@ -956,6 +956,7 @@ def _graph_with_calls(
         )
     )
     augment_graph_with_calls(g, [CallEdge(c, d) for c, d in calls])
+    g.extractor_passes["call_graph"] = True  # as the real fold stamps it (gap A5)
     return g.finalize()
 
 

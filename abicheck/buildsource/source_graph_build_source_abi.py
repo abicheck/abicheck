@@ -600,3 +600,25 @@ def mark_source_edges_extractor_coverage(
     if surface.source_edges:
         graph.degraded_passes["call_graph"] = True
         graph.degraded_passes["type_graph"] = True
+
+
+#: Fact families whose collection state the ``source_abi`` pass rests on:
+#: the declarations it links (``SOURCE_DECLARES``) and maps to exported
+#: symbols (``SOURCE_DECL_MAPS_TO_SYMBOL``).
+_SOURCE_ABI_FAMILIES = ("functions", "variables", "types")
+
+
+def stamp_source_abi_pass(graph: SourceGraphSummary, surface: SourceAbiSurface) -> None:
+    """Record the ``source_abi`` pass on *graph* (evidence-entity-model gap
+    A5): ``degraded`` when the linked replay reports a declaration family
+    ``failed``/``partial`` (its missing declarations and mappings are then
+    unknown), ``ran`` otherwise -- including a pre-C.8 surface that reports
+    no family states at all, which carried its declarations in full."""
+    from ..model.source_graph_coverage import SOURCE_ABI_PASS
+
+    states = surface.coverage.get("fact_family_states")
+    states = states if isinstance(states, dict) else {}
+    if any(states.get(f) in ("failed", "partial") for f in _SOURCE_ABI_FAMILIES):
+        graph.degraded_passes[SOURCE_ABI_PASS] = True
+    else:
+        graph.extractor_passes[SOURCE_ABI_PASS] = True

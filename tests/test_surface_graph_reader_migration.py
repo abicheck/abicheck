@@ -460,6 +460,7 @@ def test_evidence_report_graph_diff_unchanged_by_migration() -> None:
                 kind="SOURCE_DECL_MAPS_TO_SYMBOL",
             ),
         ],
+        extractor_passes={"source_abi": True},
     )
     new_graph = SourceGraphSummary(
         nodes=[
@@ -472,6 +473,7 @@ def test_evidence_report_graph_diff_unchanged_by_migration() -> None:
             ),
         ],
         edges=[],
+        extractor_passes={"source_abi": True},
     )
 
     def _snap(graph: SourceGraphSummary, with_surface_graph: bool) -> AbiSnapshot:

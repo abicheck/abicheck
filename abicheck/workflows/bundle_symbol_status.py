@@ -45,7 +45,7 @@ from ..bundle_models import (
     symbol_signature_status,
 )
 from ..model import AbiSnapshot, Visibility
-from ..model.export_index import build_raw_export_index, default_versioned_names
+from ..model.export_index import build_raw_export_index, read_default_export_names
 from ..model.surface_facts import (
     binary_exported,
     is_confirmed_true,
@@ -365,8 +365,7 @@ def build_bundle_signature_evidence(
         elf_only_mode=snapshot.elf_only_mode,
         elf=snapshot.elf,
         library_filename=snapshot.library,
-        export_names=(
-            None if raw_exports is None else default_versioned_names(raw_exports)
-        ),
+        # `None` for an unread table too (gap A4): unknown, not "exports nothing".
+        export_names=read_default_export_names(snapshot),
         export_platform=None if raw_exports is None else raw_exports.platform,
     )

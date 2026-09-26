@@ -53,6 +53,7 @@ from ..model.source_graph_coverage import (
     HEADER_PASS_ALIAS,
     PASS_EDGE_KINDS,
     TYPE_GRAPH_PASS,
+    graph_records_passes,
     trusted_kinds,
 )
 from .source_graph_compare import _kind_map, _label_map
@@ -413,7 +414,12 @@ def _dependency_kinds_covered(
     kind excluded there restricts the closure to zero edges of that kind
     regardless of whether this gate passed.
     """
-    if any(e.kind in edge_kinds for e in graph.edges):
+    # Gap A5: once any pass flag is recorded the flags alone decide; edge
+    # presence is kept only as an unflagged (pre-flag or hand-built) graph's
+    # evidence that the kind was collected at all.
+    if not graph_records_passes(graph) and any(
+        e.kind in edge_kinds for e in graph.edges
+    ):
         return True
     return any(
         (_pass_ran(graph, pass_name) or _pass_narrowed(graph, pass_name))
@@ -940,8 +946,12 @@ def _mapping_drift_findings(
     # already resolves the real declaring file via SOURCE_DECLARES edges, so
     # there was no need to leave it as a bare provenance tag.
     new_decl_files = decl_declaring_files(new)
+    # A side with no mapping must have *proven* it (gap A5, edge_query).
+    old_ok, new_ok = source_graph_covers(old, _MAPS), source_graph_covers(new, _MAPS)
     for decl in sorted(old_decls & new_decls):
         old_sym, new_sym = old_map.get(decl, ""), new_map.get(decl, "")
+        if (not old_sym and not old_ok) or (not new_sym and not new_ok):
+            continue
         if old_sym != new_sym:
             label = new_labels.get(decl, decl)
             findings.append(
@@ -1009,13 +1019,17 @@ def _public_reachability_findings(
     from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
-    # Only when both sides have a closure — an empty baseline would otherwise
-    # flag every declaration.
+    # Entering needs OLD's SOURCE_DECLARES absence proven, leaving NEW's (gap
+    # A5); an unproven side (an unflagged or narrowed graph) says nothing.
     old_pub, new_pub = _public_decls(old), _public_decls(new)
-    if old_pub and new_pub:
+    old_ok, new_ok = (
+        source_graph_covers(old, _DECLARES),
+        source_graph_covers(new, _DECLARES),
+    )
+    if old_ok or new_ok:
         old_node_ids = {n.id for n in old.nodes}
         new_node_ids = {n.id for n in new.nodes}
-        for decl in sorted(new_pub - old_pub):
+        for decl in sorted(new_pub - old_pub if old_ok else ()):
             if decl not in old_node_ids:
                 continue
             label = new_labels.get(decl, decl)
@@ -1037,7 +1051,7 @@ def _public_reachability_findings(
                     source_location=boundary,
                 )
             )
-        for decl in sorted(old_pub - new_pub):
+        for decl in sorted(old_pub - new_pub if new_ok else ()):
             if decl not in new_node_ids:
                 continue
             label = old_labels.get(decl, decl)
@@ -1071,6 +1085,8 @@ def _generated_public_closure_findings(
     from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
+    if not source_graph_covers(old, "TARGET_HAS_PUBLIC_HEADER"):
+        return findings  # OLD's closure absence unproven (gap A5)
     newly_generated = _generated_in_public_closure(new) - _generated_in_public_closure(
         old
     )
@@ -1097,6 +1113,8 @@ def _generated_public_closure_findings(
 
 
 _CALLS = "DECL_CALLS_DECL"
+_MAPS = "SOURCE_DECL_MAPS_TO_SYMBOL"
+_DECLARES = "SOURCE_DECLARES"
 
 
 def _call_reachability_findings(
@@ -1312,6 +1330,8 @@ def _build_option_reach_findings(
     from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
+    if not source_graph_covers(old, "BUILD_OPTION_AFFECTS_SYMBOL"):
+        return findings  # OLD's edge absence unproven (gap A5)
     # Added BUILD_OPTION_AFFECTS_SYMBOL edges, grouped by option.
     added_opt_edges = _option_symbol_edges(new) - _option_symbol_edges(old)
     # Only a *changed* (newly introduced) ABI-relevant flag is interesting here:
@@ -1552,6 +1572,8 @@ def _target_dependency_findings(
     from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
+    if not source_graph_covers(old, "TARGET_DEPENDS_ON"):
+        return findings  # OLD's edge absence unproven (gap A5)
     added_target_deps = _target_dependency_edges(new) - _target_dependency_edges(old)
     for target, dep in sorted(added_target_deps):
         tlabel = new_labels.get(target, target)

@@ -81,6 +81,9 @@ def _graph(schema_version: int, *, mapped: bool) -> SourceGraphSummary:
         ]
         if mapped
         else [],
+        # The L4 fold ran on both sides: a dropped mapping is observed, not a
+        # gap (an unflagged graph answers it unknown, evidence-entity-model A5).
+        extractor_passes={"source_abi": True},
     )
     graph.schema_version = schema_version
     return graph
