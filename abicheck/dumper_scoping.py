@@ -95,7 +95,7 @@ import dataclasses
 import functools
 import inspect
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence, Set as AbstractSet
+from collections.abc import Callable, Container, Mapping, Sequence, Set as AbstractSet
 from pathlib import Path
 from typing import Any
 
@@ -109,6 +109,7 @@ from .extract.occurrence_dependency_scope import (
 )
 from .model import AbiSnapshot, EnumType, Function, RecordType, Variable
 from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
+from .model.header_parse_coverage import AllBut, header_parse_excluded
 from .model.semantic_ir import SemanticIR, semantic_ir_conflict_key
 from .model.surface_facts import in_public_surface
 from .type_reachability import (
@@ -826,7 +827,7 @@ def _directly_referenced_dependency_names(
     return _referenced_from_haystack(haystack, spelling_index)
 
 
-def _name_matches(name: str, kept_identifiers: set[str]) -> bool:
+def _name_matches(name: str, kept_identifiers: Container[str]) -> bool:
     """Exact-only match against the kept types'/enums' own spellings.
 
     Deliberately does **not** fall back to bare-tail matching (a DWARF key
@@ -849,7 +850,7 @@ def _name_matches(name: str, kept_identifiers: set[str]) -> bool:
 
 
 def _scoped_dwarf(
-    dwarf: DwarfMetadata | None, kept_identifiers: set[str]
+    dwarf: DwarfMetadata | None, kept_identifiers: Container[str]
 ) -> DwarfMetadata | None:
     """Filter a DWARF layout map to the declarations kept from the flat
     ``types``/``enums`` lists (same dependency-exclusion decision, applied
@@ -880,7 +881,7 @@ def _scoped_dwarf(
 
 def _scoped_dwarf_advanced(
     adv: AdvancedDwarfMetadata | None,
-    kept_identifiers: set[str],
+    kept_identifiers: Container[str],
     excluded_symbols: set[str],
 ) -> AdvancedDwarfMetadata | None:
     """Filter Sprint-4 advanced DWARF metadata the same way: type-keyed
@@ -1289,6 +1290,18 @@ def scope_snapshot_excluding_dependencies(
         {t.qualified_name for t in kept_types if t.qualified_name}
         | {e.qualified_name for e in kept_enums if e.qualified_name},
     )
+    # Gap A3: with top-level headers dropped from the parse, "no kept header
+    # names this DWARF type" is not evidence it is a dependency's -- keep all
+    # but the confidently-identified dependency types (never silently drop).
+    deps: list[RecordType | EnumType] = [*dep_types, *dep_enums]
+    dwarf_ids = (
+        AllBut(
+            ({_candidate_identity(t) for t in deps} | {t.name for t in deps})
+            - kept_identifiers
+        )
+        if header_parse_excluded(snap)
+        else kept_identifiers
+    )
     excluded_functions = [f for f in snap.functions if _is_dep(f.source_header)]
     # A kept function's own header-AST spelling can be exactly this same
     # ambiguous shape too -- a kept `extern "C" foo` genuinely has mangled ==
@@ -1341,9 +1354,9 @@ def scope_snapshot_excluding_dependencies(
         variables=kept_variables,
         types=kept_types,
         enums=kept_enums,
-        dwarf=_scoped_dwarf(snap.dwarf, kept_identifiers),
+        dwarf=_scoped_dwarf(snap.dwarf, dwarf_ids),
         dwarf_advanced=_scoped_dwarf_advanced(
-            snap.dwarf_advanced, kept_identifiers, excluded_symbols
+            snap.dwarf_advanced, dwarf_ids, excluded_symbols
         ),
         # ADR-063 Phase 6 (second slice, Codex review, PR #1001): without
         # this, dataclasses.replace() below carries snap.semantic_ir/

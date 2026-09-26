@@ -711,11 +711,28 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
   keeps the legacy edge-presence reading in `source_graph_covers` and
   `_dependency_kinds_covered`; the persisted `coverage.*.collected` summary
   (`SourceGraphSummary.finalize`) keeps it too.
-- `compare/debug_type_scope` does not consult per-side header coverage, so
-  a public type whose header failed to parse is silently not diffed (false
-  negative, not a false absent).
-- `export_transition`'s OLD-side suppression guard does not check OLD's
-  table was read (false-negative direction).
+- **A3, header coverage for the L1 type scope — fixed (PR A3).** The clang
+  `#error` retry's dropped headers were only logged. They are now recorded
+  (`ast_toolchain["header_parse_excluded"]`, `model/header_parse_coverage`,
+  with an AST-cache sidecar so a warm run keeps them); the header-AST
+  coverage record reads `partial` covering nothing; the dependency scope no
+  longer strips a DWARF type merely because no parsed header names it (it
+  drops only confirmed dependency types); and each such debug type answers
+  `unknown` in the "Relationship coverage" section. A type is therefore never
+  dropped silently. Kept as is: `debug_type_scope` still does not *diff* an
+  unnamed debug type (that would re-admit every internal type the scope
+  exists to remove); the answer is `unknown`, reported, not a diff. A snapshot
+  dumped before the record, and a castxml dump (castxml fails the whole parse
+  rather than dropping a header), read as complete, as before.
+- **A2, OLD-side suppression guard — fixed (PR A2).**
+  `export_transition.surface_exit_is_evidence_gap` read "not confirmed
+  exported" as "not exported", so an unread OLD table suppressed a real
+  export loss. The removal paths now pass the OLD table as
+  `edge_query.ObservedExportTable`; the guard suppresses only on its typed
+  `proven_absent` answer (or OLD's own confirmed-absent fact), and a bare
+  name set refuses on a `FAILED` fact. An OLD with no binary owes no table
+  and still suppresses. Tested by an OLD-table-state × caller-kind table and
+  through `checker.compare`.
 - **C1, schema enum — fixed (PR C1).** The producer was right: with no OLD
   snapshot, `schema_staleness_status` is `not_evaluated`, like every sibling
   context status. The schema enum (report schema 5.7) and the merge scale

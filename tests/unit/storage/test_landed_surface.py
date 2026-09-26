@@ -71,6 +71,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.ref_ids",
     "abicheck.storage.env_limits",
     "abicheck.storage.ast_size_observer",
+    "abicheck.storage.ast_parse_exclusions",
     "abicheck.storage.json_compact",
     "abicheck.storage.cache_integrity",
 )

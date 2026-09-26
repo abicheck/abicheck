@@ -270,4 +270,32 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="test_harness.nested_session_prunes_outer_temp_root",
+        invariant=(
+            "A test that starts its own pytest sessions gives them an explicit "
+            "`--basetemp` of their own. On the default numbered basetemp each "
+            "nested session runs pytest's retention pass over the shared "
+            "`pytest-of-<user>` root and, once the outer run's lock reads as "
+            "stale (a long in-process mutmut run), deletes the outer run's "
+            "tree -- the test's own `tmp_path`, the nested run's cwd."
+        ),
+        fixed_by=(1396,),
+        seed_tests=("tests/test_mutmut_hypothesis_settings.py",),
+        public_surfaces=(),
+        axes={
+            "suppress": ("too_slow", "filter_too_much", "none"),
+            "outer_lock": ("live", "stale"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the one test that drives nested sessions today is "
+                    "fixed; no gate stops a new `pytest.main(...)` call under "
+                    "`tests/` from omitting `--basetemp`."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )
