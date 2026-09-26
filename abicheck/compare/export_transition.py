@@ -36,11 +36,9 @@ from collections.abc import Container
 from ..checker_types import Change
 from ..diff_helpers import make_change
 from ..model import Function, Variable
-from ..model.availability import FactStatus
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.edge_coverage import EdgeAnswer
 from ..model.surface_facts import (
-    binary_exported,
     has_observed_contract_evidence,
     in_public_contract,
     is_abi_visible,
@@ -390,17 +388,22 @@ def surface_exit_is_evidence_gap(
     # unconfirmed (evidence-entity-model gap A2): an OLD table that was not
     # read answers "unknown" for every symbol, and suppressing on that would
     # hide a real export loss. The typed I4 answer decides when the caller
-    # handed the table over; otherwise only OLD's own confirmed fact does.
-    # An OLD with no binary at all owes no table and had no export to lose.
+    # handed the table over; otherwise only OLD's own confirmed fact does. A
+    # legacy-derived negative counts: it exists only where no producer stored
+    # a fact (a pre-v46 snapshot), and there `Visibility.HIDDEN` *was* the
+    # dumper's reading of the table -- whereas a modern unread table stores
+    # FAILED/NOT_COLLECTED, never a legacy value. An OLD with no binary at all
+    # owes no table and had no export to lose; only a typed table can say so.
     if isinstance(old_exported_symbols, ObservedExportTable):
         if old_exported_symbols.owes_table and (
             old_exported_symbols.answer(key) is not EdgeAnswer.PROVEN_ABSENT
             and not is_export_confirmed_absent(old)
         ):
             return False
-    elif binary_exported(old).status is FactStatus.FAILED:
-        # A name set carries no coverage; OLD's own fact still says whether
-        # its table was read (`extract.export_table_read`).
+    elif not is_export_confirmed_absent(old):
+        # A name set carries no coverage, so it cannot tell "no binary" from
+        # "table not read" (NOT_COLLECTED, UNSUPPORTED, FAILED alike):
+        # absence rests on OLD's own confirmed fact alone.
         return False
     if not has_observed_contract_evidence(old):
         return False
