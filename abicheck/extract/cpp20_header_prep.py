@@ -27,7 +27,6 @@ import re
 from pathlib import Path
 
 from ..dumper_ast_config_cpp20_chains import _strip_inactive_if_zero_blocks
-from .digest_memo import DigestMemo, content_digest
 from .quoted_include_expansion import _strip_raw_strings
 
 _JOINED_STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\])*"', re.DOTALL)
@@ -91,15 +90,7 @@ def _preprocessed_header_content(
         content = path.read_bytes()
     except OSError:
         return None
-    return _PREP_MEMO.get_or_compute(
-        (content_digest(content), for_language_mode_decision),
-        lambda: _prepare_content(content, for_language_mode_decision),
-    )
-
-
-#: Per-file preprocessing memo (``extract/digest_memo.py``): one compare
-#: scans the old, new and combined header sets under both polarities.
-_PREP_MEMO: DigestMemo[tuple[bytes, bytes]] = DigestMemo()
+    return _prepare_content(content, for_language_mode_decision)
 
 
 def _prepare_content(

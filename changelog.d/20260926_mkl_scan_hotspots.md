@@ -24,8 +24,13 @@
   memo in `compare/template_surface.py`, `parse_elf_metadata` keeps a
   content-digest-keyed process memo (the L0 re-resolve and release members
   re-parsed the same binaries), and the structural C++20 header scan memoizes
-  its per-file preprocessing and scan on a content digest
-  (`extract/digest_memo.py`, `extract/cpp20_header_prep.py`).
+  each file's shadow-flag bits and requirement list on a content digest --
+  never the preprocessed text, which for a large header tree is tens of MB
+  (`extract/digest_memo.py`, `extract/cpp20_header_prep.py`). The per-ELF
+  memos are cleared at the start and end of every `compare`, like the
+  reconciliation memo. Measured on `libmkl_rt` 2025.3.1 -> 2026.0.0
+  (conda-forge, `--depth headers`): 173s -> 115s wall, identical 48,374
+  findings.
 
 ### Fixed
 

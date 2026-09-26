@@ -30,6 +30,7 @@ from .dumper_ast_config_cpp20_chains import (
 from .extract.cpp20_header_prep import (
     _JOINED_CHAR_LITERAL_PATTERN,
     _JOINED_STRING_LITERAL_PATTERN,
+    _prepare_content,
     _preprocessed_header_content as _preprocessed_header_content,
     _strip_literals_crossing_continuations as _strip_literals_crossing_continuations,
 )
@@ -1012,33 +1013,47 @@ class _Cpp20ShadowFlags:
 
 def _preprocess_headers(
     header_paths: list[Path], *, for_language_mode_decision: bool
-) -> tuple[list[tuple[Path, bytes]], _Cpp20ShadowFlags]:
-    """First pass: preprocess every header and OR the shadow flags across all.
+) -> tuple[list[tuple[Path, bytes, bytes | None]], _Cpp20ShadowFlags]:
+    """First pass: OR each header's shadow flags across all of them.
 
-    The second pass reuses the returned content rather than re-reading, so the
-    per-line scan runs against aggregate-wide flags.
+    Returns ``(path, raw content, prepared scan content or None)`` per file so
+    the second pass can run against aggregate-wide flags. Only the four flag
+    bits are memoised per file content (``_SHADOW_MEMO``) -- never the
+    prepared text, which for a large header tree is tens of MB -- so a memo
+    hit leaves the scan content ``None`` and the second pass re-prepares it
+    only if its own per-file memo also misses.
     """
-    per_file: list[tuple[Path, bytes]] = []
-    concept = requires = consteval = constinit = False
+    per_file: list[tuple[Path, bytes, bytes | None]] = []
+    bits = [False, False, False, False]
     for path in header_paths:
-        prepared = _preprocessed_header_content(
-            path, for_language_mode_decision=for_language_mode_decision
-        )
-        if prepared is None:
+        try:
+            raw = path.read_bytes()
+        except OSError:
             continue
-        scan_content, shadow_content = prepared
-        per_file.append((path, scan_content))
-        concept = concept or bool(_CONCEPT_AS_TYPE_NAME_PATTERN.search(shadow_content))
-        requires = requires or bool(
-            _REQUIRES_AS_TYPE_NAME_PATTERN.search(shadow_content)
+        prepared: list[bytes] = []
+        file_bits = _SHADOW_MEMO.get_or_compute(
+            (content_digest(raw), for_language_mode_decision),
+            partial(_shadow_bits, raw, for_language_mode_decision, prepared),
         )
-        consteval = consteval or bool(
-            _CONSTEVAL_AS_TYPE_NAME_PATTERN.search(shadow_content)
+        per_file.append((path, raw, prepared[0] if prepared else None))
+        bits = [a or b for a, b in zip(bits, file_bits, strict=True)]
+    return per_file, _Cpp20ShadowFlags(*bits)
+
+
+def _shadow_bits(
+    raw: bytes, for_language_mode_decision: bool, prepared_out: list[bytes]
+) -> tuple[bool, bool, bool, bool]:
+    scan_content, shadow = _prepare_content(raw, for_language_mode_decision)
+    prepared_out.append(scan_content)
+    return tuple(  # type: ignore[return-value]
+        bool(p.search(shadow))
+        for p in (
+            _CONCEPT_AS_TYPE_NAME_PATTERN,
+            _REQUIRES_AS_TYPE_NAME_PATTERN,
+            _CONSTEVAL_AS_TYPE_NAME_PATTERN,
+            _CONSTINIT_AS_TYPE_NAME_PATTERN,
         )
-        constinit = constinit or bool(
-            _CONSTINIT_AS_TYPE_NAME_PATTERN.search(shadow_content)
-        )
-    return per_file, _Cpp20ShadowFlags(concept, requires, consteval, constinit)
+    )
 
 
 def _joined_lookahead(
@@ -1142,6 +1157,7 @@ def _scan_header_for_requirements(
 #: Per-file scan memo (``extract/digest_memo.py``): one compare scans the
 #: old, new and combined header sets under both language-mode polarities.
 _SCAN_MEMO: DigestMemo[list[Cpp20Requirement]] = DigestMemo()
+_SHADOW_MEMO: DigestMemo[tuple[bool, bool, bool, bool]] = DigestMemo()
 
 
 @memoize_header_scan(_expand_with_quoted_includes)
@@ -1196,13 +1212,22 @@ def _find_cpp20_requirements(
         for_language_mode_decision=for_language_mode_decision,
     )
     found: list[Cpp20Requirement] = []
-    for path, content in per_file:
-        hits = _SCAN_MEMO.get_or_compute(
-            (str(path), content_digest(content), shadows),
-            partial(_scan_header_for_requirements, path, content, shadows),
+    flag = for_language_mode_decision
+    for path, raw, scan in per_file:
+        found.extend(
+            _SCAN_MEMO.get_or_compute(
+                (str(path), content_digest(raw), flag, shadows),
+                partial(_scan_prepared, path, raw, scan, flag, shadows),
+            )
         )
-        found.extend(hits)
     return found
+
+
+def _scan_prepared(
+    path: Path, raw: bytes, scan: bytes | None, flag: bool, shadows: _Cpp20ShadowFlags
+) -> list[Cpp20Requirement]:
+    content = scan if scan is not None else _prepare_content(raw, flag)[0]
+    return _scan_header_for_requirements(path, content, shadows)
 
 
 def _detect_cpp20_headers(

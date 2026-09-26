@@ -209,6 +209,11 @@ def exported_symbol_names(
 _EXPORTED_NAMES_MEMO = "_exported_symbol_names_memo"
 
 
+def drop_exported_symbol_names_memo(elf: object) -> None:
+    """Forget *elf*'s memoised name sets (``compare`` scopes them per call)."""
+    getattr(elf, "__dict__", {}).pop(_EXPORTED_NAMES_MEMO, None)
+
+
 def _exported_symbol_names(
     symbols: Any,
     symbol_types: Collection[str],

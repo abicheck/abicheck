@@ -196,6 +196,11 @@ def build_raw_export_index_from_elf(elf_meta: ElfMetadata) -> RawExportIndex:
 _ELF_INDEX_MEMO = "_raw_export_index_memo"
 
 
+def drop_raw_export_index_memo(elf_meta: object) -> None:
+    """Forget *elf_meta*'s memoised index (``compare`` scopes it per call)."""
+    getattr(elf_meta, "__dict__", {}).pop(_ELF_INDEX_MEMO, None)
+
+
 def build_raw_export_index_from_pe(pe_meta: PeMetadata) -> RawExportIndex:
     """*pe_meta*'s export directory as a :class:`RawExportIndex`.
 

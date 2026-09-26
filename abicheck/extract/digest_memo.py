@@ -40,29 +40,60 @@ def content_digest(content: bytes) -> bytes:
 
 
 class DigestMemo(Generic[_V]):
-    """Least-recently-used memo of at most *max_entries* results."""
+    """Least-recently-used memo of at most *max_entries* results.
 
-    def __init__(self, max_entries: int = 4096) -> None:
+    With *weigh*, it is also bounded to *max_bytes* of retained values: a
+    memo of preprocessed header text must not keep a large header tree
+    resident (19 MB per MKL release, several copies per file). A single
+    value heavier than the whole budget is returned but never stored.
+    """
+
+    def __init__(
+        self,
+        max_entries: int = 4096,
+        *,
+        max_bytes: int | None = None,
+        weigh: Callable[[_V], int] | None = None,
+    ) -> None:
         self._max = max_entries
-        self._entries: OrderedDict[Hashable, _V] = OrderedDict()
+        self._max_bytes = max_bytes
+        self._weigh = weigh
+        self._bytes = 0
+        self._entries: OrderedDict[Hashable, tuple[_V, int]] = OrderedDict()
         self._lock = threading.Lock()
 
     def get_or_compute(self, key: Hashable, compute: Callable[[], _V]) -> _V:
         """The memoised value for *key*, computing (outside the lock) on a miss."""
         with self._lock:
-            if key in self._entries:
+            hit = self._entries.get(key)
+            if hit is not None:
                 self._entries.move_to_end(key)
-                return self._entries[key]
+                return hit[0]
         value = compute()
+        weight = self._weigh(value) if self._weigh is not None else 0
+        if self._max_bytes is not None and weight > self._max_bytes:
+            return value
         with self._lock:
-            self._entries[key] = value
-            while len(self._entries) > self._max:
-                self._entries.popitem(last=False)
+            previous = self._entries.pop(key, None)
+            if previous is not None:
+                self._bytes -= previous[1]
+            self._entries[key] = (value, weight)
+            self._bytes += weight
+            while len(self._entries) > self._max or (
+                self._max_bytes is not None and self._bytes > self._max_bytes
+            ):
+                _, (_, dropped) = self._entries.popitem(last=False)
+                self._bytes -= dropped
         return value
+
+    @property
+    def retained_bytes(self) -> int:
+        return self._bytes
 
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()
+            self._bytes = 0
 
     def __len__(self) -> int:
         return len(self._entries)
