@@ -12,8 +12,6 @@ import pytest
 
 from abicheck.errors import SnapshotError
 from abicheck.extract.header_ast_backend import lang_to_profile
-from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.serialization import save_snapshot
 from abicheck.storage import cache_integrity as ci
 from abicheck.storage.json_compact import migrate_legacy_entry
 
@@ -82,38 +80,8 @@ def test_migration_failure_before_temp_file_leaves_entry(tmp_path, monkeypatch):
 def test_child_that_dies_without_reporting_is_an_error(monkeypatch):
     from abicheck.workflows.side_isolation import run_isolated
 
-    monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", "process")
     with pytest.raises(SnapshotError):
         run_isolated([lambda: os._exit(3), lambda: 1], concurrent=False)
-
-
-def _snap(path, version, fns):
-    snap = AbiSnapshot(library="libx.so", version=version)
-    snap.functions = [
-        Function(name=n, mangled=n, return_type="int", visibility=Visibility.PUBLIC)
-        for n in fns
-    ]
-    save_snapshot(snap, path)
-    return path
-
-
-@linux_only
-def test_compare_resolves_sides_in_children_with_same_verdict(tmp_path, monkeypatch):
-    from abicheck.service import CompareRequest, InputSpec, run_compare_request
-
-    old = _snap(tmp_path / "old.json", "1", ["f", "g"])
-    new = _snap(tmp_path / "new.json", "2", ["f"])
-    request = CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
-
-    monkeypatch.delenv("ABICHECK_EXTRACTION_ISOLATION", raising=False)
-    inproc = run_compare_request(request)
-    monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", "process")
-    isolated = run_compare_request(request)
-
-    kinds = lambda r: sorted((c.kind.value, c.symbol) for c in r.diff.changes)  # noqa: E731
-    assert isolated.diff.verdict == inproc.diff.verdict
-    assert kinds(isolated) == kinds(inproc)
-    assert ("func_removed", "g") in kinds(inproc)
 
 
 @linux_only
@@ -126,7 +94,6 @@ def test_truncated_result_transfer_is_a_snapshot_error(monkeypatch):
     def truncated(_self):
         raise OSError("short read")
 
-    monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", "process")
     monkeypatch.setattr(mpc.Connection, "recv", truncated)
     with pytest.raises(SnapshotError, match="transfer failed"):
         run_isolated([lambda: 1, lambda: 2], concurrent=True)

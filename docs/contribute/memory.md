@@ -107,11 +107,14 @@ Two design notes worth not relearning:
   asserted, not argued:
   `test_a_group_holds_its_object_even_when_the_content_entry_goes`.
 
-## Per-side process isolation (opt-in)
+## Per-side process isolation (the `low-memory` profile)
 
-`ABICHECK_EXTRACTION_ISOLATION=process` (Linux) resolves each side of a
-`compare` in its own forked child and hands back only the finished snapshot
-(`abicheck/workflows/side_isolation.py`). It exists because most of a dump's
+The `low-memory` performance profile (`performance.profile: low-memory` in
+`.abicheck.yml`, `compare --performance-profile low-memory`, or
+`CompareRequest.performance_profile`; see
+[`performance:`](../reference/config-file.md#performance)) resolves each
+side of a `compare` in its own forked child on Linux and hands back only the
+finished snapshot (`abicheck/workflows/side_isolation.py`). It exists because most of a dump's
 residency after the parse is not live data: the AST is allocated interleaved
 with the snapshot it produces, so freeing the AST leaves arenas pinned by the
 few snapshot objects inside each. On a 45-root scan, live data was 366 MiB of
@@ -122,16 +125,25 @@ a 2.66 GiB resident set; neither `gc.collect()`, `malloc_trim` nor
 | run | wall | peak (max over processes) | findings |
 |---|---|---|---|
 | oneDAL 2025.10 -> 2026.1, 3 headers, clang, in-process | 49.5 s | 1.338 GiB | 3548 |
-| same, `ABICHECK_EXTRACTION_ISOLATION=process` | 58.3 s | 0.888 GiB | 3548, identical |
+| same, `--performance-profile low-memory` | 58.3 s | 0.888 GiB | 3548, identical |
 | 45-root scan, dump each side separately (reporter's measurement) | neutral | -49.8% | identical |
 
 The wall-time cost is copy-on-write: a child's first write into each page it
 inherited faults a copy (about twice the minor faults and twice the system
 time of the same work in-process), plus ~1 s each way to pickle a snapshot.
 It is proportionally smaller as the per-side work grows, which is why the
-large scan measured it as neutral. It stays opt-in until that trade-off is
-measured on more workloads; the CLI's sequential side resolution is kept, so
-at most one child is alive at a time.
+large scan measured it as neutral. It stays opt-in (the default profile is
+`balanced`) until that trade-off is measured on more workloads. The profile
+resolves the sides one at a time, so at most one child is alive at a time.
+
+The profile is the user-facing name for a set of execution knobs
+(`abicheck/model/performance.py`'s `ExecutionTuning`), not a switch for
+this mechanism alone: `low-memory` also compares a release's libraries one
+at a time instead of sizing a worker pool to the host. A future memory or
+speed mechanism is added as another knob with a value per profile, so a
+project config never has to name mechanisms. Every profile must produce
+the same findings and exit code; `tests/test_performance_profile.py` holds
+that, and checks which execution path actually ran.
 
 ## Results
 

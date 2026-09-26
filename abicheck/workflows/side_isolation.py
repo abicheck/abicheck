@@ -25,11 +25,12 @@ child process that exits returns everything; only the finished snapshot
 crosses back, pickled. Dumping each side in its own process measured a
 -49.8% peak at unchanged wall time.
 
-Opt-in (``ABICHECK_EXTRACTION_ISOLATION=process``) and Linux-only: it relies
-on ``fork`` so the side's resolution closure need not be picklable, and
-``fork`` is not a safe default on macOS or available on Windows. Anywhere it
-is not enabled or not available, :func:`run_isolated` runs the callables
-in-process, exactly as before.
+Selected by the ``low-memory`` performance profile
+(:mod:`abicheck.model.performance`), never by this module. Linux-only: it
+relies on ``fork`` so the side's resolution closure need not be picklable,
+and ``fork`` is not a safe default on macOS or available on Windows. Where
+:func:`isolation_supported` is false, :func:`run_isolated` runs the
+callables in-process, exactly as before.
 
 Children are forked from the calling thread before any result is read, so
 two sides still resolve concurrently when the caller asked for that; the
@@ -43,7 +44,6 @@ from __future__ import annotations
 
 import gc
 import multiprocessing
-import os
 import pickle
 import sys
 from collections.abc import Callable, Sequence
@@ -52,17 +52,13 @@ from typing import Any, TypeVar
 from ..errors import SnapshotError
 from ..storage.acyclic_json import gc_paused
 
-__all__ = ["isolation_enabled", "run_isolated"]
+__all__ = ["isolation_supported", "run_isolated"]
 
 _T = TypeVar("_T")
 
-_ENV = "ABICHECK_EXTRACTION_ISOLATION"
 
-
-def isolation_enabled() -> bool:
-    """Whether side resolution should run in forked children here."""
-    if os.environ.get(_ENV, "").strip().lower() != "process":
-        return False
+def isolation_supported() -> bool:
+    """Whether side resolution can run in forked children on this platform."""
     return sys.platform.startswith("linux")
 
 
@@ -89,12 +85,12 @@ def _child(conn: Any, fn: Callable[[], Any]) -> None:
 def run_isolated(fns: Sequence[Callable[[], _T]], *, concurrent: bool) -> list[_T]:
     """Run each of *fns* and return their results in order.
 
-    In forked children when :func:`isolation_enabled`, else in-process. With
+    In forked children when :func:`isolation_supported`, else in-process. With
     *concurrent* the children all start before the first result is read;
     otherwise each finishes before the next starts, which bounds peak memory
     to one side at a time (the ``ABICHECK_PARALLEL_EXTRACTION=0`` contract).
     """
-    if not isolation_enabled():
+    if not isolation_supported():
         return [fn() for fn in fns]
     ctx = multiprocessing.get_context("fork")
     if not concurrent:

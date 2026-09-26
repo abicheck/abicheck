@@ -418,19 +418,33 @@ def resolve_compare_request(
             new_public_header_dirs,
         )
 
-    from .workflows.side_isolation import isolation_enabled, run_isolated
+    from .model.performance import (
+        current_performance_profile,
+        parse_performance_profile,
+        tuning_for,
+    )
+    from .workflows.side_isolation import run_isolated
 
+    tuning = tuning_for(
+        parse_performance_profile(request.performance_profile)
+        if request.performance_profile is not None
+        else current_performance_profile()
+    )
     with ast_acquisition_scope():
-        if isolation_enabled():
+        if tuning.isolate_sides:
             _deadline_ts = deadline.current_deadline_ts()
             old_res, new_res = run_isolated(
                 [
                     functools.partial(_deadline_bound_side_worker, _deadline_ts, fn)
                     for fn in (_resolve_old_side, _resolve_new_side)
                 ],
-                concurrent=allow_parallel and not resolve_sides_sequentially(request),
+                concurrent=False,
             )
-        elif not allow_parallel or resolve_sides_sequentially(request):
+        elif (
+            not allow_parallel
+            or tuning.sequential_sides
+            or resolve_sides_sequentially(request)
+        ):
             old_res = _resolve_old_side()
             new_res = _resolve_new_side()
         else:

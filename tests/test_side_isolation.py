@@ -13,7 +13,7 @@ import threading
 import pytest
 
 from abicheck.errors import SnapshotError
-from abicheck.workflows.side_isolation import isolation_enabled, run_isolated
+from abicheck.workflows.side_isolation import isolation_supported, run_isolated
 
 linux_only = pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="isolation forks; Linux only"
@@ -25,13 +25,15 @@ class _SideFailed(Exception):
 
 
 @pytest.fixture
-def isolated(monkeypatch):
-    monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", "process")
+def isolated():
+    """Forking is decided by the platform alone; nothing to switch on."""
 
 
-def test_disabled_runs_in_process(monkeypatch):
-    monkeypatch.delenv("ABICHECK_EXTRACTION_ISOLATION", raising=False)
-    assert not isolation_enabled()
+def test_unsupported_platform_runs_in_process(monkeypatch):
+    import abicheck.workflows.side_isolation as iso
+
+    monkeypatch.setattr(iso.sys, "platform", "win32")
+    assert not isolation_supported()
     pid = os.getpid()
     assert run_isolated([os.getpid, lambda: 7], concurrent=True) == [pid, 7]
 
@@ -116,11 +118,8 @@ def test_compare_report_is_identical_with_isolation(tmp_path, monkeypatch):
             check=True,
         )
 
-    def run(mode: str | None) -> tuple[int, list]:
-        if mode is None:
-            monkeypatch.delenv("ABICHECK_EXTRACTION_ISOLATION", raising=False)
-        else:
-            monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", mode)
+    def run(profile: str | None) -> tuple[int, list]:
+        extra = [] if profile is None else ["--performance-profile", profile]
         result = CliRunner().invoke(
             main,
             [
@@ -133,6 +132,7 @@ def test_compare_report_is_identical_with_isolation(tmp_path, monkeypatch):
                 "new=new/api.h",
                 "-o",
                 "json=r.json",
+                *extra,
             ],
             catch_exceptions=False,
         )
@@ -154,7 +154,7 @@ def test_compare_report_is_identical_with_isolation(tmp_path, monkeypatch):
     baseline = run(None)
     assert baseline[1], "fixture must produce findings or the check is vacuous"
     assert forked == []
-    assert run("process") == baseline
+    assert run("low-memory") == baseline
     # Both sides really went through children (sequential CLI: one each).
     assert forked == [1, 1]
 
@@ -184,13 +184,10 @@ def test_child_body_sends_result_error_and_unpicklable_report():
 def test_isolation_is_linux_only(monkeypatch):
     import abicheck.workflows.side_isolation as iso
 
-    monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", "process")
     monkeypatch.setattr(iso.sys, "platform", "darwin")
-    assert not isolation_enabled()
+    assert not isolation_supported()
     monkeypatch.setattr(iso.sys, "platform", "linux")
-    assert isolation_enabled()
-    monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", "thread")
-    assert not isolation_enabled()
+    assert isolation_supported()
 
 
 @linux_only
