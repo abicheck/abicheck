@@ -23,17 +23,17 @@ See docs/adr/001-technology-stack.md for rationale.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import logging
 import os
-import pickle
 import re
 import stat
 import struct
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import IO, cast
+from typing import IO
 
 from elftools.common.exceptions import ELFError
 from elftools.elf.dynamic import DynamicSection, DynamicTag
@@ -88,10 +88,11 @@ from .extract.elf_symbol_tables import (  # noqa: E402
 #: digest and path -- content, not a stat: an mtime has only kernel-tick
 #: resolution, so a same-size rewrite within one tick would read as unchanged. One ``compare`` parses each binary
 #: several times (primary dump, the symbols-only L0 re-resolve, release
-#: members sharing a provider); a hit costs one unpickle (~0.1s for a
+#: members sharing a provider); a hit costs one deep copy (~0.6s for a
 #: 65k-symbol library vs ~1.7s to parse) and hands every caller its own
-#: independent copy, so no caller can mutate another's metadata.
-_PARSE_MEMO: dict[tuple[object, ...], bytes] = {}
+#: independent copy, so no caller can mutate another's metadata. The memo
+#: keeps its own private copy for the same reason.
+_PARSE_MEMO: dict[tuple[object, ...], ElfMetadata] = {}
 _PARSE_MEMO_MAX = 16
 _PARSE_MEMO_LOCK = threading.Lock()
 
@@ -112,12 +113,12 @@ def parse_elf_metadata(so_path: Path) -> ElfMetadata:
             key = (hashlib.file_digest(f, "blake2b").hexdigest(), str(so_path))
             f.seek(0)
             with _PARSE_MEMO_LOCK:
-                blob = _PARSE_MEMO.get(key)
-            if blob is not None:
-                return cast("ElfMetadata", pickle.loads(blob))
+                cached = _PARSE_MEMO.get(key)
+            if cached is not None:
+                return copy.deepcopy(cached)
             meta = _parse(f, so_path)
             with _PARSE_MEMO_LOCK:
-                _PARSE_MEMO[key] = pickle.dumps(meta, pickle.HIGHEST_PROTOCOL)
+                _PARSE_MEMO[key] = copy.deepcopy(meta)
                 while len(_PARSE_MEMO) > _PARSE_MEMO_MAX:
                     _PARSE_MEMO.pop(next(iter(_PARSE_MEMO)))
             return meta
