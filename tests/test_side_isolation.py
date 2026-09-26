@@ -204,3 +204,61 @@ def test_every_child_is_reaped_when_an_early_side_fails(isolated):
     with pytest.raises(_SideFailed):
         run_isolated([boom, slow, slow], concurrent=True)
     assert multiprocessing.active_children() == []
+
+
+def _ignores_sigterm_then(block):
+    """A child that a SIGTERM cannot stop -- as one is whose inherited Python
+    SIGTERM handler waits on a lock the fork copied in its held state."""
+
+    def fn():
+        import signal
+        import time
+
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if block == "sleep":
+            time.sleep(3600)
+        elif block == "send":
+            return list(range(2_000_000))  # blocks on a full pipe
+        else:  # "lock": the inherited-held-lock deadlock itself
+            lk = threading.Lock()
+            lk.acquire()
+            lk.acquire()
+        return None
+
+    return fn
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize("block", ["sleep", "send", "lock"])
+@pytest.mark.parametrize("position", [1, 2])
+def test_a_child_that_survives_sigterm_is_still_reaped(
+    isolated, monkeypatch, block, position
+):
+    """Bug class: an unbounded reap. Whatever state a later sibling is in
+    when an earlier side fails, the run returns the
+    failure and leaves no child behind. Oracle: ``active_children()``, not
+    anything ``run_isolated`` itself reports."""
+    import time
+
+    import abicheck.workflows.side_isolation as iso
+
+    monkeypatch.setattr(iso, "_TERMINATE_GRACE_SECONDS", 0.5)
+
+    def boom():
+        time.sleep(0.2)  # let the stubborn sibling install its disposition
+        raise _SideFailed("first")
+
+    fns: list = [boom, boom, boom]
+    fns[position] = _ignores_sigterm_then(block)
+    start = time.monotonic()
+    try:
+        with pytest.raises((_SideFailed, SnapshotError)):
+            run_isolated(fns, concurrent=True)
+        assert multiprocessing.active_children() == []
+        assert time.monotonic() - start < 15
+    finally:
+        # Never leave a SIGTERM-proof child to multiprocessing's atexit
+        # join, which would hang the whole session instead of this test.
+        for child in multiprocessing.active_children():
+            child.kill()
+            child.join()
