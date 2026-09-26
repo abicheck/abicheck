@@ -148,14 +148,39 @@ def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
         # receive end cannot unblock its send: every later child inherited
         # that read end at fork. Terminate what is still running, then close
         # and reap everything -- on success and on any failure.
-        if error is not None or len(results) != len(started):
+        abandoned = error is not None or len(results) != len(started)
+        if abandoned:
             for proc, _recv in started:
                 if proc.is_alive():
                     proc.terminate()
         for _proc, recv in started:
             recv.close()
         for proc, _recv in started:
-            proc.join()
+            _reap(proc, escalate=abandoned)
     if error is not None:
         raise error
     return results
+
+
+#: How long an abandoned child gets to act on SIGTERM before SIGKILL.
+_TERMINATE_GRACE_SECONDS = 5.0
+
+
+def _reap(proc: Any, *, escalate: bool) -> None:
+    """Join *proc*; for an abandoned child, never wait on SIGTERM alone.
+
+    A forked child inherits the parent's signal dispositions, including the
+    Python-level SIGTERM handler ``cli.main`` installs, and that handler can
+    block on a lock the fork copied in its held state. SIGTERM is then a
+    request the child cannot honour, and an unbounded ``join`` hangs the
+    parent forever -- so an abandoned child that outlives the grace period is
+    killed. A child whose result was fully received has already sent it and
+    is exiting on its own, so it is joined without escalation.
+    """
+    if not escalate:
+        proc.join()
+        return
+    proc.join(_TERMINATE_GRACE_SECONDS)
+    if proc.is_alive():
+        proc.kill()
+        proc.join()

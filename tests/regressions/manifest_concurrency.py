@@ -175,4 +175,22 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="concurrency.forked_child_unbounded_reap",
+        invariant=(
+            "When an earlier side fails, `run_isolated` raises that failure "
+            "and leaves no living child, whatever state a later sibling is "
+            "in: an abandoned child gets a bounded SIGTERM grace and is then "
+            "SIGKILLed. A forked child inherits the parent's Python SIGTERM "
+            "handler, which can block on a lock the fork copied held, so "
+            "reaping must never depend on SIGTERM alone."
+        ),
+        fixed_by=(1395,),
+        seed_tests=("tests/test_side_isolation.py",),
+        public_surfaces=("cli",),
+        axes={
+            "block": ("sleep", "send", "lock"),
+            "position": ("1", "2"),
+        },
+    ),
 )
