@@ -47,7 +47,7 @@ handed to member code; only the projection is.
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -227,6 +227,41 @@ class SurfaceAcquisitionLedger:
             }
 
 
+def _with_inferred_header_roots(
+    header_inputs: Sequence[Path],
+    includes: Sequence[Path],
+    compile_context: object | None,
+) -> tuple[list[Path], object | None]:
+    """*includes* and *compile_context* widened by the ``-H`` include roots.
+
+    The same split a member dump applies (``service_dump_native``): plain
+    ``-I`` with no build-context include dirs, else a deferred token that
+    rides in the compile flags below the build's own include dirs.
+    """
+    from ..header_utils import resolve_inferred_header_roots
+
+    gcc_options = getattr(compile_context, "gcc_options", None)
+    tokens: tuple[str, ...] = tuple(getattr(compile_context, "gcc_option_tokens", ()))
+    extra, deferred = resolve_inferred_header_roots(
+        [Path(h) for h in header_inputs],
+        list(includes),
+        gcc_options=gcc_options,
+        gcc_option_tokens=tokens,
+    )
+    if not deferred:
+        return [*includes, *extra], compile_context
+    from dataclasses import replace
+
+    from ..compile_context import CompileContext
+
+    base = (
+        compile_context
+        if isinstance(compile_context, CompileContext)
+        else CompileContext()
+    )
+    return list(includes), replace(base, gcc_option_tokens=(*tokens, *deferred))
+
+
 def acquire_release_surface(
     identity: SurfaceAcquisitionIdentity,
     side: str,
@@ -239,8 +274,18 @@ def acquire_release_surface(
     version: str = "unknown",
     backend: str = "auto",
     compile_context: object | None = None,
+    header_inputs: Sequence[Path] = (),
 ) -> ReleasePublicSurface:
     """Acquire (or reuse) *side*'s public surface for *identity*.
+
+    *header_inputs* are the side's ``-H`` inputs as given (directories not
+    yet expanded). They imply include roots exactly as they do for a member
+    dump (``header_utils.resolve_inferred_header_roots``): a ``-H`` directory
+    is its own include root, so an umbrella header writing
+    ``#include <pkg/detail.h>`` relative to it parses without a separate
+    ``-I``. Without that the release contract failed to parse whenever a
+    member dump needed the same inference, and every export obligation went
+    unchecked.
 
     Parses the headers alone -- no binary is involved, so the surface is a
     property of the product's contract rather than of any one member, which
@@ -263,15 +308,18 @@ def acquire_release_surface(
                 side=side,
                 reason="no public header inputs were supplied for this release side",
             )
+        parse_includes, parse_compile = _with_inferred_header_roots(
+            header_inputs, includes, compile_context
+        )
         try:
             snapshot = build_header_only_snapshot(
                 library_hint=headers[0],
                 version=version,
                 headers=list(headers),
-                extra_includes=list(includes),
+                extra_includes=parse_includes,
                 dump_manifest=None,
                 backend=backend,
-                compile=compile_context,  # type: ignore[arg-type]
+                compile=parse_compile,  # type: ignore[arg-type]
                 lang=identity.lang,
                 lang_explicit=identity.lang_explicit,
                 public_headers=list(public_headers),

@@ -91,6 +91,20 @@ class SharedFinding:
         return out
 
 
+#: Default for :attr:`ReleasePublicSurfaceTerms.markdown_item_limit`.
+MARKDOWN_ITEMS_PER_LIST = 50
+
+
+def _omitted_line(total: int, shown: int) -> list[str]:
+    """The "+N more" line for a list cut at *shown* of *total*, or nothing."""
+    if total <= shown:
+        return []
+    return [
+        f"- … and {total - shown} more (the full list is in the JSON report, "
+        "`-o json=...`)"
+    ]
+
+
 @dataclass(frozen=True)
 class ReleasePublicSurfaceTerms:
     """Everything the release public-surface section states, as plain values."""
@@ -109,6 +123,12 @@ class ReleasePublicSurfaceTerms:
     acquisition: Mapping[str, object] = field(default_factory=dict)
     coverage_warnings: tuple[str, ...] = ()
     evaluated: bool = False
+    #: How many entries of each per-symbol list the Markdown section spells
+    #: out. A real product carries tens of thousands of release-level
+    #: findings; rendering every one made this section alone megabytes of
+    #: Markdown nobody reads. The JSON keeps the full lists; this only
+    #: bounds a human-facing projection. Not part of ``to_dict``.
+    markdown_item_limit: int = MARKDOWN_ITEMS_PER_LIST
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -208,22 +228,26 @@ def render_release_public_surface_markdown(terms: ReleasePublicSurfaceTerms) -> 
         )
     if terms.missing_exports:
         lines += ["", "### Declarations no bundle member exports", ""]
-        for finding in terms.missing_exports:
+        limit = terms.markdown_item_limit
+        for finding in terms.missing_exports[:limit]:
             state = finding.get("cross_source_evolution")
             suffix = f" ({state})" if state else ""
             lines.append(f"- `{finding['symbol']}`{suffix} — {finding['description']}")
+        lines += _omitted_line(len(terms.missing_exports), limit)
     if terms.shared_findings:
         lines += [
             "",
             "### Product-level findings (reported once, not per library)",
             "",
         ]
-        for shared in terms.shared_findings:
+        limit = terms.markdown_item_limit
+        for shared in terms.shared_findings[:limit]:
             libs = ", ".join(shared.affected_libraries)
             lines.append(
                 f"- `{shared.symbol}` [{shared.kind}] — {shared.description} "
                 f"(affects: {libs})"
             )
+        lines += _omitted_line(len(terms.shared_findings), limit)
     if terms.coverage_warnings:
         lines += ["", "### Coverage", ""]
         lines += [f"- {w}" for w in terms.coverage_warnings]

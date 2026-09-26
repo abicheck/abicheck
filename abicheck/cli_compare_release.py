@@ -1170,9 +1170,13 @@ def compare_release_cmd(
             # `assurance.require_complete`, since no member entry carries the
             # key at all then (D4). Decided once, by policy, and read by the
             # report section, the stderr notice and the exit alike.
+            # The release contract's own shortfall (an unacquired public
+            # surface checked no export obligation) joins the same fold.
             assurance_terms = release_assurance_terms(
                 release_assurance_from_entries(
-                    library_results, require_complete=require_complete_analysis
+                    library_results,
+                    require_complete=require_complete_analysis,
+                    release_shortfalls=release_surface_stage.assurance_shortfalls(),
                 )
             )
 
