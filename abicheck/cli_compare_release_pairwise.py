@@ -62,6 +62,7 @@ from .workflows.crosscheck_ownership import (
     release_level_checks,
     release_owned_checks_scope,
 )
+from .workflows.keyed_thread_pool import run_keyed_in_threads
 from .workflows.release_snapshot_retention import release_junit_pairs
 
 if TYPE_CHECKING:
@@ -136,6 +137,7 @@ _CompareReleaseCommonArgs = tuple[
     "dict[Any, Any] | None",
     "EnvironmentMatrix | None",
     "tuple[str, ...]",  # exclude_headers -- the run's --exclude-header rules
+    bool,  # lang_explicit -- whether `lang` was stated (evidence-entity-model B1)
 ]
 
 
@@ -173,6 +175,7 @@ def _run_compare_pair(
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
     exclude_headers: tuple[str, ...] = (),
+    lang_explicit: bool = False,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -239,6 +242,13 @@ def _run_compare_pair(
     arguments that made the single-library comparison exit 0). ``()`` (the
     default) is a true no-op.
 
+    *lang_explicit* (evidence-entity-model gap B1): whether *lang* was
+    stated (``compile.lang``) rather than defaulted. Forwarded so a member's
+    header parse forces a stated language exactly as a single-pair
+    ``compare`` and the release surface do; without it every member
+    auto-detected an ambiguous header while the release surface parsed it as
+    the stated language.
+
     *env_matrix* (ADR-020b / ADR-068 D5): the project's declared deployment
     constraints, resolved once for the whole release from ``.abicheck.yml``'s
     ``deployment:`` config key (the former ``--env-matrix FILE``, which used
@@ -264,6 +274,7 @@ def _run_compare_pair(
         old_version=old_version,
         new_version=new_version,
         lang=lang,
+        lang_explicit=lang_explicit,
         suppress=suppress,
         policy=policy,
         contract_evaluation=contract_evaluation,
@@ -329,6 +340,7 @@ def _compare_one_library(
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
     exclude_headers: tuple[str, ...] = (),
+    lang_explicit: bool = False,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -396,6 +408,7 @@ def _compare_one_library(
             project_policy_overrides=project_policy_overrides,
             env_matrix=env_matrix,
             exclude_headers=exclude_headers,
+            lang_explicit=lang_explicit,
         )
         result = compare_result.diff
         # Plan slice 7o: unconditional, like every other disposition ledger
@@ -768,6 +781,7 @@ def _compare_release_libraries(
     project_policy_overrides: dict[Any, Any] | None = None,
     env_matrix: EnvironmentMatrix | None = None,
     exclude_headers: tuple[str, ...] = (),
+    lang_explicit: bool = False,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, SymbolInventory]]]:
     """Compare each matched library pair and collect results.
 
@@ -836,6 +850,7 @@ def _compare_release_libraries(
         project_policy_overrides,
         env_matrix,
         exclude_headers,
+        lang_explicit,
     )
 
     # `workflows.crosscheck_ownership`: the whole-product cross-source check
@@ -948,90 +963,16 @@ def _compare_release_parallel(
     max_workers: int,
     admission: MemoryAdmission | None = None,
 ) -> list[dict[str, object]]:
-    """Run per-library release comparisons in parallel, each member admitted
-    through *admission* when given (``workflows.release_admission``).
-
-    Results are collected by key and returned in *matched_keys* order so the
-    report is deterministic regardless of completion timing (parallel is now the
-    default via ``jobs=0``, auto-detect); CI snapshots and downstream diffs
-    depend on this.
-
-    Uses a :class:`ThreadPoolExecutor` (real OS threads sharing this
-    process's memory), *not* a ``ProcessPoolExecutor`` -- a stale claim in
-    an earlier revision of this docstring said otherwise (Codex review,
-    fresh evidence). That distinction matters for `policy_file.
-    dedup_validate_overrides_warnings()`: a `ContextVar` set in the calling
-    thread is *not* automatically visible to a new thread `ThreadPoolExecutor`
-    spawns -- each worker thread starts with the `ContextVar`'s default value
-    -- so submitting bare `_compare_one_library` calls would silently escape
-    the caller's dedup scope and warn once per library even under the
-    default (`jobs=0`, auto-detected CPU count > 1) parallel path. Fixed by
-    explicitly propagating a copy of the calling thread's
-    `contextvars.Context` into each submitted call via ``Context.run``.
-
-    Two subtleties this went through, both caught by a real (initially
-    intermittent, then reliably reproducing) test failure rather than by
-    inspection -- worth recording so a future edit here doesn't reintroduce
-    either:
-
-    1. ``copy_context()`` must be called in *this* (the calling) thread, at
-       submission time -- not inside the function a worker thread executes.
-       Calling it from within the submitted callable copies whatever context
-       that already-new worker thread started with (the `ContextVar`
-       default), not this thread's dedup scope, silently reproducing the
-       exact bug this fix exists to close.
-    2. Each submission needs its *own* fresh copy, not one `Context` object
-       shared across tasks -- ``Context.run`` raises ``RuntimeError`` if the
-       same `Context` object is entered from more than one thread
-       concurrently.
-
-    Every copy still shares the same mutable dedup ``set`` object the
-    `ContextVar` points to (copying a context copies variable *bindings*,
-    not the values they point to), so every worker's dedup check is against
-    the one real, shared set regardless of which thread runs it -- guarded
-    by `policy_file`'s own dedup lock against the resulting cross-thread
-    race on that shared set (also caught by the same test failure).
-    """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    from contextlib import nullcontext
-    from contextvars import Context, copy_context
-
-    def _run_in_context(ctx: Context, key: str) -> dict[str, object]:
-        # `ctx` was captured in the calling thread at submission time (see
-        # point 1 in the docstring above) -- this closure has a concrete
-        # signature (rather than `executor.submit(ctx.run, fn, *args)`
-        # directly) so it stays checkable by mypy: `Context.run`'s own
-        # ParamSpec-generic signature otherwise defeats `submit`'s overload
-        # resolution against `_compare_one_library`'s real params.
-        # Phase boundary for the memory trace, at the dispatch site so it
-        # covers `_compare_one_library`'s own `except` paths; free when
-        # tracing is off (the default).
-        with memory_trace.phase("release.member", key=key):
-            return ctx.run(_admitted, key)
-
-    def _admitted(key: str) -> dict[str, object]:
-        # Inside `ctx.run`, so the AST-size sink `admit` installs is in the
-        # context this member's dumps (and their side threads) report to.
-        with admission.admit() if admission else nullcontext():
-            return _compare_one_library(key, *common_args)
-
-    results_by_key: dict[str, dict[str, object]] = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            # copy_context() runs here, in the calling thread -- see point 1
-            # above. A fresh copy per key -- see point 2.
-            executor.submit(_run_in_context, copy_context(), key): key
-            for key in matched_keys
-        }
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                results_by_key[key] = future.result()
-            except Exception as exc:
-                # The outer boundary; `release_member_errors` owns both.
-                name = old_map[key].name
-                results_by_key[key] = member_dispatch_failure_entry(exc, name)
-    return [results_by_key[key] for key in matched_keys if key in results_by_key]
+    """Per-library release comparisons in parallel, in *matched_keys* order
+    (deterministic reports); see ``workflows.keyed_thread_pool`` for how the
+    caller's context and memory admission reach every worker thread."""
+    return run_keyed_in_threads(
+        matched_keys,
+        lambda key: _compare_one_library(key, *common_args),
+        max_workers=max_workers,
+        admission=admission,
+        on_error=lambda exc, key: member_dispatch_failure_entry(exc, old_map[key].name),
+    )
 
 
 def _compare_release_sequential(

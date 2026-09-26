@@ -892,6 +892,23 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="cardinality.member_request_drops_scalar_field",
+        invariant=(
+            "Every request field the scalar compare path honours reaches each "
+            "member comparison of a release fan-out unchanged: a one-member "
+            "release and the scalar comparison of the same two libraries "
+            "under the same request yield the same findings. Oracle: the "
+            "scalar path's own findings, never the member path's forwarded "
+            "argument list."
+        ),
+        fixed_by=(1391,),
+        seed_tests=("tests/test_release_lang_explicit.py",),
+        axes={
+            "field": ("lang_explicit",),
+            "cardinality": ("scalar", "one_member_release"),
+        },
+    ),
+    BugClass(
         id="identity.release_edge_keyed_on_side_summary",
         invariant=(
             "A release relation edge that names a per-artifact node is keyed "
