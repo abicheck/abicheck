@@ -832,4 +832,28 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "declaration": ("unmangled", "itanium-mangled"),
         },
     ),
+    BugClass(
+        id="evidence.entry_point_skips_extraction_record",
+        invariant=(
+            "Every production path that returns a freshly extracted header "
+            "snapshot records its ownership (ADR-075 D1/D2) before any reader "
+            "sees it, and a snapshot that never recorded one reads unknown -- "
+            "never an owner guessed from ScopeOrigin. The inventory of "
+            "producer call sites is exhaustive and executable, so a new entry "
+            "point is classified before it ships."
+        ),
+        fixed_by=(),
+        seed_tests=("tests/test_ownership_entry_points.py",),
+        axes={
+            "entry_point": (
+                "resolve_input",
+                "release_surface",
+                "header_only_dump",
+                "compat_dump",
+                "compat_check",
+                "appcompat",
+                "stored_pre_v52",
+            ),
+        },
+    ),
 )

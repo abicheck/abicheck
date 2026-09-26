@@ -130,7 +130,6 @@ def test_every_snapshot_producer_call_is_classified() -> None:
     assert not stale, f"inventory names calls that no longer exist: {sorted(stale)}"
 
 
-@pytest.mark.xfail(strict=True, reason="gap B2")
 def test_stamped_sites_really_call_the_stamp() -> None:
     """A site listed as stamped names the function that stamps it, and that
     function really calls ``classify_extracted``."""
@@ -152,7 +151,6 @@ def test_stamped_sites_really_call_the_stamp() -> None:
         assert "classify_extracted" in called, (module, fn, how)
 
 
-@pytest.mark.xfail(strict=True, reason="gap B2")
 def test_appcompat_stamps_both_sides(monkeypatch: pytest.MonkeyPatch) -> None:
     from abicheck import appcompat
     from abicheck.model import AbiSnapshot
@@ -224,7 +222,6 @@ def _assert_classified(path: Path) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="gap B2")
 def test_header_only_dump_records_ownership(tmp_path: Path) -> None:
     _needs_tools()
     header, _ = _fixture(tmp_path)
@@ -235,7 +232,6 @@ def test_header_only_dump_records_ownership(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="gap B2")
 def test_compat_dump_records_ownership(tmp_path: Path) -> None:
     _needs_tools()
     header, lib = _fixture(tmp_path)
@@ -252,7 +248,6 @@ def test_compat_dump_records_ownership(tmp_path: Path) -> None:
     _assert_classified(out)
 
 
-@pytest.mark.xfail(strict=True, reason="gap B2")
 def test_pre_v52_snapshot_reads_unknown_never_a_guessed_owner(tmp_path: Path) -> None:
     from abicheck.buildsource.cross_source_checks import (
         OWNERSHIP_UNRECORDED_NOTE,

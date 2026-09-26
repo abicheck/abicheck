@@ -531,10 +531,18 @@ called either a regression or noise.
 - `scope.private_namespaces` narrows the contract but is not merged into
   `policy.internal_namespaces` (ADR-075 D7.1): that key scopes findings,
   which is the retention phase's decision.
-- Ownership is recorded only for snapshots extracted through
-  `resolve_input` and the release surface. A snapshot built by any other
-  entry point, or a stored pre-v52 baseline, has none, so its readers fall
-  back to `ScopeOrigin`.
+- ~~Ownership is recorded only for snapshots extracted through
+  `resolve_input` and the release surface.~~ **Fixed (B2):** the header-only
+  `dump` (and a typed `DumpRequest` with no path), both `compat` live dumps
+  (`compat.run_inputs.finish_live_compat_dump`) and `appcompat`'s dumps now
+  call `classify_extracted`. `tests/test_ownership_entry_points.py`
+  inventories every producer call site in `abicheck/` with how its result is
+  stamped (or why it needs none: binary-only, inner layer, `json.dump`), so a
+  new site fails until classified. A pre-v52 baseline still loads with no
+  scope and every decision unset -- `unknown`, never a guessed owner; the
+  readers' `ScopeOrigin` fallback stays, labelled as the weaker tier in the
+  `public_not_exported` coverage row (`OWNERSHIP_UNRECORDED_NOTE`) and as
+  `no_extraction_scope` on the graph's ownership coverage record.
 - `provided_by` keys a release on one platform; a mixed-platform release
   records `platform="mixed"`, whose node ids join no Phase 2 export node.
 

@@ -1396,6 +1396,11 @@ def check_appcompat(
         public_headers=list(_new_h),
         public_include_search_dirs=list(_new_inc),
     )
+    # ADR-075 D1/D2: record ownership for what this run extracted.
+    from .workflows.ownership_request import classify_extracted
+
+    classify_extracted(old_snap, None, list(_old_h), list(_old_inc))
+    classify_extracted(new_snap, None, list(_new_h), list(_new_inc))
 
     # Route through the real workflows owner; ADR-037 D1.
     diff = compare_snapshots(
