@@ -568,6 +568,9 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
+            # Newly reached (transitively) after PR #1383's import changes;
+            # same subprocess re-entry cost as the modules above.
+            "abicheck.snapshot_io",
         }
     ),
     "tests/test_action_check_target.py": frozenset(

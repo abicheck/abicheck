@@ -98,7 +98,10 @@ def canonical_cv_qualification(spellings: Iterable[str]) -> tuple[str, ...]:
     return tuple(q for q in CV_QUALIFIER_ORDER if q in seen)
 
 
-@dataclass(frozen=True)
+_FIELD_NAMES: dict[type, tuple[str, ...]] = {}
+
+
+@dataclass(frozen=True, slots=True)
 class CanonicalEntity:
     """One occurrence's canonicalized, backend-independent payload.
 
@@ -174,10 +177,16 @@ class CanonicalEntity:
         instead of restating the field list, so adding a field to this class
         cannot leave one of them silently ignoring it.
         """
+        # Field names resolved once per class: `dataclasses.fields()` per
+        # call was most of `__post_init__`'s cost on a large snapshot.
+        cls = type(self)
+        names = _FIELD_NAMES.get(cls)
+        if names is None:
+            names = _FIELD_NAMES[cls] = tuple(f.name for f in fields(cls))
         return tuple(
-            (f.name, value)
-            for f in fields(self)
-            if isinstance(value := getattr(self, f.name), Fact)
+            (name, value)
+            for name in names
+            if isinstance(value := getattr(self, name), Fact)
         )
 
     def resolved_fact_count(self) -> int:

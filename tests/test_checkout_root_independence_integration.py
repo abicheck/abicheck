@@ -15,6 +15,7 @@ audited for this is still covered.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -338,3 +339,130 @@ def test_exclude_header_scopes_out_what_only_the_excluded_header_provides(
     if sys.platform == "win32":
         return
     assert "extra_field" in names(scoped) or "Holder" in names(scoped), names(scoped)
+
+
+# The L5 shape of the same defect: a body fingerprint and a signature key
+# hashed `(lambda at /abs/checkout/...)` verbatim, so `std::make_shared<Lambda>`
+# read as `declaration_renamed` and inline bodies as `inline_body_changed`.
+_L5_HEADER = """\
+#pragma once
+#include <memory>
+#include <svs/detail/impl.hpp>
+namespace svs {
+inline auto lam = [](int x) { return x + 1; };
+struct Anon { struct { int a; } inner; };
+inline auto share_lam() { return std::make_shared<decltype(lam)>(lam); }
+inline int anon_sum(Anon const& a) { decltype(a.inner) c = a.inner; return c.a; }
+template <class F> auto wrap(F f) { return std::make_shared<F>(f); }
+inline auto wrapped() { return wrap([](int y) { return y * 2; }); }
+int run(Anon const& a);
+}
+"""
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="clang not found in PATH")
+@pytest.mark.parametrize(("old", "new"), _LAYOUTS[:2])
+def test_source_depth_dumps_of_relocated_checkouts_compare_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, old: str, new: str
+) -> None:
+    """Dump each checkout separately at `--depth source` (relative `-I`, as a
+    user types it), then compare the two stored snapshots: the pair must
+    report exactly what one checkout reports against itself, every
+    declaring header must be spelled one way, and the extraction scope must
+    not claim the rules differ."""
+    cxx = shutil.which("g++") or shutil.which("clang++")
+    if cxx is None or shutil.which("git") is None or sys.platform == "win32":
+        pytest.skip("needs a POSIX C++ compiler and git")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+    src = tmp_path / "src_tree"
+    (src / "include/svs").mkdir(parents=True)
+    (src / "include/svs/api.hpp").write_text(_L5_HEADER)
+    # Reached only through the relative `-I include`, never named on the
+    # umbrella: the header the parser used to spell relative.
+    (src / "include/svs/detail").mkdir()
+    (src / "include/svs/detail/impl.hpp").write_text(
+        "#pragma once\nnamespace svs { int helper(int); inline int twice(int v) { return 2 * v; } }\n"
+    )
+    (src / "a.cpp").write_text(
+        "#include <svs/api.hpp>\nnamespace svs { int helper(int v) { return twice(v); }"
+        " int run(Anon const& a) { (void)share_lam(); (void)wrapped(); return anon_sum(a); } }\n"
+    )
+    subprocess.run(
+        [
+            cxx,
+            "-std=c++17",
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-Iinclude",
+            "a.cpp",
+            "-o",
+            "lib.so",
+        ],
+        cwd=src,
+        check=True,
+    )
+    snaps = {}
+    for side in (old, new):
+        root = tmp_path / side
+        shutil.copytree(src, root)
+        (root / "compile_commands.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(root),
+                        "file": "a.cpp",
+                        "command": f"{cxx} -std=c++17 -fPIC -Iinclude -c a.cpp",
+                    }
+                ]
+            )
+        )
+        # A checkout marker is all the ownership anchor looks for; no commit
+        # (which a signing or identity config on the host could refuse).
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        out = f"{side.replace('/', '_')}.json"
+        result = CliRunner().invoke(
+            main,
+            [
+                "dump",
+                f"{side}/lib.so",
+                "-H",
+                f"{side}/include",
+                "--include",
+                f"{side}/include",
+                "--depth",
+                "source",
+                "--sources",
+                side,
+                "--build-info",
+                f"{side}/compile_commands.json",
+                "-o",
+                out,
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        snaps[side] = out
+
+    headers = {
+        h
+        for h in re.findall(r'"source_header": "([^"]*)"', Path(snaps[old]).read_text())
+        if h
+    }
+    assert any(h.endswith("impl.hpp") for h in headers), headers
+    assert all(Path(h).is_absolute() for h in headers), headers
+
+    def compare(a: str, b: str) -> dict:
+        CliRunner().invoke(
+            main, ["compare", a, b, "-o", "json=r.json"], catch_exceptions=False
+        )
+        return json.loads(Path("r.json").read_text())
+
+    def findings(r: dict) -> list[tuple[str, str]]:
+        return sorted((c["kind"], c.get("symbol") or "") for c in r.get("changes", []))
+
+    reference, report = compare(snaps[old], snaps[old]), compare(snaps[old], snaps[new])
+    assert findings(report) == findings(reference)
+    assert report.get("verdict") == reference.get("verdict")
+    assert not any("ownership rules" in w for w in report.get("coverage_warnings", []))

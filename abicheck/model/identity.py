@@ -121,14 +121,14 @@ class ObservationKind(enum.Enum):
 # --------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Namespace:
     """An ordinary (non-inline) namespace segment. Every field is identity."""
 
     name: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Record:
     """A record (class/struct/union) nesting scope.
 
@@ -221,7 +221,7 @@ ScopePath = tuple[ScopeSegment, ...]
 # --------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class EntityId:
     """A logical declaration's identity.
 

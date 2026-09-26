@@ -114,6 +114,33 @@ def ownership_request_from_config(
     )
 
 
+#: Directory entries that mark a version-control checkout's root.
+_CHECKOUT_MARKERS = (".git", ".hg", ".svn")
+
+
+def find_checkout_root(path: str | Path) -> str | None:
+    """The nearest ancestor of *path* (inclusive) holding a VCS marker, or
+    ``None``. A ``.git`` *file* (a worktree or submodule) counts too."""
+    current = Path(path)
+    for candidate in (current, *current.parents):
+        if any((candidate / marker).exists() for marker in _CHECKOUT_MARKERS):
+            return str(candidate)
+    return None
+
+
+def shared_checkout_root(roots: Sequence[str]) -> str | None:
+    """The one checkout root every entry of *roots* lies in, else ``None``.
+
+    ``None`` when *roots* is empty, when any root is outside a checkout, or
+    when they span two checkouts -- there is then no single anchor that
+    means the same thing on another machine, and roots stay absolute.
+    """
+    found = {find_checkout_root(r) for r in roots}
+    if len(found) != 1:
+        return None
+    return found.pop()
+
+
 def with_target_roots(
     request: OwnershipRequest | None,
     headers: Sequence[Path],
@@ -129,8 +156,16 @@ def with_target_roots(
     roots = [str(Path(h).resolve()) for h in headers if Path(h).is_dir()]
     roots += [str(Path(d).resolve()) for d in public_header_dirs]
     base = request or _PROJECT_OWNERSHIP.get() or OwnershipRequest()
+    project_root = base.project_root
+    if project_root is None:
+        # With no project config the roots were recorded absolute, so two
+        # byte-identical checkouts under different directory names always
+        # fingerprinted as "different ownership rules". The enclosing VCS
+        # checkout is the same anchor a config file would have supplied.
+        project_root = shared_checkout_root([*base.rules.target_roots, *roots])
     return replace(
         base,
+        project_root=project_root,
         rules=replace(
             base.rules,
             target_roots=tuple(dict.fromkeys([*base.rules.target_roots, *roots])),
