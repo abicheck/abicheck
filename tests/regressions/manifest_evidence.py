@@ -842,7 +842,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "binary_symbol://<platform>/<spelling> node, and no edge names "
             "the summary value `mixed`."
         ),
-        fixed_by=(),
+        fixed_by=(1392,),
         seed_tests=("tests/test_provided_by_member_platform.py",),
         axes={"member_platforms": ("elf", "pe", "macho", "mixed")},
     ),
