@@ -26,7 +26,7 @@ from the read itself rather than from "a binary was supplied"; see
 
 from __future__ import annotations
 
-from ..model import AbiSnapshot, Visibility
+from ..model import AbiSnapshot, Function, Variable, Visibility
 from ..model.export_index import ExportTableState, snapshot_export_table_state
 from ..storage import closure_identity
 from .surface_fact_producers import reconcile_export_absence, unread_export_fact
@@ -65,7 +65,8 @@ def reconcile_snapshot_export_absence(snapshot: AbiSnapshot) -> int:
     replacement = unread_export_fact(state, producer=None)
     if replacement is None:
         return withdrawn
-    for decl in (*snapshot.functions, *snapshot.variables):
+    decls: list[Function | Variable] = [*snapshot.functions, *snapshot.variables]
+    for decl in decls:
         if (
             getattr(decl, "binary_exported_fact", None) is None
             and decl.visibility is Visibility.HIDDEN

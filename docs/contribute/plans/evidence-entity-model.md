@@ -676,8 +676,13 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
   `PARTIAL(False)` reading when the table was read (it was assigned from a
   lookup against that table) and becomes `FAILED` when it was not; a stored
   baseline is reconciled on load, so live and stored operands agree. No
-  finding moved on the FP corpus, the tier-accuracy corpus, the goldens or
-  the oneDAL pair (all their tables are read).
+  finding moved on the FP corpus, the tier-accuracy corpus (both JSON
+  reports byte-identical to base) or the goldens. oneDAL
+  (`libonedal_core.so.3`, `graph` variant, one run, base e2baed5 vs this
+  fix): `binary_exported_fact` 2,494/2,495 `PRESENT:True`, 7,422
+  `PRESENT:False`, 4,265 `NOT_COLLECTED` per side on both; the same 5,078
+  findings; dump 67.3/68.9 s -> 69.6/68.2 s at ~874 MiB, compare 71.6 ->
+  72.1 s (noise). Its table is read, so nothing is withdrawn.
 - `compare/bundle_export_index.member_export_names` still counts a member
   with an unparsed block as complete (release-surface owner).
 - L5: `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_DECLARES`,
