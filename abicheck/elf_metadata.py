@@ -91,9 +91,11 @@ from .extract.elf_symbol_tables import (  # noqa: E402
 #: members sharing a provider); a hit costs one deep copy (~0.6s for a
 #: 65k-symbol library vs ~1.7s to parse) and hands every caller its own
 #: independent copy, so no caller can mutate another's metadata. The memo
-#: keeps its own private copy for the same reason.
+#: keeps its own private copy for the same reason, and at most
+#: ``_PARSE_MEMO_MAX`` of them -- enough for one compare's two sides plus their
+#: L0 re-resolve, without growing with a release fan-out's member count.
 _PARSE_MEMO: dict[tuple[object, ...], ElfMetadata] = {}
-_PARSE_MEMO_MAX = 16
+_PARSE_MEMO_MAX = 4
 _PARSE_MEMO_LOCK = threading.Lock()
 
 
