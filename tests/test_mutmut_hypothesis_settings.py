@@ -129,7 +129,12 @@ def test_two_in_process_passes_survive_like_mutmut_runs_them(
         """
         import os, sys, pytest
         os.environ["MUTANT_UNDER_TEST"] = ""
-        args = ["-q", "-p", "no:cacheprovider", "-p", "no:randomly", "-p", "no:xdist", "test_prop.py"]
+        # An explicit basetemp of its own: a nested session on the default
+        # numbered basetemp runs pytest's retention pass over the shared
+        # pytest-of-<user> root and can delete the outer run's tree -- this
+        # test's own tmp_path, which is this process's cwd.
+        args = ["-q", "-p", "no:cacheprovider", "-p", "no:randomly", "-p", "no:xdist",
+                "--basetemp", "inner-basetemp", "test_prop.py"]
         codes = [int(pytest.main(args)) for _ in range(2)]
         sys.exit(max(codes))
         """
@@ -162,10 +167,6 @@ def pytest_sessionstart(session):
 '''
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="nested pytest sessions share and prune the outer temp root",
-)
 def test_nested_sessions_never_prune_the_outer_runs_temp_tree(
     tmp_path: Path,
 ) -> None:
