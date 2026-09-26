@@ -29,8 +29,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from hypothesis import given, settings
-from hypothesis import strategies as st
+from hypothesis import given, settings, strategies as st
 
 from abicheck.compare.bundle_export_index import build_bundle_export_index
 from abicheck.compare.ownership_relations import (
