@@ -110,7 +110,10 @@ from .storage.snapshot_digest_cache import (
     digest_scope as digest_scope,
     run_scoped_digest_cache as run_scoped_digest_cache,
 )
-from .workflows.snapshot_load import backfill_python_ext_from_evidence
+from .workflows.snapshot_load import (
+    backfill_python_ext_from_evidence,
+    reconcile_stored_export_absence,
+)
 
 
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
@@ -152,6 +155,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # runs here as an explicit post-load step from `workflows` — see
     # workflows/snapshot_load.py's own docstring.
     backfill_python_ext_from_evidence(snap, d)
+    # Evidence-entity-model gap A1: the export-read rule, same as a live dump.
+    reconcile_stored_export_absence(snap)
 
     # A degraded *_facts_reliable flag used to load with no signal at all --
     # the flag itself was computed correctly, but nothing ever told the

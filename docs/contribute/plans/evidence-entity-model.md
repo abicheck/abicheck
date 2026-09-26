@@ -521,7 +521,25 @@ called either a regression or noise.
 
 ### Remaining documented gaps
 
-- The live-release RSS increase above is unexplained (one sample).
+- ~~The live-release RSS increase above is unexplained (one sample).~~
+  **Measured and attributed (B4): not an ADR-075 regression.** Same oneDAL
+  release (`libonedal.so.3` + `libonedal_dpc.so.3`, 2025.10.0 -> 2025.11.0),
+  `scripts/bench_graph_materialization.py --repeat 3`, base #1364 vs
+  `8d417ed` (after this round's Phase 3/4 work): live-directory compare
+  parent peak 1,417/1,444/1,338 MiB vs 1,281/1,313/1,762 MiB -- two of three
+  candidate runs below every base run; the original +223 MiB was one draw
+  from a ~±200 MiB spread (two members dumping concurrently, so which
+  phases overlap moves the peak). `ABICHECK_MEMORY_TRACE` on one live
+  compare per commit puts all growth in the header-graph projection
+  (`dump.header_graph.project_streaming`) and bisects it: sampled parent RSS
+  978 MiB at #1364, 1,002 MiB after the ADR-075 implementation (#1376/#1377,
+  within noise), 985-1,020 MiB through #1380, then **764 MiB sampled /
+  1,061 MiB `VmHWM` at #1383** (its graph-memory work; 83 s vs 142 s). The
+  stored-release path never moved (589.8 -> 594.0 MiB above; 1,161 MiB
+  +-1 on `8d417ed` with the header graph attached). Findings identical at
+  every point (964 across both members). Before #1383's ancestor 42cb529 the
+  trace carried no `parent_rss_peak_bytes`, so only sampled RSS is
+  comparable across the whole bisect.
 - A release's member dumps never receive `lang_explicit` (pre-existing:
   the fan-out passes only `lang` to `service.run_compare`), so under a stated
   `compile.lang: c++` each member auto-detects an ambiguous header while the
@@ -670,12 +688,27 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
 ### Remaining documented gaps
 
 - The structor placeholder gap above (export join; Phase 2 gaps owner).
-- `extract/surface_fact_producers` records `binary_exported_fact =
-  present(False)` whenever a binary was supplied, even if its export set came
-  back empty; `is_export_confirmed_absent` readers (`depth_projection`,
-  `diff_symbols`, `export_transition`) inherit that. Also a pre-v46
-  `Visibility.HIDDEN` reads as `PARTIAL(False)`. Owned by the Phase 2 gaps
-  work (producer side).
+- **A1, export fact decided from the read — fixed
+  ([#1384](https://github.com/abicheck/abicheck/pull/1384)).** `extract/surface_fact_producers` recorded
+  `binary_exported_fact = present(False)` whenever a binary was supplied,
+  even if its export set came back empty. The builders' shared tail
+  (`extract/export_table_read.finish_binary_snapshot`) and snapshot load now
+  apply one rule, `model.export_index.snapshot_export_table_state`, which is
+  `edge_query`'s own `exports` coverage rule moved to `model/` (a table is
+  read when it holds an entry or its header fields show a parse). An unread
+  (default or parse-failed) block makes every miss `FAILED`; a parsed binary
+  exporting nothing stays a confirmed empty table, exactly as the coverage
+  record already said. A pre-v46 `Visibility.HIDDEN` keeps its
+  `PARTIAL(False)` reading when the table was read (it was assigned from a
+  lookup against that table) and becomes `FAILED` when it was not; a stored
+  baseline is reconciled on load, so live and stored operands agree. No
+  finding moved on the FP corpus, the tier-accuracy corpus (both JSON
+  reports byte-identical to base) or the goldens. oneDAL
+  (`libonedal_core.so.3`, `graph` variant, one run, base e2baed5 vs this
+  fix): `binary_exported_fact` 2,494/2,495 `PRESENT:True`, 7,422
+  `PRESENT:False`, 4,265 `NOT_COLLECTED` per side on both; the same 5,078
+  findings; dump 67.3/68.9 s -> 69.6/68.2 s at ~874 MiB, compare 71.6 ->
+  72.1 s (noise). Its table is read, so nothing is withdrawn.
 - `compare/bundle_export_index.member_export_names` still counts a member
   with an unparsed block as complete (release-surface owner).
 - L5: `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_DECLARES`,
@@ -691,9 +724,13 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
   negative, not a false absent).
 - `export_transition`'s OLD-side suppression guard does not check OLD's
   table was read (false-negative direction).
-- Unrelated, found while testing: a no-baseline compare report fails
-  schema validation on `analysis_assurance.schema_staleness_status`
-  (`not_evaluated` is not in the schema's enum).
+- **C1, schema enum — fixed (PR C1).** The producer was right: with no OLD
+  snapshot, `schema_staleness_status` is `not_evaluated`, like every sibling
+  context status. The schema enum (report schema 5.7) and the merge scale
+  gained it; `run_outcome.assurance` is now validated against the
+  `analysis_assurance` shape in the compare and audit (1.6) schemas.
+  `tests/test_report_schema_conformance.py` validates every compare mode's
+  report and checks enum-vs-producer vocabulary.
 
 ## Tests
 

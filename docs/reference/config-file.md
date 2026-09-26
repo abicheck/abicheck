@@ -135,7 +135,7 @@ an unknown-key error.
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
 `compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
-`assurance:`, `deployment:`, `resource_limits:`, `policy:`, `version:`,
+`assurance:`, `deployment:`, `resource_limits:`, `performance:`, `policy:`, `version:`,
 `risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`, and
 `baseline:` are the recognized top-level keys.
 See the
@@ -557,6 +557,47 @@ policy:
     exported_not_public: ignore
     func_removed: warn
 ```
+
+---
+
+### `performance:`
+
+The memory/speed trade-off a run executes under. One key today:
+
+| Key | Values | Default |
+|---|---|---|
+| `profile` | `balanced`, `low-memory` | `balanced` |
+
+```yaml
+performance:
+  profile: low-memory
+```
+
+- **`balanced`** — fastest. Both sides of a comparison may be resolved
+  concurrently in one process (the typed API does; the `compare` CLI
+  resolves sides one after the other), and a directory/package comparison
+  sizes its worker pool to the host.
+- **`low-memory`** — lowest peak memory. The two sides are resolved one at
+  a time, each in its own short-lived process on Linux, so the memory a
+  side's header parse used goes back to the system before the next side
+  starts. A directory/package comparison handles its libraries one at a
+  time. On macOS and Windows the sides run one at a time in-process.
+  Measured on a oneDAL comparison: peak 1.34 → 0.89 GiB for about 17% more
+  wall time on that small input (see
+  [Memory](../contribute/memory.md#per-side-process-isolation-the-low-memory-profile)).
+
+A profile changes **how** a run executes, never **what** it reports: every
+profile produces the same snapshots, findings, verdict and exit code.
+
+**Precedence:** `compare --performance-profile` › `.abicheck.yml`'s
+`performance.profile` › `balanced`. In the Python API, set
+`CompareRequest.performance_profile`; left unset, it follows the ambient
+profile, which is `balanced` unless the caller entered
+`abicheck.model.performance.performance_profile_scope(...)`.
+
+An unknown value is a load-time error naming the valid ones (exit 64 from
+the CLI). The block is where further memory/speed settings will go; each
+maps onto the profile rather than exposing a separate mechanism switch.
 
 ---
 

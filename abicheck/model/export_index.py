@@ -71,6 +71,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ExportMatch",
+    "ExportTableState",
     "RawExportEntry",
     "RawExportIndex",
     "all_export_names",
@@ -83,6 +84,9 @@ __all__ = [
     "callable_visible_export_names",
     "default_versioned_names",
     "export_names_or_modeled_fallback",
+    "platform_block_parsed",
+    "read_export_platforms",
+    "snapshot_export_table_state",
     "linked_export_names",
     "macho_callable_names",
     "match_export",
@@ -524,3 +528,68 @@ def match_export(
     if any(s in static for s in linker) or (name and name in static):
         return ExportMatch.STATIC_ONLY
     return ExportMatch.ABSENT
+
+
+def platform_block_parsed(meta: object) -> bool:
+    """Whether a platform block records that its binary was actually parsed.
+
+    A symbol list alone cannot say so: a default, header-only or
+    parse-failed ``ElfMetadata()`` and a library exporting nothing both
+    leave it empty. The header fields a real parse always sets are the
+    repository's existing capture signal (``compare/undeclared_exports.py``,
+    ``diff_platform_elf_dynamic``): ELF/PE ``machine``, Mach-O ``filetype``
+    or ``cpu_type``."""
+    return any(getattr(meta, attr, "") for attr in ("machine", "filetype", "cpu_type"))
+
+
+def read_export_platforms(snap: AbiSnapshot) -> dict[str, bool]:
+    """Every export table *snap* carries -> whether it was read: it holds an
+    entry, or its header fields show the binary was parsed
+    (:func:`platform_block_parsed`). A carried block with neither is a
+    default or parse-failed one (``parse_pe_metadata``/
+    ``parse_macho_metadata`` return empty metadata on error), which reading
+    as "exports nothing" would prove every declaration unexported. The one
+    rule the export fact (:func:`snapshot_export_table_state`) and the
+    ``exports`` coverage record (``compare.edge_query``) both read."""
+    metas = {"elf": snap.elf, "pe": snap.pe, "macho": snap.macho}
+    read: dict[str, bool] = {}
+    for index in build_raw_export_indexes(snap):
+        ok = bool(index.entries) or platform_block_parsed(metas[index.platform])
+        read[index.platform] = read.get(index.platform, False) or ok
+    return read
+
+
+class ExportTableState(str, Enum):
+    """Whether a dump actually *read* an export table (evidence-entity-model
+    Phase 4, gap A1).
+
+    :class:`ExportMatch.ABSENT` is only an observation when the table it was
+    looked up in was read; a lookup against an unread or failed table answers
+    ``ABSENT`` for every declaration, and recording that as
+    ``binary_exported_fact = PRESENT(False)`` turns "we could not look" into
+    "the binary does not export it" -- which ``is_export_confirmed_absent``
+    readers (``depth_projection``, ``diff_symbols``, ``export_transition``)
+    then act on. The state is decided from the read itself, never from
+    "a binary was supplied".
+    """
+
+    #: No binary in this dump: nothing could have been exported.
+    NO_BINARY = "no_binary"
+    #: A platform block exists but records no parse: a default or
+    #: parse-failed block (:func:`platform_block_parsed`).
+    FAILED = "failed"
+    #: The table was read -- it holds an entry, or the binary's header was
+    #: parsed and it genuinely exports nothing: ``ABSENT`` is an observation.
+    READ = "read"
+
+
+def snapshot_export_table_state(snap: AbiSnapshot) -> ExportTableState:
+    """Whether the table *snap*'s producers looked declarations up in was
+    read (:func:`read_export_platforms`): the table its own ``platform``
+    names, or, when that is not one it carries, any table it carries."""
+    read = read_export_platforms(snap)
+    if not read:
+        return ExportTableState.NO_BINARY
+    platform = getattr(snap, "platform", None)
+    ok = read[platform] if platform in read else any(read.values())
+    return ExportTableState.READ if ok else ExportTableState.FAILED

@@ -155,7 +155,7 @@ class TestFastPathEqualsTheFullMerge:
         f = GraphFact(producer="p", confidence=CONF_HIGH, attrs={"role": "param"})
         resolved, conflicts = resolve_entity_attrs([f])
         assert resolved is f.attrs
-        assert conflicts == []
+        assert list(conflicts) == []
 
     def test_multi_fact_result_is_a_fresh_dict(self):
         facts = [

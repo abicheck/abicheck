@@ -180,3 +180,19 @@ def _resolve_effective_ast_backend(
     if frontend_context != "host":
         return "clang"
     return resolved
+
+
+def lang_to_profile(lang: str | None) -> str | None:
+    """Convert a ``--lang`` flag value to an internal language-profile string.
+
+    Shared by the ELF/PE/Mach-O snapshot builders (C3) — previously this logic
+    was a helper for ELF but copy-pasted inline for the other two formats.
+    """
+    if lang is None:
+        return None
+    lu = lang.upper()
+    if lu == "C":
+        return "c"
+    if lu in ("C++", "CPP"):
+        return "cpp"
+    return None

@@ -64,6 +64,15 @@ def _locations_in_document_order(tree):
             yield from _locations_in_document_order(value)
 
 
+def _without_included_from(tree):
+    """The oracle's own copy of *tree* with every location's `includedFrom`
+    removed -- what materialization is documented to leave."""
+    tree = copy.deepcopy(tree)
+    for loc in _locations_in_document_order(tree):
+        loc.pop("includedFrom", None)
+    return tree
+
+
 def _clang_encode(explicit):
     """clang's rule: drop `file`/`line` equal to the last written one."""
     encoded = copy.deepcopy(explicit)
@@ -90,7 +99,7 @@ def test_materialize_inverts_clang_sticky_encoding(seed):
     # Vacuity guard: the encoding really omitted something to restore.
     if seed == 0:
         assert encoded != explicit
-    assert materialize_locations(encoded) == explicit
+    assert materialize_locations(encoded) == _without_included_from(explicit)
 
 
 def test_materialize_is_idempotent_and_passes_non_trees_through():
@@ -120,6 +129,23 @@ def test_included_from_does_not_move_the_current_file():
     materialize_locations(tree)
     assert tree["inner"][1]["loc"]["file"] == "/a.h"
     assert tree["inner"][1]["loc"]["line"] == 3
+    assert "includedFrom" not in tree["inner"][0]["loc"]
+
+
+def test_only_included_from_is_dropped():
+    """Every other location key survives, including `tokLen`/`offset`,
+    which the header-graph call projection reads from `range`."""
+    rng = random.Random(3)
+    tree = {"inner": [_node(rng, 3) for _ in range(4)]}
+    keys_before = {
+        k
+        for loc in _locations_in_document_order(tree)
+        for k in loc
+        if k != "includedFrom"
+    }
+    materialize_locations(tree)
+    keys_after = {k for loc in _locations_in_document_order(tree) for k in loc}
+    assert keys_after == keys_before >= {"offset", "col", "tokLen", "file", "line"}
 
 
 def test_deep_tree_does_not_hit_the_recursion_limit():
