@@ -9,9 +9,10 @@
   visibility-loss and depth-projection readers then acted on a table nobody
   read. The ELF/PE/Mach-O builders and snapshot load now share one rule
   (`abicheck/extract/export_table_read.py`, `ExportTableState` in
-  `abicheck/model/export_index.py`): an empty table makes every miss
-  `NOT_COLLECTED` (unknown), a failed read `FAILED`, and only a table that
-  yielded entries keeps `PRESENT(False)`. A stored baseline written before
+  `abicheck/model/export_index.py`): a default or parse-failed block
+  (no entries and no parsed header fields) makes every miss `FAILED`; a table
+  that was read, including a parsed binary that exports nothing, keeps
+  `PRESENT(False)`; with no binary at all a miss stays `NOT_COLLECTED`. A stored baseline written before
   this fix, including a pre-v46 one whose `Visibility.HIDDEN` re-derives the
   same answer, is reconciled on load, so a stored operand and a live dump of
   the same binary agree. No schema change.
