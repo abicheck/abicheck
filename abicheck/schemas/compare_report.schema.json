@@ -2239,6 +2239,77 @@
       "additionalProperties": true
     },
     "analysis_assurance": {
+      "$ref": "#/$defs/analysis_assurance"
+    },
+    "pattern_preprocessor_scan": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The lexical pattern pre-scan and preprocessor pre-scan, folded per side and stated as an evolution per identity (ADR-068 D3/D4/D5). Advisory facts only: never a verdict, severity, or exit-code contributor. Emitted since report_schema_version 3.12; described here as of 4.5, when the block gained its `coverage` object \u2014 the same shape audit_report.schema.json carries under this key, so a consumer of either recognises the other.",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "pattern": {
+          "type": "object",
+          "description": "Each side's raw PatternFactsResult.to_dict() -- the same shape `scan`'s own report carries under `pattern_scan`.",
+          "properties": {
+            "old": {
+              "$ref": "#/$defs/patternScanSide"
+            },
+            "new": {
+              "$ref": "#/$defs/patternScanSide"
+            },
+            "escalation_evolution": {
+              "$ref": "#/$defs/evolutionMap"
+            }
+          }
+        },
+        "preprocessor": {
+          "type": "object",
+          "properties": {
+            "old": {
+              "$ref": "#/$defs/preprocessorScanSide"
+            },
+            "new": {
+              "$ref": "#/$defs/preprocessorScanSide"
+            },
+            "macro_divergence_evolution": {
+              "$ref": "#/$defs/evolutionMap"
+            },
+            "header_leak_evolution": {
+              "$ref": "#/$defs/evolutionMap"
+            }
+          }
+        },
+        "coverage": {
+          "type": "object",
+          "description": "Added in 1.5. Per-check, per-side sufficiency: whether an *absence* claim is established for that check on that side. Answered per check because the three rest on different evidence -- a set of files, one `clang -E -dM` probe per compile unit, one `clang -M` probe per public header -- so one may be established while another is not. A check whose side is not established never yields `introduced`/`resolved` for any identity; `reason` says why.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "old": {
+                "$ref": "#/$defs/checkSufficiency"
+              },
+              "new": {
+                "$ref": "#/$defs/checkSufficiency"
+              }
+            }
+          },
+          "propertyNames": {
+            "enum": [
+              "pattern_escalation",
+              "macro_divergence",
+              "header_leak"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "analysis_assurance": {
       "type": "object",
       "description": "P0.4 (schema 2.38): the analysis-assurance axis, orthogonal to verdict \u2014 how complete/trustworthy the evidence behind this comparison was. Unconditionally present on every compare-report JSON (checker.compare() always populates DiffResult.analysis_assurance). See analysis_assurance.py.",
       "required": [
@@ -2321,74 +2392,6 @@
         }
       }
     },
-    "pattern_preprocessor_scan": {
-      "type": [
-        "object",
-        "null"
-      ],
-      "description": "The lexical pattern pre-scan and preprocessor pre-scan, folded per side and stated as an evolution per identity (ADR-068 D3/D4/D5). Advisory facts only: never a verdict, severity, or exit-code contributor. Emitted since report_schema_version 3.12; described here as of 4.5, when the block gained its `coverage` object \u2014 the same shape audit_report.schema.json carries under this key, so a consumer of either recognises the other.",
-      "properties": {
-        "version": {
-          "type": "integer"
-        },
-        "pattern": {
-          "type": "object",
-          "description": "Each side's raw PatternFactsResult.to_dict() -- the same shape `scan`'s own report carries under `pattern_scan`.",
-          "properties": {
-            "old": {
-              "$ref": "#/$defs/patternScanSide"
-            },
-            "new": {
-              "$ref": "#/$defs/patternScanSide"
-            },
-            "escalation_evolution": {
-              "$ref": "#/$defs/evolutionMap"
-            }
-          }
-        },
-        "preprocessor": {
-          "type": "object",
-          "properties": {
-            "old": {
-              "$ref": "#/$defs/preprocessorScanSide"
-            },
-            "new": {
-              "$ref": "#/$defs/preprocessorScanSide"
-            },
-            "macro_divergence_evolution": {
-              "$ref": "#/$defs/evolutionMap"
-            },
-            "header_leak_evolution": {
-              "$ref": "#/$defs/evolutionMap"
-            }
-          }
-        },
-        "coverage": {
-          "type": "object",
-          "description": "Added in 1.5. Per-check, per-side sufficiency: whether an *absence* claim is established for that check on that side. Answered per check because the three rest on different evidence -- a set of files, one `clang -E -dM` probe per compile unit, one `clang -M` probe per public header -- so one may be established while another is not. A check whose side is not established never yields `introduced`/`resolved` for any identity; `reason` says why.",
-          "additionalProperties": {
-            "type": "object",
-            "properties": {
-              "old": {
-                "$ref": "#/$defs/checkSufficiency"
-              },
-              "new": {
-                "$ref": "#/$defs/checkSufficiency"
-              }
-            }
-          },
-          "propertyNames": {
-            "enum": [
-              "pattern_escalation",
-              "macro_divergence",
-              "header_leak"
-            ]
-          }
-        }
-      }
-    }
-  },
-  "$defs": {
     "surface_change_entry": {
       "type": "object",
       "description": "One reviewable surface change (workstream G slice S1, schema 3.9).",
@@ -2559,7 +2562,7 @@
           "description": "Schema 5.7: the same analysis-assurance shape as the top-level analysis_assurance block (null for a report that never ran a real comparison).",
           "oneOf": [
             {
-              "$ref": "#/properties/analysis_assurance"
+              "$ref": "#/$defs/analysis_assurance"
             },
             {
               "type": "null"

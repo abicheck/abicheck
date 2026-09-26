@@ -156,7 +156,7 @@ def _enum_fields(obj: dict[str, Any]) -> dict[str, set[str]]:
 def test_assurance_vocabulary_matches_the_schema_enums() -> None:
     from abicheck.policy.analysis_assurance_merge import _AXIS_WORST_LAST
 
-    enums = _enum_fields(_schema("compare_report")["properties"]["analysis_assurance"])
+    enums = _enum_fields(_schema("compare_report")["$defs"]["analysis_assurance"])
     checked = 0
     for axis, scale in _AXIS_WORST_LAST.items():
         if axis not in enums:
@@ -169,7 +169,7 @@ def test_assurance_vocabulary_matches_the_schema_enums() -> None:
 
 
 def test_audit_and_compare_share_one_assurance_shape() -> None:
-    compare = _schema("compare_report")["properties"]["analysis_assurance"]
+    compare = _schema("compare_report")["$defs"]["analysis_assurance"]
     audit = _schema("audit_report")["$defs"]["analysis_assurance"]
     assert audit == compare
 
@@ -248,7 +248,7 @@ def test_run_outcome_assurance_validates_against_the_assurance_shape(
     checked against the published ``analysis_assurance`` shape, was rejected
     for ``schema_staleness_status: not_evaluated``."""
     compare = _schema("compare_report")
-    sub = dict(compare["properties"]["analysis_assurance"])
+    sub = dict(compare["$defs"]["analysis_assurance"])
     sub["$schema"] = compare["$schema"]
     doc = _run(tmp_path, MODES[mode][0](tmp_path))
     assurance = doc["run_outcome"]["assurance"]
