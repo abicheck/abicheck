@@ -522,12 +522,14 @@ called either a regression or noise.
 ### Remaining documented gaps
 
 - The live-release RSS increase above is unexplained (one sample).
-- A release's member dumps never receive `lang_explicit` (pre-existing:
-  the fan-out passes only `lang` to `service.run_compare`), so under a stated
-  `compile.lang: c++` each member auto-detects an ambiguous header while the
-  release surface, which now does receive it, parses C++. The contract is
-  right; threading it to the members needs `run_compare` and the pairwise
-  fan-out to carry it (the latter is at its `no_growth` baseline).
+- ~~A release's member dumps never receive `lang_explicit`.~~ **Fixed (B1):**
+  `service.run_compare` takes `lang_explicit` onto its `CompareRequest`, and
+  the pairwise fan-out (its thread-pool runner moved to
+  `workflows/keyed_thread_pool.py` to stay under `no_growth`) and the
+  stranded-member dump forward it. A one-member release now yields the same
+  findings as the scalar pair under `compile.lang: c++`
+  (`tests/test_release_lang_explicit.py`, real g++ fixture where C and C++
+  layout of an empty struct differ).
 - `scope.private_namespaces` narrows the contract but is not merged into
   `policy.internal_namespaces` (ADR-075 D7.1): that key scopes findings,
   which is the retention phase's decision.

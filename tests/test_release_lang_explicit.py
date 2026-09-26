@@ -39,13 +39,7 @@ from abicheck import cli_compare_release_pairwise as pairwise
 from abicheck.cli import main
 
 
-@pytest.mark.parametrize(
-    "explicit",
-    [
-        pytest.param(False, marks=pytest.mark.xfail(strict=True, reason="gap B1")),
-        pytest.param(True, marks=pytest.mark.xfail(strict=True, reason="gap B1")),
-    ],
-)
+@pytest.mark.parametrize("explicit", [False, True])
 def test_member_compare_forwards_lang_explicit(
     monkeypatch: pytest.MonkeyPatch, explicit: bool
 ) -> None:
@@ -65,13 +59,7 @@ def test_member_compare_forwards_lang_explicit(
     assert seen["lang_explicit"] is explicit
 
 
-@pytest.mark.parametrize(
-    "explicit",
-    [
-        pytest.param(False, marks=pytest.mark.xfail(strict=True, reason="gap B1")),
-        pytest.param(True, marks=pytest.mark.xfail(strict=True, reason="gap B1")),
-    ],
-)
+@pytest.mark.parametrize("explicit", [False, True])
 def test_run_compare_carries_lang_explicit_onto_the_request(
     monkeypatch: pytest.MonkeyPatch, explicit: bool
 ) -> None:
@@ -120,7 +108,6 @@ def _kinds(changes: list[dict[str, Any]]) -> list[tuple[str, str]]:
 
 
 @pytest.mark.integration
-@pytest.mark.xfail(strict=True, reason="gap B1: member drops lang_explicit")
 def test_one_member_release_matches_the_scalar_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
