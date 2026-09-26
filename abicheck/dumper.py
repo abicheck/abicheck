@@ -185,6 +185,7 @@ from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
 from .storage import closure_identity
+from .storage.cache_integrity import record_digest
 
 log = logging.getLogger(__name__)
 
@@ -859,6 +860,7 @@ def _write_castxml_cache(
         return
     try:
         _atomic_write(cached, out_xml.read_bytes())
+        record_digest(cached)  # so the first read is already verified
     except OSError as exc:
         log.warning("Could not write castxml AST cache %s: %s", cached, exc)
 

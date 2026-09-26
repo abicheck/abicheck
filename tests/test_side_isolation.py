@@ -155,3 +155,39 @@ def test_compare_report_is_identical_with_isolation(tmp_path, monkeypatch):
     assert run("process") == baseline
     # Both sides really went through children (sequential CLI: one each).
     assert forked == [1, 1]
+
+
+def _child_payload(fn):
+    """Run the child body in-process (coverage does not follow a fork)."""
+    import multiprocessing
+
+    from abicheck.workflows.side_isolation import _child
+
+    recv, send = multiprocessing.Pipe(duplex=False)
+    _child(send, fn)
+    return recv.recv()
+
+
+def test_child_body_sends_result_error_and_unpicklable_report():
+    assert _child_payload(lambda: {"a": 1}) == ("ok", {"a": 1})
+
+    def boom():
+        raise _SideFailed("x")
+
+    status, err = _child_payload(boom)
+    assert status == "err" and isinstance(err, _SideFailed)
+    status, err = _child_payload(lambda: threading.Lock())
+    assert status == "err" and isinstance(err, SnapshotError)
+    assert "could not be returned" in str(err)
+
+
+def test_isolation_is_linux_only(monkeypatch):
+    import abicheck.workflows.side_isolation as iso
+
+    monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", "process")
+    monkeypatch.setattr(iso.sys, "platform", "darwin")
+    assert not isolation_enabled()
+    monkeypatch.setattr(iso.sys, "platform", "linux")
+    assert isolation_enabled()
+    monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", "thread")
+    assert not isolation_enabled()

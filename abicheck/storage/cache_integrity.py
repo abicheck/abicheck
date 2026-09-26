@@ -59,6 +59,7 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 _SUFFIX = ".sha256"
+_HEX = frozenset("0123456789abcdef")
 
 
 def sidecar_path(entry: Path) -> Path:
@@ -87,8 +88,12 @@ def record_digest(entry: Path, digest: str | None = None) -> None:
         except OSError:
             Path(tmp).unlink(missing_ok=True)
             raise
-    except OSError:
-        return
+    except OSError as exc:
+        # Never leave a previous entry's digest paired with this one: that
+        # would evict a valid entry on its next read. No sidecar at all is
+        # read as "unrecorded" and trusted on first use instead.
+        log.debug("could not record digest for %s: %s", entry, exc)
+        sidecar_path(entry).unlink(missing_ok=True)
 
 
 def verify_entry(entry: Path) -> bool | None:
@@ -99,7 +104,7 @@ def verify_entry(entry: Path) -> bool | None:
         recorded = sidecar_path(entry).read_text(encoding="ascii").strip()
     except (OSError, UnicodeDecodeError):
         return None
-    if len(recorded) != 64:
+    if len(recorded) != 64 or not all(c in _HEX for c in recorded):
         return None
     try:
         return digest_file(entry) == recorded

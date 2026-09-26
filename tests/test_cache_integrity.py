@@ -86,3 +86,45 @@ def test_castxml_entry_is_protected_too(tmp_path):
 def test_record_digest_on_missing_entry_is_a_no_op(tmp_path):
     record_digest(tmp_path / "absent.json")
     assert list(tmp_path.iterdir()) == []
+
+
+def test_non_hex_sidecar_is_unrecorded_not_a_mismatch(tmp_path):
+    cached = _store(tmp_path)
+    sidecar_path(cached).write_text("z" * 64 + "\n")
+    assert verify_entry(cached) is None
+    assert load_cached_ast("k", "clang", cached, memoize=False) == _DOC
+    assert verify_entry(cached) is True
+
+
+def test_failed_digest_write_drops_the_stale_sidecar(tmp_path, monkeypatch):
+    import abicheck.storage.cache_integrity as ci
+
+    cached = _store(tmp_path)
+    cached.write_text(json.dumps({"new": 1}))  # a republished entry
+
+    def refuse(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ci.tempfile, "mkstemp", refuse)
+    record_digest(cached)
+    assert not sidecar_path(cached).exists()
+    monkeypatch.undo()
+    assert load_cached_ast("k", "clang", cached, memoize=False) == {"new": 1}
+
+
+def test_castxml_store_records_its_digest(tmp_path, monkeypatch):
+    import abicheck.dumper as dumper
+
+    out = tmp_path / "out.xml"
+    out.write_text("<CastXML/>")
+    cached = tmp_path / "c.xml"
+    monkeypatch.setattr(dumper, "_tool_identity", lambda _b: "id")
+    dumper._write_castxml_cache(
+        cached,
+        out,
+        castxml_bin="castxml",
+        cc_bin="cc",
+        frontend_identity="id",
+        compiler_identity="id",
+    )
+    assert verify_entry(cached) is True
