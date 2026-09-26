@@ -908,4 +908,18 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "cardinality": ("scalar", "one_member_release"),
         },
     ),
+    BugClass(
+        id="identity.release_edge_keyed_on_side_summary",
+        invariant=(
+            "A release relation edge that names a per-artifact node is keyed "
+            "on the artifact it came from, never on a side-wide summary of "
+            "all members: in a mixed ELF+PE or ELF+Mach-O release every "
+            "provided_by edge's source is its own member's "
+            "binary_symbol://<platform>/<spelling> node, and no edge names "
+            "the summary value `mixed`."
+        ),
+        fixed_by=(1392,),
+        seed_tests=("tests/test_provided_by_member_platform.py",),
+        axes={"member_platforms": ("elf", "pe", "macho", "mixed")},
+    ),
 )

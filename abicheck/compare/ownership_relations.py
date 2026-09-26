@@ -325,9 +325,13 @@ class ProviderRelations:
         return self.index.providers(spelling)
 
     def edges(self) -> Iterator[tuple[str, str, str]]:
+        # Keyed per member: a mixed ELF+PE release's side-wide platform is
+        # "mixed", which names no export node.
+        by_member = self.index.member_platforms
         for spelling, members in self.index.providers_by_symbol.items():
-            src = binary_symbol_node_id(self.platform, spelling)
             for member in members:
+                platform = by_member.get(member, self.platform)
+                src = binary_symbol_node_id(platform, spelling)
                 yield src, release_member_node_id(member), EDGE_KIND_PROVIDED_BY
 
 

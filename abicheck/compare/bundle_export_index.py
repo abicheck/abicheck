@@ -135,9 +135,13 @@ class BundleExportIndex:
     failed_members: Mapping[str, str] = field(default_factory=dict)
     #: The export table kind every observed member's names came from
     #: (``elf``/``pe``/``macho``); ``"mixed"`` if members disagree, ``""``
-    #: with none. Keys the ``provided_by`` relation onto the Phase 2
-    #: ``binary_symbol://<platform>/<spelling>`` node ids.
+    #: with none. A side-wide summary only: ``"mixed"`` names no export
+    #: node, so the ``provided_by`` relation keys on :attr:`member_platforms`.
     platform: str = ""
+    #: ``{member: table kind}`` for every member whose names were read, so
+    #: each ``provided_by`` edge keys onto *its own* member's Phase 2
+    #: ``binary_symbol://<platform>/<spelling>`` node id.
+    member_platforms: Mapping[str, str] = field(default_factory=dict)
 
     def providers(self, symbol: str) -> tuple[str, ...]:
         """Which members export *symbol* (empty when none does)."""
@@ -208,7 +212,7 @@ def build_bundle_export_index(
     """
     providers: dict[str, list[str]] = {}
     without: list[str] = []
-    platforms: set[str] = set()
+    member_platforms: dict[str, str] = {}
     for name in sorted(members):
         exports = member_export_names(members[name])
         if exports is None:
@@ -216,9 +220,10 @@ def build_bundle_export_index(
             continue
         platform = member_export_platform(members[name])
         if platform:
-            platforms.add(platform)
+            member_platforms[name] = platform
         for sym in exports:
             providers.setdefault(sym, []).append(name)
+    platforms = set(member_platforms.values())
     return BundleExportIndex(
         side=side,
         providers_by_symbol={
@@ -227,6 +232,7 @@ def build_bundle_export_index(
         members=tuple(sorted(members)),
         members_without_exports=tuple(without),
         failed_members=dict(sorted((failed_members or {}).items())),
+        member_platforms=member_platforms,
         platform=(
             next(iter(platforms))
             if len(platforms) == 1
