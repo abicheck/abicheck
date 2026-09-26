@@ -129,7 +129,12 @@ def test_two_in_process_passes_survive_like_mutmut_runs_them(
         """
         import os, sys, pytest
         os.environ["MUTANT_UNDER_TEST"] = ""
-        args = ["-q", "-p", "no:cacheprovider", "-p", "no:randomly", "-p", "no:xdist", "test_prop.py"]
+        # An explicit basetemp of its own: a nested session on the default
+        # numbered basetemp runs pytest's retention pass over the shared
+        # pytest-of-<user> root and can delete the outer run's tree -- this
+        # test's own tmp_path, which is this process's cwd.
+        args = ["-q", "-p", "no:cacheprovider", "-p", "no:randomly", "-p", "no:xdist",
+                "--basetemp", "inner-basetemp", "test_prop.py"]
         codes = [int(pytest.main(args)) for _ in range(2)]
         sys.exit(max(codes))
         """
@@ -143,5 +148,74 @@ def test_two_in_process_passes_survive_like_mutmut_runs_them(
         errors="replace",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=120,
+    )
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
+
+
+_STALE_LOCK_PLUGIN = '''
+import os, time, pytest
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionstart(session):
+    """Make this session's numbered basetemp look abandoned, as a long
+    in-process mutmut run's does, so pytest's retention may prune it."""
+    bt = session.config._tmp_path_factory.getbasetemp()
+    old = time.time() - 5 * 86400
+    for p in (bt, bt / ".lock"):
+        if p.exists():
+            os.utime(p, (old, old))
+'''
+
+
+def test_nested_sessions_never_prune_the_outer_runs_temp_tree(
+    tmp_path: Path,
+) -> None:
+    """Bug class: a test that starts its own pytest sessions must not let them
+    clean up the *outer* session's temp tree. Every nested session that uses
+    the default numbered basetemp runs pytest's retention pass over the shared
+    ``pytest-of-<user>`` root, and once the outer run's lock reads as stale it
+    deletes the outer's directory -- including the ``tmp_path`` the nested run
+    is standing in. The oracle is the outer run's own verdict on the whole
+    module, under a temp root it owns and a lock made to look stale."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "stale_lock_plugin.py").write_text(
+        _STALE_LOCK_PLUGIN, encoding="utf-8"
+    )
+    temproot = tmp_path / "temproot"
+    temproot.mkdir()
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            [str(plugin_dir), os.environ.get("PYTHONPATH", "")]
+        ),
+        "PYTEST_DEBUG_TEMPROOT": str(temproot),
+        "PYTHONIOENCODING": "utf-8",
+    }
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(Path(__file__)),
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "no:randomly",
+            "-p",
+            "no:xdist",
+            "-p",
+            "stale_lock_plugin",
+            "-k",
+            "two_in_process_passes",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        timeout=300,
     )
     assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
