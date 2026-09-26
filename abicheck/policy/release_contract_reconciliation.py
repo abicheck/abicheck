@@ -184,7 +184,11 @@ def reconcile_side(
             acquisition_key=surface.acquisition_key,
             surface_resolvable=False,
             exports_total=len(index.symbols),
-            coverage_complete=index.complete,
+            # No contract was read, so no obligation was checked: this side's
+            # reconciliation is incomplete whatever the export index says.
+            # Reporting the index's own completeness here read as "every
+            # export obligation checked" on a run that checked none.
+            coverage_complete=False,
             coverage_reason=surface.unresolved_reason or index.incompleteness_reason(),
         )
     # ADR-075 D7: attribution reads the release's `provided_by` relation
@@ -314,7 +318,11 @@ def reconcile_release(
     for side in (old_side, new_side):
         if side is None:
             continue
-        if side.coverage_reason and not side.coverage_complete:
+        if (
+            side.surface_resolvable
+            and side.coverage_reason
+            and not side.coverage_complete
+        ):
             warnings.append(
                 f"release contract reconciliation on the {side.side} side is "
                 f"incomplete: {side.coverage_reason}. "
@@ -322,10 +330,11 @@ def reconcile_release(
                 "proven missing from the whole bundle and are reported as "
                 "unresolved rather than as missing exports."
             )
-        if not side.surface_resolvable and side.coverage_reason:
+        if not side.surface_resolvable:
             warnings.append(
-                f"the {side.side} side's public surface could not be acquired: "
-                f"{side.coverage_reason}"
+                f"the {side.side} side's public surface could not be acquired, "
+                "so no release-level export obligation was checked on that "
+                f"side: {side.coverage_reason or 'no reason recorded'}"
             )
 
     return ReleaseReconciliation(

@@ -41,6 +41,7 @@ and nothing else.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from ..policy.release_assurance import (
@@ -110,7 +111,10 @@ def release_assurance_from_results(
 
 
 def release_assurance_from_entries(
-    library_results: list[dict[str, object]], *, require_complete: bool
+    library_results: list[dict[str, object]],
+    *,
+    require_complete: bool,
+    release_shortfalls: Sequence[MemberAssurance] = (),
 ) -> ReleaseAssuranceDecision:
     """The fold over the live directory/package fan-out's own per-member
     entries.
@@ -121,6 +125,11 @@ def release_assurance_from_entries(
     not "this member is clean". An entry for a member that *failed* to compare
     at all carries no such key either, which is correct -- a member that never
     produced a comparison is ADR-065's scope axis, not this one's.
+
+    *release_shortfalls* are rows for analysis the release itself owns
+    rather than any member (``ReleaseSurfaceStage.assurance_shortfalls``);
+    they join the fold only when the axis was asked for, so a run without
+    ``assurance.require_complete`` stays unchanged (D4).
     """
     members = tuple(
         MemberAssurance(
@@ -133,6 +142,8 @@ def release_assurance_from_entries(
         for entry in library_results
         if isinstance(entry, dict) and "analysis_assurance_status" in entry
     )
+    if require_complete:
+        members = (*members, *release_shortfalls)
     return resolve_release_assurance_decision(
         members, require_complete=require_complete
     )

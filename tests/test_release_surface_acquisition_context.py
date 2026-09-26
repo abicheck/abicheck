@@ -146,9 +146,20 @@ class TestTheResolvedCompileContextReachesTheParse:
     def test_the_context_object_itself_is_handed_to_the_parser(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        import dataclasses
+
         context = self._context(**self.CONTEXT_FIELDS)  # type: ignore[arg-type]
         seen, _ = self._acquire_with(monkeypatch, context, tmp_path)
-        assert seen["compile"] is context
+        got = seen["compile"]
+        # Every field reaches the parse unchanged; the only widening is the
+        # `-H` include root a member dump also infers, deferred behind the
+        # build context's own tokens (never ahead of them).
+        for f in dataclasses.fields(context):
+            if f.name != "gcc_option_tokens":
+                assert getattr(got, f.name) == getattr(context, f.name), f.name
+        base = context.gcc_option_tokens
+        assert got.gcc_option_tokens[: len(base)] == base
+        assert str(tmp_path) in got.gcc_option_tokens[len(base) :]
 
     def test_the_backend_comes_from_the_resolved_context(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

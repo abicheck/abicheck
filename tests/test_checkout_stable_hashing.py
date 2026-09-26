@@ -14,14 +14,15 @@ from __future__ import annotations
 import itertools
 import random
 
+import pytest
+
 from abicheck.buildsource.source_extractors.clang_nodes import (
     _signature,
     _subtree_hash,
 )
 from abicheck.model.graph_entity_identity import signature_key
 from abicheck.workflows.ownership_request import (
-    find_checkout_root,
-    shared_checkout_root,
+    with_target_roots,
 )
 
 _PREFIXES = ["/w/old", "/home/u/src/new tree", "/mnt/cached/a/b/c", "/tmp/x"]
@@ -114,17 +115,47 @@ def test_plain_spellings_are_untouched():
         assert _signature({"type": {"qualType": s}}) == s
 
 
-def test_checkout_root_lookup(tmp_path):
-    a, b = tmp_path / "a", tmp_path / "b"
-    (a / "include/x").mkdir(parents=True)
-    (b / "include").mkdir(parents=True)
-    (a / ".git").mkdir()
-    (b / ".git").write_text("gitdir: elsewhere\n")  # a worktree marker is a file
-    assert find_checkout_root(a / "include/x") == str(a)
-    assert find_checkout_root(b / "include") == str(b)
-    assert shared_checkout_root([str(a / "include"), str(a / "include/x")]) == str(a)
-    # Spanning two checkouts, or leaving one, anchors nothing.
-    assert shared_checkout_root([str(a / "include"), str(b / "include")]) is None
-    assert shared_checkout_root([]) is None
-    outside = tmp_path.parent / "no_vcs_here_xyz"
-    assert find_checkout_root(outside) in (None, find_checkout_root(tmp_path.parent))
+def _ownership_fingerprint(headers, public_dirs=()):
+    from abicheck.extract.ownership_stamp import recorded_rules
+    from abicheck.model.extraction_scope import ExtractionScope
+
+    request = with_target_roots(None, headers, public_dirs)
+    return ExtractionScope(ownership_rules=recorded_rules(request)).fingerprint
+
+
+@pytest.mark.parametrize(
+    "old_base, new_base",
+    [
+        ("inc_old", "inc_new"),  # sibling copies in one checkout
+        ("rel-1/include", "rel-2/include"),  # two release trees
+        ("a/b/c/include", "x/include"),  # different depths
+        ("same", "same"),
+    ],
+)
+@pytest.mark.parametrize("layout", [("",), ("pub", "ext"), ("pub", "pub/sub")])
+def test_same_header_layout_is_one_ownership_rule_per_side(
+    tmp_path, old_base, new_base, layout
+):
+    """ADR-075: a side's roots are recorded against its own operand anchor,
+    so where a release tree sits on disk never reads as a rule change."""
+    (tmp_path / ".git").mkdir()  # a shared checkout must not be the anchor
+
+    def roots(base):
+        dirs = [tmp_path / base / rel for rel in layout]
+        for d in dirs:
+            d.mkdir(parents=True, exist_ok=True)
+        return dirs
+
+    assert _ownership_fingerprint(roots(old_base)) == _ownership_fingerprint(
+        roots(new_base)
+    )
+
+
+def test_a_different_header_layout_is_still_a_different_rule(tmp_path):
+    for rel in ("o/pub", "o/ext", "n/pub", "n/other"):
+        (tmp_path / rel).mkdir(parents=True)
+    old = _ownership_fingerprint([tmp_path / "o/pub", tmp_path / "o/ext"])
+    new = _ownership_fingerprint([tmp_path / "n/pub", tmp_path / "n/other"])
+    assert old != new
+    # One root versus two is a different rule too.
+    assert _ownership_fingerprint([tmp_path / "n/pub"]) != new

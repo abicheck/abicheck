@@ -50,6 +50,7 @@ from ..model.release_surface import (
     SurfaceAcquisitionIdentity,
     unresolved_surface,
 )
+from ..policy.release_assurance import MemberAssurance
 from ..policy.release_contract_reconciliation import (
     ReleaseReconciliation,
     reconcile_release,
@@ -97,6 +98,33 @@ class ReleaseSurfaceStage:
     def warnings(self) -> tuple[str, ...]:
         return (
             () if self.reconciliation is None else self.reconciliation.coverage_warnings
+        )
+
+    def assurance_shortfalls(self) -> tuple[MemberAssurance, ...]:
+        """The release contract's own analysis shortfall, as ADR-071 rows.
+
+        One ``partial`` row per side whose public surface was requested but
+        not acquired: the release's export obligations were then never
+        checked, which is an incomplete analysis however clean every member
+        comparison was. Folded into the release's assurance axis, so
+        ``assurance.require_complete`` refuses such a run instead of exiting
+        0 on a check that did not happen. Empty when the stage did not run
+        (fewer than two members, or no headers -- nothing was promised).
+        """
+        rec = self.reconciliation
+        if rec is None:
+            return ()
+        return tuple(
+            MemberAssurance(
+                name=f"<release public surface: {side.side}>",
+                status="partial",
+                notes=(
+                    "public surface not acquired, release export obligations "
+                    f"unchecked: {side.coverage_reason or 'no reason recorded'}",
+                ),
+            )
+            for side in (rec.old, rec.new)
+            if side is not None and not side.surface_resolvable
         )
 
 
@@ -428,6 +456,7 @@ def reconcile_release_public_surface(
             # the identity above also uses.
             compile_context=compile_context,
             backend=resolve_surface_backend(compile_context),
+            header_inputs=[Path(h) for h in headers],
             public_headers=[Path(h) for h in headers if Path(h).is_file()],
             public_header_dirs=[
                 *(Path(h) for h in headers if Path(h).is_dir()),
