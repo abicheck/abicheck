@@ -45,7 +45,12 @@ class SourceGraphSummary(Protocol):
 
 
 __all__ = [
+    "BUILD_OPTIONS_PASS",
+    "BUILD_TARGETS_PASS",
     "CALL_GRAPH_PASS",
+    "HEADER_DECLARATIONS_PASS",
+    "SOURCE_ABI_PASS",
+    "graph_records_passes",
     "HEADER_CALL_GRAPH_PASS",
     "HEADER_FULL_VISIBILITY_KINDS",
     "HEADER_INCLUDE_GRAPH_PASS",
@@ -62,6 +67,12 @@ __all__ = [
 ]
 
 CALL_GRAPH_PASS = "call_graph"
+#: Evidence-entity-model gap A5: the L4 source-ABI fold, the build-target
+#: fold and the build-option linker are producers too, and stamp these flags.
+SOURCE_ABI_PASS = "source_abi"
+BUILD_TARGETS_PASS = "build_targets"
+BUILD_OPTIONS_PASS = "build_options"
+HEADER_DECLARATIONS_PASS = "header_declarations"
 TYPE_GRAPH_PASS = "type_graph"
 INCLUDE_GRAPH_PASS = "include_graph"
 HEADER_CALL_GRAPH_PASS = "header_call_graph"
@@ -81,6 +92,11 @@ PASS_EDGE_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
             }
         ),
         INCLUDE_GRAPH_PASS: frozenset({"COMPILE_UNIT_INCLUDES_FILE"}),
+        SOURCE_ABI_PASS: frozenset({"SOURCE_DECLARES", "SOURCE_DECL_MAPS_TO_SYMBOL"}),
+        BUILD_TARGETS_PASS: frozenset(
+            {"TARGET_HAS_PUBLIC_HEADER", "TARGET_DEPENDS_ON"}
+        ),
+        BUILD_OPTIONS_PASS: frozenset({"BUILD_OPTION_AFFECTS_SYMBOL"}),
     }
 )
 
@@ -90,6 +106,7 @@ HEADER_PASS_ALIAS: Mapping[str, str] = MappingProxyType(
         CALL_GRAPH_PASS: HEADER_CALL_GRAPH_PASS,
         TYPE_GRAPH_PASS: HEADER_TYPE_GRAPH_PASS,
         INCLUDE_GRAPH_PASS: HEADER_INCLUDE_GRAPH_PASS,
+        SOURCE_ABI_PASS: HEADER_DECLARATIONS_PASS,
     }
 )
 
@@ -103,6 +120,8 @@ HEADER_FULL_VISIBILITY_KINDS: frozenset[str] = frozenset(
         "TYPE_HAS_FIELD_TYPE",
         "TYPE_INHERITS",
         "COMPILE_UNIT_INCLUDES_FILE",
+        # Every declaration a parsed header makes is visible to a header pass.
+        "SOURCE_DECLARES",
     }
 )
 
@@ -110,6 +129,9 @@ HEADER_FULL_VISIBILITY_KINDS: frozenset[str] = frozenset(
 HEADER_INLINE_BODIES = "header_inline_bodies"
 
 L5_EDGE_KINDS: frozenset[str] = frozenset().union(*PASS_EDGE_KINDS.values())
+
+#: The kinds a header pass sees only inside a header-written body.
+_BODY_KINDS: frozenset[str] = frozenset({"DECL_CALLS_DECL", "DECL_REFERENCES_DECL"})
 
 
 def pass_for_edge_kind(edge_kind: str) -> str | None:
@@ -156,11 +178,19 @@ def _record(
             reason="pass_degraded", source=source,
         )  # fmt: skip
     if graph.extractor_passes.get(pass_name, False):
-        if body_blind:
+        if body_blind and edge_kind in _BODY_KINDS:
             return CoverageRecord(
                 edge_kind, pass_name, ProducerRun.PARTIAL, units,
                 covered=frozenset({HEADER_INLINE_BODIES}),
                 reason="header_only_pass_body_blind", source=source,
+            )  # fmt: skip
+        if body_blind:
+            # A header pass never produces this kind at all (a declaration's
+            # exported symbol needs the binary / an L4 replay).
+            return CoverageRecord(
+                edge_kind, pass_name, ProducerRun.PARTIAL, units,
+                covered=frozenset(), reason="header_only_pass_cannot_produce",
+                source=source,
             )  # fmt: skip
         return CoverageRecord(
             edge_kind, pass_name, ProducerRun.RAN, units, source=source
@@ -188,8 +218,11 @@ def pass_coverage_records(
         return ()
     records = [
         rec
-        for name, header in ((pass_name, False), (HEADER_PASS_ALIAS[pass_name], True))
-        if (rec := _record(graph, name, edge_kind, header=header)) is not None
+        for name, header in (
+            (pass_name, False),
+            (HEADER_PASS_ALIAS.get(pass_name), True),
+        )
+        if name and (rec := _record(graph, name, edge_kind, header=header)) is not None
     ]
     if not records:
         records.append(
@@ -203,3 +236,15 @@ def pass_coverage_records(
             )  # fmt: skip
         )
     return tuple(records)
+
+
+def graph_records_passes(graph: SourceGraphSummary) -> bool:
+    """Whether *graph* recorded any pass flag at all. An unflagged graph (a
+    hand-built one, or one stored before its producers stamped coverage)
+    cannot say whether a missing edge was looked for: every absence on it is
+    ``unknown`` (``compare.edge_query.source_graph_covers``), never the
+    legacy "an edge of this kind exists somewhere, so its absence elsewhere
+    is real" reading."""
+    return bool(
+        graph.extractor_passes or graph.narrowed_passes or graph.degraded_passes
+    )

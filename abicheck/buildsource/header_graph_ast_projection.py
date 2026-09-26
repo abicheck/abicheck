@@ -89,6 +89,7 @@ from ..model.graph_facts import (
 )
 from ..model.source_graph_coverage import (
     HEADER_CALL_GRAPH_PASS as _HEADER_CALL_GRAPH_PASS,
+    HEADER_DECLARATIONS_PASS,
     HEADER_TYPE_GRAPH_PASS as _HEADER_TYPE_GRAPH_PASS,
 )
 from .ast_special_members import collect_special_member_names
@@ -305,6 +306,7 @@ def seed_ast_graph(
     # from "never ran").
     graph.extractor_passes[HEADER_CALL_GRAPH_PASS] = True
     graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
+    graph.extractor_passes[HEADER_DECLARATIONS_PASS] = True
     # ADR-046 D3 role coverage (Codex review, fresh evidence): this call above
     # is the *same* ``type_graph.parse_clang_ast_types()`` walker the
     # build-integrated ``fold_type_graph`` drives — reused unmodified, per

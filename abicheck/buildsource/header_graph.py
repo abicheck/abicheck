@@ -110,6 +110,7 @@ from ..model.graph_facts import (
 from ..model.snapshot_identity_table import identities_for_snapshot
 from ..model.source_graph import SourceGraphSummary, _header_node_id
 from ..model.source_graph_coverage import (
+    HEADER_DECLARATIONS_PASS,
     HEADER_INCLUDE_GRAPH_PASS as _HEADER_INCLUDE_GRAPH_PASS,
 )
 from ..provenance import (
@@ -372,6 +373,8 @@ def _seed_flat_graph(
     # header dump's first structural edge misread as newly added.
     if not snapshot.scope_fallback:
         graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
+        # Gap A5: every declaration the parsed headers make was walked.
+        graph.extractor_passes[HEADER_DECLARATIONS_PASS] = True
 
 
 def build_header_only_graph(

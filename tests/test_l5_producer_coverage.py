@@ -116,17 +116,7 @@ def _expected(old_state: str) -> bool:
 
 
 @pytest.mark.parametrize(
-    ("family", "old_state"),
-    [
-        pytest.param(
-            f,
-            st,
-            marks=pytest.mark.xfail(strict=True, reason="gap A5")
-            if st != "ran"
-            else (),
-        )
-        for f, st in itertools.product(sorted(SCENARIOS), STATES)
-    ],
+    ("family", "old_state"), list(itertools.product(sorted(SCENARIOS), STATES))
 )
 def test_finding_needs_the_absent_sides_producer(family: str, old_state: str) -> None:
     pass_name, kind, nodes, old_edges, new_edges = SCENARIOS[family]
@@ -139,7 +129,6 @@ def test_finding_needs_the_absent_sides_producer(family: str, old_state: str) ->
     assert (kind in kinds) is _expected(old_state), (family, old_state, kinds)
 
 
-@pytest.mark.xfail(strict=True, reason="gap A5")
 def test_mapping_drift_is_symmetric_in_which_side_lacks_the_edge() -> None:
     """Losing a mapping needs NEW's producer, gaining one OLD's."""
     _pass, kind, nodes, edges_without, edges_with = SCENARIOS["mapping_drift"]
@@ -171,7 +160,6 @@ def _surface(families: dict[str, str] | None):
     return surface
 
 
-@pytest.mark.xfail(strict=True, reason="gap A5")
 @pytest.mark.parametrize(
     ("families", "expect"),
     [
@@ -200,7 +188,6 @@ def test_build_source_graph_stamps_every_producer(
     assert graph.coverage["pass_flags_recorded"] is True
 
 
-@pytest.mark.xfail(strict=True, reason="gap A5")
 def test_edge_query_answers_the_new_kinds() -> None:
     from abicheck.compare.edge_query import EdgeEvidence
     from abicheck.model import AbiSnapshot
@@ -211,3 +198,56 @@ def test_edge_query_answers_the_new_kinds() -> None:
         ev = EdgeEvidence(AbiSnapshot(library="l", version="1"), source_graph=graph)
         got = ev.query("TARGET_DEPENDS_ON", "t:a").answer.value
         assert got == want, (state, got)
+
+
+@pytest.mark.parametrize(
+    ("old_flags", "finding", "absence"),
+    [({"build_targets": True}, True, "proven_absent"), ({}, False, "unknown")],
+    ids=["flagged_baseline", "unflagged_stored_baseline"],
+)
+def test_cli_report_through_an_embedded_l5_graph(
+    tmp_path, old_flags: dict[str, bool], finding: bool, absence: str
+) -> None:
+    """Through `abicheck compare` on stored snapshots: an unflagged (pre-A5)
+    baseline graph neither yields the finding nor hides the gap -- the
+    report's coverage section answers ``unknown``."""
+    import json
+
+    from click.testing import CliRunner
+
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.cli import main
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import save_snapshot
+
+    def graph(edges, flags):
+        g = SourceGraphSummary(
+            nodes=[_N("t:a", "target"), _N("t:b", "target")], edges=list(edges)
+        )
+        g.extractor_passes.update(flags)
+        return g.finalize()
+
+    old = AbiSnapshot(
+        library="l", version="1",
+        build_source=BuildSourcePack(root="", source_graph=graph([], old_flags)),
+    )  # fmt: skip
+    new = AbiSnapshot(
+        library="l", version="2",
+        build_source=BuildSourcePack(
+            root="",
+            source_graph=graph(
+                [_E("t:a", "t:b", "TARGET_DEPENDS_ON")], {"build_targets": True}
+            ),
+        ),
+    )  # fmt: skip
+    old_p, new_p, rep = tmp_path / "o.json", tmp_path / "n.json", tmp_path / "r.json"
+    save_snapshot(old, old_p)
+    save_snapshot(new, new_p)
+    res = CliRunner().invoke(
+        main, ["compare", str(old_p), str(new_p), "-o", f"json={rep}"]
+    )
+    assert res.exit_code in (0, 1, 2, 4), res.output
+    doc = json.loads(rep.read_text())
+    kinds = {c["kind"] for c in doc["changes"]}
+    assert ("target_dependency_added" in kinds) is finding
+    assert doc["edge_coverage"]["old"]["TARGET_DEPENDS_ON"]["absence"] == absence

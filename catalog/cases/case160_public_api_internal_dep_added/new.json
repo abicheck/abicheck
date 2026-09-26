@@ -76,7 +76,14 @@
     }
   ],
   "external_graph_refs": [],
-  "extractor_passes": {},
+  "extractor_passes": {
+    "build_options": true,
+    "build_targets": true,
+    "call_graph": true,
+    "include_graph": true,
+    "source_abi": true,
+    "type_graph": true
+  },
   "graph_id": "sha256:f401bfdeb6d14b97c14d4cc026021f704f24786e79e2a07ee3bcd1edf81f3e2f",
   "indexes": {
     "by_binary_symbol": {
