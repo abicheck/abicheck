@@ -48,6 +48,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |
 | `allow_build_query` | `bool` | `False` |
+| `performance_profile` | `PerformanceProfile \| None` | `None` |
 
 ## `CompareResult`
 

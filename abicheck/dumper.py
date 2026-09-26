@@ -171,18 +171,21 @@ from .extract.export_symbol_identity import (
     itanium_export_variable as _itanium_export_variable,
     msvc_export_function as _msvc_export_function,
 )
+from .extract.export_table_read import finish_binary_snapshot
 from .extract.header_ast_backend import (
     HEADER_BACKENDS as HEADER_BACKENDS,
     _is_hybrid_request,
     _resolve_effective_ast_backend as _resolve_effective_ast_backend,
     _resolve_header_backend as _resolve_header_backend,
     _resolve_single_ast_backend as _resolve_single_ast_backend,
+    lang_to_profile,
 )
 from .extract.header_ast_fields import parse_header_ast_fields
 from .extract.headers.clang.locations import materialize_locations
+from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
-from .storage import closure_identity
+from .storage.cache_integrity import record_digest
 
 log = logging.getLogger(__name__)
 
@@ -857,6 +860,7 @@ def _write_castxml_cache(
         return
     try:
         _atomic_write(cached, out_xml.read_bytes())
+        record_digest(cached)  # so the first read is already verified
     except OSError as exc:
         log.warning("Could not write castxml AST cache %s: %s", cached, exc)
 
@@ -1463,22 +1467,6 @@ def dump(
     )
 
 
-def _lang_to_profile(lang: str | None) -> str | None:
-    """Convert a ``--lang`` flag value to an internal language-profile string.
-
-    Shared by the ELF/PE/Mach-O snapshot builders (C3) — previously this logic
-    was a helper for ELF but copy-pasted inline for the other two formats.
-    """
-    if lang is None:
-        return None
-    lu = lang.upper()
-    if lu == "C":
-        return "c"
-    if lu in ("C++", "CPP"):
-        return "cpp"
-    return None
-
-
 def _dump_elf(
     so_path: Path,
     headers: list[Path],
@@ -1513,6 +1501,7 @@ def _dump_elf(
     empty in this case (enforced by :func:`dump`). PE/Mach-O reject a
     non-``None`` value outright (not yet supported there).
     """
+    extra_includes = absolutize_include_roots(extra_includes)  # see its docstring
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
     from .elf_metadata import parse_elf_metadata
 
@@ -1550,7 +1539,7 @@ def _dump_elf(
             _dwarf_format_out[0] if _dwarf_format_out else debug_format
         )
         dwarf_session = _dwarf_session_out[0] if _dwarf_session_out else None
-        profile_hint = _lang_to_profile(lang)
+        profile_hint = lang_to_profile(lang)
         # ADR-003 fallback chain: --dwarf-only forces DWARF mode; no headers +
         # DWARF -> DWARF-only mode; no headers + no DWARF -> symbols-only. Both
         # legs gated on resolved_debug_format, not dwarf_meta.has_dwarf (which
@@ -1705,7 +1694,7 @@ def _dump_elf(
         ),
     )
     _populate_elf_visibility(snapshot)
-    return closure_identity.renumber_anonymous_closure_identities(snapshot)
+    return finish_binary_snapshot(snapshot)
 
 
 def _dump_macho(
@@ -1735,6 +1724,7 @@ def _dump_macho(
     *dump_manifest* is not yet supported here (ADR-050 D3 is ELF-scoped) --
     rejected explicitly rather than silently ignored.
     """
+    extra_includes = absolutize_include_roots(extra_includes)  # see its docstring
     if dump_manifest is not None:
         raise ValidationError(
             "--dump-manifest is not yet supported for Mach-O binaries "
@@ -1757,7 +1747,7 @@ def _dump_macho(
         if exp.name and _is_abi_relevant_symbol(exp.name)
     }
 
-    profile_hint = _lang_to_profile(lang)
+    profile_hint = lang_to_profile(lang)
 
     if not headers:
         # Advisory only (ADR-035 P6): info log, not a per-run UserWarning.
@@ -1840,7 +1830,7 @@ def _dump_macho(
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
-    return closure_identity.renumber_anonymous_closure_identities(
+    return finish_binary_snapshot(
         AbiSnapshot(
             library=dylib_path.name,
             version=version,
@@ -1908,6 +1898,7 @@ def _dump_pe(
     *dump_manifest* is not yet supported here (ADR-050 D3 is ELF-scoped) --
     rejected explicitly rather than silently ignored.
     """
+    extra_includes = absolutize_include_roots(extra_includes)  # see its docstring
     if dump_manifest is not None:
         raise ValidationError(
             "--dump-manifest is not yet supported for PE binaries "
@@ -1921,7 +1912,7 @@ def _dump_pe(
     }
     exported_static: set[str] = set(exported_dynamic)
 
-    profile_hint = _lang_to_profile(lang)
+    profile_hint = lang_to_profile(lang)
 
     if not headers:
         # Advisory only (ADR-035 P6): info log, not a per-run UserWarning.
@@ -1977,7 +1968,7 @@ def _dump_pe(
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
-    return closure_identity.renumber_anonymous_closure_identities(
+    return finish_binary_snapshot(
         AbiSnapshot(
             library=dll_path.name,
             version=version,

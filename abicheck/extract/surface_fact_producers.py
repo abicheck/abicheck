@@ -39,7 +39,8 @@ from __future__ import annotations
 from typing import Any
 
 from ..model import Fact
-from ..model.export_index import ExportMatch
+from ..model.availability import FactStatus
+from ..model.export_index import ExportMatch, ExportTableState
 from ..model.surface_facts import export_match_diagnostic
 
 __all__ = [
@@ -47,6 +48,8 @@ __all__ = [
     "debug_info_surface_facts",
     "export_table_surface_facts",
     "header_ast_surface_facts",
+    "reconcile_export_absence",
+    "unread_export_fact",
 ]
 
 
@@ -206,3 +209,50 @@ def export_table_surface_facts(
         ),
         "binary_exported_fact": Fact.present(True, producer=producer),
     }
+
+
+def unread_export_fact(
+    state: ExportTableState, *, producer: str | None
+) -> Fact[bool] | None:
+    """(c) for a declaration an export lookup answered ``ABSENT``, given
+    whether the table was read -- ``None`` when the table was read, i.e.
+    ``ABSENT`` is a real observation and ``PRESENT(False)`` stands."""
+    if state is ExportTableState.READ:
+        return None
+    if state is ExportTableState.NO_BINARY:
+        return Fact.not_collected("no binary in this dump", producer=producer)
+    return Fact.failed(
+        "export table not read (no parse recorded); absence not established",
+        producer=producer,
+    )
+
+
+def reconcile_export_absence(snapshot: Any, state: ExportTableState) -> int:
+    """Withdraw every confirmed export absence *snapshot* records when its
+    export table was not actually read.
+
+    One post-extraction choke point rather than a flag threaded into each
+    producer: the castxml, clang and DWARF producers (and a multi-TU
+    manifest dump, and the hybrid merge) all look declarations up in the one
+    table the format builder read, so whether that table was read is a fact
+    about the dump, decided once, here, from the read. Only a
+    ``PRESENT(False)``/``PARTIAL(False)`` answer is rewritten; a positive
+    match cannot come out of an unread table, and an already-unknown fact
+    stays as it was. Returns how many facts were withdrawn.
+    """
+    if state is ExportTableState.READ:
+        return 0
+    withdrawn = 0
+    for decl in (*snapshot.functions, *snapshot.variables):
+        fact = getattr(decl, "binary_exported_fact", None)
+        if (
+            fact is None
+            or fact.status not in (FactStatus.PRESENT, FactStatus.PARTIAL)
+            or fact.value is not False
+        ):
+            continue
+        replacement = unread_export_fact(state, producer=fact.producer)
+        if replacement is not None:
+            decl.binary_exported_fact = replacement
+            withdrawn += 1
+    return withdrawn

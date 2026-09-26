@@ -83,6 +83,7 @@ from .graph_identity import (
     _decl_node_id,
     _normalize_graph_identity,
     _type_node_id,
+    checkout_stable_spelling,
 )
 from .identity import _packed
 from .mangled_name import strip_macho_itanium_decoration
@@ -252,7 +253,10 @@ def signature_key(type_spelling: str) -> str:
     """The signature discriminator the L4 source extractors and the AST
     replay passes already use (``"sha256:" + sha256("sig\\0" + qualType)``),
     so a declaration walked by either producer resolves identically."""
-    return "sha256:" + hashlib.sha256(f"sig\x00{type_spelling}".encode()).hexdigest()
+    # Checkout-stable first: a signature naming a lambda or unnamed type
+    # spells its declaring header's absolute path, which must not reach the key.
+    stable = checkout_stable_spelling(type_spelling)
+    return "sha256:" + hashlib.sha256(f"sig\x00{stable}".encode()).hexdigest()
 
 
 def unresolved_identity(kind: str, *evidence: str) -> GraphEntityIdentity:
