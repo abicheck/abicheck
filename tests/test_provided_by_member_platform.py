@@ -29,8 +29,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from abicheck.compare.bundle_export_index import build_bundle_export_index
 from abicheck.compare.ownership_relations import (
@@ -65,7 +65,6 @@ def _edges(members: dict[str, tuple[str, set[str]]]) -> set[tuple[str, str, str]
     return set(provider_relations(index).edges())
 
 
-@pytest.mark.xfail(strict=True, reason="gap B3")
 def test_mixed_elf_and_pe_release_keys_each_edge_on_its_member() -> None:
     members = {
         "libfoo.so": ("elf", {"foo", "shared"}),
@@ -76,13 +75,11 @@ def test_mixed_elf_and_pe_release_keys_each_edge_on_its_member() -> None:
     assert not any("://mixed/" in src for src, _, _ in edges)
 
 
-@pytest.mark.xfail(strict=True, reason="gap B3")
 def test_mixed_elf_and_macho_release_keys_each_edge_on_its_member() -> None:
     members = {"libfoo.so": ("elf", {"a"}), "libfoo.dylib": ("macho", {"a"})}
     assert _edges(members) == _expected(members)
 
 
-@pytest.mark.xfail(strict=True, reason="gap B3")
 @settings(max_examples=60, deadline=None)
 @given(
     st.dictionaries(

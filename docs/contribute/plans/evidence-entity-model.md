@@ -535,8 +535,14 @@ called either a regression or noise.
   `resolve_input` and the release surface. A snapshot built by any other
   entry point, or a stored pre-v52 baseline, has none, so its readers fall
   back to `ScopeOrigin`.
-- `provided_by` keys a release on one platform; a mixed-platform release
-  records `platform="mixed"`, whose node ids join no Phase 2 export node.
+- ~~`provided_by` keys a release on one platform.~~ **Fixed (B3):**
+  `BundleExportIndex.member_platforms` records each member's table kind and
+  `ProviderRelations.edges()` keys every edge on its own member's
+  `binary_symbol://<platform>/…` id; `platform="mixed"` survives only as a
+  side-wide summary (`tests/test_provided_by_member_platform.py`, ELF+PE,
+  ELF+Mach-O and a generated mix). No report renders these edges yet; the
+  reconciliation's `providers()` attribution was platform-independent and is
+  unchanged.
 
 ## Phase 4 — landed
 
