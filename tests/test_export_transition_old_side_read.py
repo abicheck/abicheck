@@ -112,7 +112,10 @@ def test_old_absence_must_be_established(table: str, typed: bool) -> None:
     got = surface_exit_is_evidence_gap(
         old, _new_decl(), old_exported_symbols=table_arg, key="foo"
     )
-    expected = EXPECT_GAP[table]
+    # A plain name set carries no coverage: it cannot tell "no binary" from
+    # "table not read", so only OLD's own observed negative establishes
+    # absence through it. A typed table knows when OLD owes none.
+    expected = EXPECT_GAP[table] if typed else table == "read_without"
     assert got is expected, (table, typed)
 
 
@@ -164,23 +167,8 @@ def test_own_fact_oracle_is_not_constant() -> None:
     assert {ok for _f, ok in OLD_OWN_FACT.values()} == {True, False}
 
 
-_BUGGY = {("not_collected", False), ("unsupported", False)}
-
-
 @pytest.mark.parametrize(
-    ("fact_name", "typed"),
-    [
-        pytest.param(
-            f,
-            t,
-            marks=pytest.mark.xfail(
-                strict=True, reason="an unknown OLD fact counted as absence"
-            )
-            if (f, t) in _BUGGY
-            else (),
-        )
-        for f, t in itertools.product(OLD_OWN_FACT, (True, False))
-    ],
+    ("fact_name", "typed"), list(itertools.product(OLD_OWN_FACT, (True, False)))
 )
 def test_only_an_observed_negative_establishes_old_absence(
     fact_name: str, typed: bool
