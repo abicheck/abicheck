@@ -521,7 +521,25 @@ called either a regression or noise.
 
 ### Remaining documented gaps
 
-- The live-release RSS increase above is unexplained (one sample).
+- ~~The live-release RSS increase above is unexplained (one sample).~~
+  **Measured and attributed (B4): not an ADR-075 regression.** Same oneDAL
+  release (`libonedal.so.3` + `libonedal_dpc.so.3`, 2025.10.0 -> 2025.11.0),
+  `scripts/bench_graph_materialization.py --repeat 3`, base #1364 vs
+  `8d417ed` (after this round's Phase 3/4 work): live-directory compare
+  parent peak 1,417/1,444/1,338 MiB vs 1,281/1,313/1,762 MiB -- two of three
+  candidate runs below every base run; the original +223 MiB was one draw
+  from a ~±200 MiB spread (two members dumping concurrently, so which
+  phases overlap moves the peak). `ABICHECK_MEMORY_TRACE` on one live
+  compare per commit puts all growth in the header-graph projection
+  (`dump.header_graph.project_streaming`) and bisects it: sampled parent RSS
+  978 MiB at #1364, 1,002 MiB after the ADR-075 implementation (#1376/#1377,
+  within noise), 985-1,020 MiB through #1380, then **764 MiB sampled /
+  1,061 MiB `VmHWM` at #1383** (its graph-memory work; 83 s vs 142 s). The
+  stored-release path never moved (589.8 -> 594.0 MiB above; 1,161 MiB
+  +-1 on `8d417ed` with the header graph attached). Findings identical at
+  every point (964 across both members). Before #1383's ancestor 42cb529 the
+  trace carried no `parent_rss_peak_bytes`, so only sampled RSS is
+  comparable across the whole bisect.
 - A release's member dumps never receive `lang_explicit` (pre-existing:
   the fan-out passes only `lang` to `service.run_compare`), so under a stated
   `compile.lang: c++` each member auto-detects an ambiguous header while the
