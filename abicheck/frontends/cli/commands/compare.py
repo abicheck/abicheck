@@ -746,6 +746,16 @@ def _embed_inline_source_side(
     "exit code. Validate a manifest on its own with "
     "`abicheck project validate`.",
 )
+@click.option(
+    "--performance-profile",
+    "performance_profile",
+    type=click.Choice(["balanced", "low-memory"]),
+    default=None,
+    help="The memory/speed trade-off to run under; overrides .abicheck.yml's "
+    "performance.profile. 'balanced' (default) is fastest; 'low-memory' "
+    "resolves one side at a time, each in its own process on Linux, for "
+    "the lowest peak memory. Never changes findings or the exit code.",
+)
 @verbose_option
 @click.pass_context
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
@@ -839,6 +849,9 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # and the exit-code matrix — identical while the single typed signature lives
     # only on run_compare (no duplicated 56-line parameter list; CodeFactor).
     from ....cli_compare_helpers import run_compare
+    from ..project_config import enter_performance_profile
+
+    enter_performance_profile(ctx, kwargs.pop("performance_profile", None))
 
     # Plan slice 7m: one repeatable ``-o FORMAT=DESTINATION`` request reaches
     # this callback as a single ``ExportSet``; expand it into the

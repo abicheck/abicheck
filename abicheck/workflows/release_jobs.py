@@ -307,9 +307,12 @@ def plan_release_workers(
     """
     import os
 
+    from ..model.performance import current_performance_profile, tuning_for
     from ..process_resources import available_mem_gib
     from .release_admission import MemoryAdmission
 
+    if jobs <= 0 and tuning_for(current_performance_profile()).sequential_members:
+        jobs = 1  # the low-memory profile: an instruction, like an explicit -j1
     effective, clamped_from, budget = resolve_release_worker_count(
         jobs, depth=depth, header_roots=header_roots
     )

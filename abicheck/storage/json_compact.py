@@ -57,7 +57,15 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO
 
-__all__ = ["CompactedAst", "compact_json_stream", "compacted_ast"]
+from .cache_integrity import entry_intact, record_digest
+
+__all__ = [
+    "CompactedAst",
+    "compact_json_stream",
+    "compacted_ast",
+    "migrate_legacy_entry",
+    "open_cached_entry",
+]
 
 _NON_ASCII = re.compile(r"[^\x00-\x7f]")
 
@@ -77,7 +85,10 @@ def _compact(block: bytes) -> bytes:
     # so its leading and trailing whitespace is always insignificant. The
     # space clang writes after each key's colon is kept: removing it safely
     # needs a tokenizer, measured at 2-5x this cost for ~4% more saving.
-    out = b"".join(line.strip(b" \t\r") for line in block.split(b"\n"))
+    # Default `bytes.strip` also drops \v/\f, which JSON forbids outside
+    # strings and which cannot sit at a line edge inside one; `map` over the
+    # method measured 1.29x faster than the equivalent generator.
+    out = b"".join(map(bytes.strip, block.split(b"\n")))
     if out.isascii():
         return out
     # Non-ASCII bytes can only sit inside strings; the block is a run of
@@ -142,12 +153,14 @@ class CompactedAst:
         if self._compact is not None and self._compact.parent == cached.parent:
             os.replace(self._compact, cached)
             self._compact = None
+            record_digest(cached)
             return
         fd, tmp = tempfile.mkstemp(dir=str(cached.parent), prefix=f".{cached.name}.")
         try:
             with os.fdopen(fd, "wb") as out, self.path.open("rb") as inp:
                 shutil.copyfileobj(inp, out)
             os.replace(tmp, cached)
+            record_digest(cached)
         except OSError:
             Path(tmp).unlink(missing_ok=True)
             raise
@@ -181,3 +194,57 @@ def compacted_ast(source: Path, work_dir: Path | None) -> Iterator[CompactedAst]
     finally:
         if doc._compact is not None:
             doc._compact.unlink(missing_ok=True)
+
+
+_SNIFF = 64 << 10
+
+
+def migrate_legacy_entry(path: Path) -> bool:
+    """Rewrite a pretty-printed cache entry at *path* into compact form, in place.
+
+    Entries written before compaction-at-store landed stay pretty-printed
+    forever otherwise -- measured at ~70% whitespace and, when one non-ASCII
+    character is present, decoded at 2 bytes per character: roughly half of
+    the clang backend's peak RSS on a warm run. Compact output never holds a
+    line feed (every one is stripped), so a line feed in the first
+    ``_SNIFF`` bytes identifies a legacy entry; a compact entry costs one
+    small read. The rewrite is atomic (temp file + ``os.replace`` in the same
+    directory), so a concurrent reader sees the old or the new document,
+    both the same JSON value. Returns whether the entry was rewritten; any
+    failure leaves the entry untouched -- migration is an optimization.
+    """
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(_SNIFF)
+    except OSError:
+        return False
+    if b"\n" not in head:
+        return False
+    tmp: Path | None = None
+    try:
+        fd, name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+        tmp = Path(name)
+        with os.fdopen(fd, "wb") as dst, path.open("rb") as src:
+            compact_json_stream(src, dst)
+        os.replace(tmp, path)
+    except (OSError, UnicodeDecodeError):
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+        return False
+    # The old sidecar (if any) described the pretty bytes.
+    record_digest(path)
+    return True
+
+
+def open_cached_entry(path: Path) -> bool:
+    """Ready the AST cache entry at *path* for reading.
+
+    ``False`` (the entry evicted) when it fails its content digest, else
+    ``True`` with a pre-compaction pretty entry migrated in place. The order
+    is the point: migration re-records the digest, so migrating first would
+    launder an edited entry into a "valid" one.
+    """
+    if not entry_intact(path):
+        return False
+    migrate_legacy_entry(path)
+    return True

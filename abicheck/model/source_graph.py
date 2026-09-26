@@ -52,6 +52,7 @@ from .graph_facts import (
     VIRTUAL_DISPATCH_NODE_KINDS,
     GraphEdge,
     GraphNode,
+    SharedGraphValues,
     _normalize_graph_identity,
     _normalize_if_decl_or_type,
     ensure_facts_and_resolve,
@@ -297,6 +298,7 @@ class SourceGraphSummary:
         self._edge_keys: set[tuple[str, str, str, str]] = set()
         self._node_by_id: dict[str, GraphNode] = {}
         self._edge_by_key: dict[tuple[str, str, str, str], GraphEdge] = {}
+        self._shared = SharedGraphValues()
         for n in seeded_nodes:
             self.add_node(n)
         for e in seeded_edges:
@@ -331,6 +333,7 @@ class SourceGraphSummary:
         node.id = self.resolve_node_id(_normalize_if_decl_or_type(node.id))
         if node.id not in self._node_ids:
             ensure_facts_and_resolve(node)
+            self._shared.share(node)
             self.nodes.append(node)
             self._node_ids.add(node.id)
             self._node_by_id[node.id] = node
@@ -358,6 +361,7 @@ class SourceGraphSummary:
         ensure_facts_and_resolve(edge)
         rkey = edge.relation_key()
         if rkey not in self._edge_keys:
+            self._shared.share(edge)
             self.edges.append(edge)
             self._edge_keys.add(rkey)
             self._edge_by_key[rkey] = edge
