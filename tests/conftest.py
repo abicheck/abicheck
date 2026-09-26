@@ -11,6 +11,7 @@ import sys
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -54,15 +55,46 @@ def _hypothesis_profile_for_mutmut() -> None:
     settings.register_profile(
         "mutmut",
         deadline=None,
-        suppress_health_check=[
-            HealthCheck.too_slow,
-            HealthCheck.differing_executors,
-        ],
+        suppress_health_check=[getattr(HealthCheck, n) for n in _MUTMUT_SUPPRESSED],
     )
     settings.load_profile("mutmut")
 
 
+# The health checks mutmut's driver trips for reasons unrelated to the
+# property under test (see `_hypothesis_profile_for_mutmut`).
+_MUTMUT_SUPPRESSED = ("too_slow", "differing_executors")
+
 _hypothesis_profile_for_mutmut()
+
+
+def _widen_settings_for_mutmut(test_settings: Any) -> Any:
+    """`test_settings` plus the mutmut relaxations, keeping everything else.
+
+    A profile alone does not reach every test: a test's own
+    `@settings(suppress_health_check=[...])` *replaces* the profile's list
+    rather than extending it, so a test suppressing only `too_slow` silently
+    re-enabled `differing_executors` under mutmut and aborted the lane's clean
+    run. Merging per test closes that for every such test at once.
+    """
+    from hypothesis import HealthCheck, settings
+
+    extra = {getattr(HealthCheck, n) for n in _MUTMUT_SUPPRESSED}
+    merged = set(test_settings.suppress_health_check) | extra
+    return settings(
+        test_settings,
+        deadline=None,
+        suppress_health_check=sorted(merged, key=lambda hc: hc.value),
+    )
+
+
+def _apply_mutmut_hypothesis_settings(items: list) -> None:
+    if "MUTANT_UNDER_TEST" not in os.environ:
+        return
+    for item in items:
+        fn = getattr(item, "function", None)
+        current = getattr(fn, "_hypothesis_internal_use_settings", None)
+        if current is not None:
+            fn._hypothesis_internal_use_settings = _widen_settings_for_mutmut(current)
 
 
 _SNAPSHOT_CACHE_BUCKETS: dict[Path, Path] = {}
@@ -626,6 +658,8 @@ _MARKER_REQUIRED_TOOL: dict[str, str] = {
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
+    _apply_mutmut_hypothesis_settings(items)
+
     reason = _integration_skip_reason()
     if reason:
         skip = pytest.mark.skip(reason=reason)
