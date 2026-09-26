@@ -862,7 +862,6 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "platform": ("elf", "pe", "macho"),
             "operand": ("live", "stored", "pre_v46_stored"),
         },
-        },
     ),
     BugClass(
         id="identity.release_edge_keyed_on_side_summary",
