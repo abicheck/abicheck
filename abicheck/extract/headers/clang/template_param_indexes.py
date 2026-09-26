@@ -42,6 +42,7 @@ from .templates import (
     _index_template_param_defaults,
     _index_template_param_kinds,
     _index_template_param_names,
+    class_template_decls,
 )
 
 #: One position's worth of template-parameter metadata, as the three indexes
@@ -108,7 +109,7 @@ def build_template_param_indexes(root: dict[str, Any]) -> TemplateParamIndexes:
     """Build all three template-parameter indexes of *root* in one call.
 
     A thin composition of the three existing builders, deliberately *not* a
-    fused single traversal: each one carries its own hard-won registration
+    fused single registration pass: each one carries its own hard-won registration
     semantics (``_register_template_param_metadata``'s ``previousDecl``
     merge, and ``_index_template_param_defaults``'s dependent-default
     translation through the names index, which is why it consumes the names
@@ -117,13 +118,14 @@ def build_template_param_indexes(root: dict[str, Any]) -> TemplateParamIndexes:
     often* they run, never what they answer.
     """
 
-    names = _index_template_param_names(root)
+    # One whole-document traversal; each index replays its own registration
+    # over the collected declarations (see `class_template_decls`).
+    decls = class_template_decls(root)
+    names = _index_template_param_names(root, decls)
     return TemplateParamIndexes(
-        kinds=_freeze_template_param_index(_index_template_param_kinds(root)),
-        # Handed the names index rather than rebuilding it internally: that
-        # rebuild was the fourth whole-document walk per root.
+        kinds=_freeze_template_param_index(_index_template_param_kinds(root, decls)),
         defaults=_freeze_template_param_index(
-            _index_template_param_defaults(root, names)
+            _index_template_param_defaults(root, names, decls)
         ),
         names=_freeze_template_param_index(names),
     )

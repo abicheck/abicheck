@@ -54,7 +54,7 @@ from .identity import EntityId, _packed
 __all__ = ["OccurrenceId", "canonical_key"]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class OccurrenceId:
     """An :class:`EntityId` plus a disambiguator for the rare same-identity,
     distinct-declaration case (see module docstring). ``disambiguator`` is

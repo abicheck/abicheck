@@ -22,6 +22,7 @@ redesign).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,6 +52,12 @@ from .fact_codec import (
 )
 
 
+def _interned(value: Any) -> Any:
+    """*value* interned when it is a string: a declaring header is shared by
+    many declarations, and each decoded record otherwise holds its own copy."""
+    return sys.intern(value) if isinstance(value, str) else value
+
+
 def _scope_origin_or_unknown(raw: Any) -> ScopeOrigin:
     """Deserialize a ScopeOrigin, defaulting unknown/invalid values to UNKNOWN.
 
@@ -70,7 +77,7 @@ def _enum_type_from_dict(e: dict[str, Any], schema_version: int) -> EnumType:
         ],
         underlying_type=e.get("underlying_type", "int"),
         source_location=e.get("source_location"),
-        source_header=e.get("source_header"),
+        source_header=_interned(e.get("source_header")),
         origin=_scope_origin_or_unknown(e.get("origin")),
         is_scoped=e.get("is_scoped"),
         deprecated=e.get("deprecated"),
@@ -161,7 +168,7 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
             # for non-friends) loads as None.
             hidden_friend_owner=f.get("hidden_friend_owner"),
             # Provenance (v6) — missing on older snapshots → None / UNKNOWN.
-            source_header=f.get("source_header"),
+            source_header=_interned(f.get("source_header")),
             origin=_scope_origin_or_unknown(f.get("origin")),
             # Tri-state language-contract fields (coverage extension) —
             # missing keys on older snapshots load as None and suppress the
@@ -190,7 +197,7 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
             elf_visibility=ElfVisibility(v["elf_visibility"])
             if v.get("elf_visibility")
             else None,
-            source_header=v.get("source_header"),
+            source_header=_interned(v.get("source_header")),
             origin=_scope_origin_or_unknown(v.get("origin")),
             alignment_bits=v.get("alignment_bits"),
             deprecated=v.get("deprecated"),
@@ -240,7 +247,7 @@ def decode_declarations(d: dict[str, Any], schema_version: int) -> DecodedDeclar
             has_anonymous_aggregate_fields=t.get(
                 "has_anonymous_aggregate_fields", False
             ),
-            source_header=t.get("source_header"),
+            source_header=_interned(t.get("source_header")),
             origin=_scope_origin_or_unknown(t.get("origin")),
             # Fine-grained layout descriptor (layout-closure work); all
             # optional/tri-state, absent on snapshots predating these fields.

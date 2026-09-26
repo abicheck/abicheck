@@ -93,7 +93,10 @@ _NORMALIZED_DESTS: dict[str, tuple[str, ...]] = {
 
 #: The raw names themselves, consumed before dispatch. Accounted for only
 #: because :data:`_NORMALIZED_DESTS` accounts for what each becomes.
-_CONSUMED_UPSTREAM = frozenset(_NORMALIZED_DESTS) | {"view"}
+#: ``performance_profile`` is popped by ``compare_cmd`` and entered as an
+#: ambient scope held for the whole command, so the audit runs under it too
+#: (asserted by ``test_performance_profile_is_consumed_before_dispatch``).
+_CONSUMED_UPSTREAM = frozenset(_NORMALIZED_DESTS) | {"view", "performance_profile"}
 
 #: Click-level parameters that belong to no command body.
 _CLICK_LEVEL = frozenset({"help", "help_all"})
@@ -363,3 +366,16 @@ def test_every_context_stashed_option_is_really_rejected(
         f"(exit {result.exit_code}); it must be wired or be a usage error"
     )
     assert spelling in result.output
+
+
+def test_performance_profile_is_consumed_before_dispatch() -> None:
+    """The ``_CONSUMED_UPSTREAM`` claim above, checked against the source:
+    ``compare_cmd`` pops it and enters the scope before either dispatch."""
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "abicheck/frontends/cli/commands/compare.py"
+    ).read_text(encoding="utf-8")
+    enter = source.index(
+        'enter_performance_profile(ctx, kwargs.pop("performance_profile"'
+    )
+    assert enter < source.index("maybe_dispatch_no_baseline_compare(ctx, kwargs)")

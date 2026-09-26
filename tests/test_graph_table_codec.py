@@ -251,8 +251,29 @@ class TestDirectDecoder:
         owner: dict[int, int] = {}
         for index, entity in enumerate([*decoded.nodes, *decoded.edges]):
             for fact in entity.facts:
-                for obj in (fact, *_containers(fact.attrs)):
+                # A flat top-level attrs dict may be shared (nothing mutates
+                # one: identity normalization is copy-on-write); the fact
+                # itself and any nested container stay per-entity.
+                nested = [c for c in _containers(fact.attrs) if c is not fact.attrs]
+                for obj in (fact, *nested):
                     assert owner.setdefault(id(obj), index) == index
+
+    def test_normalizing_one_entity_never_changes_a_sibling_sharing_its_row(
+        self,
+    ) -> None:
+        """Must-not-merge for the shared attrs dict: a decl node's identity
+        normalization (which rewrites a checkout-dependent `name`) must not
+        reach a non-decl node citing the same interned fact row."""
+        raw = "(lambda at /w/old/a.h:4:37)"
+        g = SourceGraphSummary()
+        g.add_node(GraphNode(id="header://h", kind="header", attrs={"name": raw}))
+        g.add_node(GraphNode(id="decl://x", kind="function", attrs={"name": raw}))
+        payload = _through_storage(encode_graph_table(g.finalize()))
+        decoded = {n.id: n for n in decode_graph_table(payload).nodes}
+        assert decoded["header://h"].facts[0].attrs["name"] == raw
+        assert decoded["header://h"].attrs["name"] == raw
+        assert decoded["decl://x"].facts[0].attrs["name"] != raw
+        assert "/w/old" not in decoded["decl://x"].attrs["name"]
 
     def test_one_interned_fact_across_many_entities(self) -> None:
         g = SourceGraphSummary()

@@ -94,6 +94,7 @@ STR_SUBKEYS: dict[str, frozenset[str]] = {
         {"preset", "abi_breaking", "potential_breaking", "quality_issues", "addition"}
     ),
     "scope": frozenset({"on_incomplete"}),
+    "performance": frozenset({"profile"}),
     "source": frozenset({"method"}),
     "compile": frozenset(
         {"frontend", "std", "sysroot", "compiler", "frontend_context", "lang"}
@@ -265,3 +266,26 @@ def parse_policy_overrides(policy_block: dict[str, object]) -> dict[str, str]:
     this is folded into a `PolicyFile` for the run)."""
     raw = policy_block.get("overrides")
     return dict(raw) if isinstance(raw, dict) else {}
+
+
+def parse_performance_profile_key(top: dict[str, object]) -> str | None:
+    """``performance.profile`` as its canonical spelling, ``None`` if unset.
+
+    An unknown value is a ``ValueError`` naming the valid ones (the same
+    load-time failure every other enumerated ``.abicheck.yml`` key gives).
+    Lives here, not ``build_config.py``, which is at its line-count cap."""
+    from ..model.performance import parse_performance_profile
+
+    block = top.get("performance")
+    raw = block.get("profile") if isinstance(block, dict) else None
+    if raw is None:
+        return None
+    try:
+        return parse_performance_profile(str(raw)).value
+    except ValueError as exc:
+        raise ValueError(f"performance.profile: {exc}") from None
+
+
+def performance_block(profile: str | None) -> dict[str, object]:
+    """``BuildConfig.to_dict``'s ``performance:`` block (empty when unset)."""
+    return {} if profile is None else {"profile": profile}

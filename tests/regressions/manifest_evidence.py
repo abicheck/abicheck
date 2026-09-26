@@ -833,6 +833,38 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="evidence.unread_producer_read_as_confirmed_absence",
+        invariant=(
+            "A negative answer -- not exported, not declared, not covered, "
+            "not provided -- is recorded as confirmed only when the producer "
+            "that would have observed the positive actually read its input. "
+            "A missing, empty-because-unparsed, failed or not-run source "
+            "answers 'unknown' (NOT_COLLECTED/FAILED), and every reader that "
+            "turns absence into a finding (a removal, a visibility loss, a "
+            "missing export, a dropped type) must see that unknown. The "
+            "defect shape: a producer that consulted a table records "
+            "PRESENT(False) for every miss because 'a binary was supplied', "
+            "while the table itself came back empty from a parse that "
+            "collapses failure into an empty result."
+        ),
+        fixed_by=(1384,),
+        seed_tests=("tests/test_export_table_read_absence.py",),
+        public_surfaces=("cli",),
+        axes={
+            "read_state": (
+                "binary_absent",
+                "unreadable",
+                "empty_table",
+                "read_without",
+                "read_with",
+            ),
+            "producer": ("castxml", "clang", "dwarf"),
+            "platform": ("elf", "pe", "macho"),
+            "operand": ("live", "stored", "pre_v46_stored"),
+        },
+        },
+    ),
+    BugClass(
         id="identity.release_edge_keyed_on_side_summary",
         invariant=(
             "A release relation edge that names a per-artifact node is keyed "

@@ -58,7 +58,9 @@ from .build_config_schema import (
     TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
     deployment_findings as _deployment_type_findings,
     opt_int as _opt_int,
+    parse_performance_profile_key as _parse_performance_profile_key,
     parse_policy_overrides as _parse_policy_overrides,
+    performance_block as _performance_block,
     subkey_findings as _subkey_type_findings,
 )
 from .build_config_scope import (
@@ -350,6 +352,8 @@ class BuildConfig:
     release_support_promise: str | None = None
     #: ``resource_limits:`` — Phase 7g: former ``--max-json-object-nodes``.
     resource_limits_max_bundle_facts_decode_nodes: int | None = None
+    #: ``performance.profile`` -- the memory/speed trade-off (``None`` = unset).
+    performance_profile: str | None = None
     #: ``assurance:`` — rulings.py deferred-option followup: the former
     #: ``compare --require-complete-analysis`` (P0.4's orthogonal assurance
     #: floor: fail the build when ``analysis_assurance.status`` is not
@@ -400,6 +404,7 @@ class BuildConfig:
             "gate",
             "release",
             "resource_limits",
+            "performance",
             "assurance",
             "version",
             "risk_rules",
@@ -474,6 +479,7 @@ class BuildConfig:
         "gate": frozenset({"fail_on_removed_library"}),
         "release": frozenset({"dso_only", "include_private_dso", "support_promise"}),
         "resource_limits": frozenset({"max_bundle_facts_decode_nodes"}),  # Phase 7g
+        "performance": frozenset({"profile"}),
         "policy": frozenset({"overrides"}),  # ADR-068 §3 #23
         # rulings.py deferred-option followup: former --require-complete-analysis.
         "assurance": frozenset({"require_complete"}),
@@ -698,6 +704,7 @@ class BuildConfig:
                 resource_limits, "max_bundle_facts_decode_nodes"
             ),
             assurance_require_complete=_opt_bool(assurance, "require_complete"),
+            performance_profile=_parse_performance_profile_key(top),
             version=(
                 version_raw
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
@@ -883,6 +890,7 @@ class BuildConfig:
                 else {},
             ),
             ("assurance", self._assurance_block()),
+            ("performance", _performance_block(self.performance_profile)),
             (
                 "deployment",
                 EnvironmentMatrix.dump_or_empty(self.deployment),

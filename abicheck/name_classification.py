@@ -46,6 +46,7 @@ checks and is left as a follow-up.
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Callable
 from typing import ClassVar
@@ -668,6 +669,10 @@ def _quoted_spans(name: str) -> list[tuple[int, int]]:
     return spans
 
 
+# Pure str -> str, called ~1.5M times over ~90k distinct spellings on a
+# oneDAL-scale snapshot load; bounded so a long-lived process cannot grow it
+# without limit.
+@functools.lru_cache(maxsize=1 << 18)
 def strip_anonymous_type_location(name: str) -> str:
     """Strip the checkout-dependent *directory* out of an embedded ``at
     <path>:<line>:<col>`` in an anonymous-tag or lambda-closure type
