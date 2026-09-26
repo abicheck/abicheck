@@ -842,7 +842,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "scalar path's own findings, never the member path's forwarded "
             "argument list."
         ),
-        fixed_by=(),
+        fixed_by=(1391,),
         seed_tests=("tests/test_release_lang_explicit.py",),
         axes={
             "field": ("lang_explicit",),
