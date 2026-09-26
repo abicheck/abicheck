@@ -842,7 +842,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "producer call sites is exhaustive and executable, so a new entry "
             "point is classified before it ships."
         ),
-        fixed_by=(),
+        fixed_by=(1393,),
         seed_tests=("tests/test_ownership_entry_points.py",),
         axes={
             "entry_point": (
