@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Literal
 
@@ -1198,7 +1199,7 @@ def _find_cpp20_requirements(
     for path, content in per_file:
         hits = _SCAN_MEMO.get_or_compute(
             (str(path), content_digest(content), shadows),
-            lambda: _scan_header_for_requirements(path, content, shadows),  # noqa: B023
+            partial(_scan_header_for_requirements, path, content, shadows),
         )
         found.extend(hits)
     return found
