@@ -95,3 +95,33 @@ def test_every_edge_names_its_own_members_platform(
     members: dict[str, tuple[str, set[str]]],
 ) -> None:
     assert _edges(members) == _expected(members)
+
+
+def test_member_with_names_but_no_recorded_kind_falls_back_to_side_platform() -> None:
+    # A compact projection with names but no export_platform (e.g. stored
+    # evidence written before the kind was recorded) has no per-member entry;
+    # its edges key on the side-wide platform, which here is the other
+    # member's single kind -- never "mixed", never an empty platform.
+    index = build_bundle_export_index(
+        "new",
+        {
+            "libkind.so": _member("elf", {"a"}),
+            "libbare.so": SimpleNamespace(
+                export_names=frozenset({"b"}), export_platform=None
+            ),
+        },
+    )
+    assert dict(index.member_platforms) == {"libkind.so": "elf"}
+    assert index.platform == "elf"
+    assert set(provider_relations(index).edges()) == {
+        (
+            binary_symbol_node_id("elf", "a"),
+            "release_member://libkind.so",
+            EDGE_KIND_PROVIDED_BY,
+        ),
+        (
+            binary_symbol_node_id("elf", "b"),
+            "release_member://libbare.so",
+            EDGE_KIND_PROVIDED_BY,
+        ),
+    }
