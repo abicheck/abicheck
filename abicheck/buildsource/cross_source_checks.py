@@ -228,6 +228,14 @@ class CrosscheckResult:
         }
 
 
+#: Appended to a check's coverage detail when the snapshot recorded no
+#: ownership (ADR-075 D2): its obligations then rest on `ScopeOrigin` alone.
+OWNERSHIP_UNRECORDED_NOTE = (
+    " (ownership unknown: no extraction scope recorded, so obligations rest "
+    "on header provenance only)"
+)
+
+
 def run_crosschecks(
     snapshot: AbiSnapshot, config: CrosscheckConfig | None = None
 ) -> CrosscheckResult:
@@ -547,6 +555,10 @@ def _check_public_not_exported(
         f"public headers ↔ binary exports: {len(findings)} declaration(s) with an "
         "export obligation the binary does not satisfy"
     )
+    if getattr(snapshot, "extraction_scope", None) is None:
+        # ADR-075 D2: no recorded ownership (a pre-v52 baseline) -- the
+        # obligation rests on header provenance alone, a weaker tier.
+        detail += OWNERSHIP_UNRECORDED_NOTE
     return _CheckOutput(findings, "present", detail, providers)
 
 
