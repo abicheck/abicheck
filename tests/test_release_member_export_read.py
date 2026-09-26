@@ -90,17 +90,7 @@ def test_oracle_is_not_constant() -> None:
 
 @pytest.mark.parametrize(
     ("platform", "state", "compact"),
-    [
-        pytest.param(
-            p,
-            st,
-            c,
-            marks=pytest.mark.xfail(strict=True, reason="gap A4")
-            if st == "unparsed"
-            else (),
-        )
-        for p, st, c in itertools.product(("elf", "pe", "macho"), STATES, (False, True))
-    ],
+    list(itertools.product(("elf", "pe", "macho"), STATES, (False, True))),
 )
 def test_unread_member_leaves_obligations_unresolved(
     platform: str, state: str, compact: bool
@@ -129,3 +119,32 @@ def test_unread_member_leaves_obligations_unresolved(
     assert side.coverage_complete is (EXPECT[state] != "unresolved")
     # The member that was read is never demoted by its neighbour.
     assert "api_a" in side.satisfied
+
+
+@pytest.mark.parametrize("state", ["unparsed", "parsed_empty"])
+def test_rendered_release_section_says_unresolved_not_missing(state: str) -> None:
+    """Through the report's own compute/render pair: an unread member
+    produces no missing-export finding and names the coverage gap."""
+    from abicheck.policy.release_contract_reconciliation import reconcile_release
+    from abicheck.report.release_public_surface import (
+        compute_release_public_surface,
+        render_release_public_surface_markdown,
+    )
+
+    surface = ReleasePublicSurface(
+        acquisition_key="k",
+        side="new",
+        obligations=(
+            PublicObligation(symbol="api_b", name="api_b", entity="function"),
+        ),
+        declared_symbols=frozenset({"api_b"}),
+    )
+    index = build_bundle_export_index("new", _members("elf", state, compact=True))
+    rec = reconcile_release(surface, index)
+    md = render_release_public_surface_markdown(compute_release_public_surface(rec))
+    missing = [c for c in rec.findings if "api_b" in (c.symbol or "")]
+    if state == "unparsed":
+        assert not missing, missing
+        assert "libb" in md
+    else:
+        assert missing

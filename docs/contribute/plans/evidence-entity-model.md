@@ -683,8 +683,15 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
   `PRESENT:False`, 4,265 `NOT_COLLECTED` per side on both; the same 5,078
   findings; dump 67.3/68.9 s -> 69.6/68.2 s at ~874 MiB, compare 71.6 ->
   72.1 s (noise). Its table is read, so nothing is withdrawn.
-- `compare/bundle_export_index.member_export_names` still counts a member
-  with an unparsed block as complete (release-surface owner).
+- **A4, unread release member — fixed (PR A4).**
+  `bundle_export_index.member_export_names` and the compact
+  `BundleSignatureEvidence.export_names` projection now read through
+  `model.export_index.read_default_export_names`: a default or parse-failed
+  block is `None` (unread), so the member lands in
+  `members_without_exports`, coverage goes incomplete and its obligations are
+  `unresolved`, never `missing`. A parsed empty table stays complete.
+  Tested over platform × read state × full/compact evidence, and through the
+  release section's compute/render pair.
 - L5: `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_DECLARES`,
   `TARGET_HAS_PUBLIC_HEADER`, `TARGET_DEPENDS_ON` and
   `BUILD_OPTION_AFFECTS_SYMBOL` producers stamp no coverage flag, so the

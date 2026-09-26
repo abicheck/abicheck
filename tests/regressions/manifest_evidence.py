@@ -852,6 +852,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_export_table_read_absence.py",
             "tests/test_export_transition_old_side_read.py",
             "tests/test_header_parse_coverage.py",
+            "tests/test_release_member_export_read.py",
         ),
         public_surfaces=("cli",),
         axes={
