@@ -93,7 +93,12 @@ def record_digest(entry: Path, digest: str | None = None) -> None:
         # would evict a valid entry on its next read. No sidecar at all is
         # read as "unrecorded" and trusted on first use instead.
         log.debug("could not record digest for %s: %s", entry, exc)
-        sidecar_path(entry).unlink(missing_ok=True)
+        try:
+            sidecar_path(entry).unlink(missing_ok=True)
+        except OSError as cleanup_exc:
+            # A read-only cache: recording is an optimization, never a
+            # reason to fail the load that asked for it.
+            log.debug("could not drop stale digest for %s: %s", entry, cleanup_exc)
 
 
 def verify_entry(entry: Path) -> bool | None:

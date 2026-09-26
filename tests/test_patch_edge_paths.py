@@ -131,3 +131,17 @@ def test_truncated_result_transfer_is_a_snapshot_error(monkeypatch):
     with pytest.raises(SnapshotError, match="transfer failed"):
         run_isolated([lambda: 1, lambda: 2], concurrent=True)
     assert multiprocessing.active_children() == []
+
+
+def test_record_digest_survives_a_read_only_sidecar(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    entry = tmp_path / "e.json"
+    entry.write_text("{}")
+
+    def refuse(*_a, **_k):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(ci.tempfile, "mkstemp", refuse)
+    monkeypatch.setattr(Path, "unlink", refuse)
+    ci.record_digest(entry)  # must not raise
