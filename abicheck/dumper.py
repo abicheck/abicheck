@@ -171,6 +171,7 @@ from .extract.export_symbol_identity import (
     itanium_export_variable as _itanium_export_variable,
     msvc_export_function as _msvc_export_function,
 )
+from .extract.export_table_read import finish_binary_snapshot
 from .extract.header_ast_backend import (
     HEADER_BACKENDS as HEADER_BACKENDS,
     _is_hybrid_request,
@@ -184,7 +185,6 @@ from .extract.headers.clang.locations import materialize_locations
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
-from .storage import closure_identity
 from .storage.cache_integrity import record_digest
 
 log = logging.getLogger(__name__)
@@ -1694,7 +1694,7 @@ def _dump_elf(
         ),
     )
     _populate_elf_visibility(snapshot)
-    return closure_identity.renumber_anonymous_closure_identities(snapshot)
+    return finish_binary_snapshot(snapshot)
 
 
 def _dump_macho(
@@ -1830,7 +1830,7 @@ def _dump_macho(
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
-    return closure_identity.renumber_anonymous_closure_identities(
+    return finish_binary_snapshot(
         AbiSnapshot(
             library=dylib_path.name,
             version=version,
@@ -1968,7 +1968,7 @@ def _dump_pe(
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
-    return closure_identity.renumber_anonymous_closure_identities(
+    return finish_binary_snapshot(
         AbiSnapshot(
             library=dll_path.name,
             version=version,

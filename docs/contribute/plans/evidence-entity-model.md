@@ -662,12 +662,27 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
 ### Remaining documented gaps
 
 - The structor placeholder gap above (export join; Phase 2 gaps owner).
-- `extract/surface_fact_producers` records `binary_exported_fact =
-  present(False)` whenever a binary was supplied, even if its export set came
-  back empty; `is_export_confirmed_absent` readers (`depth_projection`,
-  `diff_symbols`, `export_transition`) inherit that. Also a pre-v46
-  `Visibility.HIDDEN` reads as `PARTIAL(False)`. Owned by the Phase 2 gaps
-  work (producer side).
+- **A1, export fact decided from the read — fixed
+  ([#1384](https://github.com/abicheck/abicheck/pull/1384)).** `extract/surface_fact_producers` recorded
+  `binary_exported_fact = present(False)` whenever a binary was supplied,
+  even if its export set came back empty. The builders' shared tail
+  (`extract/export_table_read.finish_binary_snapshot`) and snapshot load now
+  apply one rule, `model.export_index.snapshot_export_table_state`, which is
+  `edge_query`'s own `exports` coverage rule moved to `model/` (a table is
+  read when it holds an entry or its header fields show a parse). An unread
+  (default or parse-failed) block makes every miss `FAILED`; a parsed binary
+  exporting nothing stays a confirmed empty table, exactly as the coverage
+  record already said. A pre-v46 `Visibility.HIDDEN` keeps its
+  `PARTIAL(False)` reading when the table was read (it was assigned from a
+  lookup against that table) and becomes `FAILED` when it was not; a stored
+  baseline is reconciled on load, so live and stored operands agree. No
+  finding moved on the FP corpus, the tier-accuracy corpus (both JSON
+  reports byte-identical to base) or the goldens. oneDAL
+  (`libonedal_core.so.3`, `graph` variant, one run, base e2baed5 vs this
+  fix): `binary_exported_fact` 2,494/2,495 `PRESENT:True`, 7,422
+  `PRESENT:False`, 4,265 `NOT_COLLECTED` per side on both; the same 5,078
+  findings; dump 67.3/68.9 s -> 69.6/68.2 s at ~874 MiB, compare 71.6 ->
+  72.1 s (noise). Its table is read, so nothing is withdrawn.
 - `compare/bundle_export_index.member_export_names` still counts a member
   with an unparsed block as complete (release-surface owner).
 - L5: `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_DECLARES`,
