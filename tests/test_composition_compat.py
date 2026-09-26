@@ -360,7 +360,10 @@ class TestPeOrdinalRetargeted:
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
                 _FakePeMeta([PeExport(name="Foo", ordinal=17)]),
             ]
-            mock_run_dump.side_effect = [object(), object()]
+            mock_run_dump.side_effect = [
+                AbiSnapshot(library="foo.dll", version="old"),
+                AbiSnapshot(library="foo.dll", version="new"),
+            ]
             change = Change(
                 kind=ChangeKind.FUNC_PARAMS_CHANGED,
                 symbol="Foo",

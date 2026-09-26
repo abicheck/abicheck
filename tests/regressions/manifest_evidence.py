@@ -869,4 +869,45 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "operand": ("live", "stored", "pre_v46_stored"),
         },
     ),
+    BugClass(
+        id="evidence.entry_point_skips_extraction_record",
+        invariant=(
+            "Every production path that returns a freshly extracted header "
+            "snapshot records its ownership (ADR-075 D1/D2) before any reader "
+            "sees it, and a snapshot that never recorded one reads unknown -- "
+            "never an owner guessed from ScopeOrigin. The inventory of "
+            "producer call sites is exhaustive and executable, so a new entry "
+            "point is classified before it ships."
+        ),
+        fixed_by=(1393,),
+        seed_tests=("tests/test_ownership_entry_points.py",),
+        axes={
+            "entry_point": (
+                "resolve_input",
+                "release_surface",
+                "header_only_dump",
+                "compat_dump",
+                "compat_check",
+                "appcompat",
+                "stored_pre_v52",
+            ),
+        },
+    ),
+    BugClass(
+        id="cardinality.member_request_drops_scalar_field",
+        invariant=(
+            "Every request field the scalar compare path honours reaches each "
+            "member comparison of a release fan-out unchanged: a one-member "
+            "release and the scalar comparison of the same two libraries "
+            "under the same request yield the same findings. Oracle: the "
+            "scalar path's own findings, never the member path's forwarded "
+            "argument list."
+        ),
+        fixed_by=(1391,),
+        seed_tests=("tests/test_release_lang_explicit.py",),
+        axes={
+            "field": ("lang_explicit",),
+            "cardinality": ("scalar", "one_member_release"),
+        },
+    ),
 )

@@ -366,3 +366,22 @@ def record_descriptor_skips(
         achieved_exclusion_patterns(rules, headers),
         matching=DESCRIPTOR_MATCHING,
     )
+
+
+def finish_live_compat_dump(
+    snapshot: AbiSnapshot,
+    rules: Sequence[HeaderSkipRule],
+    quiet: bool,
+    header_universe: Sequence[Path],
+    parsed_headers: Sequence[Path],
+) -> AbiSnapshot:
+    """Everything a snapshot this ``compat`` run *extracted* owes before use:
+    its achieved descriptor narrowing (:func:`record_descriptor_skips`) and
+    its ownership record (ADR-075 D1/D2), which every other front end stamps
+    through ``resolve_input``. One function for both live dump sites, so
+    neither can do one step and forget the other."""
+    from ..workflows.ownership_request import classify_extracted
+
+    snapshot = record_descriptor_skips(snapshot, rules, quiet, header_universe)
+    classify_extracted(snapshot, None, parsed_headers, None)
+    return snapshot

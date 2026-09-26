@@ -206,6 +206,13 @@ def execute_header_only_dump_request(
         [*resolved.public_header_dirs, *manifest_dirs],
         include_search_dirs=list(side.includes),
     )
+    # ADR-075 D1/D2: a snapshot this run extracted records its ownership,
+    # like every `resolve_input` operand and the release surface.
+    from ..ownership_request import classify_extracted
+
+    classify_extracted(
+        snap, None, headers, [*resolved.public_header_dirs, *manifest_dirs]
+    )
 
     enforce_requested_depth(resolved.requested_depth, (("input", snap),))
     try:

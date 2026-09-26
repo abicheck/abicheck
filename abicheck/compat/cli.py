@@ -95,7 +95,7 @@ from .run_inputs import (
     _emit_compat_info_notes,
     _load_compat_inputs,
     effective_skip_rules,
-    record_descriptor_skips,
+    finish_live_compat_dump,
     resolve_and_narrow_headers,
 )
 from .xml_report import write_xml_report
@@ -389,8 +389,8 @@ def compat_dump_cmd(
     # call: a snapshot that forgot the patterns it was narrowed under claims
     # a complete surface, and is then compared against a full dump as though
     # the missing declarations had been removed.
-    snap = record_descriptor_skips(
-        snap, skip_rules_for_dump, quiet, dump_header_universe
+    snap = finish_live_compat_dump(
+        snap, skip_rules_for_dump, quiet, dump_header_universe, headers_for_dump
     )
 
     # Override library name to match -lib flag
@@ -1252,7 +1252,7 @@ def _snapshot_from_compat_input(
     # either -- declarations omitted from NEW came back as removals and a
     # breaking verdict (Codex review). Sorted so the record does not depend
     # on set iteration order.
-    snap = record_descriptor_skips(snap, effective_rules, quiet, header_universe)
+    snap = finish_live_compat_dump(snap, effective_rules, quiet, header_universe, hdrs)
     return grant_live_source_licence(snap), desc.version
 
 

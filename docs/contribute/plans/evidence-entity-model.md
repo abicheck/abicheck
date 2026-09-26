@@ -540,19 +540,29 @@ called either a regression or noise.
   every point (964 across both members). Before #1383's ancestor 42cb529 the
   trace carried no `parent_rss_peak_bytes`, so only sampled RSS is
   comparable across the whole bisect.
-- A release's member dumps never receive `lang_explicit` (pre-existing:
-  the fan-out passes only `lang` to `service.run_compare`), so under a stated
-  `compile.lang: c++` each member auto-detects an ambiguous header while the
-  release surface, which now does receive it, parses C++. The contract is
-  right; threading it to the members needs `run_compare` and the pairwise
-  fan-out to carry it (the latter is at its `no_growth` baseline).
+- ~~A release's member dumps never receive `lang_explicit`.~~ **Fixed (B1):**
+  `service.run_compare` takes `lang_explicit` onto its `CompareRequest`, and
+  the pairwise fan-out (its thread-pool runner moved to
+  `workflows/keyed_thread_pool.py` to stay under `no_growth`) and the
+  stranded-member dump forward it. A one-member release now yields the same
+  findings as the scalar pair under `compile.lang: c++`
+  (`tests/test_release_lang_explicit.py`, real g++ fixture where C and C++
+  layout of an empty struct differ).
 - `scope.private_namespaces` narrows the contract but is not merged into
   `policy.internal_namespaces` (ADR-075 D7.1): that key scopes findings,
   which is the retention phase's decision.
-- Ownership is recorded only for snapshots extracted through
-  `resolve_input` and the release surface. A snapshot built by any other
-  entry point, or a stored pre-v52 baseline, has none, so its readers fall
-  back to `ScopeOrigin`.
+- ~~Ownership is recorded only for snapshots extracted through
+  `resolve_input` and the release surface.~~ **Fixed (B2):** the header-only
+  `dump` (and a typed `DumpRequest` with no path), both `compat` live dumps
+  (`compat.run_inputs.finish_live_compat_dump`) and `appcompat`'s dumps now
+  call `classify_extracted`. `tests/test_ownership_entry_points.py`
+  inventories every producer call site in `abicheck/` with how its result is
+  stamped (or why it needs none: binary-only, inner layer, `json.dump`), so a
+  new site fails until classified. A pre-v52 baseline still loads with no
+  scope and every decision unset -- `unknown`, never a guessed owner; the
+  readers' `ScopeOrigin` fallback stays, labelled as the weaker tier in the
+  `public_not_exported` coverage row (`OWNERSHIP_UNRECORDED_NOTE`) and as
+  `no_extraction_scope` on the graph's ownership coverage record.
 - `provided_by` keys a release on one platform; a mixed-platform release
   records `platform="mixed"`, whose node ids join no Phase 2 export node.
 
