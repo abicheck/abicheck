@@ -62,6 +62,12 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 |---|---|
 | `fail_on_removed_library` | bool |
 
+### `performance:`
+
+| Sub-key | Type |
+|---|---|
+| `profile` | str |
+
 ### `policy:`
 
 | Sub-key | Type |

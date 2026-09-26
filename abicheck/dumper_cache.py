@@ -23,9 +23,11 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline
+from .storage import cache_integrity
 from .storage.acyclic_json import gc_paused
 from .storage.ast_size_observer import mark_ast_intake, report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
+from .storage.json_compact import open_cached_entry
 
 log = logging.getLogger(__name__)
 
@@ -672,13 +674,15 @@ def load_cached_ast(
     if not cache_path.exists():
         return None
     deadline.check()
+    if not open_cached_entry(cache_path):
+        return None
     mark_ast_intake("ast.intake:start", backend=backend, source="cache")
     try:
         text = cache_path.read_text(encoding="utf-8")
         with gc_paused():  # a tree has no cycles: storage.acyclic_json
             root = json.loads(text)
     except (ValueError, OSError):
-        cache_path.unlink(missing_ok=True)
+        cache_integrity.evict(cache_path)
         return None
     report_ast_size(len(text))
     mark_ast_intake("ast.intake:done", backend=backend, chars=len(text))
@@ -700,12 +704,14 @@ def read_cached_castxml(cached: Path) -> Element | None:
     :func:`load_cached_ast`; lives here, next to it, rather than in
     ``dumper.py`` (which re-exports it under its historical private name).
     """
+    if not cache_integrity.entry_intact(cached):
+        return None
     try:
         root = DefusedET.parse(str(cached)).getroot()
     except Exception:
         root = None
     if root is None:
-        cached.unlink(missing_ok=True)
+        cache_integrity.evict(cached)
         return None
     return cast("Element", root)
 

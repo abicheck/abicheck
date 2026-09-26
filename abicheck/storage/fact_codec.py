@@ -277,10 +277,12 @@ def decode_fact(
     """
     if not raw:
         return Fact.not_collected() if schema_version >= min_schema_version else None
-    return Fact(
-        status=FactStatus(raw["status"]),
-        value=raw.get("value"),
-        diagnostics=tuple(raw.get("diagnostics") or ()),
+    # `Fact._make` shares one instance per common valueless shape (see its
+    # docstring) -- the decoder is where most snapshot facts are built.
+    return Fact._make(
+        FactStatus(raw["status"]),
+        raw.get("value"),
+        tuple(raw.get("diagnostics") or ()),
         # T9 (duplication-and-convergence-assessment Phase 6 item 4):
         # additive, unversioned field -- a document predating it simply has
         # no "producer" key, and `raw.get(...)` already reads that as
@@ -300,7 +302,7 @@ def decode_fact(
         # legitimate "no attribution recorded" value and is passed through
         # rather than into `provenance_text`, which rejects non-str
         # unconditionally and would raise on this legitimate case.
-        producer=(
+        (
             None
             if raw.get("producer") is None
             else provenance_text(raw["producer"], "fact producer")

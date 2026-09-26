@@ -425,10 +425,10 @@ def _decode_entities(
 
     * each interned fact row is validated and decoded **once** -- a real
       graph has tens of distinct facts across ~10^5 entities -- and every
-      entity still gets its own :class:`GraphFact` and its own ``attrs``
-      dict (a non-scalar value deep-copied, as :meth:`_Reader.attrs` does),
-      since ``ensure_facts_and_resolve`` normalizes a decl/type node's fact
-      attrs in place;
+      entity gets its own :class:`GraphFact` (identity normalization is
+      gated on the entity's kind) but shares the row's ``attrs`` dict when
+      every value is a scalar, since ``_normalize_identity_attrs`` is
+      copy-on-write; a nested value is still deep-copied per entity;
     * an edge is not resolved here: :meth:`SourceGraphSummary.add_edge`
       resolves every edge unconditionally, and ``GraphEdge.from_dict``'s
       earlier resolve was overwritten by it. A node keeps its resolve,
@@ -471,7 +471,11 @@ def _decode_entities(
             GraphFact(
                 producer=producer,
                 confidence=confidence,
-                attrs=dict(attrs) if flat else copy.deepcopy(attrs),
+                # A flat row's dict is shared by every entity citing it:
+                # nothing mutates fact attrs (the identity normalization is
+                # copy-on-write), and a real graph has ~20 distinct rows
+                # across ~10^5 entities. A nested value is still copied.
+                attrs=attrs if flat else copy.deepcopy(attrs),
             )
             for producer, confidence, attrs, flat in rows
         ]

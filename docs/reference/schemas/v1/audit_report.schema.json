@@ -321,12 +321,95 @@
           "header"
         ]
       }
+    },
+    "analysis_assurance": {
+      "type": "object",
+      "description": "P0.4 (schema 2.38): the analysis-assurance axis, orthogonal to verdict \u2014 how complete/trustworthy the evidence behind this comparison was. Unconditionally present on every compare-report JSON (checker.compare() always populates DiffResult.analysis_assurance). See analysis_assurance.py.",
+      "required": [
+        "schema_version",
+        "status"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "failed",
+            "not_comparable",
+            "not_requested"
+          ]
+        },
+        "requested_depth": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effective_depth": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "depth_satisfied": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "target_accounting": {
+          "type": "object"
+        },
+        "translation_units": {
+          "type": "object"
+        },
+        "export_accounting": {
+          "type": "object"
+        },
+        "l0_context_status": {
+          "type": "string"
+        },
+        "header_context_status": {
+          "type": "string"
+        },
+        "dwarf_context_status": {
+          "type": "string"
+        },
+        "l3_context_status": {
+          "type": "string"
+        },
+        "schema_staleness_status": {
+          "type": "string",
+          "enum": [
+            "clean",
+            "degraded",
+            "not_evaluated"
+          ],
+          "description": "Schema 5.7 adds not_evaluated: the run had no OLD snapshot (a no-baseline audit), so no pair's staleness could matter -- the value every sibling *_context_status field reports in that case. Schema 4.1: whether either compared snapshot carries a *_facts_reliable flag stale enough to matter for THIS pair, per policy.analysis_assurance_schema_staleness.schema_staleness_status -- pair-aware: a stale flag whose one real consumer's own gate (header confirmation and/or matching producer on the OTHER side) never actually runs for this pair is excluded rather than reported."
+        },
+        "fact_set_comparability": {
+          "type": "string"
+        },
+        "graph_completeness": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "properties": {
     "audit_report_schema_version": {
       "type": "string",
-      "description": "SemVer-style version of THIS schema (currently \"1.5\"). Consumers should accept any version with the same MAJOR component. Deliberately not named `report_schema_version`: that field identifies a compare report, and an audit is a different document.",
+      "description": "SemVer-style version of THIS schema (currently \"1.6\"). Consumers should accept any version with the same MAJOR component. Deliberately not named `report_schema_version`: that field identifies a compare report, and an audit is a different document.",
       "pattern": "^[0-9]+\\.[0-9]+$"
     },
     "no_baseline": {
@@ -440,7 +523,20 @@
     },
     "run_outcome": {
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": true,
+      "properties": {
+        "assurance": {
+          "description": "Audit schema 1.6: the same analysis-assurance shape the compare report's analysis_assurance block validates against (kept identical by tests/test_report_schema_conformance.py).",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/analysis_assurance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     },
     "comparison_scope": {
       "type": "object",

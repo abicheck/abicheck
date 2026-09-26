@@ -573,7 +573,7 @@ def test_facts_normalize_before_merge_so_checkout_taint_never_becomes_a_conflict
     ensure_facts_and_resolve(node)
 
     # No conflict: the two facts agree once directory taint is stripped.
-    assert node.conflicts == []
+    assert list(node.conflicts) == []
     assert "/old/checkout" not in node.attrs["name"]
     assert "/new/checkout" not in node.attrs["name"]
 
