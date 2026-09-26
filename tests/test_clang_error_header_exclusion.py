@@ -261,3 +261,15 @@ def test_retry_single_header_not_reduced(tmp_path):
         active_headers=[tmp_path / "a.h"],
     )
     assert out.returncode == 1  # not retried
+
+
+def test_out_of_range_line_ignored_even_for_a_real_guard():
+    # A genuine direct-include guard attributed past the header count is
+    # still dropped rather than indexing a header that does not exist.
+    for line in (41, 99, 0):
+        stderr = (
+            f"In file included from {AGG}:{line}:\n"
+            "/x/_detail.h:21:6: error: do not #include this internal header directly\n"
+            "   21 |     #error do not #include this internal header directly\n"
+        )
+        assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
