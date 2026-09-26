@@ -24,9 +24,12 @@ over OLD's table state and OLD's own fact, independent of ``decide``.
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from abicheck.checker import compare
+from abicheck.compare.edge_query import observed_export_table
 from abicheck.compare.export_transition import surface_exit_is_evidence_gap
 from abicheck.model import AbiSnapshot, Fact, Function
 from abicheck.model.change_catalog.kinds import ChangeKind
@@ -96,15 +99,20 @@ def test_oracle_is_not_constant() -> None:
     assert set(EXPECT_GAP.values()) == {True, False}
 
 
-@pytest.mark.xfail(strict=True, reason="gap A2: unread OLD table suppresses")
-def test_old_absence_must_be_established_unread() -> None:
-    snap, old = _old("unread")
-    assert (
-        surface_exit_is_evidence_gap(
-            old, _new_decl(), old_exported_symbols=frozenset(), key="foo"
-        )
-        is False
+@pytest.mark.parametrize(
+    ("table", "typed"), list(itertools.product(TABLES, (True, False)))
+)
+def test_old_absence_must_be_established(table: str, typed: bool) -> None:
+    snap, old = _old(table)
+    table_arg = (
+        observed_export_table(snap, ())
+        if typed
+        else frozenset(s.name for s in (snap.elf.symbols if snap.elf else ()))
     )
+    got = surface_exit_is_evidence_gap(
+        old, _new_decl(), old_exported_symbols=table_arg, key="foo"
+    )
+    assert got is EXPECT_GAP[table], (table, typed)
 
 
 def _pair(table: str) -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -119,8 +127,7 @@ def _pair(table: str) -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
-@pytest.mark.xfail(strict=True, reason="gap A2: unread OLD table hides the exit")
-@pytest.mark.parametrize("table", ["unread"])
+@pytest.mark.parametrize("table", ["unread", "read_with"])
 def test_through_compare_an_unread_old_table_never_hides_the_exit(table: str) -> None:
     """End to end: OLD exported foo (its table unread, or read), NEW still
     declares it but no longer exports it. The exit is reported either way."""

@@ -36,8 +36,11 @@ from collections.abc import Container
 from ..checker_types import Change
 from ..diff_helpers import make_change
 from ..model import Function, Variable
+from ..model.availability import FactStatus
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.edge_coverage import EdgeAnswer
 from ..model.surface_facts import (
+    binary_exported,
     has_observed_contract_evidence,
     in_public_contract,
     is_abi_visible,
@@ -48,6 +51,7 @@ from ..model.surface_facts import (
     surface_fact_summary,
 )
 from ..model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
+from .edge_query import ObservedExportTable
 
 __all__ = [
     "survives_export_narrowing",
@@ -381,6 +385,22 @@ def surface_exit_is_evidence_gap(
     # looked at the binary. That is the one failure worse than the
     # manufactured finding this guard removes.
     if key in old_exported_symbols or is_binary_exported(old):
+        return False
+    # ... and OLD's *not* being exported must be established, not merely
+    # unconfirmed (evidence-entity-model gap A2): an OLD table that was not
+    # read answers "unknown" for every symbol, and suppressing on that would
+    # hide a real export loss. The typed I4 answer decides when the caller
+    # handed the table over; otherwise only OLD's own confirmed fact does.
+    # An OLD with no binary at all owes no table and had no export to lose.
+    if isinstance(old_exported_symbols, ObservedExportTable):
+        if old_exported_symbols.owes_table and (
+            old_exported_symbols.answer(key) is not EdgeAnswer.PROVEN_ABSENT
+            and not is_export_confirmed_absent(old)
+        ):
+            return False
+    elif binary_exported(old).status is FactStatus.FAILED:
+        # A name set carries no coverage; OLD's own fact still says whether
+        # its table was read (`extract.export_table_read`).
         return False
     if not has_observed_contract_evidence(old):
         return False

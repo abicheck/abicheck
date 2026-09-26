@@ -696,8 +696,15 @@ Phase 4 delta is attributable beyond the ~2 s per side measured directly.
 - `compare/debug_type_scope` does not consult per-side header coverage, so
   a public type whose header failed to parse is silently not diffed (false
   negative, not a false absent).
-- `export_transition`'s OLD-side suppression guard does not check OLD's
-  table was read (false-negative direction).
+- **A2, OLD-side suppression guard — fixed (PR A2).**
+  `export_transition.surface_exit_is_evidence_gap` read "not confirmed
+  exported" as "not exported", so an unread OLD table suppressed a real
+  export loss. The removal paths now pass the OLD table as
+  `edge_query.ObservedExportTable`; the guard suppresses only on its typed
+  `proven_absent` answer (or OLD's own confirmed-absent fact), and a bare
+  name set refuses on a `FAILED` fact. An OLD with no binary owes no table
+  and still suppresses. Tested by an OLD-table-state × caller-kind table and
+  through `checker.compare`.
 - Unrelated, found while testing: a no-baseline compare report fails
   schema validation on `analysis_assurance.schema_staleness_status`
   (`not_evaluated` is not in the schema's enum).
