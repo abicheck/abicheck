@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -47,6 +48,8 @@ from .extract.env_flags import env_flag
 from .extract.toolchain_identity import (
     _compiler_family_from_toolchain as _compiler_family_from_toolchain,
 )
+from .model.header_parse_coverage import HEADER_PARSE_EXCLUDED_METADATA
+from .storage.ast_parse_exclusions import HEADER_PARSE_EXCLUDED_KEY
 
 log = logging.getLogger(__name__)
 
@@ -337,6 +340,12 @@ def _stamp_ast_parser(
     metadata["language_standard_explicit"] = (
         "1" if has_explicit_std(gcc_options, gcc_option_tokens) else "0"
     )
+    # Evidence-entity-model gap A3: headers the clang ``#error`` retry dropped,
+    # so the snapshot's header coverage reads partial (compare.edge_query).
+    root = getattr(parser, "_root", None)
+    excluded = root.get(HEADER_PARSE_EXCLUDED_KEY) if isinstance(root, dict) else None
+    if excluded:
+        metadata[HEADER_PARSE_EXCLUDED_METADATA] = json.dumps(sorted(excluded))
     setattr(parser, "_abicheck_ast_toolchain", metadata)
     setattr(parser, "_abicheck_ast_fallback_reason", fallback_reason)
     if producer == "castxml":

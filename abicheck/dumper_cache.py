@@ -24,6 +24,7 @@ from defusedxml import ElementTree as DefusedET
 
 from . import deadline
 from .storage.acyclic_json import gc_paused
+from .storage.ast_parse_exclusions import attach_parse_exclusions
 from .storage.ast_size_observer import mark_ast_intake, report_ast_size
 from .storage.derived_ast import offer_derived_ast_source
 
@@ -686,6 +687,7 @@ def load_cached_ast(
     deadline.check()  # loading a huge cached AST can eat the rest of the budget
     if on_disk_load is not None:
         root = on_disk_load(root)
+    attach_parse_exclusions(root, cache_path)
     if memoize:
         store_cached_ast(key, backend, root)
     return root
