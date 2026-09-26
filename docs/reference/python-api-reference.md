@@ -420,6 +420,7 @@ Compare two ABI inputs and return the classified diff result.
 | `old_version` | `str` | `''` |
 | `new_version` | `str` | `''` |
 | `lang` | `str` | `'c++'` |
+| `lang_explicit` | `bool` | `False` |
 | `frontend` | `str` | `'auto'` |
 | `suppress` | `Path \| None` | `None` |
 | `policy` | `str` | `'strict_abi'` |
