@@ -42,6 +42,7 @@ Three statements:
 from __future__ import annotations
 
 import ast
+import functools
 import shutil
 import subprocess
 from pathlib import Path
@@ -92,10 +93,22 @@ _INVENTORY: dict[tuple[str, str, str], str] = {
 }  # fmt: skip
 
 
+@functools.cache
+def _parsed_sources() -> tuple[tuple[str, ast.Module], ...]:
+    """Every ``abicheck/`` module parsed once, shared by the inventory tests
+    (the whole-package parse is what dominates their cost)."""
+    return tuple(
+        (
+            path.relative_to(_ROOT).as_posix(),
+            ast.parse(path.read_text(encoding="utf-8")),
+        )
+        for path in sorted((_ROOT / "abicheck").rglob("*.py"))
+    )
+
+
 def _producer_calls() -> set[tuple[str, str, str]]:
     found: set[tuple[str, str, str]] = set()
-    for path in sorted((_ROOT / "abicheck").rglob("*.py")):
-        rel = path.relative_to(_ROOT).as_posix()
+    for rel, tree in _parsed_sources():
 
         def walk(node: ast.AST, fn: str) -> None:
             for child in ast.iter_child_nodes(node):
@@ -115,7 +128,7 @@ def _producer_calls() -> set[tuple[str, str, str]]:
                         found.add((rel, inner, name))
                 walk(child, inner)
 
-        walk(ast.parse(path.read_text(encoding="utf-8")), "<module>")
+        walk(tree, "<module>")
     return found
 
 
@@ -135,8 +148,8 @@ def test_stamped_sites_really_call_the_stamp() -> None:
     function really calls ``classify_extracted``."""
     bodies = {
         n.name: n
-        for path in (_ROOT / "abicheck").rglob("*.py")
-        for n in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        for _, tree in _parsed_sources()
+        for n in ast.walk(tree)
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
     for (module, fn, _), how in _INVENTORY.items():
@@ -192,6 +205,46 @@ def test_appcompat_stamps_both_sides(monkeypatch: pytest.MonkeyPatch) -> None:
         ("old", [Path("o.h")], [Path("inc")]),
         ("new", [Path("n.h")], [Path("inc")]),
     ]
+
+
+def test_header_only_executor_stamps_what_it_parsed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The typed header-only executor (``dump -H`` with no binary) stamps the
+    snapshot it built, with the request's headers and public directories."""
+    from types import SimpleNamespace
+
+    from abicheck.model import AbiSnapshot
+    from abicheck.workflows.artifact import execute_header_only as mod
+
+    built = AbiSnapshot(library="api.h", version="1", from_headers=True)
+    stamped: list[tuple[object, list[Path], list[Path]]] = []
+    monkeypatch.setattr(
+        "abicheck.header_only_dump.build_header_only_snapshot", lambda **_: built
+    )
+    monkeypatch.setattr(
+        "abicheck.workflows.ownership_request.classify_extracted",
+        lambda snap, req, headers, dirs: stamped.append(
+            (snap, list(headers), list(dirs))
+        ),
+    )
+    resolved = SimpleNamespace(
+        request=SimpleNamespace(
+            input=SimpleNamespace(version="1", includes=[], compile=None)
+        ),
+        headers=[Path("inc/api.h")],
+        evidence=SimpleNamespace(dump_manifest=None),
+        header_backend="castxml",
+        lang="c++",
+        lang_explicit=False,
+        public_headers=[],
+        public_header_dirs=[Path("inc")],
+        requested_depth=None,
+        resolved_execution_context=None,
+    )
+    out = mod.execute_header_only_dump_request(resolved, SimpleNamespace())  # type: ignore[arg-type]
+    assert out.snapshot is built
+    assert stamped == [(built, [Path("inc/api.h")], [Path("inc")])]
 
 
 def _needs_tools() -> None:
