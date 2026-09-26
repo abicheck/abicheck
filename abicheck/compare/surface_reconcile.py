@@ -64,6 +64,8 @@ __all__ = [
     "RECONCILED_CPO",
     "RECONCILED_FUNCTIONS",
     "RECONCILED_FUNCTION_MAPS",
+    "RECONCILED_PUBLIC_FUNCTION_LISTS",
+    "RECONCILED_PUBLIC_VARIABLE_LISTS",
     "RECONCILIATION_SLOTS",
     "RECONCILED_VARIABLES",
     "cached_reconciliation",
@@ -209,6 +211,8 @@ RECONCILED_VARIABLES = "_abicheck_reconciled_variables"
 RECONCILED_ABI_VISIBLE = "_abicheck_reconciled_abi_visible"
 RECONCILED_FUNCTION_MAPS = "_abicheck_reconciled_function_maps"
 RECONCILED_CPO = "_abicheck_reconciled_cpo"
+RECONCILED_PUBLIC_FUNCTION_LISTS = "_abicheck_reconciled_public_function_lists"
+RECONCILED_PUBLIC_VARIABLE_LISTS = "_abicheck_reconciled_public_variable_lists"
 
 #: Every per-pair memo slot, so invalidation cannot fall behind the set.
 RECONCILIATION_SLOTS = (
@@ -217,6 +221,8 @@ RECONCILIATION_SLOTS = (
     RECONCILED_ABI_VISIBLE,
     RECONCILED_FUNCTION_MAPS,
     RECONCILED_CPO,
+    RECONCILED_PUBLIC_FUNCTION_LISTS,
+    RECONCILED_PUBLIC_VARIABLE_LISTS,
 )
 
 _ReconciledPair = tuple[dict[str, _Decl], dict[str, _Decl]]

@@ -61,7 +61,7 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 if TYPE_CHECKING:
     from .elf_facts import ElfMetadata
@@ -164,8 +164,20 @@ def build_raw_export_index_from_elf(elf_meta: ElfMetadata) -> RawExportIndex:
     Every ``.gnu.dynsym`` entry becomes a row, default-versioned or not,
     named or not, callable or not — filtering is a projection's job, not
     this constructor's.
+
+    Memoized on *elf_meta* itself, like its ``symbol_map`` cached property:
+    one compare builds this index for the same two tables over a hundred
+    times (every export projection starts here), which on a 65k-export
+    library cost ~30s of CPU. Symbol rows are final once
+    ``parse_elf_metadata`` returns; the memo is also keyed on the identity
+    and length of ``symbols``, so replacing or growing that list rebuilds.
     """
-    return RawExportIndex(
+    symbols = elf_meta.symbols
+    stamp = (id(symbols), len(symbols))
+    cached = elf_meta.__dict__.get(_ELF_INDEX_MEMO)
+    if cached is not None and cached[0] == stamp:
+        return cast("RawExportIndex", cached[1])
+    index = RawExportIndex(
         platform="elf",
         entries=tuple(
             RawExportEntry(
@@ -174,9 +186,14 @@ def build_raw_export_index_from_elf(elf_meta: ElfMetadata) -> RawExportIndex:
                 sym_type=s.sym_type.name,
                 visibility=s.visibility,
             )
-            for s in elf_meta.symbols
+            for s in symbols
         ),
     )
+    elf_meta.__dict__[_ELF_INDEX_MEMO] = (stamp, index)
+    return index
+
+
+_ELF_INDEX_MEMO = "_raw_export_index_memo"
 
 
 def build_raw_export_index_from_pe(pe_meta: PeMetadata) -> RawExportIndex:

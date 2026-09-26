@@ -181,8 +181,42 @@ def exported_symbol_names(
     """
     if elf is None or not getattr(elf, "symbols", None):
         return set()
+    # Memoised on *elf* (like ``ElfMetadata.symbol_map``): a single compare
+    # asks this of the same two tables ~80 times, each a full scan. Keyed on
+    # the identity/length of ``symbols`` too, so a replaced list rebuilds.
+    # Callers own (and may mutate) the returned set, hence the copy.
+    symbols = elf.symbols
+    memo = getattr(elf, "__dict__", None)
+    key = (
+        id(symbols),
+        len(symbols),
+        frozenset(symbol_types),
+        abi_relevant_only,
+        filter_transitive_runtime_symbols,
+    )
+    if memo is not None:
+        hit = memo.get(_EXPORTED_NAMES_MEMO, {}).get(key)
+        if hit is not None:
+            return set(hit)
+    names = _exported_symbol_names(
+        symbols, symbol_types, abi_relevant_only, filter_transitive_runtime_symbols
+    )
+    if memo is not None:
+        memo.setdefault(_EXPORTED_NAMES_MEMO, {})[key] = frozenset(names)
+    return names
+
+
+_EXPORTED_NAMES_MEMO = "_exported_symbol_names_memo"
+
+
+def _exported_symbol_names(
+    symbols: Any,
+    symbol_types: Collection[str],
+    abi_relevant_only: bool,
+    filter_transitive_runtime_symbols: bool,
+) -> set[str]:
     names: set[str] = set()
-    for sym in elf.symbols:
+    for sym in symbols:
         if not sym.name:
             continue
         sym_type = getattr(sym.sym_type, "value", sym.sym_type)

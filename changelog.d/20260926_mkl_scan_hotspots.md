@@ -17,6 +17,16 @@
   line numbers by bisect, and memoizes per-file results on a content digest, so a
   release fan-out no longer re-scans the same headers once per member.
 
+- Repeated whole-table work in one compare is now computed once: the raw ELF
+  export index and `exported_symbol_names` are memoized on the `ElfMetadata`
+  they read (~190 rebuilds per `libmkl_rt` compare), the public
+  function/variable/CPO surface reconciliations join the existing per-pair
+  memo in `compare/template_surface.py`, `parse_elf_metadata` keeps a
+  content-digest-keyed process memo (the L0 re-resolve and release members
+  re-parsed the same binaries), and the structural C++20 header scan memoizes
+  its per-file preprocessing and scan on a content digest
+  (`extract/digest_memo.py`, `extract/cpp20_header_prep.py`).
+
 ### Fixed
 
 - The castxml/clang header-AST disk caches (`~/.cache/abi_check/<backend>`)

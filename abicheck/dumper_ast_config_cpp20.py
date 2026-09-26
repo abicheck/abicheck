@@ -26,13 +26,19 @@ from typing import Literal
 from .dumper_ast_config_cpp20_chains import (
     _strip_inactive_if_zero_blocks as _strip_inactive_if_zero_blocks,
 )
+from .extract.cpp20_header_prep import (
+    _JOINED_CHAR_LITERAL_PATTERN,
+    _JOINED_STRING_LITERAL_PATTERN,
+    _preprocessed_header_content as _preprocessed_header_content,
+    _strip_literals_crossing_continuations as _strip_literals_crossing_continuations,
+)
+from .extract.digest_memo import DigestMemo, content_digest
 from .extract.header_scan_memo import memoize_header_scan
 
 # Quoted-include expansion (and the raw-string stripper it needs) moved out
 # when the scan below gained a memo; this module still uses both.
 from .extract.quoted_include_expansion import (
     _expand_with_quoted_includes as _expand_with_quoted_includes,
-    _strip_raw_strings,
 )
 
 # Structural C++20 patterns — concepts and requires-expressions. When any
@@ -919,8 +925,7 @@ def _strip_literals(line: bytes) -> bytes:
 # code — so it is safe to let ``.`` span it here (Codex review: this is what
 # let requires/concept text trapped inside a continued string literal reach
 # the structural pattern match).
-_JOINED_STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\])*"', re.DOTALL)
-_JOINED_CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\])*'", re.DOTALL)
+# (the joined-literal patterns now live in extract/cpp20_header_prep.py)
 
 
 def _strip_literals_joined(line: bytes) -> bytes:
@@ -929,36 +934,6 @@ def _strip_literals_joined(line: bytes) -> bytes:
     line = _JOINED_STRING_LITERAL_PATTERN.sub(b'""', line)
     line = _JOINED_CHAR_LITERAL_PATTERN.sub(b"''", line)
     return line
-
-
-def _strip_literals_crossing_continuations(content: bytes) -> bytes:
-    """Like :func:`_strip_literals`, but — unlike it — a literal that spans a
-    backslash-newline continuation is still fully blanked, not left behind
-    because the plain patterns refuse to cross the embedded newline.
-
-    Safe to call directly on whole-file *content* (unlike
-    :func:`_strip_literals_joined`, which additionally tolerates crossing an
-    *unrelated* later line and so is only safe on a single already-joined
-    logical line): ``\\.`` under ``re.DOTALL`` already consumes a
-    continuation's ``\\<newline>`` pair as one escaped character, so the
-    match still ends at the literal's real closing quote rather than
-    wandering into unrelated later lines. Each replacement preserves the
-    literal's embedded newline count (mirrors :func:`_strip_raw_strings`) so
-    line numbers reported for code that follows a continued literal stay
-    accurate — the plain ``_strip_literals_joined`` replacement (a bare
-    ``""``/``''``) would otherwise silently swallow those newlines (Codex
-    review: a shadow-name scan run before comment-stripping needs a
-    continuation-spanning literal fully blanked, or a fake type name like
-    ``struct concept {};`` trapped inside one leaks through and wrongly
-    shadows a genuine C++20 declaration elsewhere in the header).
-    """
-    content = _JOINED_STRING_LITERAL_PATTERN.sub(
-        lambda m: b'""' + b"\n" * m.group(0).count(b"\n"), content
-    )
-    content = _JOINED_CHAR_LITERAL_PATTERN.sub(
-        lambda m: b"''" + b"\n" * m.group(0).count(b"\n"), content
-    )
-    return content
 
 
 def _iter_logical_lines(content: bytes) -> list[tuple[int, bytes]]:
@@ -1032,59 +1007,6 @@ class _Cpp20ShadowFlags:
     requires: bool = False
     consteval: bool = False
     constinit: bool = False
-
-
-def _preprocessed_header_content(
-    path: Path, *, for_language_mode_decision: bool
-) -> tuple[bytes, bytes] | None:
-    """``(scan_content, shadow_scan_content)`` for one header, or ``None``.
-
-    Raw string literals are blanked first — their body can contain arbitrary
-    quotes/backslashes that would otherwise confuse the ordinary string-literal
-    stripper. Then string/char literals, so a literal containing comment-like
-    text (``"/* not a comment */"``) is never mistaken for a real comment;
-    that pass is backslash-newline-continuation-tolerant (Codex review) so a
-    literal split across a continuation cannot leave its trapped text — e.g. a
-    fake ``struct concept {};`` inside an error message — visible to the shadow
-    scan. Block comments are replaced by their own newline count so
-    later-reported line numbers stay accurate (CodeRabbit review).
-
-    The two returned copies differ only in how dialect-fallback guards are
-    masked, and that difference is load-bearing (Codex review, nineteenth
-    round). The shadow scan asks "does ``concept`` name an ordinary type in
-    code still reachable *if C++20 were chosen*", so a ``struct concept {};``
-    shim confined to ``#if __cplusplus < 202002L`` — content that goes away
-    once C++20 is chosen — must not count; for the requirements scan that same
-    guarded arm is the unconditionally-relevant one.
-    """
-    try:
-        content = path.read_bytes()
-    except OSError:
-        return None
-    content = _strip_raw_strings(content)
-    content = _strip_literals_crossing_continuations(content)
-    content = re.sub(
-        rb"/\*.*?\*/",
-        lambda m: b"\n" * m.group(0).count(b"\n"),
-        content,
-        flags=re.DOTALL,
-    )
-    # "//" line comments are removed once, up front, before *both* masking
-    # passes below (which then differ only in guard-masking polarity). Raw
-    # strings/literals/block comments are already blanked above, but "//"
-    # comments are otherwise only stripped per-logical-line further down, and a
-    # "// struct concept {};" comment must never make a *real* concept
-    # declaration elsewhere look ambiguous (Codex review, fifth round).
-    # #if 0 / #if false regions go too — a disabled compatibility stub must not
-    # shadow a genuine keyword used elsewhere (Codex review).
-    no_double_slash = re.sub(rb"//[^\n]*", b"", content)
-    scan_content = _strip_inactive_if_zero_blocks(
-        no_double_slash, mask_cplusplus_defined_guards=for_language_mode_decision
-    )
-    shadow_content = _strip_inactive_if_zero_blocks(
-        no_double_slash, invert_dialect_fallback_guards=False
-    )
-    return scan_content, shadow_content
 
 
 def _preprocess_headers(
@@ -1216,6 +1138,11 @@ def _scan_header_for_requirements(
     return found
 
 
+#: Per-file scan memo (``extract/digest_memo.py``): one compare scans the
+#: old, new and combined header sets under both language-mode polarities.
+_SCAN_MEMO: DigestMemo[list[Cpp20Requirement]] = DigestMemo()
+
+
 @memoize_header_scan(_expand_with_quoted_includes)
 def _find_cpp20_requirements(
     header_paths: list[Path], *, for_language_mode_decision: bool = False
@@ -1269,7 +1196,11 @@ def _find_cpp20_requirements(
     )
     found: list[Cpp20Requirement] = []
     for path, content in per_file:
-        found.extend(_scan_header_for_requirements(path, content, shadows))
+        hits = _SCAN_MEMO.get_or_compute(
+            (str(path), content_digest(content), shadows),
+            lambda: _scan_header_for_requirements(path, content, shadows),  # noqa: B023
+        )
+        found.extend(hits)
     return found
 
 
