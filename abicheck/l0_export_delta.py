@@ -56,6 +56,45 @@ from pathlib import Path
 from .checker_types import Change
 
 
+def _elf_symbol_identities(snapshot: object) -> frozenset[tuple[object, ...]] | None:
+    elf = getattr(snapshot, "elf", None)
+    symbols = getattr(elf, "symbols", None) if elf is not None else None
+    if not symbols:
+        return None
+    return frozenset(
+        (
+            sym.name,
+            getattr(sym.binding, "value", sym.binding),
+            getattr(sym.sym_type, "value", sym.sym_type),
+            sym.version,
+            sym.is_default,
+            sym.visibility,
+            sym.origin_lib,
+        )
+        for sym in symbols
+    )
+
+
+def elf_exports_cannot_lose_symbol(old: object, new: object) -> bool:
+    """True when *new*'s ELF symbol table provably keeps every *old* symbol.
+
+    A ``func_removed_elf_only`` fact needs an OLD export with no NEW
+    counterpart, so when every OLD symbol reappears in NEW with the same
+    name, binding, type, version, default-ness, visibility and origin, a
+    symbols-only re-diff cannot produce one and
+    :func:`collect_l0_export_delta` would return ``()``. Conservative: any
+    side without a captured, non-empty ELF symbol table answers ``False``
+    (fall through to the real probe), never ``True``.
+    """
+    old_ids = _elf_symbol_identities(old)
+    if old_ids is None:
+        return False
+    new_ids = _elf_symbol_identities(new)
+    if new_ids is None:
+        return False
+    return old_ids <= new_ids
+
+
 def collect_l0_export_delta(
     old_path: Path, new_path: Path, lang: str
 ) -> tuple[Change, ...]:

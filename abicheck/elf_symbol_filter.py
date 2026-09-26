@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection
+from functools import lru_cache
 from typing import Any
 
 # Canonical stdlib/runtime RTTI prefixes (single source of truth in the
@@ -103,6 +104,12 @@ _STDLIB_PREFIXES = (
 )
 
 
+_TRANSITIVE_RUNTIME_PREFIXES: tuple[str, ...] = tuple(_STDLIB_PREFIXES) + tuple(
+    _STDLIB_RTTI_PREFIXES
+)
+
+
+@lru_cache(maxsize=1 << 18)
 def is_abi_relevant_elf_symbol(
     name: str,
     *,
@@ -134,18 +141,16 @@ def is_abi_relevant_elf_symbol(
     if name.startswith(("_ZTh", "_ZTv", "_ZTc")):
         return False
 
-    for prefix in _GCC_INTERNAL_PREFIXES:
-        if name.startswith(prefix):
-            return False
+    if name.startswith(_GCC_INTERNAL_PREFIXES):
+        return False
 
-    if filter_transitive_runtime_symbols:
-        for prefix in _STDLIB_PREFIXES:
-            if name.startswith(prefix):
-                return False
-
-        for prefix in _STDLIB_RTTI_PREFIXES:
-            if name.startswith(prefix):
-                return False
+    # One tuple-argument ``startswith`` per group: ``str.startswith`` scans a
+    # tuple in C, where the earlier per-prefix Python loops cost ~48 calls per
+    # symbol (169M calls on a 65k-export libmkl_rt scan).
+    if filter_transitive_runtime_symbols and name.startswith(
+        _TRANSITIVE_RUNTIME_PREFIXES
+    ):
+        return False
 
     # Private C symbols with __ as a namespace separator
     # (e.g. H5C__flush_marked_entries, MPI__send). C++ mangled names start
@@ -176,8 +181,47 @@ def exported_symbol_names(
     """
     if elf is None or not getattr(elf, "symbols", None):
         return set()
+    # Memoised on *elf* (like ``ElfMetadata.symbol_map``): a single compare
+    # asks this of the same two tables ~80 times, each a full scan. Keyed on
+    # the identity/length of ``symbols`` too, so a replaced list rebuilds.
+    # Callers own (and may mutate) the returned set, hence the copy.
+    symbols = elf.symbols
+    memo = getattr(elf, "__dict__", None)
+    key = (
+        id(symbols),
+        len(symbols),
+        frozenset(symbol_types),
+        abi_relevant_only,
+        filter_transitive_runtime_symbols,
+    )
+    if memo is not None:
+        hit = memo.get(_EXPORTED_NAMES_MEMO, {}).get(key)
+        if hit is not None:
+            return set(hit)
+    names = _exported_symbol_names(
+        symbols, symbol_types, abi_relevant_only, filter_transitive_runtime_symbols
+    )
+    if memo is not None:
+        memo.setdefault(_EXPORTED_NAMES_MEMO, {})[key] = frozenset(names)
+    return names
+
+
+_EXPORTED_NAMES_MEMO = "_exported_symbol_names_memo"
+
+
+def drop_exported_symbol_names_memo(elf: object) -> None:
+    """Forget *elf*'s memoised name sets (``compare`` scopes them per call)."""
+    getattr(elf, "__dict__", {}).pop(_EXPORTED_NAMES_MEMO, None)
+
+
+def _exported_symbol_names(
+    symbols: Any,
+    symbol_types: Collection[str],
+    abi_relevant_only: bool,
+    filter_transitive_runtime_symbols: bool,
+) -> set[str]:
     names: set[str] = set()
-    for sym in elf.symbols:
+    for sym in symbols:
         if not sym.name:
             continue
         sym_type = getattr(sym.sym_type, "value", sym.sym_type)

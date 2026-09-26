@@ -522,7 +522,7 @@ class _CastxmlParser:
             if (
                 mangled not in self._exported_dynamic
                 and mangled not in self._exported_static
-                and name in (self._exported_dynamic | self._exported_static)
+                and (name in self._exported_dynamic or name in self._exported_static)
                 and self._is_global_scope(el)
             ):
                 mangled = name

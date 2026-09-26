@@ -42,7 +42,10 @@ from ..model import Function
 from ..model.surface_facts import in_public_surface, is_abi_visible
 from .surface_reconcile import (
     RECONCILED_ABI_VISIBLE,
+    RECONCILED_CPO,
     RECONCILED_FUNCTION_MAPS,
+    RECONCILED_PUBLIC_FUNCTION_LISTS,
+    RECONCILED_PUBLIC_VARIABLE_LISTS,
     reconcile_declaration_lists,
 )
 
@@ -148,7 +151,24 @@ def reconciled_public_functions(
     no second copy of the rule exists -- see
     :mod:`abicheck.compare.surface_reconcile` for why the repair belongs to
     the surface and not to each disposition site.
+
+    Memoised per pair (like :func:`reconciled_abi_visible_functions`): about
+    two dozen detectors ask for it. Callers get fresh list copies.
     """
+    cached = _cached(old, new, RECONCILED_PUBLIC_FUNCTION_LISTS)
+    if cached is None:
+        cached = _store(
+            old,
+            new,
+            RECONCILED_PUBLIC_FUNCTION_LISTS,
+            _reconciled_public_functions(old, new),
+        )
+    return list(cached[0]), list(cached[1])
+
+
+def _reconciled_public_functions(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[list[Function], list[Function]]:
     return _reconcile(
         public_functions(old),
         public_functions(new),
@@ -244,7 +264,23 @@ def reconciled_public_variables(
     and a display-name join would pair declarations that are not the same
     entity -- the same reasoning ``SymbolIdentityIndex`` records for
     declining a variable alias tier.
+
+    Memoised per pair; callers get fresh list copies.
     """
+    cached = _cached(old, new, RECONCILED_PUBLIC_VARIABLE_LISTS)
+    if cached is None:
+        cached = _store(
+            old,
+            new,
+            RECONCILED_PUBLIC_VARIABLE_LISTS,
+            _reconciled_public_variables(old, new),
+        )
+    return list(cached[0]), list(cached[1])
+
+
+def _reconciled_public_variables(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[list[Variable], list[Variable]]:
     return _reconcile(
         public_variables(old),
         public_variables(new),
@@ -292,7 +328,28 @@ def reconciled_cpo_surfaces(
     given caller currently exercises: ``AGENTS.md`` records six review rounds
     spent on exactly that failure in the last shared merge primitive this
     repository grew.
+
+    Memoised per pair *and* per *identity* callable (a different identity is
+    a different question); callers get fresh list copies.
     """
+    entry = _cached(old, new, RECONCILED_CPO)
+    if entry is None or entry[0] is not identity:
+        entry = _store(
+            old,
+            new,
+            RECONCILED_CPO,
+            (identity, _reconciled_cpo_surfaces(old, new, identity=identity)),
+        )
+    of, ov, nf, nv = entry[1]
+    return list(of), list(ov), list(nf), list(nv)
+
+
+def _reconciled_cpo_surfaces(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    identity: Callable[[Any], str],
+) -> tuple[list[Function], list[Variable], list[Function], list[Variable]]:
     old_funcs, new_funcs = reconciled_public_functions(old, new)
     old_vars, new_vars = reconciled_public_variables(old, new)
     cross_old_funcs, cross_new_vars = _reconcile(

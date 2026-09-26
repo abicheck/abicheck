@@ -64,6 +64,8 @@ __all__ = [
     "RECONCILED_CPO",
     "RECONCILED_FUNCTIONS",
     "RECONCILED_FUNCTION_MAPS",
+    "RECONCILED_PUBLIC_FUNCTION_LISTS",
+    "RECONCILED_PUBLIC_VARIABLE_LISTS",
     "RECONCILIATION_SLOTS",
     "RECONCILED_VARIABLES",
     "cached_reconciliation",
@@ -209,6 +211,8 @@ RECONCILED_VARIABLES = "_abicheck_reconciled_variables"
 RECONCILED_ABI_VISIBLE = "_abicheck_reconciled_abi_visible"
 RECONCILED_FUNCTION_MAPS = "_abicheck_reconciled_function_maps"
 RECONCILED_CPO = "_abicheck_reconciled_cpo"
+RECONCILED_PUBLIC_FUNCTION_LISTS = "_abicheck_reconciled_public_function_lists"
+RECONCILED_PUBLIC_VARIABLE_LISTS = "_abicheck_reconciled_public_variable_lists"
 
 #: Every per-pair memo slot, so invalidation cannot fall behind the set.
 RECONCILIATION_SLOTS = (
@@ -217,6 +221,8 @@ RECONCILIATION_SLOTS = (
     RECONCILED_ABI_VISIBLE,
     RECONCILED_FUNCTION_MAPS,
     RECONCILED_CPO,
+    RECONCILED_PUBLIC_FUNCTION_LISTS,
+    RECONCILED_PUBLIC_VARIABLE_LISTS,
 )
 
 _ReconciledPair = tuple[dict[str, _Decl], dict[str, _Decl]]
@@ -363,6 +369,17 @@ def _appended(
     return list(original) + [decl for k, decl in reconciled.items() if k not in before]
 
 
+def _drop_elf_memos(*snapshots: object) -> None:
+    from ..elf_symbol_filter import drop_exported_symbol_names_memo
+    from ..model.export_index import drop_raw_export_index_memo
+
+    for snap in snapshots:
+        elf = getattr(snap, "elf", None)
+        if elf is not None:
+            drop_raw_export_index_memo(elf)
+            drop_exported_symbol_names_memo(elf)
+
+
 def invalidate_reconciliation(old: AbiSnapshot | None) -> None:
     """Drop any memoised reconciliation held on *old*.
 
@@ -414,10 +431,17 @@ def releases_reconciliation(
 
     @wraps(fn)
     def _wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        old = args[0] if args else kwargs.get("old")
+        new = args[1] if len(args) > 1 else kwargs.get("new")
+        # The per-table ELF memos (export index, exported-name sets) share
+        # this memo's one-comparison scope: cleared on entry so a caller's
+        # in-place symbol edit between comparisons is never served stale, and
+        # on exit so a long release fan-out does not keep them resident.
+        _drop_elf_memos(old, new)
         try:
             return fn(*args, **kwargs)
         finally:
-            old = args[0] if args else kwargs.get("old")
             invalidate_reconciliation(old if isinstance(old, AbiSnapshot) else None)
+            _drop_elf_memos(old, new)
 
     return _wrapper

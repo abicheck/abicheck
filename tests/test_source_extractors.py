@@ -612,13 +612,13 @@ def test_extract_rechecks_deadline_after_parsing_xml(monkeypatch) -> None:  # ty
         return _Result()
 
     monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
-    real_parse = castxml_mod.DefusedET.parse
+    real_parse = castxml_mod.parse_castxml_xml
 
     def _slow_parse(path):
         time.sleep(0.05)
         return real_parse(path)
 
-    monkeypatch.setattr(castxml_mod.DefusedET, "parse", _slow_parse)
+    monkeypatch.setattr(castxml_mod, "parse_castxml_xml", _slow_parse)
     with deadline.deadline_scope(0.03):
         with pytest.raises(SourceExtractionError, match="deadline exceeded"):
             extractor.extract(_cu(source="foo.cpp"), public_header_roots=["foo.h"])

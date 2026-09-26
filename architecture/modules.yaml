@@ -100,6 +100,7 @@
         "abicheck/buildsource/pack_shape.py",
         "abicheck/buildsource/pattern_facts.py",
         "abicheck/buildsource/pattern_facts_files.py",
+        "abicheck/buildsource/pattern_facts_lexer.py",
         "abicheck/buildsource/preprocessor_facts.py",
         "abicheck/buildsource/preprocessor_probe_families.py",
         "abicheck/buildsource/providers.py",

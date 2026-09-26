@@ -676,3 +676,53 @@ def test_elf_classify_symbols_drops_linker_boundaries_from_symbol_only_mode() ->
     assert funcs == {"ev_run"}
     assert objects == {"ev_loop_default"}
     assert tls == set()
+
+
+# ── tuple-prefix rewrite of is_abi_relevant_elf_symbol: differential oracle ──
+
+
+def _loop_oracle(name: str, filter_transitive_runtime_symbols: bool = True) -> bool:
+    """The original one-``startswith``-per-prefix formulation."""
+    import abicheck.elf_symbol_filter as esf
+
+    if not name or name in esf._ELF_LINKER_ARTIFACTS:
+        return False
+    if name.startswith(("_ZTh", "_ZTv", "_ZTc")):
+        return False
+    for prefix in esf._GCC_INTERNAL_PREFIXES:
+        if name.startswith(prefix):
+            return False
+    if filter_transitive_runtime_symbols:
+        for prefix in (*esf._STDLIB_PREFIXES, *esf._STDLIB_RTTI_PREFIXES):
+            if name.startswith(prefix):
+                return False
+    return name.startswith("_Z") or "__" not in name[2:]
+
+
+def test_tuple_prefix_filter_matches_the_per_prefix_loop_oracle():
+    import abicheck.elf_symbol_filter as esf
+
+    prefixes = [
+        *esf._GCC_INTERNAL_PREFIXES,
+        *esf._STDLIB_PREFIXES,
+        *esf._STDLIB_RTTI_PREFIXES,
+        *esf._ELF_LINKER_ARTIFACTS,
+        "_ZTh",
+        "_Z",
+        "",
+        "mkl_",
+        "H5C",
+    ]
+    names = set()
+    for p in prefixes:
+        for suffix in ("", "x", "__y", "_Z3foo", "1v"):
+            names.add(p + suffix)
+            names.add(p[:-1] + suffix)  # one char short of every prefix
+    checked = 0
+    for n in sorted(names):
+        for flag in (True, False):
+            assert esf.is_abi_relevant_elf_symbol(
+                n, filter_transitive_runtime_symbols=flag
+            ) == _loop_oracle(n, flag), (n, flag)
+            checked += 1
+    assert checked > 500

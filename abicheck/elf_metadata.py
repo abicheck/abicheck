@@ -23,11 +23,14 @@ See docs/adr/001-technology-stack.md for rationale.
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import logging
 import os
 import re
 import stat
 import struct
+import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import IO
@@ -81,6 +84,21 @@ from .extract.elf_symbol_tables import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
+#: Process-level memo of parsed tables, keyed on the opened file's content
+#: digest and path -- content, not a stat: an mtime has only kernel-tick
+#: resolution, so a same-size rewrite within one tick would read as unchanged. One ``compare`` parses each binary
+#: several times (primary dump, the symbols-only L0 re-resolve, release
+#: members sharing a provider); a hit costs one deep copy (~0.6s for a
+#: 65k-symbol library vs ~1.7s to parse) and hands every caller its own
+#: independent copy, so no caller can mutate another's metadata. The memo
+#: keeps its own private copy for the same reason, and at most
+#: ``_PARSE_MEMO_MAX`` of them -- enough for one compare's two sides plus their
+#: L0 re-resolve, without growing with a release fan-out's member count.
+_PARSE_MEMO: dict[tuple[object, ...], ElfMetadata] = {}
+_PARSE_MEMO_MAX = 4
+_PARSE_MEMO_LOCK = threading.Lock()
+
+
 def parse_elf_metadata(so_path: Path) -> ElfMetadata:
     """Extract ELF dynamic + symbol metadata from *so_path* using pyelftools.
 
@@ -94,7 +112,18 @@ def parse_elf_metadata(so_path: Path) -> ElfMetadata:
             if not stat.S_ISREG(st.st_mode):
                 log.warning("parse_elf_metadata: not a regular file: %s", so_path)
                 return ElfMetadata()
-            return _parse(f, so_path)
+            key = (hashlib.file_digest(f, "blake2b").hexdigest(), str(so_path))
+            f.seek(0)
+            with _PARSE_MEMO_LOCK:
+                cached = _PARSE_MEMO.get(key)
+            if cached is not None:
+                return copy.deepcopy(cached)
+            meta = _parse(f, so_path)
+            with _PARSE_MEMO_LOCK:
+                _PARSE_MEMO[key] = copy.deepcopy(meta)
+                while len(_PARSE_MEMO) > _PARSE_MEMO_MAX:
+                    _PARSE_MEMO.pop(next(iter(_PARSE_MEMO)))
+            return meta
     except (ELFError, OSError, ValueError) as exc:
         log.warning("parse_elf_metadata: failed to open/parse %s: %s", so_path, exc)
         return ElfMetadata()
