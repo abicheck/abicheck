@@ -41,11 +41,13 @@ from abicheck.extract.export_table_read import reconcile_snapshot_export_absence
 from abicheck.extract.surface_fact_producers import (
     debug_info_surface_facts,
     header_ast_surface_facts,
+    reconcile_export_absence,
+    unread_export_fact,
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.availability import FactStatus
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
-from abicheck.model.export_index import ExportMatch
+from abicheck.model.export_index import ExportMatch, ExportTableState
 from abicheck.model.macho_facts import MachoExport, MachoMetadata
 from abicheck.model.pe_facts import PeExport, PeMetadata
 from abicheck.model.surface_facts import is_export_confirmed_absent
@@ -248,3 +250,33 @@ def test_cli_failed_read_never_reports_a_removal(tmp_path: Path) -> None:
     removal = {"func_removed", "func_visibility_changed", "func_removed_elf_only"}
     assert not kinds(unread_p) & removal
     assert kinds(read_p) & removal
+
+
+def test_reconcile_leaves_positive_unknown_and_factless_records() -> None:
+    """Only a confirmed negative is withdrawn: a positive, an already-unknown
+    fact and a record with no stored fact are untouched."""
+    from abicheck.model import Fact
+
+    positive = Function(
+        name="a", mangled="a", return_type="void",
+        binary_exported_fact=Fact.present(True),
+    )  # fmt: skip
+    unknown = Function(
+        name="b", mangled="b", return_type="void",
+        binary_exported_fact=Fact.not_collected("x"),
+    )  # fmt: skip
+    factless = Function(name="c", mangled="c", return_type="void")
+    snap = AbiSnapshot(
+        library="l", version="1", functions=[positive, unknown, factless]
+    )
+    assert reconcile_export_absence(snap, ExportTableState.FAILED) == 0
+    assert reconcile_export_absence(snap, ExportTableState.READ) == 0
+    assert positive.binary_exported_fact.status is FactStatus.PRESENT
+    assert unknown.binary_exported_fact.status is FactStatus.NOT_COLLECTED
+    assert factless.binary_exported_fact is None
+
+
+def test_no_binary_state_is_not_collected() -> None:
+    fact = unread_export_fact(ExportTableState.NO_BINARY, producer="clang")
+    assert fact is not None and fact.status is FactStatus.NOT_COLLECTED
+    assert unread_export_fact(ExportTableState.READ, producer=None) is None
