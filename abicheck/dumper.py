@@ -1276,7 +1276,6 @@ def dump(
     Returns:
         AbiSnapshot with functions, variables, and types populated.
     """
-    extra_includes = absolutize_include_roots(extra_includes)
     if dump_manifest is not None:
         # Each has its own manifest-field equivalent (roots / per-TU includes /
         # public_header_paths+dirs); a flat value here would be silently
@@ -1502,6 +1501,7 @@ def _dump_elf(
     empty in this case (enforced by :func:`dump`). PE/Mach-O reject a
     non-``None`` value outright (not yet supported there).
     """
+    extra_includes = absolutize_include_roots(extra_includes)  # see its docstring
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
     from .elf_metadata import parse_elf_metadata
 
@@ -1724,6 +1724,7 @@ def _dump_macho(
     *dump_manifest* is not yet supported here (ADR-050 D3 is ELF-scoped) --
     rejected explicitly rather than silently ignored.
     """
+    extra_includes = absolutize_include_roots(extra_includes)  # see its docstring
     if dump_manifest is not None:
         raise ValidationError(
             "--dump-manifest is not yet supported for Mach-O binaries "
@@ -1897,6 +1898,7 @@ def _dump_pe(
     *dump_manifest* is not yet supported here (ADR-050 D3 is ELF-scoped) --
     rejected explicitly rather than silently ignored.
     """
+    extra_includes = absolutize_include_roots(extra_includes)  # see its docstring
     if dump_manifest is not None:
         raise ValidationError(
             "--dump-manifest is not yet supported for PE binaries "

@@ -225,7 +225,7 @@ def dedup_segments(
     return out
 
 
-def absolutize_include_roots(roots: list[Path] | None) -> list[Path] | None:
+def absolutize_include_roots(roots: list[Path]) -> list[Path]:
     """*roots* (``-I`` directories) with each relative entry resolved.
 
     A relative ``-I`` root makes the header parser spell every header it
