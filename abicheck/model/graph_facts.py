@@ -700,7 +700,9 @@ class SharedGraphValues:
         )
         # `True == 1`: keep the value's type in the key so a bool and an int
         # attr never share a dict.
-        key = tuple((k, type(v), v) for k, v in items)
+        # A float keys on its hex spelling: `0.0 == -0.0` (and NaN != NaN)
+        # would otherwise share dicts that serialize differently.
+        key = tuple((k, type(v), v.hex() if type(v) is float else v) for k, v in items)
         shared = self._attrs.get(key)
         if shared is None:
             shared = self._attrs[key] = dict(items)

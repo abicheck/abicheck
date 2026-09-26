@@ -103,7 +103,9 @@ def run_isolated(fns: Sequence[Callable[[], _T]], *, concurrent: bool) -> list[_
 
 
 def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
-    started = []
+    started: list[tuple[Any, Any]] = []
+    results: list[_T] = []
+    error: BaseException | None = None
     # Move everything the parent holds into the permanent generation before
     # forking, so a child's collections never traverse (and copy-on-write
     # fault in) the inherited heap -- the fork-safety step the gc docs name.
@@ -117,31 +119,47 @@ def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
             started.append((proc, recv))
     finally:
         gc.unfreeze()
-    results: list[_T] = []
-    error: BaseException | None = None
-    for proc, recv in started:
-        try:
-            # Unpickling builds the whole snapshot graph at once; a gen-0
-            # collection every few hundred allocations would rescan it
-            # repeatedly for garbage it cannot contain yet.
-            with gc_paused():
-                status, value = recv.recv()
-        except EOFError:
-            status, value = "died", None
-        finally:
+    try:
+        for proc, recv in started:
+            if error is not None:
+                break
+            try:
+                # Unpickling builds the whole snapshot graph at once; a gen-0
+                # collection every few hundred allocations would rescan it
+                # repeatedly for garbage it cannot contain yet.
+                with gc_paused():
+                    status, value = recv.recv()
+            except EOFError:
+                proc.join()
+                status, value = "died", None
+            except OSError as exc:
+                # A partially written frame: the child died mid-transfer.
+                status, value = (
+                    "err",
+                    SnapshotError(f"side resolution result transfer failed: {exc!r}"),
+                )
+            if status == "ok":
+                results.append(value)
+            elif status == "err":
+                error = value
+            else:
+                error = SnapshotError(
+                    f"side resolution process exited with status {proc.exitcode} "
+                    "without returning a snapshot"
+                )
+    finally:
+        # On failure a sibling's result is no longer wanted, and closing our
+        # receive end cannot unblock its send: every later child inherited
+        # that read end at fork. Terminate what is still running, then close
+        # and reap everything -- on success and on any failure.
+        if error is not None or len(results) != len(started):
+            for proc, _recv in started:
+                if proc.is_alive():
+                    proc.terminate()
+        for _proc, recv in started:
             recv.close()
-        proc.join()
-        if error is not None:
-            continue
-        if status == "ok":
-            results.append(value)
-        elif status == "err":
-            error = value
-        else:
-            error = SnapshotError(
-                f"side resolution process exited with status {proc.exitcode} "
-                "without returning a snapshot"
-            )
+        for proc, _recv in started:
+            proc.join()
     if error is not None:
         raise error
     return results

@@ -5,8 +5,8 @@ and leaves the child's memory behind."""
 
 from __future__ import annotations
 
+import multiprocessing
 import os
-import resource
 import sys
 import threading
 
@@ -54,7 +54,7 @@ def test_child_exception_is_reraised_and_siblings_are_reaped(isolated):
 
     with pytest.raises(_SideFailed, match="old side failed"):
         run_isolated([boom, lambda: 1], concurrent=True)
-    assert not [t for t in threading.enumerate() if t.name.startswith("Process")]
+    assert multiprocessing.active_children() == []
 
 
 @linux_only
@@ -74,6 +74,8 @@ def test_child_allocation_does_not_stay_in_the_parent(isolated):
     """The point of isolation: a child's transient peak never becomes the
     parent's. ru_maxrss is the process high-water mark, so the parent's own
     must not move by anything near what the child allocated."""
+    import resource  # POSIX-only: imported here so Windows can collect this module
+
     before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
     def heavy():
@@ -159,8 +161,6 @@ def test_compare_report_is_identical_with_isolation(tmp_path, monkeypatch):
 
 def _child_payload(fn):
     """Run the child body in-process (coverage does not follow a fork)."""
-    import multiprocessing
-
     from abicheck.workflows.side_isolation import _child
 
     recv, send = multiprocessing.Pipe(duplex=False)
@@ -191,3 +191,19 @@ def test_isolation_is_linux_only(monkeypatch):
     assert isolation_enabled()
     monkeypatch.setenv("ABICHECK_EXTRACTION_ISOLATION", "thread")
     assert not isolation_enabled()
+
+
+@linux_only
+def test_every_child_is_reaped_when_an_early_side_fails(isolated):
+    import time
+
+    def boom():
+        raise _SideFailed("first")
+
+    def slow():
+        time.sleep(0.3)
+        return list(range(100_000))  # a payload big enough to block on send
+
+    with pytest.raises(_SideFailed):
+        run_isolated([boom, slow, slow], concurrent=True)
+    assert multiprocessing.active_children() == []

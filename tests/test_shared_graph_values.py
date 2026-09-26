@@ -84,3 +84,13 @@ def test_non_scalar_attrs_are_never_shared():
     assert x.facts[0].attrs is not y.facts[0].attrs
     x.facts[0].attrs["v"].append(2)
     assert y.facts[0].attrs["v"] == [1]
+
+
+def test_signed_zero_floats_never_share_a_dict():
+    g = SourceGraphSummary()
+    pos = GraphNode(id="decl://p", kind="function", attrs={"n": 0.0})
+    neg = GraphNode(id="decl://q", kind="function", attrs={"n": -0.0})
+    g.add_node(pos)
+    g.add_node(neg)
+    assert pos.facts[0].attrs is not neg.facts[0].attrs
+    assert str(neg.facts[0].attrs["n"]) == "-0.0"
