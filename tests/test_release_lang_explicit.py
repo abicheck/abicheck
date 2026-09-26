@@ -97,10 +97,14 @@ def _lib(root: Path, version: str, body: str) -> None:
             f"-I{inc}",
             str(src),
             "-o",
-            str(lib / "libx.so"),
+            str(root / version / "libx.so"),
         ],
         check=True,
     )
+    # Build outside the release directory and copy only the library in: on
+    # macOS `-g` leaves a `libx.so.dSYM` bundle beside the output, which the
+    # directory fan-out would otherwise try to read as a second member.
+    shutil.copy2(root / version / "libx.so", lib / "libx.so")
 
 
 def _kinds(changes: list[dict[str, Any]]) -> list[tuple[str, str]]:
