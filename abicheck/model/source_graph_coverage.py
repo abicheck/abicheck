@@ -248,3 +248,12 @@ def graph_records_passes(graph: SourceGraphSummary) -> bool:
     return bool(
         graph.extractor_passes or graph.narrowed_passes or graph.degraded_passes
     )
+
+
+def pass_or_legacy_edges(
+    graph: object, ran: bool, kinds: tuple[str, ...], legacy: bool
+) -> bool:
+    """Whether a pass family was collected: its flag, or -- only for a graph
+    that records no pass flags at all (gap A5's legacy reading) -- the
+    presence of one of its edge *kinds*."""
+    return ran or (legacy and any(e.kind in kinds for e in getattr(graph, "edges", ())))

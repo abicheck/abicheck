@@ -65,6 +65,7 @@ from .source_graph_coverage import (
     INCLUDE_GRAPH_PASS,
     TYPE_GRAPH_PASS,
     graph_records_passes,
+    pass_or_legacy_edges,
 )
 
 #: Evidence-boundary label stamped on every source-graph finding (ADR-031 D9),
@@ -531,14 +532,15 @@ class SourceGraphSummary:
         header_include_pass_ran = self.extractor_passes.get(
             HEADER_INCLUDE_GRAPH_PASS, False
         )
-        # Gap A5: with any pass flag recorded the flags alone decide; only an
-        # unflagged graph keeps the edge-presence reading (``pass_flags_recorded``).
+        # Gap A5: recorded pass flags alone decide; edge presence only for unflagged graphs.
         legacy = not graph_records_passes(self)
-        has_calls = call_pass_ran or (
-            legacy and any(e.kind == "DECL_CALLS_DECL" for e in self.edges)
-        )
-        has_includes = (include_pass_ran or header_include_pass_ran) or (
-            legacy and any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in self.edges)
+
+        def got(ran: bool, *kinds: str) -> bool:
+            return pass_or_legacy_edges(self, ran, kinds, legacy)
+
+        has_calls = got(call_pass_ran, "DECL_CALLS_DECL")
+        has_includes = got(
+            include_pass_ran or header_include_pass_ran, "COMPILE_UNIT_INCLUDES_FILE"
         )
         #: ADR-041 P0: TYPE_INHERITS/TYPE_HAS_FIELD_TYPE/DECL_HAS_TYPE describe type-level
         #: dependencies; DECL_REFERENCES_DECL a non-call decl reference. Both come from
@@ -546,12 +548,8 @@ class SourceGraphSummary:
         #: (``graph_backends.py``), so "collected" is tracked separately — a graph can have
         #: calls but no type edges (e.g. an older pack), and coverage must say so honestly.
         type_edge_kinds = ("TYPE_INHERITS", "TYPE_HAS_FIELD_TYPE", "DECL_HAS_TYPE")
-        has_type_edges = (type_pass_ran or header_type_pass_ran) or (
-            legacy and any(e.kind in type_edge_kinds for e in self.edges)
-        )
-        has_reference_edges = type_pass_ran or (
-            legacy and any(e.kind == "DECL_REFERENCES_DECL" for e in self.edges)
-        )
+        has_type_edges = got(type_pass_ran or header_type_pass_ran, *type_edge_kinds)
+        has_reference_edges = got(type_pass_ran, "DECL_REFERENCES_DECL")
         self.coverage = {
             **self.coverage,  # forward-compat: keep any unrecognized field
             "targets": kinds.get("target", 0),
