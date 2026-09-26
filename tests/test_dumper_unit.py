@@ -614,13 +614,13 @@ class TestCastxmlDump:
         # The warm-cache parse this exercises lives in `dumper_cache.
         # read_cached_castxml` (`dumper` re-exports it as
         # `_read_castxml_cache`), so slow down the parser *that* module holds.
-        real_parse = dumper_cache.DefusedET.parse
+        real_parse = dumper_cache.parse_castxml_xml
 
         def _slow_parse(path):
             time.sleep(0.05)
             return real_parse(path)
 
-        monkeypatch.setattr(dumper_cache.DefusedET, "parse", _slow_parse)
+        monkeypatch.setattr(dumper_cache, "parse_castxml_xml", _slow_parse)
         with deadline.deadline_scope(0.03):
             with pytest.raises(deadline.DeadlineExceeded):
                 _castxml_dump([Path("h.h")], [])

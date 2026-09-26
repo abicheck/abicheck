@@ -657,15 +657,15 @@ def test_validate_castxml_output_rechecks_deadline_after_parse(
     )
 
     # `_validate_castxml_output` is `dumper_castxml_probe`'s, and parses
-    # through that module's own `DefusedET` -- patch the owner rather than
+    # through that module's own `parse_castxml_xml` -- patch the owner rather than
     # reaching for an unrelated module's handle on the same library.
-    real_parse = dumper_castxml_probe.DefusedET.parse
+    real_parse = dumper_castxml_probe.parse_castxml_xml
 
     def _slow_parse(path):
         time.sleep(0.05)
         return real_parse(path)
 
-    monkeypatch.setattr(dumper_castxml_probe.DefusedET, "parse", _slow_parse)
+    monkeypatch.setattr(dumper_castxml_probe, "parse_castxml_xml", _slow_parse)
     with deadline.deadline_scope(0.03):
         with pytest.raises(deadline.DeadlineExceeded):
             dumper._validate_castxml_output(result, out_xml, [], False)

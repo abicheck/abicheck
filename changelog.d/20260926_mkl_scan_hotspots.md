@@ -32,6 +32,13 @@
   (conda-forge, `--depth headers`): 173s -> 115s wall, identical 48,374
   findings.
 
+- castxml XML documents (cached L2 entries and fresh output) are parsed
+  through `storage/castxml_xml.py`, which keeps defusedxml's parser but stores
+  one object per distinct attribute value: `libmkl_rt`'s 26 MB header dump
+  carries 1.5M attribute values but only 193k distinct ones, and the parsed
+  tree drops from ~171 to ~117 MiB per side. End to end on the MKL pair, peak
+  RSS falls from 1,228 to 1,146 MiB.
+
 ### Fixed
 
 - The castxml/clang header-AST disk caches (`~/.cache/abi_check/<backend>`)

@@ -33,13 +33,11 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import cast
 from xml.etree.ElementTree import Element
-
-from defusedxml import ElementTree as DefusedET
 
 from ... import deadline
 from ...extract.castxml_compiler_emulation import emulated_compiler_command
+from ...storage.castxml_xml import parse_castxml_xml
 from ..build_evidence import CompileUnit
 from ..source_abi import SourceAbiTu, coverage_state_for_family, default_fact_set
 from ._argv import (
@@ -480,7 +478,7 @@ class CastxmlSourceExtractor:
                     f"scan deadline exceeded before parsing castxml output for "
                     f"{compile_unit.source}"
                 ) from exc
-            root = cast(Element, DefusedET.parse(str(out_xml)).getroot())
+            root = parse_castxml_xml(out_xml)
         finally:
             out_xml.unlink(missing_ok=True)
 

@@ -20,12 +20,12 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 if TYPE_CHECKING:
     from xml.etree.ElementTree import Element
 
-from defusedxml import ElementTree as DefusedET
 
 from . import deadline
 from .storage import ast_cache_budget, ast_parse_exclusions, cache_integrity
 from .storage.acyclic_json import gc_paused
 from .storage.ast_size_observer import mark_ast_intake, report_ast_size
+from .storage.castxml_xml import parse_castxml_xml
 from .storage.derived_ast import offer_derived_ast_source
 from .storage.json_compact import open_cached_entry
 
@@ -708,13 +708,13 @@ def read_cached_castxml(cached: Path) -> Element | None:
     if not cache_integrity.entry_intact(cached):
         return None
     try:
-        root = DefusedET.parse(str(cached)).getroot()
+        root = parse_castxml_xml(cached)
     except Exception:
         root = None
     if root is None:
         cache_integrity.evict(cached)
         return None
-    return cast("Element", root)
+    return root
 
 
 def _atomic_copy(src: Path, dst: Path) -> None:
