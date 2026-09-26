@@ -200,8 +200,15 @@ class TestCallReachability:
             assert self._findings(full, weak) == []
             assert self._findings(weak, full) == []
 
-    def test_unflagged_legacy_graphs_keep_the_legacy_reading(self):
-        assert len(self._findings({}, {})) == 1
+    def test_unflagged_graphs_answer_unknown(self):
+        """Evidence-entity-model gap A5: the legacy edge-presence reading is
+        retired. An unflagged graph (hand-built, or stored before producers
+        stamped passes) cannot prove an absence, so the change is not
+        reported -- in either direction, and against a flagged side too."""
+        full = {"extractor_passes": ["call_graph"]}
+        assert self._findings({}, {}) == []
+        assert self._findings({}, full) == []
+        assert self._findings(full, {}) == []
 
 
 def test_source_graph_findings_tables_are_the_model_owner():

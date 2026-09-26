@@ -136,7 +136,10 @@ def test_seeds_public_and_private_function_decls_with_visibility() -> None:
     # still runs unconditionally (no clang needed), but there are no types
     # in this snapshot for it to find anything about.
     assert "header_call_graph" not in graph.extractor_passes
-    assert graph.extractor_passes == {"header_type_graph": True}
+    assert graph.extractor_passes == {
+        "header_type_graph": True,
+        "header_declarations": True,
+    }
     assert not any(e.kind in ("DECL_CALLS_DECL", "TYPE_INHERITS") for e in graph.edges)
 
 
@@ -345,7 +348,10 @@ def test_no_ast_root_yields_no_call_pass_on_an_empty_snapshot() -> None:
     graph = build_header_only_graph(_snapshot())
     assert graph.nodes == []
     assert graph.edges == []
-    assert graph.extractor_passes == {"header_type_graph": True}
+    assert graph.extractor_passes == {
+        "header_type_graph": True,
+        "header_declarations": True,
+    }
 
 
 # ── flat-model structural edges (no AST/clang at all) ───────────────────────
@@ -375,7 +381,10 @@ def test_flat_model_public_struct_private_field_type() -> None:
     assert edge.attrs["resolution"] == "unique_candidate"
     node_by_id = {n.id: n for n in graph.nodes}
     assert node_by_id["type://Private"].attrs["visibility"] == "private_header"
-    assert graph.extractor_passes == {"header_type_graph": True}
+    assert graph.extractor_passes == {
+        "header_type_graph": True,
+        "header_declarations": True,
+    }
 
 
 def test_flat_model_type_inherits_base() -> None:
@@ -558,7 +567,10 @@ def test_flat_model_never_stamps_call_graph_pass() -> None:
     public = RecordType(name="Public", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER)
     graph = build_header_only_graph(_snapshot(types=[public]))
     assert HEADER_CALL_GRAPH_PASS not in graph.extractor_passes
-    assert graph.extractor_passes == {HEADER_TYPE_GRAPH_PASS: True}
+    assert graph.extractor_passes == {
+        HEADER_TYPE_GRAPH_PASS: True,
+        "header_declarations": True,
+    }
 
 
 def test_flat_model_never_stamps_type_graph_pass_on_scope_fallback() -> None:
@@ -766,6 +778,12 @@ def test_header_include_extractor_folds_into_graph(tmp_path, monkeypatch) -> Non
         [str(pub)], [str(tmp_path)]
     )
     added = augment_graph_with_includes(graph, include_map)
+    graph.finalize()
+    # Gap A5: on a graph that records pass flags, an edge alone no longer
+    # marks its kind collected -- the producer's flag does, which the real
+    # caller (`service_header_graph_attach`) stamps after the pass.
+    assert graph.coverage["include_edges"]["collected"] is False
+    graph.extractor_passes["header_include_graph"] = True
     graph.finalize()
 
     assert added == 1
