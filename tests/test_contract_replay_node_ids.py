@@ -190,7 +190,8 @@ def test_fresh_report_carries_the_new_encoding_version() -> None:
     from abicheck.schemas import REPORT_SCHEMA_VERSION
 
     assert CONTRACT_EVIDENCE_SCHEMA_VERSION == 2
-    assert REPORT_SCHEMA_VERSION == "5.6"
+    # 5.6 introduced the encoding; any later report schema still carries it.
+    assert tuple(map(int, REPORT_SCHEMA_VERSION.split("."))) >= (5, 6)
 
 
 def _fixture_pair() -> tuple[AbiSnapshot, AbiSnapshot]:

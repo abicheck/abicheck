@@ -155,7 +155,11 @@ __all__ = [
 #:   extraction, so it keeps its source-read licence and no existing value
 #:   moves -- unlike a stored-snapshot ``compare``, which now honestly
 #:   declines to re-derive (see ``buildsource/source_inputs.py``).
-AUDIT_REPORT_SCHEMA_VERSION = "1.5"
+#: ``1.6``: ``run_outcome.assurance`` is validated against the compare
+#:   report's ``analysis_assurance`` shape (with the ``not_evaluated``
+#:   ``schema_staleness_status`` every audit has always emitted, since an
+#:   audit has no OLD side -- compare report ``5.7``). No emitted value changes.
+AUDIT_REPORT_SCHEMA_VERSION = "1.6"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.
