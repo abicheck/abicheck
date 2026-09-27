@@ -41,24 +41,32 @@ from abicheck.extract.header_scan_memo import memoize_header_scan
 
 
 class _WaiterCount:
-    """Counts callers blocked on an in-flight computation.
+    """Counts callers blocked on each in-flight computation.
 
     Both memos hand a concurrent caller the producer's ``Future`` and block
-    in ``Future.result()``. Each test's producer waits here until every
-    other caller of its key is blocked there, so the claim "computed once
-    while they overlapped" never rests on a timing guess: a caller that
-    arrived after the producer finished would legitimately compute again.
+    in ``Future.result()``. Each producer waits here until every other
+    caller of *its own* key is blocked on *its own* future, so the claim
+    "computed once while they overlapped" never rests on a timing guess (a
+    caller arriving after the producer finished would legitimately compute
+    again). A future is attributed to the thread that created it: both
+    memos create it on the producer's thread and run the computation there.
     """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._cond = threading.Condition()
-        self._blocked: dict[object, int] = {}
+        self._blocked: dict[int, int] = {}  # producer thread ident -> waiters
         counter = self
 
         class _CountingFuture(Future):  # type: ignore[type-arg]
+            def __init__(self) -> None:
+                super().__init__()
+                self.producer = threading.get_ident()
+
             def result(self, timeout: float | None = None) -> object:
                 with counter._cond:
-                    counter._blocked[id(self)] = counter._blocked.get(id(self), 0) + 1
+                    counter._blocked[self.producer] = (
+                        counter._blocked.get(self.producer, 0) + 1
+                    )
                     counter._cond.notify_all()
                 return super().result(timeout)
 
@@ -66,13 +74,13 @@ class _WaiterCount:
             monkeypatch.setattr(module, "Future", _CountingFuture)
 
     def wait_for(self, n: int) -> None:
-        """Block until *n* callers wait on one in-flight future."""
+        """Block the calling producer until *n* callers wait on its future."""
+        me = threading.get_ident()
         with self._cond:
-            ok = self._cond.wait_for(
-                lambda: any(c >= n for c in self._blocked.values()) or n == 0,
-                timeout=30,
-            )
-        assert ok, f"expected {n} callers blocked on the in-flight computation"
+            ok = self._cond.wait_for(lambda: self._blocked.get(me, 0) >= n, timeout=30)
+            # A later producer can reuse this thread (a retry after a failure).
+            self._blocked.pop(me, None)
+        assert ok, f"expected {n} callers blocked on this computation"
 
 
 @pytest.fixture
