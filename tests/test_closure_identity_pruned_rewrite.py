@@ -185,3 +185,69 @@ def test_vacuity_guard_markers_really_get_renumbered() -> None:
     )
     renumber_anonymous_closure_identities(snap)
     assert snap.types[0].qualified_name == "W<(lambda:a.h#1)>"
+
+
+@settings(max_examples=200, deadline=None)
+@given(_snapshots())
+def test_collect_and_flag_matches_oracles_on_snapshot_dataclasses(
+    snap: AbiSnapshot,
+) -> None:
+    """The same two oracles over real model dataclasses -- ``Function``/
+    ``Param``/``RecordType`` and the ``Fact`` fields nested in them, which
+    ``collect_and_flag`` expands inline rather than recursing into (the
+    generic-container property above never reaches that path)."""
+    for field in closure_identity._LAMBDA_IDENTITY_FIELDS:
+        value = getattr(snap, field)
+        seen: list[str] = []
+
+        def record(text: str) -> str:
+            seen.append(text)
+            return text + "!"
+
+        out: list[str] = []
+        flagged = collect_and_flag(value, out, closure_identity._may_hold_marker)
+        expected: list[str] = []
+        _collect_strings(value, expected)
+        assert out == expected, field
+        _walk_rewrite_strings(copy.deepcopy(value), record)
+        # Conservative: whatever the walk would rewrite is flagged ...
+        if any(closure_identity._may_hold_marker(s) for s in seen):
+            assert flagged, field
+        # ... and the flag is exactly the documented superset: any string
+        # reachable through `_rewrite_plan` fields, sequences, and both
+        # halves of a mapping.
+        assert flagged == any(
+            closure_identity._may_hold_marker(s) for s in _rewrite_plan_strings(value)
+        ), field
+        # Collection off: nothing collected, identical flag.
+        silent: list[str] = []
+        assert (
+            collect_and_flag(
+                value, silent, closure_identity._may_hold_marker, collect=False
+            )
+            == flagged
+        )
+        assert silent == []
+
+
+def _rewrite_plan_strings(value: object) -> list[str]:
+    """Naive reference for the strings ``collect_and_flag``'s flag covers."""
+    from collections.abc import Mapping
+    from enum import Enum
+
+    from abicheck.qualified_name_segments_walk import _rewrite_plan
+
+    if isinstance(value, str):
+        return [] if isinstance(value, Enum) else [value]
+    plan = _rewrite_plan(type(value))
+    if plan is not None:
+        return [s for name in plan for s in _rewrite_plan_strings(getattr(value, name))]
+    if isinstance(value, (list, tuple)):
+        return [s for item in value for s in _rewrite_plan_strings(item)]
+    if isinstance(value, Mapping):
+        return [
+            s
+            for k, v in value.items()
+            for s in (*_rewrite_plan_strings(k), *_rewrite_plan_strings(v))
+        ]
+    return []

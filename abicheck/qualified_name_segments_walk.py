@@ -456,13 +456,7 @@ def collect_and_flag(
         return pred(value)
     fields = _flag_plan(tp)
     if fields is not None:
-        hit = False
-        for name, collected in fields:
-            if collect_and_flag(
-                getattr(value, name), out, pred, collect=collect and collected
-            ):
-                hit = True
-        return hit
+        return _flag_fields(value, fields, out, pred, collect)
     hit = False
     if tp is list or tp is tuple or isinstance(value, (list, tuple)):
         for item in value:  # type: ignore[attr-defined]
@@ -478,4 +472,80 @@ def collect_and_flag(
                 hit = True
             if collect_and_flag(v, out, pred, collect=collect):
                 hit = True
+    return hit
+
+
+#: Per-type node classification for :func:`_flag_fields`: ``_STR`` for an
+#: exact ``str``, ``_LEAF`` for a type :func:`collect_and_flag` always
+#: answers ``False`` for without collecting anything (a scalar, or an enum
+#: that is not itself a dataclass/sequence/mapping -- a ``(str, Enum)``
+#: member included, which it deliberately does not treat as text),
+#: ``_OTHER`` otherwise.
+_STR, _LEAF, _OTHER = 0, 1, 2
+_NODE_KIND: dict[type, int] = {str: _STR}
+
+
+def _node_kind(tp: type) -> int:
+    kind = _NODE_KIND.get(tp)
+    if kind is None:
+        leaf = tp in _SCALAR_TYPES or (
+            issubclass(tp, _Enum)
+            and _flag_plan(tp) is None
+            and not issubclass(tp, (list, tuple, _Mapping))
+        )
+        kind = _NODE_KIND[tp] = _LEAF if leaf else _OTHER
+    return kind
+
+
+def _flag_fields(
+    value: object,
+    fields: tuple[tuple[str, bool], ...],
+    out: list[str],
+    pred: _Callable[[str], bool],
+    collect: bool,
+) -> bool:
+    """:func:`collect_and_flag` over a dataclass instance's *fields*.
+
+    Identical result (same strings, same order, same flag) with fewer calls:
+    a leaf field is answered inline, and so is each field of a nested
+    dataclass -- a ``Fact`` is the bulk of a real snapshot's nodes, ~42 per
+    function -- rather than each costing a recursive call. Anything else
+    recurses exactly as before.
+    """
+    hit = False
+    kinds = _NODE_KIND
+    for name, collected in fields:
+        keep = collect and collected
+        child = getattr(value, name)
+        ctp = type(child)
+        kind = kinds.get(ctp)
+        if kind is None:
+            kind = _node_kind(ctp)
+        if kind == _STR:
+            if keep:
+                out.append(child)
+            if not hit and pred(child):
+                hit = True
+            continue
+        if kind == _LEAF:
+            continue
+        sub = _flag_plan(ctp)
+        if sub is None:
+            if collect_and_flag(child, out, pred, collect=keep):
+                hit = True
+            continue
+        for sub_name, sub_collected in sub:
+            grand = getattr(child, sub_name)
+            gtp = type(grand)
+            gkind = kinds.get(gtp)
+            if gkind is None:
+                gkind = _node_kind(gtp)
+            if gkind == _STR:
+                if keep and sub_collected:
+                    out.append(grand)
+                if not hit and pred(grand):
+                    hit = True
+            elif gkind == _OTHER and not (gtp is tuple and not grand):
+                if collect_and_flag(grand, out, pred, collect=keep and sub_collected):
+                    hit = True
     return hit

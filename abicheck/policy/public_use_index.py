@@ -79,6 +79,10 @@ def build_public_use_index(functions: Iterable[Function]) -> PublicUseIndex:
     """
     by_short: dict[str, bool] = {}
     by_exact: dict[str, bool] = {}
+    # Per-call memo of the per-spelling work below (the ``strip_ptr`` result
+    # and the keys it contributes): a large C API repeats a few hundred
+    # spellings across tens of thousands of sites.
+    keys_for: dict[str, tuple[str, frozenset[str]]] = {}
     for fn in functions:
         # Use the function's own visibility, not demangled-name membership in
         # public_roots(): a *hidden* C++ overload sharing a public overload's
@@ -89,15 +93,24 @@ def build_public_use_index(functions: Iterable[Function]) -> PublicUseIndex:
         for p in fn.params:
             sites.append((getattr(p, "type", "") or "", getattr(p, "pointer_depth", 0)))
         for type_str, depth in sites:
-            # One normalisation per *site*: ``_strip_ptr`` is pure, so a second
-            # call could only ever return the same value.
-            stripped = strip_ptr(type_str)
+            # One normalisation per distinct *spelling*: ``strip_ptr`` is pure,
+            # so a second call could only ever return the same value.
+            cached = keys_for.get(type_str)
+            if cached is None:
+                stripped_once = strip_ptr(type_str)
+                cached = keys_for[type_str] = (
+                    stripped_once,
+                    frozenset(
+                        {type_str.rsplit("::", 1)[-1]} | set(stripped_once.split())
+                    ),
+                )
+            stripped, short_keys = cached
             # The by-value test is the predicate's, unchanged -- pointer depth
             # *and* a literal ``*`` in the spelling. A reference spells ``&``,
             # carries no ``*`` and usually no depth, so it counted as by-value
             # before and still does; this is not the place to reinterpret that.
             by_value = depth < 1 and not _is_pointer(type_str)
-            for key in {type_str.rsplit("::", 1)[-1]} | set(stripped.split()):
+            for key in short_keys:
                 by_short[key] = by_short.get(key, False) or by_value
             for key in (type_str, stripped):
                 by_exact[key] = by_exact.get(key, False) or by_value

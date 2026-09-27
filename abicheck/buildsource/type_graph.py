@@ -66,7 +66,7 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
-from functools import partial
+from functools import lru_cache, partial
 from typing import TYPE_CHECKING, Any
 
 from .. import deadline
@@ -202,12 +202,17 @@ def _top_level_paren_index(s: str) -> int:
     return -1
 
 
+@lru_cache(maxsize=1 << 16)
 def _base_type_name(qual_type: str) -> str:
     """Strip cv/pointer/reference/array decoration down to a base type spelling.
 
     Best-effort textual normalization (``"const detail::Impl *"`` ->
     ``"detail::Impl"``), not a real type-identity resolution — matches the
     approximate/overapprox confidence this module labels its edges with.
+
+    Memoized: a pure function of its argument, and one header graph asks it
+    about the same spelling about twice (``_resolve_nested_type_names`` and
+    ``header_graph.resolve``) -- 1.47M calls on one MKL side.
     """
     s = (qual_type or "").strip()
     if not s:
