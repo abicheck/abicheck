@@ -95,16 +95,7 @@ def build_public_use_index(functions: Iterable[Function]) -> PublicUseIndex:
         for type_str, depth in sites:
             # One normalisation per distinct *spelling*: ``strip_ptr`` is pure,
             # so a second call could only ever return the same value.
-            cached = keys_for.get(type_str)
-            if cached is None:
-                stripped_once = strip_ptr(type_str)
-                cached = keys_for[type_str] = (
-                    stripped_once,
-                    frozenset(
-                        {type_str.rsplit("::", 1)[-1]} | set(stripped_once.split())
-                    ),
-                )
-            stripped, short_keys = cached
+            stripped, short_keys = _spelling_keys(type_str, keys_for)
             # The by-value test is the predicate's, unchanged -- pointer depth
             # *and* a literal ``*`` in the spelling. A reference spells ``&``,
             # carries no ``*`` and usually no depth, so it counted as by-value
@@ -115,6 +106,20 @@ def build_public_use_index(functions: Iterable[Function]) -> PublicUseIndex:
             for key in (type_str, stripped):
                 by_exact[key] = by_exact.get(key, False) or by_value
     return PublicUseIndex(by_short, by_exact)
+
+
+def _spelling_keys(
+    type_str: str, memo: dict[str, tuple[str, frozenset[str]]]
+) -> tuple[str, frozenset[str]]:
+    """``(strip_ptr(type_str), its by-short keys)``, once per spelling in *memo*."""
+    cached = memo.get(type_str)
+    if cached is None:
+        stripped = strip_ptr(type_str)
+        cached = memo[type_str] = (
+            stripped,
+            frozenset({type_str.rsplit("::", 1)[-1]} | set(stripped.split())),
+        )
+    return cached
 
 
 def query_public_use(index: PublicUseIndex, type_name: str) -> tuple[bool, bool]:

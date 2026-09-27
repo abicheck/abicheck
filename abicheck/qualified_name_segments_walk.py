@@ -480,20 +480,18 @@ def collect_and_flag(
 #: answers ``False`` for without collecting anything (a scalar, or an enum
 #: that is not itself a dataclass/sequence/mapping -- a ``(str, Enum)``
 #: member included, which it deliberately does not treat as text),
-#: ``_OTHER`` otherwise.
-_STR, _LEAF, _OTHER = 0, 1, 2
+#: ``_OTHER`` otherwise. All truthy, so a lookup can fall back with ``or``.
+_STR, _LEAF, _OTHER = 1, 2, 3
 _NODE_KIND: dict[type, int] = {str: _STR}
 
 
 def _node_kind(tp: type) -> int:
-    kind = _NODE_KIND.get(tp)
-    if kind is None:
-        leaf = tp in _SCALAR_TYPES or (
-            issubclass(tp, _Enum)
-            and _flag_plan(tp) is None
-            and not issubclass(tp, (list, tuple, _Mapping))
-        )
-        kind = _NODE_KIND[tp] = _LEAF if leaf else _OTHER
+    leaf = tp in _SCALAR_TYPES or (
+        issubclass(tp, _Enum)
+        and _flag_plan(tp) is None
+        and not issubclass(tp, (list, tuple, _Mapping))
+    )
+    kind = _NODE_KIND[tp] = _LEAF if leaf else _OTHER
     return kind
 
 
@@ -503,24 +501,24 @@ def _flag_fields(
     out: list[str],
     pred: _Callable[[str], bool],
     collect: bool,
+    hit: bool = False,
+    expand: bool = True,
 ) -> bool:
-    """:func:`collect_and_flag` over a dataclass instance's *fields*.
+    """:func:`collect_and_flag` over a dataclass instance's *fields*,
+    returning *hit* or'ed with its own flag.
 
     Identical result (same strings, same order, same flag) with fewer calls:
-    a leaf field is answered inline, and so is each field of a nested
-    dataclass -- a ``Fact`` is the bulk of a real snapshot's nodes, ~42 per
-    function -- rather than each costing a recursive call. Anything else
-    recurses exactly as before.
+    a leaf field is answered inline, and -- one level deep, *expand* -- so
+    is each field of a nested dataclass (a ``Fact`` is the bulk of a real
+    snapshot's nodes, ~42 per function) rather than each costing a
+    recursive :func:`collect_and_flag` call. Anything else recurses exactly
+    as before.
     """
-    hit = False
-    kinds = _NODE_KIND
     for name, collected in fields:
         keep = collect and collected
         child = getattr(value, name)
         ctp = type(child)
-        kind = kinds.get(ctp)
-        if kind is None:
-            kind = _node_kind(ctp)
+        kind = _NODE_KIND.get(ctp) or _node_kind(ctp)
         if kind == _STR:
             if keep:
                 out.append(child)
@@ -529,23 +527,9 @@ def _flag_fields(
             continue
         if kind == _LEAF:
             continue
-        sub = _flag_plan(ctp)
-        if sub is None:
-            if collect_and_flag(child, out, pred, collect=keep):
-                hit = True
-            continue
-        for sub_name, sub_collected in sub:
-            grand = getattr(child, sub_name)
-            gtp = type(grand)
-            gkind = kinds.get(gtp)
-            if gkind is None:
-                gkind = _node_kind(gtp)
-            if gkind == _STR:
-                if keep and sub_collected:
-                    out.append(grand)
-                if not hit and pred(grand):
-                    hit = True
-            elif gkind == _OTHER and not (gtp is tuple and not grand):
-                if collect_and_flag(grand, out, pred, collect=keep and sub_collected):
-                    hit = True
+        sub = _flag_plan(ctp) if expand else None
+        if sub is not None:
+            hit = _flag_fields(child, sub, out, pred, keep, hit, expand=False)
+        elif collect_and_flag(child, out, pred, collect=keep):
+            hit = True
     return hit
