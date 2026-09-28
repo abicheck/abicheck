@@ -1,0 +1,5 @@
+### Performance
+
+- **Size the release fan-out from what can actually run** — a directory/package `compare` now runs at most as many members at once as the interpreter can execute Python for (2 under the GIL, the CPU count on a free-threaded build), instead of a CPU-derived pool that started every member at once. Wall time is unchanged under the GIL while peak memory no longer scales with the member count. Override with `ABICHECK_MEMBER_JOBS`; the policy lives in `process_resources.python_parallelism`.
+- **One process-wide include-probe pool** — the `clang -M` include pass shares one host-sized thread pool instead of building a pool per call, so the thread high-water mark no longer grows with members x compile units (previously ~3300 threads on a 28-member release, with ~1.5 GiB of per-thread malloc arenas). Only one queued probe polls the host budget; the rest block.
+- **Drop retained header ASTs before the release tail** — the request's AST acquisition table releases every completed entry once the release-level public-surface reconciliation has run, so the compare/report tail no longer carries parsed ASTs nobody will read again.

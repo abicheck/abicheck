@@ -616,7 +616,7 @@ def compare_release_cmd(
     from .workflows.extraction import ast_acquisition_scope
     from .workflows.policy_file import dedup_validate_overrides_warnings
 
-    with dedup_validate_overrides_warnings(), ast_acquisition_scope():
+    with dedup_validate_overrides_warnings(), ast_acquisition_scope() as ast_scope:
         # Validate suppression file early (before per-library loop)
         _validate_suppression_early(
             suppress,
@@ -965,6 +965,13 @@ def compare_release_cmd(
                 depth=depth,
                 include_dependencies=include_dependencies,
             )
+            # The last consumer of this request's parsed header ASTs was the
+            # reconciliation above; everything below is compare/report work
+            # over snapshots and findings. Flush the acquisition table so the
+            # tail -- where a 28-member release measured its peak RSS -- does
+            # not carry roots nobody will read again. A pure cache flush:
+            # anything still in flight stays, and a later ask re-parses.
+            ast_scope.release_completed()
             # Folded with the same `_RELEASE_VERDICT_ORDER` ranking every
             # other release-global contributor (bundle findings, the probe
             # matrix, a removed library) uses, so a release-level contract

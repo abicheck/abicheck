@@ -231,3 +231,81 @@ def mem_cap(budget_gib: float) -> int | None:
     if avail is None:
         return None
     return max(1, int(avail / budget_gib))
+
+
+# ---------------------------------------------------------------------------
+# Concurrency policy: how much *Python* work can actually run at once.
+#
+# Every pool above sizes itself off CPUs and RAM, which is right for a worker
+# whose cost is a child process (clang, castxml): those run in parallel
+# whatever the interpreter does. It is wrong for a worker whose cost is
+# Python itself -- parsing an AST document, building the model, comparing,
+# rendering. Under the GIL such workers serialize, so a release fan-out of 28
+# members measured ~100% CPU while holding 28 members' working sets resident
+# at once. On a free-threaded build (PEP 703, ``python3.xt``) the same
+# workers really do scale, and memory becomes the only limit.
+#
+# So the number of concurrently *running* Python-heavy workers is a property
+# of the interpreter, decided here, in one place, rather than guessed at each
+# pool. Two levels, deliberately separate:
+#
+# * level 1 -- Python-heavy units (release members): :func:`python_parallelism`;
+# * level 2 -- child-process units (``clang -M`` probes and friends): the
+#   CPU/RAM sizing above, bounded process-wide by the caller's own gate.
+# ---------------------------------------------------------------------------
+
+#: Override for level 1: how many Python-heavy units (release members) may run
+#: at once. ``0``/unset takes the interpreter-derived default; an unparsable
+#: value is ignored. The one knob for this level -- add to it, not beside it.
+MEMBER_JOBS_ENV_VAR = "ABICHECK_MEMBER_JOBS"
+
+#: Level-1 default while the GIL is enabled. Not 1: while one member's Python
+#: holds the GIL, another member's clang child (``-M`` probe, AST dump) still
+#: runs, so a second member overlaps the child-process phases for the cost of
+#: one extra working set. Beyond two, measured wall time was flat and resident
+#: memory grew linearly (28 concurrent members vs. batches: ~10x peak RSS for
+#: no speedup).
+GIL_MEMBER_PARALLELISM = 2
+
+
+def gil_enabled() -> bool:
+    """Whether this interpreter serializes Python bytecode on a GIL.
+
+    ``sys._is_gil_enabled`` exists from 3.13; on a free-threaded build it
+    answers ``False`` unless the GIL was re-enabled at runtime (``PYTHON_GIL=1``
+    or an extension module that does not declare free-threading support), in
+    which case the conservative answer is the right one. Older interpreters
+    always have a GIL.
+    """
+    import sys
+
+    probe = getattr(sys, "_is_gil_enabled", None)
+    return True if probe is None else bool(probe())
+
+
+def python_parallelism(*, diagnostics: list[str] | None = None) -> int:
+    """How many Python-heavy units may run at once (>= 1).
+
+    ``ABICHECK_MEMBER_JOBS`` when set to a positive integer (clamped to
+    :func:`jobs_ceiling`, like every other override); otherwise
+    :data:`GIL_MEMBER_PARALLELISM` under the GIL and the CPU count on a
+    free-threaded interpreter. Memory is *not* considered here -- the caller's
+    memory admission is what bounds a level-1 pool by RAM; this bounds it by
+    what can actually execute.
+    """
+    raw = os.environ.get(MEMBER_JOBS_ENV_VAR, "").strip()
+    if raw:
+        try:
+            requested = int(raw)
+        except ValueError:
+            requested = 0
+            if diagnostics is not None:
+                diagnostics.append(
+                    f"ignoring unparsable {MEMBER_JOBS_ENV_VAR}={raw!r}; "
+                    "using the interpreter-derived default"
+                )
+        if requested > 0:
+            return max(1, min(requested, jobs_ceiling()))
+    if gil_enabled():
+        return GIL_MEMBER_PARALLELISM
+    return max(1, os.cpu_count() or 1)

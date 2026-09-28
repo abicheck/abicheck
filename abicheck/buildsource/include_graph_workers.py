@@ -21,8 +21,9 @@ module so "what a depfile means" (argv sanitization, depfile parsing, graph
 folding, diagnostics) and "how many compilers may run at once, bounded by what"
 have one owner each.
 
-Everything here is deliberately state-free apart from the one process-wide
-semaphore: each probe is planned up front (:class:`DepfileProbe`) and reports
+Everything here is deliberately state-free apart from the two process-wide
+objects -- the admission gate and the shared probe pool (bounded threads, see
+:func:`_shared_pool`): each probe is planned up front (:class:`DepfileProbe`) and reports
 its result as data (:class:`ProbeOutcome`), so the caller's own ordered fold --
 not completion order -- decides what the pass produced.
 """
@@ -34,7 +35,7 @@ import subprocess  # noqa: S404 - depfile probes shell out to clang (never shell
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 
 from .. import deadline, process_resources
@@ -108,6 +109,8 @@ class _ProbeGate:
         self._limit = limit
         self._cond = threading.Condition()
         self._in_flight = 0
+        #: Whether some queued caller currently holds the polling role.
+        self._poller_present = False
 
     @property
     def in_flight(self) -> int:
@@ -118,20 +121,40 @@ class _ProbeGate:
     def acquire(self, timeout: float) -> bool:
         """Admit one child within *timeout* seconds, or return ``False``.
 
-        Waits in short slices rather than one long one so a budget that *grows*
-        while this caller is queued is noticed promptly, not only when a
-        current holder happens to release.
+        Blocking, with exactly **one** timed waiter. The budget is re-read on
+        every attempt (see the class docstring), and a budget that *grows*
+        while nobody releases has to be noticed by someone -- but not by every
+        queued caller. An earlier version had each waiter wake every
+        :data:`_GATE_POLL_SECONDS`, which is harmless with a handful of
+        waiters and was the hot spot of a 28-member release: ~3300 queued
+        threads re-reading ``/proc`` and cgroup files twice a second, 62% of
+        sampled time inside this method. Now the first queued caller becomes
+        the *poller* and takes short slices; everyone else blocks until a
+        release (or the poller's own admission) hands them a wakeup, or their
+        own deadline passes. Leaving -- admitted or timed out -- the poller
+        passes the role on with a ``notify``.
         """
         ends_at = time.monotonic() + timeout
+        polling = False
         with self._cond:
-            while True:
-                if self._in_flight < self._limit():
-                    self._in_flight += 1
-                    return True
-                left = ends_at - time.monotonic()
-                if left <= 0:
-                    return False
-                self._cond.wait(timeout=min(left, _GATE_POLL_SECONDS))
+            try:
+                while True:
+                    if self._in_flight < self._limit():
+                        self._in_flight += 1
+                        return True
+                    left = ends_at - time.monotonic()
+                    if left <= 0:
+                        return False
+                    if not self._poller_present:
+                        self._poller_present = polling = True
+                    self._cond.wait(
+                        timeout=min(left, _GATE_POLL_SECONDS) if polling else left
+                    )
+            finally:
+                if polling:
+                    self._poller_present = False
+                    # Hand the role (and any headroom the poller saw) on.
+                    self._cond.notify()
 
     def release(self) -> None:
         with self._cond:
@@ -139,8 +162,9 @@ class _ProbeGate:
             self._cond.notify()
 
 
-#: Longest a queued probe waits before re-reading the host budget, so a budget
-#: that *grows* is picked up without waiting for a holder to release.
+#: Longest the one polling waiter (see :meth:`_ProbeGate.acquire`) waits
+#: before re-reading the host budget, so a budget that *grows* is picked up
+#: without waiting for a holder to release. Every other waiter blocks.
 _GATE_POLL_SECONDS = 0.5
 
 #: The one process-wide gate. A plain module-level instance, not lazily built:
@@ -296,19 +320,130 @@ def run_probes(
     # independent. Admits against the live host budget, never a per-pool size
     # or a cached one -- see `_ProbeGate` for the holes both of those had.
     deadline_ts = deadline.current_deadline_ts()
-    with ThreadPoolExecutor(max_workers=resolved_jobs) as pool:
-        futures = [
-            pool.submit(
-                _run_probe_in_worker,
-                deadline_ts,
-                unit,
-                aggregate_deadline,
-                per_unit_timeout_s,
-                slots,
+    proxies = _submit_windowed(
+        planned,
+        lambda unit: (
+            _run_probe_in_worker,
+            deadline_ts,
+            unit,
+            aggregate_deadline,
+            per_unit_timeout_s,
+            slots,
+        ),
+        window=resolved_jobs,
+    )
+    return [f.result() for f in track(proxies, "include map", len(proxies))]
+
+
+#: Upper bound on the process-wide probe pool's thread count. Independent of
+#: any caller's unit count *and* of the live host budget: the pool is built
+#: once, and the budget is enforced per admission by :data:`_PROBE_GATE`, so
+#: this only has to be an upper bound on what the gate could ever admit
+#: usefully -- one thread per CPU (a ``clang -M`` child is single-threaded),
+#: floored so a small runner still overlaps a few probes.
+def _shared_pool_size() -> int:
+    return process_resources.jobs_ceiling(floor=4, cpu_multiplier=1)
+
+
+_SHARED_POOL_LOCK = threading.Lock()
+_SHARED_POOL: ThreadPoolExecutor | None = None
+
+
+def _shared_pool() -> ThreadPoolExecutor:
+    """The one probe executor for the whole process, built on first use.
+
+    Every :func:`run_probes` call used to build its own pool of
+    ``min(host_job_limit, unit_count)`` threads. The gate kept *children*
+    bounded, but not threads: a 28-member release on a 224-core host created
+    ~3300 of them, nearly all parked in the gate, and their per-thread malloc
+    arenas were ~1.5 GiB of the run's peak RSS. One shared pool makes the
+    thread high-water mark a constant of the host instead of a product of
+    members x units.
+    """
+    global _SHARED_POOL
+    with _SHARED_POOL_LOCK:
+        if _SHARED_POOL is None:
+            _SHARED_POOL = ThreadPoolExecutor(
+                max_workers=_shared_pool_size(), thread_name_prefix="abicheck-probe"
             )
-            for unit in planned
-        ]
-        return [f.result() for f in track(futures, "include map", len(futures))]
+        return _SHARED_POOL
+
+
+def _forget_shared_pool_in_child() -> None:
+    # A forked child inherits the object but none of its threads.
+    global _SHARED_POOL
+    _SHARED_POOL = None
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_forget_shared_pool_in_child)
+
+
+def _submit_windowed(
+    items: list[DepfileProbe],
+    call: Callable[[DepfileProbe], tuple],
+    *,
+    window: int,
+) -> list[Future[ProbeOutcome]]:
+    """Run ``call(item)`` for every item on the shared pool, at most *window*
+    at a time for this caller; one future per item, in *items* order.
+
+    The per-caller *window* is what keeps an explicit ``jobs=`` meaningful
+    on a pool other callers share: the next item is submitted from the
+    completion callback of a previous one, so this caller never has more than
+    *window* units queued or running, and never blocks a shared worker
+    waiting for its own turn (which a per-caller semaphore acquired *inside*
+    the worker would, starving every other caller). Order of the returned
+    list is the planned order, so the caller's fold is unchanged.
+    """
+    pool = _shared_pool()
+    proxies: list[Future[ProbeOutcome]] = [Future() for _ in items]
+    lock = threading.Lock()
+    state = {"next": 0, "owed": 0, "draining": False}
+
+    def request_launch() -> None:
+        # A trampoline, not recursion: a unit that finishes before its
+        # callback is attached runs that callback synchronously, inside the
+        # submit that is still on the stack, so a direct call would nest once
+        # per unit. Whoever is already draining picks up the owed launch.
+        with lock:
+            state["owed"] += 1
+            if state["draining"]:
+                return
+            state["draining"] = True
+        while True:
+            with lock:
+                if state["owed"] == 0 or state["next"] >= len(items):
+                    state["owed"] = 0
+                    state["draining"] = False
+                    return
+                state["owed"] -= 1
+                index = state["next"]
+                state["next"] += 1
+            launch_one(index)
+
+    def launch_one(index: int) -> None:
+        proxy = proxies[index]
+
+        def finished(done: Future[ProbeOutcome]) -> None:
+            exc = done.exception()
+            if exc is not None:
+                proxy.set_exception(exc)
+            else:
+                proxy.set_result(done.result())
+            request_launch()
+
+        try:
+            inner = pool.submit(*call(items[index]))
+        except BaseException as exc:  # e.g. interpreter shutdown
+            proxy.set_exception(exc)
+            request_launch()
+            return
+        inner.add_done_callback(finished)
+
+    for _ in range(min(window, len(items))):
+        request_launch()
+    return proxies
 
 
 def _run_probe_in_worker(

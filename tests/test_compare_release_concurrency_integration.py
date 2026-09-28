@@ -317,6 +317,9 @@ class TestConcurrentReleaseWorkflow:
         # An operator budget turns the AST-costed admission gate off, so a
         # small runner cannot serialize the 2/4-worker runs this compares.
         monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "1")
+        # Level-1 member cap (`process_resources.python_parallelism`) would
+        # otherwise hold a GIL build at 2 members whatever the resolver says.
+        monkeypatch.setenv("ABICHECK_MEMBER_JOBS", "4")
         pinned_counts: list[int] = []
         results = {}
         for workers in (1, 2, 4):
@@ -395,6 +398,9 @@ class TestInstrumentedParallelReleaseMatchesStored:
 
         monkeypatch.setattr(native, "_attach_header_graph", attach)
         monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "1")
+        # Level-1 member cap (`process_resources.python_parallelism`) would
+        # otherwise hold a GIL build at 2 members whatever the resolver says.
+        monkeypatch.setenv("ABICHECK_MEMBER_JOBS", "4")
         real_resolve = release_jobs.resolve_release_worker_count
         workers_now = [4]
 

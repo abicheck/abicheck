@@ -53,7 +53,6 @@ from .dumper_ast_config import (
 )
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
 from .dumper_cache import (
-    _atomic_write as _atomic_write,
     _cache_path as _cache_path,
     read_cached_castxml as _read_castxml_cache,
 )
@@ -185,6 +184,7 @@ from .extract.headers.clang.locations import materialize_locations
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
+from .storage.atomic_file import atomic_write as _atomic_write
 from .storage.cache_integrity import record_digest
 
 log = logging.getLogger(__name__)
