@@ -37,6 +37,7 @@ import subprocess  # noqa: S404 - AST extraction shells out to clang (never shel
 from typing import Any
 
 from .. import deadline
+from .._compiler_options import CLANG_GCC_HEADER_COMPAT_DEFINES
 
 #: Per-TU wall-clock ceiling for one AST dump. Folded against the scan's own
 #: remaining ``--budget`` so one hung TU can never eat the whole scan.
@@ -67,7 +68,14 @@ def run_clang_ast_dump(
     diagnostic, so ``extractor_pass_fully_covered`` (ADR-041 P0 slice 3) never
     counts that TU as cleanly, fully parsed.
     """
-    cmd = [clang_bin, "-Xclang", "-ast-dump=json", "-fsyntax-only", *argv]
+    cmd = [
+        clang_bin,
+        "-Xclang",
+        "-ast-dump=json",
+        "-fsyntax-only",
+        *CLANG_GCC_HEADER_COMPAT_DEFINES,
+        *argv,
+    ]
     scan_remaining = deadline.remaining()
     effective_timeout = (
         LOCAL_CAP_S if scan_remaining is None else min(LOCAL_CAP_S, scan_remaining)

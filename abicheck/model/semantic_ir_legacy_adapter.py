@@ -113,7 +113,6 @@ from .identity import (
 )
 from .occurrence import OccurrenceId
 from .semantic_ir import CanonicalEntity, SemanticIR
-from .semantic_ir_index import SemanticIRIndex
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -486,11 +485,22 @@ def _assert_sidecar_identity_consistent(
     SemanticIR resolves *some* occurrence of `kind`; see this direction's
     own gate below for why a producer that resolves none at all is exempt.
     """
-    index = SemanticIRIndex(snapshot.semantic_ir) if snapshot.semantic_ir else None
-    if index is None:
+    if not snapshot.semantic_ir:
         return
+    # Only the *set* of entity ids of `kind` is needed here, never the
+    # reduced winner per id, so this reads the occurrence keys directly
+    # rather than building a `SemanticIRIndex` -- whose construction ranks
+    # every occurrence of every kind (`canonical_entities()` ->
+    # `resolved_fact_count()`), and which this load-boundary check used to
+    # build twice per snapshot (~18% of a release scan's parse phase).
+    # `dict.fromkeys` keeps the same first-occurrence order
+    # `canonical_entities()` yields, so error messages are unchanged.
     by_rendered: dict[str, list[EntityId]] = {}
-    for entity_id in index.entities_of_kind(kind):
+    for entity_id in dict.fromkeys(
+        occ.entity_id
+        for occ in snapshot.semantic_ir.occurrences
+        if occ.entity_id.kind is kind
+    ):
         by_rendered.setdefault(render_display_name_or_leaf(entity_id), []).append(
             entity_id
         )

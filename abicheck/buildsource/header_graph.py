@@ -643,12 +643,70 @@ class ClangHeaderIncludeExtractor:
         ``COMPILE_UNIT_INCLUDES_FILE`` edges for the same headers the AST
         pass parsed correctly (Codex review).
         """
+        from .header_include_memo import memoized_include_extract
+
+        if not self.available():
+            return {}, [f"{self.clang_bin} not found in PATH"]
+        # Every argument below is independent of which release member is
+        # being dumped, so a directory/package fan-out would otherwise re-run
+        # the identical `clang -M` set once per side per member.
+        key = (
+            self.clang_bin,
+            tuple(headers),
+            tuple(includes),
+            language,
+            sysroot,
+            nostdinc,
+            gcc_options,
+            tuple(gcc_option_tokens),
+        )
+        from .._compiler_options import split_gcc_options
+        from ..header_utils import cache_relevant_operand_paths, deferred_token_dirs
+
+        # Every directory the argv searches seeds the freshness witness,
+        # including ones riding inside pass-through options.
+        option_tokens = [
+            *(split_gcc_options(gcc_options) if gcc_options else []),
+            *gcc_option_tokens,
+        ]
+        search_dirs = [
+            *includes,
+            *(str(p) for p in cache_relevant_operand_paths(option_tokens)),
+            *(str(p) for p in deferred_token_dirs(gcc_option_tokens)),
+        ]
+        if sysroot:
+            search_dirs.append(sysroot)
+        return memoized_include_extract(
+            key,
+            headers,
+            search_dirs,
+            partial(
+                self._extract_uncached,
+                headers,
+                includes,
+                language=language,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                gcc_options=gcc_options,
+                gcc_option_tokens=gcc_option_tokens,
+            ),
+        )
+
+    def _extract_uncached(
+        self,
+        headers: list[str],
+        includes: list[str],
+        *,
+        language: str,
+        sysroot: str | None,
+        nostdinc: bool,
+        gcc_options: str | None,
+        gcc_option_tokens: tuple[str, ...],
+    ) -> tuple[dict[str, list[str]], list[str]]:
         from .._compiler_options import split_gcc_options
         from .build_evidence import BuildEvidence, CompileUnit
         from .include_graph import ClangIncludeExtractor
 
-        if not self.available():
-            return {}, [f"{self.clang_bin} not found in PATH"]
         extra_tokens = split_gcc_options(gcc_options) if gcc_options else []
         toolchain_tokens: list[str] = []
         if sysroot:

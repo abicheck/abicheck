@@ -50,6 +50,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from ..checker_types import Change
+from ..model.plain_copy import plain_deepcopy
 from .document import ReportDocument
 from .envelope import RenderOptions, ReportEnvelope
 from .finding import build_report_findings
@@ -292,10 +293,13 @@ def _snapshot_change(change: Change) -> Change:
     ``ImpactAssessment``, dicts/lists of the same) -- nothing here holds a
     reference to another large shared object (an ``AbiSnapshot``, a
     ``PolicyFile``) that a deep copy would wastefully duplicate.
-    """
-    import copy
 
-    return copy.deepcopy(change)
+    :func:`~abicheck.model.plain_copy.plain_deepcopy` gives exactly that
+    independence (every mutable container reachable from the copy is fresh)
+    at a third of ``copy.deepcopy``'s cost, by sharing the subtrees nothing
+    can mutate -- enum members, strings, a frozen ``EntityId``.
+    """
+    return plain_deepcopy(change)
 
 
 def _snapshot_diff_result(result: DiffResult) -> DiffResult:

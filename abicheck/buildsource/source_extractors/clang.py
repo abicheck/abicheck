@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Any
 
 from ... import deadline
+from ..._compiler_options import clang_ast_dump_tail
 from ...dumper_clang import _is_intel_sycl_driver, _needs_sycl_host_only
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
@@ -497,17 +498,7 @@ def build_clang_command(
     A clang-cl/MSVC compile unit is driven through clang's ``cl`` driver mode.
     """
     cmd, _msvc = _clang_context_args(compile_unit, compiler_binary, clang_bin=clang_bin)
-    # Syntax-only AST dump to stdout as JSON. -ferror-limit=0 keeps parsing past
-    # recoverable errors so a single bad decl does not blank the whole dump.
-    return [
-        clang_bin,
-        *cmd,
-        "-fsyntax-only",
-        "-ferror-limit=0",
-        "-Xclang",
-        "-ast-dump=json",
-        str(source),
-    ]
+    return [clang_bin, *cmd, *clang_ast_dump_tail(str(source))]
 
 
 def build_clang_macro_command(

@@ -11,6 +11,7 @@ layers may import ``model``, so the shared scan lives here instead.
 
 from __future__ import annotations
 
+import functools
 import re
 
 #: Tokens that are type qualifiers / builtin keywords, not type names.
@@ -49,9 +50,20 @@ IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_:]*")
 
 def type_identifiers(type_str: str | None) -> set[str]:
     """Candidate type names referenced by *type_str*: every non-noise
-    identifier token, plus the unqualified tail of a ``::``-qualified one."""
+    identifier token, plus the unqualified tail of a ``::``-qualified one.
+
+    Returns a fresh set per call: callers routinely ``|=`` into the result,
+    so the memoized value underneath must stay immutable."""
     if not type_str:
         return set()
+    return set(_type_identifiers_cached(type_str))
+
+
+# Pure str -> frozenset, hit millions of times over a few hundred distinct
+# spellings on a release-scale compare tail; bounded like
+# `name_classification`'s own spelling caches.
+@functools.lru_cache(maxsize=1 << 18)
+def _type_identifiers_cached(type_str: str) -> frozenset[str]:
     out: set[str] = set()
     for tok in IDENT_RE.findall(type_str):
         if tok in TYPE_NOISE:
@@ -59,4 +71,4 @@ def type_identifiers(type_str: str | None) -> set[str]:
         out.add(tok)
         if "::" in tok:
             out.add(tok.rsplit("::", 1)[1])
-    return out
+    return frozenset(out)

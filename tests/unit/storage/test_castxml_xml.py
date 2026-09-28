@@ -9,14 +9,19 @@ import random
 import pytest
 from defusedxml import ElementTree as DefusedET, EntitiesForbidden
 
-from abicheck.storage.castxml_xml import parse_castxml_xml
+from abicheck.storage.castxml_xml import ARGUMENT_ATTRIBUTES_READ, parse_castxml_xml
 
 _TAGS = ["Function", "Argument", "Typedef", "Struct", "Field", "File"]
 _VALUES = ["_1", "_2", "f1", "f2", "int", "1", "", "a&amp;b", "x y", "é"]
 
 
 def _shape(el):
-    return (el.tag, dict(el.attrib), el.text, el.tail, [_shape(c) for c in el])
+    # `Argument` keeps only the attributes a reader consults; everything else
+    # must match a plain parse exactly.
+    attrs = dict(el.attrib)
+    if el.tag == "Argument":
+        attrs = {k: v for k, v in attrs.items() if k in ARGUMENT_ATTRIBUTES_READ}
+    return (el.tag, attrs, el.text, el.tail, [_shape(c) for c in el])
 
 
 def _random_doc(rng: random.Random, depth: int = 0) -> str:

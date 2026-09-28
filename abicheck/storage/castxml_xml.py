@@ -23,6 +23,19 @@ string for each, so the parsed tree was ~170 MiB per side and the single
 largest allocation site of a large compare. Sharing equal values cuts it by
 about a third; the pool lives only for the parse.
 
+``Argument`` elements are the bulk of what is left: on the same dump they
+are 256k of 285k elements, and every one is a distinct object carrying its
+own ``file``/``line``/``location``. No reader consults those -- a parameter
+is read for its ``name``, ``type`` and ``default`` only
+(:data:`ARGUMENT_ATTRIBUTES_READ`) -- and with only those kept, the same
+parameter spelling recurs across thousands of signatures. So each
+``Argument`` is reduced to those attributes and, as its parent closes,
+replaced by one shared element per distinct attribute set; the fresh copy is
+freed immediately, which lowers the peak and not only what stays resident
+(116 -> 26 MiB live on that dump). Sharing is sound because nothing mutates
+a parsed castxml tree; ``tests/test_castxml_xml_argument_interning.py``
+pins both halves of that claim against the parser's own source.
+
 Parsing still goes through defusedxml's parser, so its entity/DTD
 protections are unchanged; only the tree builder differs.
 """
@@ -36,21 +49,43 @@ from xml.etree.ElementTree import Element, TreeBuilder
 
 from defusedxml.ElementTree import DefusedXMLParser, parse as _defused_parse
 
-__all__ = ["parse_castxml_xml"]
+__all__ = ["ARGUMENT_ATTRIBUTES_READ", "parse_castxml_xml"]
+
+#: The only ``Argument`` attributes any castxml reader consults
+#: (``extract.headers.castxml.functions.parse_function_params``). Adding a
+#: reader of another one means adding it here, or it reads ``None``.
+ARGUMENT_ATTRIBUTES_READ: frozenset[str] = frozenset({"name", "type", "default"})
 
 
 class _SharingTreeBuilder(TreeBuilder):
-    """A :class:`TreeBuilder` that stores one object per distinct attribute value."""
+    """A :class:`TreeBuilder` that stores one object per distinct attribute
+    value, and one ``Argument`` element per distinct parameter spelling."""
 
     def __init__(self) -> None:
         super().__init__()
         self._pool: dict[str, str] = {}
+        self._arguments: dict[tuple[object, ...], Element] = {}
 
     def start(
         self, tag: str | Callable[..., Element], attrs: dict[str, str]
     ) -> Element:
         pool = self._pool
+        if tag == "Argument":
+            attrs = {k: v for k, v in attrs.items() if k in ARGUMENT_ATTRIBUTES_READ}
         return super().start(tag, {k: pool.setdefault(v, v) for k, v in attrs.items()})
+
+    def end(self, tag: str | Callable[..., Element]) -> Element:
+        # Same tag type `start` takes (an element factory is a valid tag).
+        el = super().end(cast(str, tag))
+        if len(el):
+            shared = self._arguments
+            for i, child in enumerate(el):
+                # A childless Argument is fully described by its attributes
+                # and its text/tail.
+                if child.tag == "Argument" and not len(child):
+                    key = (child.text, child.tail, *sorted(child.attrib.items()))
+                    el[i] = shared.setdefault(key, child)
+        return el
 
 
 def parse_castxml_xml(path: Path | str) -> Element:

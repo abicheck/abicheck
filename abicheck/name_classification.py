@@ -777,6 +777,10 @@ def strip_anonymous_type_location(name: str) -> str:
     return _ANON_TYPE_LOCATION_PATH_ONLY_RE.sub(_replace, name)
 
 
+# Pure str -> str and the hottest leaf of the compare tail (~776k calls on a
+# 2-library release, six regex substitutions each, over far fewer distinct
+# spellings); bounded the same way as `strip_anonymous_type_location`.
+@functools.lru_cache(maxsize=1 << 18)
 def canonicalize_type_name(name: str) -> str:
     """Normalise a C/C++ type name for comparison.
 
