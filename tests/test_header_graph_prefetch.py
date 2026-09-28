@@ -149,3 +149,49 @@ def test_prefetch_engages_only_where_it_cannot_parse_twice(
     result = attach.prefetch_graph_if_useful(wanted, backend, headers, [], "c++", None)
     assert (result is not None) is engages
     assert bool(started) is engages
+
+
+@pytest.mark.parametrize("max_threads", ["", "1", "0"])
+def test_prefetch_runs_the_acquisition_on_its_own_thread_and_returns_it(
+    monkeypatch: pytest.MonkeyPatch, max_threads: str
+) -> None:
+    import threading
+
+    monkeypatch.setenv("ABICHECK_MAX_THREADS", max_threads)
+    sentinel = attach.HeaderGraphAst(None, None, [], [], ())
+    seen: list[tuple[str, tuple[object, ...]]] = []
+
+    def fake_acquire(*args: object) -> attach.HeaderGraphAst:
+        seen.append((threading.current_thread().name, args))
+        return sentinel
+
+    monkeypatch.setattr(attach, "acquire_header_graph_ast", fake_acquire)
+    future = attach.prefetch_header_graph_ast([Path("a.h")], [Path("inc")], "c++", None)
+    assert future.result(timeout=10) is sentinel
+    ((thread_name, args),) = seen
+    assert args == ([Path("a.h")], [Path("inc")], "c++", None)
+    # A fresh budget always has a thread for it ("0"/unset mean unlimited).
+    assert thread_name.startswith("abicheck-hgraph")
+
+
+def test_a_spent_budget_runs_the_prefetch_inline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    from abicheck import process_resources as pr
+
+    monkeypatch.setenv("ABICHECK_MAX_THREADS", "1")
+    monkeypatch.setattr(pr, "THREAD_BUDGET", pr._ThreadBudget())
+    names: list[str] = []
+    monkeypatch.setattr(
+        attach,
+        "acquire_header_graph_ast",
+        lambda *a: names.append(threading.current_thread().name),
+    )
+    with pr.BudgetedExecutor(1):  # takes the only budgeted thread
+        attach.prefetch_header_graph_ast([Path("a.h")], [], "c++", None).result(
+            timeout=10
+        )
+    assert names == [threading.current_thread().name]
+    assert pr.THREAD_BUDGET.in_use == 0
