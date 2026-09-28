@@ -119,3 +119,20 @@ def test_declaration_bridge_output_is_unchanged() -> None:
     explicit = Param(name="a", type="int", is_restrict=True, kind=ParamKind.POINTER)
     assert explicit.is_restrict_fact == _direct(FactStatus.PRESENT, True)
     assert explicit.kind_fact == _direct(FactStatus.PRESENT, ParamKind.POINTER)
+
+
+class _Unhashable(Enum):
+    A = 1
+    B = 2
+
+    def __eq__(self, other: object) -> bool:  # no __hash__: members unhashable
+        return isinstance(other, _Unhashable) and self.value == other.value
+
+
+def test_an_unhashable_enum_member_still_works() -> None:
+    """``Fact.present`` accepted such a member before the fast path existed;
+    the fast path must not start raising ``TypeError`` on it."""
+    got = Fact.present(_Unhashable.A)
+    assert got == _direct(FactStatus.PRESENT, _Unhashable.A)
+    assert Fact.present(_Unhashable.A) is got
+    assert Fact.present(_Unhashable.B).value is _Unhashable.B

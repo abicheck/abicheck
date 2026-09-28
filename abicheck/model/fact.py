@@ -275,9 +275,9 @@ _FLYWEIGHT: dict[tuple[object, ...], Fact[Any]] = {}
 #: instance ``Fact._make`` shares, filled on first use.
 _PRESENT_CONSTANTS: dict[object, Fact[Any]] = {}
 _VALUELESS_CONSTANTS: dict[FactStatus, Fact[Any]] = {}
-#: ``Fact.present(member)`` for an enum member, keyed ``(type, member)``;
+#: ``Fact.present(member)`` for an enum member, keyed ``(type, member name)``;
 #: bounded by the number of enum members in the codebase.
-_PRESENT_ENUM: dict[tuple[type, Enum], Fact[Any]] = {}
+_PRESENT_ENUM: dict[tuple[type, str], Fact[Any]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -419,8 +419,9 @@ class Fact(Generic[T]):
             # An enum member is an immutable singleton, so one shared fact per
             # member is as safe as the ``bool`` constants above. Keyed on the
             # type too: members of two ``StrEnum``s with one string value
-            # compare equal.
-            key = (type(value), value)
+            # compare equal. By *name*, never the member itself: an enum
+            # overriding ``__eq__`` without ``__hash__`` is unhashable.
+            key = (type(value), value.name)
             shared = _PRESENT_ENUM.get(key)
             if shared is None:
                 shared = _PRESENT_ENUM[key] = cls(
