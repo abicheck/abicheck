@@ -22,8 +22,8 @@ from typing import Any
 import pytest
 
 from abicheck.buildsource import header_include_memo as memo_mod
-from abicheck.name_classification import canonicalize_type_name
 from abicheck.model import type_identifiers as ti_mod
+from abicheck.name_classification import canonicalize_type_name
 
 
 def _type_spellings(n: int, seed: int) -> list[str]:
