@@ -62,6 +62,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple
 
+from ..model.comparison_memo import comparison_memoized
 from ..model.graph_entity_identity import (
     IDENTITY_STATE_ATTR,
     GraphEntityIdentity,
@@ -287,6 +288,16 @@ class ReferencedIdentifiers(NamedTuple):
 
 
 def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
+    """Shared across one comparison (:mod:`..model.comparison_memo`); see
+    :func:`_referenced_identifiers_by_node` for what it computes."""
+    return comparison_memoized(
+        "referenced_identifiers_by_node",
+        snap,
+        lambda: _referenced_identifiers_by_node(snap),
+    )
+
+
+def _referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
     """First pass, computed before any node is emitted: node id -> the
     sorted union of every type-identifier string that *any* declaration/
     record/typedef mapping to that id references in its own signature/

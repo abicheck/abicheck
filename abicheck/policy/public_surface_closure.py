@@ -98,7 +98,9 @@ full accounting of what remains open.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from copy import copy
+from dataclasses import fields, replace
+from typing import TYPE_CHECKING, Any
 
 from ..compare.edge_query import UNIT_HEADERS, EdgeEvidence
 from ..compare.surface_graph import (
@@ -107,6 +109,7 @@ from ..compare.surface_graph import (
     referenced_identifiers_by_node,
 )
 from ..diff_cxx_rules import owner_class_of
+from ..model.comparison_memo import comparison_memo_active, comparison_memoized
 from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.edge_coverage import EdgeAnswer
 from ..model.graph_join import EDGE_KIND_EXPORTS
@@ -735,8 +738,32 @@ def resolve_public_surface(
     e.g. ``--used-by``/``--required-symbol`` scoping) but is not yet
     consulted -- the resolution today is entirely snapshot-derived, with no
     external root injection.
+
+    Resolved once per snapshot per comparison (:mod:`..model.comparison_memo`):
+    ``compare_snapshots`` resolves both sides before comparing, and
+    post-processing's scoping pass and the surface-graph build resolved them
+    again. ``PublicSurface`` is mutable, so every caller gets its own copy of
+    each container -- the values themselves (names, origins) are immutable.
     """
-    return _resolve_public_surface_from_snapshot(snapshot)
+    shared = comparison_memoized(
+        "resolve_public_surface",
+        snapshot,
+        lambda: _resolve_public_surface_from_snapshot(snapshot),
+    )
+    if not comparison_memo_active():
+        return shared
+    return _independent_copy(shared)
+
+
+def _independent_copy(surface: PublicSurface) -> PublicSurface:
+    """*surface* with every set/dict/list field copied, so a caller mutating
+    its result cannot reach the memoized original or another caller's."""
+    copied: dict[str, Any] = {
+        f.name: copy(value)
+        for f in fields(surface)
+        if isinstance(value := getattr(surface, f.name), (set, dict, list))
+    }
+    return replace(surface, **copied)
 
 
 # ``type_reachability.directly_referenced_stdlib_types()`` migrating here

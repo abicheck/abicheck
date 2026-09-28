@@ -1,0 +1,196 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""The comparison-lifetime memo (``model/comparison_memo.py``).
+
+Contract, each stated independently of the implementation:
+
+* outside a scope nothing is cached -- a snapshot still being built can
+  never be served a value derived from an earlier state of itself;
+* inside one, a value is computed once per ``(name, snapshot)``, and the
+  scope releases every snapshot it pinned when it closes;
+* a nested scope resolutions the outer one;
+* the memoized public surface hands every caller an independent object;
+* and, the property that matters: ``compare_snapshots`` renders the same
+  JSON report with the memo on as with it off, over every known detector
+  mutation -- with a vacuity guard proving the memo really served hits.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import gc
+import weakref
+
+import pytest
+from _detector_mutations import MUTATIONS, build_snapshot
+
+from abicheck.compare import surface_reconcile
+from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.comparison_memo import (
+    comparison_memo_active,
+    comparison_memo_scope,
+    comparison_memoized,
+)
+from abicheck.policy import public_surface_closure
+from abicheck.policy.public_surface_closure import resolve_public_surface
+from abicheck.reporter import to_json
+from abicheck.workflows import compare_policy
+
+
+class _Snap:
+    """Any object: the memo keys on identity, not type."""
+
+
+def test_outside_a_scope_nothing_is_cached() -> None:
+    calls = []
+    snap = _Snap()
+    for _ in range(3):
+        comparison_memoized("k", snap, lambda: calls.append(1) or len(calls))
+    assert calls == [1, 1, 1]
+    assert not comparison_memo_active()
+
+
+def test_inside_a_scope_each_name_and_snapshot_computes_once() -> None:
+    calls: list[tuple[str, int]] = []
+    a, b = _Snap(), _Snap()
+
+    def value(name: str, snap: object) -> object:
+        return comparison_memoized(
+            name, snap, lambda: calls.append((name, id(snap))) or object()
+        )
+
+    with comparison_memo_scope():
+        assert comparison_memo_active()
+        first = {(n, id(s)): value(n, s) for n in ("x", "y") for s in (a, b)}
+        for _ in range(3):
+            for n in ("x", "y"):
+                for s in (a, b):
+                    assert value(n, s) is first[(n, id(s))]
+    assert sorted(calls) == sorted(first)  # one computation per key
+    assert not comparison_memo_active()
+
+
+def test_nested_scope_resolutions_the_outer_one() -> None:
+    calls = []
+    snap = _Snap()
+    with comparison_memo_scope():
+        comparison_memoized("k", snap, lambda: calls.append(1))
+        with comparison_memo_scope():
+            comparison_memoized("k", snap, lambda: calls.append(2))
+        # Still open after the inner scope closed.
+        comparison_memoized("k", snap, lambda: calls.append(3))
+    assert calls == [1]
+
+
+def test_closing_the_scope_releases_pinned_snapshots() -> None:
+    snap = _Snap()
+    ref = weakref.ref(snap)
+    with comparison_memo_scope():
+        comparison_memoized("k", snap, object)
+        del snap
+        gc.collect()
+        assert ref() is not None  # pinned while open: its id cannot be reused
+    gc.collect()
+    assert ref() is None
+
+
+def _public_snapshot() -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libx.so",
+        version="1",
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1fv",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+    )
+
+
+def test_memoized_public_surface_is_independent_per_caller() -> None:
+    snap = _public_snapshot()
+    fresh = resolve_public_surface(snap)
+    with comparison_memo_scope():
+        one = resolve_public_surface(snap)
+        one.public_symbols.add("mutated")
+        one.origin_by_key["mutated"] = next(iter(fresh.origin_by_key.values()), None)  # type: ignore[assignment]
+        two = resolve_public_surface(snap)
+    assert one is not two
+    assert "mutated" not in two.public_symbols
+    assert "mutated" not in two.origin_by_key
+    assert two == fresh
+
+
+def _context() -> dict:
+    return {
+        "functions": [
+            Function(
+                name="ctx_f0",
+                mangled="_Zctx_f0v",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+        "types": [],
+    }
+
+
+def _report(old: AbiSnapshot, new: AbiSnapshot) -> str:
+    return to_json(
+        compare_policy.compare_snapshots(old, new), include_exit_decision=True
+    )
+
+
+@pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
+@pytest.mark.parametrize("tag", [0, 7])
+def test_compare_report_is_identical_with_and_without_the_memo(
+    mutation, tag: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_extra, new_extra, *_ = mutation(tag)
+
+    def pair() -> tuple[AbiSnapshot, AbiSnapshot]:
+        # Fresh objects per run: the two runs must share no cached state.
+        return (
+            build_snapshot("1.0", _context(), old_extra),
+            build_snapshot("2.0", _context(), new_extra),
+        )
+
+    resolutions = []
+    real_resolve = public_surface_closure._resolve_public_surface_from_snapshot
+
+    def counting_resolve(*args, **kwargs):
+        resolutions.append(1)
+        return real_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(
+        public_surface_closure,
+        "_resolve_public_surface_from_snapshot",
+        counting_resolve,
+    )
+    with_memo = _report(*pair())
+    resolutions_with = len(resolutions)
+
+    resolutions.clear()
+    for module in (compare_policy, surface_reconcile):
+        monkeypatch.setattr(module, "comparison_memo_scope", contextlib.nullcontext)
+    without_memo = _report(*pair())
+    resolutions_without = len(resolutions)
+
+    assert with_memo == without_memo
+    # Vacuity guard: the memo run really shared work the plain run repeated.
+    assert resolutions_with < resolutions_without

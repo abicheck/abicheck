@@ -28,6 +28,23 @@
   on one key compute it once and the others wait, rather than every release
   worker repeating the same scan until the first one finished.
 
+- Per-snapshot facts one comparison derived several times over -- the
+  identity table, the referenced-identifier graph, the export join, the
+  public surface -- are computed once per comparison
+  (`model/comparison_memo.py`, opened by `compare_snapshots` and the
+  `checker.compare` wrapper). Outside a comparison nothing is cached; the
+  memoized `PublicSurface` is handed to each caller as its own copy.
+- `Fact.present(True/False/None/<enum member>)` and the argument-less
+  `not_collected()`/`unsupported()`/`not_applicable()` return their shared
+  instance without building the flyweight key: `Function()` construction
+  5.3 µs to 2.9 µs.
+- The C/C++ string and character literal patterns of the C++20 header scan
+  are unrolled (same matches, 11x faster over MKL's headers), and
+  `match_export` filters spellings in C.
+
+A second round on the same pair: three-library release 190 s to 158 s,
+single `libmkl_rt` 130 s to 118 s, reports identical.
+
 MKL 2024.2.2 → 2025.2.0, 4 CPUs, cold castxml cache: three-library release
 228 s → 192 s (max RSS 2.05 → 1.94 GiB), single `libmkl_rt` 139 s → 131 s
 (1.39 → 1.33 GiB). Reports identical.

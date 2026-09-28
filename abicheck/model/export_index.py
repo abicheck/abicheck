@@ -536,7 +536,7 @@ def match_export(
     producer checked in before this primitive existed -- so the truth value
     ("any tier but ``ABSENT``") is unchanged for every input.
     """
-    own = tuple(s for s in spellings if s)
+    own = tuple(filter(None, spellings))  # non-empty spellings, filtered in C
     linker = own if own else ((name,) if name else ())
     if any(s in dynamic for s in linker):
         return ExportMatch.DYNAMIC

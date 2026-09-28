@@ -49,6 +49,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from .comparison_memo import comparison_memoized
 from .export_index import snapshot_export_names
 from .graph_entity_identity import SnapshotIdentities, snapshot_identities
 from .mangled_name import itanium_ctor_dtor_marker_span
@@ -81,8 +82,19 @@ def identities_for_snapshot(
     """:func:`snapshot_identities` with the snapshot's export tables, plus
     the header AST's ctor/dtor names when the caller holds the AST (the
     header graph build). A pure function of its arguments: it never reads
-    the lazily-decoded persisted graph."""
+    the lazily-decoded persisted graph.
+
+    The plain form (no *ast_names*) is shared across one comparison
+    (:mod:`.comparison_memo`), so every consumer inside it holds the same
+    table and anything keyed on it can be shared too."""
+    names = tuple(ast_names)
+    if not names:
+        return comparison_memoized(
+            "identities_for_snapshot",
+            snap,
+            lambda: snapshot_identities(snap, export_names=snapshot_export_names(snap)),
+        )
     return snapshot_identities(
         snap,
-        export_names=snapshot_export_names(snap) | ast_special_member_names(ast_names),
+        export_names=snapshot_export_names(snap) | ast_special_member_names(names),
     )

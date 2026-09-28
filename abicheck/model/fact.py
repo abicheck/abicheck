@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field, replace
+from enum import Enum
 from typing import Any, Generic, TypeVar
 
 from .availability import FactStatus
@@ -268,6 +269,15 @@ _SHAREABLE_VALUE_TYPES = (type(None), bool, tuple)
 #: handful of backends times six statuses times four values.
 _FLYWEIGHT_LIMIT = 4096
 _FLYWEIGHT: dict[tuple[object, ...], Fact[Any]] = {}
+#: ``Fact.present(v)`` for ``v`` in ``True``/``False``/``None`` and
+#: the argument-less ``not_collected()``/``unsupported()``/``not_applicable()``
+#: (no diagnostics or producer): each the very
+#: instance ``Fact._make`` shares, filled on first use.
+_PRESENT_CONSTANTS: dict[object, Fact[Any]] = {}
+_VALUELESS_CONSTANTS: dict[FactStatus, Fact[Any]] = {}
+#: ``Fact.present(member)`` for an enum member, keyed ``(type, member)``;
+#: bounded by the number of enum members in the codebase.
+_PRESENT_ENUM: dict[tuple[type, Enum], Fact[Any]] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,6 +393,43 @@ class Fact(Generic[T]):
         cls, value: T, *diagnostics: str, producer: str | None = None
     ) -> Fact[T]:
         """Usable evidence — including a confirmed-empty/None value."""
+        # Fast path for the constants every declaration's legacy/fact bridge
+        # asks for (``present(False)``, ``present(None)``...): the same shared
+        # instance ``_make`` hands out, without building its lookup key --
+        # two per ``Param``, a dozen per ``Function``, millions per large
+        # snapshot.
+        if (
+            cls is Fact
+            and not diagnostics
+            and producer is None
+            and (value is None or value is True or value is False)
+        ):
+            shared = _PRESENT_CONSTANTS.get(value)
+            if shared is None:
+                shared = _PRESENT_CONSTANTS[value] = cls._make(
+                    FactStatus.PRESENT, value, (), None
+                )
+            return shared
+        if (
+            cls is Fact
+            and not diagnostics
+            and producer is None
+            and isinstance(value, Enum)
+        ):
+            # An enum member is an immutable singleton, so one shared fact per
+            # member is as safe as the ``bool`` constants above. Keyed on the
+            # type too: members of two ``StrEnum``s with one string value
+            # compare equal.
+            key = (type(value), value)
+            shared = _PRESENT_ENUM.get(key)
+            if shared is None:
+                shared = _PRESENT_ENUM[key] = cls(
+                    status=FactStatus.PRESENT,
+                    value=value,
+                    diagnostics=(),
+                    producer=None,
+                )
+            return shared
         return cls._make(FactStatus.PRESENT, value, diagnostics, producer)
 
     @classmethod
@@ -395,11 +442,15 @@ class Fact(Generic[T]):
     @classmethod
     def not_collected(cls, *diagnostics: str, producer: str | None = None) -> Fact[T]:
         """The producer was never invoked for this family."""
+        if cls is Fact and not diagnostics and producer is None:
+            return _valueless_constant(FactStatus.NOT_COLLECTED)
         return cls._make(FactStatus.NOT_COLLECTED, None, diagnostics, producer)
 
     @classmethod
     def unsupported(cls, *diagnostics: str, producer: str | None = None) -> Fact[T]:
         """This producer cannot express this family at all."""
+        if cls is Fact and not diagnostics and producer is None:
+            return _valueless_constant(FactStatus.UNSUPPORTED)
         return cls._make(FactStatus.UNSUPPORTED, None, diagnostics, producer)
 
     @classmethod
@@ -412,6 +463,8 @@ class Fact(Generic[T]):
     @classmethod
     def not_applicable(cls, *diagnostics: str, producer: str | None = None) -> Fact[T]:
         """The family is meaningless for this artifact kind."""
+        if cls is Fact and not diagnostics and producer is None:
+            return _valueless_constant(FactStatus.NOT_APPLICABLE)
         return cls._make(FactStatus.NOT_APPLICABLE, None, diagnostics, producer)
 
 
@@ -428,3 +481,12 @@ def fact_confirmed_true(fact: Fact[bool | None] | None) -> bool:
     so it must not be conflated with "no evidence".
     """
     return fact is not None and fact.status is FactStatus.PRESENT and fact.value is True
+
+
+def _valueless_constant(status: FactStatus) -> Fact[Any]:
+    """The shared argument-less fact for a valueless *status* -- the same
+    instance ``Fact._make`` hands out, without building its lookup key."""
+    shared = _VALUELESS_CONSTANTS.get(status)
+    if shared is None:
+        shared = _VALUELESS_CONSTANTS[status] = Fact._make(status, None, (), None)
+    return shared

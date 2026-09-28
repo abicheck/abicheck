@@ -51,6 +51,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from ..model.comparison_memo import comparison_memo_active, comparison_memoized
 from ..model.export_index import (
     RawExportIndex,
     all_export_names,
@@ -244,8 +245,23 @@ def join_exports(
     *identities* may be passed when the caller already built the snapshot's
     identity table; it is otherwise computed here. The result is a pure
     function of the snapshot and independent of the order of its records.
+
+    Shared across one comparison (:mod:`..model.comparison_memo`) whenever
+    the join is over the snapshot's own identity table -- *identities*
+    omitted, or the very table ``identities_for_snapshot`` shares -- since
+    three consumers used to rebuild it per snapshot.
     """
-    ids = identities if identities is not None else identities_for_snapshot(snap)
+    if identities is not None and not comparison_memo_active():
+        return _join_exports(snap, identities)
+    own = identities_for_snapshot(snap)
+    if identities is None or identities is own:
+        return comparison_memoized(
+            "join_exports", snap, lambda: _join_exports(snap, own)
+        )
+    return _join_exports(snap, identities)
+
+
+def _join_exports(snap: AbiSnapshot, ids: SnapshotIdentities) -> ExportJoin:
     spellings = _declaration_spellings(snap, ids)
     captured = bool(build_raw_export_indexes(snap))
     tables = export_tables(snap)
