@@ -36,9 +36,9 @@ the manual check and the compiled alternation cannot silently drift apart.
 
 from __future__ import annotations
 
+import bisect
 import re
 from collections.abc import Collection
-from typing import Any
 
 from .spelling_match_cache import (
     VOCABULARY_CACHE,
@@ -197,40 +197,56 @@ def _build_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | Non
     """
     if not spellings:
         return None
-    root: dict[str, Any] = {}
-    for spelling in spellings:
-        node = root
-        for ch in spelling:
-            node = node.setdefault(ch, {})
-        node[_TERMINAL] = True
+    words = sorted(set(spellings))
     try:
-        body = _trie_body(root, 0)
+        body = _trie_body(words, 0, len(words), 0, 0)
         return re.compile(_bounded(body))
     except (_TrieTooDeep, RecursionError):
         return _build_flat_spelling_pattern(spellings)
 
 
-#: Marks "a spelling ends here" in a trie node. Not a single character, so
-#: it can never collide with a real edge label.
-_TERMINAL = "<end>"
+def _trie_body(words: list[str], lo: int, hi: int, pos: int, depth: int) -> str:
+    """Regex text for the prefix trie of ``words[lo:hi]`` below *pos*.
 
-
-def _trie_body(node: dict[str, Any], depth: int) -> str:
-    """Regex text for the trie below *node*.
+    *words* is sorted and duplicate-free, and every word in the slice shares
+    its first *pos* characters, so each trie node is a contiguous slice: a
+    word ending at the node sorts first, and each child is the run sharing
+    the next character (bounded with :func:`bisect.bisect_right`, not a
+    scan). Built this way rather than as a nested dict inserted one
+    character at a time, which on a real vocabulary was most of the build.
 
     A chain of single-child, non-terminal nodes is emitted as one literal.
     At a branch, continuations come first and termination (``?``) last, so
     a longer spelling is always tried before a shorter prefix of it.
-    Children are emitted in sorted order, so one vocabulary always yields
-    one pattern text (and hits ``re``'s own compile cache).
+    Children are emitted in character order, so one vocabulary always
+    yields one pattern text (and hits ``re``'s own compile cache).
     """
     if depth > _MAX_TRIE_DEPTH:
         raise _TrieTooDeep
-    prefix, node = _literal_chain(node)
-    alternatives = [
-        re.escape(edge) + _trie_body(node[edge], depth + 1)
-        for edge in sorted(k for k in node if k != _TERMINAL)
-    ]
+    first, last = words[lo], words[hi - 1]
+    # The literal chain runs to the first position where the slice branches
+    # (first and last differ -- they bound every word between them) or where
+    # a word ends (only `first` can: it is a prefix of the rest, so it sorts
+    # first).
+    end = _common_prefix_end(first, last, pos)
+    prefix = re.escape(first[pos:end])
+    terminal = len(first) == end
+    child_lo = lo + 1 if terminal else lo
+    alternatives: list[str] = []
+    while child_lo < hi:
+        word = words[child_lo]
+        # Sorted words have sorted prefixes, so the run sharing this child's
+        # stem ends at the first word whose own prefix sorts after it --
+        # exact for any character, unlike a sentinel upper bound.
+        stem = word[: end + 1]
+        child_hi = bisect.bisect_right(
+            words, stem, child_lo + 1, hi, key=lambda w: w[: end + 1]
+        )
+        alternatives.append(
+            re.escape(word[end])
+            + _trie_body(words, child_lo, child_hi, end + 1, depth + 1)
+        )
+        child_lo = child_hi
     if not alternatives:
         return prefix
     group = (
@@ -238,21 +254,24 @@ def _trie_body(node: dict[str, Any], depth: int) -> str:
         if len(alternatives) == 1
         else "(?:" + "|".join(alternatives) + ")"
     )
-    if _TERMINAL in node:
+    if terminal:
         # Optional, and greedy: the continuation is tried before stopping here.
         return prefix + "(?:" + group + ")?"
     return prefix + group
 
 
-def _literal_chain(node: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """Follow single-child, non-terminal nodes from *node*, returning their
-    edges as one escaped literal and the first node that branches or ends."""
-    literal: list[str] = []
-    while _TERMINAL not in node and len(node) == 1:
-        (edge,) = node
-        literal.append(re.escape(edge))
-        node = node[edge]
-    return "".join(literal), node
+def _common_prefix_end(a: str, b: str, pos: int) -> int:
+    """The end of the common prefix of *a* and *b* (equal up to *pos*),
+    capped at the shorter length -- a binary search over C-level slice
+    compares rather than a Python loop over characters."""
+    lo, hi = pos, min(len(a), len(b))
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if a[lo:mid] == b[lo:mid]:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
 
 
 def _bounded(body: str) -> str:

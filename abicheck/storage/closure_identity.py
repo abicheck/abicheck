@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import contextlib as _contextlib
 import dataclasses as _dataclasses
+import functools as _functools
 import re as _re
 import threading as _threading
 from collections.abc import (
@@ -105,6 +106,7 @@ _ANON_TYPE_MARKER_PREFIX_RE = _re.compile(r"\((lambda|unnamed\s+\w+|anonymous\s+
 #: ``:digits:digits`` as the real discriminator, matching this module's
 #: previous (regex-only) behavior for that case.
 _ANON_TYPE_TRAILING_LINE_COL_RE = _re.compile(r":(\d+):(\d+)\s*$")
+_PAREN_RE = _re.compile(r"[()]")
 
 
 class _AnonTypeMatch(_NamedTuple):
@@ -179,29 +181,27 @@ def _scan_anon_type_marker(
     candidate to avoid swallowing that later marker.
     """
     depth = 0
-    i = prefix_match.end()
-    length = len(name)
+    body_start = prefix_match.end()
     last_candidate: int | None = None
-    while i < length:
-        ch = name[i]
-        if ch == "(":
+    # Only parens move the depth, so visit just those positions instead of
+    # every character of the name.
+    for paren in _PAREN_RE.finditer(name, body_start):
+        i = paren.start()
+        if name[i] == "(":
             depth += 1
-        elif ch == ")":
-            if depth == 0:
-                body = name[prefix_match.end() : i]
-                if _ANON_TYPE_TRAILING_LINE_COL_RE.search(body) is not None:
-                    last_candidate = i
-            else:
-                depth -= 1
-        i += 1
+        elif depth == 0:
+            if _ANON_TYPE_TRAILING_LINE_COL_RE.search(name, body_start, i) is not None:
+                last_candidate = i
+        else:
+            depth -= 1
     if last_candidate is not None:
         return _anon_type_match_from_close_paren(name, prefix_match, last_candidate)
 
-    for i in range(prefix_match.end(), length):
-        if name[i] == ")":
-            body = name[prefix_match.end() : i]
-            if _ANON_TYPE_TRAILING_LINE_COL_RE.search(body) is not None:
-                return _anon_type_match_from_close_paren(name, prefix_match, i)
+    i = name.find(")", body_start)
+    while i != -1:
+        if _ANON_TYPE_TRAILING_LINE_COL_RE.search(name, body_start, i) is not None:
+            return _anon_type_match_from_close_paren(name, prefix_match, i)
+        i = name.find(")", i + 1)
     return None
 
 
@@ -238,12 +238,21 @@ def _quoted_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _anon_type_ordinal_matches(name: str) -> list[_AnonTypeMatch]:
+def _anon_type_ordinal_matches(name: str) -> tuple[_AnonTypeMatch, ...]:
     """Every anonymous/lambda-closure marker in *name*, excluding one that
     falls inside a quoted literal.
+
+    A pure function of *name*, asked about the same strings many times per
+    snapshot (collect, apply and the conflict pass all rescan one name
+    set), so the scan is memoized; the result is an immutable tuple.
     """
     if "(" not in name:
-        return []
+        return ()
+    return _anon_type_ordinal_matches_cached(name)
+
+
+@_functools.lru_cache(maxsize=1 << 16)
+def _anon_type_ordinal_matches_cached(name: str) -> tuple[_AnonTypeMatch, ...]:
     quoted_spans = _quoted_spans(name)
     matches: list[_AnonTypeMatch] = []
     consumed_until = -1
@@ -262,7 +271,7 @@ def _anon_type_ordinal_matches(name: str) -> list[_AnonTypeMatch]:
         if match is not None:
             matches.append(match)
             consumed_until = match.end
-    return matches
+    return tuple(matches)
 
 
 def collect_anonymous_type_ordinals(

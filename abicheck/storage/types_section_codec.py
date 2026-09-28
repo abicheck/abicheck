@@ -56,7 +56,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from .canonical import canonical_form_unless_trusted
+from .canonical import canonical_form_unless_trusted, canonical_input_is_trusted
 
 __all__ = ["TypesSection"]
 
@@ -170,26 +170,62 @@ class TypesSection:
         other legacy section, made structural here instead of a separate
         post-hoc check.
         """
-        if not isinstance(payload, Mapping):
-            raise ValueError(
-                f"a 'types' section payload must be a mapping, not "
-                f"{type(payload).__name__}"
-            )
-        raw = payload.get("types")
-        # `list` for a fresh `split_legacy_document` payload; `tuple` when
-        # *payload* comes from an already-migrated `SectionDTO.payload`
-        # (`storage.dto.SectionDTO`'s own frozen storage converts every
-        # list to a tuple -- see that class's `_freeze`) -- both are the
-        # identical logical sequence, so both are accepted here.
-        if not isinstance(raw, (list, tuple)):
-            raise ValueError(
-                f"a 'types' section payload must carry a 'types' list -- got {raw!r}"
-            )
-        extra = set(payload) - {"types"}
-        if extra:
-            raise ValueError(
-                f"a 'types' section payload may only carry 'types', not {sorted(extra)}"
-            )
         # `__post_init__` freezes this, so the constructor's own tuple(...)
         # here need not defend against aliasing itself.
-        return cls(types=tuple(raw))
+        return cls(types=tuple(_validated_types(payload)))
+
+    @classmethod
+    def document_from_owned(cls, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """``cls.from_document(payload).to_document()`` for a payload that is
+        already `canonical_form`'s own output and exclusively owned by the
+        caller (the `canonical_input_trusted` precondition, honoured only
+        inside it; `GraphSection.document_from_owned` is the same idea).
+
+        Same validation; returns the payload's own ``types`` list instead of
+        a freeze-then-thaw deep copy of it, an identity for the plain
+        ``dict``/``list``/scalar tree the precondition guarantees. A tuple
+        (an already-migrated DTO payload) is not that shape, so it takes
+        the full path.
+        """
+        if (
+            not canonical_input_is_trusted()
+            or not isinstance(payload, Mapping)
+            or type(payload.get("types")) is not list
+        ):
+            return cls.from_document(payload).to_document()
+        return {"types": _validated_types(payload)}
+
+    @classmethod
+    def validated_document(cls, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """``cls.from_document(payload).to_document()`` up to
+        `canonical_form`: the same validation, the payload's own ``types``
+        uncopied (see `GraphSection.validated_document`)."""
+        return {"types": list(_validated_types(payload))}
+
+
+def _validated_types(payload: Mapping[str, Any]) -> Any:
+    """`TypesSection.from_document`'s checks; returns the ``types`` sequence.
+
+    Raises `ValueError` if *payload* is not a mapping, lacks a ``types``
+    list (or tuple), or carries any other key.
+    """
+    if not isinstance(payload, Mapping):
+        raise ValueError(
+            f"a 'types' section payload must be a mapping, not {type(payload).__name__}"
+        )
+    raw = payload.get("types")
+    # `list` for a fresh `split_legacy_document` payload; `tuple` when
+    # *payload* comes from an already-migrated `SectionDTO.payload`
+    # (`storage.dto.SectionDTO`'s own frozen storage converts every
+    # list to a tuple -- see that class's `_freeze`) -- both are the
+    # identical logical sequence, so both are accepted here.
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError(
+            f"a 'types' section payload must carry a 'types' list -- got {raw!r}"
+        )
+    extra = set(payload) - {"types"}
+    if extra:
+        raise ValueError(
+            f"a 'types' section payload may only carry 'types', not {sorted(extra)}"
+        )
+    return raw

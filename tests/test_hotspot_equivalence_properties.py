@@ -9,10 +9,11 @@ the new code path, so a divergence in the new structure shows up here.
 from __future__ import annotations
 
 import math
+import re
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
-from hypothesis import given, settings, strategies as st
+from hypothesis import example, given, settings, strategies as st
 
 from abicheck import pattern_verdicts
 from abicheck.checker_policy import ChangeKind
@@ -153,3 +154,254 @@ def test_current_date_rederives_after_a_timezone_change():
         )
     finally:
         selectors._today_cache = (date.min, 0.0, float("-inf"), None)
+
+
+# --- sorted-slice trie builder ------------------------------------------------
+
+from typing import Any  # noqa: E402
+
+from abicheck.compare import spelling_pattern  # noqa: E402
+from abicheck.storage import closure_identity  # noqa: E402
+
+_END = object()
+
+
+def _dict_trie_body(node: dict[Any, Any], depth: int) -> str:
+    """The dict-trie builder the sorted-slice one replaced, verbatim in shape."""
+    if depth > spelling_pattern._MAX_TRIE_DEPTH:
+        raise spelling_pattern._TrieTooDeep
+    literal: list[str] = []
+    while _END not in node and len(node) == 1:
+        (edge,) = node
+        literal.append(re.escape(edge))
+        node = node[edge]
+    prefix = "".join(literal)
+    alternatives = [
+        re.escape(edge) + _dict_trie_body(node[edge], depth + 1)
+        for edge in sorted(k for k in node if k is not _END)
+    ]
+    if not alternatives:
+        return prefix
+    group = (
+        alternatives[0]
+        if len(alternatives) == 1
+        else "(?:" + "|".join(alternatives) + ")"
+    )
+    if _END in node:
+        return prefix + "(?:" + group + ")?"
+    return prefix + group
+
+
+def _dict_trie_pattern_text(spellings) -> str | None:
+    root: dict[Any, Any] = {}
+    for spelling in spellings:
+        node = root
+        for ch in spelling:
+            node = node.setdefault(ch, {})
+        node[_END] = True
+    try:
+        return spelling_pattern._bounded(_dict_trie_body(root, 0))
+    except spelling_pattern._TrieTooDeep:
+        return None
+
+
+_spelling_alphabet = st.sampled_from([*"ab:_<>*&, .()[]$^\\1", "\U0010ffff", "\x00"])
+_vocab = st.sets(st.text(_spelling_alphabet, max_size=6), min_size=1, max_size=25)
+
+
+@settings(max_examples=500, deadline=None)
+@given(vocab=_vocab)
+def test_sorted_trie_builds_the_dict_trie_pattern_text(vocab):
+    """Byte-identical pattern text, so matching (and ``re``'s compile
+    cache) is unchanged -- including the empty spelling, prefix chains,
+    regex metacharacters and prefix-related spellings."""
+    expected = _dict_trie_pattern_text(vocab)
+    built = spelling_pattern._build_spelling_pattern(vocab)
+    assert expected is not None and built is not None
+    assert built.pattern == expected
+
+
+def test_sorted_trie_too_deep_still_falls_back_to_flat():
+    deep = {"<" * i + "x" for i in range(spelling_pattern._MAX_TRIE_DEPTH + 5)}
+    deep |= {"<" * i + "y" for i in range(spelling_pattern._MAX_TRIE_DEPTH + 5)}
+    built = spelling_pattern._build_spelling_pattern(deep)
+    flat = spelling_pattern._build_flat_spelling_pattern(deep)
+    assert _dict_trie_pattern_text(deep) is None
+    assert built is not None and flat is not None and built.pattern == flat.pattern
+
+
+# --- anonymous-marker scan ---------------------------------------------------
+
+
+def _old_scan(name: str, prefix_match):
+    depth = 0
+    i = prefix_match.end()
+    last = None
+    while i < len(name):
+        ch = name[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            if depth == 0:
+                if closure_identity._ANON_TYPE_TRAILING_LINE_COL_RE.search(
+                    name[prefix_match.end() : i]
+                ):
+                    last = i
+            else:
+                depth -= 1
+        i += 1
+    if last is not None:
+        return closure_identity._anon_type_match_from_close_paren(
+            name, prefix_match, last
+        )
+    for i in range(prefix_match.end(), len(name)):
+        if name[i] == ")" and closure_identity._ANON_TYPE_TRAILING_LINE_COL_RE.search(
+            name[prefix_match.end() : i]
+        ):
+            return closure_identity._anon_type_match_from_close_paren(
+                name, prefix_match, i
+            )
+    return None
+
+
+def _old_matches(name: str):
+    if "(" not in name:
+        return []
+    spans = closure_identity._quoted_spans(name)
+    out, consumed = [], -1
+    for prefix in closure_identity._ANON_TYPE_MARKER_PREFIX_RE.finditer(name):
+        if prefix.start() < consumed:
+            continue
+        if any(a <= prefix.start() < b for a, b in spans):
+            continue
+        m = _old_scan(name, prefix)
+        if m is not None:
+            out.append(m)
+            consumed = m.end
+    return out
+
+
+_marker_parts = st.sampled_from(
+    [
+        "(lambda:",
+        "(unnamed struct:",
+        "(anonymous union:",
+        "a.h",
+        "b(c.hpp",
+        "x)y.h",
+        ":1:2",
+        ":10:3",
+        ":1:2)",
+        "a.h:3:4)",
+        " ",
+        ")",
+        "(",
+        "<",
+        ">",
+        '"',
+        "\\",
+        "::",
+        "foo",
+    ]
+)
+
+
+@settings(max_examples=3000, deadline=None)
+@given(parts=st.lists(_marker_parts, max_size=14))
+@example(parts=["(lambda:", "foo:1:2)", "bar.hpp:10:2)"])
+@example(parts=["(lambda:", "b(c.hpp", ":1:2)", "(lambda:", "a.h:3:4)"])
+@example(parts=["(unnamed struct:", "x)y.h", ":10:3", ")"])
+def test_anon_marker_scan_matches_the_character_loop(parts):
+    name = "".join(parts)
+    expected = _old_matches(name)
+    assert list(closure_identity._anon_type_ordinal_matches(name)) == expected
+    # And the memoized answer is the same on a repeat.
+    assert list(closure_identity._anon_type_ordinal_matches(name)) == expected
+
+
+# --- reclassify kind buckets ---------------------------------------------------
+
+from abicheck.checker_policy import Verdict  # noqa: E402
+from abicheck.checker_types import Change  # noqa: E402
+from abicheck.policy import reclassify  # noqa: E402
+
+_KINDS = [ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_ADDED, ChangeKind.TYPE_SIZE_CHANGED]
+_SYMS = ["ns::f", "ns::g", "other::h"]
+_TO = [Verdict.COMPATIBLE, Verdict.BREAKING, Verdict.API_BREAK]
+
+
+@st.composite
+def _rule(draw):
+    kind = draw(st.sampled_from([None, *(k.value for k in _KINDS)]))
+    sym = draw(st.sampled_from([None, *_SYMS]))
+    return reclassify.ReclassifyRule(
+        to_verdict=draw(st.sampled_from(_TO)),
+        change_kind=kind,
+        symbol=sym,
+        symbol_pattern=".*" if sym is None else None,
+    )
+
+
+@settings(max_examples=400, deadline=None)
+@given(
+    rules=st.lists(_rule(), max_size=8),
+    changes=st.lists(
+        st.tuples(st.sampled_from(_KINDS), st.sampled_from(_SYMS)),
+        min_size=1,
+        max_size=6,
+    ),
+)
+def test_kind_buckets_pick_the_same_first_match_as_the_full_scan(rules, changes):
+    """Oracle: the first rule in file order whose ``matches`` is true, over
+    the whole list. A rule scoped to the finding's kind (or to no kind)
+    still decides it; a rule scoped to another kind never does."""
+    for kind, sym in changes:
+        change = Change(kind=kind, symbol=sym, description="d")
+        expected = next((r.to_verdict for r in rules if r.matches(change)), None)
+        assert reclassify.first_matching_reclassify_verdict(rules, change) == expected
+        bucket = reclassify.reclassify_rules_for_kind(rules, kind.value)
+        for rule in rules:
+            if rule.change_kind in (None, kind.value):
+                assert any(rule is other for other in bucket)
+            elif len(rules) > 1:  # a 0/1-rule list is returned as is
+                assert all(rule is not other for other in bucket)
+
+
+def test_kind_buckets_follow_the_selector_not_a_mutated_field():
+    rule = reclassify.ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE, change_kind="func_removed", symbol="ns::f"
+    )
+    other = reclassify.ReclassifyRule(to_verdict=Verdict.BREAKING, symbol="ns::g")
+    rule.change_kind = "func_added"  # matches() still uses the captured kind
+    rules = [rule, other]
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="ns::f", description="d")
+    assert rule.matches(change)
+    assert (
+        reclassify.first_matching_reclassify_verdict(rules, change)
+        is Verdict.COMPATIBLE
+    )
+
+
+def test_kind_buckets_rebuild_after_in_place_mutation():
+    a = reclassify.ReclassifyRule(
+        to_verdict=Verdict.BREAKING, change_kind="func_added", symbol="ns::f"
+    )
+    b = reclassify.ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE, change_kind="func_removed", symbol="ns::f"
+    )
+    rules = [a]
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="ns::f", description="d")
+    assert reclassify.first_matching_reclassify_verdict(rules, change) is None
+    rules.append(b)
+    assert (
+        reclassify.first_matching_reclassify_verdict(rules, change)
+        is Verdict.COMPATIBLE
+    )
+
+
+def test_sorted_trie_handles_the_highest_code_point():
+    """A spelling continuing with U+10FFFF after a shared stem must still
+    get its own child run (a sentinel upper bound never advanced past it)."""
+    vocab = {"a", "a\U0010ffffb", "a\U0010ffff", "ab"}
+    built = spelling_pattern._build_spelling_pattern(vocab)
+    assert built is not None and built.pattern == _dict_trie_pattern_text(vocab)
