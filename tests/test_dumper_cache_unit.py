@@ -17,7 +17,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dumper_cache import _atomic_copy, _atomic_write, _cache_path
+from abicheck.dumper_cache import _cache_path
+from abicheck.storage.atomic_file import (
+    atomic_copy as _atomic_copy,
+    atomic_write as _atomic_write,
+)
 from abicheck.storage.json_chunked_write import _atomic_write_json
 
 

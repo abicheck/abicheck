@@ -787,7 +787,7 @@ def test_extract_from_build_enforces_aggregate_timeout(monkeypatch) -> None:
         ]
     )
 
-    ext = ClangIncludeExtractor(aggregate_timeout_s=1.0)
+    ext = ClangIncludeExtractor(aggregate_timeout_s=1.0, jobs=1)
     out = ext.extract_from_build(build)
 
     assert len(calls) == 1

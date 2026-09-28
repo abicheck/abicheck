@@ -7,7 +7,6 @@ import contextvars
 import json
 import logging
 import os
-import shutil
 import sys
 import tempfile
 import threading
@@ -190,7 +189,9 @@ class AstAcquisitionScope:
         self._groups[token] = (value, keys)
         return token
 
-    def _evict_groups_locked(self, protect: int | None = None) -> None:
+    def _evict_groups_locked(
+        self, protect: int | None = None, bound: int = MAX_RETAINED_CONTEXT_GROUPS
+    ) -> None:
         """Release least-recently-used groups until the bound is met.
 
         *protect* is the group the caller is in the middle of populating,
@@ -205,7 +206,7 @@ class AstAcquisitionScope:
         never evict itself", which is true only while some older group is
         releasable. The table-wide invariant test caught it.
         """
-        while len(self._groups) > MAX_RETAINED_CONTEXT_GROUPS:
+        while len(self._groups) > bound:
             for token in list(self._groups):
                 if token == protect:
                     continue
@@ -266,7 +267,11 @@ class AstAcquisitionScope:
             keys |= group_keys
         return keys
 
-    def _evict_ungrouped_locked(self, protect: tuple[str, str] | None = None) -> None:
+    def _evict_ungrouped_locked(
+        self,
+        protect: tuple[str, str] | None = None,
+        bound: int = MAX_RETAINED_RAW_ENTRIES,
+    ) -> None:
         """Drop least-recently-used *completed* ungrouped entries.
 
         Three things are never evicted, and each is load-bearing:
@@ -288,11 +293,11 @@ class AstAcquisitionScope:
         becomes collectable once its real consumers let go, which is the
         whole point.
         """
-        if len(self._ungrouped) <= MAX_RETAINED_RAW_ENTRIES:
+        if len(self._ungrouped) <= bound:
             return
         grouped = self._grouped_keys_locked()
         for key in list(self._ungrouped):
-            if len(self._ungrouped) <= MAX_RETAINED_RAW_ENTRIES:
+            if len(self._ungrouped) <= bound:
                 return
             if key == protect or key in grouped:
                 continue
@@ -302,6 +307,17 @@ class AstAcquisitionScope:
             self._entries.pop(key, None)
             del self._ungrouped[key]
             self.released_entries += 1
+
+    def release_completed(self) -> None:
+        """Flush at a phase boundary no consumer will ask across again.
+
+        The LRU bounds taken to zero: every releasable group and completed raw
+        entry goes, under the same rules (anything in flight stays). A pure
+        cache flush -- a later ask re-runs its producer for an equal result.
+        """
+        with self._lock:
+            self._evict_groups_locked(bound=0)
+            self._evict_ungrouped_locked(bound=0)
 
     def group_stats(self) -> dict[str, int]:
         """Counts for a memory trace: retained groups, entries, releases.
@@ -715,59 +731,6 @@ def read_cached_castxml(cached: Path) -> Element | None:
         cache_integrity.evict(cached)
         return None
     return root
-
-
-def _atomic_copy(src: Path, dst: Path) -> None:
-    """Copy *src* into *dst* via a same-directory temp file + ``os.replace``.
-
-    Same atomicity rationale as :func:`_atomic_write` (a concurrent reader
-    never sees a torn file), but streams the copy (``shutil.copyfileobj``)
-    instead of reading *src* fully into a Python ``bytes`` object first — the
-    L2 clang AST-dump cache write is exactly the case this matters for: the
-    JSON tree it is caching can be hundreds of MB to multiple GB for a
-    pathological header (P0 SVS field report), and the caller already holds
-    one in-memory copy of it (the parsed dict) — a second full-size ``bytes``
-    copy just to write the cache would double peak memory for no reason.
-    """
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(dst.parent), prefix=f".{dst.name}.", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "wb") as out, open(src, "rb") as inp:
-            shutil.copyfileobj(inp, out)
-        os.replace(tmp_name, dst)
-    except OSError:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
-
-
-def _atomic_write(path: Path, data: bytes) -> None:
-    """Write *data* to *path* via a same-directory temp file + ``os.replace``.
-
-    Plain ``open(path, "wb")``/``shutil.copy2`` can leave a torn file behind if
-    two processes race to populate the same cache key (e.g. comparing two
-    releases that share an unchanged header tree, with old/new extracted
-    concurrently) — a reader would then see a partially-written file instead
-    of a clean cache miss. ``os.replace`` is atomic on both POSIX and Windows,
-    so a concurrent reader always sees either the old (absent) or the new
-    (complete) file, never something in between.
-    """
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-        os.replace(tmp_name, path)
-    except OSError:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
 
 
 def _cache_path(key: str, backend: str = "castxml") -> Path:

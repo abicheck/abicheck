@@ -232,6 +232,18 @@ def build_fixture(
 # ---------------------------------------------------------------------------
 
 
+def _thread_count(pid: int) -> int | None:
+    """``Threads:`` from ``/proc/<pid>/status``, or ``None`` if unreadable."""
+    try:
+        with open(f"/proc/{pid}/status", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("Threads:"):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
 class _Sampler(threading.Thread):
     """Poll a running process tree's memory until told to stop.
 
@@ -256,6 +268,10 @@ class _Sampler(threading.Thread):
         self.tree_pss_peak: int | None = None
         self.cgroup_peak: int | None = None
         self.max_processes = 0
+        #: Parent-process thread high-water mark (``/proc/<pid>/status``).
+        #: What the release concurrency policy bounds: a thread burst costs
+        #: per-thread malloc arenas and context switches even when idle.
+        self.thread_peak: int | None = None
         self.samples = 0
 
     @staticmethod
@@ -309,6 +325,7 @@ class _Sampler(threading.Thread):
             if any_read:
                 self.tree_rss_peak = self._peak(self.tree_rss_peak, rss_total)
                 self.tree_pss_peak = self._peak(self.tree_pss_peak, pss_total)
+            self.thread_peak = self._peak(self.thread_peak, _thread_count(self.pid))
             cg_current, cg_peak = _cgroup_memory()
             for value in (cg_current, cg_peak):
                 self.cgroup_peak = self._peak(self.cgroup_peak, value)
@@ -440,6 +457,13 @@ def run_variant(
         cache_dir=cache_dir,
     )
 
+    import resource
+
+    # Children's rusage, read as a delta around this one run: CPU time (so
+    # CPU% = cpu / wall -- the figure that says whether a run used one core
+    # or many), minor faults and involuntary context switches (what a
+    # thread burst or an arena setting moves). Covers the whole reaped tree.
+    usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     started = time.monotonic()
     proc = subprocess.Popen(
         args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -450,6 +474,10 @@ def run_variant(
     sampler.stop.set()
     sampler.join(2)
     elapsed = time.monotonic() - started
+    usage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    cpu_seconds = (usage_after.ru_utime - usage_before.ru_utime) + (
+        usage_after.ru_stime - usage_before.ru_stime
+    )
 
     report_path = out / "report.json"
     verdict = None
@@ -483,6 +511,11 @@ def run_variant(
         "tree_peak_pss_bytes": sampler.tree_pss_peak,
         "cgroup_peak_bytes": sampler.cgroup_peak,
         "max_processes": sampler.max_processes,
+        "thread_peak": sampler.thread_peak,
+        "cpu_seconds": round(cpu_seconds, 3),
+        "cpu_percent": round(100.0 * cpu_seconds / elapsed, 1) if elapsed else None,
+        "minor_faults": usage_after.ru_minflt - usage_before.ru_minflt,
+        "involuntary_context_switches": usage_after.ru_nivcsw - usage_before.ru_nivcsw,
         "samples": sampler.samples,
         "tracemalloc": tracemalloc,
         "stderr_tail": stderr_text[-2000:],
