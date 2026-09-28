@@ -59,6 +59,11 @@ def test_acquisition_key_is_independent_of_include_spelling(
 ) -> None:
     if shutil.which(tool) is None:
         pytest.skip(f"{tool} not available")
+    if fn_name == "_castxml_dump":
+        try:
+            dumper._resolve_gated_castxml_bin(None)
+        except Exception as exc:  # outside the version policy
+            pytest.skip(f"castxml rejected by version policy: {exc}")
     fn = getattr(dumper, fn_name)
     work = tmp_path / "work"
     roots = [work / "include", work / "include" / "svs" / "lib"]

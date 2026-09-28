@@ -9,7 +9,7 @@ the new code path, so a divergence in the new structure shows up here.
 from __future__ import annotations
 
 import math
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 from hypothesis import given, settings, strategies as st
@@ -80,9 +80,14 @@ def test_current_date_tracks_a_moving_clock(steps):
             return datetime.fromtimestamp(clock[0]).date()
 
     real_time, real_date = selectors.time, selectors.date
-    selectors.time = SimpleNamespace(time=lambda: clock[0])
+    selectors.time = SimpleNamespace(
+        time=lambda: clock[0],
+        timezone=real_time.timezone,
+        altzone=real_time.altzone,
+        tzname=real_time.tzname,
+    )
     selectors.date = _FakeDate
-    selectors._today_cache = (date.min, 0.0, float("-inf"))
+    selectors._today_cache = (date.min, 0.0, float("-inf"), None)
     try:
         for step in steps:
             clock[0] += step
@@ -90,7 +95,7 @@ def test_current_date_tracks_a_moving_clock(steps):
             assert got == datetime.fromtimestamp(clock[0]).date()
     finally:
         selectors.time, selectors.date = real_time, real_date
-        selectors._today_cache = (date.min, 0.0, float("-inf"))
+        selectors._today_cache = (date.min, 0.0, float("-inf"), None)
 
 
 def test_current_date_matches_date_today():
@@ -130,3 +135,21 @@ def test_shared_attrs_preserve_content_and_share_only_equal(dicts):
                 assert _repr(dicts[i]) == _repr(dicts[j])
             if _repr(dicts[i]) == _repr(dicts[j]) and "l" not in dicts[i]:
                 assert a is b
+
+
+def test_current_date_rederives_after_a_timezone_change():
+    """A stale zone in the cache is never trusted, even inside its window."""
+    import time as _time
+
+    selectors._current_date()
+    today, start, end, _zone = selectors._today_cache
+    selectors._today_cache = (today - timedelta(days=1), start, end, ("stale",))
+    try:
+        assert selectors._current_date() == date.today()
+        assert selectors._today_cache[3] == (
+            _time.timezone,
+            _time.altzone,
+            _time.tzname,
+        )
+    finally:
+        selectors._today_cache = (date.min, 0.0, float("-inf"), None)

@@ -379,9 +379,14 @@ def _matches_symbol(
     return True
 
 
-# (date, [start, end) epoch-second window it is "today" for) -- see
-# _current_date.
-_today_cache: tuple[date, float, float] = (date.min, 0.0, float("-inf"))
+# (date, [start, end) epoch-second window it is "today" for, the local
+# timezone it was derived under) -- see _current_date.
+_today_cache: tuple[date, float, float, object] = (
+    date.min,
+    0.0,
+    float("-inf"),
+    None,
+)
 
 
 def _current_date() -> date:
@@ -392,12 +397,16 @@ def _current_date() -> date:
     ``localtime`` conversion) was nearly the whole cost of each.
     ``time.time()`` is an order of magnitude cheaper. The cache holds the
     cached day's own local-midnight bounds, so crossing midnight in either
-    direction (including a backwards clock step) re-derives the date.
+    direction (including a backwards clock step) or a timezone change
+    re-derives the date.
     """
     global _today_cache
     now = time.time()
-    cached, start, end = _today_cache
-    if start <= now < end:
+    # The local zone only changes through tzset(), which also updates these,
+    # so a zone change re-derives the date too.
+    zone = (time.timezone, time.altzone, time.tzname)
+    cached, start, end, cached_zone = _today_cache
+    if start <= now < end and cached_zone == zone:
         return cached
     today = date.today()
     # A naive datetime's .timestamp() is local time, so DST-length days
@@ -406,7 +415,7 @@ def _current_date() -> date:
     start = datetime.combine(today, midnight).timestamp()
     end = datetime.combine(today + timedelta(days=1), midnight).timestamp()
     if start <= now < end:
-        _today_cache = (today, start, end)
+        _today_cache = (today, start, end, zone)
     return today
 
 
