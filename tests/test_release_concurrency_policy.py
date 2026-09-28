@@ -380,3 +380,73 @@ def test_release_completed_keeps_in_flight_entries_and_their_groups() -> None:
     assert list(scope._entries) == [("b", repr(id(busy_root)))]
     finish.set()
     worker.join(5)
+
+
+# ---------------------------------------------------------------------------
+# Level 2: failure paths of the shared probe pool
+# ---------------------------------------------------------------------------
+
+
+def _probes(n: int) -> list[igw.DepfileProbe]:
+    return [_probe(i) for i in range(n)]
+
+
+@pytest.mark.parametrize("window", [1, 3, 8])
+@pytest.mark.parametrize("failing", [frozenset(), frozenset({0}), frozenset({2, 5})])
+def test_a_raising_unit_fails_only_its_own_slot_and_the_rest_still_run(
+    window: int, failing: frozenset[int]
+) -> None:
+    ran: list[str] = []
+    lock = threading.Lock()
+
+    def work(unit: igw.DepfileProbe) -> str:
+        with lock:
+            ran.append(unit.unit_id)
+        index = int(unit.unit_id.removeprefix("cu://"))
+        if index in failing:
+            raise RuntimeError(unit.unit_id)
+        return unit.unit_id
+
+    units = _probes(7)
+    proxies = igw._submit_windowed(units, lambda u: (work, u), window=window)
+    for i, proxy in enumerate(proxies):
+        exc = proxy.exception(timeout=10)
+        if i in failing:
+            assert isinstance(exc, RuntimeError) and str(exc) == f"cu://{i}"
+        else:
+            assert exc is None and proxy.result() == f"cu://{i}"
+    assert sorted(ran) == sorted(u.unit_id for u in units)
+
+
+def test_a_pool_that_refuses_work_fails_every_unit_without_recursing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Closed:
+        def submit(self, *_a: object) -> None:
+            raise RuntimeError("cannot schedule new futures after shutdown")
+
+    monkeypatch.setattr(igw, "_shared_pool", lambda: _Closed())
+    # Far more units than the recursion limit would tolerate if each failed
+    # submission recursed into the next.
+    proxies = igw._submit_windowed(_probes(3000), lambda u: (str, u), window=4)
+    assert all(isinstance(p.exception(timeout=5), RuntimeError) for p in proxies)
+
+
+def test_a_forked_child_forgets_the_parents_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentinel = object()
+    monkeypatch.setattr(igw, "_SHARED_POOL", sentinel)
+    igw._forget_shared_pool_in_child()
+    assert igw._SHARED_POOL is None
+
+
+def test_bad_member_jobs_without_a_diagnostics_list_is_ignored_quietly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(process_resources.MEMBER_JOBS_ENV_VAR, "lots")
+    monkeypatch.setattr(process_resources, "gil_enabled", lambda: True)
+    assert (
+        process_resources.python_parallelism()
+        == process_resources.GIL_MEMBER_PARALLELISM
+    )
