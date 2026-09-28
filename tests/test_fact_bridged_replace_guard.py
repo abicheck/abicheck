@@ -109,11 +109,6 @@ _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
     ("abicheck/pack_application.py", "apply_to_compare_config"): (
         "Replaces on SeverityConfig, which carries no Fact[T] field."
     ),
-    ("abicheck/policy/public_surface_closure.py", "_independent_copy"): (
-        "Copies a PublicSurface's set/dict/list fields for a memoized "
-        "surface's caller; PublicSurface carries no Fact[T]-bridged field, "
-        "and every value is carried over unchanged."
-    ),
     ("abicheck/qualified_name_segments_walk.py", "_walk_rewrite_strings"): (
         "Generic closure-marker walk. It rewrites a mutable dataclass by "
         "setattr and recurses into the Fact sibling itself (see that "

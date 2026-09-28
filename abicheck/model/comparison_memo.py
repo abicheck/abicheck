@@ -16,12 +16,10 @@
 """Per-snapshot derived facts shared across one comparison.
 
 One ``compare`` derives the same pure facts from each snapshot several times
-over: the identity table, the referenced-identifier graph and the export
-join are each rebuilt by the public-surface resolution ``compare_snapshots``
-runs before the comparison, again by post-processing's scoping pass, and
-again by the edge-coverage report (MKL ``libmkl_rt``: ``join_exports`` 8
-calls / 9.3 s and ``referenced_identifiers_by_node`` 8 calls / 3.1 s for
-what is four snapshots' worth of work).
+over: the identity table and the export join built on it are rebuilt by the
+public-surface resolution ``compare_snapshots`` runs before the comparison,
+again by post-processing's scoping pass, and again by the edge-coverage
+report (MKL ``libmkl_rt``: ``join_exports`` 8 calls / 9.3 s).
 
 A comparison already treats its snapshots as read-only for its whole
 duration -- ``compare.surface_reconcile`` memoizes on exactly that
@@ -32,6 +30,13 @@ opens it (nested scopes join the outermost one), and
 ``(name, snapshot)`` inside it. Outside a scope nothing is cached, so a
 snapshot still being built (a dump, a merge) can never be served a value
 derived from an earlier state of itself.
+
+What is memoized is chosen against memory as well as time: every entry
+stays resident until the comparison ends. The public surface and the
+referenced-identifier graph were tried too and dropped -- holding them for
+the whole comparison raised peak allocation by ~5 MiB on the memory gate's
+1-2k-declaration scenarios (``Memory regression (PR vs base)``) for a few
+seconds of MKL-scale time; the identity table and export join cost ~1-2 MiB.
 
 Keys use ``id(snapshot)``; the scope holds a strong reference to every
 snapshot it keyed, so an id cannot be reused by a different object while

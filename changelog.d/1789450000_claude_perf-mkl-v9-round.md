@@ -28,12 +28,10 @@
   on one key compute it once and the others wait, rather than every release
   worker repeating the same scan until the first one finished.
 
-- Per-snapshot facts one comparison derived several times over -- the
-  identity table, the referenced-identifier graph, the export join, the
-  public surface -- are computed once per comparison
+- The identity table and the export join one comparison derived several
+  times per snapshot are computed once per comparison
   (`model/comparison_memo.py`, opened by `compare_snapshots` and the
-  `checker.compare` wrapper). Outside a comparison nothing is cached; the
-  memoized `PublicSurface` is handed to each caller as its own copy.
+  `checker.compare` wrapper). Outside a comparison nothing is cached.
 - `Fact.present(True/False/None/<enum member>)` and the argument-less
   `not_collected()`/`unsupported()`/`not_applicable()` return their shared
   instance without building the flyweight key: `Function()` construction

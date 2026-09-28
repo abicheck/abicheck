@@ -22,7 +22,6 @@ Contract, each stated independently of the implementation:
 * inside one, a value is computed once per ``(name, snapshot)``, and the
   scope releases every snapshot it pinned when it closes;
 * a nested scope resolutions the outer one;
-* the memoized public surface hands every caller an independent object;
 * and, the property that matters: ``compare_snapshots`` renders the same
   JSON report with the memo on as with it off, over every known detector
   mutation -- with a vacuity guard proving the memo really served hits.
@@ -38,14 +37,12 @@ import pytest
 from _detector_mutations import MUTATIONS, build_snapshot
 
 from abicheck.compare import surface_reconcile
-from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model import AbiSnapshot, Function, Visibility, snapshot_identity_table
 from abicheck.model.comparison_memo import (
     comparison_memo_active,
     comparison_memo_scope,
     comparison_memoized,
 )
-from abicheck.policy import public_surface_closure
-from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.reporter import to_json
 from abicheck.workflows import compare_policy
 
@@ -107,35 +104,6 @@ def test_closing_the_scope_releases_pinned_snapshots() -> None:
     assert ref() is None
 
 
-def _public_snapshot() -> AbiSnapshot:
-    return AbiSnapshot(
-        library="libx.so",
-        version="1",
-        functions=[
-            Function(
-                name="f",
-                mangled="_Z1fv",
-                return_type="int",
-                visibility=Visibility.PUBLIC,
-            )
-        ],
-    )
-
-
-def test_memoized_public_surface_is_independent_per_caller() -> None:
-    snap = _public_snapshot()
-    fresh = resolve_public_surface(snap)
-    with comparison_memo_scope():
-        one = resolve_public_surface(snap)
-        one.public_symbols.add("mutated")
-        one.origin_by_key["mutated"] = next(iter(fresh.origin_by_key.values()), None)  # type: ignore[assignment]
-        two = resolve_public_surface(snap)
-    assert one is not two
-    assert "mutated" not in two.public_symbols
-    assert "mutated" not in two.origin_by_key
-    assert two == fresh
-
-
 def _context() -> dict:
     return {
         "functions": [
@@ -171,16 +139,14 @@ def test_compare_report_is_identical_with_and_without_the_memo(
         )
 
     resolutions = []
-    real_resolve = public_surface_closure._resolve_public_surface_from_snapshot
+    real_identities = snapshot_identity_table.snapshot_identities
 
-    def counting_resolve(*args, **kwargs):
+    def counting_identities(*args, **kwargs):
         resolutions.append(1)
-        return real_resolve(*args, **kwargs)
+        return real_identities(*args, **kwargs)
 
     monkeypatch.setattr(
-        public_surface_closure,
-        "_resolve_public_surface_from_snapshot",
-        counting_resolve,
+        snapshot_identity_table, "snapshot_identities", counting_identities
     )
     with_memo = _report(*pair())
     resolutions_with = len(resolutions)
