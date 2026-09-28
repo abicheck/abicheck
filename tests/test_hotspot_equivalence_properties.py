@@ -317,3 +317,83 @@ def test_anon_marker_scan_matches_the_character_loop(parts):
     assert list(closure_identity._anon_type_ordinal_matches(name)) == expected
     # And the memoized answer is the same on a repeat.
     assert list(closure_identity._anon_type_ordinal_matches(name)) == expected
+
+
+# --- reclassify kind buckets ---------------------------------------------------
+
+from abicheck.checker_policy import Verdict  # noqa: E402
+from abicheck.checker_types import Change  # noqa: E402
+from abicheck.policy import reclassify  # noqa: E402
+
+_KINDS = [ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_ADDED, ChangeKind.TYPE_SIZE_CHANGED]
+_SYMS = ["ns::f", "ns::g", "other::h"]
+_TO = [Verdict.COMPATIBLE, Verdict.BREAKING, Verdict.API_BREAK]
+
+
+@st.composite
+def _rule(draw):
+    kind = draw(st.sampled_from([None, *(k.value for k in _KINDS)]))
+    sym = draw(st.sampled_from([None, *_SYMS]))
+    return reclassify.ReclassifyRule(
+        to_verdict=draw(st.sampled_from(_TO)),
+        change_kind=kind,
+        symbol=sym,
+        symbol_pattern=".*" if sym is None else None,
+    )
+
+
+@settings(max_examples=400, deadline=None)
+@given(
+    rules=st.lists(_rule(), max_size=8),
+    changes=st.lists(
+        st.tuples(st.sampled_from(_KINDS), st.sampled_from(_SYMS)),
+        min_size=1,
+        max_size=6,
+    ),
+)
+def test_kind_buckets_pick_the_same_first_match_as_the_full_scan(rules, changes):
+    """Oracle: the first rule in file order whose ``matches`` is true, over
+    the whole list. A rule scoped to the finding's kind (or to no kind)
+    still decides it; a rule scoped to another kind never does."""
+    for kind, sym in changes:
+        change = Change(kind=kind, symbol=sym, description="d")
+        expected = next((r.to_verdict for r in rules if r.matches(change)), None)
+        assert reclassify.first_matching_reclassify_verdict(rules, change) == expected
+        bucket = reclassify.reclassify_rules_for_kind(rules, kind.value)
+        for rule in rules:
+            if rule.change_kind in (None, kind.value):
+                assert any(rule is other for other in bucket)
+            elif len(rules) > 1:  # a 0/1-rule list is returned as is
+                assert all(rule is not other for other in bucket)
+
+
+def test_kind_buckets_follow_the_selector_not_a_mutated_field():
+    rule = reclassify.ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE, change_kind="func_removed", symbol="ns::f"
+    )
+    other = reclassify.ReclassifyRule(to_verdict=Verdict.BREAKING, symbol="ns::g")
+    rule.change_kind = "func_added"  # matches() still uses the captured kind
+    rules = [rule, other]
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="ns::f", description="d")
+    assert rule.matches(change)
+    assert (
+        reclassify.first_matching_reclassify_verdict(rules, change)
+        is Verdict.COMPATIBLE
+    )
+
+
+def test_kind_buckets_rebuild_after_in_place_mutation():
+    a = reclassify.ReclassifyRule(
+        to_verdict=Verdict.BREAKING, change_kind="func_added", symbol="ns::f"
+    )
+    b = reclassify.ReclassifyRule(
+        to_verdict=Verdict.COMPATIBLE, change_kind="func_removed", symbol="ns::f"
+    )
+    rules = [a]
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="ns::f", description="d")
+    assert reclassify.first_matching_reclassify_verdict(rules, change) is None
+    rules.append(b)
+    assert (
+        reclassify.first_matching_reclassify_verdict(rules, change)
+        is Verdict.COMPATIBLE
+    )

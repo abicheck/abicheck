@@ -458,12 +458,11 @@ def reclassify_rules_for_kind(rules: Sequence[_R], kind_value: str) -> Sequence[
         or any(a is not b for a, b in zip(entry[0], rules, strict=True))
     ):
         buckets: dict[str | None, list[_R]] = {None: []}
-        for rule in rules:
-            kind = getattr(rule, "change_kind", None)
+        kinds = [_matched_kind(rule) for rule in rules]
+        for kind in kinds:
             if kind is not None:
                 buckets.setdefault(kind, [])
-        for rule in rules:
-            kind = getattr(rule, "change_kind", None)
+        for rule, kind in zip(rules, kinds, strict=True):
             for bucket_kind, bucket in buckets.items():
                 if kind is None or kind == bucket_kind:
                     bucket.append(rule)
@@ -474,6 +473,19 @@ def reclassify_rules_for_kind(rules: Sequence[_R], kind_value: str) -> Sequence[
     bucketed = entry[1]
     found = bucketed.get(kind_value)
     return found if found is not None else bucketed[None]
+
+
+def _matched_kind(rule: Any) -> str | None:
+    """The ``kind`` selector *rule* actually matches with: the one its
+    selector set captured at construction (`matches` never re-reads the
+    public field -- see the class docstring), falling back to the field for
+    a rule-shaped object with no selector set."""
+    selector = getattr(rule, "_selector", None)
+    if selector is not None:
+        kind: str | None = selector.change_kind
+        return kind
+    fallback: str | None = getattr(rule, "change_kind", None)
+    return fallback
 
 
 def first_matching_reclassify_verdict(
