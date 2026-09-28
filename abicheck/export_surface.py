@@ -74,18 +74,20 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, EnumType, Function, RecordType
 from .model.graph_entity_identity import GraphEntityIdentity
 from .model.graph_join import JoinState
+from .model.type_identifiers import (
+    IDENT_RE as _IDENT_RE,
+    TYPE_NOISE as _TYPE_NOISE,
+    type_identifiers as _type_identifiers,
+)
 from .name_classification import (
     STDLIB_TYPE_NAMESPACE_PREFIXES,
     is_cxx_runtime_library,
 )
 from .policy.public_surface import (
-    _IDENT_RE,
-    _TYPE_NOISE,
     PublicSurface,
     _index_surface_types,
     _is_real_type,
     _symbol_keys,
-    _type_identifiers,
 )
 from .policy.public_surface_closure import _walk_type_closure
 from .type_reachability import (

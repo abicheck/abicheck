@@ -27,6 +27,8 @@ correctly for the header-tier (unmangled) fallback shapes it depends on.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.compare.namespace_move import find_namespace_move_groups
 from abicheck.diff_cxx_rules import (
     qualified_name_scope_components,
@@ -702,3 +704,82 @@ class TestQualifiedNameScopeComponentsRequiresATokenBoundaryForOperator:
         ``"operator<<"`` with no preceding scope (index 0) is still a real
         operator token, not a truncated identifier."""
         assert qualified_name_scope_components("operator<<") == ["operator<<"]
+
+
+# Behavior-preservation corpus recorded from the pre-refactor implementation
+# (single-function scanner, before the shared depth-scan helper extraction).
+_RECORDED_SCOPE_COMPONENTS: list[tuple[str, list[str] | None]] = [
+    ("", None),
+    ("foo", ["foo"]),
+    ("ns::Class::method", ["ns", "Class", "method"]),
+    ("::foo", None),
+    ("foo::", None),
+    ("foo::::bar", None),
+    ("a:::b", ["a", ":b"]),
+    ("a::::b", None),
+    ("lib::foo<old::A>", ["lib", "foo<old::A>"]),
+    ("lib::foo<old::A", None),
+    ("lib::foo>old", None),
+    ("api::C::operator old::X", ["api", "C", "operator old::X"]),
+    ("api::C::operator old::X<", None),
+    ("operator ns::Bar", ["operator ns::Bar"]),
+    ("ns::operator<", ["ns", "operator<"]),
+    ("ns::operator<<", ["ns", "operator<<"]),
+    ("ns::operator>>", ["ns", "operator>>"]),
+    ("ns::operator<=>", ["ns", "operator<=>"]),
+    ("ns::operator->", ["ns", "operator->"]),
+    (
+        "ns::C::operator std::integral_constant<bool, (sizeof(T) > 1)>",
+        ["ns", "C", "operator std::integral_constant<bool, (sizeof(T) > 1)>"],
+    ),
+    ("ns::C::operator B<N < M>", ["ns", "C", "operator B<N < M>"]),
+    ("ns::C::operator B<N << M>", ["ns", "C", "operator B<N << M>"]),
+    (
+        "ns::C::operator B<[]{ return N > M; }>",
+        ["ns", "C", "operator B<[]{ return N > M; }>"],
+    ),
+    ("ns::C::operator B<A[N > M]>", ["ns", "C", "operator B<A[N > M]>"]),
+    (
+        "ns::C::operator B<[]() -> bool { return true; }>",
+        ["ns", "C", "operator B<[]() -> bool { return true; }>"],
+    ),
+    ("ns::f<[]{ return 1 > 0; }>::g", ["ns", "f<[]{ return 1 > 0; }>", "g"]),
+    ("ns::{lambda()#1}::operator()", ["ns", "{lambda()#1}", "operator()"]),
+    ("(anonymous namespace)::Foo::bar", ["(anonymous namespace)", "Foo", "bar"]),
+    ("ns::(anonymous namespace)::x", ["ns", "(anonymous namespace)", "x"]),
+    ("f(int (*)(a::b))::g", ["f(int (*)(a::b))", "g"]),
+    ("ns::decltype(a::b)::c", ["ns", "decltype(a::b)", "c"]),
+    ("ns::`anonymous namespace'::f", ["ns", "`anonymous namespace'", "f"]),
+    ("ns::X<a::b<c::d>>::e", ["ns", "X<a::b<c::d>>", "e"]),
+    ("ns::X<(a > b)>::y", ["ns", "X<(a > b)>", "y"]),
+    ("ns::X<(a::b)>::y", ["ns", "X<(a::b)>", "y"]),
+    ("a)b::c", None),
+    ("a}b::c", None),
+    ("a]b::c", None),
+    ("a{b::c", None),
+    ("a[b::c", None),
+    ("ns::X<a>>::b", None),
+    ("ns::f(a,(b)::c", None),
+    ("x::operator ", ["x", "operator "]),
+    ("x::operator ::y", ["x", "operator ::y"]),
+    ("a::b<c,d>::operator()<int>", ["a", "b<c,d>", "operator()<int>"]),
+    ("a::operator< <int>", None),
+    (
+        "std::vector<int, std::allocator<int> >::push_back",
+        ["std", "vector<int, std::allocator<int> >", "push_back"],
+    ),
+    ("ns::A<N<M>::b", None),
+    ("ns::A<N <M>::b", ["ns", "A<N <M>", "b"]),
+    ("ns::C::operator bool", ["ns", "C", "operator bool"]),
+    ("a::{::b}::c", ["a", "{::b}", "c"]),
+    ("a::[x::y]::c", ["a", "[x::y]", "c"]),
+    ("a::b<c->d>::e", ["a", "b<c->d>", "e"]),
+    ("::", None),
+]
+
+
+@pytest.mark.parametrize(("qualified", "expected"), _RECORDED_SCOPE_COMPONENTS)
+def test_qualified_name_scope_components_recorded_corpus(
+    qualified: str, expected: list[str] | None
+) -> None:
+    assert qualified_name_scope_components(qualified) == expected

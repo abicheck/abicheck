@@ -244,7 +244,7 @@ re-executed against the pack directory itself. Fixed at the root
 in a Flow-2 pack's ``BuildEvidence`` via the same lighter
 ``load_inputs_manifest``/``_load_build_evidence`` pair this module uses
 below, rather than the full ``ingest_inputs_pack``), which is what makes
-this module's own uniform ``_is_pack_dir_any``/``_pack_dir_build_evidence``
+this module's own uniform ``is_pack_dir_any``/``_pack_dir_build_evidence``
 treatment of both call sites correct rather than merely convenient --
 before that fix, mirroring ``embed_build_source``'s recognition here alone
 would have made this preview *wrong* for the L2-seed-reachable branches
@@ -258,41 +258,16 @@ import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .frontends.cli.dump_build_query_config import (
+    BUILD_QUERY_SECTION as _SECTION,
+    is_pack_dir_any,
+    load_query_config,
+    resolve_config_inputs,
+)
+
 if TYPE_CHECKING:
     from .buildsource.build_evidence import BuildEvidence
     from .dry_run import DryRunResult
-
-_SECTION = "Build query (trust)"
-
-
-def _is_inputs_pack_dir(path: Path | None) -> bool:
-    """Compatibility alias for ``buildsource.inputs_pack.is_inputs_pack_dir``.
-
-    Owned there since ADR-061 Phase 3; this was the third of three copies of
-    the same guard, each local because the original lived in the CLI layer.
-    """
-    from .workflows.extraction import is_inputs_pack_dir
-
-    return is_inputs_pack_dir(path)
-
-
-def _is_pack_dir_any(path: Path | None) -> bool:
-    """True when *path* is either pack-directory shape the real resolvers
-    fold in and null the corresponding ``raw_build_info``/``raw_sources``
-    operand for -- a classic :class:`BuildSourcePack` (``is_pack_dir``) or a
-    Flow-2 ``abicheck_inputs/`` pack (ADR-035 D5, ``_is_inputs_pack_dir``).
-
-    Both ``embed_build_source`` and (since the fix this module's own
-    docstring records) ``buildsource.l2_seed._l2_seed_pack_inputs`` treat
-    both shapes identically for this purpose (``bi_is_pack or bi_is_inputs``
-    / ``src_is_pack or src_is_inputs``, both unconditionally nulling the raw
-    operand regardless of whether the pack carries any L3 evidence) -- so
-    every reachability branch in this module that keys off "is this operand
-    itself a pack" can safely recognize both the same way too.
-    """
-    from .workflows.extraction import is_pack_dir
-
-    return is_pack_dir(path) or _is_inputs_pack_dir(path)
 
 
 def _pack_dir_build_evidence(path: Path) -> BuildEvidence | None:
@@ -439,24 +414,10 @@ def _resolve_compile_db_hint_line(
     )
 
 
-def add_build_query_dry_run_section(
-    result: DryRunResult,
-    *,
-    so_path: Path | None = None,
-    dump_manifest_given: bool = False,
-    sources: Path | None,
-    headers: tuple[Path, ...],
-    collect_mode: str,
-    build_info: Path | None,
-    build_config: Path | None,
+def _reject_dump_manifest_for_non_elf(
+    so_path: Path | None, dump_manifest_given: bool
 ) -> None:
-    """Append the ``build.query`` trust/execution report to *result*."""
-    from .workflows.extraction import (
-        _compile_db_at,
-        discover_build_config,
-        load_build_config,
-    )
-
+    """Raise the PE/Mach-O ``--dump-manifest`` usage error ``dump_cmd`` raises."""
     # `dump_cmd`'s own dispatch rejects --dump-manifest for a PE/Mach-O
     # binary outright (`--dump-manifest is not yet supported for {fmt}
     # binaries`, ADR-050 D3, a `click.UsageError`) before `handle_non_elf_
@@ -496,82 +457,17 @@ def add_build_query_dry_run_section(
                 "binaries (ADR-050 D3); use a single-header dump for this format."
             )
 
-    # An *explicit* --config is validated unconditionally by `dump_cmd`
-    # itself, before this function is ever called: `resolve_dump_compile_
-    # context()`/`cli_options.merge_compile_config()` -- the L2 compile-
-    # context resolver every `dump` invocation runs, regardless of build-
-    # source collection, and unconditionally before the `--dry-run` branch
-    # -- already raises `click.UsageError` for a malformed *explicit*
-    # config, so a malformed explicit --config never reaches this function
-    # at all. Verified end-to-end: `dump ... --config bad.yml --depth
-    # binary` with no --sources/--build-info exits 64 before ever printing
-    # a dry-run report (CodeRabbit/Codex review, fresh evidence -- this
-    # function does not need its own duplicate check). This is unlike an
-    # *auto-discovered* config, which that same resolver only warns about
-    # and falls back from -- handled further below, gated on whether
-    # `embed_build_source`'s own, stricter load is actually reached.
 
-    # Neither real call site is even attempted without --sources/--build-info
-    # at all -- `l2_seed`'s own guard is `(sources is None and build_info is
-    # None) or not headers`, and `_write_snapshot_output` never calls
-    # `embed_build_source` without one of them either (Codex review, fresh
-    # evidence).
-    if sources is None and build_info is None:
-        result.add(
-            _SECTION,
-            "build.query: will NOT run -- neither --sources nor --build-info "
-            "was given, so no build-evidence collection is attempted at all",
-        )
-        return
-
-    # `l2_seed.seed_includes_and_fold_compile_context` is only ever called
-    # from the artifact-bearing dispatch (`perform_elf_dump`/
-    # `handle_non_elf_dump`) -- when `SO_PATH` is omitted, `dump_cmd`
-    # dispatches to `dump_source_only()` instead (the parallel-baseline
-    # flow), which never seeds L2 at all: "this path's snapshot starts with
-    # no functions/variables... a source-only dump has no -H headers
-    # either" (its own docstring). So the L2-seed path is reachable only
-    # when BOTH headers are present AND a real artifact was given -- headers
-    # alone, with no `SO_PATH`, give this module no route to `collect_
-    # inline_pack` the real `dump --sources ... -H ...` (no binary) run
-    # doesn't also lack (Codex review, fresh evidence).
-    l2_seed_reachable = bool(headers) and so_path is not None
-
-    # Neither `l2_seed.seed_includes_and_fold_compile_context` (needs headers
-    # AND a real artifact, per `l2_seed_reachable` above) nor `embed_build_
-    # source` (needs a non-"off" collect mode) would even call
-    # `collect_inline_pack`/`_resolve_compile_db` -- build.query, trusted or
-    # not, is never reached (Codex review, fresh evidence).
-    if not l2_seed_reachable and collect_mode == "off":
-        result.add(
-            _SECTION,
-            "build.query: will NOT run -- no evidence collection requested "
-            f"(collect mode {collect_mode!r} with no headers to parse)",
-        )
-        return
-
-    # `embed_build_source`'s own pack loading (`_load_pack_or_raise`, a
-    # `click.ClickException`, exit 1) and its own auto-discovered-config
-    # load (further below, a `click.UsageError`, exit 64) are both reached
-    # only *past* its own `if not layers: return` gate
-    # (`collection_for_ci_mode(collect_mode)` returning no layers for an
-    # "off" collect mode) -- under a collect mode that resolves to no
-    # layers (e.g. `--depth headers`, which still leaves `headers`
-    # non-empty and so does not return at the guard above),
-    # `embed_build_source` is never called into far enough to load either,
-    # and `l2_seed`'s own independent pack/config loading (reached via the
-    # headers-gated L2-seed path instead) degrades any load failure to a
-    # silent no-op (no seeded dirs, no fold, no query attempt) rather than
-    # raising through. Verified end-to-end against a real compiled library:
-    # a malformed `--sources` pack, and separately a malformed
-    # auto-discovered config, both exit 0 under `--depth headers` -- the
-    # dump simply proceeds without L3 seeding -- while the identical inputs
-    # under the default (non-"off") collect mode exit 1/64 respectively
-    # (Codex review, fresh evidence). This module therefore only
-    # raises/blocks for a malformed pack or auto-discovered config when
-    # `collect_mode != "off"`.
-    collect_active = collect_mode != "off"
-
+def _load_sources_pack(
+    result: DryRunResult,
+    *,
+    sources: Path | None,
+    build_info: Path | None,
+    collect_mode: str,
+    collect_active: bool,
+    l2_seed_reachable: bool,
+) -> tuple[bool, BuildEvidence | None]:
+    """Preview-load a ``--sources`` pack; ``(stop, evidence)``."""
     # `embed_build_source` loads `bi_pack`/`src_pack` unconditionally and
     # independently of one another (`_load_pack_or_raise(build_info)` and
     # `_load_pack_or_raise(sources)`, both called regardless of what the
@@ -581,7 +477,7 @@ def add_build_query_dry_run_section(
     # only inside the --build-info-is-absent-or-non-pack branch further
     # down, since that branch is an `elif` a non-pack --build-info would
     # otherwise skip entirely (Codex review, fresh evidence).
-    if sources is not None and _is_pack_dir_any(sources):
+    if sources is not None and is_pack_dir_any(sources):
         try:
             src_pack_evidence = _pack_dir_build_evidence(sources)
         except Exception as exc:  # noqa: BLE001 -- best-effort preview load; see
@@ -667,7 +563,7 @@ def add_build_query_dry_run_section(
                             "pack is the only remaining real call site, and it "
                             "fails before ever reaching build.query"
                         )
-                        return
+                        return True, None
                 # Fall through with no L3 evidence from this pack, same as a
                 # valid-but-empty one -- the rest of this function resolves
                 # the L2 seed's own query via build_info.
@@ -678,7 +574,7 @@ def add_build_query_dry_run_section(
                     f"build.query: could not load --sources pack {sources}: {exc}",
                 )
                 result.block(f"--sources names an unloadable pack ({sources}): {exc}")
-                return
+                return True, None
             else:
                 # `build_info is None` and `collect_mode == "off"`:
                 # `l2_seed`'s own pack loading attempts the SAME malformed
@@ -696,11 +592,21 @@ def add_build_query_dry_run_section(
                     "load failure, rather than raising) could otherwise "
                     "reach it",
                 )
-                return
+                return True, None
     else:
         src_pack_evidence = None
+    return False, src_pack_evidence
 
-    if build_info is not None and _is_pack_dir_any(build_info):
+
+def _load_build_info_pack(
+    result: DryRunResult,
+    *,
+    build_info: Path | None,
+    collect_mode: str,
+    collect_active: bool,
+) -> tuple[bool, BuildEvidence | None]:
+    """Preview-load a ``--build-info`` pack; ``(stop, evidence)``."""
+    if build_info is not None and is_pack_dir_any(build_info):
         try:
             bi_pack_evidence = _pack_dir_build_evidence(build_info)
         except Exception as exc:  # noqa: BLE001 -- best-effort preview load,
@@ -735,244 +641,66 @@ def add_build_query_dry_run_section(
                     "load failure, rather than raising) could otherwise "
                     "reach it",
                 )
-            return
+            return True, None
     else:
         bi_pack_evidence = None
+    return False, bi_pack_evidence
 
-    # `_l2_seed_pack_inputs` nulls `raw_sources` whenever --sources is itself
-    # a pack directory, unconditionally (independent of --build-info) -- both
-    # config auto-discovery and the query's own cwd must use that same
-    # normalized value, not the pack directory itself (Codex review, fresh
-    # evidence).
-    effective_sources = (
-        None if (sources is not None and _is_pack_dir_any(sources)) else sources
-    )
 
-    # Two independent real call sites can load `cfg_path`, with two different
-    # reachability conditions and two different failure behaviors:
-    #
-    # 1. `embed_build_source`'s own `raw_build_info`/`raw_sources` -- non-None
-    #    only for a *non-pack* operand -- gate whether IT loads/validates
-    #    `cfg_path`, and only once `collect_active` (its own collect-mode
-    #    gate) already let it get that far. A load failure there is a real
-    #    `click.UsageError` (exit 64).
-    # 2. `l2_seed._l2_seed_config` (reached via `seed_includes_and_fold_
-    #    compile_context`, gated on `l2_seed_reachable` above -- headers
-    #    non-empty AND a real artifact -- independent of `collect_active`/
-    #    pack status) *also* loads `cfg_path` whenever it runs,
-    #    unconditionally -- but its own load is
-    #    best-effort: a `ValueError` degrades to "no seeded dirs, no fold"
-    #    rather than raising (its own docstring: "surfaces loudly elsewhere
-    #    ... this is a best-effort include-dir hint, so it degrades ...
-    #    rather than raising through"). Missing this path (Codex review,
-    #    fresh evidence) meant a valid explicit --config's own query/
-    #    compile_db went unread whenever the only reachable path was an
-    #    empty pack + headers (`raw_operand_present` False, `collect_active`
-    #    irrelevant since embed_build_source never even gets called for a
-    #    fully-pack-absorbed pair) -- reported as "(none configured)" even
-    #    though the real run genuinely resolves and runs a trusted query
-    #    through this exact path.
-    #
-    # So *reading* cfg_path is gated on either path being reachable
-    # (`config_readable`); *raising* on a load failure is gated on
-    # `raise_on_bad_config`, requiring embed_build_source's own stricter
-    # path specifically -- config validation must happen here, ahead of
-    # every "will NOT run because X takes precedence" branch below (which
-    # answer a materially different question: whether `_resolve_compile_db`
-    # would use `cfg.query` once collect_inline_pack does run), not after
-    # them (Codex review, fresh evidence: an earlier revision validated
-    # config only after those precedence checks had already returned, so a
-    # malformed auto-discovered config combined with e.g. an already-
-    # resolved --build-info compile database never got validated at all --
-    # verified end-to-end that the real run still raises for that exact
-    # combination).
-    raw_operand_present = (
-        build_info is not None and not _is_pack_dir_any(build_info)
-    ) or (effective_sources is not None)
-    config_readable = l2_seed_reachable or raw_operand_present
-    # `embed_build_source`'s own auto-discovery is `discover_build_config
-    # (raw_sources)` -- keyed on `effective_sources` alone, never
-    # `build_info` -- so a raw (non-pack) `--build-info` can make
-    # `raw_operand_present` True while `effective_sources` is still `None`
-    # (--sources absent, or itself a pack): in that shape `embed_build_
-    # source` never discovers *any* file (`discover_build_config(None)` is
-    # always `None`), so it can never be the reason a load fails, no matter
-    # how `collect_active`/`raw_operand_present` resolve (Codex review,
-    # fresh evidence -- a malformed `.abicheck.yml` inside a `--sources`
-    # pack, combined with a raw `--build-info`, previously raised here even
-    # though `embed_build_source` never reads that file at all: only
-    # `l2_seed`'s own pack-rooted discovery does, and that path always
-    # degrades silently). When `effective_sources` *is* set, `sources ==
-    # effective_sources` unconditionally (it is only ever nulled when
-    # `--sources` is itself a pack), so `discover_from` above always agrees
-    # with what `embed_build_source` would independently discover -- no
-    # divergence to guard against in that case.
-    raise_on_bad_config = (
-        collect_active and raw_operand_present and effective_sources is not None
-    )
+def _raw_build_info_preempts(result: DryRunResult, build_info: Path) -> bool:
+    """Report whether a raw (non-pack) ``--build-info`` takes precedence over build.query."""
+    # A pre-captured Bazel aquery/cquery jsonproto is routed to the
+    # adapter before _resolve_compile_db is ever reached, and always
+    # bypasses it once recognized -- regardless of how many compile
+    # units the capture itself yields (Codex review, fresh evidence).
+    # sniff_build_info_format never executes anything (its own
+    # docstring), matching this module's read-only contract.
+    from .workflows.extraction import _compile_db_at, sniff_build_info_format
 
-    # Same source (source-tree-root-only, no upward walk) `embed_build_source`
-    # itself resolves from for this purpose -- distinct from `discover_project_
-    # config`'s upward walk, which the rest of this dry-run report already uses
-    # for the generic ".abicheck.yml:" info line.
-    #
-    # But *which* value depends on which real call site is doing the
-    # discovering, and the two disagree (Codex review, fresh evidence):
-    # `embed_build_source` discovers from its own normalized `raw_sources`
-    # (nulled whenever --sources is a pack, matching `effective_sources`
-    # here), while `l2_seed._l2_seed_config` discovers from the *original,
-    # unnormalized* `sources` it is handed
-    # (`_resolve_l2_seed_pack_args`/`seed_includes_and_fold_compile_context`
-    # pass the raw `sources` parameter straight through to it, never the
-    # pack-nulled value) -- so an empty --sources pack carrying its own
-    # .abicheck.yml is genuinely readable by the L2-seed path even though
-    # `effective_sources` alone would report "(none configured)". When
-    # --sources is not itself a pack, `sources` and `effective_sources` are
-    # identical, so this only changes behavior for the pack case. `cwd`/the
-    # compile-DB hint below still use `effective_sources`, matching
-    # `embed_build_source`'s own real cwd/compile-DB resolution -- only
-    # config *discovery* differs between the two real call sites.
-    discover_from = sources if l2_seed_reachable else effective_sources
-    cfg_path = build_config or discover_build_config(discover_from)
-    # An explicit --config is now the *only* authorizer (CLI cleanup phase
-    # two, PR 3C): `--build-query`/`--build-compile-db` are removed, so the
-    # real gate in `cli_buildsource.embed_build_source` reduces to this same
-    # single term. There is no longer a second way to mark a query trusted.
-    trusted = build_config is not None
+    if build_info.is_file() and sniff_build_info_format(build_info) in (
+        "bazel_aquery",
+        "bazel_cquery",
+    ):
+        result.add(
+            _SECTION,
+            f"build.query: will NOT run -- --build-info ({build_info}) is "
+            "a pre-captured Bazel aquery/cquery jsonproto, which takes "
+            "precedence over build.query",
+        )
+        return True
+    # `_resolve_compile_db`'s own first branch: an explicit --build-info
+    # that already resolves to a real compile database is returned
+    # immediately -- cfg.query, trusted or not, is never even consulted
+    # (Codex review).
+    found = _compile_db_at(build_info)
+    if found is not None:
+        result.add(
+            _SECTION,
+            f"build.query: will NOT run -- --build-info already resolves "
+            f"to a compile database ({found}), which takes precedence "
+            "over build.query",
+        )
+        return True
+    return False
 
-    # The real path (`cli_buildsource.py`) always loads *cfg_path* when one
-    # is found, for `cfg.compile_db` as well as `cfg.query`.
-    cfg = None
-    cfg_compile_db: str | None = None
-    if cfg_path is not None and config_readable:
-        try:
-            cfg = load_build_config(cfg_path)
-        except ValueError as exc:
-            # `build_config is None` here -- the explicit-config case
-            # already raised, unconditionally, at the very top of this
-            # function. This is therefore always an *auto-discovered*
-            # config, which `embed_build_source` validates strictly (a
-            # `click.UsageError`, exit 64) only past its own collect-mode
-            # AND raw-operand gate -- `raise_on_bad_config` above -- while
-            # `l2_seed`'s own headers-gated load degrades silently
-            # regardless (CodeRabbit/Codex review, fresh evidence; verified
-            # end-to-end: a malformed auto-discovered config exits 0,
-            # warn-only, under `--depth headers`, but exits 64 under the
-            # default collect mode). Raised directly rather than encoded via
-            # `result.block()`, matching this module's documented exit-64
-            # contract, same as the explicit-config case above.
-            if raise_on_bad_config:
-                import click
 
-                raise click.UsageError(
-                    f"cannot parse build config {cfg_path}: {exc}"
-                ) from exc
-            result.add(_SECTION, f"build.query: could not load {cfg_path}: {exc}")
-            # `cfg_path` here was discovered from `discover_from` above, which
-            # -- when `l2_seed_reachable` -- is the *unnormalized* `sources`,
-            # not `effective_sources`. `embed_build_source`'s own discovery
-            # always uses `effective_sources`, so whenever the two diverge
-            # (`effective_sources is None`, e.g. because `--sources` is
-            # itself a pack) `embed_build_source` never even attempts to
-            # read *this* `cfg_path` -- it is purely an L2-seed-only
-            # discovery, and this load failure says nothing about whether
-            # `embed_build_source`'s own, independent config resolution
-            # (which may still succeed from the explicit --config's own query
-            # override with no file involved at all) would also fail --
-            # BUT ONLY when `embed_build_source` is actually *reachable* at
-            # all: its own dispatch guard is `raw_build_info is not None or
-            # raw_sources is not None`, and `raw_sources` is nulled the exact
-            # same way `effective_sources` is (both collapse to `None`
-            # whenever `--sources` is itself a pack) -- so inside this
-            # `effective_sources is None` branch, `raw_sources` is always
-            # `None` too, and the guard reduces to whether a genuine, raw
-            # (non-pack) `--build-info` was also given. `raw_operand_present`
-            # (computed above) already answers exactly that question in this
-            # branch. Getting this wrong is a real, confirmed regression, not
-            # a hypothetical: an earlier revision of this fix fell through
-            # unconditionally whenever `effective_sources is None`, which
-            # made a `--sources`-only pack (no `--build-info` at all) with a
-            # malformed config report "will run" -- but with `raw_build_info`
-            # also `None` in that shape, `embed_build_source`'s own dispatch
-            # guard is never satisfied at all, so it never reaches the
-            # query-resolution step either;
-            # the *only* real call site (the L2 seed) already failed to
-            # load this exact config, so the real run does NOT execute the
-            # query here (Codex review, fresh evidence -- verified by
-            # reading `embed_build_source`'s own `if raw_build_info is not
-            # None or raw_sources is not None:` guard directly). The
-            # original finding this whole branch exists for (Codex review,
-            # commit f9fd95d) specifically named a raw `--build-info` as
-            # part of the scenario -- this fix was too broad in dropping
-            # that qualifier. Fall through with `cfg = None` only when
-            # `raw_operand_present` -- i.e. a raw `--build-info` genuinely
-            # makes `embed_build_source` reachable -- rather than returning,
-            # so the precedence chain below still answers correctly from
-            # that operand alone in that case. When `effective_sources is
-            # not None`, `discover_from` always agrees with what
-            # `embed_build_source` would discover (see the
-            # `raise_on_bad_config` comment above), so this load failure
-            # really does mean both call sites are equally affected --
-            # reporting "will NOT run" there remains correct, and this
-            # branch is unreached in that case since `raise_on_bad_config`
-            # (which requires `collect_active` too) would already have
-            # raised whenever `embed_build_source` could actually be reached
-            # with a failing config of its own. `raw_operand_present` alone
-            # is not sufficient, though (Codex review, fresh evidence): it
-            # says a raw --build-info exists to make embed_build_source's
-            # *dispatch guard* satisfiable, but that guard is reached only
-            # when `collect_active` (`collect_mode != "off"`) in the first
-            # place -- `embed_build_source` is called from `cli_dump_
-            # helpers.perform_elf_dump` behind exactly that check. With
-            # `--depth headers` (collect_mode "off"), embed_build_source is
-            # never invoked at all regardless of what operands were given,
-            # so it can't be the fallback call site either -- verified
-            # end-to-end against a real gcc-compiled library, a malformed
-            # pack-local .abicheck.yml, a raw --build-info directory, an
-            # explicit --config, and --depth headers: the real run
-            # exits 0 with the marker never created, i.e. build.query never
-            # runs, even though an earlier revision of this branch reported
-            # "will run (trusted -- explicit --config)" here.
-            if not collect_active and effective_sources is None and raw_operand_present:
-                result.add(
-                    _SECTION,
-                    "build.query: will NOT run -- the auto-discovered config "
-                    "failed to load for the L2 seed path (which silently "
-                    "degrades on a load failure, rather than raising), and "
-                    f"embed_build_source is unreachable anyway -- collect "
-                    f"mode {collect_mode!r} means only the best-effort L2 "
-                    "seed path could ever run this query",
-                )
-                return
-            if effective_sources is not None or not raw_operand_present:
-                result.add(
-                    _SECTION,
-                    "build.query: will NOT run -- the auto-discovered config "
-                    "failed to load, and only the best-effort L2 seed path "
-                    "(which silently degrades on a load failure, rather than "
-                    "raising) could otherwise reach it",
-                )
-                return
-            result.add(
-                _SECTION,
-                "build.query: the auto-discovered config failed to load, but "
-                "only for the L2 seed path's own pack-rooted discovery "
-                "(which silently degrades on a load failure, rather than "
-                "raising) -- embed_build_source's own, independent config "
-                "resolution never reads this same file (--sources is a pack, "
-                "so its discovery is nulled), and it is reachable at all "
-                f"only because a raw --build-info ({build_info}) was also "
-                "given, so it is evaluated separately below from an "
-                "auto-discovered config of its own, if any",
-            )
-        else:
-            cfg_compile_db = cfg.compile_db or None
+def _query_preempted(
+    result: DryRunResult,
+    *,
+    build_info: Path | None,
+    sources: Path | None,
+    effective_sources: Path | None,
+    l2_seed_reachable: bool,
+    bi_pack_evidence: BuildEvidence | None,
+    src_pack_evidence: BuildEvidence | None,
+) -> bool:
+    """Report whether an operand's own evidence takes precedence over build.query."""
 
     # NOW the "does the query actually get reached" precedence chain --
     # unaffected by config validation above, since these branches answer
     # whether `collect_inline_pack`/`_resolve_compile_db` would even look at
     # `cfg.query` given the operands' own shapes.
-    if build_info is not None and _is_pack_dir_any(build_info):
+    if build_info is not None and is_pack_dir_any(build_info):
         # `_l2_seed_pack_inputs`/`embed_build_source`'s own `base_build=
         # bi_pack.build_evidence` fold a --build-info pack's own L3 compile
         # units in *before* _resolve_compile_db is even considered --
@@ -988,7 +716,7 @@ def add_build_query_dry_run_section(
                 "a pack that already carries L3 compile units, which take "
                 "precedence over build.query",
             )
-            return
+            return True
         if effective_sources is None and not l2_seed_reachable:
             # embed_build_source's own raw_build_info becomes None once
             # --build-info is a pack (regardless of collect mode), and
@@ -1005,41 +733,10 @@ def add_build_query_dry_run_section(
                 "L3 compile units, and neither --sources nor headers give "
                 "another path to collect_inline_pack",
             )
-            return
+            return True
     elif build_info is not None:
-        # A pre-captured Bazel aquery/cquery jsonproto is routed to the
-        # adapter before _resolve_compile_db is ever reached, and always
-        # bypasses it once recognized -- regardless of how many compile
-        # units the capture itself yields (Codex review, fresh evidence).
-        # sniff_build_info_format never executes anything (its own
-        # docstring), matching this module's read-only contract.
-        from .workflows.extraction import sniff_build_info_format
-
-        if build_info.is_file() and sniff_build_info_format(build_info) in (
-            "bazel_aquery",
-            "bazel_cquery",
-        ):
-            result.add(
-                _SECTION,
-                f"build.query: will NOT run -- --build-info ({build_info}) is "
-                "a pre-captured Bazel aquery/cquery jsonproto, which takes "
-                "precedence over build.query",
-            )
-            return
-        # `_resolve_compile_db`'s own first branch: an explicit --build-info
-        # that already resolves to a real compile database is returned
-        # immediately -- cfg.query, trusted or not, is never even consulted
-        # (Codex review).
-        found = _compile_db_at(build_info)
-        if found is not None:
-            result.add(
-                _SECTION,
-                f"build.query: will NOT run -- --build-info already resolves "
-                f"to a compile database ({found}), which takes precedence "
-                "over build.query",
-            )
-            return
-    elif sources is not None and _is_pack_dir_any(sources):
+        return _raw_build_info_preempts(result, build_info)
+    elif sources is not None and is_pack_dir_any(sources):
         # `_l2_seed_pack_inputs` folds a --sources pack into base_build the
         # identical way a --build-info pack does, but only when no
         # --build-info was also given (an explicit --build-info always wins
@@ -1052,7 +749,7 @@ def add_build_query_dry_run_section(
                 "pack that already carries L3 compile units, which take "
                 "precedence over build.query",
             )
-            return
+            return True
         if not l2_seed_reachable:
             # build_info is None in this branch (elif chain), so
             # embed_build_source's raw_build_info is already None; raw_sources
@@ -1067,26 +764,17 @@ def add_build_query_dry_run_section(
                 "compile units and no headers give another path to "
                 "collect_inline_pack",
             )
-            return
+            return True
+    return False
 
-    effective_query = cfg.query if cfg else None
-    # `_run_build_query`'s own resolution of the compile-DB path it expects
-    # the query to have (re)written is gated on `sources is not None`: with
-    # no source tree (an absent --sources, or one that normalized to None
-    # because it's itself a pack), it neither globs `cfg.compile_db` against
-    # it nor auto-discovers a `compile_commands.json` -- `db` stays `None`
-    # regardless of whether a compile-DB hint is configured (Codex review,
-    # fresh evidence). This module must not promise a specific path the real
-    # run can never resolve to.
-    _configured_compile_db_hint = cfg_compile_db
-    compile_db_hint = (
-        _configured_compile_db_hint if effective_sources is not None else None
-    )
 
+def _trusted_query_argv(
+    result: DryRunResult, effective_query: str | None, trusted: bool
+) -> list[str] | None:
+    """Return the query's argv, or ``None`` after reporting why it will not run."""
     if not effective_query:
         result.add(_SECTION, "build.query: (none configured)")
-        return
-
+        return None
     if not trusted:
         result.add(
             _SECTION,
@@ -1094,7 +782,7 @@ def add_build_query_dry_run_section(
             "(sourced from an auto-discovered .abicheck.yml, which is never "
             "trusted to execute; pass --config to authorize it)",
         )
-        return
+        return None
 
     try:
         argv = shlex.split(effective_query)
@@ -1104,7 +792,7 @@ def add_build_query_dry_run_section(
             f"build.query: {effective_query!r} -- will NOT run "
             f"(could not parse as a command: {exc})",
         )
-        return
+        return None
     if not argv:
         # `_run_build_query`'s own `if not argv: return None` -- a
         # whitespace-only query parses to an empty argv and is never
@@ -1114,18 +802,17 @@ def add_build_query_dry_run_section(
             f"build.query: {effective_query!r} -- will NOT run "
             "(parses to an empty command)",
         )
-        return
+        return None
+    return argv
 
-    # Since PR 3C an explicit --config is the only authorizer, so reaching
-    # here at all means `build_config is not None` (see `trusted` above).
-    # Kept as a named constant rather than inlined so the rendered label
-    # stays greppable next to the trust decision it reports.
-    trust_source = "explicit --config"
-    cwd = (
-        effective_sources
-        if effective_sources is not None and effective_sources.is_dir()
-        else Path.cwd()
-    )
+
+def _compile_db_preview_line(
+    result: DryRunResult,
+    compile_db_hint: str | None,
+    _configured_compile_db_hint: str | None,
+    effective_sources: Path | None,
+) -> str:
+    """Render the resulting compile-DB path line (blocking an absolute hint)."""
     if compile_db_hint and Path(compile_db_hint).is_absolute():
         # `_run_build_query`'s own resolution -- reached here, since we are
         # already inside the "trusted, will run" branch -- calls
@@ -1228,6 +915,17 @@ def add_build_query_dry_run_section(
             "resulting compile-DB path: (build.compile_db not configured -- "
             "the query's own default output location)"
         )
+    return compile_db_line
+
+
+def _run_count_suffix_and_note(
+    *,
+    build_info: Path | None,
+    effective_sources: Path | None,
+    l2_seed_reachable: bool,
+    collect_active: bool,
+) -> tuple[str, tuple[str, ...]]:
+    """How many real call sites may run the query, as a suffix and note."""
     # Two independent real call sites can each reach this identical `cfg.
     # query` resolution for the SAME operands: `l2_seed.seed_includes_and_
     # fold_compile_context` (gated on `l2_seed_reachable`) runs first inside
@@ -1299,7 +997,7 @@ def add_build_query_dry_run_section(
     # None` split above (which only distinguishes *why* a reachable second
     # invocation may or may not still run `cfg.query`).
     raw_build_info_for_embed = (
-        None if (build_info is None or _is_pack_dir_any(build_info)) else build_info
+        None if (build_info is None or is_pack_dir_any(build_info)) else build_info
     )
     embed_dispatch_possible = (
         raw_build_info_for_embed is not None or effective_sources is not None
@@ -1364,6 +1062,41 @@ def add_build_query_dry_run_section(
     else:
         count_suffix = ""
         count_note = ()
+    return count_suffix, count_note
+
+
+def _report_will_run(
+    result: DryRunResult,
+    *,
+    argv: list[str],
+    effective_sources: Path | None,
+    compile_db_hint: str | None,
+    configured_compile_db_hint: str | None,
+    build_info: Path | None,
+    l2_seed_reachable: bool,
+    collect_active: bool,
+) -> None:
+    """Append the trusted "will run" report: argv, cwd, compile-DB path, run count."""
+
+    # Since PR 3C an explicit --config is the only authorizer, so reaching
+    # here at all means `build_config is not None` (see `trusted` above).
+    # Kept as a named constant rather than inlined so the rendered label
+    # stays greppable next to the trust decision it reports.
+    trust_source = "explicit --config"
+    cwd = (
+        effective_sources
+        if effective_sources is not None and effective_sources.is_dir()
+        else Path.cwd()
+    )
+    compile_db_line = _compile_db_preview_line(
+        result, compile_db_hint, configured_compile_db_hint, effective_sources
+    )
+    count_suffix, count_note = _run_count_suffix_and_note(
+        build_info=build_info,
+        effective_sources=effective_sources,
+        l2_seed_reachable=l2_seed_reachable,
+        collect_active=collect_active,
+    )
     result.add(
         _SECTION,
         f"build.query: will run (trusted -- {trust_source})" + count_suffix,
@@ -1371,4 +1104,187 @@ def add_build_query_dry_run_section(
         f"cwd: {cwd}",
         compile_db_line,
         *count_note,
+    )
+
+
+def add_build_query_dry_run_section(
+    result: DryRunResult,
+    *,
+    so_path: Path | None = None,
+    dump_manifest_given: bool = False,
+    sources: Path | None,
+    headers: tuple[Path, ...],
+    collect_mode: str,
+    build_info: Path | None,
+    build_config: Path | None,
+) -> None:
+    """Append the ``build.query`` trust/execution report to *result*."""
+
+    _reject_dump_manifest_for_non_elf(so_path, dump_manifest_given)
+
+    # An *explicit* --config is validated unconditionally by `dump_cmd`
+    # itself, before this function is ever called: `resolve_dump_compile_
+    # context()`/`cli_options.merge_compile_config()` -- the L2 compile-
+    # context resolver every `dump` invocation runs, regardless of build-
+    # source collection, and unconditionally before the `--dry-run` branch
+    # -- already raises `click.UsageError` for a malformed *explicit*
+    # config, so a malformed explicit --config never reaches this function
+    # at all. Verified end-to-end: `dump ... --config bad.yml --depth
+    # binary` with no --sources/--build-info exits 64 before ever printing
+    # a dry-run report (CodeRabbit/Codex review, fresh evidence -- this
+    # function does not need its own duplicate check). This is unlike an
+    # *auto-discovered* config, which that same resolver only warns about
+    # and falls back from -- handled further below, gated on whether
+    # `embed_build_source`'s own, stricter load is actually reached.
+
+    # Neither real call site is even attempted without --sources/--build-info
+    # at all -- `l2_seed`'s own guard is `(sources is None and build_info is
+    # None) or not headers`, and `_write_snapshot_output` never calls
+    # `embed_build_source` without one of them either (Codex review, fresh
+    # evidence).
+    if sources is None and build_info is None:
+        result.add(
+            _SECTION,
+            "build.query: will NOT run -- neither --sources nor --build-info "
+            "was given, so no build-evidence collection is attempted at all",
+        )
+        return
+
+    # `l2_seed.seed_includes_and_fold_compile_context` is only ever called
+    # from the artifact-bearing dispatch (`perform_elf_dump`/
+    # `handle_non_elf_dump`) -- when `SO_PATH` is omitted, `dump_cmd`
+    # dispatches to `dump_source_only()` instead (the parallel-baseline
+    # flow), which never seeds L2 at all: "this path's snapshot starts with
+    # no functions/variables... a source-only dump has no -H headers
+    # either" (its own docstring). So the L2-seed path is reachable only
+    # when BOTH headers are present AND a real artifact was given -- headers
+    # alone, with no `SO_PATH`, give this module no route to `collect_
+    # inline_pack` the real `dump --sources ... -H ...` (no binary) run
+    # doesn't also lack (Codex review, fresh evidence).
+    l2_seed_reachable = bool(headers) and so_path is not None
+
+    # Neither `l2_seed.seed_includes_and_fold_compile_context` (needs headers
+    # AND a real artifact, per `l2_seed_reachable` above) nor `embed_build_
+    # source` (needs a non-"off" collect mode) would even call
+    # `collect_inline_pack`/`_resolve_compile_db` -- build.query, trusted or
+    # not, is never reached (Codex review, fresh evidence).
+    if not l2_seed_reachable and collect_mode == "off":
+        result.add(
+            _SECTION,
+            "build.query: will NOT run -- no evidence collection requested "
+            f"(collect mode {collect_mode!r} with no headers to parse)",
+        )
+        return
+
+    # `embed_build_source`'s own pack loading (`_load_pack_or_raise`, a
+    # `click.ClickException`, exit 1) and its own auto-discovered-config
+    # load (further below, a `click.UsageError`, exit 64) are both reached
+    # only *past* its own `if not layers: return` gate
+    # (`collection_for_ci_mode(collect_mode)` returning no layers for an
+    # "off" collect mode) -- under a collect mode that resolves to no
+    # layers (e.g. `--depth headers`, which still leaves `headers`
+    # non-empty and so does not return at the guard above),
+    # `embed_build_source` is never called into far enough to load either,
+    # and `l2_seed`'s own independent pack/config loading (reached via the
+    # headers-gated L2-seed path instead) degrades any load failure to a
+    # silent no-op (no seeded dirs, no fold, no query attempt) rather than
+    # raising through. Verified end-to-end against a real compiled library:
+    # a malformed `--sources` pack, and separately a malformed
+    # auto-discovered config, both exit 0 under `--depth headers` -- the
+    # dump simply proceeds without L3 seeding -- while the identical inputs
+    # under the default (non-"off") collect mode exit 1/64 respectively
+    # (Codex review, fresh evidence). This module therefore only
+    # raises/blocks for a malformed pack or auto-discovered config when
+    # `collect_mode != "off"`.
+    collect_active = collect_mode != "off"
+
+    stopped, src_pack_evidence = _load_sources_pack(
+        result,
+        sources=sources,
+        build_info=build_info,
+        collect_mode=collect_mode,
+        collect_active=collect_active,
+        l2_seed_reachable=l2_seed_reachable,
+    )
+    if stopped:
+        return
+    stopped, bi_pack_evidence = _load_build_info_pack(
+        result,
+        build_info=build_info,
+        collect_mode=collect_mode,
+        collect_active=collect_active,
+    )
+    if stopped:
+        return
+
+    (
+        effective_sources,
+        raw_operand_present,
+        config_readable,
+        raise_on_bad_config,
+        cfg_path,
+    ) = resolve_config_inputs(
+        sources=sources,
+        build_info=build_info,
+        build_config=build_config,
+        l2_seed_reachable=l2_seed_reachable,
+        collect_active=collect_active,
+    )
+    # An explicit --config is now the *only* authorizer (CLI cleanup phase
+    # two, PR 3C): `--build-query`/`--build-compile-db` are removed, so the
+    # real gate in `cli_buildsource.embed_build_source` reduces to this same
+    # single term. There is no longer a second way to mark a query trusted.
+    trusted = build_config is not None
+
+    stopped, cfg, cfg_compile_db = load_query_config(
+        result,
+        cfg_path=cfg_path,
+        config_readable=config_readable,
+        raise_on_bad_config=raise_on_bad_config,
+        collect_active=collect_active,
+        collect_mode=collect_mode,
+        effective_sources=effective_sources,
+        raw_operand_present=raw_operand_present,
+        build_info=build_info,
+    )
+    if stopped:
+        return
+
+    if _query_preempted(
+        result,
+        build_info=build_info,
+        sources=sources,
+        effective_sources=effective_sources,
+        l2_seed_reachable=l2_seed_reachable,
+        bi_pack_evidence=bi_pack_evidence,
+        src_pack_evidence=src_pack_evidence,
+    ):
+        return
+
+    effective_query = cfg.query if cfg else None
+    # `_run_build_query`'s own resolution of the compile-DB path it expects
+    # the query to have (re)written is gated on `sources is not None`: with
+    # no source tree (an absent --sources, or one that normalized to None
+    # because it's itself a pack), it neither globs `cfg.compile_db` against
+    # it nor auto-discovers a `compile_commands.json` -- `db` stays `None`
+    # regardless of whether a compile-DB hint is configured (Codex review,
+    # fresh evidence). This module must not promise a specific path the real
+    # run can never resolve to.
+    _configured_compile_db_hint = cfg_compile_db
+    compile_db_hint = (
+        _configured_compile_db_hint if effective_sources is not None else None
+    )
+
+    argv = _trusted_query_argv(result, effective_query, trusted)
+    if argv is None:
+        return
+    _report_will_run(
+        result,
+        argv=argv,
+        effective_sources=effective_sources,
+        compile_db_hint=compile_db_hint,
+        configured_compile_db_hint=_configured_compile_db_hint,
+        build_info=build_info,
+        l2_seed_reachable=l2_seed_reachable,
+        collect_active=collect_active,
     )

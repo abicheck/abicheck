@@ -143,7 +143,7 @@ asset_name="$(_substitute_literal "$asset_name" '{generation}' "${GENERATION:-}"
 # (Codex review, third round).
 case "$asset_name" in
   *$'\n'* | *$'\r'* | */* | *\\* | [A-Za-z]:* | *'#'*)
-    echo "::error::asset-name-template resolved to a value containing a newline, carriage return, path separator ('/' or '\\'), a drive-qualified prefix, or '#' (which 'gh release upload' parses as a display-label separator, not a literal filename character) -- refusing to create an archive or write a GITHUB_OUTPUT line from it." >&2
+    printf '%s\n' "::error::asset-name-template resolved to a value containing a newline, carriage return, path separator ('/' or '\\'), a drive-qualified prefix, or '#' (which 'gh release upload' parses as a display-label separator, not a literal filename character) -- refusing to create an archive or write a GITHUB_OUTPUT line from it." >&2
     exit 1
     ;;
 esac

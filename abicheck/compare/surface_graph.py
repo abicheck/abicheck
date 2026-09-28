@@ -57,7 +57,6 @@ an approximate name-string id. The earlier ``declaration::``/``type::``/
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, NamedTuple
@@ -79,6 +78,7 @@ from ..model.graph_join import (
     CrossLayerJoin,
 )
 from ..model.snapshot_identity_table import identities_for_snapshot
+from ..model.type_identifiers import type_identifiers as _type_identifiers
 from .debug_type_join import join_debug_types
 from .export_join import join_exports
 from .ownership_relations import (
@@ -147,55 +147,6 @@ EDGE_EVIDENCE_CLASS: Mapping[str, EdgeEvidenceClass] = MappingProxyType(
         EDGE_KIND_IN_CONTRACT: EdgeEvidenceClass.DERIVED,
     }
 )
-
-_TYPE_NOISE: frozenset[str] = frozenset(
-    {
-        "const",
-        "volatile",
-        "unsigned",
-        "signed",
-        "struct",
-        "class",
-        "union",
-        "enum",
-        "typename",
-        "mutable",
-        "restrict",
-        "register",
-        "void",
-        "bool",
-        "char",
-        "short",
-        "int",
-        "long",
-        "float",
-        "double",
-        "wchar_t",
-        "char8_t",
-        "char16_t",
-        "char32_t",
-    }
-)
-_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_:]*")
-
-
-def _type_identifiers(type_str: str | None) -> set[str]:
-    """Candidate type names referenced by *type_str* — a local, leaf-safe
-    duplicate of ``surface._type_identifiers`` (``compare/`` may not import
-    a `policy`-layer module; both sides independently reading the same
-    small, pure regex scan is the established leaf-duplication pattern this
-    codebase already uses for e.g. ``storage``/``model``'s two ``_packed``
-    implementations)."""
-    if not type_str:
-        return set()
-    out: set[str] = set()
-    for tok in _IDENT_RE.findall(type_str):
-        if tok in _TYPE_NOISE:
-            continue
-        out.add(tok)
-        if "::" in tok:
-            out.add(tok.rsplit("::", 1)[1])
-    return out
 
 
 def fact_list(fact: Fact[list[str]] | None) -> list[str]:

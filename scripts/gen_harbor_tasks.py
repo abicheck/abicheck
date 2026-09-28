@@ -599,7 +599,8 @@ host_arch="$(uname -m)"
 case "$host_arch" in
     aarch64) host_arch=arm64 ;;
 esac
-case " {allowed_shell} " in
+allowed_archs=" {allowed_shell} "
+case "$allowed_archs" in
     *" $host_arch "*) ;;
     *)
         python3 -c "import json,sys; print('architecture_mismatch: host is ' + sys.argv[1] + ', task requires one of ' + repr(json.loads(sys.argv[2])), file=sys.stderr)" \\
