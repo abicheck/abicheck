@@ -205,7 +205,7 @@ def _dict_trie_pattern_text(spellings) -> str | None:
         return None
 
 
-_spelling_alphabet = st.sampled_from(list("ab:_<>*&, .()[]$^\\1"))
+_spelling_alphabet = st.sampled_from([*"ab:_<>*&, .()[]$^\\1", "\U0010ffff", "\x00"])
 _vocab = st.sets(st.text(_spelling_alphabet, max_size=6), min_size=1, max_size=25)
 
 
@@ -397,3 +397,11 @@ def test_kind_buckets_rebuild_after_in_place_mutation():
         reclassify.first_matching_reclassify_verdict(rules, change)
         is Verdict.COMPATIBLE
     )
+
+
+def test_sorted_trie_handles_the_highest_code_point():
+    """A spelling continuing with U+10FFFF after a shared stem must still
+    get its own child run (a sentinel upper bound never advanced past it)."""
+    vocab = {"a", "a\U0010ffffb", "a\U0010ffff", "ab"}
+    built = spelling_pattern._build_spelling_pattern(vocab)
+    assert built is not None and built.pattern == _dict_trie_pattern_text(vocab)

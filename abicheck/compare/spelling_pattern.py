@@ -235,7 +235,13 @@ def _trie_body(words: list[str], lo: int, hi: int, pos: int, depth: int) -> str:
     alternatives: list[str] = []
     while child_lo < hi:
         word = words[child_lo]
-        child_hi = bisect.bisect_right(words, word[: end + 1] + _MAX_CHAR, child_lo, hi)
+        # Sorted words have sorted prefixes, so the run sharing this child's
+        # stem ends at the first word whose own prefix sorts after it --
+        # exact for any character, unlike a sentinel upper bound.
+        stem = word[: end + 1]
+        child_hi = bisect.bisect_right(
+            words, stem, child_lo + 1, hi, key=lambda w: w[: end + 1]
+        )
         alternatives.append(
             re.escape(word[end])
             + _trie_body(words, child_lo, child_hi, end + 1, depth + 1)
@@ -252,11 +258,6 @@ def _trie_body(words: list[str], lo: int, hi: int, pos: int, depth: int) -> str:
         # Optional, and greedy: the continuation is tried before stopping here.
         return prefix + "(?:" + group + ")?"
     return prefix + group
-
-
-#: Sorts after any continuation of a stem, so ``bisect_right(words, stem +
-#: _MAX_CHAR)`` ends the run of words starting with ``stem``.
-_MAX_CHAR = chr(0x10FFFF)
 
 
 def _common_prefix_end(a: str, b: str, pos: int) -> int:
