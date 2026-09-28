@@ -160,3 +160,24 @@ def test_compare_report_is_identical_with_and_without_the_memo(
     assert with_memo == without_memo
     # Vacuity guard: the memo run really shared work the plain run repeated.
     assert resolutions_with < resolutions_without
+
+
+def test_export_join_with_a_foreign_identity_table_is_never_shared() -> None:
+    """Only a join over the snapshot's own shared identity table may be
+    memoized; one built from a caller's separately-constructed table (the
+    AST-names form, say) must be computed for that caller, in and out of a
+    scope, and equal the plain join whenever the tables agree."""
+    from abicheck.compare.export_join import join_exports
+    from abicheck.model.graph_entity_identity import snapshot_identities
+    from abicheck.model.snapshot_identity_table import identities_for_snapshot
+
+    snap = build_snapshot("1.0", _context(), {})
+    foreign = snapshot_identities(snap, export_names=frozenset())
+    outside = join_exports(snap, foreign)
+    with comparison_memo_scope():
+        shared = join_exports(snap)
+        assert join_exports(snap, identities_for_snapshot(snap)) is shared
+        first = join_exports(snap, foreign)
+        second = join_exports(snap, foreign)
+    assert first is not shared and first is not second
+    assert first == second == outside
