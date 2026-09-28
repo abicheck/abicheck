@@ -43,6 +43,7 @@ This module itself imports nothing from ``surface.py``/``export_surface.py``.
 
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -106,6 +107,16 @@ _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_:]*")
 def _type_identifiers(type_str: str | None) -> set[str]:
     if not type_str:
         return set()
+    # A fresh set per call: callers routinely `|=` into the result, so the
+    # memoized value must stay immutable.
+    return set(_type_identifiers_cached(type_str))
+
+
+# Pure str -> frozenset, hit hundreds of thousands of times over a much
+# smaller set of distinct spellings on a release-scale compare tail; bounded
+# like `name_classification`'s own spelling caches.
+@functools.lru_cache(maxsize=1 << 18)
+def _type_identifiers_cached(type_str: str) -> frozenset[str]:
     out: set[str] = set()
     for tok in _IDENT_RE.findall(type_str):
         if tok in _TYPE_NOISE:
@@ -113,7 +124,7 @@ def _type_identifiers(type_str: str | None) -> set[str]:
         out.add(tok)
         if "::" in tok:
             out.add(tok.rsplit("::", 1)[1])
-    return out
+    return frozenset(out)
 
 
 @dataclass

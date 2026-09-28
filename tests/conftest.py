@@ -293,10 +293,16 @@ def _isolate_ast_memo() -> Iterator[None]:
     the next.
     """
     from abicheck import dumper_cache
+    from abicheck.buildsource.header_include_memo import clear_include_memo
 
+    # The header-only `clang -M` include-pass memo is process-wide for the
+    # same reason and with the same hazard: a test faking the extractor
+    # must never be served another test's include map.
     dumper_cache._ast_memo_slot.set(None)
+    clear_include_memo()
     yield
     dumper_cache._ast_memo_slot.set(None)
+    clear_include_memo()
 
 
 @pytest.fixture

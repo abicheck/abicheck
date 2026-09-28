@@ -36,6 +36,7 @@ import ``.service`` or this module back.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -52,6 +53,8 @@ from .header_utils import (
 if TYPE_CHECKING:
     from .model import AbiSnapshot
 from .workflows import memory_trace
+
+_log = logging.getLogger(__name__)
 
 
 def _attach_header_graph(
@@ -145,6 +148,7 @@ def _attach_header_graph(
     from .buildsource.pack import BuildSourcePack
     from .dumper import _clang_header_dump, _resolve_clang_bin
     from .dumper_clang_streaming import suppress_streaming_prune
+    from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
     from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
 
     # Everything either projection path may raise on an AST that is readable
@@ -268,6 +272,7 @@ def _attach_header_graph(
         streamed_paths.append(ast_path)
         return projection
 
+    ast_failure: str | None = None
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:
@@ -358,8 +363,22 @@ def _attach_header_graph(
                 # popped) above; only the write-back on a miss is suppressed.
                 memoize=False,
             )
-    except (SnapshotError, ValidationError):
+    except (SnapshotError, ValidationError) as exc:
+        # Not silent: the graph below falls back to declaration-only, and
+        # the call-graph pass is recorded as *attempted and failed* so the
+        # comparison's `graph_completeness` reads "degraded" rather than a
+        # clean, fully-covered graph (ADR-028 D3: a failed extractor is an
+        # explicit fact, never an empty surface).
         ast_root = None
+        ast_failure = (
+            str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
+        )
+        _log.warning(
+            "header graph: clang AST parse failed; falling back to a "
+            "declaration-only graph (call/reference edges not collected): %s",
+            ast_failure,
+        )
+        memory_trace.mark("dump.header_graph.clang_ast:failed")
     # Reduce the AST to the four compact projections the graph builder
     # actually reads, then drop the tree BEFORE the graph is allocated, so
     # the two are never resident together.
@@ -455,6 +474,9 @@ def _attach_header_graph(
     # "nothing is held longer than it is needed" has to hold that for its
     # own intermediate too.
     projection = None
+    if ast_failure is not None:
+        graph.degraded_passes[HEADER_CALL_GRAPH_PASS] = True
+        graph.finalize()
     memory_trace.mark("dump.header_graph.build:done")
     if header_graph_includes and resolved_headers and cc.frontend_context == "host":
         # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header
