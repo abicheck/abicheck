@@ -308,7 +308,7 @@ def plan_release_workers(
     import os
 
     from ..model.performance import current_performance_profile, tuning_for
-    from ..process_resources import available_mem_gib
+    from ..process_resources import available_mem_gib, python_parallelism
     from .release_admission import MemoryAdmission
 
     if jobs <= 0 and tuning_for(current_performance_profile()).sequential_members:
@@ -333,4 +333,15 @@ def plan_release_workers(
         committable, default_cost_gib=budget, floor_gib=_RELEASE_JOB_MEM_BUDGET_GIB
     )
     pool = clamped_from if gated and clamped_from is not None else effective
+    if jobs <= 0:
+        # Level 1 of `process_resources`' concurrency policy: a member is
+        # Python-heavy work, so no more of them run -- or even exist as
+        # threads -- than the interpreter can execute at once. Memory still
+        # narrows it further through the admission gate. Without this the
+        # pool was sized from CPUs (91 threads on a 224-core host), every
+        # member of a 28-member release started at t~0, and the run held 28
+        # working sets resident for ~0% speedup under the GIL. An explicit
+        # *jobs* is an instruction and is not capped here.
+        parallel = python_parallelism()
+        effective, pool = min(effective, parallel), min(pool, parallel)
     return ReleaseWorkerPlan(effective, clamped_from, budget, pool, admission)

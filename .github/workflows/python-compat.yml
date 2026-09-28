@@ -118,3 +118,84 @@ jobs:
             tests/test_serialization.py \
             tests/test_packaged_policy_examples.py \
             tests/test_castxml_free_examples.py
+
+  free-threading:
+    # The free-threaded (PEP 703, no-GIL) interpreter. abicheck's release
+    # fan-out, include-probe pool and AST acquisition table are shared-memory
+    # thread code whose level-1 concurrency is sized by
+    # `process_resources.python_parallelism` -- 2 members under the GIL, the
+    # CPU count here -- so this is the lane where a real data race, or a
+    # dependency that silently re-enables the GIL, would show up.
+    #
+    # 3.15t is the base free-threaded interpreter this project tests; 3.14t is
+    # deliberately not covered. Taken from conda-forge (its `python_rc` label
+    # while 3.15 is a release candidate) via the same pinned, sha256-verified
+    # micromamba `scripts/setup_dev_env.sh` uses. Non-blocking until 3.15 is
+    # final, like the 3.15 smoke leg above.
+    name: free-threading (py3.15t)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      MICROMAMBA_VERSION: '2.9.0-0'
+      MICROMAMBA_SHA256: '366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - name: Install free-threaded CPython 3.15 from conda-forge
+        run: |
+          curl -Ls -o "$RUNNER_TEMP/micromamba" \
+            "https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}/micromamba-linux-64"
+          echo "${MICROMAMBA_SHA256}  $RUNNER_TEMP/micromamba" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/micromamba"
+          export MAMBA_ROOT_PREFIX="$RUNNER_TEMP/mamba"
+          "$RUNNER_TEMP/micromamba" create -y -q -p "$RUNNER_TEMP/py315t" \
+            -c conda-forge/label/python_rc -c conda-forge \
+            "python=3.15=*_cp315t" pip
+          "$RUNNER_TEMP/py315t/bin/python" -VV
+          echo "PY=$RUNNER_TEMP/py315t/bin/python" >> "$GITHUB_ENV"
+      - name: Install abicheck
+        run: |
+          "$PY" -m pip install -e ".[dev]"
+      - name: Every module imports with the GIL still disabled
+        # No PYTHON_GIL here on purpose: an extension module that does not
+        # declare free-threading support re-enables the GIL on import, and
+        # that is exactly what this step exists to notice.
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$PY" - <<'EOF'
+          import importlib, pkgutil, sys
+          import abicheck
+          assert not sys._is_gil_enabled(), "interpreter is not free-threaded"
+          failed = []
+          for mod in pkgutil.walk_packages(abicheck.__path__, "abicheck."):
+              try:
+                  importlib.import_module(mod.name)
+              except Exception as exc:  # noqa: BLE001 - report every failure
+                  failed.append(f"{mod.name}: {exc!r}")
+          if failed:
+              print("\n".join(failed))
+              sys.exit(1)
+          if sys._is_gil_enabled():
+              sys.exit("an imported extension module re-enabled the GIL")
+          print("all abicheck modules imported; GIL still disabled")
+          EOF
+      - name: Concurrency and smoke tests without the GIL
+        env:
+          PYTHON_GIL: '0'
+        run: |
+          "$PY" -m pytest -q --tb=short -r fE -n auto \
+            -m "not integration and not libabigail and not abicc and not slow" \
+            tests/test_release_concurrency_policy.py \
+            tests/test_include_graph_parallel.py \
+            tests/test_include_graph.py \
+            tests/test_parallel_probe.py \
+            tests/test_ast_acquisition_retention.py \
+            tests/test_ast_acquisition_raw_entry_bound.py \
+            tests/test_l2_ast_acquisition_singleflight.py \
+            tests/test_spelling_match_cache_concurrency.py \
+            tests/test_release_admission.py \
+            tests/test_compare_release_concurrency_integration.py \
+            tests/test_process_resources.py \
+            tests/test_cli_root_surface.py \
+            tests/test_checker.py \
+            tests/test_serialization.py
