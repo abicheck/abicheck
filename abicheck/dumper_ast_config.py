@@ -21,7 +21,11 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-from ._compiler_options import has_explicit_std, split_gcc_options
+from ._compiler_options import (
+    clang_ast_dump_tail,
+    has_explicit_std,
+    split_gcc_options,
+)
 from .dumper_ast_config_cpp20 import _preprocessed_header_content
 from .dumper_clang import _needs_sycl_host_only
 from .extract.cache_header_scan import iter_cache_header_files
@@ -36,7 +40,10 @@ from .header_utils import drop_include_tokens_duplicating_paths
 #: write-side key fix (see `dumper._clang_header_dump`) closes only for
 #: entries written from here on. Bump again if the clang cache format ever
 #: changes in some other incompatible way.
-_CLANG_CACHE_SCHEMA_VERSION = 3
+#: Bumped to 4 when every clang AST pass started receiving
+#: `CLANG_GCC_HEADER_COMPAT_DEFINES`: an entry written before could hold an
+#: AST clang only partially recovered from GCC's `omp.h`.
+_CLANG_CACHE_SCHEMA_VERSION = 4
 
 #: Salts every castxml header-parse cache key. Bumped to 2 when castxml's
 #: emulated compiler started receiving the run's standard/sysroot/target
@@ -579,11 +586,5 @@ def _build_clang_header_command(
             cmd += ["-std=gnu++20"]
     if dpcpp_multi_context:
         cmd += ["-fsycl", "-v"]
-    cmd += [
-        "-fsyntax-only",
-        "-ferror-limit=0",
-        "-Xclang",
-        "-ast-dump=json",
-        str(agg_path),
-    ]
+    cmd += clang_ast_dump_tail(str(agg_path))
     return cmd

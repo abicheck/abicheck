@@ -17,6 +17,39 @@ if TYPE_CHECKING:
 #: that function's docstring for what does diverge and why).
 _WHITESPACE = " \t\r\n"
 
+#: Defines every clang AST pass adds so it can parse GCC's own headers.
+#:
+#: GCC >= 11 headers use the deallocator form of the malloc attribute,
+#: ``__attribute__((__malloc__ (dealloc)))`` -- unconditionally in GCC's
+#: ``omp.h``, which clang reaches whenever a GCC resource directory
+#: (``/usr/lib/gcc/<triple>/<ver>/include``) is on the include path, as it is
+#: for any run that also feeds castxml. clang rejects the argument form as a
+#: hard error ("'__malloc__' attribute takes no arguments"), which failed the
+#: whole AST pass. A function-like macro only expands when followed by
+#: ``(``, so the plain ``__malloc__`` spelling (glibc's ``__attribute_malloc__``)
+#: is untouched and only the argument form collapses to it; the dropped
+#: deallocator carries no ABI fact any pass reads.
+CLANG_GCC_HEADER_COMPAT_DEFINES: tuple[str, ...] = ("-D__malloc__(...)=__malloc__",)
+
+
+def clang_ast_dump_tail(source: str) -> list[str]:
+    """The fixed tail of a ``clang -ast-dump=json`` compile over *source*.
+
+    Syntax-only, JSON AST to stdout; ``-ferror-limit=0`` keeps parsing past
+    recoverable errors so one bad declaration does not blank the whole dump.
+    Carries :data:`CLANG_GCC_HEADER_COMPAT_DEFINES`, which belongs on AST
+    passes only -- never on a ``-E -dM`` macro pass, where it would be
+    recorded as one of the translation unit's own macros.
+    """
+    return [
+        *CLANG_GCC_HEADER_COMPAT_DEFINES,
+        "-fsyntax-only",
+        "-ferror-limit=0",
+        "-Xclang",
+        "-ast-dump=json",
+        source,
+    ]
+
 
 def split_gcc_options(text: str) -> list[str]:
     """Quote-aware split of a ``--gcc-options``-style compiler-flags string
