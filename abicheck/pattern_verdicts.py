@@ -244,6 +244,7 @@ def apply_pattern_verdicts(
     ledger.extend(m for _, m in new_ap_transitions)
 
     # 3. Per-finding modulation of existing changes.
+    ap_index = _AntiPatternIndex(new_aps)
     for c in changes:
         m = _modulate_change(
             c,
@@ -251,7 +252,7 @@ def apply_pattern_verdicts(
             new,
             old_idioms,
             new_idioms,
-            new_aps,
+            ap_index,
             tier,
             demote_allowed,
             protected_kinds,
@@ -456,7 +457,7 @@ def _modulate_change(
     new: AbiSnapshot,
     old_idioms: dict[str, list[IdiomTag]],
     new_idioms: dict[str, list[IdiomTag]],
-    new_aps: list[AntiPattern],
+    ap_index: _AntiPatternIndex,
     tier: str,
     demote_allowed: bool,
     protected_kinds: frozenset[ChangeKind] = frozenset(),
@@ -510,7 +511,7 @@ def _modulate_change(
                 )
 
     # Rule: anti-pattern raise (annotate; never hides).
-    note = _antipattern_annotation(c, new_aps)
+    note = _antipattern_annotation(c, ap_index)
     if note is not None:
         rule_id, edges = note
         # Pure annotation: the finding's category is unchanged (a raise can
@@ -611,8 +612,27 @@ def _pimpl_pointee_match(
     return None
 
 
+class _AntiPatternIndex:
+    """*new_aps* keyed by exact and by short (last ``::`` segment) symbol.
+
+    Built once per comparison: the per-finding lookup used to rescan every
+    anti-pattern twice per change (an ``rsplit`` per anti-pattern per
+    change), quadratic on a large finding set. Each bucket keeps
+    *new_aps*' order, so the matched evidence is unchanged.
+    """
+
+    __slots__ = ("by_exact", "by_short")
+
+    def __init__(self, new_aps: Iterable[AntiPattern]) -> None:
+        self.by_exact: dict[str, list[AntiPattern]] = {}
+        self.by_short: dict[str, list[AntiPattern]] = {}
+        for ap in new_aps:
+            self.by_exact.setdefault(ap.symbol, []).append(ap)
+            self.by_short.setdefault(ap.symbol.rsplit("::", 1)[-1], []).append(ap)
+
+
 def _antipattern_annotation(
-    c: Change, new_aps: list[AntiPattern]
+    c: Change, ap_index: _AntiPatternIndex
 ) -> tuple[str, list[str]] | None:
     """If *c* sits on a recognised ABI anti-pattern surface, return (rule, edges).
 
@@ -621,9 +641,8 @@ def _antipattern_annotation(
     short name when that name is unambiguous among the anti-patterns, so the
     disclosed evidence always belongs to the finding it annotates.
     """
-    short = c.symbol.rsplit("::", 1)[-1]
-    exact = [ap for ap in new_aps if ap.symbol == c.symbol]
-    short_aps = [ap for ap in new_aps if ap.symbol.rsplit("::", 1)[-1] == short]
+    exact = ap_index.by_exact.get(c.symbol, [])
+    short_aps = ap_index.by_short.get(c.symbol.rsplit("::", 1)[-1], [])
     matched = exact if exact else (short_aps if len(short_aps) == 1 else [])
     if not matched:
         return None

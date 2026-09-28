@@ -659,7 +659,7 @@ class SurfaceGraphLike(Protocol):
     def to_dict(self) -> dict[str, Any]: ...
 
 
-_SHAREABLE_SCALARS = (str, int, float, bool, type(None))
+_SHAREABLE_SCALARS = frozenset((str, int, float, bool, type(None)))
 
 
 class SharedGraphValues:
@@ -692,20 +692,26 @@ class SharedGraphValues:
         return self._strings.setdefault(value, value)
 
     def _attrs_dict(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        if not all(type(v) in _SHAREABLE_SCALARS for v in attrs.values()):
-            return attrs
-        items = tuple(
-            (self._str(k), self._str(v) if type(v) is str else v)
-            for k, v in attrs.items()
-        )
+        # One pass builds the lookup key from the raw values; interning only
+        # happens on a miss, since a hit returns a dict already built from
+        # interned strings.
         # `True == 1`: keep the value's type in the key so a bool and an int
         # attr never share a dict.
         # A float keys on its hex spelling: `0.0 == -0.0` (and NaN != NaN)
         # would otherwise share dicts that serialize differently.
-        key = tuple((k, type(v), v.hex() if type(v) is float else v) for k, v in items)
+        parts = []
+        for k, v in attrs.items():
+            t = type(v)
+            if t not in _SHAREABLE_SCALARS:
+                return attrs
+            parts.append((k, t, v.hex() if t is float else v))
+        key = tuple(parts)
         shared = self._attrs.get(key)
         if shared is None:
-            shared = self._attrs[key] = dict(items)
+            shared = self._attrs[key] = {
+                self._str(k): self._str(v) if type(v) is str else v
+                for k, v in attrs.items()
+            }
         return shared
 
     def share(self, entity: GraphNode | GraphEdge) -> None:
