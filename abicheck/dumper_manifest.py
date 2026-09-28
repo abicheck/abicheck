@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass, replace as _dataclasses_replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -77,6 +77,7 @@ from .extract.tu_jobs import _tu_jobs
 from .model import EnumType, Function, RecordType, Variable
 from .model.identity import EntityId
 from .model.semantic_ir import SemanticIR
+from .process_resources import BudgetedExecutor
 from .tu_fragment import (
     MergedTuFragments as MergedTuFragments,
     TuFragment as TuFragment,
@@ -356,7 +357,7 @@ def _run_tu_fragments(
     # sibling can't be force-killed from here regardless, so waiting on it
     # only delays the diagnostic and keeps burning its CPU/RAM for nothing
     # (Codex review, PR #636 follow-up).
-    pool = ThreadPoolExecutor(max_workers=jobs)
+    pool = BudgetedExecutor(jobs)
     results: list[TuFragment | None] = [None] * len(tus)
     future_to_index = {
         pool.submit(_run_one_with_deadline, tu): i for i, tu in enumerate(tus)

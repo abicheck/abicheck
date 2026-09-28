@@ -91,9 +91,11 @@ def run_keyed_in_threads(
     by `policy_file`'s own dedup lock against the resulting cross-thread
     race on that shared set (also caught by the same test failure).
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import as_completed
     from contextlib import nullcontext
     from contextvars import Context, copy_context
+
+    from ..process_resources import BudgetedExecutor
 
     def _run_in_context(ctx: Context, key: str) -> _T:
         with memory_trace.phase("release.member", key=key):
@@ -104,7 +106,7 @@ def run_keyed_in_threads(
             return fn(key)
 
     results_by_key: dict[str, _T] = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with BudgetedExecutor(max_workers) as executor:
         futures = {
             executor.submit(_run_in_context, copy_context(), key): key for key in keys
         }

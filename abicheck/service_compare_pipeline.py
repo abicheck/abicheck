@@ -48,7 +48,6 @@ Two mechanical notes:
 
 from __future__ import annotations
 
-import concurrent.futures
 import contextvars
 import dataclasses
 import functools
@@ -67,6 +66,7 @@ from .policy.depth_projection import (
     project_pair_to_depth,
     project_snapshot_to_depth,
 )
+from .process_resources import BudgetedExecutor
 from .serialization import run_scoped_digest_cache
 from .workflows import abi3_audit, gate as gate_workflow
 from .workflows.artifact.compile_context_gate import (
@@ -452,7 +452,7 @@ def resolve_compare_request(
             # each worker -- see `_deadline_bound_side_worker`'s own docstring.
             _deadline_ts = deadline.current_deadline_ts()
             acquisition_context = contextvars.copy_context()
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            with BudgetedExecutor(2) as pool:
                 old_future = pool.submit(
                     acquisition_context.copy().run,
                     _deadline_bound_side_worker,

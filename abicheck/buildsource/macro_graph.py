@@ -197,13 +197,13 @@ import re
 import shutil
 import time
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from .. import deadline
 from ..model.mangled_name import strip_macho_itanium_decoration
+from ..process_resources import BudgetedExecutor
 from .clang_ast_run import run_clang_ast_dump
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
 from .preprocessor_facts import _DEFINE_RE
@@ -1118,7 +1118,7 @@ class ClangMacroGraphExtractor:
                     deadline.current_deadline_ts(),
                     _probe,
                 )
-                with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
+                with BudgetedExecutor(self.last_jobs) as pool:
                     for ranges, local_diagnostics in pool.map(pool_worker, units):
                         add_ranges(ranges)
                         self.diagnostics.extend(local_diagnostics)
