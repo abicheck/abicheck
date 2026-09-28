@@ -102,6 +102,7 @@ narrower gap from the general outcome's reachability.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Set as AbstractSet
 from typing import TYPE_CHECKING, Any
 
 from abicheck.model.entity_identity import (
@@ -290,7 +291,7 @@ def _strong_aliases(ident: CanonicalIdentity) -> set[str]:
 
 
 def _all_structural_contexts(
-    graph: SourceGraphSummary,
+    graph: SourceGraphSummary, node_ids: AbstractSet[str] | None = None
 ) -> dict[str, frozenset[tuple[str, str, str]]]:
     """Every node's structural "position" in *graph* — the set of
     (direction, edge_kind+role, neighbor_identity) tuples it participates
@@ -311,20 +312,48 @@ def _all_structural_contexts(
     graph (e.g. a template/SYCL-heavy header closure) that blew up into a
     real CI timeout (Codex review round; caught by CI, not a review
     comment).
+
+    *node_ids*, when given, restricts the result to those nodes (ids not in
+    *graph* are ignored). A node's context depends only on its own incident
+    edges and its neighbors' identities, so each restricted entry equals the
+    unrestricted one; the saving is that neighbor identities are resolved
+    only for nodes adjacent to a requested one. The reconciler asks for its
+    added/removed candidates only -- typically a few dozen ids in a graph of
+    tens of thousands of nodes.
     """
-    identity_by_id = {n.id: _neighbor_identity(n) for n in graph.nodes}
-    ctx: dict[str, set[tuple[str, str, str]]] = {n.id: set() for n in graph.nodes}
+    node_by_id = {n.id: n for n in graph.nodes}
+    wanted = node_by_id.keys() if node_ids is None else node_ids
+    ctx: dict[str, set[tuple[str, str, str]]] = {
+        nid: set() for nid in wanted if nid in node_by_id
+    }
+    identity_by_id: dict[str, str] = {}
+
+    def identity(nid: str) -> str:
+        found = identity_by_id.get(nid)
+        if found is None:
+            node = node_by_id.get(nid)
+            found = identity_by_id[nid] = (
+                _neighbor_identity(node) if node is not None else ""
+            )
+        return found
+
     for e in graph.edges:
+        dst_wanted = e.dst in ctx
+        src_wanted = e.src in ctx
+        if not (dst_wanted or src_wanted):
+            continue
         role = str(e.attrs.get("role", ""))
         tag = f"{e.kind}:{role}" if role else e.kind
-        if e.dst in ctx:
-            ctx[e.dst].add(("in", tag, identity_by_id.get(e.src, "")))
-        if e.src in ctx:
-            ctx[e.src].add(("out", tag, identity_by_id.get(e.dst, "")))
+        if dst_wanted:
+            ctx[e.dst].add(("in", tag, identity(e.src)))
+        if src_wanted:
+            ctx[e.src].add(("out", tag, identity(e.dst)))
     return {nid: frozenset(c) for nid, c in ctx.items()}
 
 
-def _declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
+def _declaring_files(
+    graph: SourceGraphSummary, node_ids: AbstractSet[str] | None = None
+) -> dict[str, str]:
     """Every node's declaring-file project-relative path, resolved via an
     incoming ``SOURCE_DECLARES`` edge.
 
@@ -337,11 +366,17 @@ def _declaring_files(graph: SourceGraphSummary) -> dict[str, str]:
     and a real cross-header move is misclassified as
     ``declaration_identity_reconciled`` instead of ``OUTCOME_MOVED``
     (Codex review, fresh evidence).
+
+    *node_ids*, when given, restricts the result to those declaration ids;
+    each restricted entry equals the unrestricted one (the last matching
+    edge wins either way, since edges are scanned in the same order).
     """
     label_by_id = {n.id: n.label for n in graph.nodes}
     result: dict[str, str] = {}
     for e in graph.edges:
         if e.kind != "SOURCE_DECLARES":
+            continue
+        if node_ids is not None and e.dst not in node_ids:
             continue
         label = label_by_id.get(e.src)
         if label:
@@ -383,7 +418,11 @@ class _Reconciler:
     """
 
     def __init__(
-        self, old_graph: SourceGraphSummary, new_graph: SourceGraphSummary
+        self,
+        old_graph: SourceGraphSummary,
+        new_graph: SourceGraphSummary,
+        old_ids: AbstractSet[str] | None = None,
+        new_ids: AbstractSet[str] | None = None,
     ) -> None:
         self.result = GraphReconciliation()
         self.matched_old: set[str] = set()
@@ -391,10 +430,13 @@ class _Reconciler:
         # Computed once per side, for the whole graph -- not per kind, and not
         # per node-probed-in-Tier-3 (see _all_structural_contexts' own
         # docstring for why the latter mattered on a large graph).
-        self.old_contexts = _all_structural_contexts(old_graph)
-        self.new_contexts = _all_structural_contexts(new_graph)
-        self.old_declaring_files = _declaring_files(old_graph)
-        self.new_declaring_files = _declaring_files(new_graph)
+        # Restricted to *old_ids*/*new_ids* when given: every lookup below is
+        # of an added/removed candidate, and each restricted entry equals the
+        # whole-graph one (see both helpers' docstrings).
+        self.old_contexts = _all_structural_contexts(old_graph, old_ids)
+        self.new_contexts = _all_structural_contexts(new_graph, new_ids)
+        self.old_declaring_files = _declaring_files(old_graph, old_ids)
+        self.new_declaring_files = _declaring_files(new_graph, new_ids)
 
     def _record_pair(
         self,
@@ -642,11 +684,20 @@ def reconcile_added_removed(
     ambiguity-safe, and each only ever considering what the previous ones left
     unmatched. See :class:`_Reconciler` for the tiers themselves.
     """
-    run = _Reconciler(old_graph, new_graph)
-    removed_by_kind = _group_reconcilable_by_kind(
-        removed_nodes, run.result.true_removed
+    true_removed: list[GraphNode] = []
+    true_added: list[GraphNode] = []
+    removed_by_kind = _group_reconcilable_by_kind(removed_nodes, true_removed)
+    added_by_kind = _group_reconcilable_by_kind(added_nodes, true_added)
+    # Only reconcilable candidates are ever looked up in the whole-graph
+    # indices, so build them for those ids alone.
+    run = _Reconciler(
+        old_graph,
+        new_graph,
+        {n.id for nodes in removed_by_kind.values() for n in nodes},
+        {n.id for nodes in added_by_kind.values() for n in nodes},
     )
-    added_by_kind = _group_reconcilable_by_kind(added_nodes, run.result.true_added)
+    run.result.true_removed.extend(true_removed)
+    run.result.true_added.extend(true_added)
 
     for kind in sorted(set(removed_by_kind) | set(added_by_kind)):
         old_list = removed_by_kind.get(kind, [])
