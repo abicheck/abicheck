@@ -51,6 +51,7 @@ from __future__ import annotations
 import contextvars
 import dataclasses
 import functools
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -590,26 +591,59 @@ def classify_compare_pair(
         pf = apply_lower_precedence_overrides(
             pf, dict(request.project_policy_overrides), base_policy=request.policy
         )
+
     # The four Nones are the out-of-band pack-override params -- reusing the
     # raw sources/build_info paths would make `_resolve_side_pack` try (and
     # fail) to reload them as packs; None uses the embedded facts.
-    (
-        extra_changes,
-        layer_coverage_rows,
-        evidence_metrics,
-        _ev_changes,
-    ) = prepare_embedded_build_source(
-        old,
-        new,
-        pair.old_evidence.collect_mode,
-        None,
-        None,
-        None,
-        None,
-        None,
-        policy_file=pf,
-    )
-    extra_changes, _fail = abi3_audit.fold(extra_changes, new, request.abi3_floor)
+    def _build_source_findings() -> tuple[Any, Any, Any, Any]:
+        (
+            extra,
+            coverage_rows,
+            metrics,
+            _ev,
+        ) = prepare_embedded_build_source(
+            old,
+            new,
+            pair.old_evidence.collect_mode,
+            None,
+            None,
+            None,
+            None,
+            None,
+            policy_file=pf,
+        )
+        extra, fail = abi3_audit.fold(extra, new, request.abi3_floor)
+        return extra, coverage_rows, metrics, fail
+
+    _overlap_future = None
+    if os.environ.get("ABICHECK_BUILDSOURCE_OVERLAP") == "1":
+        # Experimental: compute the build-source findings on a budgeted
+        # thread while compare() runs its detectors; they are only needed
+        # where compare() merges extra_changes, right after the detectors.
+        _overlap_pool = BudgetedExecutor(1, thread_name_prefix="abicheck-bsrc")
+        _overlap_future = _overlap_pool.submit(
+            contextvars.copy_context().run, _build_source_findings
+        )
+        _overlap_future.add_done_callback(lambda _f: _overlap_pool.shutdown(wait=False))
+
+        class _DeferredExtra:
+            """Resolves the overlapped findings at compare()'s merge point."""
+
+            def _value(self) -> list[Any]:
+                assert _overlap_future is not None
+                return _overlap_future.result()[0] or []
+
+            def __bool__(self) -> bool:
+                return bool(self._value())
+
+            def __iter__(self) -> Any:
+                return iter(self._value())
+
+        extra_changes: Any = _DeferredExtra()
+    else:
+        extra_changes, layer_coverage_rows, evidence_metrics, _fail = (
+            _build_source_findings()
+        )
     result = compare_snapshots(
         old,
         new,
@@ -655,6 +689,10 @@ def classify_compare_pair(
         contract_evaluation=request.contract_evaluation,
         contract_mode=request.contract_mode,
     )
+    if _overlap_future is not None:
+        extra_changes, layer_coverage_rows, evidence_metrics, _fail = (
+            _overlap_future.result()
+        )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])

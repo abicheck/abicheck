@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -339,6 +340,21 @@ def _run_dump_uncached(
         )
 
     if binary_fmt == "elf":
+        _prefetched_graph = None
+        if (
+            os.environ.get("ABICHECK_HEADER_GRAPH_PREFETCH") == "1"
+            and _HEADER_GRAPH_ENABLED
+            and not _skip_header_graph_attach
+            and not dwarf_only
+            and not symbols_only
+            and _headers
+            and _resolve_header_backend(eff_backend) == "castxml"
+        ):
+            from .service_header_graph_attach import prefetch_header_graph_ast
+
+            _prefetched_graph = prefetch_header_graph_ast(
+                _headers, _includes, _header_graph_lang, compile
+            )
         # See the hybrid-path scope above -- but only worth opening when
         # _attach_header_graph below will actually run: it no-ops on
         # `_skip_header_graph_attach`/`dwarf_only`/`symbols_only` and on
@@ -422,6 +438,7 @@ def _run_dump_uncached(
             # declaration-provenance classification above, not silently
             # re-widen it.
             include_search_dirs=_public_include_search_dirs,
+            prefetched=_prefetched_graph,
         )
         snap = attach_clang_layout(
             snap, _headers, _includes, lang=lang, compile=compile
