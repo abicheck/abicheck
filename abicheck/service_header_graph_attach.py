@@ -59,6 +59,22 @@ from .workflows import memory_trace
 _log = logging.getLogger(__name__)
 
 
+# G29 Phase A: the L2 header-only semantic graph (ADR-041 addendum) and its
+# include-file extension used to be strictly opt-in via ``--header-graph``/
+# ``--header-graph-includes``. They are now always attempted whenever headers
+# are available (``_attach_header_graph`` itself still no-ops without parsed
+# headers, and degrades to a declaration-only graph when clang is
+# unavailable) — no public flag controls this anymore; see
+# ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
+# TODO(header-graph-phase-D): ``header_graph_includes`` runs one extra
+# ``clang -M`` pass per top-level header on every dump/compare with no
+# caching of its own (only the aggregate AST pass is disk-cached via
+# ``_clang_header_dump``) — bounded by header count, fails soft when clang is
+# unavailable, but not yet cheap. Caching this pass is deferred to Phase D.
+_HEADER_GRAPH_ENABLED = True
+_HEADER_GRAPH_INCLUDES_ENABLED = True
+
+
 def _attach_header_graph(
     snap: AbiSnapshot,
     header_graph: bool,
@@ -655,8 +671,10 @@ def prefetch_header_graph_ast(
 ) -> Future[HeaderGraphAst]:
     """Start :func:`acquire_header_graph_ast` on a budgeted thread now.
 
-    Experimental (``ABICHECK_HEADER_GRAPH_PREFETCH=1``): lets the header
-    graph's own clang parse run while the primary castxml dump runs.
+    Lets the header graph's own clang parse run while the primary castxml
+    dump runs. Its thread comes from the process-wide budget
+    (``ABICHECK_MAX_THREADS``); with the budget spent it runs inline, which
+    is exactly the old, sequential order.
     """
     import contextvars
 
@@ -669,3 +687,27 @@ def prefetch_header_graph_ast(
     )
     future.add_done_callback(lambda _f: pool.shutdown(wait=False))
     return future
+
+
+def prefetch_graph_if_useful(
+    wanted: bool,
+    resolved_backend: str,
+    headers: list[Path],
+    includes: list[Path],
+    lang: str | None,
+    compile: CompileContext | None,
+) -> Future[HeaderGraphAst] | None:
+    """Start the header graph's clang parse now, when that is worth doing.
+
+    The parse depends only on the headers and compile context, never on the
+    snapshot, so under castxml -- which never produces the clang AST the
+    graph needs -- it can run alongside the primary dump. Measured on a cold
+    header cache: 11-15% off a single-library compare, neutral on a warm
+    cache and on a release whose members already fill the cores. Under the
+    clang frontend the attach reuses the primary pass's AST instead, so a
+    prefetch there would parse the same headers twice; ``None`` then, and
+    whenever the graph is not wanted at all.
+    """
+    if not (wanted and headers and resolved_backend == "castxml"):
+        return None
+    return prefetch_header_graph_ast(headers, includes, lang, compile)

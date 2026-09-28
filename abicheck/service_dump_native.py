@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import os
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -62,7 +61,12 @@ from .header_utils import (
     resolve_inferred_header_roots,
 )
 from .model import AbiSnapshot
-from .service_header_graph_attach import _attach_header_graph
+from .service_header_graph_attach import (
+    _HEADER_GRAPH_ENABLED,
+    _HEADER_GRAPH_INCLUDES_ENABLED,
+    _attach_header_graph,
+    prefetch_graph_if_useful,
+)
 from .service_metadata_attach import (
     _try_attach_numpy_capi_surface,
     _try_attach_python_api_surface,
@@ -82,21 +86,6 @@ if TYPE_CHECKING:
 # (and tests capturing caplog) rely on that name — same convention
 # ``service_metadata_attach.py`` already documents for the identical reason.
 _logger = logging.getLogger("abicheck.service")
-
-# G29 Phase A: the L2 header-only semantic graph (ADR-041 addendum) and its
-# include-file extension used to be strictly opt-in via ``--header-graph``/
-# ``--header-graph-includes``. They are now always attempted whenever headers
-# are available (``_attach_header_graph`` itself still no-ops without parsed
-# headers, and degrades to a declaration-only graph when clang is
-# unavailable) — no public flag controls this anymore; see
-# ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
-# TODO(header-graph-phase-D): ``header_graph_includes`` runs one extra
-# ``clang -M`` pass per top-level header on every dump/compare with no
-# caching of its own (only the aggregate AST pass is disk-cached via
-# ``_clang_header_dump``) — bounded by header count, fails soft when clang is
-# unavailable, but not yet cheap. Caching this pass is deferred to Phase D.
-_HEADER_GRAPH_ENABLED = True
-_HEADER_GRAPH_INCLUDES_ENABLED = True
 
 
 def _run_dump_uncached(
@@ -340,21 +329,15 @@ def _run_dump_uncached(
         )
 
     if binary_fmt == "elf":
-        _prefetched_graph = None
-        if (
-            os.environ.get("ABICHECK_HEADER_GRAPH_PREFETCH") == "1"
-            and _HEADER_GRAPH_ENABLED
-            and not _skip_header_graph_attach
-            and not dwarf_only
-            and not symbols_only
-            and _headers
-            and _resolve_header_backend(eff_backend) == "castxml"
-        ):
-            from .service_header_graph_attach import prefetch_header_graph_ast
-
-            _prefetched_graph = prefetch_header_graph_ast(
-                _headers, _includes, _header_graph_lang, compile
-            )
+        _graph_wanted = not (_skip_header_graph_attach or dwarf_only or symbols_only)
+        _prefetched_graph = prefetch_graph_if_useful(
+            _HEADER_GRAPH_ENABLED and _graph_wanted,
+            _resolve_header_backend(eff_backend),
+            _headers,
+            _includes,
+            _header_graph_lang,
+            compile,
+        )
         # See the hybrid-path scope above -- but only worth opening when
         # _attach_header_graph below will actually run: it no-ops on
         # `_skip_header_graph_attach`/`dwarf_only`/`symbols_only` and on
@@ -375,10 +358,7 @@ def _run_dump_uncached(
         with (
             (
                 dumper_cache.ast_memoize_scope()
-                if _headers
-                and not _skip_header_graph_attach
-                and not dwarf_only
-                and not symbols_only
+                if _headers and _graph_wanted
                 else nullcontext()
             ),
             closure_identity.defer_closure_identity_renumbering(),
@@ -417,14 +397,8 @@ def _run_dump_uncached(
         # (Codex review).
         snap = _attach_header_graph(
             snap,
-            _HEADER_GRAPH_ENABLED
-            and not _skip_header_graph_attach
-            and not dwarf_only
-            and not symbols_only,
-            _HEADER_GRAPH_INCLUDES_ENABLED
-            and not _skip_header_graph_attach
-            and not dwarf_only
-            and not symbols_only,
+            _HEADER_GRAPH_ENABLED and _graph_wanted,
+            _HEADER_GRAPH_INCLUDES_ENABLED and _graph_wanted,
             _headers,
             _includes,
             _header_graph_lang,

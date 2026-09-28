@@ -49,8 +49,11 @@ cache warm, identical reports in every run:
   only costs memory); free-threaded it runs one per CPU, still bounded by the
   memory admission gate.
 
-What does not change: single-library `compare` and `dump` gain less, since
-only the old/new sides and the per-TU header parses run in parallel there.
+Single-library `compare` and `dump` gain less, since only the old/new sides,
+the per-TU header parses, and (under the default castxml frontend) the header
+graph's own clang parse run in parallel there. That last overlap helps on
+every interpreter when the header cache is cold: 11% faster on 3.13, 15% on
+3.15t, for one library.
 
 ## Trying it
 
