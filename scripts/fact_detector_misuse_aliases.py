@@ -624,775 +624,821 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
     outer alias a function does *not* rebind still propagates in
     unchanged.
     """
-    fact_names = _imported_fact_aliases(tree)
-    # Computed up front (not after the walk below, as in an earlier
-    # revision) so the walrus-target branch inside that same walk can
-    # already use it to hop a comprehension-scoped walrus target out to
-    # its real PEP 572 binding scope -- see that branch's own comment.
-    lexical_parents = _lexical_function_parents(tree)
-    # Position-keyed, not qualname-keyed -- see `_def_containing_qualnames`'s
-    # own docstring for why a def/class statement's own start position can't
-    # be resolved via `_qualname_at` the way every other binding site below
-    # is (that position is always inside the node's *own* span first).
-    def_containing = _def_containing_qualnames(tree)
-    # Scope-aware annotation resolution (Codex review, fresh evidence):
-    # `from other_model import Value as Fact; def f(value: Fact, other):
-    # return value == other` -- the bare identifier `Fact` in this
-    # annotation is a genuine shadow of the real constructor, the exact
-    # concept `_locally_bound_constructor_shadow_names()` already
-    # computes for the constructor-*call* path (`is_fact_typed()` below).
-    # Reused here rather than duplicated for the annotation checks.
-    _annotation_shadows = _locally_bound_constructor_shadow_names(tree, qualnames)
-    _annotation_globals = _global_declared_names(tree, qualnames)
-    # `F = Fact; def f(value: F[int], other): return value == other`
-    # (Codex review, fresh evidence): a constructor *alias* is exactly as
-    # Fact-typed in annotation position as the real `Fact` name itself,
-    # but this closure previously only ever subtracted shadows -- it
-    # never added constructor aliases the way the constructor-*call*
-    # path already does. Computed here (rather than reusing a value
-    # threaded in from `fact_equality_misuse_sites()`) since this
-    # function has its own independent `qualnames`/`lexical_parents`
-    # already in scope, and `_resolve_effective_fact_names()` folds the
-    # shadow-subtraction and alias-addition into one combined,
-    # nearest-scope-wins walk -- the identical primitive the
-    # constructor-call path uses, so the two paths cannot silently
-    # disagree about what a given name means at a given scope.
-    _annotation_constructor_aliases = _constructor_alias_names(
-        tree,
-        qualnames,
-        fact_names,
-        _annotation_shadows,
-        lexical_parents,
-        _annotation_globals,
-    )
+    collector = _AliasCollector(tree, qualnames)
+    collector.collect(tree)
+    return collector.resolve()
 
-    def _effective_fact_names(qualname: str) -> frozenset[str]:
+
+class _AliasCollector:
+    """The state and passes behind :func:`_fact_aliases`.
+
+    Split out of what used to be one ~1100-line function (with the
+    per-node collection branches and the fixed-point resolution all
+    inline) purely so each step is its own small method; behavior is
+    unchanged. :meth:`collect` performs the single `ast.walk` collection
+    pass, :meth:`resolve` the outer fixed point, and every other method is
+    one branch or one pass of those two.
+    """
+
+    def __init__(self, tree: ast.Module, qualnames: _QualnameSpans) -> None:
+        self.qualnames = qualnames
+        self.fact_names = _imported_fact_aliases(tree)
+        # Computed up front (not after the walk below, as in an earlier
+        # revision) so the walrus-target branch inside that same walk can
+        # already use it to hop a comprehension-scoped walrus target out to
+        # its real PEP 572 binding scope -- see that branch's own comment.
+        self.lexical_parents = _lexical_function_parents(tree)
+        # Position-keyed, not qualname-keyed -- see `_def_containing_qualnames`'s
+        # own docstring for why a def/class statement's own start position can't
+        # be resolved via `_qualname_at` the way every other binding site below
+        # is (that position is always inside the node's *own* span first).
+        self.def_containing = _def_containing_qualnames(tree)
+        # Scope-aware annotation resolution (Codex review, fresh evidence):
+        # `from other_model import Value as Fact; def f(value: Fact, other):
+        # return value == other` -- the bare identifier `Fact` in this
+        # annotation is a genuine shadow of the real constructor, the exact
+        # concept `_locally_bound_constructor_shadow_names()` already
+        # computes for the constructor-*call* path (`is_fact_typed()` below).
+        # Reused here rather than duplicated for the annotation checks.
+        self._annotation_shadows = _locally_bound_constructor_shadow_names(
+            tree, self.qualnames
+        )
+        self._annotation_globals = _global_declared_names(tree, self.qualnames)
+        # `F = Fact; def f(value: F[int], other): return value == other`
+        # (Codex review, fresh evidence): a constructor *alias* is exactly as
+        # Fact-typed in annotation position as the real `Fact` name itself,
+        # but this closure previously only ever subtracted shadows -- it
+        # never added constructor aliases the way the constructor-*call*
+        # path already does. Computed here (rather than reusing a value
+        # threaded in from `fact_equality_misuse_sites()`) since this
+        # function has its own independent `qualnames`/`lexical_parents`
+        # already in scope, and `_resolve_effective_fact_names()` folds the
+        # shadow-subtraction and alias-addition into one combined,
+        # nearest-scope-wins walk -- the identical primitive the
+        # constructor-call path uses, so the two paths cannot silently
+        # disagree about what a given name means at a given scope.
+        self._annotation_constructor_aliases = _constructor_alias_names(
+            tree,
+            self.qualnames,
+            self.fact_names,
+            self._annotation_shadows,
+            self.lexical_parents,
+            self._annotation_globals,
+        )
+        self.aliases: dict[str, set[str]] = {}
+        self.candidates: dict[str, list[tuple[str, ast.expr]]] = {}
+        # A `for`/comprehension loop target bound to every element of a
+        # literal `Tuple`/`List` display needs a *conjunctive* fixed point --
+        # the target is only reliably Fact-typed if EVERY element is, unlike
+        # `candidates` above's ordinary *disjunctive* resolution (a name is
+        # known the moment ANY one of its recorded values resolves). A bare
+        # `ast.Name` element referencing an already-known alias (`old_fact =
+        # old.bases_fact` outer, then `for fact in (old_fact,): ...`) can't be
+        # confirmed Fact-typed at collection time -- `_is_fact_typed_expr()`
+        # deliberately never resolves a bare name, since answering that needs
+        # the very `known` set this fixed point builds (Codex review, fresh
+        # evidence) -- so each such loop is recorded here, elements and all,
+        # and re-checked every fixed-point pass alongside `candidates` below.
+        #
+        # **Each element carries its own resolution qualname, not just the
+        # entry's (Codex review, fresh evidence).** For a plain `for` loop
+        # this is always the same as the entry's own qualname (a `for`
+        # statement introduces no scope of its own) -- but a comprehension's
+        # *first* generator iterable evaluates in the *parent* scope, while
+        # the resolved target name must still become known in the
+        # *comprehension's own* scope (where the actual read happens). One
+        # shared qualname per entry can't express both at once: `fact = rec.
+        # bases_fact; [fact == other for fact in (fact,)]` needs the tuple
+        # element `fact` checked against the *parent's* known aliases, but
+        # the comprehension's own target `fact` becomes known in the
+        # *comprehension's* own scope -- see the comprehension collection
+        # branch's own docstring for the full reasoning.
+        self.tuple_loop_candidates: dict[
+            str, list[tuple[str, list[tuple[ast.expr, str]]]]
+        ] = {}
+        # A candidate whose *target* binds in one scope but whose *value*
+        # must resolve against a DIFFERENT scope -- so far, only a
+        # comprehension-scope-hopping walrus (Codex review, fresh evidence):
+        # `[(captured := fact) for fact in (rec.bases_fact,)]` binds
+        # `captured` at the *enclosing* scope PEP 572 hops it out to (see the
+        # `NamedExpr` collection branch's own docstring), but its RHS `fact`
+        # is the comprehension's own loop target, only ever known within the
+        # comprehension's own scope -- never the scope `captured` binds in.
+        # Entries here are keyed by the *binding* qualname (the same outer
+        # key `candidates` uses), each carrying its own separate value-
+        # resolution qualname alongside the ordinary `(name, value)` pair --
+        # the identical "one shared qualname per entry can't express both"
+        # problem `tuple_loop_candidates`' own per-element qualname above
+        # already solves, applied to a single scalar value instead of a
+        # tuple's elements.
+        self.cross_scope_candidates: dict[str, list[tuple[str, ast.expr, str]]] = {}
+        # Every name *this* function binds on its own -- every parameter
+        # (Fact-typed or not) and every simple assignment target -- used below
+        # to stop an inherited alias from shadowing a genuine local rebinding
+        # (Codex review, fresh evidence): `fact = rec.bases_fact` in an outer
+        # function, then `def inner(fact, other): return fact == other`, where
+        # `inner`'s own `fact` parameter is an ordinary, unrelated local that
+        # merely reuses the name -- unconditionally inheriting the parent's
+        # alias set would flag valid code as a false positive. Python's own
+        # scoping rule is that *any* binding of a name anywhere in a function
+        # (a parameter, or an assignment target, regardless of order) makes
+        # that name local to the *whole* function, shadowing an outer one for
+        # every line in it -- not narrowed to after the rebinding, the same
+        # over-approximating-is-safe direction used everywhere else in this
+        # module, just applied here to exclude a name rather than include one.
+        self.locally_bound: dict[str, set[str]] = {}
+        # Every name a function declares `global`/`nonlocal` -- excluded from
+        # `locally_bound`'s shadowing subtraction below, since these are the
+        # one real exception to Python's own "assignment anywhere makes a
+        # name local to the whole function" rule (Codex review, fresh
+        # evidence): `nonlocal fact` (or `global fact`) explicitly says this
+        # name is *not* a new local at all, it's the identical outer/global
+        # variable -- so a reassignment to it later in the same function
+        # (`fact = 1`) does not shadow an inherited outer alias the way an
+        # ordinary local rebinding would; a use anywhere in the function
+        # (before or after that reassignment) can still genuinely see the
+        # outer Fact-typed value. Not narrowed to "only before the
+        # reassignment" -- the same over-approximating-is-safe direction this
+        # whole module already takes, just applied in the opposite direction
+        # from the shadowing fix's own (a false positive on a *later*, real
+        # reassignment to a non-Fact value is the accepted cost, matching how
+        # a shadow is never narrowed to "only after the rebinding" either).
+        self.nonlocal_or_global: dict[str, set[str]] = {}
+        # The `global`-declared subset of the above, tracked separately
+        # (Codex review, fresh evidence): `nonlocal` and `global` both exempt a
+        # name from ordinary shadowing (the set above), but they resolve
+        # through completely different scope chains once exempted. `nonlocal
+        # fact` genuinely means "the nearest *enclosing function's* own `fact`"
+        # -- exactly what `lexical_parents[qualname]` already gives every other
+        # inherited name, so ordinary inheritance is already correct for it.
+        # `global fact` means "*module*-scope `fact`, full stop" -- it must
+        # bypass every intervening function layer's own inheritance entirely,
+        # even one that happens to have an unrelated alias of the identical
+        # bare name (a first version of this fix routed `global` through the
+        # same ordinary-inheritance path `nonlocal` uses, which is wrong in
+        # both directions: a genuinely Fact-typed module-level `fact` shadowed
+        # by an intervening function's own unrelated, non-Fact `fact` local
+        # would be silently missed, and the reverse -- an intervening
+        # function's own genuinely Fact-typed `fact` -- would be wrongly
+        # attributed to an unrelated module-level name). Resolved directly
+        # against `aliases["<module>"]` in the outer fixed-point loop below,
+        # independent of `lexical_parents` altogether.
+        self.global_declared: dict[str, set[str]] = {}
+        # `(qualname, arg_name, default_expr)` -- a parameter default whose
+        # Fact-typedness can't be decided during this same walk, since it
+        # must be checked against its *enclosing* scope's alias set (where a
+        # default expression is genuinely evaluated -- Python's own binding
+        # rule), not the function's own (which has already had this exact
+        # name excluded via the shadowing subtraction, since the parameter
+        # itself is always in that scope's own `locally_bound`). Resolved in
+        # a dedicated pass after the fixed point below has already stabilized
+        # every scope's own alias set -- see that pass's own comment.
+        self.pending_defaults: list[tuple[str, str, tuple[int, int], ast.expr]] = []
+        # `id()` of every `ast.NamedExpr` found inside a parameter's own
+        # default-value expression -- these are handled explicitly by the
+        # `FunctionDef`/`AsyncFunctionDef`/`Lambda` branch below (registered
+        # in the *enclosing* scope, matching Python's real default-evaluation
+        # rule) and must be skipped by the generic, position-based `NamedExpr`
+        # branch, which would otherwise misattribute one to the function being
+        # *defined* -- see both branches' own comments for why.
+        self.default_walrus_ids: set[int] = set()
+
+    def _effective_fact_names(self, qualname: str) -> frozenset[str]:
         return _resolve_effective_fact_names(
             qualname,
-            fact_names,
-            _annotation_shadows,
-            _annotation_constructor_aliases,
-            lexical_parents,
-            _annotation_globals,
+            self.fact_names,
+            self._annotation_shadows,
+            self._annotation_constructor_aliases,
+            self.lexical_parents,
+            self._annotation_globals,
         )
 
-    aliases: dict[str, set[str]] = {}
-    candidates: dict[str, list[tuple[str, ast.expr]]] = {}
-    # A `for`/comprehension loop target bound to every element of a
-    # literal `Tuple`/`List` display needs a *conjunctive* fixed point --
-    # the target is only reliably Fact-typed if EVERY element is, unlike
-    # `candidates` above's ordinary *disjunctive* resolution (a name is
-    # known the moment ANY one of its recorded values resolves). A bare
-    # `ast.Name` element referencing an already-known alias (`old_fact =
-    # old.bases_fact` outer, then `for fact in (old_fact,): ...`) can't be
-    # confirmed Fact-typed at collection time -- `_is_fact_typed_expr()`
-    # deliberately never resolves a bare name, since answering that needs
-    # the very `known` set this fixed point builds (Codex review, fresh
-    # evidence) -- so each such loop is recorded here, elements and all,
-    # and re-checked every fixed-point pass alongside `candidates` below.
-    #
-    # **Each element carries its own resolution qualname, not just the
-    # entry's (Codex review, fresh evidence).** For a plain `for` loop
-    # this is always the same as the entry's own qualname (a `for`
-    # statement introduces no scope of its own) -- but a comprehension's
-    # *first* generator iterable evaluates in the *parent* scope, while
-    # the resolved target name must still become known in the
-    # *comprehension's own* scope (where the actual read happens). One
-    # shared qualname per entry can't express both at once: `fact = rec.
-    # bases_fact; [fact == other for fact in (fact,)]` needs the tuple
-    # element `fact` checked against the *parent's* known aliases, but
-    # the comprehension's own target `fact` becomes known in the
-    # *comprehension's* own scope -- see the comprehension collection
-    # branch's own docstring for the full reasoning.
-    tuple_loop_candidates: dict[str, list[tuple[str, list[tuple[ast.expr, str]]]]] = {}
-    # A candidate whose *target* binds in one scope but whose *value*
-    # must resolve against a DIFFERENT scope -- so far, only a
-    # comprehension-scope-hopping walrus (Codex review, fresh evidence):
-    # `[(captured := fact) for fact in (rec.bases_fact,)]` binds
-    # `captured` at the *enclosing* scope PEP 572 hops it out to (see the
-    # `NamedExpr` collection branch's own docstring), but its RHS `fact`
-    # is the comprehension's own loop target, only ever known within the
-    # comprehension's own scope -- never the scope `captured` binds in.
-    # Entries here are keyed by the *binding* qualname (the same outer
-    # key `candidates` uses), each carrying its own separate value-
-    # resolution qualname alongside the ordinary `(name, value)` pair --
-    # the identical "one shared qualname per entry can't express both"
-    # problem `tuple_loop_candidates`' own per-element qualname above
-    # already solves, applied to a single scalar value instead of a
-    # tuple's elements.
-    cross_scope_candidates: dict[str, list[tuple[str, ast.expr, str]]] = {}
-    # Every name *this* function binds on its own -- every parameter
-    # (Fact-typed or not) and every simple assignment target -- used below
-    # to stop an inherited alias from shadowing a genuine local rebinding
-    # (Codex review, fresh evidence): `fact = rec.bases_fact` in an outer
-    # function, then `def inner(fact, other): return fact == other`, where
-    # `inner`'s own `fact` parameter is an ordinary, unrelated local that
-    # merely reuses the name -- unconditionally inheriting the parent's
-    # alias set would flag valid code as a false positive. Python's own
-    # scoping rule is that *any* binding of a name anywhere in a function
-    # (a parameter, or an assignment target, regardless of order) makes
-    # that name local to the *whole* function, shadowing an outer one for
-    # every line in it -- not narrowed to after the rebinding, the same
-    # over-approximating-is-safe direction used everywhere else in this
-    # module, just applied here to exclude a name rather than include one.
-    locally_bound: dict[str, set[str]] = {}
-    # Every name a function declares `global`/`nonlocal` -- excluded from
-    # `locally_bound`'s shadowing subtraction below, since these are the
-    # one real exception to Python's own "assignment anywhere makes a
-    # name local to the whole function" rule (Codex review, fresh
-    # evidence): `nonlocal fact` (or `global fact`) explicitly says this
-    # name is *not* a new local at all, it's the identical outer/global
-    # variable -- so a reassignment to it later in the same function
-    # (`fact = 1`) does not shadow an inherited outer alias the way an
-    # ordinary local rebinding would; a use anywhere in the function
-    # (before or after that reassignment) can still genuinely see the
-    # outer Fact-typed value. Not narrowed to "only before the
-    # reassignment" -- the same over-approximating-is-safe direction this
-    # whole module already takes, just applied in the opposite direction
-    # from the shadowing fix's own (a false positive on a *later*, real
-    # reassignment to a non-Fact value is the accepted cost, matching how
-    # a shadow is never narrowed to "only after the rebinding" either).
-    nonlocal_or_global: dict[str, set[str]] = {}
-    # The `global`-declared subset of the above, tracked separately
-    # (Codex review, fresh evidence): `nonlocal` and `global` both exempt a
-    # name from ordinary shadowing (the set above), but they resolve
-    # through completely different scope chains once exempted. `nonlocal
-    # fact` genuinely means "the nearest *enclosing function's* own `fact`"
-    # -- exactly what `lexical_parents[qualname]` already gives every other
-    # inherited name, so ordinary inheritance is already correct for it.
-    # `global fact` means "*module*-scope `fact`, full stop" -- it must
-    # bypass every intervening function layer's own inheritance entirely,
-    # even one that happens to have an unrelated alias of the identical
-    # bare name (a first version of this fix routed `global` through the
-    # same ordinary-inheritance path `nonlocal` uses, which is wrong in
-    # both directions: a genuinely Fact-typed module-level `fact` shadowed
-    # by an intervening function's own unrelated, non-Fact `fact` local
-    # would be silently missed, and the reverse -- an intervening
-    # function's own genuinely Fact-typed `fact` -- would be wrongly
-    # attributed to an unrelated module-level name). Resolved directly
-    # against `aliases["<module>"]` in the outer fixed-point loop below,
-    # independent of `lexical_parents` altogether.
-    global_declared: dict[str, set[str]] = {}
-    # `(qualname, arg_name, default_expr)` -- a parameter default whose
-    # Fact-typedness can't be decided during this same walk, since it
-    # must be checked against its *enclosing* scope's alias set (where a
-    # default expression is genuinely evaluated -- Python's own binding
-    # rule), not the function's own (which has already had this exact
-    # name excluded via the shadowing subtraction, since the parameter
-    # itself is always in that scope's own `locally_bound`). Resolved in
-    # a dedicated pass after the fixed point below has already stabilized
-    # every scope's own alias set -- see that pass's own comment.
-    pending_defaults: list[tuple[str, str, tuple[int, int], ast.expr]] = []
-    # `id()` of every `ast.NamedExpr` found inside a parameter's own
-    # default-value expression -- these are handled explicitly by the
-    # `FunctionDef`/`AsyncFunctionDef`/`Lambda` branch below (registered
-    # in the *enclosing* scope, matching Python's real default-evaluation
-    # rule) and must be skipped by the generic, position-based `NamedExpr`
-    # branch, which would otherwise misattribute one to the function being
-    # *defined* -- see both branches' own comments for why.
-    default_walrus_ids: set[int] = set()
-    for node in ast.walk(tree):
+    # -- collection -------------------------------------------------------
+
+    def collect(self, tree: ast.Module) -> None:
+        for node in ast.walk(tree):
+            self._collect_binding_node(node)
+            self._collect_scope_header(node)
+        # A `global`/`nonlocal`-declared name is never a real local rebinding
+        # -- exclude it from the shadowing subtraction now that every
+        # ordinary binding has been collected (see `nonlocal_or_global`'s own
+        # declaration above for why).
+        for qualname, declared in self.nonlocal_or_global.items():
+            if qualname in self.locally_bound:
+                self.locally_bound[qualname] -= declared
+
+    def _collect_binding_node(self, node: ast.AST) -> None:
         if isinstance(node, ast.Assign):
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            for target in node.targets:
-                for name in _bound_names(target):
-                    locally_bound.setdefault(qualname, set()).add(name)
-            # The alias-*candidate* pool (a specific value attributed to a
-            # specific name, fed through the fixed point below) covers
-            # every plain-`Name` target, not only a lone one -- a chained
-            # assignment (`first = second = rec.bases_fact`) gives every
-            # target the identical RHS value, unlike a tuple-unpacking
-            # target (`a, b = pair`), which has no single value to
-            # attribute to `a` alone (Codex review, fresh evidence: the
-            # single-target restriction wrongly excluded this ordinary,
-            # unrelated shape too, letting `first == other`/`second ==
-            # other` both bypass the gate). A tuple/list target among
-            # `node.targets` still contributes nothing here -- only
-            # `locally_bound`, via `_bound_names` above -- since it has no
-            # single value of its own either -- *unless* the RHS is
-            # itself a literal `Tuple`/`List` display of the identical
-            # length, in which case each element genuinely does have its
-            # own value (Codex review, fresh evidence: `old_fact, new_fact
-            # = old.bases_fact, new.bases_fact` then `old_fact ==
-            # new_fact` is an ordinary detector refactor of two
-            # independent Fact-typed values, bypassing the gate entirely
-            # under the plain-`Name`-only restriction) -- see
-            # `_paired_unpacking_candidates()`'s own docstring for exactly
-            # which shapes this covers.
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    candidates.setdefault(qualname, []).append((target.id, node.value))
-                elif isinstance(target, (ast.Tuple, ast.List)):
-                    candidates.setdefault(qualname, []).extend(
-                        _paired_unpacking_candidates(target, node.value)
-                    )
+            self._collect_assign(node)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            locally_bound.setdefault(qualname, set()).add(node.target.id)
-            if _is_fact_typed_annotation(
-                node.annotation, _effective_fact_names(qualname)
-            ):
-                aliases.setdefault(qualname, set()).add(node.target.id)
-            elif node.value is not None:
-                candidates.setdefault(qualname, []).append((node.target.id, node.value))
+            self._collect_ann_assign(node, node.target)
         elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
-            if id(node) in default_walrus_ids:
-                # Already handled by the `FunctionDef`/`AsyncFunctionDef`/
-                # `Lambda` branch below, registered in the *enclosing*
-                # scope -- this generic, position-based path would
-                # otherwise misattribute it to the function being defined
-                # (see that branch's own comment for why).
-                continue
-            # `(fact := rec.bases_fact)` -- a real alias binding too, not
-            # merely an inline-recognizable expression (see `_is_fact_
-            # typed_expr`'s own NamedExpr branch for that half): `fact`
-            # itself becomes usable later in the same scope, e.g. `if
-            # (fact := rec.bases_fact) is not None: return fact == other`
-            # (Codex review, fresh evidence).
-            #
-            # **Bound to the scope PEP 572 actually assigns it to, not
-            # simply wherever it's lexically written (Codex review, fresh
-            # evidence, second round on this same branch).** Outside a
-            # comprehension, a walrus target binds to its immediately
-            # enclosing scope exactly like an ordinary assignment does --
-            # the first revision of this branch treated *every* walrus as
-            # exempt from `locally_bound`, on the theory that its PEP 572
-            # scope-hopping rule always applies; that rule is real, but it
-            # only fires when the walrus sits *directly inside a
-            # comprehension*, and skipping `locally_bound` unconditionally
-            # meant a nested function's own `(fact := 1)` -- an ordinary,
-            # unrelated local rebinding, no comprehension involved at all
-            # -- failed to shadow a genuine outer alias of the same name,
-            # a real false positive. Fixed by hopping the *comprehension*
-            # case out to its real binding scope (the nearest enclosing
-            # non-comprehension scope, walking `lexical_parents` -- a
-            # walrus can sit inside several nested comprehensions at once,
-            # and PEP 572 hops out of all of them, not just the innermost)
-            # while treating every other case as an ordinary local
-            # binding, added to `locally_bound` the same as any other
-            # assignment target.
-            walrus_qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            binding_qualname = walrus_qualname
-            while binding_qualname.rsplit(".", 1)[-1].startswith("<comp>#"):
-                binding_qualname = lexical_parents.get(binding_qualname, "<module>")
-            # A genuine local binding at `binding_qualname` either way --
-            # whether that's the walrus's own lexical scope (no hop) or the
-            # scope PEP 572 actually hopped it out to (Codex review, fresh
-            # evidence: the `binding_qualname == walrus_qualname` guard here
-            # wrongly skipped this mark whenever a real hop occurred, even
-            # though this branch's own comment above already states the
-            # intent -- "every other case" gets the identical `locally_
-            # bound` treatment. `[(fact := x) for x in values]` directly
-            # inside `inner` binds `fact` as an ordinary local *of `inner`*
-            # under PEP 572, shadowing an outer `fact` alias for a later,
-            # real `fact == other` read in `inner` -- but with the mark
-            # skipped, `inner`'s own inheritance step never learned this,
-            # and the outer alias leaked straight through instead).
-            locally_bound.setdefault(binding_qualname, set()).add(node.target.id)
-            # No hop -- the walrus's own value resolves in the identical
-            # scope it binds in, the ordinary `candidates` case. A real
-            # hop means the value must still resolve against the
-            # comprehension's own `walrus_qualname` (where it's actually
-            # written and where any comprehension-local alias, e.g. its
-            # own `for` target, becomes known), even though the target
-            # name itself becomes known at `binding_qualname` instead
-            # (Codex review, fresh evidence: `[(captured := fact) for
-            # fact in (rec.bases_fact,)]; captured == other` was missed,
-            # since the pre-fix code resolved `fact` against
-            # `binding_qualname`'s own aliases, where the comprehension's
-            # `for`-bound `fact` was never recorded at all).
-            if binding_qualname == walrus_qualname:
-                candidates.setdefault(binding_qualname, []).append(
-                    (node.target.id, node.value)
-                )
-            else:
-                cross_scope_candidates.setdefault(binding_qualname, []).append(
-                    (node.target.id, node.value, walrus_qualname)
-                )
+            self._collect_named_expr(node, node.target)
         elif isinstance(node, (ast.For, ast.AsyncFor)):
-            # `for fact, other in pairs:` -- the same tuple-unpacking
-            # binding as `ast.Assign`, just via a loop target instead
-            # (Codex review, fresh evidence: "the other Python binding
-            # forms" alongside unpacking).
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            for name in _bound_names(node.target):
-                locally_bound.setdefault(qualname, set()).add(name)
-            # `for fact in (old.bases_fact, new.bases_fact): return fact ==
-            # other` -- a single loop target bound, one iteration at a
-            # time, to every element of a literal `Tuple`/`List` display
-            # (Codex review, fresh evidence). Unlike `_paired_unpacking_
-            # candidates` (which pairs *distinct* targets to distinct RHS
-            # elements in one assignment), every iteration reuses the
-            # *same* target name -- so the alias only holds if *every*
-            # element is definitively Fact-typed, not merely one of them
-            # (`for x in (rec.bases_fact, some_other_call()):` must stay
-            # unflagged, since `x` is only sometimes a Fact).
-            #
-            # **A bare-`Name` element referencing an already-known alias
-            # is a real Fact-typed element too, resolved through the
-            # fixed point below rather than at collection time (Codex
-            # review, fresh evidence).** `old_fact = old.bases_fact`
-            # outer, then `for fact in (old_fact,): fact == other` --
-            # `_is_fact_typed_expr()` deliberately never resolves a bare
-            # name (that needs `known`, which doesn't exist yet during
-            # this single collection pass), so an all-elements check
-            # gated on it alone rejected this ordinary alias refactor.
-            # Every element satisfying either check (structurally
-            # Fact-typed, or a bare name at all -- whether it actually
-            # resolves is `tuple_loop_candidates`' own job at fixed-point
-            # time, below) is enough to register the whole loop; an
-            # element that is neither still disqualifies it outright, the
-            # identical conservative behavior as before.
-            display_elts = _static_display_elements(node.iter)
-            if (
-                isinstance(node.target, ast.Name)
-                and display_elts
-                and all(
-                    _admissible_loop_element(elt, fact_names) for elt in display_elts
-                )
-            ):
-                tuple_loop_candidates.setdefault(qualname, []).append(
-                    (node.target.id, [(elt, qualname) for elt in display_elts])
-                )
-            # `for fact, tag in ((old.bases_fact, "old"), (new.bases_fact,
-            # "new")): return fact == other` -- the tuple-*unpacking*
-            # sibling of the case just above: the loop target is itself a
-            # `Tuple`/`List` display, destructured one iteration at a time
-            # against each element of the *iterable*, which -- reusing
-            # `display_elts` from the branch above, so this and the
-            # simple-target case can't independently drift on which
-            # display shapes they each recognize (Codex review, fresh
-            # evidence: originally gated on a hand-rolled `isinstance(
-            # node.iter, (ast.Tuple, ast.List))`, missing the identical
-            # set/dict-keys displays the simple-target case was already
-            # fixed for) -- must also be one of `_static_display_elements`'s
-            # own recognized shapes for any single sub-value to be
-            # identifiable at all. Reuses `_paired_unpacking_candidates()`
-            # -- the
-            # identical elementwise pairing `ast.Assign`'s own unpacking
-            # handling already relies on -- once per iteration element,
-            # since each is exactly the "one assignment's worth" of value
-            # that function already knows how to pair against the
-            # (unchanging, one per loop) target shape; a starred target,
-            # a length mismatch, or an iteration element that isn't
-            # itself a literal display makes that call return `[]` for
-            # that element, and any single failure disqualifies the
-            # *whole* loop (bailing via `all_iterations_paired`) rather
-            # than silently pairing only some iterations -- the identical
-            # "no candidates at all over a partial, best-effort pairing"
-            # principle `_paired_unpacking_candidates()`'s own docstring
-            # already states, extended across iterations instead of
-            # within one. Once every iteration pairs successfully, each
-            # target name's own per-iteration values are collected and
-            # registered together, subject to the identical
-            # every-element-Fact-typed-or-deferred-name conjunctive
-            # requirement the simple-target case above already applies.
-            elif (
-                isinstance(node.target, (ast.Tuple, ast.List))
-                and display_elts is not None
-            ):
-                per_name_elements: dict[str, list[ast.expr]] = {}
-                all_iterations_paired = bool(display_elts)
-                for iteration_elt in display_elts:
-                    pairs = _paired_unpacking_candidates(node.target, iteration_elt)
-                    if not pairs:
-                        all_iterations_paired = False
-                        break
-                    for name, value in pairs:
-                        per_name_elements.setdefault(name, []).append(value)
-                if all_iterations_paired:
-                    for name, raw_elts in per_name_elements.items():
-                        if all(
-                            _admissible_loop_element(elt, fact_names)
-                            for elt in raw_elts
-                        ):
-                            tuple_loop_candidates.setdefault(qualname, []).append(
-                                (name, [(elt, qualname) for elt in raw_elts])
-                            )
+            self._collect_for(node)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
-            # `with ctx() as fact:` -- likewise a real local binding.
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            for item in node.items:
-                if item.optional_vars is not None:
-                    for name in _bound_names(item.optional_vars):
-                        locally_bound.setdefault(qualname, set()).add(name)
+            self._collect_with(node)
         elif isinstance(node, ast.ExceptHandler):
-            # `except SomeError as fact:` -- `node.name` is a bare `str`,
-            # not an `ast.Name` (Python's own grammar for this one binding
-            # form), so it doesn't go through `_bound_names`.
-            if node.name is not None:
-                qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-                locally_bound.setdefault(qualname, set()).add(node.name)
+            self._collect_except_handler(node)
         elif isinstance(node, ast.Match):
-            # `case fact:`/`case [*rest]:`/`case {**rest}:` -- a real
-            # local binding too, the same as any other capture form above
-            # (Codex review, fresh evidence). `match`/`case` introduces no
-            # scope of its own in Python, so every case's own captures are
-            # attributed to the `match` statement's own position.
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            for case in node.cases:
-                for name in _match_pattern_names(case.pattern):
-                    locally_bound.setdefault(qualname, set()).add(name)
-                # `case fact:` (a bare capture, matching -- and binding --
-                # the *entire* subject unconditionally), `case SomeClass()
-                # as fact:` (an `as`-pattern, binding the entire subject
-                # whenever its own sub-pattern matches), `case fact as
-                # alias:` (a *chained* `MatchAs`, binding *both* names to
-                # the whole subject -- Codex review, fresh evidence), `case
-                # (C() as fact) | (D() as fact):` (an OR pattern trusted
-                # per `_trusted_matchor_chain_names()`'s own rule), `case
-                # (fact, _):`/`case {"fact": fact}:` (a structural
-                # sequence/mapping pattern capturing a *sub*-part of the
-                # subject positionally/by literal key), and `case (fact,)
-                # as whole:` (a structural pattern *wrapped* by an outer
-                # `as`-pattern, binding `whole` to the entire subject *and*
-                # `fact` to its own sub-part -- Codex review, fresh
-                # evidence: the previous top-level dispatch treated
-                # `MatchAs` exclusively as a whole-subject capture and
-                # never recursed into its wrapped sub-pattern, unlike
-                # `_paired_sub_pattern_candidates()`'s own identical
-                # per-position handling of the same shape) all delegate to
-                # `_paired_sub_pattern_candidates()`, the single shared
-                # primitive that already states every one of these rules
-                # for the per-*position* case -- reused whole here rather
-                # than reimplemented, so the top-level whole-subject
-                # dispatch and the per-position dispatch cannot silently
-                # diverge on the same pattern shapes again. A bare
-                # wildcard `_`/a literal `MatchValue`/a `MatchClass` with
-                # no `as` contributes no candidate, matching the
-                # pre-existing behavior for those shapes.
-                for name, value in _paired_sub_pattern_candidates(
-                    case.pattern, node.subject
-                ):
-                    candidates.setdefault(qualname, []).append((name, value))
+            self._collect_match(node)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            # `import json as fact` / `from pkg import item as fact` --
-            # a real local binding too, the identical shadowing shape as
-            # any other assignment form above (Codex review, fresh
-            # evidence: this collector had no branch for either import
-            # statement at all, so a nested function's own import-bound
-            # `fact` never shadowed an outer Fact alias). A bare `import
-            # a.b.c` (no `as`) binds only the top-level package name `a`
-            # in the importing scope -- Python's own import-binding rule
-            # -- so an unaliased dotted name is split on its first `.`
-            # rather than used whole.
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            for alias in node.names:
-                bound_name = alias.asname or alias.name.split(".", 1)[0]
-                locally_bound.setdefault(qualname, set()).add(bound_name)
+            self._collect_import(node)
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            nonlocal_or_global.setdefault(qualname, set()).update(node.names)
-            if isinstance(node, ast.Global):
-                global_declared.setdefault(qualname, set()).update(node.names)
+            self._collect_global_or_nonlocal(node)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            # A `def`/`class` statement binds its own *name* in the
-            # containing scope, exactly like an ordinary assignment target
-            # (Codex review, fresh evidence): `def fact(): ...` then `fact
-            # == other` in the same scope resolves `fact` to the function
-            # object just defined, an ordinary local -- Python's own
-            # `LOAD_FAST`/`LOAD_NAME` semantics, not the outer Fact alias.
-            # The branch below already records this node's own *nested*
-            # scope (its parameters, in `qualname`'s own `locally_bound`
-            # entry) -- but never the definition's *name* in the scope
-            # that contains it, so an outer alias of the same name was
-            # never shadowed, a real false positive. A lambda has no name
-            # of its own to bind (it's an expression, not a statement), so
-            # it's excluded from this specific registration -- unlike the
-            # branch below, which still applies to it identically.
-            containing_qualname = def_containing.get(
-                (node.lineno, node.col_offset), "<module>"
-            )
-            locally_bound.setdefault(containing_qualname, set()).add(node.name)
+            self._collect_definition_name(node)
+
+    def _collect_scope_header(self, node: ast.AST) -> None:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            # `ast.Lambda` shares the identical `.args: ast.arguments`
-            # shape a `def` has (Codex review, fresh evidence -- see
-            # `_enclosing_qualnames`'s own docstring): a lambda parameter
-            # can never carry an annotation (`arg.annotation` is always
-            # `None`), so `_is_fact_typed_annotation` correctly never
-            # matches one -- only the `locally_bound` recording actually
-            # matters for a lambda, but sharing this branch rather than
-            # duplicating it costs nothing.
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            all_args = (
-                *node.args.posonlyargs,
-                *node.args.args,
-                *node.args.kwonlyargs,
-                *((node.args.vararg,) if node.args.vararg else ()),
-                *((node.args.kwarg,) if node.args.kwarg else ()),
-            )
-            for arg in all_args:
-                locally_bound.setdefault(qualname, set()).add(arg.arg)
-                if _is_fact_typed_annotation(
-                    arg.annotation, _effective_fact_names(qualname)
-                ):
-                    aliases.setdefault(qualname, set()).add(arg.arg)
-            # A parameter's own *default value* -- evaluated once, in the
-            # enclosing scope, at `def`/lambda time -- can itself be
-            # Fact-typed (Codex review, fresh evidence): `fact = rec.
-            # bases_fact; def inner(fact=fact): return fact == other` --
-            # calling `inner()` with no override genuinely runs the
-            # comparison against that outer Fact value, but the parameter
-            # is already unconditionally excluded from the inherited
-            # alias set (`locally_bound`, just above) regardless of what
-            # its own default is. Positional defaults right-align against
-            # `posonlyargs + args` (the last `len(defaults)` of them);
-            # `kw_defaults` pairs positionally with `kwonlyargs`, `None`
-            # for a keyword-only parameter with no default at all.
-            positional = (*node.args.posonlyargs, *node.args.args)
-            offset = len(positional) - len(node.args.defaults)
-            for arg, default in zip(positional[offset:], node.args.defaults):
-                pending_defaults.append(
-                    (qualname, arg.arg, (node.lineno, node.col_offset), default)
-                )
-            for arg, kw_default in zip(node.args.kwonlyargs, node.args.kw_defaults):
-                if kw_default is not None:
-                    pending_defaults.append(
-                        (
-                            qualname,
-                            arg.arg,
-                            (node.lineno, node.col_offset),
-                            kw_default,
-                        )
-                    )
-            # A walrus *inside* a default expression -- `def inner(x=(fact
-            # := rec.bases_fact)):` -- binds `fact` in the scope the
-            # default is evaluated in too, which is the scope that
-            # directly, syntactically contains the `def`/lambda (Python's
-            # own default-evaluation rule, the same one the pending-
-            # defaults handling above already relies on), not `inner`'s
-            # own body scope (Codex review, fresh evidence): the generic,
-            # position-based `NamedExpr` branch would otherwise attribute
-            # it to `inner` -- the smallest span containing the walrus's
-            # own position, since a default expression is textually part
-            # of the `def`/lambda's own span -- silently losing an alias a
-            # later, genuinely outer `fact == other` needs. Registered
-            # directly in the containing scope (`def_containing`, computed
-            # once up front for exactly this kind of use) as an ordinary
-            # local binding, and excluded from the generic branch via
-            # `default_walrus_ids` so it isn't also (mis)processed there.
-            #
-            # **`def_containing`, not `lexical_parents` (Codex review,
-            # fresh evidence).** A *method's* own default-embedded walrus
-            # is evaluated while its containing *class body* executes,
-            # ordinary class-body code, not a closure lookup --
-            # `lexical_parents` intentionally skips that class layer for
-            # the different question of a method *body*'s own free-
-            # variable lookup, the identical class-skipping issue the
-            # sibling `pending_defaults`/`_default_and_annotation_scope_
-            # overrides()` fixes already had to make for the same reason.
-            # `class C: fact = 1; def f(self, x=(fact := rec.bases_fact)):
-            # ...` must publish `fact` to `C`'s own class-body scope, not
-            # skip past it to whatever encloses `C`.
-            #
-            # **Stops at a nested scope boundary, via `_iter_default_
-            # subtree()` (Codex review, fresh evidence).** A default
-            # containing its own lambda/comprehension -- `def configure(cb
-            # =lambda: (fact := rec.bases_fact)): ...` -- only *creates*
-            # the lambda object at def-time in the enclosing scope; the
-            # walrus inside its body binds `fact` in the *lambda's own*
-            # scope when the lambda is later called, never the enclosing
-            # one, the identical distinction `_default_and_annotation_
-            # scope_overrides()` already draws for a `Compare` found the
-            # same way. An unrestricted `ast.walk(default_expr)` crossed
-            # that boundary too, wrongly publishing the lambda-local walrus
-            # target as an alias of the *enclosing* (here, module) scope.
-            #
-            # **A parameter annotation or return annotation is walked the
-            # identical way (CodeRabbit review, fresh evidence).** This
-            # loop only ever walked `node.args.defaults`/`kw_defaults` --
-            # but a walrus in a parameter's own annotation or the `->`
-            # return annotation binds at the identical def-time, in the
-            # identical containing scope, absent `from __future__ import
-            # annotations` (which this module's own sibling override
-            # function, `_default_and_annotation_scope_overrides()`,
-            # already treats every annotation as evaluated under
-            # regardless of postponed-evaluation status -- unconditionally
-            # walking here too matches that established, deliberately
-            # conservative choice rather than adding a second, narrower
-            # rule: a walrus that in fact never executes under postponed
-            # evaluation registering a spurious alias is a false positive,
-            # the safe direction this whole module already accepts
-            # throughout). `subtrees` mirrors that sibling function's own
-            # construction exactly, so the two can't independently drift.
-            enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
-            walrus_subtrees = [*node.args.defaults, *node.args.kw_defaults]
-            for arg in (
-                *node.args.posonlyargs,
-                *node.args.args,
-                *node.args.kwonlyargs,
-                *((node.args.vararg,) if node.args.vararg else ()),
-                *((node.args.kwarg,) if node.args.kwarg else ()),
-            ):
-                if arg.annotation is not None:
-                    walrus_subtrees.append(arg.annotation)
-            walrus_returns = getattr(node, "returns", None)
-            if walrus_returns is not None:
-                walrus_subtrees.append(walrus_returns)
-            for default_expr in walrus_subtrees:
-                if default_expr is None:
-                    continue
-                for walrus in _iter_default_subtree(default_expr):
-                    if isinstance(walrus, ast.NamedExpr) and isinstance(
-                        walrus.target, ast.Name
-                    ):
-                        default_walrus_ids.add(id(walrus))
-                        locally_bound.setdefault(enclosing, set()).add(walrus.target.id)
-                        candidates.setdefault(enclosing, []).append(
-                            (walrus.target.id, walrus.value)
-                        )
+            self._collect_function_parameters(node)
         elif isinstance(node, ast.ClassDef):
-            # A walrus inside a class base or metaclass keyword --
-            # `class C(make_base(fact := rec.vtable_fact)): ...` -- binds
-            # `fact` in the scope containing the `class` statement, the
-            # identical PEP 572-independent evaluation-time rule the
-            # `FunctionDef`/`AsyncFunctionDef`/`Lambda` branch above
-            # already applies to a default expression (Codex review,
-            # fresh evidence): a class header executes while the scope
-            # *containing* the class statement is active, before the
-            # new class's own body scope even exists, so the generic,
-            # position-based `NamedExpr` branch's `class-body` attribution
-            # -- correct for a walrus inside the body itself -- is wrong
-            # here, silently losing an alias a later, genuinely outer
-            # `fact == other` needs. `_default_and_annotation_scope_
-            # overrides()` already draws this identical distinction for
-            # the *read* side (`class Outer: fact = rec.bases_fact; class
-            # Inner(make_base(fact == other)): ...`); this is its sibling
-            # fix for a *binding* found the same way. Uses the same
-            # `def_containing`/`_iter_default_subtree` machinery -- a
-            # base/keyword containing its own lambda/comprehension stops
-            # at that boundary identically, and the walrus is excluded
-            # from the generic branch via `default_walrus_ids` so it
-            # isn't also (mis)processed there.
-            enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
-            for base_or_keyword in (*node.bases, *(kw.value for kw in node.keywords)):
-                for walrus in _iter_default_subtree(base_or_keyword):
-                    if isinstance(walrus, ast.NamedExpr) and isinstance(
-                        walrus.target, ast.Name
-                    ):
-                        default_walrus_ids.add(id(walrus))
-                        locally_bound.setdefault(enclosing, set()).add(walrus.target.id)
-                        candidates.setdefault(enclosing, []).append(
-                            (walrus.target.id, walrus.value)
-                        )
+            self._collect_class_header_walruses(node)
         elif isinstance(
             node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
         ):
-            # A comprehension's own `for` target(s) -- real local bindings
-            # scoped to the comprehension itself, the identical shape a
-            # `for` loop's own target already gets above (Codex review,
-            # fresh evidence -- see `_enclosing_qualnames`'s own
-            # docstring).
-            qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
-            for gen_index, generator in enumerate(node.generators):
-                for name in _bound_names(generator.target):
-                    locally_bound.setdefault(qualname, set()).add(name)
-                # The comprehension equivalent of the `for`-loop literal-
-                # collection case above -- `[fact == other for fact in
-                # (old.bases_fact, new.bases_fact)]` -- the identical
-                # every-element-Fact-typed-or-a-deferred-alias requirement
-                # (see the `for`/`AsyncFor` branch's own docstring for the
-                # bare-`Name`-element reasoning).
-                #
-                # **Each element resolves against the scope the iterable
-                # actually evaluates in, distinct from the scope the
-                # resolved target name itself becomes known in (Codex
-                # review, fresh evidence).** The target always becomes
-                # known in the comprehension's own scope (`qualname`) --
-                # that's where the actual read happens -- but only the
-                # *first* generator's own iterable evaluates in the scope
-                # directly containing the comprehension; every other
-                # generator's iterable, like the element expression, runs
-                # inside the comprehension's own new scope, where the
-                # target(s) from every earlier generator are already
-                # locally bound (see `_enclosing_qualnames`'s own
-                # docstring for the identical distinction). `fact = rec.
-                # bases_fact; [fact == other for fact in (fact,)]` -- the
-                # tuple element `fact` names the *outer* alias, but the
-                # comprehension's own target is *also* `fact`, shadowing
-                # it in the comprehension's own scope -- checking that
-                # element against the comprehension's own (shadowed)
-                # scope would check the name against itself and never
-                # resolve, while registering the *entry* under the
-                # parent instead would make the target known in the wrong
-                # scope for the actual read to see. `tuple_loop_
-                # candidates`' own per-element `(expr, qualname)` pairing
-                # (see its own declaration comment) exists for exactly
-                # this split. `_qualname_at()` on the first generator's
-                # own iterable position picks up the narrower override
-                # span `_enclosing_qualnames()` already registers for
-                # exactly this iterable, tagged with the comprehension's
-                # own *incoming* (parent) qualname.
-                elt_qualname = (
-                    _qualname_at(
-                        (generator.iter.lineno, generator.iter.col_offset), qualnames
-                    )
-                    if gen_index == 0
-                    else qualname
+            self._collect_comprehension(node)
+
+    def _collect_assign(self, node: ast.Assign) -> None:
+        qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        for target in node.targets:
+            for name in _bound_names(target):
+                self.locally_bound.setdefault(qualname, set()).add(name)
+        # The alias-*candidate* pool (a specific value attributed to a
+        # specific name, fed through the fixed point below) covers
+        # every plain-`Name` target, not only a lone one -- a chained
+        # assignment (`first = second = rec.bases_fact`) gives every
+        # target the identical RHS value, unlike a tuple-unpacking
+        # target (`a, b = pair`), which has no single value to
+        # attribute to `a` alone (Codex review, fresh evidence: the
+        # single-target restriction wrongly excluded this ordinary,
+        # unrelated shape too, letting `first == other`/`second ==
+        # other` both bypass the gate). A tuple/list target among
+        # `node.targets` still contributes nothing here -- only
+        # `locally_bound`, via `_bound_names` above -- since it has no
+        # single value of its own either -- *unless* the RHS is
+        # itself a literal `Tuple`/`List` display of the identical
+        # length, in which case each element genuinely does have its
+        # own value (Codex review, fresh evidence: `old_fact, new_fact
+        # = old.bases_fact, new.bases_fact` then `old_fact ==
+        # new_fact` is an ordinary detector refactor of two
+        # independent Fact-typed values, bypassing the gate entirely
+        # under the plain-`Name`-only restriction) -- see
+        # `_paired_unpacking_candidates()`'s own docstring for exactly
+        # which shapes this covers.
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                self.candidates.setdefault(qualname, []).append((target.id, node.value))
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                self.candidates.setdefault(qualname, []).extend(
+                    _paired_unpacking_candidates(target, node.value)
                 )
-                gen_display_elts = _static_display_elements(generator.iter)
-                if (
-                    isinstance(generator.target, ast.Name)
-                    and gen_display_elts
-                    and all(
-                        _admissible_loop_element(elt, fact_names)
-                        for elt in gen_display_elts
-                    )
-                ):
-                    tuple_loop_candidates.setdefault(qualname, []).append(
-                        (
-                            generator.target.id,
-                            [(elt, elt_qualname) for elt in gen_display_elts],
-                        )
-                    )
-                # The tuple-*unpacking* sibling of the case just above --
-                # the identical shape the `for`/`AsyncFor` branch already
-                # handles for a plain `for` loop, applied to a
-                # comprehension's own generator (Codex review, fresh
-                # evidence): `[fact == other for fact, tag in
-                # ((old.bases_fact, "old"),)]` was invisible, since this
-                # branch only ever matched a bare `ast.Name` target.
-                # Reuses `gen_display_elts` (Codex review, fresh evidence:
-                # originally gated on a hand-rolled `isinstance(generator.
-                # iter, (ast.Tuple, ast.List))`, the identical drift risk
-                # the `for`/`AsyncFor` branch's own sibling was fixed for).
-                elif (
-                    isinstance(generator.target, (ast.Tuple, ast.List))
-                    and gen_display_elts is not None
-                ):
-                    comp_per_name_elements: dict[str, list[ast.expr]] = {}
-                    all_iterations_paired = bool(gen_display_elts)
-                    for iteration_elt in gen_display_elts:
-                        pairs = _paired_unpacking_candidates(
-                            generator.target, iteration_elt
-                        )
-                        if not pairs:
-                            all_iterations_paired = False
-                            break
-                        for pname, pvalue in pairs:
-                            comp_per_name_elements.setdefault(pname, []).append(pvalue)
-                    if all_iterations_paired:
-                        for pname, pelts in comp_per_name_elements.items():
-                            if all(
-                                _admissible_loop_element(pelt, fact_names)
-                                for pelt in pelts
-                            ):
-                                tuple_loop_candidates.setdefault(qualname, []).append(
-                                    (
-                                        pname,
-                                        [(pelt, elt_qualname) for pelt in pelts],
-                                    )
-                                )
 
-    # A `global`/`nonlocal`-declared name is never a real local rebinding
-    # -- exclude it from the shadowing subtraction now that every
-    # ordinary binding has been collected (see `nonlocal_or_global`'s own
-    # declaration above for why).
-    for qualname, declared in nonlocal_or_global.items():
-        if qualname in locally_bound:
-            locally_bound[qualname] -= declared
+    def _collect_ann_assign(self, node: ast.AnnAssign, target: ast.Name) -> None:
+        qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        self.locally_bound.setdefault(qualname, set()).add(target.id)
+        if _is_fact_typed_annotation(
+            node.annotation, self._effective_fact_names(qualname)
+        ):
+            self.aliases.setdefault(qualname, set()).add(target.id)
+        elif node.value is not None:
+            self.candidates.setdefault(qualname, []).append((target.id, node.value))
 
-    def _declared_target_scope(qualname: str, name: str) -> str:
+    def _collect_named_expr(self, node: ast.NamedExpr, target: ast.Name) -> None:
+        if id(node) in self.default_walrus_ids:
+            # Already handled by the `FunctionDef`/`AsyncFunctionDef`/
+            # `Lambda` branch below, registered in the *enclosing*
+            # scope -- this generic, position-based path would
+            # otherwise misattribute it to the function being defined
+            # (see that branch's own comment for why).
+            return
+        # `(fact := rec.bases_fact)` -- a real alias binding too, not
+        # merely an inline-recognizable expression (see `_is_fact_
+        # typed_expr`'s own NamedExpr branch for that half): `fact`
+        # itself becomes usable later in the same scope, e.g. `if
+        # (fact := rec.bases_fact) is not None: return fact == other`
+        # (Codex review, fresh evidence).
+        #
+        # **Bound to the scope PEP 572 actually assigns it to, not
+        # simply wherever it's lexically written (Codex review, fresh
+        # evidence, second round on this same branch).** Outside a
+        # comprehension, a walrus target binds to its immediately
+        # enclosing scope exactly like an ordinary assignment does --
+        # the first revision of this branch treated *every* walrus as
+        # exempt from `locally_bound`, on the theory that its PEP 572
+        # scope-hopping rule always applies; that rule is real, but it
+        # only fires when the walrus sits *directly inside a
+        # comprehension*, and skipping `locally_bound` unconditionally
+        # meant a nested function's own `(fact := 1)` -- an ordinary,
+        # unrelated local rebinding, no comprehension involved at all
+        # -- failed to shadow a genuine outer alias of the same name,
+        # a real false positive. Fixed by hopping the *comprehension*
+        # case out to its real binding scope (the nearest enclosing
+        # non-comprehension scope, walking `lexical_parents` -- a
+        # walrus can sit inside several nested comprehensions at once,
+        # and PEP 572 hops out of all of them, not just the innermost)
+        # while treating every other case as an ordinary local
+        # binding, added to `locally_bound` the same as any other
+        # assignment target.
+        walrus_qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        binding_qualname = walrus_qualname
+        while binding_qualname.rsplit(".", 1)[-1].startswith("<comp>#"):
+            binding_qualname = self.lexical_parents.get(binding_qualname, "<module>")
+        # A genuine local binding at `binding_qualname` either way --
+        # whether that's the walrus's own lexical scope (no hop) or the
+        # scope PEP 572 actually hopped it out to (Codex review, fresh
+        # evidence: the `binding_qualname == walrus_qualname` guard here
+        # wrongly skipped this mark whenever a real hop occurred, even
+        # though this branch's own comment above already states the
+        # intent -- "every other case" gets the identical `locally_
+        # bound` treatment. `[(fact := x) for x in values]` directly
+        # inside `inner` binds `fact` as an ordinary local *of `inner`*
+        # under PEP 572, shadowing an outer `fact` alias for a later,
+        # real `fact == other` read in `inner` -- but with the mark
+        # skipped, `inner`'s own inheritance step never learned this,
+        # and the outer alias leaked straight through instead).
+        self.locally_bound.setdefault(binding_qualname, set()).add(target.id)
+        # No hop -- the walrus's own value resolves in the identical
+        # scope it binds in, the ordinary `candidates` case. A real
+        # hop means the value must still resolve against the
+        # comprehension's own `walrus_qualname` (where it's actually
+        # written and where any comprehension-local alias, e.g. its
+        # own `for` target, becomes known), even though the target
+        # name itself becomes known at `binding_qualname` instead
+        # (Codex review, fresh evidence: `[(captured := fact) for
+        # fact in (rec.bases_fact,)]; captured == other` was missed,
+        # since the pre-fix code resolved `fact` against
+        # `binding_qualname`'s own aliases, where the comprehension's
+        # `for`-bound `fact` was never recorded at all).
+        if binding_qualname == walrus_qualname:
+            self.candidates.setdefault(binding_qualname, []).append(
+                (target.id, node.value)
+            )
+        else:
+            self.cross_scope_candidates.setdefault(binding_qualname, []).append(
+                (target.id, node.value, walrus_qualname)
+            )
+
+    def _collect_for(self, node: ast.For | ast.AsyncFor) -> None:
+        # `for fact, other in pairs:` -- the same tuple-unpacking
+        # binding as `ast.Assign`, just via a loop target instead
+        # (Codex review, fresh evidence: "the other Python binding
+        # forms" alongside unpacking).
+        qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        for name in _bound_names(node.target):
+            self.locally_bound.setdefault(qualname, set()).add(name)
+        # `for fact in (old.bases_fact, new.bases_fact): return fact ==
+        # other` -- a single loop target bound, one iteration at a
+        # time, to every element of a literal `Tuple`/`List` display
+        # (Codex review, fresh evidence). Unlike `_paired_unpacking_
+        # candidates` (which pairs *distinct* targets to distinct RHS
+        # elements in one assignment), every iteration reuses the
+        # *same* target name -- so the alias only holds if *every*
+        # element is definitively Fact-typed, not merely one of them
+        # (`for x in (rec.bases_fact, some_other_call()):` must stay
+        # unflagged, since `x` is only sometimes a Fact).
+        #
+        # **A bare-`Name` element referencing an already-known alias
+        # is a real Fact-typed element too, resolved through the
+        # fixed point below rather than at collection time (Codex
+        # review, fresh evidence).** `old_fact = old.bases_fact`
+        # outer, then `for fact in (old_fact,): fact == other` --
+        # `_is_fact_typed_expr()` deliberately never resolves a bare
+        # name (that needs `known`, which doesn't exist yet during
+        # this single collection pass), so an all-elements check
+        # gated on it alone rejected this ordinary alias refactor.
+        # Every element satisfying either check (structurally
+        # Fact-typed, or a bare name at all -- whether it actually
+        # resolves is `tuple_loop_candidates`' own job at fixed-point
+        # time, below) is enough to register the whole loop; an
+        # element that is neither still disqualifies it outright, the
+        # identical conservative behavior as before.
+        display_elts = _static_display_elements(node.iter)
+        self._register_display_loop_target(
+            qualname, node.target, display_elts, qualname
+        )
+
+    def _register_display_loop_target(
+        self,
+        qualname: str,
+        target: ast.expr,
+        display_elts: list[ast.expr] | None,
+        elt_qualname: str,
+    ) -> None:
+        """Record a `for`/comprehension target iterating a literal display
+        (see :meth:`_collect_for`'s and :meth:`_collect_comprehension`'s
+        comments). `qualname` is where the target binds; `elt_qualname` is
+        where each display element resolves -- the same scope for a plain
+        `for` loop, the parent scope for a comprehension's first generator.
+        """
+        if (
+            isinstance(target, ast.Name)
+            and display_elts
+            and all(
+                _admissible_loop_element(elt, self.fact_names) for elt in display_elts
+            )
+        ):
+            self.tuple_loop_candidates.setdefault(qualname, []).append(
+                (target.id, [(elt, elt_qualname) for elt in display_elts])
+            )
+        # `for fact, tag in ((old.bases_fact, "old"), (new.bases_fact,
+        # "new")): return fact == other` -- the tuple-*unpacking*
+        # sibling of the case just above: the loop target is itself a
+        # `Tuple`/`List` display, destructured one iteration at a time
+        # against each element of the *iterable*, which -- reusing
+        # `display_elts` from the branch above, so this and the
+        # simple-target case can't independently drift on which
+        # display shapes they each recognize (Codex review, fresh
+        # evidence: originally gated on a hand-rolled `isinstance(
+        # node.iter, (ast.Tuple, ast.List))`, missing the identical
+        # set/dict-keys displays the simple-target case was already
+        # fixed for) -- must also be one of `_static_display_elements`'s
+        # own recognized shapes for any single sub-value to be
+        # identifiable at all. Reuses `_paired_unpacking_candidates()`
+        # -- the
+        # identical elementwise pairing `ast.Assign`'s own unpacking
+        # handling already relies on -- once per iteration element,
+        # since each is exactly the "one assignment's worth" of value
+        # that function already knows how to pair against the
+        # (unchanging, one per loop) target shape; a starred target,
+        # a length mismatch, or an iteration element that isn't
+        # itself a literal display makes that call return `[]` for
+        # that element, and any single failure disqualifies the
+        # *whole* loop (bailing via `all_iterations_paired`) rather
+        # than silently pairing only some iterations -- the identical
+        # "no candidates at all over a partial, best-effort pairing"
+        # principle `_paired_unpacking_candidates()`'s own docstring
+        # already states, extended across iterations instead of
+        # within one. Once every iteration pairs successfully, each
+        # target name's own per-iteration values are collected and
+        # registered together, subject to the identical
+        # every-element-Fact-typed-or-deferred-name conjunctive
+        # requirement the simple-target case above already applies.
+        elif isinstance(target, (ast.Tuple, ast.List)) and display_elts is not None:
+            per_name_elements = _paired_loop_elements(target, display_elts)
+            for name, raw_elts in per_name_elements.items():
+                if all(
+                    _admissible_loop_element(elt, self.fact_names) for elt in raw_elts
+                ):
+                    self.tuple_loop_candidates.setdefault(qualname, []).append(
+                        (name, [(elt, elt_qualname) for elt in raw_elts])
+                    )
+
+    def _collect_with(self, node: ast.With | ast.AsyncWith) -> None:
+        # `with ctx() as fact:` -- likewise a real local binding.
+        qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        for item in node.items:
+            if item.optional_vars is not None:
+                for name in _bound_names(item.optional_vars):
+                    self.locally_bound.setdefault(qualname, set()).add(name)
+
+    def _collect_except_handler(self, node: ast.ExceptHandler) -> None:
+        # `except SomeError as fact:` -- `node.name` is a bare `str`,
+        # not an `ast.Name` (Python's own grammar for this one binding
+        # form), so it doesn't go through `_bound_names`.
+        if node.name is not None:
+            qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+            self.locally_bound.setdefault(qualname, set()).add(node.name)
+
+    def _collect_match(self, node: ast.Match) -> None:
+        # `case fact:`/`case [*rest]:`/`case {**rest}:` -- a real
+        # local binding too, the same as any other capture form above
+        # (Codex review, fresh evidence). `match`/`case` introduces no
+        # scope of its own in Python, so every case's own captures are
+        # attributed to the `match` statement's own position.
+        qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        for case in node.cases:
+            for name in _match_pattern_names(case.pattern):
+                self.locally_bound.setdefault(qualname, set()).add(name)
+            # `case fact:` (a bare capture, matching -- and binding --
+            # the *entire* subject unconditionally), `case SomeClass()
+            # as fact:` (an `as`-pattern, binding the entire subject
+            # whenever its own sub-pattern matches), `case fact as
+            # alias:` (a *chained* `MatchAs`, binding *both* names to
+            # the whole subject -- Codex review, fresh evidence), `case
+            # (C() as fact) | (D() as fact):` (an OR pattern trusted
+            # per `_trusted_matchor_chain_names()`'s own rule), `case
+            # (fact, _):`/`case {"fact": fact}:` (a structural
+            # sequence/mapping pattern capturing a *sub*-part of the
+            # subject positionally/by literal key), and `case (fact,)
+            # as whole:` (a structural pattern *wrapped* by an outer
+            # `as`-pattern, binding `whole` to the entire subject *and*
+            # `fact` to its own sub-part -- Codex review, fresh
+            # evidence: the previous top-level dispatch treated
+            # `MatchAs` exclusively as a whole-subject capture and
+            # never recursed into its wrapped sub-pattern, unlike
+            # `_paired_sub_pattern_candidates()`'s own identical
+            # per-position handling of the same shape) all delegate to
+            # `_paired_sub_pattern_candidates()`, the single shared
+            # primitive that already states every one of these rules
+            # for the per-*position* case -- reused whole here rather
+            # than reimplemented, so the top-level whole-subject
+            # dispatch and the per-position dispatch cannot silently
+            # diverge on the same pattern shapes again. A bare
+            # wildcard `_`/a literal `MatchValue`/a `MatchClass` with
+            # no `as` contributes no candidate, matching the
+            # pre-existing behavior for those shapes.
+            for name, value in _paired_sub_pattern_candidates(
+                case.pattern, node.subject
+            ):
+                self.candidates.setdefault(qualname, []).append((name, value))
+
+    def _collect_import(self, node: ast.Import | ast.ImportFrom) -> None:
+        # `import json as fact` / `from pkg import item as fact` --
+        # a real local binding too, the identical shadowing shape as
+        # any other assignment form above (Codex review, fresh
+        # evidence: this collector had no branch for either import
+        # statement at all, so a nested function's own import-bound
+        # `fact` never shadowed an outer Fact alias). A bare `import
+        # a.b.c` (no `as`) binds only the top-level package name `a`
+        # in the importing scope -- Python's own import-binding rule
+        # -- so an unaliased dotted name is split on its first `.`
+        # rather than used whole.
+        qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        for alias in node.names:
+            bound_name = alias.asname or alias.name.split(".", 1)[0]
+            self.locally_bound.setdefault(qualname, set()).add(bound_name)
+
+    def _collect_global_or_nonlocal(self, node: ast.Global | ast.Nonlocal) -> None:
+        qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        self.nonlocal_or_global.setdefault(qualname, set()).update(node.names)
+        if isinstance(node, ast.Global):
+            self.global_declared.setdefault(qualname, set()).update(node.names)
+
+    def _collect_definition_name(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+    ) -> None:
+        # A `def`/`class` statement binds its own *name* in the
+        # containing scope, exactly like an ordinary assignment target
+        # (Codex review, fresh evidence): `def fact(): ...` then `fact
+        # == other` in the same scope resolves `fact` to the function
+        # object just defined, an ordinary local -- Python's own
+        # `LOAD_FAST`/`LOAD_NAME` semantics, not the outer Fact alias.
+        # The branch below already records this node's own *nested*
+        # scope (its parameters, in `qualname`'s own `locally_bound`
+        # entry) -- but never the definition's *name* in the scope
+        # that contains it, so an outer alias of the same name was
+        # never shadowed, a real false positive. A lambda has no name
+        # of its own to bind (it's an expression, not a statement), so
+        # it's excluded from this specific registration -- unlike the
+        # branch below, which still applies to it identically.
+        containing_qualname = self.def_containing.get(
+            (node.lineno, node.col_offset), "<module>"
+        )
+        self.locally_bound.setdefault(containing_qualname, set()).add(node.name)
+
+    def _collect_function_parameters(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
+    ) -> None:
+        # `ast.Lambda` shares the identical `.args: ast.arguments`
+        # shape a `def` has (Codex review, fresh evidence -- see
+        # `_enclosing_qualnames`'s own docstring): a lambda parameter
+        # can never carry an annotation (`arg.annotation` is always
+        # `None`), so `_is_fact_typed_annotation` correctly never
+        # matches one -- only the `locally_bound` recording actually
+        # matters for a lambda, but sharing this branch rather than
+        # duplicating it costs nothing.
+        qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        all_args = (
+            *node.args.posonlyargs,
+            *node.args.args,
+            *node.args.kwonlyargs,
+            *((node.args.vararg,) if node.args.vararg else ()),
+            *((node.args.kwarg,) if node.args.kwarg else ()),
+        )
+        for arg in all_args:
+            self.locally_bound.setdefault(qualname, set()).add(arg.arg)
+            if _is_fact_typed_annotation(
+                arg.annotation, self._effective_fact_names(qualname)
+            ):
+                self.aliases.setdefault(qualname, set()).add(arg.arg)
+        # A parameter's own *default value* -- evaluated once, in the
+        # enclosing scope, at `def`/lambda time -- can itself be
+        # Fact-typed (Codex review, fresh evidence): `fact = rec.
+        # bases_fact; def inner(fact=fact): return fact == other` --
+        # calling `inner()` with no override genuinely runs the
+        # comparison against that outer Fact value, but the parameter
+        # is already unconditionally excluded from the inherited
+        # alias set (`locally_bound`, just above) regardless of what
+        # its own default is. Positional defaults right-align against
+        # `posonlyargs + args` (the last `len(defaults)` of them);
+        # `kw_defaults` pairs positionally with `kwonlyargs`, `None`
+        # for a keyword-only parameter with no default at all.
+        positional = (*node.args.posonlyargs, *node.args.args)
+        offset = len(positional) - len(node.args.defaults)
+        for arg, default in zip(positional[offset:], node.args.defaults):
+            self.pending_defaults.append(
+                (qualname, arg.arg, (node.lineno, node.col_offset), default)
+            )
+        for arg, kw_default in zip(node.args.kwonlyargs, node.args.kw_defaults):
+            if kw_default is not None:
+                self.pending_defaults.append(
+                    (
+                        qualname,
+                        arg.arg,
+                        (node.lineno, node.col_offset),
+                        kw_default,
+                    )
+                )
+        self._collect_default_and_annotation_walruses(node)
+
+    def _collect_default_and_annotation_walruses(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
+    ) -> None:
+        # A walrus *inside* a default expression -- `def inner(x=(fact
+        # := rec.bases_fact)):` -- binds `fact` in the scope the
+        # default is evaluated in too, which is the scope that
+        # directly, syntactically contains the `def`/lambda (Python's
+        # own default-evaluation rule, the same one the pending-
+        # defaults handling above already relies on), not `inner`'s
+        # own body scope (Codex review, fresh evidence): the generic,
+        # position-based `NamedExpr` branch would otherwise attribute
+        # it to `inner` -- the smallest span containing the walrus's
+        # own position, since a default expression is textually part
+        # of the `def`/lambda's own span -- silently losing an alias a
+        # later, genuinely outer `fact == other` needs. Registered
+        # directly in the containing scope (`def_containing`, computed
+        # once up front for exactly this kind of use) as an ordinary
+        # local binding, and excluded from the generic branch via
+        # `default_walrus_ids` so it isn't also (mis)processed there.
+        #
+        # **`def_containing`, not `lexical_parents` (Codex review,
+        # fresh evidence).** A *method's* own default-embedded walrus
+        # is evaluated while its containing *class body* executes,
+        # ordinary class-body code, not a closure lookup --
+        # `lexical_parents` intentionally skips that class layer for
+        # the different question of a method *body*'s own free-
+        # variable lookup, the identical class-skipping issue the
+        # sibling `pending_defaults`/`_default_and_annotation_scope_
+        # overrides()` fixes already had to make for the same reason.
+        # `class C: fact = 1; def f(self, x=(fact := rec.bases_fact)):
+        # ...` must publish `fact` to `C`'s own class-body scope, not
+        # skip past it to whatever encloses `C`.
+        #
+        # **Stops at a nested scope boundary, via `_iter_default_
+        # subtree()` (Codex review, fresh evidence).** A default
+        # containing its own lambda/comprehension -- `def configure(cb
+        # =lambda: (fact := rec.bases_fact)): ...` -- only *creates*
+        # the lambda object at def-time in the enclosing scope; the
+        # walrus inside its body binds `fact` in the *lambda's own*
+        # scope when the lambda is later called, never the enclosing
+        # one, the identical distinction `_default_and_annotation_
+        # scope_overrides()` already draws for a `Compare` found the
+        # same way. An unrestricted `ast.walk(default_expr)` crossed
+        # that boundary too, wrongly publishing the lambda-local walrus
+        # target as an alias of the *enclosing* (here, module) scope.
+        #
+        # **A parameter annotation or return annotation is walked the
+        # identical way (CodeRabbit review, fresh evidence).** This
+        # loop only ever walked `node.args.defaults`/`kw_defaults` --
+        # but a walrus in a parameter's own annotation or the `->`
+        # return annotation binds at the identical def-time, in the
+        # identical containing scope, absent `from __future__ import
+        # annotations` (which this module's own sibling override
+        # function, `_default_and_annotation_scope_overrides()`,
+        # already treats every annotation as evaluated under
+        # regardless of postponed-evaluation status -- unconditionally
+        # walking here too matches that established, deliberately
+        # conservative choice rather than adding a second, narrower
+        # rule: a walrus that in fact never executes under postponed
+        # evaluation registering a spurious alias is a false positive,
+        # the safe direction this whole module already accepts
+        # throughout). `subtrees` mirrors that sibling function's own
+        # construction exactly, so the two can't independently drift.
+        enclosing = self.def_containing.get((node.lineno, node.col_offset), "<module>")
+        walrus_subtrees = [*node.args.defaults, *node.args.kw_defaults]
+        for arg in (
+            *node.args.posonlyargs,
+            *node.args.args,
+            *node.args.kwonlyargs,
+            *((node.args.vararg,) if node.args.vararg else ()),
+            *((node.args.kwarg,) if node.args.kwarg else ()),
+        ):
+            if arg.annotation is not None:
+                walrus_subtrees.append(arg.annotation)
+        walrus_returns = getattr(node, "returns", None)
+        if walrus_returns is not None:
+            walrus_subtrees.append(walrus_returns)
+        for default_expr in walrus_subtrees:
+            if default_expr is None:
+                continue
+            self._register_header_walruses(enclosing, default_expr)
+
+    def _register_header_walruses(self, enclosing: str, expr: ast.expr) -> None:
+        """Register every walrus in a def/lambda default or annotation, or a
+        class base/keyword, as a binding of the scope containing that
+        header (see the two callers' own comments for why)."""
+        for walrus in _iter_default_subtree(expr):
+            if isinstance(walrus, ast.NamedExpr) and isinstance(
+                walrus.target, ast.Name
+            ):
+                self.default_walrus_ids.add(id(walrus))
+                self.locally_bound.setdefault(enclosing, set()).add(walrus.target.id)
+                self.candidates.setdefault(enclosing, []).append(
+                    (walrus.target.id, walrus.value)
+                )
+
+    def _collect_class_header_walruses(self, node: ast.ClassDef) -> None:
+        # A walrus inside a class base or metaclass keyword --
+        # `class C(make_base(fact := rec.vtable_fact)): ...` -- binds
+        # `fact` in the scope containing the `class` statement, the
+        # identical PEP 572-independent evaluation-time rule the
+        # `FunctionDef`/`AsyncFunctionDef`/`Lambda` branch above
+        # already applies to a default expression (Codex review,
+        # fresh evidence): a class header executes while the scope
+        # *containing* the class statement is active, before the
+        # new class's own body scope even exists, so the generic,
+        # position-based `NamedExpr` branch's `class-body` attribution
+        # -- correct for a walrus inside the body itself -- is wrong
+        # here, silently losing an alias a later, genuinely outer
+        # `fact == other` needs. `_default_and_annotation_scope_
+        # overrides()` already draws this identical distinction for
+        # the *read* side (`class Outer: fact = rec.bases_fact; class
+        # Inner(make_base(fact == other)): ...`); this is its sibling
+        # fix for a *binding* found the same way. Uses the same
+        # `def_containing`/`_iter_default_subtree` machinery -- a
+        # base/keyword containing its own lambda/comprehension stops
+        # at that boundary identically, and the walrus is excluded
+        # from the generic branch via `default_walrus_ids` so it
+        # isn't also (mis)processed there.
+        enclosing = self.def_containing.get((node.lineno, node.col_offset), "<module>")
+        for base_or_keyword in (*node.bases, *(kw.value for kw in node.keywords)):
+            self._register_header_walruses(enclosing, base_or_keyword)
+
+    def _collect_comprehension(
+        self, node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
+    ) -> None:
+        # A comprehension's own `for` target(s) -- real local bindings
+        # scoped to the comprehension itself, the identical shape a
+        # `for` loop's own target already gets above (Codex review,
+        # fresh evidence -- see `_enclosing_qualnames`'s own
+        # docstring).
+        qualname = _qualname_at((node.lineno, node.col_offset), self.qualnames)
+        for gen_index, generator in enumerate(node.generators):
+            for name in _bound_names(generator.target):
+                self.locally_bound.setdefault(qualname, set()).add(name)
+            # The comprehension equivalent of the `for`-loop literal-
+            # collection case above -- `[fact == other for fact in
+            # (old.bases_fact, new.bases_fact)]` -- the identical
+            # every-element-Fact-typed-or-a-deferred-alias requirement
+            # (see the `for`/`AsyncFor` branch's own docstring for the
+            # bare-`Name`-element reasoning).
+            #
+            # **Each element resolves against the scope the iterable
+            # actually evaluates in, distinct from the scope the
+            # resolved target name itself becomes known in (Codex
+            # review, fresh evidence).** The target always becomes
+            # known in the comprehension's own scope (`qualname`) --
+            # that's where the actual read happens -- but only the
+            # *first* generator's own iterable evaluates in the scope
+            # directly containing the comprehension; every other
+            # generator's iterable, like the element expression, runs
+            # inside the comprehension's own new scope, where the
+            # target(s) from every earlier generator are already
+            # locally bound (see `_enclosing_qualnames`'s own
+            # docstring for the identical distinction). `fact = rec.
+            # bases_fact; [fact == other for fact in (fact,)]` -- the
+            # tuple element `fact` names the *outer* alias, but the
+            # comprehension's own target is *also* `fact`, shadowing
+            # it in the comprehension's own scope -- checking that
+            # element against the comprehension's own (shadowed)
+            # scope would check the name against itself and never
+            # resolve, while registering the *entry* under the
+            # parent instead would make the target known in the wrong
+            # scope for the actual read to see. `tuple_loop_
+            # candidates`' own per-element `(expr, qualname)` pairing
+            # (see its own declaration comment) exists for exactly
+            # this split. `_qualname_at()` on the first generator's
+            # own iterable position picks up the narrower override
+            # span `_enclosing_qualnames()` already registers for
+            # exactly this iterable, tagged with the comprehension's
+            # own *incoming* (parent) qualname.
+            elt_qualname = (
+                _qualname_at(
+                    (generator.iter.lineno, generator.iter.col_offset), self.qualnames
+                )
+                if gen_index == 0
+                else qualname
+            )
+            gen_display_elts = _static_display_elements(generator.iter)
+            # The tuple-*unpacking* sibling of the case just above --
+            # the identical shape the `for`/`AsyncFor` branch already
+            # handles for a plain `for` loop, applied to a
+            # comprehension's own generator (Codex review, fresh
+            # evidence): `[fact == other for fact, tag in
+            # ((old.bases_fact, "old"),)]` was invisible, since this
+            # branch only ever matched a bare `ast.Name` target.
+            # Reuses `gen_display_elts` (Codex review, fresh evidence:
+            # originally gated on a hand-rolled `isinstance(generator.
+            # iter, (ast.Tuple, ast.List))`, the identical drift risk
+            # the `for`/`AsyncFor` branch's own sibling was fixed for).
+            self._register_display_loop_target(
+                qualname, generator.target, gen_display_elts, elt_qualname
+            )
+
+    # -- resolution -------------------------------------------------------
+
+    def _declared_target_scope(self, qualname: str, name: str) -> str:
         """Where an *assignment* to `name`, written inside `qualname`,
         actually writes -- `<module>` for a `global`-declared name, the
         nearest enclosing function for a `nonlocal`-declared one, or
@@ -1409,9 +1455,9 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
         (through ordinary inheritance, not its own `global`/`nonlocal`
         declaration) never saw it as Fact-typed at all.
         """
-        if name in global_declared.get(qualname, ()):
+        if name in self.global_declared.get(qualname, ()):
             return "<module>"
-        if name in nonlocal_or_global.get(qualname, ()):
+        if name in self.nonlocal_or_global.get(qualname, ()):
             # `nonlocal` can skip *multiple* enclosing functions, not just
             # the immediate lexical parent (Codex review, fresh evidence):
             # Python resolves it to the nearest enclosing function scope
@@ -1430,200 +1476,249 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
             # an ancestor whose own binding of the name is itself
             # borrowed from further out, the identical case Python's own
             # resolution skips.
-            candidate = lexical_parents.get(qualname, "<module>")
-            while candidate != "<module>" and name not in locally_bound.get(
+            candidate = self.lexical_parents.get(qualname, "<module>")
+            while candidate != "<module>" and name not in self.locally_bound.get(
                 candidate, ()
             ):
-                candidate = lexical_parents.get(candidate, "<module>")
+                candidate = self.lexical_parents.get(candidate, "<module>")
             return candidate
         return qualname
 
-    def _scope_depth(qualname: str) -> int:
+    def _scope_depth(self, qualname: str) -> int:
         depth = 0
         current = qualname
-        while current in lexical_parents:
-            current = lexical_parents[current]
+        while current in self.lexical_parents:
+            current = self.lexical_parents[current]
             depth += 1
         return depth
 
-    # Every scope actually in the tree, not just ones with a candidate or a
-    # directly-annotated alias of their own -- otherwise a scope with
-    # nothing but an inherited alias (e.g. `inner` in the closure example
-    # above) never gets processed at all, and its lookup below silently
-    # sees no entry rather than its parent's set.
-    all_qualnames = (
-        set(candidates)
-        | set(aliases)
-        | {q for _start, _end, q in qualnames}
-        | {"<module>"}
-    )
-    # Both passes below -- depth-ordered parent inheritance (plus each
-    # scope's own candidate fixed point) and pending-default resolution
-    # -- are wrapped in one further, *outer* fixed point (Codex review,
-    # fresh evidence): `def inner(fact=rec.bases_fact): def nested():
-    # return fact == other` needs `nested` to inherit `fact` from
-    # `inner`, but `inner` only gains `fact` from resolving its own
-    # *default* -- and the default-resolution pass deliberately runs
-    # *after* the depth-ordered inheritance pass (it needs each scope's
-    # alias set already final before checking a default against it), so
-    # a single top-to-bottom run processes `nested`'s inheritance before
-    # `inner`'s own default has been resolved at all, silently missing
-    # the propagation. Re-running both passes together until neither
-    # changes anything converges correctly: the second pass through
-    # inheritance sees `inner`'s now-resolved `fact` and propagates it to
-    # `nested` exactly the same way an ordinary parent alias already
-    # would. Guaranteed to terminate -- every alias set only ever grows,
-    # over a finite universe of (qualname, name) pairs.
-    outer_changed = True
-    while outer_changed:
-        outer_changed = False
-        for qualname in sorted(all_qualnames, key=_scope_depth):
-            known = aliases.setdefault(qualname, set())
-            parent = lexical_parents.get(qualname)
-            global_names = global_declared.get(qualname, set())
-            if parent is not None:
-                # A class body's own top-level statements use `LOAD_NAME`/
-                # `STORE_NAME`, not `LOAD_FAST` -- resolved dynamically at
-                # each statement against whatever the class namespace holds
-                # *so far*, not statically pre-determined by "is this name
-                # assigned anywhere in this class body" the way a function
-                # body's `LOAD_FAST` is (Codex review, fresh evidence):
-                # `fact = rec.bases_fact` outer, then `class C: hit = fact
-                # == other; fact = 1` -- the later `fact = 1` reassignment
-                # is a real class-body-local rebinding, but the READ on the
-                # line before it still resolves to the outer alias in real
-                # Python, since the class namespace has nothing under
-                # `fact` yet at that point. This module has no statement-
-                # order-aware lookup (every other scope's shadowing is
-                # correctly whole-scope, per `locally_bound`'s own
-                # docstring -- only a class body's `LOAD_NAME` genuinely
-                # differs), so the conservative, over-approximating-is-safe
-                # answer here is to never let a class body's own local
-                # rebinding shadow what it inherits at all -- the identical
-                # direction `locally_bound`'s own docstring already argues
-                # for the opposite case (nonlocal/global): a false positive
-                # on a class body that reassigns `fact` to something
-                # ordinary *before* using it is the accepted cost, exactly
-                # matching how a shadow is never narrowed to "only after
-                # the rebinding" for a function either.
-                shadowed = (
-                    set()
-                    if qualname.endswith("<class-body>")
-                    else locally_bound.get(qualname, set())
-                )
-                inherited = (aliases.get(parent, set()) - shadowed) - global_names
-                if not inherited <= known:
+    def resolve(self) -> dict[str, set[str]]:
+        # Every scope actually in the tree, not just ones with a candidate or a
+        # directly-annotated alias of their own -- otherwise a scope with
+        # nothing but an inherited alias (e.g. `inner` in the closure example
+        # above) never gets processed at all, and its lookup below silently
+        # sees no entry rather than its parent's set.
+        all_qualnames = (
+            set(self.candidates)
+            | set(self.aliases)
+            | {q for _start, _end, q in self.qualnames}
+            | {"<module>"}
+        )
+        # Both passes below -- depth-ordered parent inheritance (plus each
+        # scope's own candidate fixed point) and pending-default resolution
+        # -- are wrapped in one further, *outer* fixed point (Codex review,
+        # fresh evidence): `def inner(fact=rec.bases_fact): def nested():
+        # return fact == other` needs `nested` to inherit `fact` from
+        # `inner`, but `inner` only gains `fact` from resolving its own
+        # *default* -- and the default-resolution pass deliberately runs
+        # *after* the depth-ordered inheritance pass (it needs each scope's
+        # alias set already final before checking a default against it), so
+        # a single top-to-bottom run processes `nested`'s inheritance before
+        # `inner`'s own default has been resolved at all, silently missing
+        # the propagation. Re-running both passes together until neither
+        # changes anything converges correctly: the second pass through
+        # inheritance sees `inner`'s now-resolved `fact` and propagates it to
+        # `nested` exactly the same way an ordinary parent alias already
+        # would. Guaranteed to terminate -- every alias set only ever grows,
+        # over a finite universe of (qualname, name) pairs.
+        all_qualnames = (
+            set(self.candidates)
+            | set(self.aliases)
+            | {q for _start, _end, q in self.qualnames}
+            | {"<module>"}
+        )
+        outer_changed = True
+        while outer_changed:
+            outer_changed = False
+            for qualname in sorted(all_qualnames, key=self._scope_depth):
+                if self._resolve_scope(qualname):
                     outer_changed = True
-                known |= inherited
-            if global_names:
-                # `global fact` bypasses `lexical_parents` entirely --
-                # Python's own rule is "the identical module-scope `fact`,
-                # regardless of what any enclosing function does with the
-                # same bare name" (see `global_declared`'s own declaration
-                # comment for the two-directional bug this closes).
-                module_inherited = aliases.get("<module>", set()) & global_names
-                if not module_inherited <= known:
-                    outer_changed = True
-                known |= module_inherited
-            changed = True
-            while changed:
-                changed = False
-                for name, value in candidates.get(qualname, []):
-                    if name in known:
-                        continue
-                    if _candidate_resolves_to_fact(value, fact_names, known):
-                        known.add(name)
-                        changed = True
-                        outer_changed = True
-                # `cross_scope_candidates`' own value/binding scope split
-                # -- the value is checked against *its own* recorded
-                # qualname's converged aliases (`aliases.get(value_
-                # qualname, set())`), never `known` (this loop's current
-                # binding-scope set), since the two can genuinely differ
-                # (see the comprehension-scope-hopping walrus collection
-                # branch's own docstring).
-                for name, value, value_qualname in cross_scope_candidates.get(
-                    qualname, []
-                ):
-                    if name in known:
-                        continue
-                    if _candidate_resolves_to_fact(
-                        value, fact_names, aliases.get(value_qualname, set())
-                    ):
-                        known.add(name)
-                        changed = True
-                        outer_changed = True
-                # `tuple_loop_candidates`' own conjunctive resolution --
-                # unlike `candidates` above (known the moment ANY one
-                # recorded value resolves), a loop-target entry here needs
-                # EVERY element to resolve before the target itself does
-                # (Codex review, fresh evidence -- see the `for`/`AsyncFor`
-                # collection branch's own docstring). Each element
-                # resolves through `_candidate_resolves_to_fact()` --
-                # the identical per-value check `candidates` above uses,
-                # so a nested `IfExp` element is covered here too --
-                # against *its own* recorded qualname's `known` set
-                # (`aliases.get(elt_qualname, set())`), not necessarily
-                # the current `qualname`: a comprehension's first-
-                # generator element resolves against the parent scope's
-                # aliases while the target itself still becomes known in
-                # `qualname` (see the comprehension collection branch's
-                # own docstring for why the two differ). `aliases` is
-                # this same fixed point's own accumulator, read live --
-                # scopes are visited in `_scope_depth` order each outer
-                # pass, so a parent's aliases are already available by
-                # the time its child is processed, and any later addition
-                # still converges on a subsequent `outer_changed` pass.
-                # This loop naturally participates in the surrounding
-                # `while changed:` fixed point either way, converging
-                # once every element (structural, alias, or nested
-                # conditional) is confirmed.
-                for name, elts in tuple_loop_candidates.get(qualname, []):
-                    if name in known:
-                        continue
-                    if all(
-                        _candidate_resolves_to_fact(
-                            elt, fact_names, aliases.get(elt_qualname, set())
-                        )
-                        for elt, elt_qualname in elts
-                    ):
-                        known.add(name)
-                        changed = True
-                        outer_changed = True
-            # Propagate a `global`/`nonlocal`-declared name, confirmed
-            # Fact-typed *within this writer's own scope* (via `known`
-            # just above -- direct annotation, or the inner fixed point
-            # resolving it through a same-scope local like `local = rec.
-            # bases_fact; fact = local`), into the scope it actually
-            # writes to (Codex review, fresh evidence, second round on
-            # this same write-side routing fix). The first revision
-            # instead *moved* each declared assignment's raw `(name,
-            # value)` candidate straight into the target scope's own
-            # candidate list -- but `value` can itself be a bare `Name`
-            # referencing a *third*, same-writer-scope local (`local` in
-            # the example above), and once moved, the inner fixed point
-            # for the *target* scope checks that name against the
-            # *target*'s own `known` set, where a name local only to the
-            # writer was never going to appear -- silently breaking
-            # exactly the RHS indirection this whole write-side fix exists
-            # to close. Checked here instead, each outer iteration, only
-            # after `known` reflects everything resolvable within the
-            # writer's own scope for *this* iteration -- so `local`
-            # resolves in `seed`'s own scope first, then `fact` (now
-            # confirmed via `local`) propagates to `<module>` the same
-            # iteration, with no separate resolution context to get out of
-            # sync with the writer's own.
-            for declared_name in nonlocal_or_global.get(qualname, ()):
-                if declared_name not in known:
-                    continue
-                target_scope = _declared_target_scope(qualname, declared_name)
-                if target_scope == qualname:
-                    continue
-                target_known = aliases.setdefault(target_scope, set())
-                if declared_name not in target_known:
-                    target_known.add(declared_name)
-                    outer_changed = True
+            if self._resolve_pending_defaults():
+                outer_changed = True
+        return self.aliases
 
+    def _resolve_scope(self, qualname: str) -> bool:
+        """One outer-pass visit of `qualname`: inherit, run its own
+        candidate fixed point, then propagate declared writes. Returns
+        whether anything changed (the outer fixed point's `changed` bit)."""
+        known = self.aliases.setdefault(qualname, set())
+        changed = self._inherit_into(qualname, known)
+        if self._resolve_own_candidates(qualname, known):
+            changed = True
+        if self._propagate_declared_writes(qualname, known):
+            changed = True
+        return changed
+
+    def _inherit_into(self, qualname: str, known: set[str]) -> bool:
+        changed = False
+        parent = self.lexical_parents.get(qualname)
+        global_names = self.global_declared.get(qualname, set())
+        if parent is not None:
+            # A class body's own top-level statements use `LOAD_NAME`/
+            # `STORE_NAME`, not `LOAD_FAST` -- resolved dynamically at
+            # each statement against whatever the class namespace holds
+            # *so far*, not statically pre-determined by "is this name
+            # assigned anywhere in this class body" the way a function
+            # body's `LOAD_FAST` is (Codex review, fresh evidence):
+            # `fact = rec.bases_fact` outer, then `class C: hit = fact
+            # == other; fact = 1` -- the later `fact = 1` reassignment
+            # is a real class-body-local rebinding, but the READ on the
+            # line before it still resolves to the outer alias in real
+            # Python, since the class namespace has nothing under
+            # `fact` yet at that point. This module has no statement-
+            # order-aware lookup (every other scope's shadowing is
+            # correctly whole-scope, per `locally_bound`'s own
+            # docstring -- only a class body's `LOAD_NAME` genuinely
+            # differs), so the conservative, over-approximating-is-safe
+            # answer here is to never let a class body's own local
+            # rebinding shadow what it inherits at all -- the identical
+            # direction `locally_bound`'s own docstring already argues
+            # for the opposite case (nonlocal/global): a false positive
+            # on a class body that reassigns `fact` to something
+            # ordinary *before* using it is the accepted cost, exactly
+            # matching how a shadow is never narrowed to "only after
+            # the rebinding" for a function either.
+            shadowed = (
+                set()
+                if qualname.endswith("<class-body>")
+                else self.locally_bound.get(qualname, set())
+            )
+            inherited = (self.aliases.get(parent, set()) - shadowed) - global_names
+            if not inherited <= known:
+                changed = True
+            known |= inherited
+        if global_names:
+            # `global fact` bypasses `lexical_parents` entirely --
+            # Python's own rule is "the identical module-scope `fact`,
+            # regardless of what any enclosing function does with the
+            # same bare name" (see `global_declared`'s own declaration
+            # comment for the two-directional bug this closes).
+            module_inherited = self.aliases.get("<module>", set()) & global_names
+            if not module_inherited <= known:
+                changed = True
+            known |= module_inherited
+        return changed
+
+    def _resolve_own_candidates(self, qualname: str, known: set[str]) -> bool:
+        any_added = False
+        changed = True
+        while changed:
+            plain = self._resolve_plain_candidates(qualname, known)
+            cross = self._resolve_cross_scope_candidates(qualname, known)
+            loops = self._resolve_loop_candidates(qualname, known)
+            changed = plain or cross or loops
+            any_added = any_added or changed
+        return any_added
+
+    def _resolve_plain_candidates(self, qualname: str, known: set[str]) -> bool:
+        changed = False
+        for name, value in self.candidates.get(qualname, []):
+            if name in known:
+                continue
+            if _candidate_resolves_to_fact(value, self.fact_names, known):
+                known.add(name)
+                changed = True
+        return changed
+
+    def _resolve_cross_scope_candidates(self, qualname: str, known: set[str]) -> bool:
+        # `cross_scope_candidates`' own value/binding scope split
+        # -- the value is checked against *its own* recorded
+        # qualname's converged aliases (`aliases.get(value_
+        # qualname, set())`), never `known` (this loop's current
+        # binding-scope set), since the two can genuinely differ
+        # (see the comprehension-scope-hopping walrus collection
+        # branch's own docstring).
+        changed = False
+        for name, value, value_qualname in self.cross_scope_candidates.get(
+            qualname, []
+        ):
+            if name in known:
+                continue
+            if _candidate_resolves_to_fact(
+                value, self.fact_names, self.aliases.get(value_qualname, set())
+            ):
+                known.add(name)
+                changed = True
+        return changed
+
+    def _resolve_loop_candidates(self, qualname: str, known: set[str]) -> bool:
+        # `tuple_loop_candidates`' own conjunctive resolution --
+        # unlike `candidates` above (known the moment ANY one
+        # recorded value resolves), a loop-target entry here needs
+        # EVERY element to resolve before the target itself does
+        # (Codex review, fresh evidence -- see the `for`/`AsyncFor`
+        # collection branch's own docstring). Each element
+        # resolves through `_candidate_resolves_to_fact()` --
+        # the identical per-value check `candidates` above uses,
+        # so a nested `IfExp` element is covered here too --
+        # against *its own* recorded qualname's `known` set
+        # (`aliases.get(elt_qualname, set())`), not necessarily
+        # the current `qualname`: a comprehension's first-
+        # generator element resolves against the parent scope's
+        # aliases while the target itself still becomes known in
+        # `qualname` (see the comprehension collection branch's
+        # own docstring for why the two differ). `aliases` is
+        # this same fixed point's own accumulator, read live --
+        # scopes are visited in `_scope_depth` order each outer
+        # pass, so a parent's aliases are already available by
+        # the time its child is processed, and any later addition
+        # still converges on a subsequent `outer_changed` pass.
+        # This loop naturally participates in the surrounding
+        # `while changed:` fixed point either way, converging
+        # once every element (structural, alias, or nested
+        # conditional) is confirmed.
+        changed = False
+        for name, elts in self.tuple_loop_candidates.get(qualname, []):
+            if name in known:
+                continue
+            if all(
+                _candidate_resolves_to_fact(
+                    elt, self.fact_names, self.aliases.get(elt_qualname, set())
+                )
+                for elt, elt_qualname in elts
+            ):
+                known.add(name)
+                changed = True
+        return changed
+
+    def _propagate_declared_writes(self, qualname: str, known: set[str]) -> bool:
+        # Propagate a `global`/`nonlocal`-declared name, confirmed
+        # Fact-typed *within this writer's own scope* (via `known`
+        # just above -- direct annotation, or the inner fixed point
+        # resolving it through a same-scope local like `local = rec.
+        # bases_fact; fact = local`), into the scope it actually
+        # writes to (Codex review, fresh evidence, second round on
+        # this same write-side routing fix). The first revision
+        # instead *moved* each declared assignment's raw `(name,
+        # value)` candidate straight into the target scope's own
+        # candidate list -- but `value` can itself be a bare `Name`
+        # referencing a *third*, same-writer-scope local (`local` in
+        # the example above), and once moved, the inner fixed point
+        # for the *target* scope checks that name against the
+        # *target*'s own `known` set, where a name local only to the
+        # writer was never going to appear -- silently breaking
+        # exactly the RHS indirection this whole write-side fix exists
+        # to close. Checked here instead, each outer iteration, only
+        # after `known` reflects everything resolvable within the
+        # writer's own scope for *this* iteration -- so `local`
+        # resolves in `seed`'s own scope first, then `fact` (now
+        # confirmed via `local`) propagates to `<module>` the same
+        # iteration, with no separate resolution context to get out of
+        # sync with the writer's own.
+        changed = False
+        for declared_name in self.nonlocal_or_global.get(qualname, ()):
+            if declared_name not in known:
+                continue
+            target_scope = self._declared_target_scope(qualname, declared_name)
+            if target_scope == qualname:
+                continue
+            target_known = self.aliases.setdefault(target_scope, set())
+            if declared_name not in target_known:
+                target_known.add(declared_name)
+                changed = True
+        return changed
+
+    def _resolve_pending_defaults(self) -> bool:
         # Resolve every pending parameter default against each scope's
         # own alias set as it stands *this* iteration -- a default
         # expression is evaluated in the scope that directly,
@@ -1642,14 +1737,34 @@ def _fact_aliases(tree: ast.Module, qualnames: _QualnameSpans) -> dict[str, set[
         # needs the class body's own alias set here, exactly the way
         # `_default_and_annotation_scope_overrides` needs it for a
         # comparison found directly inside the default expression itself.
-        for qualname, arg_name, def_pos, default in pending_defaults:
-            parent = def_containing.get(def_pos, "<module>")
-            default_target_aliases = aliases.setdefault(qualname, set())
+        changed = False
+        for qualname, arg_name, def_pos, default in self.pending_defaults:
+            parent = self.def_containing.get(def_pos, "<module>")
+            default_target_aliases = self.aliases.setdefault(qualname, set())
             if arg_name in default_target_aliases:
                 continue
             if _candidate_resolves_to_fact(
-                default, fact_names, aliases.get(parent, set())
+                default, self.fact_names, self.aliases.get(parent, set())
             ):
                 default_target_aliases.add(arg_name)
-                outer_changed = True
-    return aliases
+                changed = True
+        return changed
+
+
+def _paired_loop_elements(
+    target: ast.Tuple | ast.List, display_elts: list[ast.expr]
+) -> dict[str, list[ast.expr]]:
+    """Pair an unpacking loop target against every iteration element,
+    collecting each target name's per-iteration values -- or `{}` when
+    the display is empty or any single iteration fails to pair (the
+    whole loop is then disqualified, never paired partially)."""
+    per_name_elements: dict[str, list[ast.expr]] = {}
+    if not display_elts:
+        return {}
+    for iteration_elt in display_elts:
+        pairs = _paired_unpacking_candidates(target, iteration_elt)
+        if not pairs:
+            return {}
+        for name, value in pairs:
+            per_name_elements.setdefault(name, []).append(value)
+    return per_name_elements
