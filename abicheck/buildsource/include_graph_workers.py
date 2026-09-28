@@ -37,6 +37,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Any
 
 from .. import deadline, process_resources
 from ..extract.progress import track
@@ -381,7 +382,7 @@ if hasattr(os, "register_at_fork"):
 
 def _submit_windowed(
     items: list[DepfileProbe],
-    call: Callable[[DepfileProbe], tuple],
+    call: Callable[[DepfileProbe], tuple[Any, ...]],
     *,
     window: int,
 ) -> list[Future[ProbeOutcome]]:
