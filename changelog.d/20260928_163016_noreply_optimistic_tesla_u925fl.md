@@ -5,3 +5,7 @@
 ### Fixed
 
 - **clang AST passes now parse GCC's own headers** — GCC 11+ headers use the deallocator form `__attribute__((__malloc__ (dealloc)))`, and GCC's `omp.h` uses it with no guard. clang rejects that form as a hard error. So on any run whose include path contains a GCC resource directory (for example `-I /usr/lib/gcc/<triple>/<ver>/include`, which castxml setups need), the L2 clang frontend and the header-graph pass both failed. For the header graph that failure was silent. Every clang AST pass (L2 header dump, L4 source replay, L5 graph passes) now adds `-D__malloc__(...)=__malloc__` through one shared `clang_ast_dump_tail`. Macro (`-E -dM`) passes do not get it, so it is never recorded as a macro of the translation unit. The clang AST cache schema is bumped so partially recovered entries are not served.
+
+### Changed
+
+- **castxml parse trees are about 4× smaller** — `parse_castxml_xml` now keeps only the `Argument` attributes some reader actually uses (`name`, `type`, `default`, listed in `ARGUMENT_ATTRIBUTES_READ`). As each parent element closes, its `Argument` children are replaced by one shared element per distinct parameter spelling. On a 26 MB MKL header dump the live tree drops from 116 to 26 MiB, and the peak drops too. Parser output is unchanged: this is checked against a plain parse on generated documents and on a real castxml run. A source-level test enforces that no reader uses another `Argument` attribute or modifies a parsed tree.
