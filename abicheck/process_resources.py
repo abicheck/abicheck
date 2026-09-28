@@ -41,7 +41,12 @@ caller and test keeps working unchanged.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, TypeVar
+
+_T = TypeVar("_T")
 
 _KIB = 1024.0
 _GIB = 1024.0 * 1024.0 * 1024.0
@@ -309,3 +314,118 @@ def python_parallelism(*, diagnostics: list[str] | None = None) -> int:
     if gil_enabled():
         return GIL_MEMBER_PARALLELISM
     return max(1, os.cpu_count() or 1)
+
+
+# ---------------------------------------------------------------------------
+# One process-wide thread budget.
+#
+# Every pool above is sized on its own -- members, the two sides of a member,
+# include probes, per-TU header parses, L4/L5 build-source passes -- and they
+# nest, so their product, not any one of them, is what the process runs.
+# ``ABICHECK_MAX_THREADS`` bounds that product: each pool borrows its worker
+# threads from one budget when it is created and returns them when it shuts
+# down. The budget is the *only* total cap; the per-pool knobs still decide how
+# much of it a pool asks for.
+#
+# Borrowing never blocks. A pool created while the budget is spent is granted
+# fewer threads than it asked for, down to none, and a pool granted none runs
+# each task inline in the thread that submits it. Blocking instead would
+# deadlock: pools nest, so an outer worker holding its thread would wait for
+# threads only its own inner pool could release. Inline is always safe here
+# because no abicheck pool submits a task that waits on a later task of the
+# same pool -- every pool maps independent units.
+# ---------------------------------------------------------------------------
+
+#: Process-wide cap on worker threads held by abicheck pools at once. Unset,
+#: ``0`` or unparsable means unlimited (each pool's own sizing alone).
+MAX_THREADS_ENV_VAR = "ABICHECK_MAX_THREADS"
+
+
+def max_threads() -> int | None:
+    """The configured thread budget, or ``None`` when unlimited."""
+    raw = os.environ.get(MAX_THREADS_ENV_VAR, "").strip()
+    try:
+        value = int(raw) if raw else 0
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+class _ThreadBudget:
+    """Counts worker threads currently lent to pools (see the section note)."""
+
+    def __init__(self) -> None:
+        import threading
+
+        self._lock = threading.Lock()
+        self.in_use = 0
+        self.peak = 0
+
+    def grant(self, requested: int) -> int:
+        cap = max_threads()
+        with self._lock:
+            granted = (
+                requested if cap is None else max(0, min(requested, cap - self.in_use))
+            )
+            self.in_use += granted
+            self.peak = max(self.peak, self.in_use)
+            return granted
+
+    def release(self, granted: int) -> None:
+        with self._lock:
+            self.in_use -= granted
+
+
+#: The one budget for the process.
+THREAD_BUDGET = _ThreadBudget()
+
+
+class InlineExecutor(Executor):
+    """Runs each task at submission, in the submitting thread."""
+
+    def submit(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> Future[_T]:
+        future: Future[_T] = Future()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except BaseException as exc:  # noqa: BLE001 - delivered via the future
+            future.set_exception(exc)
+        return future
+
+
+class BudgetedExecutor(Executor):
+    """A thread pool of up to *requested* workers, borrowed from the budget.
+
+    Behaves like ``ThreadPoolExecutor(max_workers=requested)`` -- including as
+    a context manager -- except that it holds only the threads
+    :data:`THREAD_BUDGET` grants it (:attr:`granted_threads`), running tasks
+    inline when granted none. The grant is returned by the first ``shutdown``;
+    a caller that shuts down with ``wait=False`` therefore returns threads that
+    may still be finishing, a brief overshoot accepted on that (failure) path
+    only.
+    """
+
+    def __init__(self, requested: int, *, thread_name_prefix: str = "") -> None:
+        import threading
+
+        self.granted_threads = THREAD_BUDGET.grant(max(1, requested))
+        self._inner: Executor = (
+            ThreadPoolExecutor(
+                max_workers=self.granted_threads,
+                thread_name_prefix=thread_name_prefix,
+            )
+            if self.granted_threads
+            else InlineExecutor()
+        )
+        self._lock = threading.Lock()
+        self._released = False
+
+    def submit(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> Future[_T]:
+        return self._inner.submit(fn, *args, **kwargs)
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        self._inner.shutdown(wait=wait, cancel_futures=cancel_futures)
+        with self._lock:
+            if self._released:
+                return
+            self._released = True
+        THREAD_BUDGET.release(self.granted_threads)

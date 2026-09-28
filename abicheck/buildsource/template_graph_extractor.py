@@ -33,12 +33,12 @@ from __future__ import annotations
 import shutil
 import time
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING
 
 from .. import deadline
+from ..process_resources import BudgetedExecutor
 from .clang_ast_run import run_clang_ast_dump
 from .template_graph import (
     _FUNCTION_KIND,
@@ -178,7 +178,7 @@ class ClangTemplateGraphExtractor:
                     deadline.current_deadline_ts(),
                     _probe,
                 )
-                with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
+                with BudgetedExecutor(self.last_jobs) as pool:
                     for instantiations, local_diagnostics in pool.map(
                         pool_worker, units
                     ):

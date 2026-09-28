@@ -84,6 +84,7 @@ nav:
       - Packages & Multi-Library Products:
         - Debian Symbols Files: use/debian-symbols.md
         - Multi-Binary Releases: use/multi-binary.md
+        - Free-Threaded Python: use/free-threading.md
       - Applications & Consumers:
         - Application Compatibility: use/appcompat.md
         - API Surface Intelligence: use/api-surface-intelligence.md

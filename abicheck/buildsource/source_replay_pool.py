@@ -23,12 +23,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from typing import Any
 
 from .. import deadline
 from ..extract.progress import track
+from ..process_resources import BudgetedExecutor
 from .build_evidence import CompileUnit
 from .source_abi import SourceAbiTu
 
@@ -72,8 +73,12 @@ def _extract_cache_misses(
         )
         # Process pool parallelizes the GIL-bound AST post-processing too, not
         # just the clang subprocess wait (opt-in; see _l4_use_process_pool).
-        executor_cls = ProcessPoolExecutor if use_process_pool else ThreadPoolExecutor
-        executor_kwargs: dict[str, Any] = {"max_workers": jobs}
+        executor_cls = ProcessPoolExecutor if use_process_pool else BudgetedExecutor
+        executor_kwargs: dict[str, Any] = (
+            {"max_workers": jobs}
+            if executor_cls is ProcessPoolExecutor
+            else {"requested": jobs}
+        )
         if executor_cls is ProcessPoolExecutor:
             # A process-pool worker is a genuinely separate OS process, so it
             # never inherits the SIGTERM handler cli.main installed in the

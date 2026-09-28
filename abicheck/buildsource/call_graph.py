@@ -40,7 +40,6 @@ import os
 import shutil
 import time
 from collections.abc import Callable, Iterable, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
@@ -58,6 +57,7 @@ from ..model.graph_facts import (
 )
 from ..model.mangled_name import strip_macho_itanium_decoration
 from ..model.source_graph import function_decl_identity
+from ..process_resources import BudgetedExecutor
 from .adapters.base import source_from_argv
 from .call_decl_record import (
     _OVERRIDE_MARKER_KINDS,
@@ -1272,7 +1272,7 @@ class ClangCallGraphExtractor:
                     deadline.current_deadline_ts(),
                     _probe,
                 )
-                with ThreadPoolExecutor(max_workers=self.last_jobs) as pool:
+                with BudgetedExecutor(self.last_jobs) as pool:
                     done = pool.map(pool_worker, units)
                     for edges, local_diagnostics in track(
                         done, "call graph", len(units)

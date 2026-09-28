@@ -51,11 +51,11 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TypeVar
 
 from . import deadline
+from .process_resources import BudgetedExecutor
 
 _Item = TypeVar("_Item")
 _Result = TypeVar("_Result")
@@ -96,7 +96,7 @@ def run_parallel_probes(
         with deadline.with_deadline_ts(deadline_ts):
             return probe(item)
 
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
+    with BudgetedExecutor(jobs) as pool:
         return list(pool.map(_bound, items))
 
 

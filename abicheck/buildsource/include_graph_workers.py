@@ -35,7 +35,7 @@ import subprocess  # noqa: S404 - depfile probes shell out to clang (never shell
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
@@ -343,14 +343,22 @@ def run_probes(
 #: usefully -- one thread per CPU (a ``clang -M`` child is single-threaded),
 #: floored so a small runner still overlaps a few probes.
 def _shared_pool_size() -> int:
+    raw = os.environ.get(_JOBS_ENV_VAR, "").strip()
+    try:
+        requested = int(raw) if raw else 0
+    except ValueError:
+        requested = 0
+    if requested > 0:
+        # No point holding more threads than probes may run at once.
+        return min(requested, process_resources.jobs_ceiling())
     return process_resources.jobs_ceiling(floor=4, cpu_multiplier=1)
 
 
 _SHARED_POOL_LOCK = threading.Lock()
-_SHARED_POOL: ThreadPoolExecutor | None = None
+_SHARED_POOL: process_resources.BudgetedExecutor | None = None
 
 
-def _shared_pool() -> ThreadPoolExecutor:
+def _shared_pool() -> process_resources.BudgetedExecutor:
     """The one probe executor for the whole process, built on first use.
 
     Every :func:`run_probes` call used to build its own pool of
@@ -364,8 +372,10 @@ def _shared_pool() -> ThreadPoolExecutor:
     global _SHARED_POOL
     with _SHARED_POOL_LOCK:
         if _SHARED_POOL is None:
-            _SHARED_POOL = ThreadPoolExecutor(
-                max_workers=_shared_pool_size(), thread_name_prefix="abicheck-probe"
+            # Borrowed from the process-wide thread budget
+            # (``ABICHECK_MAX_THREADS``) for the life of the process.
+            _SHARED_POOL = process_resources.BudgetedExecutor(
+                _shared_pool_size(), thread_name_prefix="abicheck-probe"
             )
         return _SHARED_POOL
 
