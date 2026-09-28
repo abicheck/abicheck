@@ -1154,4 +1154,31 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "input_size": ("16", "256", "2048"),
         },
     ),
+    BugClass(
+        id="perf.narrowed_computation_must_equal_the_unnarrowed_answer",
+        invariant=(
+            "An index restricted to the ids a caller will look up, or a "
+            "memo keyed on the part of an input an answer depends on, must "
+            "return exactly what the unrestricted, uncached computation "
+            "would for every id or input it serves -- and every input that "
+            "can change the answer must be in the key (or own the cache's "
+            "lifetime). Tested against an independent oracle (the "
+            "pre-optimization code path) over generated inputs, with a "
+            "memo exercised by sequences that hit earlier entries, plus a "
+            "check that the narrowed path actually engaged."
+        ),
+        # #1409: graph reconciliation indexed ~18k nodes to look up ~25
+        # candidates; ownership classify re-derived per-path facts once per
+        # declaration. Both now narrowed; mutated keys/filters fail the tests.
+        fixed_by=(1409,),
+        seed_tests=(
+            "tests/test_graph_reconcile_candidate_index.py",
+            "tests/test_ownership_path_memo.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "narrowing": ("restricted-index", "per-owner-memo"),
+            "input": ("generated-graph", "generated-rules-and-sites"),
+        },
+    ),
 )
