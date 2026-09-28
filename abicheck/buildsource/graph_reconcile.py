@@ -101,8 +101,8 @@ narrower gap from the general outcome's reachability.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from collections.abc import Set as AbstractSet
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from abicheck.model.entity_identity import (

@@ -57,7 +57,11 @@ def _reference_classify(
 ) -> OwnershipDecision:
     """``classify`` as it was before the path memo (verbatim logic)."""
     parts = own._name_parts(site.qualified_name)
-    if site.artificial and len(parts) == 1 and parts[0].startswith(own._BUILTIN_PREFIXES):
+    if (
+        site.artificial
+        and len(parts) == 1
+        and parts[0].startswith(own._BUILTIN_PREFIXES)
+    ):
         return OwnershipDecision(OWNER_TOOLCHAIN, CONTRACT_EXTERNAL, "builtin")
     if not site.path:
         return OwnershipDecision(OWNER_UNRESOLVED, CONTRACT_UNRESOLVED, "no_file")
@@ -123,10 +127,19 @@ def _rules(draw: st.DrawFn) -> ResolvedOwnershipRules:
             target_roots=tuple(roots[:split]),
             dependencies=(DependencyRoots("dep", tuple(roots[split:])),),
             private_headers=tuple(
-                draw(st.lists(st.sampled_from(["*/detail/*", "src/*", "*.inl", "include/a.h"]), unique=True))
+                draw(
+                    st.lists(
+                        st.sampled_from(
+                            ["*/detail/*", "src/*", "*.inl", "include/a.h"]
+                        ),
+                        unique=True,
+                    )
+                )
             ),
             private_namespaces=tuple(
-                draw(st.lists(st.sampled_from(["ns::detail", "dep", "ns"]), unique=True))
+                draw(
+                    st.lists(st.sampled_from(["ns::detail", "dep", "ns"]), unique=True)
+                )
             ),
         ),
         "/p",

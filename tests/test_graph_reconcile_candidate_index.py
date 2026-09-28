@@ -54,7 +54,11 @@ def _graph_parts(draw: st.DrawFn) -> tuple[list[GraphNode], list[GraphEdge]]:
     ids = [n.id for n in nodes] + ["gone"]
     edges = []
     for _ in range(draw(st.integers(min_value=0, max_value=25))):
-        attrs = {"role": draw(st.sampled_from(["field", "base"]))} if draw(st.booleans()) else {}
+        attrs = (
+            {"role": draw(st.sampled_from(["field", "base"]))}
+            if draw(st.booleans())
+            else {}
+        )
         edges.append(
             GraphEdge(
                 src=draw(st.sampled_from(ids)),
@@ -103,7 +107,9 @@ def test_reconciliation_equals_whole_graph_index_reference(
     data: st.DataObject,
 ) -> None:
     old_g, new_g = _graph(*old), _graph(*new)
-    removed = data.draw(st.lists(st.sampled_from(old_g.nodes), unique_by=lambda n: n.id))
+    removed = data.draw(
+        st.lists(st.sampled_from(old_g.nodes), unique_by=lambda n: n.id)
+    )
     added = data.draw(st.lists(st.sampled_from(new_g.nodes), unique_by=lambda n: n.id))
 
     restricted = gr.reconcile_added_removed(removed, added, old_g, new_g).to_dict()
@@ -126,8 +132,12 @@ def test_restriction_engages_and_resolves_only_adjacent_identities(
     identities are resolved only for nodes adjacent to a requested id, and
     a changed request changes the answer's key set (the restriction is an
     input to the result, not ignored)."""
-    nodes = [GraphNode(id=f"n{i}", kind="source_decl", label=f"f{i}") for i in range(50)]
-    edges = [GraphEdge(src=f"n{i}", dst=f"n{i + 1}", kind="USES_TYPE") for i in range(49)]
+    nodes = [
+        GraphNode(id=f"n{i}", kind="source_decl", label=f"f{i}") for i in range(50)
+    ]
+    edges = [
+        GraphEdge(src=f"n{i}", dst=f"n{i + 1}", kind="USES_TYPE") for i in range(49)
+    ]
     graph = _graph(nodes, edges)
 
     resolved: list[str] = []
@@ -141,7 +151,9 @@ def test_restriction_engages_and_resolves_only_adjacent_identities(
     ctx = gr._all_structural_contexts(graph, {"n10"})
     assert set(ctx) == {"n10"}
     assert sorted(resolved) == ["n11", "n9"]
-    assert ctx["n10"] == frozenset({("in", "USES_TYPE", "source_decl:f9"), ("out", "USES_TYPE", "source_decl:f11")})
+    assert ctx["n10"] == frozenset(
+        {("in", "USES_TYPE", "source_decl:f9"), ("out", "USES_TYPE", "source_decl:f11")}
+    )
 
     resolved.clear()
     assert set(gr._all_structural_contexts(graph, {"n20", "n30"})) == {"n20", "n30"}
