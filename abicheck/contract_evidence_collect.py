@@ -109,6 +109,7 @@ from .export_surface import ExportSurface, observed_exports_by_platform
 from .model import AbiSnapshot, EnumType, Function, RecordType
 from .model.graph_entity_identity import SnapshotIdentities, snapshot_identities
 from .model.surface_facts import in_public_surface
+from .model.type_identifiers import type_identifiers as _type_identifiers
 from .policy.contract_graph_encoding import (
     alias_node as _alias_node,
     name_node as _name_node,
@@ -117,7 +118,6 @@ from .policy.public_surface import (
     PublicSurface,
     _index_surface_types,
     _symbol_keys,
-    _type_identifiers,
 )
 
 # --------------------------------------------------------------------------

@@ -22,9 +22,8 @@ from typing import Any
 import pytest
 
 from abicheck.buildsource import header_include_memo as memo_mod
-from abicheck.compare import surface_graph as compare_surface_graph
 from abicheck.name_classification import canonicalize_type_name
-from abicheck.policy import public_surface as policy_public_surface
+from abicheck.model import type_identifiers as ti_mod
 
 
 def _type_spellings(n: int, seed: int) -> list[str]:
@@ -66,9 +65,7 @@ class TestCanonicalizeTypeNameCache:
             assert canonicalize_type_name(s) == raw(s)
 
 
-@pytest.mark.parametrize(
-    "module", [compare_surface_graph, policy_public_surface], ids=["compare", "policy"]
-)
+@pytest.mark.parametrize("module", [ti_mod])
 class TestTypeIdentifiersCache:
     @staticmethod
     def _oracle(module: Any, type_str: str | None) -> set[str]:
@@ -76,8 +73,8 @@ class TestTypeIdentifiersCache:
         if not type_str:
             return set()
         out: set[str] = set()
-        for tok in module._IDENT_RE.findall(type_str):
-            if tok in module._TYPE_NOISE:
+        for tok in module.IDENT_RE.findall(type_str):
+            if tok in module.TYPE_NOISE:
                 continue
             out.add(tok)
             if "::" in tok:
@@ -86,18 +83,18 @@ class TestTypeIdentifiersCache:
 
     def test_matches_oracle(self, module: Any) -> None:
         for s in [None, "", *_type_spellings(300, 7)]:
-            assert module._type_identifiers(s) == self._oracle(module, s)
-            assert module._type_identifiers(s) == self._oracle(module, s)
+            assert module.type_identifiers(s) == self._oracle(module, s)
+            assert module.type_identifiers(s) == self._oracle(module, s)
 
     def test_mutating_a_result_does_not_poison_the_cache(self, module: Any) -> None:
         # Callers do `idents |= ...` on the returned set.
         spelling = "ns::Widget const *"
-        first = module._type_identifiers(spelling)
+        first = module.type_identifiers(spelling)
         expected = set(first)
         first |= {"Injected"}
         first.discard("Widget")
-        assert module._type_identifiers(spelling) == expected
-        assert module._type_identifiers(spelling) is not module._type_identifiers(
+        assert module.type_identifiers(spelling) == expected
+        assert module.type_identifiers(spelling) is not module.type_identifiers(
             spelling
         )
 

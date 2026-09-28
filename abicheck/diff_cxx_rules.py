@@ -405,100 +405,10 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
     """
     if not qualified:
         return None
-    marker = "::operator "
-    angle_depth = 0
-    paren_depth = 0
-    brace_depth = 0
-    bracket_depth = 0
-    i = 0
-    n = len(qualified)
-    marker_idx = -1
-    while i < n:
-        ch = qualified[i]
-        if ch == "{":
-            brace_depth += 1
-            i += 1
-            continue
-        if ch == "}":
-            brace_depth -= 1
-            if brace_depth < 0:
-                return None
-            i += 1
-            continue
-        if ch == "[":
-            bracket_depth += 1
-            i += 1
-            continue
-        if ch == "]":
-            bracket_depth -= 1
-            if bracket_depth < 0:
-                return None
-            i += 1
-            continue
-        if brace_depth > 0 or bracket_depth > 0:
-            # Opaque interior of a brace-delimited lambda body (a legal
-            # C++20 non-type template argument, e.g. "B<[]{ return N > M;
-            # }>") or a bracketed subscript expression (e.g. "B<A[N >
-            # M]>", confirmed to compile: a ">" nested inside "[...]" is
-            # unambiguous to the parser -- "]", not ">", closes the
-            # subscript, so it carries none of the top-level
-            # template-argument ambiguity a bare ">" would). Both are a
-            # full expression/statement grammar unrelated to the
-            # enclosing template-argument-list's own bracket balance. See
-            # this function's own docstring for why braces/brackets need
-            # no whitespace heuristic, unlike angle brackets.
-            i += 1
-            continue
-        if ch == ">" and i > 0 and qualified[i - 1] == "-":
-            # A lambda's trailing-return-type arrow ("[]() -> bool {...}",
-            # confirmed to compile as a non-type template argument and be
-            # pretty-printed verbatim) -- unlike the other ">" cases, this
-            # needs no heuristic or brace/bracket-depth awareness at all:
-            # by the C++ lexical grammar's own maximal-munch rule, a "-"
-            # character immediately adjacent to a ">" can ONLY ever
-            # tokenize as the single "->" token, never as two separate
-            # "-" and ">" tokens -- if the source meant a subtraction
-            # immediately followed by a separate closing ">" with zero
-            # characters between them, the compiler's own lexer would
-            # already have misread THAT as "->" too, so this adjacency
-            # cannot represent two separate tokens in any valid, compiled
-            # C++ program (Codex review, fresh evidence).
-            i += 1
-            continue
-        if ch in "<>" and _operator_keyword_precedes(qualified, i):
-            tok_len = _operator_angle_token_len(qualified, i)
-            if tok_len:
-                i += tok_len
-                continue
-        if ch == "<":
-            lt_tok_len = _less_than_led_operator_token_len(qualified, i)
-            if lt_tok_len:
-                i += lt_tok_len
-                continue
-        if ch == "(":
-            paren_depth += 1
-        elif ch == ")":
-            paren_depth -= 1
-            if paren_depth < 0:
-                return None
-        elif (
-            ch == "<" and paren_depth == 0 and _is_template_opening_angle(qualified, i)
-        ):
-            angle_depth += 1
-        elif ch == ">" and paren_depth == 0:
-            angle_depth -= 1
-            if angle_depth < 0:
-                return None
-        elif (
-            angle_depth == 0
-            and paren_depth == 0
-            and marker_idx == -1
-            and qualified[i : i + len(marker)] == marker
-        ):
-            marker_idx = i
-        i += 1
-    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0 or bracket_depth != 0:
+    colons = _top_level_colon_positions(qualified)
+    if colons is None:
         return None
+    marker_idx = _conversion_operator_marker_index(qualified, colons)
     if marker_idx != -1:
         head = qualified[:marker_idx]
         leaf = qualified[marker_idx + 2 :]  # keep the "operator ..." target whole
@@ -514,76 +424,149 @@ def qualified_name_scope_components(qualified: str) -> list[str] | None:
         # There is no scope to substitute here regardless, so treat the
         # whole thing as one leaf rather than guessing at a split.
         return [qualified]
-    comps: list[str] = []
-    angle_depth = 0
-    paren_depth = 0
-    brace_depth = 0
-    bracket_depth = 0
-    start = 0
+    return _split_at_top_level_separators(qualified, colons)
+
+
+_CONVERSION_OPERATOR_MARKER = "::operator "
+
+
+class _ScopeDepths:
+    """The four independent nesting counters
+    :func:`qualified_name_scope_components` tracks (see its docstring for
+    why each bracket kind is counted separately)."""
+
+    __slots__ = ("angle", "paren", "brace", "bracket")
+
+    def __init__(self) -> None:
+        self.angle = 0
+        self.paren = 0
+        self.brace = 0
+        self.bracket = 0
+
+    def balanced(self) -> bool:
+        return (
+            self.angle == 0
+            and self.paren == 0
+            and self.brace == 0
+            and self.bracket == 0
+        )
+
+
+def _step_opaque_delimiter(depths: _ScopeDepths, ch: str) -> bool | None:
+    """Handle a brace/bracket character, or a character inside an opaque
+    brace/bracket interior (a lambda body or subscript expression -- see
+    :func:`qualified_name_scope_components`'s docstring).
+
+    Returns ``True`` when ``ch`` was consumed here, ``False`` when the
+    caller should keep classifying it, ``None`` on an unbalanced close.
+    """
+    if ch == "{":
+        depths.brace += 1
+    elif ch == "}":
+        depths.brace -= 1
+        if depths.brace < 0:
+            return None
+    elif ch == "[":
+        depths.bracket += 1
+    elif ch == "]":
+        depths.bracket -= 1
+        if depths.bracket < 0:
+            return None
+    else:
+        return depths.brace > 0 or depths.bracket > 0
+    return True
+
+
+def _operator_token_skip(qualified: str, i: int) -> int:
+    """Width of a multi-character token at ``i`` that must be skipped whole
+    rather than counted as angle nesting: a lambda trailing-return arrow's
+    ``>`` (maximal munch makes ``->`` unambiguous), an ``operator<``-family
+    name, or any ``<``-led operator token. ``0`` when none applies."""
+    ch = qualified[i]
+    if ch == ">" and i > 0 and qualified[i - 1] == "-":
+        return 1
+    if ch in "<>" and _operator_keyword_precedes(qualified, i):
+        tok_len = _operator_angle_token_len(qualified, i)
+        if tok_len:
+            return tok_len
+    if ch == "<":
+        return _less_than_led_operator_token_len(qualified, i)
+    return 0
+
+
+def _step_angle_paren(depths: _ScopeDepths, qualified: str, i: int) -> bool | None:
+    """Update the paren/angle counters for ``qualified[i]``.
+
+    Returns ``True`` when ``i`` is a top-level (angle and paren depth 0)
+    position not itself a delimiter, ``False`` otherwise, ``None`` on an
+    unbalanced close."""
+    ch = qualified[i]
+    if ch == "(":
+        depths.paren += 1
+    elif ch == ")":
+        depths.paren -= 1
+        if depths.paren < 0:
+            return None
+    elif ch == "<" and depths.paren == 0 and _is_template_opening_angle(qualified, i):
+        depths.angle += 1
+    elif ch == ">" and depths.paren == 0:
+        depths.angle -= 1
+        if depths.angle < 0:
+            return None
+    else:
+        return depths.angle == 0 and depths.paren == 0
+    return False
+
+
+def _top_level_colon_positions(qualified: str) -> list[int] | None:
+    """Every index of a ``:`` at top-level nesting (outside any template
+    argument list, paren group, lambda body or subscript), or ``None`` when
+    the whole string's nesting is unbalanced. The single depth scan shared
+    by the conversion-operator marker search and the scope split."""
+    depths = _ScopeDepths()
+    colons: list[int] = []
     i = 0
+    n = len(qualified)
     while i < n:
-        ch = qualified[i]
-        if ch == "{":
-            brace_depth += 1
+        opaque = _step_opaque_delimiter(depths, qualified[i])
+        if opaque is None:
+            return None
+        if opaque:
             i += 1
             continue
-        if ch == "}":
-            brace_depth -= 1
-            if brace_depth < 0:
-                return None
-            i += 1
+        skip = _operator_token_skip(qualified, i)
+        if skip:
+            i += skip
             continue
-        if ch == "[":
-            bracket_depth += 1
-            i += 1
-            continue
-        if ch == "]":
-            bracket_depth -= 1
-            if bracket_depth < 0:
-                return None
-            i += 1
-            continue
-        if brace_depth > 0 or bracket_depth > 0:
-            i += 1
-            continue
-        if ch == ">" and i > 0 and qualified[i - 1] == "-":
-            # A lambda's trailing-return-type arrow -- see this function's
-            # own docstring / the sibling scan above for why this needs
-            # no heuristic at all.
-            i += 1
-            continue
-        if ch in "<>" and _operator_keyword_precedes(qualified, i):
-            tok_len = _operator_angle_token_len(qualified, i)
-            if tok_len:
-                i += tok_len
-                continue
-        if ch == "<":
-            lt_tok_len = _less_than_led_operator_token_len(qualified, i)
-            if lt_tok_len:
-                i += lt_tok_len
-                continue
-        if ch == "(":
-            paren_depth += 1
-        elif ch == ")":
-            paren_depth -= 1
-            if paren_depth < 0:
-                return None
-        elif (
-            ch == "<" and paren_depth == 0 and _is_template_opening_angle(qualified, i)
-        ):
-            angle_depth += 1
-        elif ch == ">" and paren_depth == 0:
-            angle_depth -= 1
-            if angle_depth < 0:
-                return None
-        elif angle_depth == 0 and paren_depth == 0 and qualified[i : i + 2] == "::":
-            comps.append(qualified[start:i])
-            i += 2
-            start = i
-            continue
+        top = _step_angle_paren(depths, qualified, i)
+        if top is None:
+            return None
+        if top and qualified[i] == ":":
+            colons.append(i)
         i += 1
-    if angle_depth != 0 or paren_depth != 0 or brace_depth != 0 or bracket_depth != 0:
-        return None
+    return colons if depths.balanced() else None
+
+
+def _conversion_operator_marker_index(qualified: str, colons: list[int]) -> int:
+    """First top-level ``"::operator "`` marker position, or ``-1``."""
+    for i in colons:
+        if qualified.startswith(_CONVERSION_OPERATOR_MARKER, i):
+            return i
+    return -1
+
+
+def _split_at_top_level_separators(
+    qualified: str, colons: list[int]
+) -> list[str] | None:
+    """Split at top-level ``"::"`` separators, scanning left to right and
+    never letting one separator overlap the previous one; ``None`` when any
+    resulting component is empty."""
+    comps: list[str] = []
+    start = 0
+    for i in colons:
+        if i >= start and qualified.startswith("::", i):
+            comps.append(qualified[start:i])
+            start = i + 2
     comps.append(qualified[start:])
     if any(not c for c in comps):
         return None
@@ -629,57 +612,66 @@ def strip_trailing_top_level_parameter_list(text: str) -> str:
     template opener via :func:`_is_template_opening_angle`'s spacing signal,
     the same one :func:`qualified_name_scope_components` uses.
     """
-    depth = 0
-    paren_depth = 0
-    brace_depth = 0
-    bracket_depth = 0
+    depths = _ScopeDepths()
     i = 0
     n = len(text)
     while i < n:
-        ch = text[i]
-        if ch == "{":
-            brace_depth += 1
+        if _step_clamped_opaque_delimiter(depths, text[i]):
             i += 1
             continue
-        if ch == "}":
-            brace_depth = max(0, brace_depth - 1)
-            i += 1
+        skip = _trailing_param_scan_token_skip(text, i)
+        if skip:
+            i += skip
             continue
-        if ch == "[":
-            bracket_depth += 1
-            i += 1
-            continue
-        if ch == "]":
-            bracket_depth = max(0, bracket_depth - 1)
-            i += 1
-            continue
-        if brace_depth > 0 or bracket_depth > 0:
-            # Opaque lambda-body/subscript interior -- see
-            # qualified_name_scope_components's identical concern.
-            i += 1
-            continue
-        if ch == ">" and i > 0 and text[i - 1] == "-":
-            # A lambda's trailing-return-type arrow -- see
-            # qualified_name_scope_components's identical concern.
-            i += 1
-            continue
-        if ch == "<":
-            lt_tok_len = _less_than_led_operator_token_len(text, i)
-            if lt_tok_len:
-                i += lt_tok_len
-                continue
-        if ch == "(":
-            if depth == 0 and paren_depth == 0:
-                return text[:i]
-            paren_depth += 1
-        elif ch == ")":
-            paren_depth = max(0, paren_depth - 1)
-        elif ch == "<" and paren_depth == 0 and _is_template_opening_angle(text, i):
-            depth += 1
-        elif ch == ">" and paren_depth == 0:
-            depth = max(0, depth - 1)
+        if text[i] == "(" and depths.angle == 0 and depths.paren == 0:
+            return text[:i]
+        _step_clamped_angle_paren(depths, text, i)
         i += 1
     return text
+
+
+def _step_clamped_opaque_delimiter(depths: _ScopeDepths, ch: str) -> bool:
+    """Brace/bracket handling for :func:`strip_trailing_top_level_parameter_list`:
+    like :func:`_step_opaque_delimiter`, but an unbalanced close clamps at
+    zero instead of rejecting (that function never fails, it only declines
+    to strip). ``True`` when ``ch`` was consumed."""
+    if ch == "{":
+        depths.brace += 1
+    elif ch == "}":
+        depths.brace = max(0, depths.brace - 1)
+    elif ch == "[":
+        depths.bracket += 1
+    elif ch == "]":
+        depths.bracket = max(0, depths.bracket - 1)
+    else:
+        return depths.brace > 0 or depths.bracket > 0
+    return True
+
+
+def _trailing_param_scan_token_skip(text: str, i: int) -> int:
+    """Token skip for :func:`strip_trailing_top_level_parameter_list`: the
+    lambda trailing-return arrow and ``<``-led operator tokens only (no
+    ``operator``-keyword check, unlike :func:`_operator_token_skip`)."""
+    ch = text[i]
+    if ch == ">" and i > 0 and text[i - 1] == "-":
+        return 1
+    if ch == "<":
+        return _less_than_led_operator_token_len(text, i)
+    return 0
+
+
+def _step_clamped_angle_paren(depths: _ScopeDepths, text: str, i: int) -> None:
+    """Paren/angle counters for :func:`strip_trailing_top_level_parameter_list`,
+    clamping at zero on an unbalanced close."""
+    ch = text[i]
+    if ch == "(":
+        depths.paren += 1
+    elif ch == ")":
+        depths.paren = max(0, depths.paren - 1)
+    elif ch == "<" and depths.paren == 0 and _is_template_opening_angle(text, i):
+        depths.angle += 1
+    elif ch == ">" and depths.paren == 0:
+        depths.angle = max(0, depths.angle - 1)
 
 
 def owner_class_of(f: Function) -> str | None:

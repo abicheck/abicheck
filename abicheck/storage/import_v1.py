@@ -590,6 +590,14 @@ def export_legacy_sections(
             )
             continue
         document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
+        if section_kind == SEMANTIC_IR_SECTION_KIND:
+            # The current-version payload decodes directly: the frozen DTO
+            # `semantic_ir_from_dto` would build is a copy it only reads.
+            current_ir = current_section_payload(raw)
+            if current_ir is not None and current_ir[0] == section_kind:
+                ir, conflicts = semantic_ir_from_document(current_ir[1])
+                document.update(semantic_ir_to_document(ir, conflicts))
+                continue
         current = current_section_payload(raw) if document_codec is not None else None
         if (
             document_codec is not None

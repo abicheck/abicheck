@@ -1279,7 +1279,7 @@ class TestUnresolvedTypeEdges:
         self, spelling, expected
     ) -> None:
         from abicheck.export_surface import _dependent_spans, _is_dependent_token
-        from abicheck.surface import _IDENT_RE
+        from abicheck.model.type_identifiers import IDENT_RE as _IDENT_RE
 
         spans = _dependent_spans(spelling)
         kept = sorted(

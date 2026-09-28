@@ -51,6 +51,7 @@ from .classification import (
     excluded_from_verdict_as_persistent_hygiene,
     policy_kind_sets,
 )
+from .reclassify import reclassify_rules_for_kind
 
 if TYPE_CHECKING:
     from ..checker_types import Change
@@ -126,6 +127,8 @@ def policy_governs(change: Change, policy_file: PolicyFile | None) -> bool:
         return False
     if change.kind in (getattr(policy_file, "overrides", {}) or {}):
         return True
+    rules = getattr(policy_file, "reclassify", ()) or ()
     return any(
-        rule.matches(change) for rule in (getattr(policy_file, "reclassify", ()) or ())
+        rule.matches(change)
+        for rule in reclassify_rules_for_kind(rules, change.kind.value)
     )

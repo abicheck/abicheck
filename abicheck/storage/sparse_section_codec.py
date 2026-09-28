@@ -79,7 +79,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, ClassVar, TypeVar
 
-from .canonical import canonical_form_unless_trusted
+from .canonical import canonical_form_unless_trusted, canonical_input_is_trusted
 
 __all__ = [
     "BinarySection",
@@ -283,6 +283,54 @@ class _SparseSectionMixin:
         }
         doc.update(_unfreeze(self.extra))
         return doc
+
+    @classmethod
+    def from_document(cls, payload: Mapping[str, Any]) -> Any:
+        """Every concrete section overrides this with its own constructor
+        from a payload; declared here so the mixin can name it."""
+        raise NotImplementedError
+
+    @classmethod
+    def document_from_owned(cls, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """``cls.from_document(payload).to_document()`` for a payload that is
+        already `canonical_form`'s own output and exclusively owned by the
+        caller (the `canonical_input_trusted` precondition, honoured only
+        inside it -- `GraphSection.document_from_owned` is the same idea).
+
+        Runs the identical validation (allowlist split, then every required
+        and optional field's shape check, in the constructor's order) and
+        returns the document `to_document` would -- required fields first,
+        then the rest in payload order -- without the freeze-then-thaw deep
+        copy, which for a plain ``dict``/``list``/scalar tree is an identity.
+        Loading a stored baseline decoded every sparse section that way just
+        to hand the same values back.
+        """
+        if not canonical_input_is_trusted():
+            full: dict[str, Any] = cls.from_document(payload).to_document()
+            return full
+        return cls.validated_document(payload)
+
+    @classmethod
+    def validated_document(cls, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """``cls.from_document(payload).to_document()`` up to
+        `canonical_form`: the same validation and key order, with the
+        payload's own values uncopied. For a caller that canonicalizes (and
+        so copies) the result next anyway -- `storage.dto.section_dto_dict`
+        on the write path -- the codec's own canonicalize-freeze-thaw was a
+        redundant second pass (`GraphSection.validated_document` is the
+        same idea)."""
+        required, extra = cls._split_document(payload)
+        for name, value in required.items():
+            shape = cls.REQUIRED_FIELD_SHAPES.get(name)
+            if shape is not None:
+                _check_field_shape(cls.SECTION_KIND, name, value, shape)
+        for name, value in extra.items():
+            shape = cls.OPTIONAL_FIELD_SHAPES.get(name)
+            if shape is not None:
+                _check_field_shape(cls.SECTION_KIND, name, value, shape)
+        document = dict(required)
+        document.update(extra)
+        return document
 
     @classmethod
     def _split_document(

@@ -111,6 +111,7 @@ from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.edge_coverage import EdgeAnswer
 from ..model.graph_join import EDGE_KIND_EXPORTS
 from ..model.surface_facts import in_public_surface
+from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..model.vocabulary import ScopeOrigin
 from .public_surface import (
     _DEMOTE_ORIGINS,
@@ -119,7 +120,6 @@ from .public_surface import (
     _is_real_type,
     _record_origin,
     _symbol_keys,
-    _type_identifiers,
 )
 
 if TYPE_CHECKING:
