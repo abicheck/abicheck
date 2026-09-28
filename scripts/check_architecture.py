@@ -997,45 +997,117 @@ def _check_facade(path: Path, name: str, limit: int, findings: list[Finding]) ->
             )
 
 
-def check_repository(root: Path, *, base_revision: str | None = None) -> list[Finding]:
-    """Return all ADR-061 violations below ``root``."""
-    findings: list[Finding] = []
-    modules = _load_mapping(root / "architecture/modules.yaml", findings)
-    debt = _load_mapping(root / "architecture/debt.yaml", findings)
-    dispositions_config = _load_mapping(
-        root / "architecture/dispositions.yaml", findings
-    )
-    layers = _validate_modules(modules, findings)
-    disposition_paths = _validate_dispositions(
-        dispositions_config, layers, findings, root
-    )
-    _check_selector_leaf_purity(root, findings)
-    limits = modules.get("limits", {})
-    production_limit = (
-        limits.get("production", 800) if isinstance(limits, dict) else 800
-    )
-    test_limit = limits.get("test", 1200) if isinstance(limits, dict) else 1200
-    package_agents_limit = (
-        limits.get("package_agents", 150) if isinstance(limits, dict) else 150
-    )
-    if not isinstance(production_limit, int) or production_limit <= 0:
-        findings.append(
-            Finding("schema", "limits.production must be a positive integer")
-        )
-        production_limit = 800
-    if not isinstance(test_limit, int) or test_limit <= 0:
-        findings.append(Finding("schema", "limits.test must be a positive integer"))
-        test_limit = 1200
-    if not isinstance(package_agents_limit, int) or package_agents_limit <= 0:
-        findings.append(
-            Finding("schema", "limits.package_agents must be a positive integer")
-        )
-        package_agents_limit = 150
-    baselines = _validate_debt(debt, production_limit, test_limit, findings)
-    dependency_direction_exceptions = _validate_dependency_direction_exceptions(
-        debt, layers, findings
-    )
+def _positive_int_limit(
+    limits: object, key: str, default: int, findings: list[Finding]
+) -> int:
+    """Read ``limits.<key>``, reporting and defaulting a non-positive value."""
+    value = limits.get(key, default) if isinstance(limits, dict) else default
+    if not isinstance(value, int) or value <= 0:
+        findings.append(Finding("schema", f"limits.{key} must be a positive integer"))
+        return default
+    return value
 
+
+def _debt_base_lines(
+    root: Path,
+    relative: str,
+    base_revision: str | None,
+    adopting_contract: bool,
+    pending_renames: dict[str, str],
+    base_debt_tracked_paths: frozenset[str],
+) -> int | None:
+    """Return the PR-base line count for a debt-tracked file, following renames."""
+    base_lines = (
+        _git_file_line_count(root, base_revision, relative)
+        if base_revision and not adopting_contract
+        else None
+    )
+    if (
+        base_revision
+        and base_lines is None
+        and relative in pending_renames
+        and pending_renames[relative] in base_debt_tracked_paths
+    ):
+        # Not a new file -- git itself recognizes this path as a rename,
+        # *and* the renamed-from path was itself a genuinely debt-tracked
+        # file at the base revision (not just any git-detected rename
+        # source -- see _base_debt_tracked_paths's own docstring for why
+        # that second check matters). Compare against its own baseline
+        # content instead of treating this as a from-scratch addition.
+        base_lines = _git_file_line_count(
+            root, base_revision, pending_renames[relative]
+        )
+    return base_lines
+
+
+def _check_debt_entry(
+    root: Path,
+    relative: str,
+    baseline: int,
+    base_revision: str | None,
+    base_has_contract: bool | None,
+    adopting_contract: bool,
+    exception_roots: list[str],
+    pending_renames: dict[str, str],
+    base_debt_tracked_paths: frozenset[str],
+    findings: list[Finding],
+) -> None:
+    """Check one adoption-debt entry against its baseline and the PR base."""
+    path = root / relative
+    if not path.is_file():
+        findings.append(
+            Finding(
+                "debt-path",
+                f"{relative}: debt entry names a missing file; remove the retired entry",
+            )
+        )
+        return
+    lines = _line_count(path)
+    base_lines = _debt_base_lines(
+        root,
+        relative,
+        base_revision,
+        adopting_contract,
+        pending_renames,
+        base_debt_tracked_paths,
+    )
+    if (
+        base_revision
+        and base_has_contract
+        and base_lines is None
+        and not any(
+            relative == prefix or relative.startswith(prefix.rstrip("/") + "/")
+            for prefix in exception_roots
+        )
+    ):
+        findings.append(
+            Finding(
+                "debt-exemption",
+                f"{relative}: new ordinary files cannot be added to the adoption debt ledger",
+            )
+        )
+    if (
+        lines > baseline
+        and not adopting_contract
+        and (base_lines is None or lines > base_lines)
+    ):
+        comparison = f" and PR base {base_lines}" if base_lines is not None else ""
+        findings.append(
+            Finding(
+                "debt-no-growth",
+                f"{relative}: {lines} lines exceeds adoption baseline {baseline}{comparison}; move responsibility instead of raising the baseline",
+            )
+        )
+
+
+def _check_debt_baselines(
+    root: Path,
+    modules: dict[str, Any],
+    baselines: dict[str, int],
+    base_revision: str | None,
+    findings: list[Finding],
+) -> None:
+    """Check the adoption debt ledger's no-growth and no-new-entry rules."""
     base_has_contract = (
         _base_has_architecture_contract(root, base_revision) if base_revision else None
     )
@@ -1063,64 +1135,28 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         else frozenset()
     )
     for relative, baseline in baselines.items():
-        path = root / relative
-        if not path.is_file():
-            findings.append(
-                Finding(
-                    "debt-path",
-                    f"{relative}: debt entry names a missing file; remove the retired entry",
-                )
-            )
-            continue
-        lines = _line_count(path)
-        base_lines = (
-            _git_file_line_count(root, base_revision, relative)
-            if base_revision and not adopting_contract
-            else None
+        _check_debt_entry(
+            root,
+            relative,
+            baseline,
+            base_revision,
+            base_has_contract,
+            adopting_contract,
+            exception_roots,
+            pending_renames,
+            base_debt_tracked_paths,
+            findings,
         )
-        if (
-            base_revision
-            and base_lines is None
-            and relative in pending_renames
-            and pending_renames[relative] in base_debt_tracked_paths
-        ):
-            # Not a new file -- git itself recognizes this path as a rename,
-            # *and* the renamed-from path was itself a genuinely debt-tracked
-            # file at the base revision (not just any git-detected rename
-            # source -- see _base_debt_tracked_paths's own docstring for why
-            # that second check matters). Compare against its own baseline
-            # content instead of treating this as a from-scratch addition.
-            base_lines = _git_file_line_count(
-                root, base_revision, pending_renames[relative]
-            )
-        if (
-            base_revision
-            and base_has_contract
-            and base_lines is None
-            and not any(
-                relative == prefix or relative.startswith(prefix.rstrip("/") + "/")
-                for prefix in exception_roots
-            )
-        ):
-            findings.append(
-                Finding(
-                    "debt-exemption",
-                    f"{relative}: new ordinary files cannot be added to the adoption debt ledger",
-                )
-            )
-        if (
-            lines > baseline
-            and not adopting_contract
-            and (base_lines is None or lines > base_lines)
-        ):
-            comparison = f" and PR base {base_lines}" if base_lines is not None else ""
-            findings.append(
-                Finding(
-                    "debt-no-growth",
-                    f"{relative}: {lines} lines exceeds adoption baseline {baseline}{comparison}; move responsibility instead of raising the baseline",
-                )
-            )
 
+
+def _check_new_file_sizes(
+    root: Path,
+    baselines: dict[str, int],
+    production_limit: int,
+    test_limit: int,
+    findings: list[Finding],
+) -> None:
+    """Flag production/test files over their limit with no debt entry."""
     for path in sorted((root / "abicheck").rglob("*.py")):
         relative = path.relative_to(root).as_posix()
         lines = _line_count(path)
@@ -1144,28 +1180,40 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                     )
                 )
 
+
+def _check_frozen_root_families(
+    root: Path, modules: dict[str, Any], findings: list[Finding]
+) -> None:
+    """Forbid new root siblings of a frozen prefix family."""
     families = modules.get("frozen_root_families", {})
-    if isinstance(families, dict):
-        for prefix, allowed_raw in families.items():
-            allowed = set(
-                _string_list(allowed_raw, f"frozen_root_families.{prefix}", findings)
+    if not isinstance(families, dict):
+        return
+    for prefix, allowed_raw in families.items():
+        allowed = set(
+            _string_list(allowed_raw, f"frozen_root_families.{prefix}", findings)
+        )
+        if not isinstance(prefix, str) or not prefix:
+            findings.append(
+                Finding("schema", "frozen_root_families keys must be non-empty strings")
             )
-            if not isinstance(prefix, str) or not prefix:
+            continue
+        for path in sorted((root / "abicheck").glob(f"{prefix}*.py")):
+            if path.name not in allowed:
                 findings.append(
                     Finding(
-                        "schema", "frozen_root_families keys must be non-empty strings"
+                        "frozen-root-family",
+                        f"{path.relative_to(root)}: new root {prefix!r} sibling is forbidden; create the responsibility package owner",
                     )
                 )
-                continue
-            for path in sorted((root / "abicheck").glob(f"{prefix}*.py")):
-                if path.name not in allowed:
-                    findings.append(
-                        Finding(
-                            "frozen-root-family",
-                            f"{path.relative_to(root)}: new root {prefix!r} sibling is forbidden; create the responsibility package owner",
-                        )
-                    )
 
+
+def _check_root_modules(
+    root: Path,
+    modules: dict[str, Any],
+    layers: dict[str, dict[str, Any]],
+    findings: list[Finding],
+) -> None:
+    """Flag undeclared flat root modules."""
     public_root_files = {
         module.removeprefix("abicheck.").replace(".", "/") + ".py"
         for module in _string_list(
@@ -1202,14 +1250,24 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                 )
             )
 
-    # ADR-061 gap F / definition-of-done item 16: a flat root module with no
-    # owning layer must carry one of the three recorded dispositions
-    # (migrate/retain/accept) in architecture/dispositions.yaml. Scoped to
-    # root files only (mirroring the "root-module"/"frozen-root-family"
-    # checks above) -- a module physically under a responsibility package's
-    # own directory, or classified via a layer's legacy_paths, already has an
-    # owner and is not this check's concern. "Unclassified for now" is not a
-    # valid disposition; the schema has no such value.
+
+def _check_root_dispositions(
+    root: Path,
+    layers: dict[str, dict[str, Any]],
+    disposition_paths: set[str],
+    findings: list[Finding],
+) -> None:
+    """Require a recorded disposition for every unowned flat root module.
+
+    ADR-061 gap F / definition-of-done item 16: a flat root module with no
+    owning layer must carry one of the three recorded dispositions
+    (migrate/retain/accept) in architecture/dispositions.yaml. Scoped to
+    root files only (mirroring the "root-module"/"frozen-root-family"
+    checks) -- a module physically under a responsibility package's own
+    directory, or classified via a layer's legacy_paths, already has an
+    owner and is not this check's concern. "Unclassified for now" is not a
+    valid disposition; the schema has no such value.
+    """
     for path in sorted((root / "abicheck").glob("*.py")):
         if path.name == "__init__.py":
             continue
@@ -1225,6 +1283,15 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                 )
             )
 
+
+def _check_root_packages(
+    root: Path,
+    modules: dict[str, Any],
+    layers: dict[str, dict[str, Any]],
+    package_agents_limit: int,
+    findings: list[Finding],
+) -> None:
+    """Check package collisions, undeclared root packages, and AGENTS.md size."""
     legacy_dirs = set(
         _string_list(
             modules.get("legacy_root_directories", []),
@@ -1268,6 +1335,11 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                 )
             )
 
+
+def _check_generic_module_names(
+    root: Path, modules: dict[str, Any], findings: list[Finding]
+) -> None:
+    """Flag modules whose name names no stable responsibility."""
     legacy_generic = set(
         _string_list(
             modules.get("legacy_generic_modules", []),
@@ -1287,6 +1359,91 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                 )
             )
 
+
+def _is_dependency_exempt(
+    relative_path: str, target: str, exceptions: set[tuple[str, str]]
+) -> bool:
+    """Whether an import edge is a reviewed dependency-direction exception."""
+    return (relative_path, target) in exceptions or any(
+        relative_path == exc_path
+        and (target == exc_target or target.startswith(exc_target + "."))
+        for exc_path, exc_target in exceptions
+    )
+
+
+def _check_module_imports(
+    root: Path,
+    path: Path,
+    source_layer: str,
+    layers: dict[str, dict[str, Any]],
+    public_roots: set[str],
+    dependency_direction_exceptions: set[tuple[str, str]],
+    graph: dict[str, set[str]],
+    findings: list[Finding],
+) -> None:
+    """Check one module's first-party imports against its layer's rules."""
+    module = _module_name(root, path)
+    owner_path = layers[source_layer]["path"]
+    migrated_source = (
+        path.relative_to(root).as_posix().startswith(owner_path.rstrip("/") + "/")
+    )
+    agents = root / owner_path / "AGENTS.md"
+    if migrated_source and not agents.is_file():
+        findings.append(
+            Finding(
+                "scoped-instructions",
+                f"{layers[source_layer]['path']}/: migrated package requires AGENTS.md",
+            )
+        )
+    for lineno, target in _imports(path, module, findings):
+        if target != "abicheck" and not target.startswith("abicheck."):
+            continue
+        target_layer = _layer_for(target, root, layers)
+        if target_layer == source_layer:
+            continue
+        if target_layer is None:
+            if migrated_source and not any(
+                target == surface or target.startswith(surface + ".")
+                for surface in public_roots
+            ):
+                findings.append(
+                    Finding(
+                        "unclassified-import",
+                        f"{path.relative_to(root)}:{lineno}: migrated layer {source_layer!r} imports unclassified first-party module {target!r}",
+                    )
+                )
+            continue
+        allowed = set(layers[source_layer]["may_import"])
+        if target_layer not in allowed:
+            if _is_dependency_exempt(
+                path.relative_to(root).as_posix(),
+                target,
+                dependency_direction_exceptions,
+            ):
+                # ADR-061 gap A: a real, reviewed exception
+                # (architecture/debt.yaml's dependency_direction_exceptions)
+                # -- the edge is visible and legal-looking but its
+                # direction stays accepted debt, not silently legal, so
+                # it contributes to neither this finding nor the
+                # responsibility-cycle graph below.
+                continue
+            findings.append(
+                Finding(
+                    "dependency-direction",
+                    f"{path.relative_to(root)}:{lineno}: {source_layer} -> {target_layer} is forbidden; allowed: {', '.join(sorted(allowed)) or '(none)'}",
+                )
+            )
+        graph[source_layer].add(target_layer)
+
+
+def _check_dependency_graph(
+    root: Path,
+    modules: dict[str, Any],
+    layers: dict[str, dict[str, Any]],
+    dependency_direction_exceptions: set[tuple[str, str]],
+    findings: list[Finding],
+) -> None:
+    """Check layer import direction and report any responsibility cycle."""
     public_roots = set(
         _string_list(
             modules.get("public_root_surfaces", []), "public_root_surfaces", findings
@@ -1294,66 +1451,19 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
     )
     graph: dict[str, set[str]] = {name: set() for name in layers}
     for path in sorted((root / "abicheck").rglob("*.py")):
-        module = _module_name(root, path)
         source_layer = _source_layer_for(path, root, layers)
         if source_layer is None:
             continue
-        owner_path = layers[source_layer]["path"]
-        migrated_source = (
-            path.relative_to(root).as_posix().startswith(owner_path.rstrip("/") + "/")
+        _check_module_imports(
+            root,
+            path,
+            source_layer,
+            layers,
+            public_roots,
+            dependency_direction_exceptions,
+            graph,
+            findings,
         )
-        agents = root / owner_path / "AGENTS.md"
-        if migrated_source and not agents.is_file():
-            findings.append(
-                Finding(
-                    "scoped-instructions",
-                    f"{layers[source_layer]['path']}/: migrated package requires AGENTS.md",
-                )
-            )
-        for lineno, target in _imports(path, module, findings):
-            if target != "abicheck" and not target.startswith("abicheck."):
-                continue
-            target_layer = _layer_for(target, root, layers)
-            if target_layer == source_layer:
-                continue
-            if target_layer is None:
-                if migrated_source and not any(
-                    target == surface or target.startswith(surface + ".")
-                    for surface in public_roots
-                ):
-                    findings.append(
-                        Finding(
-                            "unclassified-import",
-                            f"{path.relative_to(root)}:{lineno}: migrated layer {source_layer!r} imports unclassified first-party module {target!r}",
-                        )
-                    )
-                continue
-            allowed = set(layers[source_layer]["may_import"])
-            if target_layer not in allowed:
-                relative_path = path.relative_to(root).as_posix()
-                exempted = (
-                    relative_path,
-                    target,
-                ) in dependency_direction_exceptions or any(
-                    relative_path == exc_path
-                    and (target == exc_target or target.startswith(exc_target + "."))
-                    for exc_path, exc_target in dependency_direction_exceptions
-                )
-                if exempted:
-                    # ADR-061 gap A: a real, reviewed exception
-                    # (architecture/debt.yaml's dependency_direction_exceptions)
-                    # -- the edge is visible and legal-looking but its
-                    # direction stays accepted debt, not silently legal, so
-                    # it contributes to neither this finding nor the
-                    # responsibility-cycle graph below.
-                    continue
-                findings.append(
-                    Finding(
-                        "dependency-direction",
-                        f"{path.relative_to(root)}:{lineno}: {source_layer} -> {target_layer} is forbidden; allowed: {', '.join(sorted(allowed)) or '(none)'}",
-                    )
-                )
-            graph[source_layer].add(target_layer)
     cycle = _find_cycle(graph)
     if cycle:
         findings.append(
@@ -1363,6 +1473,12 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
             )
         )
 
+
+def _check_facades(
+    root: Path, modules: dict[str, Any], findings: list[Finding]
+) -> None:
+    """Check every configured facade exists and stays delegation-only."""
+    limits = modules.get("limits", {})
     facades = _string_list(modules.get("facades", []), "facades", findings)
     facade_limit = limits.get("facade", 150) if isinstance(limits, dict) else 150
     for facade in facades:
@@ -1373,6 +1489,40 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
             )
         else:
             _check_facade(path, facade, facade_limit, findings)
+
+
+def check_repository(root: Path, *, base_revision: str | None = None) -> list[Finding]:
+    """Return all ADR-061 violations below ``root``."""
+    findings: list[Finding] = []
+    modules = _load_mapping(root / "architecture/modules.yaml", findings)
+    debt = _load_mapping(root / "architecture/debt.yaml", findings)
+    dispositions_config = _load_mapping(
+        root / "architecture/dispositions.yaml", findings
+    )
+    layers = _validate_modules(modules, findings)
+    disposition_paths = _validate_dispositions(
+        dispositions_config, layers, findings, root
+    )
+    _check_selector_leaf_purity(root, findings)
+    limits = modules.get("limits", {})
+    production_limit = _positive_int_limit(limits, "production", 800, findings)
+    test_limit = _positive_int_limit(limits, "test", 1200, findings)
+    package_agents_limit = _positive_int_limit(limits, "package_agents", 150, findings)
+    baselines = _validate_debt(debt, production_limit, test_limit, findings)
+    dependency_direction_exceptions = _validate_dependency_direction_exceptions(
+        debt, layers, findings
+    )
+    _check_debt_baselines(root, modules, baselines, base_revision, findings)
+    _check_new_file_sizes(root, baselines, production_limit, test_limit, findings)
+    _check_frozen_root_families(root, modules, findings)
+    _check_root_modules(root, modules, layers, findings)
+    _check_root_dispositions(root, layers, disposition_paths, findings)
+    _check_root_packages(root, modules, layers, package_agents_limit, findings)
+    _check_generic_module_names(root, modules, findings)
+    _check_dependency_graph(
+        root, modules, layers, dependency_direction_exceptions, findings
+    )
+    _check_facades(root, modules, findings)
     return findings
 
 

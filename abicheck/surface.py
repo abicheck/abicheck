@@ -61,17 +61,16 @@ Design constraints (ADR-024 §D5, anti-hiding):
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .compare.surface_graph import _type_identifiers
 from .demangle import demangle
 from .model import ScopeOrigin
 from .model.owner_recovery import (
     itanium_special_name_owner_identifiers,
     itanium_special_name_owner_scope_components,
 )
+from .model.type_identifiers import type_identifiers as _type_identifiers
 from .policy.public_surface import PublicSurface as PublicSurface
 from .policy.public_surface_closure import resolve_public_surface
 
@@ -288,39 +287,6 @@ def is_symbol_level_finding(change: Change) -> bool:
     """
     kv = change.kind.value
     return kv not in _NEVER_FILTER_KIND_NAMES and kv not in _TYPE_LEVEL_KIND_NAMES
-
-
-# Tokens that are type qualifiers / keywords, not type names.
-_TYPE_NOISE: frozenset[str] = frozenset(
-    {
-        "const",
-        "volatile",
-        "unsigned",
-        "signed",
-        "struct",
-        "class",
-        "union",
-        "enum",
-        "typename",
-        "mutable",
-        "restrict",
-        "register",
-        "void",
-        "bool",
-        "char",
-        "short",
-        "int",
-        "long",
-        "float",
-        "double",
-        "wchar_t",
-        "char8_t",
-        "char16_t",
-        "char32_t",
-    }
-)
-
-_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_:]*")
 
 
 # ``PublicSurface`` itself now lives in ``policy/public_surface.py`` --
