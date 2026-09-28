@@ -172,3 +172,118 @@ def test_sectioned_document_round_trips_a_real_snapshot() -> None:
         snapshot_to_dict(snapshot_from_dict(from_sectioned_document(sectioned)))
         == legacy
     )
+
+
+def _owned_codecs():
+    from abicheck.storage.sparse_section_codec import (
+        BinarySection,
+        BuildSection,
+        DebugSection,
+        DeclarationsSection,
+        LayoutSection,
+        ProvenanceSection,
+    )
+
+    return [
+        BinarySection,
+        DeclarationsSection,
+        LayoutSection,
+        DebugSection,
+        BuildSection,
+        ProvenanceSection,
+    ]
+
+
+def _payload_for(codec, draw_data):
+    fields = sorted(set(codec.REQUIRED_FIELDS) | codec.OPTIONAL_FIELDS) + ["bogus"]
+    keys = draw_data.draw(
+        st.lists(st.sampled_from(fields), unique=True, max_size=len(fields))
+    )
+    # Mostly carry every required field, so the validation passes often
+    # enough to compare documents, not only errors.
+    if draw_data.draw(st.booleans()):
+        keys = list(dict.fromkeys([*codec.REQUIRED_FIELDS, *keys]))
+    shaped = st.one_of(
+        st.none(),
+        st.booleans(),
+        st.integers(-3, 3),
+        st.text(max_size=3),
+        st.lists(_json, max_size=3),
+        st.dictionaries(st.text(max_size=3), _json, max_size=3),
+    )
+    return {k: draw_data.draw(shaped) for k in keys}
+
+
+@settings(max_examples=400, deadline=None)
+@given(st.data())
+def test_sparse_document_from_owned_equals_round_trip(data) -> None:
+    """Owned fast path == ``from_document(p).to_document()``: same errors,
+    same values, same key order -- for every sparse section codec."""
+    from abicheck.storage.canonical import canonical_form, canonical_input_trusted
+
+    codec = data.draw(st.sampled_from(_owned_codecs()))
+    payload = canonical_form(_payload_for(codec, data))
+    try:
+        expected = codec.from_document(payload).to_document()
+    except ValueError:
+        with canonical_input_trusted(), pytest.raises(ValueError):
+            codec.document_from_owned(canonical_form(payload))
+        return
+    for trusted in (False, True):
+        owned = canonical_form(payload)
+        if trusted:
+            with canonical_input_trusted():
+                got = codec.document_from_owned(owned)
+        else:
+            got = codec.document_from_owned(owned)
+        assert got == expected
+        assert list(got) == list(expected)
+
+
+@settings(max_examples=200, deadline=None)
+@given(st.one_of(st.lists(_json, max_size=4), _json), st.booleans())
+def test_types_document_from_owned_equals_round_trip(types, extra_key) -> None:
+    from abicheck.storage.canonical import canonical_form, canonical_input_trusted
+    from abicheck.storage.types_section_codec import TypesSection
+
+    payload = canonical_form({"types": types, **({"x": 1} if extra_key else {})})
+    try:
+        expected = TypesSection.from_document(payload).to_document()
+    except ValueError:
+        with canonical_input_trusted(), pytest.raises(ValueError):
+            TypesSection.document_from_owned(payload)
+        return
+    with canonical_input_trusted():
+        assert TypesSection.document_from_owned(canonical_form(payload)) == expected
+    assert TypesSection.document_from_owned(payload) == expected
+
+
+def test_types_document_from_owned_keeps_the_full_path_for_a_tuple() -> None:
+    from abicheck.storage.canonical import canonical_input_trusted
+    from abicheck.storage.types_section_codec import TypesSection
+
+    with canonical_input_trusted():
+        got = TypesSection.document_from_owned({"types": ({"a": (1,)},)})
+    assert got == {"types": [{"a": [1]}]}
+
+
+@settings(max_examples=400, deadline=None)
+@given(st.data())
+def test_validated_document_canonicalizes_to_round_trip_for_every_section(data) -> None:
+    """The write path's ``canonical_form(validated_document(p))`` equals
+    ``from_document(p).to_document()``, and they reject the same payloads."""
+    from abicheck.storage.canonical import canonical_form
+    from abicheck.storage.types_section_codec import TypesSection
+
+    codec = data.draw(st.sampled_from([*_owned_codecs(), TypesSection]))
+    if codec is TypesSection:
+        payload = {"types": data.draw(st.one_of(st.lists(_json, max_size=3), _json))}
+    else:
+        payload = _payload_for(codec, data)
+    try:
+        expected = codec.from_document(payload).to_document()
+    except ValueError:
+        with pytest.raises(ValueError):
+            codec.validated_document(payload)
+        return
+    assert canonical_form(codec.validated_document(payload)) == expected

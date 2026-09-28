@@ -138,7 +138,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from ..model.change_catalog.kinds import ChangeKind, HasKind
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
@@ -425,6 +425,57 @@ class ReclassifyRule:
         return out
 
 
+_R = TypeVar("_R")
+
+#: ``id(rules)`` -> (the rule objects it held, their kind buckets). See
+#: :func:`reclassify_rules_for_kind`.
+_KIND_BUCKETS: dict[int, tuple[tuple[Any, ...], dict[str | None, tuple[Any, ...]]]] = {}
+_KIND_BUCKETS_MAX = 32
+
+
+def reclassify_rules_for_kind(rules: Sequence[_R], kind_value: str) -> Sequence[_R]:
+    """The rules in *rules* that can match a finding of *kind_value*, in order.
+
+    A rule with a ``kind`` selector never matches a finding of any other
+    kind (every accepting path of ``SelectorSet.matches_selectors`` checks
+    it), so dropping those rules up front is exact, not a heuristic, and
+    keeps file order -- first-match-wins is unchanged. It is keyed on the
+    rule *list* and the finding's ``kind`` only, both fixed for a run, so
+    nothing about a (mutable) ``Change`` is cached. Every consumer asks
+    about every finding many times, so evaluating only the one or two rules
+    that share its kind replaces a scan of the whole rule set per question.
+
+    The entry is re-validated by identity on each call, so a list mutated
+    in place, or a new list reusing a freed ``id``, rebuilds it.
+    """
+    if len(rules) < 2:
+        return rules
+    key = id(rules)
+    entry = _KIND_BUCKETS.get(key)
+    if (
+        entry is None
+        or len(entry[0]) != len(rules)
+        or any(a is not b for a, b in zip(entry[0], rules, strict=True))
+    ):
+        buckets: dict[str | None, list[_R]] = {None: []}
+        for rule in rules:
+            kind = getattr(rule, "change_kind", None)
+            if kind is not None:
+                buckets.setdefault(kind, [])
+        for rule in rules:
+            kind = getattr(rule, "change_kind", None)
+            for bucket_kind, bucket in buckets.items():
+                if kind is None or kind == bucket_kind:
+                    bucket.append(rule)
+        if len(_KIND_BUCKETS) >= _KIND_BUCKETS_MAX:
+            _KIND_BUCKETS.clear()
+        entry = (tuple(rules), {k: tuple(v) for k, v in buckets.items()})
+        _KIND_BUCKETS[key] = entry
+    bucketed = entry[1]
+    found = bucketed.get(kind_value)
+    return found if found is not None else bucketed[None]
+
+
 def first_matching_reclassify_verdict(
     rules: list[ReclassifyRule], change: Any, today: date | None = None
 ) -> Verdict | None:
@@ -437,7 +488,7 @@ def first_matching_reclassify_verdict(
     order is meaningful. Documented in ``policy_file.py``'s ``reclassify:``
     format and enforced here as the one place this resolution happens.
     """
-    for rule in rules:
+    for rule in reclassify_rules_for_kind(rules, change.kind.value):
         if rule.matches(change, today):
             return rule.to_verdict
     return None
@@ -688,7 +739,7 @@ def reclassify_rule_for_change(
             next_priority_v = override_v
     else:
         next_priority_v = base_v
-    for rule in rules:
+    for rule in reclassify_rules_for_kind(rules, change.kind.value):
         if rule.matches(change, today):
             reclass_v = rule.to_verdict
             # The verdict this matching rule *actually* produces, applying
