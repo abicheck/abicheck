@@ -660,10 +660,26 @@ class ClangHeaderIncludeExtractor:
             gcc_options,
             tuple(gcc_option_tokens),
         )
+        from .._compiler_options import split_gcc_options
+        from ..header_utils import cache_relevant_operand_paths, deferred_token_dirs
+
+        # Every directory the argv searches seeds the freshness witness,
+        # including ones riding inside pass-through options.
+        option_tokens = [
+            *(split_gcc_options(gcc_options) if gcc_options else []),
+            *gcc_option_tokens,
+        ]
+        search_dirs = [
+            *includes,
+            *(str(p) for p in cache_relevant_operand_paths(option_tokens)),
+            *(str(p) for p in deferred_token_dirs(gcc_option_tokens)),
+        ]
+        if sysroot:
+            search_dirs.append(sysroot)
         return memoized_include_extract(
             key,
             headers,
-            includes,
+            search_dirs,
             partial(
                 self._extract_uncached,
                 headers,

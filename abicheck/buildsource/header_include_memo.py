@@ -102,7 +102,13 @@ def memoized_include_extract(
 
     *key* must name every input that reaches the ``clang -M`` argv;
     *headers*/*includes* seed the freshness witness alongside the included
-    files the result itself reports.
+    files the result itself reports. *includes* must name every search
+    directory the argv reaches, including ones carried inside pass-through
+    options, or a header newly shadowing a reported one goes unnoticed.
+
+    A result carrying diagnostics is returned but never stored: a partial
+    run may be transient, and serving it again would pin the pass as
+    degraded after the cause cleared.
     """
     with _lock:
         gate = _inflight.setdefault(key, threading.Lock())
@@ -115,6 +121,10 @@ def memoized_include_extract(
                     _entries.move_to_end(key)
                 return _copy(entry)
         include_map, diagnostics = compute()
+        if diagnostics:
+            with _lock:
+                _entries.pop(key, None)
+            return {k: list(v) for k, v in include_map.items()}, list(diagnostics)
         fresh = _Entry(
             include_map={k: list(v) for k, v in include_map.items()},
             diagnostics=tuple(diagnostics),

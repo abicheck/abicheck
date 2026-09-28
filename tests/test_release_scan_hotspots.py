@@ -169,14 +169,32 @@ class TestHeaderIncludeMemo:
 
         def compute():
             n["calls"] += 1
-            return {"h": [dep]}, ["diag"]
+            return {"h": [dep]}, []
 
         a = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
         a[0]["h"].append("junk")
         a[1].append("junk")
         b = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
         assert n["calls"] == 1
-        assert b == ({"h": [dep]}, ["diag"])
+        assert b == ({"h": [dep]}, [])
+
+    def test_a_result_with_diagnostics_is_never_served_again(
+        self, tmp_path: Path
+    ) -> None:
+        headers, includes, dep = self._files(tmp_path)
+        results = [({"h": [dep]}, ["one header failed"]), ({"h": [dep]}, [])]
+        n = {"calls": 0}
+
+        def compute():
+            n["calls"] += 1
+            return results[min(n["calls"], len(results)) - 1]
+
+        first = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        second = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        third = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        assert first[1] == ["one header failed"]
+        assert second == ({"h": [dep]}, []) and third == second
+        assert n["calls"] == 2
 
     def test_distinct_keys_do_not_share(self, tmp_path: Path) -> None:
         headers, includes, dep = self._files(tmp_path)
@@ -281,6 +299,41 @@ class TestHeaderIncludeMemo:
         ex.extract(headers, includes, language="CXX", gcc_options="-DX=1")
         ClangHeaderIncludeExtractor(clang_bin="clang-18").extract(headers, includes)
         assert n["calls"] == 5
+
+    @pytest.mark.parametrize("via", ["gcc_options", "gcc_option_tokens"])
+    def test_a_search_dir_inside_options_is_witnessed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, via: str
+    ) -> None:
+        from abicheck.buildsource.header_graph import ClangHeaderIncludeExtractor
+
+        headers, includes, dep = self._files(tmp_path)
+        extra = tmp_path / "generated"
+        extra.mkdir()
+        n = {"calls": 0}
+
+        def fake_uncached(self, hs, incs, **kw):
+            n["calls"] += 1
+            return {"h": [dep]}, []
+
+        monkeypatch.setattr(ClangHeaderIncludeExtractor, "available", lambda self: True)
+        monkeypatch.setattr(
+            ClangHeaderIncludeExtractor, "_extract_uncached", fake_uncached
+        )
+        kw: dict[str, Any] = (
+            {"gcc_options": f"-I {extra}"}
+            if via == "gcc_options"
+            else {"gcc_option_tokens": (f"-I{extra}",)}
+        )
+        ex = ClangHeaderIncludeExtractor(clang_bin="clang++")
+        ex.extract(headers, includes, **kw)
+        ex.extract(headers, includes, **kw)
+        assert n["calls"] == 1
+        # A header newly appearing in that directory could shadow `dep`.
+        (extra / "dep.h").write_text("")
+        st = os.stat(extra)
+        os.utime(extra, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
+        ex.extract(headers, includes, **kw)
+        assert n["calls"] == 2
 
 
 class TestHeaderGraphAstFailureIsNotSilent:
