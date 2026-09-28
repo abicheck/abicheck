@@ -76,6 +76,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.cache_integrity",
     "abicheck.storage.ast_cache_budget",
     "abicheck.storage.castxml_xml",
+    "abicheck.storage.atomic_file",
 )
 
 
