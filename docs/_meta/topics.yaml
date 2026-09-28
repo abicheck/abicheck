@@ -915,3 +915,11 @@ topics:
       - reference/verify-source-run.md
       - use/github-action.md
       - use/multi-component-ci.md
+  concurrency-and-free-threading:
+    canonical_page: use/free-threading.md
+    fact_sources:
+      - abicheck/process_resources.py
+      - abicheck/workflows/release_jobs.py
+    reference_page: reference/environment.md
+    allowed_summaries:
+      - use/github-action.md

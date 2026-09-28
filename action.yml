@@ -1241,6 +1241,10 @@ runs:
       uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
       with:
         python-version: ${{ inputs.python-version }}
+        # Only consulted when no stable release matches the request, so a
+        # released version resolves exactly as before; it is what lets a
+        # caller opt into a release-candidate interpreter such as '3.15t'.
+        allow-prereleases: true
 
     # ── 2. System dependencies ────────────────────────────────────────────────
     # `dependency-source` (new) takes priority; an unset `dependency-source`

@@ -252,7 +252,7 @@ suppression:
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `python-version` | `3.13` | Python version for setup-python |
+| `python-version` | `3.13` | Python version for setup-python. Accepts free-threaded builds such as `3.15t` (see [Free-threaded Python](free-threading.md)) |
 | `dependency-source` | *(unset — falls back to `install-deps`)* | How to install system dependencies: `conda-forge` (**default**), `conda-forge-gcc14`, `conda-forge-clang20` (the only conda-forge source that provisions clang — see the note above), `system`, or `none`. See the [GitHub Action Inputs/Outputs Reference](../reference/github-action-inputs.md) for the exact per-value breakdown. |
 | `install-deps` | `true` | **Deprecated** — use `dependency-source` instead (kept for one release cycle; ignored if `dependency-source` is set). `true` (its own default too) maps to `dependency-source: conda-forge`, `false` maps to `dependency-source: none`. |
 | `upload-sarif` | `false` | Upload SARIF to GitHub Code Scanning. Requires `format: sarif` and `mode: compare`; any other combination is a hard error raised before any dependency install. |
