@@ -74,8 +74,9 @@ class _SharingTreeBuilder(TreeBuilder):
             attrs = {k: v for k, v in attrs.items() if k in ARGUMENT_ATTRIBUTES_READ}
         return super().start(tag, {k: pool.setdefault(v, v) for k, v in attrs.items()})
 
-    def end(self, tag: str) -> Element:
-        el = super().end(tag)
+    def end(self, tag: str | Callable[..., Element]) -> Element:
+        # Same tag type `start` takes (an element factory is a valid tag).
+        el = super().end(cast(str, tag))
         if len(el):
             shared = self._arguments
             for i, child in enumerate(el):

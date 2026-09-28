@@ -121,3 +121,36 @@ def test_real_findings_match_deepcopy() -> None:
         ours = plain_deepcopy(c)
         assert ours == copy.deepcopy(c)
         assert not (set(_mutables(c, {})) & set(_mutables(ours, {})))
+
+
+class _Plain:
+    """Not a dataclass: must fall back to copy.deepcopy."""
+
+    def __init__(self) -> None:
+        self.items = [1, 2]
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _Plain) and other.items == self.items
+
+
+@dataclasses.dataclass(slots=True)
+class MutSlot:
+    a: Any
+
+
+def test_non_dataclass_falls_back_to_deepcopy() -> None:
+    src = {"p": _Plain(), "r": range(3), "c": 1 + 2j}
+    ours = plain_deepcopy(src)
+    assert ours == src
+    assert ours["p"] is not src["p"] and ours["p"].items is not src["p"].items
+    assert ours["r"] is src["r"] and ours["c"] is src["c"]
+
+
+def test_mutable_slots_dataclass_is_copied() -> None:
+    src = MutSlot([1, {"k": [2]}])
+    ours = plain_deepcopy(src)
+    assert ours == src and ours is not src and ours.a is not src.a
+    assert ours.a[1]["k"] is not src.a[1]["k"]
+    frozen_with_list = SlotBox([1])
+    copied = plain_deepcopy(frozen_with_list)
+    assert copied is not frozen_with_list and copied.a is not frozen_with_list.a

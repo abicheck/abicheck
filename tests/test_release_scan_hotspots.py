@@ -213,6 +213,22 @@ class TestHeaderIncludeMemo:
         memo_mod.memoized_include_extract(("k",), headers, includes, compute)
         assert n["calls"] == 2
 
+    def test_a_missing_file_that_appears_invalidates(self, tmp_path: Path) -> None:
+        headers, includes, dep = self._files(tmp_path)
+        later = tmp_path / "inc" / "generated.h"
+        n = {"calls": 0}
+
+        def compute():
+            n["calls"] += 1
+            return {"h": [dep, str(later)]}, []
+
+        memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        assert n["calls"] == 1
+        later.write_text("")
+        memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        assert n["calls"] == 2
+
     def test_concurrent_callers_compute_once(self, tmp_path: Path) -> None:
         headers, includes, dep = self._files(tmp_path)
         n = {"calls": 0}
@@ -268,8 +284,15 @@ class TestHeaderIncludeMemo:
 
 
 class TestHeaderGraphAstFailureIsNotSilent:
+    @pytest.mark.parametrize(
+        "message",
+        ["omp.h:341:45: error: '__malloc__' attribute takes no arguments", ""],
+    )
     def test_failed_clang_ast_marks_call_graph_degraded(
-        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        message: str,
     ) -> None:
         import abicheck.service_header_graph_attach as attach_mod
         from abicheck.errors import SnapshotError
@@ -277,9 +300,7 @@ class TestHeaderGraphAstFailureIsNotSilent:
         from abicheck.model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
 
         def failing_dump(*_a: Any, **_k: Any):
-            raise SnapshotError(
-                "omp.h:341:45: error: '__malloc__' attribute takes no arguments"
-            )
+            raise SnapshotError(message)
 
         monkeypatch.setattr("abicheck.dumper._clang_header_dump", failing_dump)
         monkeypatch.setattr(attach_mod, "expand_header_inputs", lambda h: list(h))
@@ -309,4 +330,7 @@ class TestHeaderGraphAstFailureIsNotSilent:
         graph = out.build_source.source_graph
         assert graph.degraded_passes.get(HEADER_CALL_GRAPH_PASS) is True
         assert not graph.extractor_passes.get(HEADER_CALL_GRAPH_PASS)
-        assert any("__malloc__" in r.getMessage() for r in caplog.records)
+        # The first line of the error is logged, or the exception type when
+        # the error carries no text.
+        expected = message.splitlines()[0] if message else "SnapshotError"
+        assert any(expected in r.getMessage() for r in caplog.records)
