@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 from ..model.ownership_rules import (
@@ -90,6 +90,14 @@ class ResolvedOwnershipRules:
     private_headers: tuple[str, ...]
     private_namespaces: tuple[tuple[str, ...], ...]
     dependency_names: frozenset[str]
+    #: :func:`_path_facts` per declaring-file spelling. Everything
+    #: :func:`classify` decides from the path alone is a function of the
+    #: path and the fields above, and a snapshot's declarations share a
+    #: handful of headers, so each is resolved once per rules object --
+    #: whose lifetime this cache shares. Not part of equality or hashing.
+    _path_memo: dict[str, _PathFacts] = field(
+        default_factory=dict, init=False, repr=False, compare=False, hash=False
+    )
 
 
 @dataclass(frozen=True)
@@ -178,13 +186,6 @@ def _name_parts(qualified: str) -> tuple[str, ...]:
     return tuple(p.strip() for p in parts if p.strip())
 
 
-def _is_builtin(site: DeclarationSite) -> bool:
-    parts = _name_parts(site.qualified_name)
-    return (
-        site.artificial and len(parts) == 1 and parts[0].startswith(_BUILTIN_PREFIXES)
-    )
-
-
 def _matching_root(segments: tuple[str, ...], roots: tuple[_Root, ...]) -> _Root | None:
     best: _Root | None = None
     for root in roots:
@@ -195,8 +196,34 @@ def _matching_root(segments: tuple[str, ...], roots: tuple[_Root, ...]) -> _Root
     return best
 
 
-def _private_rule(
-    site: DeclarationSite, segments: tuple[str, ...], rules: ResolvedOwnershipRules
+#: What :func:`classify` decides from a declaring-file path alone: the final
+#: decision when the path settles it (no root, a dependency root), else the
+#: target root and the private-header rule the path matches (or ``None``).
+_PathFacts = OwnershipDecision | tuple[_Root, str | None]
+
+
+def _path_facts(path: str, rules: ResolvedOwnershipRules) -> _PathFacts:
+    memo = rules._path_memo
+    found = memo.get(path)
+    if found is None:
+        found = memo[path] = _path_facts_uncached(path, rules)
+    return found
+
+
+def _path_facts_uncached(path: str, rules: ResolvedOwnershipRules) -> _PathFacts:
+    segments = _segments(path, rules.project_root)
+    root = _matching_root(segments, rules.roots)
+    if root is None:
+        if is_system_header(path):
+            return OwnershipDecision(OWNER_TOOLCHAIN, CONTRACT_EXTERNAL, "system_path")
+        return OwnershipDecision(OWNER_UNRESOLVED, CONTRACT_UNRESOLVED, "no_root")
+    if root.owner != OWNER_TARGET:
+        return OwnershipDecision(root.owner, CONTRACT_EXTERNAL, root.rule_id)
+    return root, _private_header_rule(segments, rules)
+
+
+def _private_header_rule(
+    segments: tuple[str, ...], rules: ResolvedOwnershipRules
 ) -> str | None:
     base = PurePosixPath(*_segments(".", rules.project_root))
     full = PurePosixPath(*segments)
@@ -206,7 +233,12 @@ def _private_rule(
     for pattern in rules.private_headers:
         if any(fnmatch.fnmatchcase(c, pattern) for c in candidates):
             return f"private_header:{pattern}"
-    name = _name_parts(site.qualified_name)
+    return None
+
+
+def _private_namespace_rule(
+    name: tuple[str, ...], rules: ResolvedOwnershipRules
+) -> str | None:
     for ns in rules.private_namespaces:
         # A namespace scopes what is declared *inside* it: `a::b` makes
         # `a::b::X` private, never `a::b` itself nor `a::bc::X`.
@@ -217,26 +249,23 @@ def _private_rule(
 
 def classify(site: DeclarationSite, rules: ResolvedOwnershipRules) -> OwnershipDecision:
     """The owner and contract of the declaration at *site* under *rules*."""
-    if _is_builtin(site):
+    name = _name_parts(site.qualified_name)
+    if site.artificial and len(name) == 1 and name[0].startswith(_BUILTIN_PREFIXES):
         return OwnershipDecision(OWNER_TOOLCHAIN, CONTRACT_EXTERNAL, "builtin")
     if not site.path:
         return OwnershipDecision(OWNER_UNRESOLVED, CONTRACT_UNRESOLVED, "no_file")
-    segments = _segments(site.path, rules.project_root)
-    root = _matching_root(segments, rules.roots)
-    if root is None:
-        if is_system_header(site.path):
-            return OwnershipDecision(OWNER_TOOLCHAIN, CONTRACT_EXTERNAL, "system_path")
-        return OwnershipDecision(OWNER_UNRESOLVED, CONTRACT_UNRESOLVED, "no_root")
-    if root.owner != OWNER_TARGET:
-        return OwnershipDecision(root.owner, CONTRACT_EXTERNAL, root.rule_id)
+    facts = _path_facts(site.path, rules)
+    if isinstance(facts, OwnershipDecision):
+        return facts
+    root, private_header = facts
     diagnostics: tuple[str, ...] = ()
-    name = _name_parts(site.qualified_name)
     if name and name[0] in rules.dependency_names:
         diagnostics = (
             f"{site.qualified_name} is declared in a target file but in "
             f"dependency namespace {name[0]!r}; the file decides",
         )
-    private = _private_rule(site, segments, rules)
+    # A private header outranks a private namespace, as before the split.
+    private = private_header or _private_namespace_rule(name, rules)
     if private is not None:
         return OwnershipDecision(OWNER_TARGET, CONTRACT_PRIVATE, private, diagnostics)
     return OwnershipDecision(OWNER_TARGET, CONTRACT_PUBLIC, root.rule_id, diagnostics)
