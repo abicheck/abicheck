@@ -266,6 +266,12 @@ def _clang_header_dump(
 
     ``frontend_context`` selects the host or device DPC++ evidence.
     """
+    # The acquisition key folds the ``-I`` spelling in, so the spelling is
+    # canonicalized here -- the one choke point every caller reaches --
+    # rather than trusted to each caller: a relative root on one caller and
+    # an absolute one on another made two keys (and two full parses) for
+    # one header set. Idempotent for absolute roots.
+    extra_includes = absolutize_include_roots(list(extra_includes))
     clang_bin = _resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     dpcpp_multi_context, dpcpp_host_context = _resolve_dpcpp_acquisition(
         clang_bin, frontend_context, gcc_options, gcc_option_tokens
@@ -886,6 +892,9 @@ def _castxml_dump(
     _expected_acquisition_key: str | None = None,
 ) -> Element:
     """Run CastXML on *headers* and return its parsed XML root."""
+    # One ``-I`` spelling per root for the acquisition key; see
+    # ``_clang_header_dump``.
+    extra_includes = absolutize_include_roots(list(extra_includes))
     castxml_bin = _resolve_gated_castxml_bin(castxml_bin)
     if _selected_tool_out is not None:
         _selected_tool_out.append(castxml_bin)

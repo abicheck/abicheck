@@ -79,8 +79,9 @@ outcome applies.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Protocol
 
 from ..model.change_catalog.kinds import ChangeKind
@@ -378,6 +379,37 @@ def _matches_symbol(
     return True
 
 
+# (date, [start, end) epoch-second window it is "today" for) -- see
+# _current_date.
+_today_cache: tuple[date, float, float] = (date.min, 0.0, float("-inf"))
+
+
+def _current_date() -> date:
+    """``date.today()``, re-derived only when the clock leaves the cached day.
+
+    Expiry is checked once per selector per finding per consumer -- millions
+    of calls on a large policy run -- and ``date.today()`` (~0.8 us, a
+    ``localtime`` conversion) was nearly the whole cost of each.
+    ``time.time()`` is an order of magnitude cheaper. The cache holds the
+    cached day's own local-midnight bounds, so crossing midnight in either
+    direction (including a backwards clock step) re-derives the date.
+    """
+    global _today_cache
+    now = time.time()
+    cached, start, end = _today_cache
+    if start <= now < end:
+        return cached
+    today = date.today()
+    # A naive datetime's .timestamp() is local time, so DST-length days
+    # still end at the real local midnight.
+    midnight = datetime.min.time()
+    start = datetime.combine(today, midnight).timestamp()
+    end = datetime.combine(today + timedelta(days=1), midnight).timestamp()
+    if start <= now < end:
+        _today_cache = (today, start, end)
+    return today
+
+
 @dataclass
 class SelectorSet:
     """The shared selector grammar :class:`~abicheck.suppression.Suppression`
@@ -502,7 +534,7 @@ class SelectorSet:
         """Return True if this selector set has passed its ``expires`` date."""
         if self.expires is None:
             return False
-        check_date = today or date.today()
+        check_date = today or _current_date()
         return check_date > self.expires
 
     def matches_selectors(
