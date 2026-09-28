@@ -8056,6 +8056,26 @@ part once. Lower the budget toward ~1.1 when that lands. The oneDAL receipts
 (`performance.md`, "oneDAL solo L2 compare") involve a handful of libraries
 with 125 header roots, which is where this term shows up at real scale.
 
+**Measured on MKL (2026-09-27): the header *parse* is not per member.** A
+reported "56 header parses for 28 members" counted the `header AST parse`
+progress lines, which one member dump emits whether it runs the frontend or
+waits on another worker's run. Instrumenting a 3-member MKL release
+(2024.2.2 → 2025.2.0) showed the frontend runs once per side per AST key,
+shared through the request's acquisition table (`dumper_cache.
+run_ast_acquisition`). The one real duplicate was the release public-surface
+parse keying apart from the member dumps on a relative `-I` spelling (fixed:
+`resolve_header_ast_result` absolutizes for every caller), which took castxml
+runs from 4 to 2. What *is* per member, measured: the export-bound field
+parse over the shared DOM (`extract/header_ast_fields.
+_parse_header_ast_legacy`, dominated by `parse_functions`: ~2.5 s alone,
+~7 s under 4-way contention, per member-side). It is per member on purpose --
+visibility, constructor/destructor fallbacks and the surface facts are
+decided from that member's export table while the declaration is built
+(that module's own docstring) -- so sharing it means splitting each
+`Function` into an export-neutral parse plus a per-member binding step. That
+split is the remaining lever for a large release, and the RSS it would save
+is the per-member declaration lists, not DOMs.
+
 ### ~~`compare --format` repeated silently keeps only the last format~~ — CLOSED by the export grammar
 
 Recorded while building the full-CLI harness against `main` at `f6aa2aae`, where

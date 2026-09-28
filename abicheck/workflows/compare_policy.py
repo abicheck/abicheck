@@ -44,14 +44,17 @@ forces that mechanism here).
 
 from __future__ import annotations
 
+import functools
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from ..checker import compare
 from ..checker_types import DiffResult
 from ..errors import ValidationError
 from ..model import AbiSnapshot
+from ..model.comparison_memo import comparison_memo_scope
 from ..policy.public_surface_query import PublicSurfaceQuery
 from ..policy_file import (
     dedup_validate_overrides_warnings as _dedup_validate_overrides_warnings,
@@ -153,6 +156,23 @@ def _validate_contract_mode(
         )
 
 
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _within_comparison_memo_scope(fn: _F) -> _F:
+    """Open the comparison memo scope before the public-surface resolution
+    below, so it shares its per-snapshot facts with ``checker.compare``
+    (which joins this scope rather than opening its own)."""
+
+    @functools.wraps(fn)
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        with comparison_memo_scope():
+            return fn(*args, **kwargs)
+
+    return cast("_F", _wrapper)
+
+
+@_within_comparison_memo_scope
 def compare_snapshots(
     old: AbiSnapshot,
     new: AbiSnapshot,

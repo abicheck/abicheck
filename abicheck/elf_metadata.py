@@ -23,10 +23,10 @@ See docs/adr/001-technology-stack.md for rationale.
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import logging
 import os
+import pickle
 import re
 import stat
 import struct
@@ -88,13 +88,19 @@ from .extract.elf_symbol_tables import (  # noqa: E402
 #: digest and path -- content, not a stat: an mtime has only kernel-tick
 #: resolution, so a same-size rewrite within one tick would read as unchanged. One ``compare`` parses each binary
 #: several times (primary dump, the symbols-only L0 re-resolve, release
-#: members sharing a provider); a hit costs one deep copy (~0.6s for a
-#: 65k-symbol library vs ~1.7s to parse) and hands every caller its own
-#: independent copy, so no caller can mutate another's metadata. The memo
-#: keeps its own private copy for the same reason, and at most
-#: ``_PARSE_MEMO_MAX`` of them -- enough for one compare's two sides plus their
+#: members sharing a provider). Entries are stored *pickled*: every hit hands
+#: its caller an independent object (no caller can mutate another's
+#: metadata), and a pickle round trip is several times cheaper than the
+#: ``copy.deepcopy`` it replaced on both halves -- measured on a 56k-symbol
+#: library, 0.15s to store and 0.10s to load vs 0.6s for each deep copy.
+#: That matters on the scalar path, where the two sides are two different
+#: files and the memo never hits: a deep copy per store was pure overhead
+#: (7.3s of an MKL ``libmkl_rt`` compare). A pickled entry is also one flat
+#: ``bytes`` object rather than a second live object graph of the symbol
+#: table, which is what inflated the live-at-exit residue. At most
+#: ``_PARSE_MEMO_MAX`` entries -- enough for one compare's two sides plus their
 #: L0 re-resolve, without growing with a release fan-out's member count.
-_PARSE_MEMO: dict[tuple[object, ...], ElfMetadata] = {}
+_PARSE_MEMO: dict[tuple[object, ...], bytes] = {}
 _PARSE_MEMO_MAX = 4
 _PARSE_MEMO_LOCK = threading.Lock()
 
@@ -117,10 +123,12 @@ def parse_elf_metadata(so_path: Path) -> ElfMetadata:
             with _PARSE_MEMO_LOCK:
                 cached = _PARSE_MEMO.get(key)
             if cached is not None:
-                return copy.deepcopy(cached)
+                loaded: ElfMetadata = pickle.loads(cached)
+                return loaded
             meta = _parse(f, so_path)
+            stored = pickle.dumps(meta, protocol=pickle.HIGHEST_PROTOCOL)
             with _PARSE_MEMO_LOCK:
-                _PARSE_MEMO[key] = copy.deepcopy(meta)
+                _PARSE_MEMO[key] = stored
                 while len(_PARSE_MEMO) > _PARSE_MEMO_MAX:
                     _PARSE_MEMO.pop(next(iter(_PARSE_MEMO)))
             return meta

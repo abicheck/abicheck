@@ -29,8 +29,13 @@ from pathlib import Path
 from ..dumper_ast_config_cpp20_chains import _strip_inactive_if_zero_blocks
 from .quoted_include_expansion import _strip_raw_strings
 
-_JOINED_STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\])*"', re.DOTALL)
-_JOINED_CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\])*'", re.DOTALL)
+# Unrolled ("normal* (special normal*)*") rather than one alternation per
+# character: the same language and the same greedy match, but a run of
+# ordinary characters is consumed in one step -- 11x faster over MKL's 10 MB
+# of headers. tests/test_literal_pattern_unrolling.py holds the original
+# spelling as the oracle.
+_JOINED_STRING_LITERAL_PATTERN = re.compile(rb'"[^"\\]*(?:\\.[^"\\]*)*"', re.DOTALL)
+_JOINED_CHAR_LITERAL_PATTERN = re.compile(rb"'[^'\\]*(?:\\.[^'\\]*)*'", re.DOTALL)
 
 
 def _strip_literals_crossing_continuations(content: bytes) -> bytes:

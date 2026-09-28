@@ -380,12 +380,21 @@ def _is_callback_type(type_str: str, typedefs: dict[str, str]) -> bool:
 def _recognise_callbacks(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     out: dict[str, IdiomTag] = {}
     typedefs = graph.snapshot.typedefs
+    # One answer per distinct spelling for this pass: a large C API repeats a
+    # few hundred parameter spellings across tens of thousands of functions
+    # (MKL: 215 across 27.5k), and each answer walks the typedef chain
+    # through the lock-guarded ``strip_ptr`` memo. Local to the call, so it
+    # can never outlive *typedefs* or answer for another snapshot.
+    is_callback: dict[str, bool] = {}
     for fn in graph.snapshot.functions:
         if not in_public_surface(fn):
             continue
         for p in fn.params:
             ptype = getattr(p, "type", "") or ""
-            if _is_callback_type(ptype, typedefs):
+            answer = is_callback.get(ptype)
+            if answer is None:
+                answer = is_callback[ptype] = _is_callback_type(ptype, typedefs)
+            if answer:
                 out.setdefault(
                     fn.name,
                     IdiomTag(

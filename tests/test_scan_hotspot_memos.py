@@ -154,6 +154,31 @@ def test_parse_elf_metadata_memo_returns_independent_equal_copies(tmp_path) -> N
     assert "g" in names
 
 
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="ELF only")
+def test_parse_elf_metadata_memo_never_deep_copies(tmp_path, monkeypatch) -> None:
+    """A miss must not pay a deep copy: on the scalar path the two sides are
+    two different files, so the memo never hits and any per-store copy is
+    pure overhead (it was 7.3s of an MKL compare). Entries are flat bytes."""
+    import copy
+
+    lib = tmp_path / "liba.so"
+    (tmp_path / "a.c").write_text("int f(void){return 0;}\n")
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(lib), str(tmp_path / "a.c")], check=True
+    )
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise AssertionError("parse_elf_metadata deep-copied")
+
+    monkeypatch.setattr(copy, "deepcopy", _boom)
+    elf_metadata._PARSE_MEMO.clear()
+    miss = elf_metadata.parse_elf_metadata(lib)
+    hit = elf_metadata.parse_elf_metadata(lib)
+    assert miss == hit and miss is not hit and miss.symbols
+    assert all(isinstance(v, bytes) for v in elf_metadata._PARSE_MEMO.values())
+
+
 def test_compare_scopes_the_elf_memos_to_one_call() -> None:
     from abicheck.checker import compare
     from abicheck.elf_symbol_filter import _EXPORTED_NAMES_MEMO

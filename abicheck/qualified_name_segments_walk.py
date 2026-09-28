@@ -456,13 +456,7 @@ def collect_and_flag(
         return pred(value)
     fields = _flag_plan(tp)
     if fields is not None:
-        hit = False
-        for name, collected in fields:
-            if collect_and_flag(
-                getattr(value, name), out, pred, collect=collect and collected
-            ):
-                hit = True
-        return hit
+        return _flag_fields(value, fields, out, pred, collect)
     hit = False
     if tp is list or tp is tuple or isinstance(value, (list, tuple)):
         for item in value:  # type: ignore[attr-defined]
@@ -478,4 +472,64 @@ def collect_and_flag(
                 hit = True
             if collect_and_flag(v, out, pred, collect=collect):
                 hit = True
+    return hit
+
+
+#: Per-type node classification for :func:`_flag_fields`: ``_STR`` for an
+#: exact ``str``, ``_LEAF`` for a type :func:`collect_and_flag` always
+#: answers ``False`` for without collecting anything (a scalar, or an enum
+#: that is not itself a dataclass/sequence/mapping -- a ``(str, Enum)``
+#: member included, which it deliberately does not treat as text),
+#: ``_OTHER`` otherwise. All truthy, so a lookup can fall back with ``or``.
+_STR, _LEAF, _OTHER = 1, 2, 3
+_NODE_KIND: dict[type, int] = {str: _STR}
+
+
+def _node_kind(tp: type) -> int:
+    leaf = tp in _SCALAR_TYPES or (
+        issubclass(tp, _Enum)
+        and _flag_plan(tp) is None
+        and not issubclass(tp, (list, tuple, _Mapping))
+    )
+    kind = _NODE_KIND[tp] = _LEAF if leaf else _OTHER
+    return kind
+
+
+def _flag_fields(
+    value: object,
+    fields: tuple[tuple[str, bool], ...],
+    out: list[str],
+    pred: _Callable[[str], bool],
+    collect: bool,
+    hit: bool = False,
+    expand: bool = True,
+) -> bool:
+    """:func:`collect_and_flag` over a dataclass instance's *fields*,
+    returning *hit* or'ed with its own flag.
+
+    Identical result (same strings, same order, same flag) with fewer calls:
+    a leaf field is answered inline, and -- one level deep, *expand* -- so
+    is each field of a nested dataclass (a ``Fact`` is the bulk of a real
+    snapshot's nodes, ~42 per function) rather than each costing a
+    recursive :func:`collect_and_flag` call. Anything else recurses exactly
+    as before.
+    """
+    for name, collected in fields:
+        keep = collect and collected
+        child = getattr(value, name)
+        ctp = type(child)
+        kind = _NODE_KIND.get(ctp) or _node_kind(ctp)
+        if kind == _STR:
+            if keep:
+                out.append(child)
+            if not hit and pred(child):
+                hit = True
+            continue
+        if kind == _LEAF:
+            continue
+        sub = _flag_plan(ctp) if expand else None
+        if sub is not None:
+            hit = _flag_fields(child, sub, out, pred, keep, hit, expand=False)
+        elif collect_and_flag(child, out, pred, collect=keep):
+            hit = True
     return hit

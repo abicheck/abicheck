@@ -70,6 +70,7 @@ from .dumper_toolchain import (
 )
 from .extract.header_ast_fields import parse_header_ast_fields
 from .extract.manifest_semantic_ir import manifest_semantic_ir
+from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import track
 from .extract.semantic_normalizer import normalize_header_ast
 from .extract.tu_jobs import _tu_jobs
@@ -639,10 +640,20 @@ def resolve_header_ast_result(
         )
         provenance_headers = tuple(dump_manifest.roots)
     else:
+        # Every caller spells its ``-I`` roots the same way here, not only
+        # the binary dumps that already absolutized them (``dumper._dump_elf``
+        # and siblings): the AST cache/acquisition key folds the spelling in,
+        # so a header-only parse of the *same* headers with a relative root
+        # (the release public surface) used to miss the member dumps' entry
+        # and run a second full frontend parse per side, and its snapshot
+        # spelled reached headers differently. Idempotent for absolute roots.
         legacy_tu = TranslationUnit(
             name="legacy-main",
             forced_includes=tuple(headers),
-            includes=tuple(IncludeEntry(path=p) for p in extra_includes),
+            includes=tuple(
+                IncludeEntry(path=p)
+                for p in absolutize_include_roots(list(extra_includes))
+            ),
         )
         fragment = run_tu_fragment(
             legacy_tu,

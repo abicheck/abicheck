@@ -898,8 +898,13 @@ def _looks_like_genuine_requires_clause(
     return False
 
 
-_STRING_LITERAL_PATTERN = re.compile(rb'"(?:\\.|[^"\\\n])*"')
-_CHAR_LITERAL_PATTERN = re.compile(rb"'(?:\\.|[^'\\\n])*'")
+# Unrolled ("normal* (special normal*)*") rather than one alternation per
+# character: the same language and the same greedy match, but a run of
+# ordinary characters is consumed in one step -- same unrolling as
+# extract/cpp20_header_prep.py's continuation-crossing pair. tests/test_literal_pattern_unrolling.py holds the original
+# spelling as the oracle.
+_STRING_LITERAL_PATTERN = re.compile(rb'"[^"\\\n]*(?:\\.[^"\\\n]*)*"')
+_CHAR_LITERAL_PATTERN = re.compile(rb"'[^'\\\n]*(?:\\.[^'\\\n]*)*'")
 
 
 def _strip_literals(line: bytes) -> bytes:

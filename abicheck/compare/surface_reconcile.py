@@ -52,6 +52,7 @@ from functools import wraps
 from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
 from ..model import AbiSnapshot
+from ..model.comparison_memo import comparison_memo_scope
 from .export_transition import surface_exit_is_evidence_gap
 
 if TYPE_CHECKING:
@@ -439,7 +440,11 @@ def releases_reconciliation(
         # on exit so a long release fan-out does not keep them resident.
         _drop_elf_memos(old, new)
         try:
-            return fn(*args, **kwargs)
+            # Same one-comparison scope for the pure per-snapshot facts
+            # (identity table, referenced identifiers, export join) several
+            # stages of the comparison derive independently.
+            with comparison_memo_scope():
+                return fn(*args, **kwargs)
         finally:
             invalidate_reconciliation(old if isinstance(old, AbiSnapshot) else None)
             _drop_elf_memos(old, new)
