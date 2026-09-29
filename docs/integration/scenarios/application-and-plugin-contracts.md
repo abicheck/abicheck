@@ -1,9 +1,7 @@
 # Scenarios S22 & S23: Application and Plugin Contracts
 
 Not every check is "does this library's own public header/binary surface
-stay compatible." Two related but distinct questions
-[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
-§8 names S22 and S23:
+stay compatible." Two related but distinct questions are catalogued as scenarios S22 and S23:
 
 - **S22 — application compatibility.** Will *this specific application*
   still work with the new library version? Scopes the verdict to only what

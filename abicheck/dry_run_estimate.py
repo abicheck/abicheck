@@ -170,7 +170,7 @@ def _scan_imports() -> tuple[Any, ...]:
 
 @dataclass(frozen=True)
 class CostEstimate:
-    """Projected cost of one L-layer for *this* project (ADR-035 D10 dry-run)."""
+    """Projected cost of one L-layer for *this* project (dry-run)."""
 
     method: str | None  # S-axis (s0..s6) producing it; None for intrinsic L0-L2
     layer: str  # L-axis it populates (L0_binary..L5_source_graph)
@@ -694,7 +694,7 @@ def estimate_scan(
     resolved_level: tuple[SourceMethod, EvidenceDepth] | None = None,
 ) -> list[CostEstimate]:
     """Dry-run: projected per-layer cost of one comparison operand for this
-    project (ADR-035 D10). Probes the project (TU count, header fan-out,
+    project. Probes the project (TU count, header fan-out,
     collect mode) and returns one :class:`CostEstimate` per L-layer the level
     would touch -- **without running any compiler or parsing any binary**.
     Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget

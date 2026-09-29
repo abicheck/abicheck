@@ -7348,7 +7348,7 @@ threading the resolved `contract_mode`/`contract_evaluation` config through
 `_run_no_baseline_compare_cmd` into `run_no_baseline_compare`, the same way
 the two-sided `compare` path already does via
 `compatibility_evaluation_frontend`/`contract_pipeline`. Recorded in
-[`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact)
+[`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-single-artifact)
 rather than left as a silent behavioral gap in the doc that would otherwise
 claim the axis "applies exactly as it would for a two-sided run."
 

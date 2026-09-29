@@ -46,7 +46,7 @@ library (there is no CLI baseline registry anymore — keep JSON snapshots
 yourself, plain files, your own storage/naming convention) — see [Baseline
 Management](baseline-management.md). The detected changes then flow through
 the stages below (the numbers match the diagram above), which is the
-normative order `contract_pipeline.py` fixes (ADR-049 D9) for the ordinary,
+normative order `contract_pipeline.py` fixes for the ordinary,
 unscoped path:
 
 1. **Classify contract relevance — opt-in, `--contract`.** Only
@@ -83,7 +83,7 @@ unscoped path:
    only, and only after step 4 returned.** This is evidence *precedence*,
    not a step earlier in the pipeline: a `--used-by`/`--required-symbol`
    run has been *told* what the contract is (a concrete consumer's imports,
-   or an explicit entrypoint list — ADR-049 §4.3), and that outranks
+   or an explicit entrypoint list), and that outranks
    whatever the snapshot-derived relevance in step 1 concluded on its own.
    For a finding already carrying a relevance (i.e. `--contract`
    was also set), a match against that explicit scope *promotes* it to
@@ -108,7 +108,7 @@ clean `0` to `1` but never lowers a `2`/`4`. This is a genuinely different
 question from suppression or policy: those decide what an *observed* finding
 means, while contract coverage asks whether there was enough evidence to
 make that decision at all. See [Exit Codes → Contract-coverage
-contribution](../reference/exit-codes.md#contract-coverage-contribution-adr-049)
+contribution](../reference/exit-codes.md#contract-coverage-contribution)
 for the full contract.
 
 The important distinction to hold onto: **out-of-contract**, **suppressed**,
@@ -125,7 +125,7 @@ exit code.
 !!! tip "No `--profile ci-gate` shortcut any more"
     A `--profile ci-gate` used to bundle the common gating knobs
     (`--depth headers -o review=... --severity-preset default`); it was
-    removed (ADR-068 D5 / plan Phase 7e) because it bundled evidence depth,
+    removed in 0.6 because it bundled evidence depth,
     report rendering, and gate policy behind one word. State the three flags
     directly, or put them in `.abicheck.yml` so every run picks them up
     without retyping them — see [CLI usage guide](cli-usage.md).

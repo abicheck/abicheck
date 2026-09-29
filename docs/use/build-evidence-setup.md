@@ -47,8 +47,7 @@ cmake -S contrib/abicheck-clang-plugin -B build \
 cmake --build build            # -> build/libabicheck-facts.so
 ```
 
-Validated across LLVM/Clang **16, 17, and 18** (ADR-038 C.6 differential
-conformance gate). The `.so` you build here must be loaded by a clang of the
+Validated across LLVM/Clang **16, 17, and 18** (differential conformance gate). The `.so` you build here must be loaded by a clang of the
 **same** major.
 
 !!! warning "The plugin is ABI-locked to one LLVM major"
@@ -174,13 +173,13 @@ identical, so `dump --build-info` folds them in the same way, with no separate
 merge step; the portable default remains `compile_commands.json` replay
 (`dump --sources`).
 
-## Project-contract blocks (ADR-037 D4)
+## Project-contract blocks
 
 `.abicheck.yml` is also the home for the project's stable comparison contract —
 the settings that are version-controlled and reviewed in a PR rather than typed
 per run. `compare` auto-discovers the nearest config and merges CLI flags over
 it (precedence **CLI > config > built-in default**). Loading is **strict**
-(ADR-043): an unknown top-level or block key, a wrong-typed value, or a bad
+: an unknown top-level or block key, a wrong-typed value, or a bad
 enum is a hard error (exit 64), not a warning. A top-level `version:` records
 the schema version.
 
@@ -216,7 +215,7 @@ These keys are the **only** spelling for those settings: the hidden per-run
 CLI flags that used to shadow them were removed, so a project states each
 once, in config. The L2/L4 frontend is one knob, `--ast-frontend`
 (`auto`/`castxml`/`clang`; env `ABICHECK_AST_FRONTEND`), shared across header-AST
-parsing and source-ABI replay (ADR-037 D8). `hybrid` (G28 Phase 3) is header-AST
+parsing and source-ABI replay. `hybrid` (G28 Phase 3) is header-AST
 only for now — it runs castxml and clang together and merges them, but has no
 L4 source-ABI-replay path yet.
 
@@ -224,7 +223,7 @@ L4 source-ABI-replay path yet.
 
 > **History note:** the standalone `collect` command (which wrote a raw,
 > on-disk pack directory) and the `graph explain`/`graph compare` commands
-> were both removed outright in the ADR-043 CLI reset — neither has a direct
+> were both removed outright in the pre-1.0 CLI reset — neither has a direct
 > CLI replacement. `collect`'s capability lives on as `dump --sources`/
 > `--build-info`'s inline collection (below) plus a few library-only
 > functions for advanced producers; `graph explain`/`graph compare`'s
@@ -267,7 +266,7 @@ cheaper run when you don't need the source-ABI findings.
 ### What `collect`'s advanced flags have no CLI replacement for
 
 A few capabilities `collect` exposed as flags never got a `dump`/`compare`
-equivalent — ADR-043 D4 judged them below the five-command bar — but the
+equivalent — the pre-1.0 CLI reset judged them below the five-command bar — but the
 underlying library functions were *not* deleted, only their Click wiring:
 
 | `collect` flag (removed) | Library function to call instead |
@@ -344,7 +343,7 @@ findings with **no out-of-band directories** to manage or keep in sync —
 pass `--build-info old=/new=` only when you deliberately want to override a
 side's facts at compare time instead of what's already embedded.
 
-## External CLI extractors & the security model (ADR-032)
+## External CLI extractors & the security model
 
 A build system abicheck does not natively support can be integrated through an
 **external CLI extractor** — a separate program registered by a YAML manifest,
@@ -409,5 +408,5 @@ manifest is driven by this library call or (historically) the deleted CLI:
   are trusted-by-operator: register only extractors you vet.
 
 Every external run records a full **reproducibility ledger** row in the pack
-manifest (ADR-032 D10): the redacted command, its content hash, declared
+manifest: the redacted command, its content hash, declared
 capabilities, start/finish timestamps, status, and diagnostics.

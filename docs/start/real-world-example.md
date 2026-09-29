@@ -75,7 +75,7 @@ abicheck compare old/lib/libfoo.so.2.3.0 new/lib/libfoo.so.2.4.0 \
   set `compile.std: c++20` in that same `.abicheck.yml`. Of the compile
   context, only the two operand-shaped inputs have a CLI spelling:
   `-I/--include` and **preprocessor macros**,
-  `-D/--define NAME[=VALUE]` on both `compare` and `dump` (ADR-074), for a
+  `-D/--define NAME[=VALUE]` on both `compare` and `dump`, for a
   one-off run. `compile.defines: [FOO=1]` stays the right answer for CI; a CLI
   `-D` overrides it for that macro name only.
 
@@ -102,7 +102,7 @@ noisy, at LOW confidence:
 ```
 
 Note what that note does **not** say: it does not tell you the 5 RTTI/internal
-findings are safe to ignore. Symbol shape is not contract membership (ADR-069)
+findings are safe to ignore. Symbol shape is not contract membership
 — a vtable layout change on a public base class is a real break for every
 consumer that derives from it. What narrows the set here is *evidence*, not
 spelling: **with** headers, abicheck can see which declarations are actually in
@@ -203,7 +203,7 @@ abicheck compare baselines/libfoo-2.3.0.abi.json build/libfoo.so -H include/ \
   ```
 - `--since origin/main` (or `--changed-path …`) — which files changed, so it
   replays only the changed translation units. Without a seed, `--depth source`
-  replays the whole current target instead (ADR-043 D7) — broader, not
+  replays the whole current target instead — broader, not
   shallower.
 
 !!! note "Cross-release body-change diff needs a source-aware baseline"
@@ -220,7 +220,7 @@ whole library; with a `--since`/`--changed-path` seed, just the changed TUs);
 leave it off on `compare` and it infers the deepest rung `--sources`/
 `--build-info` already justify, bottoming out at `headers` if neither is
 given — never a risk-based choice. (`scan` used to have a risk-scored `auto`
-rung; ADR-068's second 2026-09-09 amendment retired it, so omitting `--depth`
+rung; 0.6 retired it, so omitting `--depth`
 on `scan` now resolves to a fixed `headers`. `compare` keeps the inference
 described above, so the two agree only when neither `--sources` nor
 `--build-info` is given.) **How each depth

@@ -200,7 +200,7 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     floor — to catch stable symbols newer than it (see
     [Audit a single module](#1-audit-a-single-module-compare-abi3) above; the
     retired `scan --abi3 <floor>` was this workflow's spelling before `scan`
-    was deleted outright in ADR-068 Phase 6).
+    was deleted outright in 0.6).
 
 !!! note "Version-specific modules are not checked"
     A per-version module (`foo.cpython-311-…so`) legitimately uses private

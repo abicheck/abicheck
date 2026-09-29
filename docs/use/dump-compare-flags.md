@@ -59,13 +59,12 @@ via `--include-system-declarations`.
 
 When analysing libraries built for a different architecture, declare the
 cross-toolchain in `.abicheck.yml`'s `compile:` block. Phase 7
-(one-comparison-product.md §4.1/§4.2, ADR-037 D8.1) moved this whole family
+(one-comparison-product.md §4.1/§4.2) moved this whole family
 off `dump`/`compare`'s CLI entirely — a stable project/toolchain property,
 not a per-run choice — so there is **no `--compiler`/`--compiler-prefix`/
 `--compiler-option`/`--sysroot`/`--nostdinc`/`--ast-frontend`/`--lang` flag
 left on any command at all. The two per-run inputs that remain are the
-operand-shaped ones: `-I/--include` (below) and `-D/--define` (ADR-074,
-covered under [Preprocessor macros](#preprocessor-macros-d-define)):
+operand-shaped ones: `-I/--include` (below) and `-D/--define` (covered under [Preprocessor macros](#preprocessor-macros-d-define)):
 
 ```yaml
 # .abicheck.yml
@@ -128,7 +127,7 @@ script still passing one of these flags exits `64` — see
 
 ## Preprocessor macros: `-D` / `--define`
 
-The one L2 compile-context setting that kept a CLI spelling (ADR-074). It takes
+The one L2 compile-context setting that kept a CLI spelling. It takes
 a **logical macro definition**, `NAME` or `NAME=VALUE`, never a compiler flag,
 and is repeatable on both `dump` and `compare`:
 
@@ -287,7 +286,7 @@ if it is missing, abicheck **degrades gracefully** — L4 is marked partial and
 the artifact-backed tiers (L0–L2) remain fully authoritative. Build/source
 evidence (L3/L4) *explains, localizes, and scopes* findings or raises its own
 source-level findings, but it **never silently deletes an artifact-proven
-break** (the *authority rule*, ADR-028 D3).
+break** (the *authority rule*).
 
 !!! tip "Diagnosing which layers you have"
     Run `abicheck dump libfoo.so --dry-run` to classify the inputs and print
@@ -340,7 +339,7 @@ automatically searches for debug artifacts across multiple locations:
 
 | Flag / config key | Description |
 |------|-------------|
-| `--debug-info <path>` | The separate-debug-info input, over all of its transports: a directory containing separate debug files, a detached DWARF debug file (a `.debug` sidecar), or -- on `compare` with directory/package operands -- a debug package (RPM/Deb/tar). Which one a given operand is comes from its content, not its name. Naming a `.pdb` or a DWARF-package (`.dwp`) file *directly* is a usage error: no extraction path reads one, so it would be accepted and silently ignored -- pass the directory holding it (which the resolver searches), or set `debug.pdb_path` for a PDB. Can be repeated. A per-run evidence input (ADR-068 D5 guard #3) -- stays a CLI flag on `dump`/`compare`. Spelled `--debug-root` before plan Phase 7n merged the two; the old spelling exits 64. |
+| `--debug-info <path>` | The separate-debug-info input, over all of its transports: a directory containing separate debug files, a detached DWARF debug file (a `.debug` sidecar), or -- on `compare` with directory/package operands -- a debug package (RPM/Deb/tar). Which one a given operand is comes from its content, not its name. Naming a `.pdb` or a DWARF-package (`.dwp`) file *directly* is a usage error: no extraction path reads one, so it would be accepted and silently ignored -- pass the directory holding it (which the resolver searches), or set `debug.pdb_path` for a PDB. Can be repeated. A per-run evidence input -- stays a CLI flag on `dump`/`compare`. Spelled `--debug-root` before plan Phase 7n merged the two; the old spelling exits 64. |
 | `--debug-info old=<path>` | Debug info for the old side only (`compare` command). |
 | `--debug-info new=<path>` | Debug info for the new side only (`compare` command). |
 | `dump --debug-info <pkg>` | A usage error: `dump`'s operand is one binary, with no package-extraction stage. Pass the extracted directory, or use `compare --debug-info` on the release packages. |

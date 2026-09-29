@@ -61,7 +61,7 @@ table or DWARF at all for this fixture; it is only visible in the per-side
 compile flags captured from a `compile_commands.json` (or an equivalent
 build-system compile database). No artifact-level (L0/L1/L2) evidence
 carries this fact, which is exactly why the verdict tops out at RISK rather
-than BREAKING (ADR-028 D3: an L3-only finding may never silently become a
+than BREAKING (the authority rule: an L3-only finding may never silently become a
 proven binary break).
 
 ## Why abicheck catches it

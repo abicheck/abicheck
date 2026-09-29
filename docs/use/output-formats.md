@@ -73,7 +73,7 @@ JUnit-specific redundancy metadata is emitted.
 
 ## Public-header surface scoping
 
-Public-header surface scoping (ADR-024) restricts findings to the *public* ABI
+Public-header surface scoping restricts findings to the *public* ABI
 surface, plus the types reachable from it.
 
 "Public" is **not** simply "exported AND declared". abicheck models three
@@ -97,7 +97,7 @@ surface (e.g. a layout change to an internal struct no public API references)
 are **not dropped**: they are moved to an audit ledger so the "why was this
 excluded" trail stays inspectable. Internal-type leaks are never filtered.
 
-Scoping is **on by default** (ADR-024 Phase 5). When no public-header surface
+Scoping is **on by default**. When no public-header surface
 can be resolved — e.g. comparing two stripped `.so` files with no header or
 DWARF provenance — scoping is automatically a no-op and every finding is
 reported, so the default never hides anything it cannot place. Pass
@@ -106,13 +106,13 @@ regardless of surface).
 
 The ledger is **always** reported — there is no switch. (`--show-filtered`
 was removed; the scope/reconciliation ledger, the pattern-modulation ledger
-and the `--suppress` audit are unconditional, ADR-067.)
+and the `--suppress` audit are unconditional.)
 
 ### Widening the surface (`scope.public_symbols`)
 
 Some symbols you *do* guarantee as public can't be seen by header provenance —
 hand-written asm stubs, `.def` exports, `extern "C"` shims, or symbols whose
-MSVC mangling castxml can't match. The **widening overlay** (ADR-024 §D6) forces
+MSVC mangling castxml can't match. The **widening overlay** forces
 such symbols back into the public surface so their changes are reported rather
 than demoted:
 
@@ -161,7 +161,7 @@ Each demoted finding carries a `reason` code explaining why it was excluded:
 
 The `private-header` / `system-header` reasons are provenance-derived: they
 only appear when the snapshots were produced with a `-H`/`--header`
-public-header set (ADR-015) -- both `dump` and `compare` derive provenance
+public-header set -- both `dump` and `compare` derive provenance
 from it directly (a file entry tags that header public, a directory entry
 tags everything under it); the separate `--public-header-dir` spelling this
 paragraph once named was consolidated into the same `-H`/`--header` option
@@ -173,7 +173,7 @@ linkage/reachability reasons above are emitted.
 ### Scope-resolution confidence
 
 The ledger also carries a structured **confidence** in the surface resolution
-itself (ADR-024 §D5.3), distinct from the overall verdict confidence:
+itself, distinct from the overall verdict confidence:
 
 - `confidence`: `"high"` (a clean header-scoped run) or `"reduced"`.
 - `notes`: structured codes explaining any reduction —
@@ -240,7 +240,7 @@ BREAKING: 3 breaking, 1 risk (42 total) [12 redundant hidden]
 ```
 
 (This used to be reachable only via the built-in `quick` `--profile`;
-`--profile` was removed outright — ADR-068 D5 / plan Phase 7e — and
+`--profile` was removed outright in 0.6 — and
 `oneline` promoted to a first-class export format instead of losing the
 capability.)
 
@@ -284,8 +284,7 @@ non-overlapping populations:
 subset compatibility policy actually scored, so their sum can be lower when
 a finding was never evaluated. A CI gate that should not fail on
 pre-existing debt reads `compatibility_changes`; the debt itself stays fully
-listed in `changes[]` and in `cross_source_evolution`, per ADR-067's
-record-before-disposing rule.
+listed in `changes[]` and in `cross_source_evolution`, per the record-before-disposing rule.
 
 The `--stat`/`-o oneline=` one-line summary follows the same split: it
 counts only the observed subset and states the inventory in its own clause.
@@ -304,8 +303,7 @@ it both land in the same group. Supported for the `json`/`markdown`
 see below); `junit` still renders as `full` (no testsuite grouping
 equivalent yet — JUnit's `<testcase>` model already groups by symbol, not
 by finding). This is a
-first slice reusing the existing `Change.caused_by_type` field (see
-[ADR-052](../contribute/adr/052-unified-impact-assessment-model.md));
+first slice reusing the existing `Change.caused_by_type` field;
 a future slice (G29 Phase 6) will additionally correlate consumer-overlay
 findings that don't share a `caused_by_type` today.
 
@@ -488,7 +486,7 @@ is):
 | `source_contract` | intrinsically `API_BREAK_KINDS` | A source-level break that needs a recompile or a policy decision — not necessarily a shipped ABI break. |
 | `contextual_risk` | intrinsically `RISK_KINDS` (`COMPATIBLE_WITH_RISK` under the default policy) | Build/source/deployment context suggests risk without proving a break. |
 | `consumer_proven` | *(set explicitly, not derived from the finding's own classification)* | Runtime/`appcompat`/`plugin-check` evidence demonstrated that a **specific** consumer actually depends on what changed — see [Application Compatibility](appcompat.md). |
-| `not_checkable` | *(the finding itself)* | The finding **is** the missing-evidence signal (`evidence_required_missing`, ADR-033 D7), not a break — the coverage gap is explicit rather than a silent gap in the report. |
+| `not_checkable` | *(the finding itself)* | The finding **is** the missing-evidence signal (`evidence_required_missing`), not a break — the coverage gap is explicit rather than a silent gap in the report. |
 
 `COMPATIBLE`/`NO_CHANGE` findings (additions, clean comparisons) carry no
 `evidence_status` — there is no epistemic strength to qualify.
@@ -500,8 +498,8 @@ follows *no* verdict-modulation mechanism at all: not the active `--policy`
 into its breaking set for gating; `sdk_vendor` downgrades source-level
 kinds), not a `PolicyFile` kind-set override, not a `PolicyFile`
 `evidence_policy` ceiling (the `build_context_drift`/`source_only_findings`/
-`graph_risk_findings` knobs, ADR-033 D7), and not a per-finding
-`effective_verdict` (ADR-027 A4 pattern modulation, frozen-namespace
+`graph_risk_findings` knobs), and not a per-finding
+`effective_verdict` (pattern modulation, frozen-namespace
 escalation). All of those change what *fails the build*, not what evidence
 actually proved — and since more than one of them share the same
 `effective_verdict` field, there is no reliable way to tell "a detector
@@ -731,10 +729,10 @@ Every JSON report carries a top-level `report_schema_version` field
 > `scan`, schema 1.24; and the not-comparable refusal document alike)
 > carries an additive top-level `run_outcome` block —
 > `compatibility`/`assurance`/`gate`/`operational`/`lifecycle`, plus
-> (schema 2.50, ADR-065) `scope` — its own `schema_version` is `1.1`
+> (schema 2.50) `scope` — its own `schema_version` is `1.1`
 > once `scope` is present; a `1.0` block has no `scope` and reads as
 > `complete` — the report's independent-axis outcome
-> (ADR-063 D6) — alongside the unchanged
+> — alongside the unchanged
 > `verdict`/`exit_code`/`severity` fields; nothing existing changes
 > meaning or is removed. `gate` is an exit-code-free category
 > (`none`/`addition_quality`/`potential_breaking`/`abi_breaking`).
@@ -762,7 +760,7 @@ Every JSON report carries a top-level `report_schema_version` field
 > carry different version numbers at the same time; consumers should read
 > whichever field belongs to the file they loaded.
 >
-> **Retired third shape (historical).** Before ADR-068 Phase 6 deleted the
+> **Retired third shape (historical).** Before 0.6 deleted the
 > `scan` command outright (no alias, no deprecation window), `scan`'s own
 > JSON output emitted a **third, separate shape**: a `ScanOutcome` object (`mode`,
 > `level`, `risk`, `verdict`, `exit_code`, …) carrying its own top-level
@@ -770,7 +768,7 @@ Every JSON report carries a top-level `report_schema_version` field
 > interchangeable with, `report_schema_version`. Through `1.30` the typed
 > Python `ScanResult.to_dict()` envelope stamped the same value and nested
 > the `ScanOutcome` dict under its `report` key; that type was removed in
-> ADR-068 Phase 4, ahead of the command itself. Nothing produces a new
+> 0.6, ahead of the command itself. Nothing produces a new
 > `scan_schema_version` report any more, and `abicheck.schemas.
 > SCAN_SCHEMA_VERSION` no longer exists. Tooling that reads a **stored,
 > previously-generated** scan-shaped report (recognized structurally by its
@@ -830,7 +828,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 #### Historical: `scan --against`'s report cap and truncation
 
-`scan` was deleted outright in ADR-068 Phase 6 (no alias, no deprecation
+`scan` was deleted outright in 0.6 (no alias, no deprecation
 window); the rest of this subsection is a historical record of a stored,
 `scan_schema_version`-keyed report's shape, kept for anyone reading an old
 report rather than as a live command reference.
@@ -888,9 +886,7 @@ below), never guessed. Authority is unaffected either way: a finding's
 `docs/contribute/plans/one-comparison-product.md`) is the first cross-source
 check (`abicheck/buildsource/cross_source_checks.py`) migrated onto this model: run
 per side inside `compare`'s own pipeline rather than only under the
-now-retired `scan --against`
-(`docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md`
-D3, which went on to delete the command outright in Phase 6), its own
+now-retired `scan --against` (0.6 went on to delete the command outright), its own
 findings now carry a real, non-default `evolution` value
 (reflected in `finding_evolution.counts` above) — `introduced` (absent on
 OLD with sufficient evidence, present on NEW), `resolved` (present on OLD,
@@ -1412,7 +1408,7 @@ and confidence.
 ### Evidence metrics (timing & finding split)
 
 Alongside the coverage table, a pack-aware compare prints an **evidence-metrics
-summary** (ADR-033 D6/D9) so CI can tune which evidence mode to run by cost and
+summary** so CI can tune which evidence mode to run by cost and
 signal:
 
 ```text

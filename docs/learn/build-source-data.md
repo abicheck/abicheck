@@ -16,9 +16,9 @@ generated: false
 
 abicheck primarily compares **built artifacts** — binaries (L0), debug info
 (L1), and public headers (L2). A **build/source pack** is an *optional* sidecar
-that augments a snapshot with **source and build evidence** (ADR-028): build
-context (L3), source ABI replay (L4, ADR-030), and source graph summaries
-(L5, ADR-031) — all three are implemented and shipped today; see "Evidence
+that augments a snapshot with **source and build evidence**: build
+context (L3), source ABI replay (L4), and source graph summaries
+(L5) — all three are implemented and shipped today; see "Evidence
 layers" below for what each one requires and produces.
 
 The pack exists to give the existing ABI/API decision engine **more facts** —
@@ -50,13 +50,13 @@ unless an artifact diff also proves the break. They flow through the normal
 | **L4** | per-TU source ABI replay | Source-visible ABI/API facts | API/source-risk evidence; never sole shipped-ABI authority |
 | **L5** | Clang/Kythe/CodeQL graph summaries | Include/type/call/build reasoning | Explanation, localization, impact |
 
-L3 and L4 are implemented today (ADR-029, ADR-030). L4 ships three extractor
+L3 and L4 are implemented today. L4 ships three extractor
 backends — **clang** (the source-based default: inline/template/constexpr body
 fingerprints + default arguments), **castxml** (declarations/types/const values),
 and an **Android** header-checker adapter — plus the linker, source-replay diff,
 replay scopes, and per-TU cache (see [L4 findings](#source-abi-replay-findings-l4)).
 
-L5 has landed (ADR-031, phases 1–4): a compact, abicheck-owned **source graph
+L5 has landed: a compact, abicheck-owned **source graph
 summary**. Folded from the L3 build evidence it carries `target`,
 `compile_unit`, `source`, `header`, `generated_file`, and `build_option` nodes
 linked by `TARGET_HAS_SOURCE` / `TARGET_HAS_PUBLIC_HEADER` / `TARGET_DEPENDS_ON`
@@ -80,14 +80,13 @@ further, independent layer folds pre-captured Kythe/CodeQL backends
 through `graph compare` and the verdict pipeline, and `graph explain`
 localizes a single finding through the graph.
 
-**Beyond calls: non-call type/decl dependencies (ADR-041 P0).** A call graph
+**Beyond calls: non-call type/decl dependencies.** A call graph
 alone misses a real class of risk — a public struct with a private base class
 or private field type, or a public inline function reading an internal
 constant, none of which are *calls*. `type_graph.py`'s Clang-AST pass folds
 in automatically alongside the call graph (same L4 source-ABI replay
 trigger, no
-extra flag) and populates three further edge kinds the L5 schema had reserved
-since ADR-031 but nothing produced before ADR-041: `TYPE_INHERITS` (a private
+extra flag) and populates three further edge kinds the L5 schema had reserved but nothing produced earlier: `TYPE_INHERITS` (a private
 base class), `TYPE_HAS_FIELD_TYPE` (a private field/member type), and
 `DECL_HAS_TYPE` (a private parameter/return type) — plus `DECL_REFERENCES_DECL`
 for a non-call reference (e.g. reading an internal constant). Together with
@@ -103,7 +102,7 @@ the five, not calls alone. Each kind has a dedicated example:
 (`DECL_HAS_TYPE`), and [case190](../reference/examples/case190_public_inline_function_references_internal_constant.md)
 (`DECL_REFERENCES_DECL`, the ADR's *other* headline example, verbatim).
 
-**Header-only graph, no build integration (ADR-041 addendum).** `header_graph.py`
+**Header-only graph, no build integration.** `header_graph.py`
 builds the same node/edge shapes straight from a header-only dump — no
 `compile_commands.json`, no `--sources` checkout. Since G29 Phase A this is
 built automatically by `dump`/`compare` whenever `--depth headers` or deeper
@@ -236,14 +235,13 @@ abicheck compare old.abi.json new.abi.json
 none, L3 is reported as `not_collected` and the scan continues. Source ABI
 replay (L4) still **requires clang** (or castxml for the declaration subset) and
 degrades to partial coverage when the front-end is absent — the artifact tiers
-stay authoritative (ADR-028 D3).
+stay authoritative.
 
 ### Producing binary- and source-side facts separately
 
 Build-side and source-side facts can still be produced independently — on
 different machines, at different times. There is no longer a `collect`/`merge`
-command to pre-combine them into one baseline file first (ADR-043 — the
-library functions survive internally, but are not a documented CLI path).
+command to pre-combine them into one baseline file first (the library functions survive internally, but are not a documented CLI path).
 Instead, feed `compare` (or a later `dump`) the out-of-band pack directly, per
 side, and it is ingested inline:
 
@@ -267,7 +265,7 @@ When the **product build itself** can emit normalized facts (a Clang plugin, a
 compiler wrapper, or any tooling that writes the schema), it skips the
 source-side replay entirely: the build drops a self-describing
 `abicheck_inputs/` directory next to its binary, and abicheck ingests it
-**without re-running a compiler frontend** (ADR-035 D5). This is the
+**without re-running a compiler frontend**. This is the
 vendor/closed-source path — exact build-context facts contribute to the baseline
 without shipping sources or letting abicheck rebuild the project.
 
@@ -305,7 +303,7 @@ covers the `abicheck-cc` wrapper and the Clang plugin producers in full.
 
 ### Choosing how much to collect — `dump --depth`
 
-`dump --depth` (the unified evidence-depth dial, ADR-037 D5) selects *which*
+`dump --depth` (the unified evidence-depth dial) selects *which*
 layers are collected from `--sources` / `--build-info`, trading cost for depth:
 
 ```bash
@@ -341,7 +339,7 @@ depth.)
 
 A source checkout often *contains* the build system. abicheck can use existing
 build outputs from the checkout, while executable build queries are gated by an
-explicit trusted config path and the ADR-032 D5 action ceiling (**read by
+explicit trusted config path and the action ceiling (**read by
 default, trusted query opt-in, full build never**):
 
 ```yaml
@@ -378,9 +376,9 @@ sources:
   as `build.compile_db`, but its `build.query` is **never** auto-run (it may be
   attacker-controlled) — pass it via an explicit `--config` to trust it. (The
   external-CLI-extractor / manifest plugin path formerly run via the separate
-  `collect --extractor-manifest` command is gone from the CLI (ADR-043); its
+  `collect --extractor-manifest` command is gone from the CLI; its
   action-ceiling gate survives as a library-level mechanism only — see
-  [External CLI extractors](../use/build-evidence-setup.md#external-cli-extractors-the-security-model-adr-032)
+  [External CLI extractors](../use/build-evidence-setup.md#external-cli-extractors-the-security-model)
   for what remains documented.)
 - **`run_build` / `wrap_build` (denied):** abicheck never performs a full
   project build or compiler-wrapper interception. The inferred queries above are

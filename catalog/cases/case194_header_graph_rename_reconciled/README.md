@@ -53,13 +53,13 @@ declaration_renamed demo::detail::RawConfigV2 demo::detail::RawConfig -> demo::d
 
 Verdict: COMPATIBLE_WITH_RISK — the risk finding fires independently of the
 rename explanation (reconciliation only explains/localizes; it never
-suppresses an existing finding, ADR-028 D3).
+suppresses an existing finding).
 
 ## Minimum evidence
 
 `min_evidence: L5` — reconciling the two nodes as "the same declaration,
 renamed" instead of an unrelated remove+add pair requires the derived source
-graph's structural-context matching (G31 Phase B, ADR-048): both nodes
+graph's structural-context matching (G31 Phase B): both nodes
 occupy the identical, unique `TYPE_HAS_FIELD_TYPE:field` position from
 `demo::Config`. No lower evidence tier carries graph node identity at all.
 
@@ -105,7 +105,7 @@ info; neither has an equivalent to abicheck's source-graph canonical-identity
 and reconciliation machinery, so neither could report this as a rename at
 all — at most they'd see nothing (the type is fully internal and outside
 either tool's ABI-surface scope). This finding and its reconciliation are
-unique to abicheck's L5 build-source evidence layer (ADR-048). Contrast with
+unique to abicheck's L5 build-source evidence layer. Contrast with
 [case195](../case195_header_graph_ambiguous_rename_not_reconciled/README.md),
 the deliberate counter-example where two simultaneous renames correctly stay
 unreconciled.

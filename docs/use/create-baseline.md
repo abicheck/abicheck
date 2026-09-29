@@ -128,7 +128,7 @@ abicheck compare old/libfoo.so new/libfoo.so \
   time.
 
 (`scan ARTIFACT --against OLD` was this workflow's spelling before `scan`
-was deleted outright in ADR-068 Phase 6 — no alias, no deprecation window;
+was deleted outright in 0.6 — no alias, no deprecation window;
 `compare OLD NEW` is the direct replacement, with `OLD`/`ARTIFACT` swapping
 argument order to match `compare`'s own `OLD NEW` convention.)
 

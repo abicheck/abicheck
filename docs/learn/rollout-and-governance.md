@@ -185,7 +185,7 @@ the custom file format, and packs are owned by
 
 ### Versioning policy
 
-A policy file may also declare a `versioning:` block (ADR-066 D4) naming
+A policy file may also declare a `versioning:` block naming
 five independent controls: `scheme` (how version labels order — strict
 SemVer by default), `promise` (what compatibility the project claims
 between two ordered versions — `none` by default, e.g. a pre-1.0 project
@@ -205,7 +205,7 @@ versioning:
 
 This never changes what abicheck *observed*: the finding set, the verdict,
 and the SemVer/SONAME recommendation stay exactly what they would be
-without the block (ADR-066 D5 — "policy changes acceptance; it never
+without the block ("policy changes acceptance; it never
 changes facts"). What it adds is orthogonal: whether *this* release is
 acceptable under the declared promise
 (`abicheck.policy.versioning_policy.evaluate_release_acceptance`, exposed
@@ -224,7 +224,7 @@ a table.
 
 ### Change acknowledgment and the additions review gate
 
-A policy file may also declare an `acknowledgment:` block (ADR-067 D6),
+A policy file may also declare an `acknowledgment:` block,
 today with one control: `unacknowledged_additions` (`allow`, `warn`, or
 `block` — `allow` by default, so no existing run changes):
 

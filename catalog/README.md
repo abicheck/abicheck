@@ -11,7 +11,7 @@ the same cases by rule, scenario kind, ecosystem, operation, evidence level,
 language, and verdict.
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **208 cases** (203 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **208 cases** (203 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -47,7 +47,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | COMPATIBLE (addition) | 11 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 23 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 10 | — | ✅ |
-| Bundle (multi-binary) | 5 | see [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
+| Bundle (multi-binary) | 5 | see [Multi-binary analysis](../docs/use/multi-binary.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
 > **Verdict source of truth:** [`ground_truth.json`](ground_truth.json), which aligns with the 5-tier classification in [`abicheck/checker_policy.py`](../abicheck/checker_policy.py): `BREAKING_KINDS` → `API_BREAK_KINDS` → `RISK_KINDS` → `QUALITY_KINDS` → `ADDITION_KINDS`.

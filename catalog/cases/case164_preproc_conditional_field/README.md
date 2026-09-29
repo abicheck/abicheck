@@ -1,12 +1,12 @@
 # Case 164: Preprocessor-Conditional Field (Build-Context False Positive)
 
-**Category:** Build-Context Reconciliation (ADR-039) | **Verdict:** ✅ NO_CHANGE
+**Category:** Build-Context Reconciliation | **Verdict:** ✅ NO_CHANGE
 (build-context reconciliation is automatic; a context-free header read
 misreports BREAKING)
 
 ## Verdict and consumer impact
 
-This case demonstrates ADR-039 (build-context reconciliation): a false positive
+This case demonstrates build-context reconciliation: a false positive
 that the `binary` and `headers` depths cannot avoid and that only **build**
 evidence resolves.
 
@@ -35,7 +35,7 @@ shipped layout never moves.
 # Context-free header read (no build evidence) -- the false positive:
 abicheck compare v1.abi.json v2.abi.json --scope-public-headers
 
-# With build-context reconciliation (ADR-039) -- the phantom clears:
+# With build-context reconciliation -- the phantom clears:
 abicheck compare v1.abi.json v2.abi.json --scope-public-headers \
 ```
 
@@ -76,8 +76,7 @@ compile database's active `-D` set during a build-aware `dump`) against
 each struct's guarded members: since `CONFIG_KEEP_LEGACY` is in
 `build_context_defines` on both sides, the guarded field is proven
 present in both real builds and the phantom removal is reclassified as a
-context-free parsing artifact rather than a genuine break (ADR-028 D3: a
-reconciled finding is always disclosed, never silently
+context-free parsing artifact rather than a genuine break (a reconciled finding is always disclosed, never silently
 dropped, and an *unconditional* removal — or one guarded on an undefined
 macro — is never reconciled away).
 

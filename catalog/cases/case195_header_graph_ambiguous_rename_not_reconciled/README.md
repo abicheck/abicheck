@@ -59,7 +59,7 @@ cannot be safely established.
 
 `min_evidence: L5` — attempting (and correctly declining) to reconcile the
 two renamed nodes requires the derived source graph's structural-context
-matching (G31 Phase B, ADR-048). No lower evidence tier carries graph node
+matching (G31 Phase B). No lower evidence tier carries graph node
 identity at all.
 
 ## Why abicheck catches it
@@ -87,7 +87,7 @@ same CI job as case194, but here it correctly avoids putting a specific
 "RawA was renamed to RawX" claim into a PR comment when the evidence can't
 actually support which old name maps to which new one — guessing (e.g.
 "first old wins first new") would be exactly the false-positive-by-
-arbitrary-choice class of bug ADR-045 fixed for flat type matching,
+arbitrary-choice class of bug abicheck already avoids for flat type matching,
 generalized here to graph nodes.
 
 ## Safe redesign
@@ -110,6 +110,6 @@ silent rather than mis-pair two unrelated declarations.
 info; neither has an equivalent to abicheck's source-graph reconciliation
 machinery, so this ambiguity-detection behavior — and the deliberate
 refusal to guess — is unique to abicheck's L5 build-source evidence layer
-(ADR-045, ADR-048). Contrast with
+. Contrast with
 [case194](../case194_header_graph_rename_reconciled/README.md), the matching
 positive case where an unambiguous single rename does reconcile.
