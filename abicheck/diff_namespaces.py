@@ -26,8 +26,11 @@ Detectors emitted here:
   new headers while the experimental alias is kept.
 
 * ``EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT`` — a name in
-  ``experimental::`` was removed and no declaration with the same leaf
-  name exists at a stable location in the new headers.
+  ``experimental::`` was removed and no replacement exists at a stable
+  location in the new headers: neither at the same path minus the
+  experimental segment, nor (functions only) as a unique, newly added
+  declaration with the same leaf name and parameter signature under the
+  same top-level namespace (see ``_unique_promotion_target``).
 
 * ``STD_REEXPORT_REMOVED`` — a public function whose declaration is just
   a ``using std::X;`` re-export was deleted. Detection works on
@@ -44,6 +47,15 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
+from .compare.namespace_shape_detectors import (  # noqa: F401 -- re-exported
+    _batch_demangle_public,
+    _build_std_reexport_change,
+    _collect_public_declared_names,
+    _looks_like_std_reexport,
+    _qualified_function_name,
+    detect_inline_namespace_version_bump,
+    detect_std_reexport_removed,
+)
 from .compare.qualified_name_normalization import (
     segments as _segments,
     version_strip_segments as _version_strip_segments,
@@ -99,52 +111,6 @@ def _strip_experimental(
     return qualified, None
 
 
-def _qualified_function_name(
-    name: str, mangled: str, demangled: dict[str, str] | None = None
-) -> str:
-    """Return the best-effort qualified declaration name for a function.
-
-    Header-derived snapshots populate ``Function.name`` with the
-    qualified declaration name (``acme::lib::sort``). ELF-only mode
-    leaves ``Function.name`` set to the mangled string; in that case we
-    fall back to demangling of the mangled name.
-
-    When iterating all functions of a snapshot, pass a *demangled* map
-    (from :func:`_batch_demangle_public`) so the whole snapshot is demangled in
-    a single batched ``c++filt`` call instead of one subprocess per symbol —
-    the per-symbol path is what makes namespace detection explode on large
-    stripped libraries. The lazy single-symbol fallback is kept for callers
-    that have no batch (and is itself memoised in ``demangle_batch``).
-
-    A demangled string is a *full declaration* — return type, qualified
-    name, parameter list, and trailing qualifiers (``ns::C::f(ns::T
-    const&, long) const``) — not merely a qualified name. This is
-    deliberately returned as-is, signature included: it is what
-    distinguishes one overload from another for callers that index
-    functions by qualified name (:func:`_func_index_items`) — a
-    caller that needs only the *leaf* member name must strip the signature
-    itself (via :func:`diff_templates._strip_param_signature`) before
-    segmenting, rather than have it stripped here, or two overloads
-    (``f(int)``, ``f(double)``) collapse onto one identity and an overload
-    that is removed while a sibling survives goes unreported (Codex
-    review).
-    """
-    if "::" in name or "<" in name:
-        return name
-    if mangled.startswith("_Z"):
-        if demangled is not None:
-            return demangled.get(mangled, name)
-        from .demangle import demangle_batch
-
-        return demangle_batch([mangled]).get(mangled, name)
-    return name
-
-
-# ---------------------------------------------------------------------------
-# Detector: experimental → stable graduation / removal
-# ---------------------------------------------------------------------------
-
-
 def _split_experimental(
     qnames: list[str],
     experimental_namespaces: tuple[str, ...],
@@ -163,6 +129,11 @@ class _IndexItem(NamedTuple):
     stripped: str
     leaf: str
     identity: object | None
+    #: Parameter-type signature (``Param.type`` spellings, in order) when
+    #: the producer supplied one; ``None`` when there is no signature
+    #: evidence (types). Only consulted by the promotion check
+    #: (:func:`_unique_promotion_target`), never by the paired index.
+    signature: tuple[str, ...] | None = None
 
 
 # A singleton's key is (its own raw ``stripped``, ``leaf``); a genuinely
@@ -546,7 +517,8 @@ def _func_index_items(
             if f.mangled and _looks_like_real_mangled_name(f.mangled)
             else None
         )
-        out.append(_IndexItem(qname, stripped, leaf, identity))
+        signature = tuple(p.type for p in f.params)
+        out.append(_IndexItem(qname, stripped, leaf, identity, signature))
     return out
 
 
@@ -698,6 +670,129 @@ def _identity_stable_keys(items: list[_IndexItem]) -> dict[object, set[str]]:
                 _strip_param_signature(item.stripped)
             )
     return out
+
+
+def _scope_path(item: _IndexItem) -> tuple[str, ...]:
+    """The declaration's own qualified-name segments, signature removed."""
+    return tuple(_segments(_strip_param_signature(item.qname)))
+
+
+def _signature_decls(
+    items: list[_IndexItem],
+) -> set[tuple[tuple[str, ...], tuple[str, ...]]]:
+    return {(_scope_path(i), i.signature) for i in items if i.signature is not None}
+
+
+def _same_leaf_and_signature_under_root(
+    item: _IndexItem, removed: _IndexItem, root: str
+) -> tuple[str, ...] | None:
+    """*item*'s scope path when it shares *removed*'s leaf, signature and
+    top-level namespace, else ``None``."""
+    if item.signature is None or item.signature != removed.signature:
+        return None
+    if item.leaf != removed.leaf:
+        return None
+    path = _scope_path(item)
+    return path if path and path[0] == root else None
+
+
+def _promotion_candidates(
+    removed: _IndexItem,
+    root: str,
+    old_items: list[_IndexItem],
+    new_items: list[_IndexItem],
+    experimental_namespaces: tuple[str, ...],
+) -> set[tuple[str, ...]]:
+    """Stable, newly added NEW declarations *removed* could have moved to."""
+    old_decls = _signature_decls(old_items)
+    out: set[tuple[str, ...]] = set()
+    for item in new_items:
+        path = _same_leaf_and_signature_under_root(item, removed, root)
+        if path is None or any(s in experimental_namespaces for s in path):
+            continue
+        if (path, item.signature) not in old_decls:
+            out.add(path)
+    return out
+
+
+def _promotion_claimants(
+    removed: _IndexItem,
+    root: str,
+    old_items: list[_IndexItem],
+    new_items: list[_IndexItem],
+    experimental_namespaces: tuple[str, ...],
+) -> set[tuple[str, ...]]:
+    """Removed OLD experimental declarations that could claim the same
+    target as *removed* (always including *removed* itself)."""
+    new_decls = _signature_decls(new_items)
+    out: set[tuple[str, ...]] = {_scope_path(removed)}
+    for item in old_items:
+        path = _same_leaf_and_signature_under_root(item, removed, root)
+        if path is None or not any(s in experimental_namespaces for s in path):
+            continue
+        if (path, item.signature) not in new_decls:
+            out.add(path)
+    return out
+
+
+def _unique_promotion_target(
+    removed: _IndexItem,
+    old_items: list[_IndexItem],
+    new_items: list[_IndexItem],
+    experimental_namespaces: tuple[str, ...],
+) -> str | None:
+    """Return the one stable NEW declaration *removed* was promoted to, or
+    ``None`` when the evidence does not prove a unique promotion.
+
+    Layer 1 of :func:`_paired_stable_indices` matches on the *full*
+    experimental-stripped path, so a promotion that also changes the
+    enclosing namespace (``ccl::preview::split_communicators`` ->
+    ``ccl::v1::split_communicators``, where ``v1`` is an ordinary, non-
+    inline namespace so the mangled names differ and layer 2 cannot merge
+    them either) otherwise reads as a removal without replacement even
+    though the declaration moved to a stable home. This closes that gap
+    under an evidence gate; a candidate qualifies only when **all** hold:
+
+    * it is not itself in an experimental namespace;
+    * its leaf name equals *removed*'s;
+    * both sides carry a parameter signature and the two are equal --
+      no signature evidence, no promotion;
+    * it lives under the same top-level namespace (the library root), so
+      a same-named function in an unrelated library root is never used;
+    * it is *new*: no OLD declaration had that exact scope path with that
+      signature -- an already-existing same-named function elsewhere is
+      not evidence the experimental one was promoted to it.
+
+    Exactly one distinct qualifying scope path is required; two or more
+    is ambiguous and yields ``None`` (the removal is reported, the same
+    false-negative-over-false-positive default this module uses
+    throughout). The target is also *reserved*: it counts only when
+    exactly one removed experimental declaration (distinct scope path, same
+    leaf, signature and root, absent from NEW) claims it -- two removals
+    (``ccl::preview::f(int)`` and ``ccl::experimental::f(int)``) cannot
+    both be promoted to one ``ccl::v1::f(int)``, so neither is. The result
+    depends only on the *sets* of items, never on their order.
+    """
+    if removed.signature is None:
+        return None
+    removed_path = _scope_path(removed)
+    if not removed_path:
+        return None
+    root = removed_path[0]
+    if root in experimental_namespaces:
+        # `preview::foo` has no library root to anchor the search to.
+        return None
+    candidates = _promotion_candidates(
+        removed, root, old_items, new_items, experimental_namespaces
+    )
+    if len(candidates) != 1:
+        return None
+    claimants = _promotion_claimants(
+        removed, root, old_items, new_items, experimental_namespaces
+    )
+    if claimants != {removed_path}:
+        return None
+    return "::".join(next(iter(candidates)))
 
 
 def _classify_experimental_event(
@@ -926,12 +1021,24 @@ def _findings_for(
             )
             for item in old_exp_items
         )
+        # A declaration promoted to a stable namespace whose path differs
+        # by more than the experimental segment (see
+        # `_unique_promotion_target`) is not a removal without replacement.
+        # `all(...)` for the same reason as `still_linked` above: a bucket
+        # of collapsed overloads is only promoted when every one is.
+        promoted = bool(old_exp_items) and all(
+            _unique_promotion_target(
+                item, old_items or [], new_items or [], experimental_namespaces
+            )
+            is not None
+            for item in old_exp_items
+        )
         event = _classify_experimental_event(
             old_exp,
             old_stable,
             new_exp,
             new_stable,
-            still_linked=still_linked,
+            still_linked=still_linked or promoted,
         )
         if event is None:
             continue
@@ -1008,268 +1115,6 @@ def detect_experimental_namespace_changes(
         )
     )
     return out
-
-
-# ---------------------------------------------------------------------------
-# Detector: std re-export removed
-# ---------------------------------------------------------------------------
-
-# Heuristic: a function whose declared qualified name resolves to a
-# library namespace AND whose mangled name resolves to a name in
-# ``std::`` is a re-export (the library names it via ``using std::X``).
-#
-# Concrete forms we accept:
-#   - Function.name == "lib::ns::par"         (declared in library headers)
-#   - Function.mangled demangles to a name beginning with "std::"
-#     (the underlying definition belongs to the standard library).
-#
-# We DO NOT use libstdc++/libc++ internal-namespace heuristics here —
-# false positives on real library functions would be worse than missing
-# the occasional re-export. The detector therefore requires both halves
-# of the signal to fire.
-
-_STD_PREFIX = "std::"
-
-
-def _looks_like_std_reexport(
-    declared_qualified: str,
-    underlying_qualified: str,
-) -> bool:
-    """Return True when declared_qualified is a non-std alias for underlying_qualified.
-
-    Both names must be fully qualified. The underlying name must live in
-    ``std::``; the declared name must live somewhere else (any library
-    namespace). Identical names — i.e. the function genuinely lives in
-    ``std::`` — are not re-exports.
-    """
-    if not declared_qualified or not underlying_qualified:
-        return False
-    declared_segs = _segments(declared_qualified)
-    underlying_segs = _segments(underlying_qualified)
-    if not declared_segs or not underlying_segs:
-        return False
-    # Declared must NOT be in std::; underlying MUST be in std::.
-    if declared_segs[0] == "std":
-        return False
-    if underlying_segs[0] != "std":
-        return False
-    # Same leaf name on both sides — a using-declaration preserves the leaf.
-    return declared_segs[-1] == underlying_segs[-1]
-
-
-def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
-    """Return the set of qualified declared names of public functions in
-    *snap* -- the source-declaration population, see
-    :func:`_func_index_items`."""
-    demangled = _batch_demangle_public(snap)
-    out: set[str] = set()
-    for f in snap.functions:
-        if not in_source_declaration_index(f):
-            continue
-        qname = _qualified_function_name(f.name, f.mangled, demangled)
-        if qname:
-            out.add(qname)
-    return out
-
-
-def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
-    """Demangle every public mangled name in *snap* in one batch call --
-    same population as :func:`_func_index_items`: a declaration whose export
-    vanished is still declared."""
-    from .demangle import demangle_batch
-
-    mangled = [
-        f.mangled
-        for f in snap.functions
-        if f.mangled.startswith("_Z") and in_source_declaration_index(f)
-    ]
-    return demangle_batch(mangled) if mangled else {}
-
-
-def _build_std_reexport_change(declared: str, underlying: str) -> Change:
-    """Build a single ``STD_REEXPORT_REMOVED`` finding.
-
-    ADR-044 D1 (Codex review): only ever emitted for a declaration that was a
-    *public* function (``detect_std_reexport_removed`` filters on
-    the source-declaration population before calling this) — same construction-time
-    tagging rationale as ``_emit_experimental_change``.
-    """
-    return make_change(
-        ChangeKind.STD_REEXPORT_REMOVED,
-        symbol=declared,
-        name=declared,
-        detail=underlying,
-        old_value=f"{declared} → {underlying}",
-        new_value=None,
-        public_reachable=True,
-        reachability_state=ReachabilityState.PROVEN_REACHABLE,
-        reachability_kind="direct_public_symbol",
-    )
-
-
-def detect_std_reexport_removed(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-) -> list[Change]:
-    """Report ``using std::X;`` re-exports that disappeared from public headers.
-
-    A re-export is detected when the OLD snapshot has a public function
-    whose declared qualified name lives in a library namespace but whose
-    mangled name demangles to ``std::``. If the same declared qualified
-    name is absent from the NEW snapshot's function set, we emit one
-    ``STD_REEXPORT_REMOVED`` per missing declaration.
-
-    The detector is intentionally narrow — it never fires when the
-    declared name and the underlying name are identical, when the
-    declared name is in ``std::``, or when the mangled name does not
-    demangle to ``std::``.
-    """
-    demangled = _batch_demangle_public(old)
-    new_declared = _collect_public_declared_names(new)
-
-    changes: list[Change] = []
-    seen: set[str] = set()
-    for f in old.functions:
-        if not in_source_declaration_index(f):
-            continue
-        declared = _qualified_function_name(f.name, f.mangled, demangled)
-        if not declared or declared in seen or declared in new_declared:
-            continue
-        underlying = demangled.get(f.mangled, "")
-        if not _looks_like_std_reexport(declared, underlying):
-            continue
-        seen.add(declared)
-        changes.append(_build_std_reexport_change(declared, underlying))
-
-    return changes
-
-
-# ---------------------------------------------------------------------------
-# Detector: versioned inline namespace bumped (header-declared)
-# ---------------------------------------------------------------------------
-
-
-def detect_inline_namespace_version_bump(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-) -> list[Change]:
-    """Detect declarations whose versioned inline-namespace segment shifted.
-
-    Complementary to the existing symbol-level ``INLINE_NAMESPACE_MOVED``
-    detector (``diff_platform._diff_inline_namespace``): that one needs
-    ≥2 mangled-symbol moves and works only on built shared libraries;
-    this one fires from declared qualified names so it works for header-
-    only / template-library snapshots and on a single declaration.
-
-    The detector matches old and new declarations by the *version-
-    stripped* qualified name. If both sides have versioned segments AND
-    the integer suffix changed, emit one finding per moved declaration.
-    """
-    old_idx = _index_versioned(_collect_versioned_entries(old))
-    new_idx = _index_versioned(_collect_versioned_entries(new))
-    return _emit_version_bumps(old_idx, new_idx)
-
-
-def _index_versioned(
-    items: list[tuple[str, bool, str]],
-) -> dict[tuple[str, ...], list[tuple[str, int, bool, str]]]:
-    """Map version-stripped segments → ``(qualified, version_int, is_public, entity)``.
-
-    The trailing entity is carried because this index pools functions and
-    record types (see :func:`_collect_versioned_entries`), so the kind is a
-    property of the finding, not of the ChangeKind.
-    """
-    out: dict[tuple[str, ...], list[tuple[str, int, bool, str]]] = {}
-    for qname, is_public, entity in items:
-        segs = _segments(qname)
-        stripped, ver = _version_strip_segments(segs)
-        if ver is None:
-            continue
-        out.setdefault(stripped, []).append((qname, ver, is_public, entity))
-    return out
-
-
-def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool, str]]:
-    """Return ``[(qualified_name, is_reliably_public), …]`` for *snap*.
-
-    A function entry is reliably public because it was filtered to the
-    source-declaration population above (see :func:`_func_index_items`). A type entry is reliably public only when
-    ``RecordType.origin == ScopeOrigin.PUBLIC_HEADER`` (ADR-024's opt-in
-    public-header scoping via ``-H``/``--header``) —
-    the one signal that *does* exist for a type in the absence of a
-    visibility field (Codex review). Without that opt-in flag every type's
-    ``origin`` is ``ScopeOrigin.UNKNOWN``, so this degrades to the prior
-    untagged behavior automatically, not a regression for the common case.
-    """
-    from .model import ScopeOrigin
-
-    demangled = _batch_demangle_public(snap)
-    items: list[tuple[str, bool, str]] = []
-    for f in snap.functions:
-        if not in_source_declaration_index(f):
-            continue
-        qname = _qualified_function_name(f.name, f.mangled, demangled)
-        if qname:
-            items.append((qname, True, "function"))
-    for t in snap.types:
-        if t.name:
-            items.append((t.name, t.origin == ScopeOrigin.PUBLIC_HEADER, "type"))
-    return items
-
-
-def _emit_version_bumps(
-    old_idx: dict[tuple[str, ...], list[tuple[str, int, bool, str]]],
-    new_idx: dict[tuple[str, ...], list[tuple[str, int, bool, str]]],
-) -> list[Change]:
-    changes: list[Change] = []
-    for stripped, old_list in old_idx.items():
-        new_list = new_idx.get(stripped, [])
-        if not new_list:
-            continue
-        old_versions = {v for _, v, _, _ in old_list}
-        new_versions = {v for _, v, _, _ in new_list}
-        if old_versions == new_versions:
-            continue
-        if max(new_versions) <= max(old_versions):
-            continue
-        old_q = old_list[0][0]
-        new_q = new_list[0][0]
-        # `_collect_versioned_entries` marks a function entry reliably
-        # public (source-declaration filter) and a type entry reliably
-        # public only when its origin is ScopeOrigin.PUBLIC_HEADER (Codex
-        # review) — untagged otherwise, same as before public-header
-        # scoping is used. `or`, not `and` (Codex review, fresh evidence):
-        # old-side public evidence alone already proves an old-consumer
-        # break (an application linked against the old public symbol),
-        # regardless of whether the new symbol also has public-header
-        # evidence — public-header scoping can be asymmetric between two
-        # snapshots (a type moved out of the scoped header set, or the flag
-        # only covers one side), so requiring both sides publicly-tagged
-        # let a genuine old-consumer break stay untagged and suppressible.
-        subject_is_public = old_list[0][2] or new_list[0][2]
-        # Polymorphic: the pooled index holds functions and record types
-        # alike; unstated when the two sides disagree.
-        entities = {old_list[0][3], new_list[0][3]}
-        changes.append(
-            make_change(
-                ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
-                symbol=new_q,
-                entity_discriminator=(
-                    next(iter(entities)) if len(entities) == 1 else None
-                ),
-                old=old_q,
-                new=new_q,
-                detail=f"{sorted(old_versions)} to {sorted(new_versions)}",
-                public_reachable=subject_is_public,
-                reachability_state=(
-                    ReachabilityState.PROVEN_REACHABLE
-                    if subject_is_public
-                    else ReachabilityState.UNKNOWN
-                ),
-                reachability_kind="direct_public_symbol" if subject_is_public else None,
-            )
-        )
-    return changes
 
 
 # ---------------------------------------------------------------------------

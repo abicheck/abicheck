@@ -29,6 +29,15 @@ from __future__ import annotations
 import re
 
 from ..model import AbiSnapshot
+from ..model.export_entity_name import (  # noqa: F401 -- re-exported for callers/tests
+    _ARTIFACT_OPERAND_PREFIXES,
+    _NESTED_QUALIFIERS_RE,
+    _THUNK_PREFIX_RE,
+    EntityName,
+    _encoding_after_prefixes,
+    _read_decimal_length,
+    entity_name_components,
+)
 from .source_link import (
     _TBB_MALLOC_PROXY_C_SYMBOLS,
     _TBB_MALLOC_PROXY_CPP_SYMBOLS,
@@ -79,6 +88,15 @@ ACCOUNT_INTERNAL_NS = "internal_namespace"
 #: An exported C++ template instantiation with no matching public declaration
 #: (the header declares the template, the binary carries an instantiation).
 ACCOUNT_TEMPLATE_INST = "template_instantiation"
+#: An instantiation (or member of an instantiation) of a template a public
+#: header declares -- ``template <attr_id A> X::set(...)``, a member of a public
+#: class template. Public API a consumer links against, so documented, never a
+#: "hide it" finding (hiding it breaks those consumers).
+ACCOUNT_PUBLIC_TEMPLATE = "public_template_instantiation"
+#: A standard/third-party template the library instantiated over its *own*
+#: types (``std::_Sp_counted_deleter<dnnl::impl::stream*, ...>``): the library's
+#: own vague-linkage copy, not a statically linked dependency.
+ACCOUNT_OWN_TYPE_INSTANTIATION = "own_type_instantiation"
 #: An undocumented export none of the finer reasons explain — a bare accidental
 #: entry point (often ``extern "C"``) with no public declaration.
 ACCOUNT_UNDECLARED = "undeclared_export"
@@ -93,6 +111,7 @@ _UNDOCUMENTED_ACCOUNTS: tuple[str, ...] = (
     ACCOUNT_EXTERNAL_DEP,
     ACCOUNT_INTERNAL_NS,
     ACCOUNT_TEMPLATE_INST,
+    ACCOUNT_OWN_TYPE_INSTANTIATION,
     ACCOUNT_UNDECLARED,
 )
 
@@ -120,85 +139,6 @@ _VENDORED_OWNER_NAMESPACES: dict[str, str] = {
     "google": "Google/protobuf (vendored third-party)",
     "protobuf": "Protocol Buffers (vendored third-party)",
 }
-
-#: Itanium prefixes whose *operand* is a type whose owning namespace decides
-#: external-vs-native: vtable/typeinfo/typeinfo-name/VTT/construction-vtable
-#: (``_ZTV``/``_ZTI``/``_ZTS``/``_ZTT``/``_ZTC``) and a guard variable (``_ZGV``,
-#: ``_ZGVZ`` for a local static). Peeling them lets a leaked *dependency*
-#: vtable/typeinfo/construction-vtable (``_ZTVNSt…``, ``_ZTIN3fmt…``,
-#: ``_ZTCN3fmt3FooE0_NS_3BarE``) be attributed to the dependency instead of exempted
-#: as this library's own class artifact (Codex review). Prefix order is immaterial —
-#: the fourth char (``C``/``V``/``I``/``S``/``T``) disambiguates them — and the
-#: construction-vtable operand (``N3fmt3FooE0_…``) still begins with the nested-name
-#: ``N`` that :func:`_mangled_owner_namespace` reads. Thunks carry a numeric
-#: call-offset before the operand and are peeled by :data:`_THUNK_PREFIX_RE` instead.
-_ARTIFACT_OPERAND_PREFIXES = (
-    "_ZTV",
-    "_ZTI",
-    "_ZTS",
-    "_ZTT",
-    "_ZTC",
-    "_ZGVZ",
-    "_ZGV",
-)
-
-#: A non-virtual/virtual/covariant thunk prefix (``_ZTh``/``_ZTv``/``_ZTc``)
-#: followed by its call-offset run. Each offset chunk is ``n?<num>_`` and, for a
-#: covariant (``_ZTc``) thunk, may carry an ``h``/``v`` tag (``h<n>_`` /
-#: ``v<n>_<n>_``), so the run token is ``[hv]?n?\d+_``. Peeling the whole run —
-#: not just the ``_ZTh`` letters — leaves the nested-name operand, so a leaked
-#: dependency thunk (``_ZThn16_N3fmt…``, ``_ZTv0_n24_N5boost…``, covariant
-#: ``_ZTchn16_h16_N3fmt…``) attributes to its dependency instead of falling through
-#: to the artifact exemption (Codex review).
-_THUNK_PREFIX_RE = re.compile(r"^_ZT[hvc](?:[hv]?n?\d+_)+")
-
-#: Itanium nested-name CV-qualifiers (``r`` restrict / ``V`` volatile / ``K`` const)
-#: and ref-qualifiers (``R`` ``&`` / ``O`` ``&&``) that sit between the ``N`` intro
-#: and the first name component. Skipped before reading the owner so a const/ref
-#: member export (``_ZNK3fmt…``) still resolves its namespace (Codex review).
-_NESTED_QUALIFIERS_RE = re.compile(r"^[rVK]*[RO]?")
-
-
-def _read_decimal_length(text: str, start: int) -> tuple[int, int] | None:
-    """Read an Itanium source-name length without unbounded ``int()`` conversion.
-
-    Exported symbol names can come from untrusted binaries/snapshots. Feeding an
-    arbitrary digit run to :func:`int` can raise on modern Python when it exceeds
-    the interpreter's integer-string limit (and is needless work on older
-    runtimes). Accumulate only while the length can still address ``text``; a
-    longer run is still safe and simply skips past the end of the malformed name.
-    """
-    if start >= len(text) or not ("0" <= text[start] <= "9"):
-        return None
-    i = start
-    length = 0
-    limit = len(text)
-    while i < len(text) and "0" <= text[i] <= "9":
-        digit = ord(text[i]) - ord("0")
-        length = length * 10 + digit
-        i += 1
-        if length > limit:
-            while i < len(text) and "0" <= text[i] <= "9":
-                i += 1
-            return length, i
-    return length, i
-
-
-def _encoding_after_prefixes(symbol: str) -> str:
-    """Strip ``_Z`` and any vtable/typeinfo/guard-variable/thunk prefix.
-
-    Returns the Itanium *encoding* that follows — the operand type for an artifact,
-    or the name+signature for a plain function/data — with the nested-name ``N``
-    intro left intact so callers can tell a nested name (``N3fmt…E``) from an
-    un-nested top-level name (``3fmt`` = a global ``fmt``, no namespace).
-    """
-    thunk = _THUNK_PREFIX_RE.match(symbol)
-    if thunk:
-        return symbol[thunk.end() :]
-    for pfx in _ARTIFACT_OPERAND_PREFIXES:
-        if symbol.startswith(pfx):
-            return symbol[len(pfx) :]
-    return symbol[2:] if symbol.startswith("_Z") else symbol
 
 
 def _mangled_owner_namespace(symbol: str) -> str | None:
@@ -389,45 +329,19 @@ def _msvc_scope_components(symbol: str) -> list[str]:
 
 
 def _nested_component(symbol: str, index: int) -> str | None:
-    """The *index*-th (0-based) depth-0 component of an Itanium nested name.
+    """The *index*-th (0-based) component of an Itanium entity name.
 
-    Reads only the entity-name qualifiers (skipping template arguments and stopping
-    at the nested-name close), so ``_ZN6google8protobuf7MessageEv`` yields
-    ``google`` at 0 and ``protobuf`` at 1. ``None`` for an un-nested name or when the
-    component does not exist.
+    Reads only the entity-name qualifiers (template arguments are skipped as
+    whole productions and the nested-name close ends the walk), so
+    ``_ZN6google8protobuf7MessageEv`` yields ``google`` at 0 and ``protobuf``
+    at 1. ``None`` for an unparseable name or when the component does not
+    exist. See :func:`entity_name_components`.
     """
-    rest = _encoding_after_prefixes(symbol)
-    if not rest.startswith("N"):
+    parsed = entity_name_components(symbol)
+    if parsed is None or not parsed.nested:
         return None
-    rest = _NESTED_QUALIFIERS_RE.sub("", rest[1:], count=1)
-    i, depth, seen = 0, 0, 0
-    while i < len(rest):
-        c = rest[i]
-        if c == "I":
-            depth += 1
-            i += 1
-        elif c == "E":
-            if depth == 0:
-                break
-            depth -= 1
-            i += 1
-        elif "0" <= c <= "9":
-            parsed = _read_decimal_length(rest, i)
-            if parsed is None:
-                i += 1
-                continue
-            length, j = parsed
-            if length > len(rest) - j:
-                return None
-            name = rest[j : j + length]
-            i = j + length
-            if depth == 0:
-                if seen == index:
-                    return name
-                seen += 1
-        else:
-            i += 1
-    return None
+    comps = parsed.components
+    return comps[index] if 0 <= index < len(comps) else None
 
 
 #: Library-name stems a vendored owner ships under, when they differ from the owner
@@ -627,96 +541,30 @@ def _entity_owner_is_internal(symbol: str) -> bool:
         # name; only the enclosing scopes that follow decide internal-ness.
         comps = symbol.lstrip("?").split("@@", 1)[0].split("@")
         return any(_is_internal_ns_component(c) for c in comps[1:] if c)
-    if not symbol.startswith("_Z"):
-        return False
-    rest = _encoding_after_prefixes(symbol)
-    if not rest.startswith("N"):
-        return False  # un-nested name has no enclosing namespace
-    # Collect the depth-0 nested-name components up to the closing ``E`` (parameters
-    # follow it); template arguments (depth > 0) are skipped, not treated as scopes.
-    rest = _NESTED_QUALIFIERS_RE.sub("", rest[1:], count=1)
-    components: list[str] = []
-    i, depth = 0, 0
-    while i < len(rest):
-        c = rest[i]
-        if c == "I":
-            depth += 1
-            i += 1
-        elif c == "E":
-            if depth == 0:
-                break
-            depth -= 1
-            i += 1
-        elif "0" <= c <= "9":
-            parsed = _read_decimal_length(rest, i)
-            if parsed is None:
-                i += 1
-                continue
-            length, j = parsed
-            if length > len(rest) - j:
-                return False
-            i = j + length
-            if depth == 0:
-                components.append(rest[j : j + length])
-        else:
-            i += 1
-    # The last depth-0 component is the entity's own name; only its enclosing
-    # namespace/class components decide internal-ness (Codex review).
-    return any(_is_internal_ns_component(c) for c in components[:-1])
+    parsed = entity_name_components(symbol)
+    if parsed is None or not parsed.nested:
+        return False  # unparseable, or un-nested: no enclosing namespace
+    # The last component is the entity's own name; only its enclosing
+    # namespace/class components decide internal-ness (Codex review). Names
+    # that occur *inside* a template-argument list or the signature -- a
+    # ``detail::traits<...>::return_type`` return type, a ``dnnl::impl::T``
+    # template argument -- are never components, because
+    # :func:`entity_name_components` skips each template-argument list as one
+    # balanced production.
+    return any(_is_internal_ns_component(c) for c in parsed.components[:-1])
 
 
 def _has_template_args(symbol: str) -> bool:
     """Whether the *entity* an Itanium *symbol* names is a template instantiation.
 
-    Scans only the encoded entity **name**, never the function signature's parameter
-    encodings: a plain ``foo(std::vector<int>)`` (``_ZN3lib3fooESt6vectorIiSaIiEE``)
-    is *not* a template instantiation even though a parameter type carries ``I…E``
-    (Codex review). For a nested name the entity is a template iff **any** of its
-    components carries template arguments — including an enclosing class-template
-    specialization whose member is exported (``lib::Box<int>::bar()`` =
-    ``_ZN3lib3BoxIiE3barEv``), not only the final component (Codex review). An ``I``
+    Reads only the encoded entity **name**, never the function signature's
+    parameter encodings: a plain ``foo(std::vector<int>)``
+    (``_ZN3lib3fooESt6vectorIiSaIiEE``) is *not* a template instantiation even
+    though a parameter type carries ``I…E`` (Codex review). The entity is a
+    template iff **any** of its components carries template arguments --
+    including an enclosing class-template specialization whose member is
+    exported (``lib::Box<int>::bar()`` = ``_ZN3lib3BoxIiE3barEv``). An ``I``
     inside an ordinary identifier (``InitEngine``) is never a template opener.
     """
-    if not symbol.startswith("_Z"):
-        return False
-    rest = _encoding_after_prefixes(symbol)
-    if rest.startswith("N"):
-        # Walk the nested name tracking template-arg depth; the entity name ends at
-        # the first depth-0 ``E`` (parameters follow it and must not be scanned). A
-        # template-args opener (``I`` at depth 0) on *any* component makes the entity
-        # a template instantiation.
-        i, depth, saw_template = 1, 0, False
-        while i < len(rest):
-            c = rest[i]
-            if c == "I":
-                if depth == 0:
-                    saw_template = True
-                depth += 1
-                i += 1
-            elif c == "E":
-                if depth == 0:
-                    return saw_template  # depth-0 ``E`` closes the nested name
-                depth -= 1
-                i += 1
-            elif "0" <= c <= "9":
-                parsed = _read_decimal_length(rest, i)
-                if parsed is None:
-                    i += 1
-                    continue
-                length, j = parsed
-                if length > len(rest) - j:
-                    return False
-                i = j + length  # skip the source-name characters
-            else:
-                i += 1
-        return saw_template
-    # Un-nested ``_Z<len><name>…``: a template iff the single name is followed by an
-    # ``I`` template-args opener (``_Z9transformIdEv``); the tail is the signature.
-    parsed = _read_decimal_length(rest, 0)
-    if parsed is None:
-        return False
-    length, name_start = parsed
-    if length > len(rest) - name_start:
-        return False
-    end = name_start + length
-    return end < len(rest) and rest[end] == "I"
+    parsed = entity_name_components(symbol)
+    return parsed is not None and bool(parsed.template_positions)

@@ -66,6 +66,7 @@ from .service_header_graph_attach import (
     _HEADER_GRAPH_INCLUDES_ENABLED,
     _attach_header_graph,
     prefetch_graph_if_useful,
+    prefetch_settled_on_failure,
 )
 from .service_metadata_attach import (
     _try_attach_numpy_capi_surface,
@@ -362,6 +363,7 @@ def _run_dump_uncached(
                 else nullcontext()
             ),
             closure_identity.defer_closure_identity_renumbering(),
+            prefetch_settled_on_failure(_prefetched_graph),
         ):
             snap = _dump_elf(
                 path,

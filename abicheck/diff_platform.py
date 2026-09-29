@@ -22,8 +22,9 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.debug_type_scope import debug_layout_scope
 from .compare.edge_query import export_table_covered
+from .compare.enum_sentinel import is_sentinel_enum_member
 from .detector_registry import registry
-from .diff_helpers import _normalize_type_name, is_sentinel_enum_member, make_change
+from .diff_helpers import _normalize_type_name, make_change
 from .diff_platform_elf_dynamic import (
     _INTERNAL_NAME_PATTERNS as _INTERNAL_NAME_PATTERNS,
     _RELRO_RANK as _RELRO_RANK,

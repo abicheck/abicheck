@@ -479,6 +479,12 @@ class TestLangCFallsBackToCpp:
         # The C-mode hint (suggesting --lang c++) is what the user sees, since
         # that matches the mode they explicitly requested.
         assert "--lang" in str(exc.value)
+        # ...but it is marked as a failed language-mode retry carrying the
+        # C++ retry's diagnostics, so the unparseable-header fallback may
+        # still attribute it to a header instead of treating it as a
+        # toolchain failure.
+        assert exc.value.language_retry_failed is True
+        assert exc.value.attribution_stderr == "error: expected ';'"
 
     def test_pure_c_header_does_not_retry(self, tmp_path: Path) -> None:
         modes: list[bool] = []

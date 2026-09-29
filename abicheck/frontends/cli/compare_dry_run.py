@@ -135,6 +135,10 @@ def build_compare_dry_run_result(
     select_required: tuple[str, ...] = (),
     exclude_headers: tuple[str, ...] = (),
     defines: tuple[str, ...] = (),
+    compile_context: Any = None,
+    lang: str = "c++",
+    old_dump_manifest: object | None = None,
+    new_dump_manifest: object | None = None,
 ) -> Any:
     """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff.
 
@@ -227,6 +231,33 @@ def build_compare_dry_run_result(
         f"new sources/build-info: {new_sources or new_build_info or '(embedded)'}",
     )
     result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
+    from ...workflows.header_frontend_preflight import (
+        operand_parses_headers,
+        preflight_header_frontend,
+    )
+
+    # Preflight only when some operand really parses headers: a stored
+    # snapshot ignores -H, and a dump manifest parses headers without it.
+    if operand_parses_headers(
+        old_input, old_effective, old_dump_manifest
+    ) or operand_parses_headers(new_input, new_effective, new_dump_manifest):
+        # The frontend the real run will use, resolved by the same functions
+        # the dump calls -- a present clang does not rescue a missing castxml
+        # under `auto`, so listing both tools was not a prediction.
+
+        # The run lets an explicit compile-context frontend win over the bare
+        # backend argument (``service_dump_native._run_dump_uncached``).
+        cc_frontend = str(getattr(compile_context, "frontend", "auto") or "auto")
+        frontend = preflight_header_frontend(
+            cc_frontend if cc_frontend.lower() != "auto" else header_backend,
+            lang=lang,
+            gcc_path=getattr(compile_context, "gcc_path", None),
+            gcc_prefix=getattr(compile_context, "gcc_prefix", None),
+        )
+        result.add("Tools and frontends", frontend.describe())
+        blocker = frontend.blocker()
+        if blocker:
+            result.block(blocker)
     result.add(
         "Configuration and value origins",
         f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",

@@ -837,19 +837,15 @@ class DiffResult(ReportSideFacts):
     # above).
     evidence_contract_error: bool = field(default=False, kw_only=True)
     budget_overflow: bool = field(default=False, kw_only=True)
-    # ADR-068 Phase 1 item 2 (`one-comparison-product.md`): findings from a
-    # *previous* comparison in an N>1-comparison chain that no longer appear
-    # in this result's own `changes` -- `FindingEvolution.RESOLVED`'s home,
-    # mirroring `out_of_surface_changes`/`redundant_changes`'s own
-    # audit-trail-list-plus-verdict-exclusion shape above. A resolved
-    # finding is never a member of `changes` (there is no current-side
-    # `Change` for policy to score), so it is recorded here rather than
-    # folded into the main list with a special-cased kind. Always empty for
-    # a plain, single `compare()` call -- populated only by a dedicated
-    # N>1-comparison consumer (`workflows/history.py` and future siblings),
-    # same as `Change.evolution`. Appended at the true end, same convention
-    # as `evidence_contract_error`/`budget_overflow` above.
+    # ADR-068 Phase 1 item 2: findings from a *previous* comparison in a
+    # chain that no longer appear in `changes` (`FindingEvolution.RESOLVED`'s
+    # home -- never a `changes` member, as no current-side `Change` exists
+    # for policy to score), and whether a previous comparison was supplied at
+    # all -- the recorded fact `finding_evolution.chain_evaluated` reports,
+    # never inferred from counts (two empty results compared still evaluated
+    # a chain). Both set only by `policy.finding_evolution`.
     resolved_findings: list[Change] = field(default_factory=list, kw_only=True)
+    finding_evolution_evaluated: bool = field(default=False, kw_only=True)
     # Phase 2b (one-comparison-product.md plan §3 #6/#8, ADR-068 D3/D4/D5):
     # the folded, per-side lexical pattern pre-scan + preprocessor pre-scan
     # result (``workflows.pattern_preprocessor_scan.

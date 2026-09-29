@@ -550,8 +550,14 @@ class TestPublishedSchemaDeclaresTheNewContract:
         assert set(prop["enum"]) == {e.value for e in ChangeEntity}
 
     def test_operation_is_declared_with_the_catalog_s_own_vocabulary(self):
+        # Schema 5.9: the catalog's vocabulary plus the one report-only value a
+        # cross-source hygiene finding's stated evolution can read.
+        from abicheck.report.change_operation import UNCHANGED_OPERATION
+
         prop = self._change_props()["operation"]
-        assert set(prop["enum"]) == {o.value for o in ChangeOperation}
+        assert set(prop["enum"]) == {o.value for o in ChangeOperation} | {
+            UNCHANGED_OPERATION
+        }
 
     def test_the_schema_no_longer_describes_a_suffix_derived_operation(self):
         description = self._change_props()["operation"]["description"]

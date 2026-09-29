@@ -34,19 +34,23 @@ carrying a ``no_growth`` baseline; reading and narrowing header inputs is
 
 from __future__ import annotations
 
-from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 from ..errors import ValidationError
 from ..model.header_exclusion_record import (
     GLOB_MATCHING,
+    declared_header_paths,
+    exclusion_asymmetry_is_vacuous,
     exclusions_are_symmetric,
+    glob_header_matches,
 )
 from .dependency_header_roots import dependency_header_predicate
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Collection, Sequence
     from pathlib import Path
+
+    from ..model import AbiSnapshot
 
 
 def apply_header_exclusions(
@@ -90,13 +94,7 @@ def header_matches_exclusion(path: str | None, patterns: Sequence[str]) -> bool:
     drops declarations an excluded header contributes through another
     header's ``#include``. Tried against the bare file name, the full path,
     and the path under any leading directory (``**/`` semantics)."""
-    if not path or not patterns:
-        return False
-    name = path.replace("\\", "/").rsplit("/", 1)[-1]
-    return any(
-        fnmatch(name, pat) or fnmatch(path, pat) or fnmatch(path, f"*/{pat}")
-        for pat in patterns
-    )
+    return glob_header_matches(path, patterns)
 
 
 def _expanded_header_inputs(headers: Sequence[Path]) -> list[Path]:
@@ -257,6 +255,9 @@ def exclusion_asymmetry_reason(
     new_patterns: Sequence[str],
     old_matching: str = GLOB_MATCHING,
     new_matching: str = GLOB_MATCHING,
+    *,
+    old_declared_headers: Collection[str] | None = None,
+    new_declared_headers: Collection[str] | None = None,
 ) -> str | None:
     """Why this pair is not comparable, or ``None`` when the two agree.
 
@@ -286,6 +287,15 @@ def exclusion_asymmetry_reason(
     """
     if exclusions_are_symmetric(old_patterns, new_patterns, old_matching, new_matching):
         return None
+    if exclusion_asymmetry_is_vacuous(
+        old_patterns,
+        new_patterns,
+        old_matching,
+        new_matching,
+        old_declared_headers,
+        new_declared_headers,
+    ):
+        return None
     old_set = frozenset(old_patterns)
     new_set = frozenset(new_patterns)
 
@@ -309,6 +319,24 @@ def exclusion_asymmetry_reason(
                 "same pattern text does not name the same set of headers."
             )
         )
+    )
+
+
+def exclusion_asymmetry_reason_for(old: AbiSnapshot, new: AbiSnapshot) -> str | None:
+    """:func:`exclusion_asymmetry_reason` read off two snapshots.
+
+    Passes each side's parsed header surface, so a pattern only one side
+    *achieved* (snapshots record matched patterns, not the shared request)
+    is accepted when it would have removed nothing from the other side --
+    see ``model.header_exclusion_record.exclusion_asymmetry_is_vacuous``.
+    """
+    return exclusion_asymmetry_reason(
+        getattr(old, "excluded_header_patterns", ()) or (),
+        getattr(new, "excluded_header_patterns", ()) or (),
+        getattr(old, "excluded_header_matching", GLOB_MATCHING) or GLOB_MATCHING,
+        getattr(new, "excluded_header_matching", GLOB_MATCHING) or GLOB_MATCHING,
+        old_declared_headers=declared_header_paths(old),
+        new_declared_headers=declared_header_paths(new),
     )
 
 

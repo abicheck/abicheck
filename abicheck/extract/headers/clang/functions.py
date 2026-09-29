@@ -90,7 +90,7 @@ from .context import (
     symbol_candidates as _symbol_candidates,
     visibility_and_surface_facts as _visibility_and_surface_facts,
 )
-from .inline_semantics import is_effectively_inline
+from .inline_semantics import fold_inline_across_redeclarations, is_effectively_inline
 from .param_kind import param_kind as _param_kind
 from .return_type import return_type as _return_type
 
@@ -797,4 +797,4 @@ def parse_functions(
                 ),
             )
         )
-    return funcs
+    return fold_inline_across_redeclarations(funcs)

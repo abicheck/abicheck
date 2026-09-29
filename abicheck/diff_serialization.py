@@ -34,6 +34,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .checker_types import Change
+from .compare.enum_sentinel import identifier_tokens, is_sentinel_enum_member
 from .diff_helpers import make_change
 from .model.change_catalog.kinds import ChangeKind
 
@@ -85,6 +86,39 @@ def _looks_like_serialization_tag(name: str) -> bool:
     return any(leaf.endswith(p) for p in _TAG_SUFFIX_PATTERNS)
 
 
+#: Token tails that mark an *enum type* as a serialization-tag registry. A bare
+#: ``_tag`` suffix is deliberately absent: ``format_tag``, ``dispatch_tag`` and
+#: similar layout/dispatch enums end in ``tag`` without being persisted ids,
+#: and flagging their members (including end markers such as
+#: ``format_tag_last``) duplicated the ordinary enum-member findings.
+_TAG_TYPE_TOKEN_TAILS: tuple[tuple[str, ...], ...] = (
+    ("serialization", "tag"),
+    ("serializationtag",),
+    ("serialization", "tags"),
+    ("tag", "id"),
+    ("tagid",),
+    ("tag", "ids"),
+)
+
+
+def _enum_type_is_tag_registry(enum_name: str) -> bool:
+    """Whether an enum *type* name is strong evidence of a tag-id registry.
+
+    Spelling-independent: the leaf is tokenized (snake/Camel/UPPER), and a
+    trailing C typedef ``_t`` token is dropped, so ``ns::SerializationTag``,
+    ``ns_serialization_tag_t`` and ``SERIALIZATION_TAG`` classify alike --
+    and ``dnnl::memory::format_tag`` / ``dnnl_format_tag_t`` both do *not*.
+    """
+    tokens = identifier_tokens(_last_segment(enum_name))
+    if len(tokens) > 1 and tokens[-1] == "t":
+        tokens = tokens[:-1]
+    return any(
+        tuple(tokens[-len(tail) :]) == tail
+        for tail in _TAG_TYPE_TOKEN_TAILS
+        if len(tokens) >= len(tail)
+    )
+
+
 def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, tuple[str, str]]:
     """Return ``{tag_name: (stringified_value, display_entity)}``.
 
@@ -116,14 +150,18 @@ def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, tuple[str, str]]:
         if _looks_like_serialization_tag(var.name) and var.value is not None:
             out.setdefault(var.name, (str(var.value), _ENTITY_VARIABLE))
     for enum_t in snap.enums or []:
-        enum_leaf = _last_segment(enum_t.name).lower()
-        type_is_tag = enum_leaf in _TAG_EXACT_LEAVES or any(
-            enum_leaf.endswith(p) for p in _TAG_SUFFIX_PATTERNS
-        )
+        type_is_tag = _enum_type_is_tag_registry(enum_t.name)
         for m in enum_t.members:
-            full = f"{enum_t.name}::{m.name}"
-            if type_is_tag or _looks_like_serialization_tag(m.name):
-                out.setdefault(full, (str(m.value), _ENTITY_ENUM))
+            # An end-of-list marker (``*_last``, ``LastSymbol``, ``*_count``)
+            # is not a persisted id; its value moves whenever a member is
+            # added and the enum-member detectors already report it.
+            # Cheap name test first: the sentinel check tokenizes, and almost
+            # no member of an ordinary enum is a tag candidate at all.
+            if not (type_is_tag or _looks_like_serialization_tag(m.name)):
+                continue
+            if is_sentinel_enum_member(m.name):
+                continue
+            out.setdefault(f"{enum_t.name}::{m.name}", (str(m.value), _ENTITY_ENUM))
     return out
 
 

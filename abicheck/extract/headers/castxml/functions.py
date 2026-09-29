@@ -58,6 +58,7 @@ from .names import (
     _parse_vtable_index,
     _ref_qualifier_from_mangled,
 )
+from .out_of_line_inline import declared_inline_out_of_line
 from .scope import scope_path
 from .type_resolution import (
     is_global_scope,
@@ -619,8 +620,10 @@ def parse_function_element(
         is_volatile=is_volatile,
         is_pure_virtual=el.get("pure_virtual") == "1",
         is_deleted=is_deleted,
-        # castxml emits inline="1" for inline functions/methods
-        is_inline=el.get("inline") == "1",
+        # castxml emits inline="1" only when the *first* declaration says
+        # so; a later out-of-line `inline` definition is recovered from the
+        # header text (see `out_of_line_inline`).
+        is_inline=el.get("inline") == "1" or declared_inline_out_of_line(ctx, el),
         access=access,
         return_pointer_depth=ret_ptr_depth,
         ref_qualifier=ref_qualifier,

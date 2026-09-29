@@ -30,17 +30,20 @@ re-exported there, so the public ``dumper._castxml_version_note`` /
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 from xml.etree.ElementTree import (
     Element,  # type annotation only; parsing uses defusedxml
 )
 
 from . import deadline
 from .dumper_ast_config import _CPP_ONLY_PATTERNS, _detect_cpp_headers
+from .dumper_ast_config_cpp20 import _detect_cpp20_headers
 from .dumper_clang_errors import diagnose_header_compile_failure
-from .errors import HeaderToolchainError, SnapshotError
+from .errors import HeaderToolchainError, SnapshotError, UnsupportedCastxmlVersionError
 from .storage.castxml_xml import parse_castxml_xml
 
 # castxml drives an internal Clang frontend; it must be new enough to parse
@@ -233,7 +236,11 @@ def _validate_castxml_output(
         is_toolchain = _is_toolchain_version_failure(result.stderr) or (
             not force_cpp and _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
         )
-        raise (HeaderToolchainError if is_toolchain else SnapshotError)(message)
+        error = (HeaderToolchainError if is_toolchain else SnapshotError)(message)
+        # The full diagnostics, untruncated: the unparseable-header fallback
+        # attributes errors to headers from the include chains in here.
+        error.stderr = result.stderr or ""
+        raise error
     if not out_xml.exists() or out_xml.stat().st_size == 0:
         stderr_snippet = result.stderr[:1000].strip()
         detail = f"\ncastxml stderr: {stderr_snippet}" if stderr_snippet else ""
@@ -262,3 +269,83 @@ def _validate_castxml_output(
     # round 3, mirrors the cached-hit and clang-AST paths).
     deadline.check()
     return root
+
+
+def castxml_dump_excluding_unparseable(
+    castxml_dump: Any, headers: list[Path], *args: Any, **kwargs: Any
+) -> tuple[Element, list[Path]]:
+    """``castxml_dump(headers, ...)``, dropping headers that cannot compile.
+
+    A multi-header ``-H`` parse is one aggregate translation unit, so one
+    header castxml rejects (oneDNN's ``dnnl_sycl.hpp``: ``#error
+    "Unsupported compiler"``) used to sink every header. See
+    :mod:`abicheck.extract.unparseable_header_fallback` for the attribution
+    and retry rules. A toolchain-version failure or an unsupported castxml
+    is not about any one header and is never reduced. Returns the XML root
+    and the excluded headers, in input order of exclusion rounds.
+    """
+    from .extract.unparseable_header_fallback import (
+        parse_excluding_unparseable_headers,
+    )
+
+    return parse_excluding_unparseable_headers(
+        headers,
+        lambda active: castxml_dump(active, *args, **kwargs),
+        is_header_specific=castxml_failure_is_header_specific,
+    )
+
+
+def castxml_failure_is_header_specific(exc: SnapshotError) -> bool:
+    """Whether a castxml failure may be reduced by dropping headers.
+
+    A frontend-version mismatch or an unsupported castxml is never about one
+    header. A ``HeaderToolchainError`` raised for a *language-mode* mismatch
+    (``--lang c`` over C++ syntax) whose C++ retry also failed on ordinary,
+    attributable diagnostics is (``language_retry_failed``, set by
+    ``dumper``): the retry proved the mode was not the problem.
+    """
+    if isinstance(exc, UnsupportedCastxmlVersionError):
+        return False
+    texts = [str(exc), exc.attribution_stderr or ""]
+    if any(_is_toolchain_version_failure(t) for t in texts):
+        return False
+    if isinstance(exc, HeaderToolchainError):
+        return exc.language_retry_failed
+    return True
+
+
+def record_unparseable_headers(parser: Any, excluded: list[Path]) -> Any:
+    """Record *excluded* on the stamped parser's ``ast_toolchain`` metadata,
+    which ``dumper`` copies onto ``AbiSnapshot.ast_toolchain`` -- so the
+    reduced L2 evidence survives serialization and reaches the report."""
+    if excluded:
+        from .model.header_exclusion_record import EXCLUDED_HEADERS_TOOLCHAIN_KEY
+
+        metadata = dict(getattr(parser, "_abicheck_ast_toolchain", {}) or {})
+        metadata[EXCLUDED_HEADERS_TOOLCHAIN_KEY] = json.dumps(
+            [str(p) for p in excluded]
+        )
+        parser._abicheck_ast_toolchain = metadata
+    return parser
+
+
+def _castxml_cpp_retry_allowed(
+    primary: SnapshotError, *, force_cpp: bool, headers: list[Path]
+) -> bool:
+    """Whether a failed C-mode castxml run may be retried in C++ mode (G16/A3).
+
+    An explicit ``--lang c`` on a header that actually requires C++ (a stray
+    class/namespace/template, or C++20 concept/requires syntax — Codex review)
+    should degrade to a C++ retry rather than hard-fail. No retry when we are
+    already in C++ mode, when the failure is a frontend-too-old signature (a mode
+    switch won't help), or when the header has no *genuinely C++-only* construct
+    (``_CPP_ONLY_PATTERNS`` excludes ``extern "C"``: a guarded ``extern "C"``
+    header is valid C, so a C-mode failure there is real and must NOT be masked
+    by re-parsing as C++, which would skip the ``#ifndef __cplusplus`` branches —
+    Codex review).
+    """
+    if force_cpp or _is_toolchain_version_failure(str(primary)):
+        return False
+    return _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS) or _detect_cpp20_headers(
+        headers
+    )

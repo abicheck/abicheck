@@ -67,9 +67,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from ....model import Function
 from ....model.identity import Anonymous, Record, ScopePath
 
-__all__ = ["encloses_class_scope", "is_effectively_inline"]
+__all__ = [
+    "encloses_class_scope",
+    "fold_inline_across_redeclarations",
+    "is_effectively_inline",
+]
 
 # Function-shaped clang AST node kinds that can be class members. A plain
 # ``FunctionDecl`` is never one, so it can never be implicitly inline by the
@@ -212,3 +217,34 @@ def is_effectively_inline(
     # whose base class has none), and that declaration was still defaulted on
     # its first declaration.
     return _has_body(node) or node.get("explicitlyDefaulted") is not None
+
+
+#: A real (not display-name fallback) symbol: Itanium ``_Z``/Darwin ``__Z`` or
+#: MSVC ``?``. An uninstantiated template or other mangle-less declaration
+#: falls back to its bare leaf name, which two unrelated declarations can
+#: share, so only a real mangling is a safe redeclaration key.
+_REAL_MANGLING_PREFIXES = ("_Z", "__Z", "?")
+
+
+def fold_inline_across_redeclarations(funcs: list[Function]) -> list[Function]:
+    """Mark every declaration of a function inline when *any* of them is.
+
+    [dcl.inline]/6: a function is inline if any declaration of it says so.
+    The header shape this matters for declares a member in the class and
+    defines it out of line with the keyword --
+    ``struct P { void run() const; }; inline void P::run() const {}`` --
+    which clang dumps as two nodes: the in-class ``CXXMethodDecl`` (no
+    ``inline`` key, no body) and the out-of-line one (``"inline": true``).
+    Recording each node's own answer left one non-inline ``Function`` per
+    such member, and ``public_not_exported`` then demanded an export for it.
+    Mutates *funcs* in place (and returns it); keyed by real mangled name only.
+    """
+    inline_symbols = {
+        f.mangled
+        for f in funcs
+        if f.is_inline and f.mangled.startswith(_REAL_MANGLING_PREFIXES)
+    }
+    for f in funcs:
+        if not f.is_inline and f.mangled in inline_symbols:
+            f.is_inline = True
+    return funcs

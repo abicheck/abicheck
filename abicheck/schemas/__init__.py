@@ -1039,7 +1039,22 @@ _ARTIFACT_NAMES = frozenset(
 #:        it, so such a report failed validation. ``run_outcome.assurance`` is
 #:        now validated against that same ``analysis_assurance`` shape instead
 #:        of any object. No emitted value changes.
-REPORT_SCHEMA_VERSION = "5.7"
+#: 5.8 -- additive ``finding_evolution.basis`` (``"comparison_chain"``),
+#:        ``chain_evaluated``, ``total`` and ``within_comparison_counterpart``.
+#:        A single comparison's ``finding_evolution.counts.not_evaluated``
+#:        and ``summary.change_inventory.hygiene_persistent`` answer
+#:        different questions (across a comparison chain vs. OLD-vs-NEW
+#:        within this comparison) over the same population; ``total`` states
+#:        that population so it reconciles with ``summary.total_changes``.
+#: 5.9 -- additive: a finding's ``operation`` may read ``"unchanged"``. A
+#:        cross-source hygiene finding (``exported_not_public`` and siblings)
+#:        whose ``cross_source_evolution`` ``compare()`` stated now reports
+#:        that state -- ``introduced`` -> ``added``, ``resolved`` ->
+#:        ``removed``, ``persistent`` -> ``unchanged`` -- instead of the kind's
+#:        declared ``modified``, which made every such finding read as a
+#:        modification even when identical on both sides
+#:        (``report/change_operation.operation_for_change``).
+REPORT_SCHEMA_VERSION = "5.9"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

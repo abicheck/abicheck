@@ -320,6 +320,7 @@ _FIELD_POLICY: dict[str, str] = {
     "out_of_surface_changes": "concat",
     "reconciled_changes": "concat",
     "resolved_findings": "concat",
+    "finding_evolution_evaluated": "any",
     "detector_results": "concat",
     "pattern_modulations": "concat",
     "layer_coverage": "concat",

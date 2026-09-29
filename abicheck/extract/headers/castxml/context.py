@@ -97,6 +97,10 @@ class CastxmlParserContext:
         self.id_map: dict[str, Element] = {}
         self.virtual_methods_by_class: dict[str, list[Element]] = {}
         self.source_lines_cache: dict[str, list[str]] = {}
+        # Per-file index / per-directory file list for
+        # ``out_of_line_inline.declared_inline_out_of_line``.
+        self.out_of_line_inline_index: dict[str, dict[tuple[str, str], set[int]]] = {}
+        self.files_by_directory: dict[str, list[str]] | None = None
         # Tag-grouped elements populated by the single pass in build_id_map()
         # below, so parse_functions()/parse_types()/etc. don't each re-scan
         # every top-level element themselves.

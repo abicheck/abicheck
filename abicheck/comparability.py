@@ -957,14 +957,9 @@ def _check_header_exclusions_comparable(
     than redundant with ``scope_fingerprint``, and why no pre-v47 ambiguity
     carve-out is needed.
     """
-    from .extract.header_exclusions import exclusion_asymmetry_reason
+    from .extract.header_exclusions import exclusion_asymmetry_reason_for
 
-    reason = exclusion_asymmetry_reason(
-        getattr(old, "excluded_header_patterns", ()) or (),
-        getattr(new, "excluded_header_patterns", ()) or (),
-        getattr(old, "excluded_header_matching", "glob") or "glob",
-        getattr(new, "excluded_header_matching", "glob") or "glob",
-    )
+    reason = exclusion_asymmetry_reason_for(old, new)
     if reason is None:
         return None
     return ComparabilityMismatch(kind="scope", reason=reason)

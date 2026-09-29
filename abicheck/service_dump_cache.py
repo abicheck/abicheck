@@ -61,8 +61,8 @@ def _dump_is_cacheable(
     — the dominant release-baseline/CI comparison case a repeated pipeline
     re-extracts identically on every run — is cached. A PDB path, a DWARF
     debug-info root, debuginfod resolution (network-dependent), a forced
-    debug format, a symbols-only/debug-presence-only dump, or a custom
-    ``CompileContext`` all change what ``run_dump`` produces in ways not
+    debug format, a symbols-only/debug-presence-only dump, or a
+    ``CompileContext`` naming an untrackable header input all change what ``run_dump`` produces in ways not
     folded into the cache key below, so those combinations always fall
     through to a live dump rather than risk serving a stale/mismatched
     snapshot.
@@ -76,10 +76,19 @@ def _dump_is_cacheable(
     headers/includes/public-header inputs already covered by the cache key,
     and ``snapshot_cache.store``/``lookup`` round-trip the full snapshot
     (including ``build_source``) through JSON, so a cache hit still carries
-    the graph. TODO(header-graph-phase-D): the graph's build inputs (e.g.
-    ``--gcc-*``/``--sysroot`` reaching the second internal clang AST pass via
-    ``compile``) are still excluded from caching by the ``compile is None``
-    check above, same as before this change — no new gap introduced.
+    the graph. A ``CompileContext`` (``--compiler*``/``--sysroot``/
+    ``--nostdinc``/``--ast-frontend``/``--frontend-context``) is cacheable:
+    its normalized content is folded into the key
+    (:func:`compile_context_cache_field`, :func:`effective_header_backend`),
+    and the compiler/clang identities are resolved with its
+    ``gcc_path``/``gcc_prefix``. A ``None`` context and an all-default one
+    share a key, since they produce identical dumps. The header content a
+    context makes reachable (``sysroot``, ``-I``/``-isystem``/``-include``
+    and siblings in its compiler options) is content-hashed with the same
+    include-tree walk as ``-I`` directories
+    (:func:`compile_context_header_inputs`), so a warm hit never serves a
+    snapshot parsed from stale headers; a context with an input that walk
+    cannot follow is not cached at all.
 
     A labeled ``--include`` (``include_labels`` non-empty, ADR-050 D1) is
     likewise excluded: the label rides only into ``AbiSnapshot.contract``
@@ -127,10 +136,102 @@ def _dump_is_cacheable(
         and debug_format is None
         and not symbols_only
         and not debug_presence_only
-        and compile is None
+        and _compile_context_is_keyable(compile)
         and not include_labels
         and (dump_manifest is None or _manifest_all_tus_required(dump_manifest))
     )
+
+
+def _compile_context_is_keyable(compile: object | None) -> bool:
+    """Whether *compile* can be folded into the whole-snapshot cache key:
+    ``None``, or a real ``CompileContext`` whose fields are keyed by
+    :func:`compile_context_cache_field` and whose header inputs are all
+    content-trackable (:func:`compile_context_header_inputs`). Anything else
+    falls through to a live dump."""
+    from .compile_context import CompileContext
+
+    if compile is None:
+        return True
+    return (
+        isinstance(compile, CompileContext)
+        and compile_context_header_inputs(compile) is not None
+    )
+
+
+def compile_context_header_inputs(
+    compile: object | None,
+) -> tuple[list[Path], list[Path]] | None:
+    """``(files, dirs)`` header inputs *compile* adds (``sysroot``, plus
+    ``-I``/``-include``/... in ``gcc_options`` and ``gcc_option_tokens``),
+    for :func:`cached_run_dump` to content-hash; ``None`` when one is
+    untrackable (see :mod:`abicheck.extract.compile_header_inputs`)."""
+    from ._compiler_options import split_gcc_options
+    from .extract.compile_header_inputs import compile_option_header_inputs
+
+    cc = _normalized_compile_context(compile)
+    if cc is None:
+        return [], []
+    tokens = split_gcc_options(cc.gcc_options) if cc.gcc_options else []
+    tokens += cc.gcc_option_tokens
+    return compile_option_header_inputs(tokens, sysroot=cc.sysroot)
+
+
+def _normalized_compile_context(compile: object | None) -> Any:
+    """``None`` for "no customisation" -- a ``None`` context and an
+    all-default ``CompileContext()`` produce identical dumps, so they must
+    share one cache key."""
+    from .compile_context import CompileContext
+
+    if not isinstance(compile, CompileContext):
+        return None
+    normalized = CompileContext(
+        gcc_path=compile.gcc_path,
+        gcc_prefix=compile.gcc_prefix,
+        gcc_options=compile.gcc_options,
+        gcc_option_tokens=tuple(compile.gcc_option_tokens),
+        defines=tuple(compile.defines),
+        sysroot=compile.sysroot,
+        nostdinc=compile.nostdinc,
+        frontend=(compile.frontend or "auto").lower(),
+        frontend_context=compile.frontend_context or "host",
+    )
+    return None if normalized.is_default else normalized
+
+
+def compile_context_cache_field(compile: object | None) -> str:
+    """Canonical key material for a (normalized) compile context.
+
+    ``frontend`` is deliberately *excluded*: it is folded in through the
+    effective header backend (:func:`effective_header_backend`), which is
+    what ``run_dump`` actually resolves. ``defines`` is excluded as a
+    receipt-only field -- its rendered ``-D`` tokens already live in
+    ``gcc_option_tokens``.
+    """
+    cc = _normalized_compile_context(compile)
+    if cc is None:
+        return "compile:default"
+    return "compile:" + json.dumps(
+        {
+            "gcc_path": cc.gcc_path,
+            "gcc_prefix": cc.gcc_prefix,
+            "gcc_options": cc.gcc_options,
+            "gcc_option_tokens": list(cc.gcc_option_tokens),
+            "sysroot": str(cc.sysroot) if cc.sysroot is not None else None,
+            "nostdinc": cc.nostdinc,
+            "frontend_context": cc.frontend_context,
+        },
+        sort_keys=True,
+    )
+
+
+def effective_header_backend(header_backend: str, compile: object | None) -> str:
+    """The backend request ``run_dump`` honours: an explicit (non-``auto``)
+    ``compile.frontend`` wins over the bare ``header_backend`` argument
+    (``service_dump_native._run_dump_uncached``)."""
+    cc = _normalized_compile_context(compile)
+    if cc is not None and cc.frontend != "auto":
+        return str(cc.frontend)
+    return header_backend
 
 
 def _manifest_all_tus_required(dump_manifest: Any) -> bool:
@@ -278,6 +379,7 @@ def _dump_cache_extra_key(
     uses_ast: bool = True,
     lang_explicit: bool = False,
     public_include_search_dirs: list[Path] | None = None,
+    compile: object | None = None,
 ) -> str:
     """Build the ``extra`` cache-key material for a cacheable dump — every
     input to ``run_dump`` that affects its output besides the binary content
@@ -350,6 +452,11 @@ def _dump_cache_extra_key(
     """
     from .dumper import _resolve_header_backend
 
+    header_backend = effective_header_backend(header_backend, compile)
+    compile_field = compile_context_cache_field(compile)
+    _cc = _normalized_compile_context(compile)
+    gcc_path = _cc.gcc_path if _cc is not None else None
+    gcc_prefix = _cc.gcc_prefix if _cc is not None else None
     resolved_backend = _resolve_header_backend(header_backend)
     if not uses_ast:
         # A binary-only dump never invokes an AST frontend or compiler. Do not
@@ -364,6 +471,7 @@ def _dump_cache_extra_key(
                 sep.join(sorted(str(p) for p in (public_header_dirs or []))),
                 str(lang_explicit),
                 _public_include_search_dirs_key_field(public_include_search_dirs, sep),
+                compile_field,
             ]
         )
 
@@ -393,14 +501,14 @@ def _dump_cache_extra_key(
     if resolved_backend in ("clang", "hybrid") or auto_may_fallback_to_clang:
         try:
             frontend_tools.append(
-                _tool_identity(_resolve_clang_bin(compiler, None, None))
+                _tool_identity(_resolve_clang_bin(compiler, gcc_path, gcc_prefix))
             )
         except Exception as exc:  # missing optional backend remains key material
             frontend_tools.append(f"clang-unavailable:{type(exc).__name__}:{exc}")
     compiler_identity = ""
     if resolved_backend in ("castxml", "hybrid"):
         try:
-            compiler_bin, _ = _resolve_compiler_binary(compiler, None, None)
+            compiler_bin, _ = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
             compiler_identity = _tool_identity(compiler_bin)
         except Exception as exc:
             compiler_identity = f"compiler-unavailable:{type(exc).__name__}:{exc}"
@@ -408,10 +516,9 @@ def _dump_cache_extra_key(
     # G29 Phase A's header-graph attach (service._attach_header_graph) always
     # runs its own internal clang AST pass (_clang_header_dump) to build the
     # L2 semantic graph -- unconditionally, regardless of which backend
-    # `resolved_backend` above is (a plain castxml dump still gets one). A
-    # cacheable call always has `compile is None` (_dump_is_cacheable
-    # requires it), so that pass always resolves clang with no gcc_path/
-    # gcc_prefix override -- resolve the same way here and hash the actual
+    # `resolved_backend` above is (a plain castxml dump still gets one). That
+    # pass resolves clang with the compile context's gcc_path/gcc_prefix
+    # override (None when absent) -- resolve the same way here and hash the actual
     # resolved binary path (not just the bare driver name), so a cache
     # written while clang was missing/at a different PATH entry can't be
     # replayed once clang becomes available/changes, silently keeping a
@@ -423,7 +530,9 @@ def _dump_cache_extra_key(
 
     header_graph_clang = ""
     try:
-        clang_driver = _resolve_clang_bin("cc" if lang == "c" else "c++", None, None)
+        clang_driver = _resolve_clang_bin(
+            "cc" if lang == "c" else "c++", gcc_path, gcc_prefix
+        )
         resolved_path = shutil.which(clang_driver) or clang_driver
         # The resolved PATH string alone survives an in-place binary swap at
         # the same path (an apt/package upgrade, or a symlink retargeted to a
@@ -454,6 +563,7 @@ def _dump_cache_extra_key(
             sep.join(sorted(str(p) for p in (public_header_dirs or []))),
             str(lang_explicit),
             _public_include_search_dirs_key_field(public_include_search_dirs, sep),
+            compile_field,
         ]
     )
 
@@ -619,6 +729,15 @@ def cached_run_dump(
         _extra_public_headers = public_headers
         _extra_public_header_dirs = public_header_dirs
 
+    # Header inputs the compile context adds (sysroot, -I/-isystem/-include
+    # in its compiler options) reach the parser too: fold their content into
+    # the same walk, so an edit under any of them busts the key.
+    _cc_inputs = compile_context_header_inputs(compile)
+    if _cc_inputs is None:  # guarded by _dump_is_cacheable; defensive
+        return _dump_uncached()
+    _cache_headers = [*_cache_headers, *_cc_inputs[0]]
+    _cache_includes = [*_cache_includes, *_cc_inputs[1]]
+
     def _build_extra() -> str:
         base = _dump_cache_extra_key(
             binary_fmt,
@@ -629,6 +748,7 @@ def cached_run_dump(
             uses_ast=_uses_ast,
             lang_explicit=lang_explicit,
             public_include_search_dirs=public_include_search_dirs,
+            compile=compile,
         )
         # NUL-joined (see _dump_cache_extra_key's own docstring on why NUL,
         # not a printable delimiter, is the only collision-safe choice here

@@ -97,9 +97,9 @@ from .export_accounting import (
     ACCOUNT_ALLOCATOR_INTERPOSER,
     ACCOUNT_CXX_ARTIFACT,
     ACCOUNT_EXTERNAL_DEP,
-    ACCOUNT_INTERNAL_NS,
+    ACCOUNT_OWN_TYPE_INSTANTIATION,
     ACCOUNT_PUBLIC,
-    ACCOUNT_TEMPLATE_INST,
+    ACCOUNT_PUBLIC_TEMPLATE,
     _account_undocumented_export,
     _external_dependency_origin,
     _library_self_names,
@@ -109,6 +109,18 @@ from .export_accounting import (
 # Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
 # 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
 # keep importing these names from ``crosscheck``.
+from .export_declaration_evidence import (
+    build_export_declaration_evidence,
+    instantiated_over_owned_types,
+    public_template_for_export,
+    textual_declaration_hint,
+)
+from .export_obligation_linkage import (
+    inline_declared_symbols as inline_declared_symbols,
+    is_static_member_symbol,
+    owner_in_internal_namespace,
+)
+from .exported_not_public_finding import exported_not_public_finding
 from .template_linkage import names_a_template_specialization
 
 #: Cross-check fact-schema version. Independent of every other buildsource
@@ -291,6 +303,17 @@ def run_crosschecks(
 # ---------------------------------------------------------------------------
 
 
+def _leaked_dependency_origin(
+    sym: str, own_inst: bool, needed_libs: list[str], self_names: tuple[str, ...]
+) -> str | None:
+    """The external library *sym* leaked from, or ``None``; a std/vendored
+    template instantiated over the library's own types (*own_inst*) is the
+    library's own vague-linkage copy, never a statically linked dependency."""
+    if own_inst:
+        return None
+    return _external_dependency_origin(sym, needed_libs, self_names)
+
+
 def _check_exported_not_public(
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
@@ -354,6 +377,7 @@ def _check_exported_not_public(
     # An allocator-interposition library (malloc proxy) deliberately exports
     # malloc/operator-new/… replacements; those are native, not a leaked dependency.
     interposer = _ALLOCATOR_INTERPOSER_MARKER in exported
+    evidence = build_export_declaration_evidence(snapshot)
 
     # Account for *every* export with a precise reason so the report can state
     # "100 % accounted": documented API and compiler artifacts are legitimate;
@@ -377,11 +401,14 @@ def _check_exported_not_public(
         # ``_ZTIN3fmt…``) is that exact leaked surface these counters measure, and
         # exempting it as a class artifact would silently undercount it (Codex
         # review). Only a *native* class's artifact is then exempted below.
-        origin_lib = _external_dependency_origin(sym, needed_libs, self_names)
+        # A std/vendored template instantiated over the library's own types is
+        # the library's own vague-linkage copy, never a statically linked dep.
+        own_inst = instantiated_over_owned_types(sym, evidence.owned_namespaces)
+        origin_lib = _leaked_dependency_origin(sym, own_inst, needed_libs, self_names)
         if origin_lib is not None:
             account[ACCOUNT_EXTERNAL_DEP] += 1
             findings.append(
-                _exported_not_public_finding(
+                exported_not_public_finding(
                     sym, ACCOUNT_EXTERNAL_DEP, origin_lib, decl_by_sym.get(sym)
                 )
             )
@@ -389,16 +416,27 @@ def _check_exported_not_public(
         if _is_cxx_implementation_symbol(sym):
             account[ACCOUNT_CXX_ARTIFACT] += 1
             continue
-        category = _account_undocumented_export(sym)
+        # An instantiation of a publicly declared template is public API a
+        # consumer links against; "hide it" would break that consumer.
+        if public_template_for_export(sym, evidence) is not None:
+            account[ACCOUNT_PUBLIC_TEMPLATE] += 1
+            continue
+        category = (
+            ACCOUNT_OWN_TYPE_INSTANTIATION
+            if own_inst
+            else _account_undocumented_export(sym)
+        )
         account[category] += 1
+        hint = textual_declaration_hint(sym, evidence)
         findings.append(
-            _exported_not_public_finding(sym, category, None, decl_by_sym.get(sym))
+            exported_not_public_finding(sym, category, None, decl_by_sym.get(sym), hint)
         )
 
     documented = (
         account[ACCOUNT_PUBLIC]
         + account[ACCOUNT_CXX_ARTIFACT]
         + account[ACCOUNT_ALLOCATOR_INTERPOSER]
+        + account[ACCOUNT_PUBLIC_TEMPLATE]
     )
     breakdown = ", ".join(
         f"{cat}={account[cat]}" for cat in _UNDOCUMENTED_ACCOUNTS if account[cat]
@@ -409,64 +447,6 @@ def _check_exported_not_public(
         f"compiler artifact)" + (f"; by reason: {breakdown}" if breakdown else "")
     )
     return _CheckOutput(findings, "present", detail, providers, counters=dict(account))
-
-
-#: Per-category message templates for an undocumented export. Each states the
-#: precise reason and the fix, so a maintainer can triage a leaked dependency
-#: symbol differently from an internal-namespace escape (ADR-035 D4 accounting).
-def _exported_not_public_finding(
-    sym: str,
-    category: str,
-    origin_lib: str | None,
-    decl: Function | Variable | None,
-) -> Change:
-    """Build the ``exported_not_public`` finding for one undocumented export.
-
-    The message is category-specific — an external-dependency leak names the
-    originating library and points at the linkage fix, an internal-namespace or
-    template escape points at the visibility fix — so the *precise reason* rides
-    on the finding, not just the aggregate count.
-    """
-    where = ""
-    if decl is not None and category != ACCOUNT_EXTERNAL_DEP:
-        kind = "function" if isinstance(decl, Function) else "variable"
-        where = f" (declared as {kind} {decl.name!r} in a non-public header)"
-    if category == ACCOUNT_EXTERNAL_DEP:
-        message = (
-            f"Symbol {sym!r} is exported by the binary but originates from an "
-            f"external dependency ({origin_lib}) statically linked and re-exported "
-            "— not part of this library's API. Hide it (visibility/version script) "
-            "or link the dependency dynamically; a differing dependency version on "
-            "another host makes the leaked symbol an ODR/compatibility hazard."
-        )
-    elif category == ACCOUNT_INTERNAL_NS:
-        message = (
-            f"Symbol {sym!r} is exported by the binary but declared in no public "
-            f"header{where}; it belongs to an internal namespace "
-            "(impl/internal/detail/anonymous). It is accidental ABI surface — hide "
-            "it with -fvisibility=hidden or a version script."
-        )
-    elif category == ACCOUNT_TEMPLATE_INST:
-        message = (
-            f"Symbol {sym!r} is an exported C++ template instantiation with no "
-            f"matching public declaration{where} (the public headers declare the "
-            "template, the binary carries this instantiation). Confirm it is "
-            "intended surface, or hide it."
-        )
-    else:  # ACCOUNT_UNDECLARED
-        message = (
-            f"Symbol {sym!r} is exported by the binary but declared in no public "
-            f"header{where}. It is accidental ABI surface — hide it "
-            "(visibility/version script) or document it."
-        )
-    return _change(
-        ChangeKind.EXPORTED_NOT_PUBLIC,
-        sym,
-        message,
-        new_value=sym,
-        old_value=origin_lib,
-        confidence=Confidence.HIGH,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -518,8 +498,11 @@ def _check_public_not_exported(
     # read through the one graph relation, never re-derived from paths.
     owned = contract_relations(snapshot)
     findings: list[Change] = []
+    inline_symbols = inline_declared_symbols(snapshot.functions)
     for i, fn in enumerate(snapshot.functions):
-        if not _has_export_obligation(fn) or owned.function_owes_no_export(i):
+        if not _has_export_obligation(
+            fn, inline_symbols
+        ) or owned.function_owes_no_export(i):
             continue
         if fn.mangled not in satisfied:
             findings.append(
@@ -1474,12 +1457,18 @@ def _l4_reconciled_symbols(snapshot: AbiSnapshot, exported: set[str]) -> set[str
     return reconciled
 
 
-def _has_export_obligation(fn: Function) -> bool:
+def _has_export_obligation(
+    fn: Function, inline_symbols: frozenset[str] = frozenset()
+) -> bool:
     """Whether *fn* promises a dynamic symbol (so absence from exports is a risk).
 
     Conservative on purpose (ADR-035 D4): exclude everything that legitimately
     emits no exported symbol — inline, pure-virtual, deleted, static, non-public
-    access, mangle-less, and template-shaped declarations.
+    access, mangle-less, internal-namespace, and template-shaped declarations.
+    *inline_symbols* (:func:`inline_declared_symbols`) carries inline-ness
+    declared on *another* record of the same symbol (an out-of-line
+    ``inline`` definition). A ``static`` **member** keeps its obligation;
+    only internal linkage exempts (:func:`is_static_member_symbol`).
 
     Deliberately **not** gated on ``visibility``: castxml derives
     ``Visibility.PUBLIC`` from the export table, so the very decl this check looks
@@ -1494,16 +1483,18 @@ def _has_export_obligation(fn: Function) -> bool:
     # ``static`` free functions have internal linkage and emit no dynamic
     # symbol, so a static header helper must not be read as a missing export
     # (Codex review).
-    if fn.is_static:
+    if fn.is_static and not is_static_member_symbol(fn.mangled):
         return False
-    if fn.is_inline or fn.is_pure_virtual or fn.is_deleted:
+    if fn.is_inline or fn.mangled in inline_symbols:
+        return False
+    if fn.is_pure_virtual or fn.is_deleted:
         return False
     if not fn.mangled:
         return False
     # A C++ member whose ``mangled`` is just the display name is a castxml
     # fallback (notably ctors/dtors); comparing that bare name against the
     # binary's real ``_ZN…`` symbols would false-positive (Codex review).
-    if not _looks_mangled(fn):
+    if not _looks_mangled(fn) or owner_in_internal_namespace(fn.mangled):
         return False
     # A template specialization/instantiation has vague linkage: its
     # definition is in the public header, so a consumer's own translation
@@ -1534,7 +1525,7 @@ def _var_has_export_obligation(var: Variable) -> bool:
         return False
     if not var.mangled:
         return False
-    if not _looks_mangled(var):
+    if not _looks_mangled(var) or owner_in_internal_namespace(var.mangled):
         return False
     if var.is_const:
         return False

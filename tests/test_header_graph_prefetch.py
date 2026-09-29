@@ -157,7 +157,13 @@ def test_prefetch_runs_the_acquisition_on_its_own_thread_and_returns_it(
 ) -> None:
     import threading
 
+    from abicheck import process_resources as pr
+
     monkeypatch.setenv("ABICHECK_MAX_THREADS", max_threads)
+    # The claim below is about a *fresh* budget, so give it one: the
+    # process-wide budget carries whatever earlier tests in this process
+    # still hold (a single-process suite such as mutmut's stats run).
+    monkeypatch.setattr(pr, "THREAD_BUDGET", pr._ThreadBudget())
     sentinel = attach.HeaderGraphAst(None, None, [], [], ())
     seen: list[tuple[str, tuple[object, ...]]] = []
 
@@ -195,3 +201,79 @@ def test_a_spent_budget_runs_the_prefetch_inline(
         )
     assert names == [threading.current_thread().name]
     assert pr.THREAD_BUDGET.in_use == 0
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("boom"), OSError("boom")])
+def test_a_failing_dump_settles_its_prefetch_before_returning(
+    monkeypatch: pytest.MonkeyPatch, exc: BaseException
+) -> None:
+    """A dump that fails after starting a prefetch must not return while the
+    orphaned parse still holds a thread-budget slot: the budget is back to
+    where it started the moment the failure propagates, whatever it is."""
+    import threading
+
+    from abicheck.process_resources import THREAD_BUDGET
+
+    release = threading.Event()
+
+    def slow_acquire(*_args: object) -> attach.HeaderGraphAst:
+        release.wait(5)
+        return attach.HeaderGraphAst(None, None, [], [], ())
+
+    monkeypatch.setenv("ABICHECK_MAX_THREADS", "")
+    monkeypatch.setattr(attach, "acquire_header_graph_ast", slow_acquire)
+    before = THREAD_BUDGET.in_use
+    future = attach.prefetch_header_graph_ast([Path("a.h")], [], "c++", None)
+    assert THREAD_BUDGET.in_use == before + 1
+    threading.Timer(0.05, release.set).start()
+    with pytest.raises(type(exc)):
+        with attach.prefetch_settled_on_failure(future):
+            raise exc
+    assert future.done()
+    # The done-callback's shutdown may run a moment after result() returns.
+    for _ in range(100):
+        if THREAD_BUDGET.in_use == before:
+            break
+        threading.Event().wait(0.01)
+    assert THREAD_BUDGET.in_use == before
+
+
+def test_a_successful_block_does_not_wait_on_the_prefetch() -> None:
+    """On success the block must not block on (or consume) the prefetch --
+    the header-graph attach does that later."""
+    from concurrent.futures import Future
+
+    pending: Future[attach.HeaderGraphAst] = Future()
+    with attach.prefetch_settled_on_failure(pending):
+        pass
+    assert not pending.done()
+    with attach.prefetch_settled_on_failure(None):
+        pass
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt(), SystemExit(1)])
+def test_an_interrupt_never_waits_on_the_prefetch(exc: BaseException) -> None:
+    """Ctrl-C / exit must propagate at once, not after a background parse."""
+    from concurrent.futures import Future
+
+    never: Future[attach.HeaderGraphAst] = Future()  # would block forever
+    with pytest.raises(type(exc)):
+        with attach.prefetch_settled_on_failure(never):
+            raise exc
+    assert not never.done()
+
+
+def test_a_stuck_prefetch_bounds_the_failure_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ordinary failure waits at most the settle bound for a stuck parse."""
+    import time
+    from concurrent.futures import Future
+
+    monkeypatch.setattr(attach, "_PREFETCH_SETTLE_TIMEOUT_S", 0.05)
+    stuck: Future[attach.HeaderGraphAst] = Future()
+    start = time.monotonic()
+    with pytest.raises(RuntimeError):
+        with attach.prefetch_settled_on_failure(stuck):
+            raise RuntimeError("boom")
+    assert time.monotonic() - start < 2.0

@@ -288,3 +288,109 @@ class TestFindingEvolutionSummary:
             "persistent": 0,
             "not_evaluated": 0,
         }
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation with the within-comparison inventory (oneDNN validation:
+# ``finding_evolution`` read ``not_evaluated: 462`` beside
+# ``change_inventory.hygiene_persistent: 414`` -- two axes over one
+# population, with nothing in the report saying so).
+# ---------------------------------------------------------------------------
+
+from abicheck.policy.evidence_status import CrossSourceEvolution  # noqa: E402
+
+_cross_states = st.one_of(st.none(), st.sampled_from(list(CrossSourceEvolution)))
+_chain_states = st.sampled_from(
+    [s for s in FindingEvolution if s is not FindingEvolution.RESOLVED]
+)
+_kinds = st.sampled_from(
+    [
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.FUNC_ADDED,
+        ChangeKind.EXPORTED_NOT_PUBLIC,
+    ]
+)
+
+
+@st.composite
+def _mixed_result(draw: st.DrawFn) -> DiffResult:
+    rows = draw(
+        st.lists(
+            st.tuples(st.sampled_from(_ALPHABET), _kinds, _cross_states, _chain_states),
+            max_size=12,
+        )
+    )
+    chain = draw(st.booleans())
+    changes = []
+    for sym, kind, cross, evo in rows:
+        c = Change(kind=kind, symbol=sym, description=f"{kind.value} {sym}")
+        c.cross_source_evolution = cross
+        if chain:
+            c.evolution = evo
+        changes.append(c)
+    return DiffResult(
+        old_version="o",
+        new_version="n",
+        library="lib",
+        changes=changes,
+        finding_evolution_evaluated=chain,
+    )
+
+
+class TestReconcilesWithChangeInventory:
+    @given(_mixed_result())
+    def test_both_blocks_partition_the_same_population(
+        self, result: DiffResult
+    ) -> None:
+        """Oracle: ``len(result.changes)``, counted independently of either
+        block's own summation."""
+        import json
+
+        from abicheck.reporter import to_json
+
+        doc = json.loads(to_json(result))
+        evo = doc["finding_evolution"]
+        inv = doc["summary"]["change_inventory"]
+        n = len(result.changes)
+        assert evo["basis"] == "comparison_chain"
+        assert evo["total"] == n == doc["summary"]["total_changes"]
+        assert sum(v for k, v in evo["counts"].items() if k != "resolved") == n
+        hygiene = sum(v for k, v in inv.items() if k.startswith("hygiene_"))
+        assert inv["compatibility_changes"] + hygiene == n
+        # A persistent inventory finding under a single comparison is a
+        # not-evaluated chain finding -- never a contradiction.
+        assert evo["chain_evaluated"] is result.finding_evolution_evaluated
+        assert evo["within_comparison_counterpart"] == "summary.change_inventory"
+
+
+class TestChainEvaluatedIsTheRecordedFact:
+    """``chain_evaluated`` states whether a previous comparison was supplied
+    -- recorded by ``apply_finding_evolution`` -- never an inference from
+    counts. Oracle: ``previous is not None``, independent of the sets."""
+
+    @given(
+        st.sets(st.sampled_from(_ALPHABET), max_size=5),
+        st.one_of(st.none(), st.sets(st.sampled_from(_ALPHABET), max_size=5)),
+    )
+    def test_chain_evaluated_iff_previous_supplied(
+        self, cur: set[str], prev: set[str] | None
+    ) -> None:
+        current = _result_for(cur, tag="cur")
+        previous = None if prev is None else _result_for(prev, tag="prev")
+        apply_finding_evolution(current, previous)
+        summary = compute_finding_evolution_summary(current)
+        assert summary.chain_evaluated is (prev is not None)
+        assert summary.to_dict()["chain_evaluated"] is (prev is not None)
+
+    def test_two_empty_results_are_an_evaluated_chain(self) -> None:
+        current = _result_for(set(), tag="cur")
+        apply_finding_evolution(current, _result_for(set(), tag="prev"))
+        assert compute_finding_evolution_summary(current).chain_evaluated is True
+
+    def test_plain_compare_is_not_an_evaluated_chain(self) -> None:
+        assert (
+            compute_finding_evolution_summary(
+                _result_for({"a"}, tag="c")
+            ).chain_evaluated
+            is False
+        )

@@ -599,7 +599,7 @@ def _embed_inline_source_side(
     "'show=<tokens>' (display filter over severity "
     "[breaking/api-break/risk/compatible], element "
     "[functions/variables/types/enums/elf/build/source/analysis] and "
-    "action [added/removed/changed] -- AND across dimensions, OR within "
+    "action [added/removed/changed/unchanged] -- AND across dimensions, OR within "
     "one, repeatable to OR whole groups together). Example: --view root-cause "
     "--view show=breaking,functions. Disclosure is not a token: the "
     "pattern-modulation ledger, the scope/reconciliation ledger and the "

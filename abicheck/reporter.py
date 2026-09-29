@@ -44,6 +44,7 @@ from .report.change_annotations import (
     change_annotation_fields as _change_annotation_fields,
 )
 from .report.change_inventory import render_change_inventory_json
+from .report.change_operation import operation_for_change
 from .report.contract_fields import (
     add_contract_evaluation_fields as _add_contract_evaluation_fields,
 )
@@ -1532,7 +1533,7 @@ def _change_to_dict(
     if surface_facts := getattr(c, "surface_facts", None):
         d["surface_facts"] = dict(surface_facts)
     if isinstance(kind, ChangeKind):
-        d["operation"] = operation_for_kind(kind.value)
+        d["operation"] = operation_for_change(c, kind.value)
         d["entity"] = entity_for_change(c, kind.value)
         d["finding_id"] = _finding_id(c)
         # Backend-independent sibling of finding_id (schema 2.36).

@@ -38,7 +38,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
 from concurrent.futures import Future
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -687,6 +689,37 @@ def prefetch_header_graph_ast(
     )
     future.add_done_callback(lambda _f: pool.shutdown(wait=False))
     return future
+
+
+#: Longest a failed dump waits for its abandoned header-graph prefetch.
+_PREFETCH_SETTLE_TIMEOUT_S = 10.0
+
+
+@contextmanager
+def prefetch_settled_on_failure(
+    future: Future[HeaderGraphAst] | None,
+) -> Iterator[None]:
+    """Wait for *future* to finish before re-raising a failure of the block.
+
+    A prefetch runs beside the primary dump; if that dump fails, nothing will
+    ever consume the prefetched graph, but its parse keeps running and keeps
+    its thread-budget slot (released only when it completes). Settling it
+    here returns the slot before the failing call returns, so a failed dump
+    never leaves an orphaned parse behind to starve a later pool.
+    """
+    try:
+        yield
+    except Exception:
+        # Bounded: a prefetch stuck in a slow parse must not hold the error
+        # hostage. Past the bound the slot is returned when the parse ends,
+        # exactly the pre-fix behavior, but the common case (a parse that is
+        # finishing or already done) is settled before the error propagates.
+        if future is not None:
+            with suppress(BaseException):
+                future.result(timeout=_PREFETCH_SETTLE_TIMEOUT_S)
+        raise
+    # KeyboardInterrupt / SystemExit propagate immediately: an interrupt must
+    # never wait on a background parse (up to clang's own timeout).
 
 
 def prefetch_graph_if_useful(
