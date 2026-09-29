@@ -93,3 +93,73 @@ def render_use_case_impact_html(impact: Mapping[str, Any] | None) -> str:
         "impact.</p>"
         "</div>"
     )
+
+
+def _surface_declaration_html(entry: Mapping[str, Any]) -> str:
+    h = html.escape
+    old = entry.get("old_declaration")
+    new = entry.get("new_declaration")
+    if old and new and old != new:
+        decl = f"<code>{h(str(old))}</code> &rarr; <code>{h(str(new))}</code>"
+    elif new:
+        decl = f"<code>{h(str(new))}</code>"
+    elif old:
+        decl = f"<code>{h(str(old))}</code>"
+    else:
+        decl = h(str(entry.get("description") or ""))
+    loc = entry.get("source_location")
+    if loc:
+        decl += f" <span class='empty'>({h(str(loc))})</span>"
+    return decl
+
+
+def render_surface_changes_html(
+    section: Mapping[str, Any] | None, *, limit: int | None = None
+) -> str:
+    """Additions, removals and modifications, each with its declarations.
+
+    Every group is capped independently and states its own omitted count,
+    exactly like the Markdown form; a section with nothing in any group
+    renders nothing, since the report already says there were no changes.
+    """
+    from .surface_changes import MAX_COMPACT_SURFACE_ITEMS
+
+    if not section or not section.get("total"):
+        return ""
+    h = html.escape
+    cap = max(0, MAX_COMPACT_SURFACE_ITEMS if limit is None else limit)
+    parts: list[str] = []
+    for label, key in (
+        ("Additions", "additions"),
+        ("Removals", "removals"),
+        ("Modifications", "modifications"),
+    ):
+        entries = list(section.get(key) or ())
+        parts.append(f"<h4>{label} ({len(entries)})</h4>")
+        if not entries:
+            parts.append("<p class='empty'>none</p>")
+            continue
+        shown = entries[:cap]
+        rows = "".join(
+            f"<tr><td><code>{h(str(e.get('symbol')))}</code></td>"
+            f"<td>{h(str(e.get('verdict')))}</td>"
+            f"<td>{_surface_declaration_html(e)}</td></tr>"
+            for e in shown
+        )
+        parts.append(
+            "<table class='changes'><thead><tr><th>Symbol</th><th>Verdict</th>"
+            f"<th>Declaration (old &rarr; new)</th></tr></thead><tbody>{rows}</tbody></table>"
+        )
+        omitted = len(entries) - len(shown)
+        if omitted:
+            quantifier = f"{omitted} more" if shown else f"all {omitted}"
+            parts.append(
+                f"<p class='empty surface-omitted'>&hellip; {quantifier} "
+                f"{label.lower()} omitted (the JSON report lists every entry).</p>"
+            )
+    return (
+        "<div class='section' id='surface-changes'>"
+        f"<h3>Surface changes ({int(section.get('total') or 0)})</h3>"
+        + "".join(parts)
+        + "</div>"
+    )

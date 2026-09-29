@@ -655,10 +655,10 @@ inputs:
       Output format: json, markdown, sarif, html, junit, review, or oneline
       (each mode's default when this input is left unset). compare, two-sided
       shape, single-pair (non-directory, non-package) operand: all seven.
-      compare, two-sided shape, directory/package operand: json, markdown, or
-      junit only — sarif/html/review/oneline are rejected with an error (the
-      per-library release fan-out has no single report those formats
-      describe). compare against a stored BundleFacts baseline (old-library
+      compare, two-sided shape, directory/package operand: json, markdown,
+      junit, oneline, or html (a release page rendered from the release JSON)
+      — sarif/review are rejected with an error (the per-library release
+      fan-out has no single report those formats describe). compare against a stored BundleFacts baseline (old-library
       naming such a document, new-library a directory/package): json or
       markdown only — that driver renders no junit either. This one narrowing
       is NOT pre-checked before the dependency install, unlike every other

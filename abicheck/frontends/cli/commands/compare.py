@@ -92,10 +92,10 @@ from ..runtime import (
 )
 from .dump import dump_cmd
 
-#: `oneline` joined the set once `report/release_oneline.py` gave it a real
-#: aggregate render (it needs no per-member `DiffResult`, unlike the three
-#: still missing -- see `docs/contribute/known-gaps.md`).
-_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline"})
+#: `oneline` and `html` render the aggregate release document alone
+#: (`report/release_oneline.py`, `report/render_release_html.py`); the two still
+#: missing need a per-member `DiffResult` -- see `docs/contribute/known-gaps.md`.
+_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline", "html"})
 
 
 def reject_release_incompatible_view_mode(report_mode: str) -> None:
@@ -186,7 +186,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     if fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
             f"-o {fmt}=... is not available when comparing directories or "
-            "packages: sarif/html/review require a single-pair (non-directory, "
+            "packages: sarif/review require a single-pair (non-directory, "
             "non-package) comparison. Choose one of: "
             f"{', '.join(sorted(_RELEASE_FORMATS))}, or compare one library at "
             f"a time (a single old/new .so pair) to export {fmt}."
@@ -212,7 +212,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         if secondary_fmt not in _RELEASE_FORMATS:
             raise click.UsageError(
                 f"-o {secondary_fmt}=... is not available when comparing "
-                "directories or packages: sarif/html/review require a "
+                "directories or packages: sarif/review require a "
                 "single-pair (non-directory, non-package) comparison. Choose "
                 f"one of: {', '.join(sorted(_RELEASE_FORMATS))}, or compare one "
                 "library at a time (a single old/new .so pair) to export "
@@ -581,7 +581,7 @@ def _embed_inline_source_side(
     "suitable for a job summary or PR comment; 'oneline' emits a "
     "single human-readable summary line -- the 'just tell me' "
     "flow. A directory/package (release) comparison renders "
-    "json/markdown/junit/oneline only. Every export is rendered "
+    "json/markdown/junit/oneline/html only. Every export is rendered "
     "from the one completed comparison -- asking for more "
     "artifacts never re-runs the analysis and never changes the "
     "verdict or the exit code.",

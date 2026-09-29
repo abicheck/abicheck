@@ -883,6 +883,7 @@ def build_html_document(
             ),
             "impact": dataclasses.asdict(impact) if impact is not None else None,
             "versioning_policy": compute_versioning_policy(result),
+            "surface_changes": _surface_changes(result, display_changes),
             "use_case_impact": compute_use_case_impact(
                 result, display_changes if show_only else None
             ),
@@ -953,6 +954,16 @@ def generate_html_report(
         envelope=envelope,
     )
     return render_html_document(document)
+
+
+def _surface_changes(result: object, changes: list[object]) -> dict[str, object] | None:
+    """Additions/removals/modifications over the displayed changes (``None``
+    for a duck-typed result that carries no policy to resolve them with)."""
+    from .report.surface_changes import compute_surface_changes
+
+    if not hasattr(result, "_effective_kind_sets"):
+        return None
+    return compute_surface_changes(result, changes=changes).to_dict()  # type: ignore[arg-type]
 
 
 def compute_versioning_policy(result: object) -> dict[str, object] | None:

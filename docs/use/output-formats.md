@@ -406,8 +406,10 @@ abicheck compare old.json new.json \
 - Also works for a directory/package (release) comparison: the per-library
   fan-out renders every requested format from the same already-computed
   per-library results, without re-running any library's comparison. Only
-  `json`/`markdown`/`junit`/`oneline` are available there —
-  `sarif`/`html`/`review` still require a single-pair comparison.
+  `json`/`markdown`/`junit`/`oneline`/`html` are available there —
+  `sarif`/`review` still require a single-pair comparison. See
+  [Release HTML report](#release-html-report) for what the release `html`
+  page contains.
 
 The bundled GitHub Action uses this to get JSON for its sticky PR comment
 without re-running the whole comparison a second time.
@@ -1059,6 +1061,43 @@ documented, with a fully annotated example, in [Aggregate
 Reports](aggregate-reports.md) rather than repeated here.
 
 ---
+
+## Release HTML report
+
+`compare OLD_DIR NEW_DIR -o html=release.html` (a directory or package
+comparison) writes one standalone page rendered from the release JSON
+document alone — the same data `-o json=...` writes — so it states nothing
+the JSON does not, and asking for it never changes the verdict or the exit
+code. It contains:
+
+- the release verdict, exit code and its reasons, and the run outcome;
+- one row per compared member (verdict, breaking, source breaks, risk,
+  additions, quality) and the libraries found on one side only;
+- the comparison scope: completeness, selection, the `scope.on_incomplete`
+  policy, both inventories, and every unchecked, out-of-scope,
+  inventory-proven removed and inventory-proven added member with its state
+  and reason;
+- release-level surface changes, when the document carries them;
+- a **dependency graph**: one box per member (status as text and colour:
+  breaking, api break, compatible, no change, unchecked) plus one per needed
+  library no member provides (external), and one arrow per recorded
+  `DT_NEEDED` entry. Layers follow dependency depth (a library that needs
+  nothing recorded sits at the bottom). A dashed arrow was recorded on one
+  side only. The same edges are listed in a plain table under the picture,
+  and a graph of more than 60 libraries is capped with the omitted counts
+  stated;
+- release coherence findings (calls between members whose compatibility
+  could not be confirmed) and run warnings.
+
+The graph is drawn only from facts the report records: each member's
+`libraries[].dependencies` block (release schema 1.9) carries, per side, the
+ELF `DT_SONAME` (`soname`) and `DT_NEEDED` list (`needed`) read from that
+member's snapshot. A member without ELF metadata (PE, Mach-O) has no block,
+and the page says how many members recorded dependency facts.
+
+The single-pair HTML report gains a **Surface changes** section with the
+same additions/removals/modifications grouping as Markdown and the same
+per-group cap (12 entries, omitted count stated).
 
 ## Release recommendation
 

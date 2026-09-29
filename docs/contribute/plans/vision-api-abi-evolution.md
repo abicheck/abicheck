@@ -791,11 +791,38 @@ exit code unchanged; HTML consumer rows match the JSON attribution) and
 the maximal presence runs for every presence pattern up to five releases;
 the page lists exactly the JSON's events).
 
-Still open: a relationship/dependency graph visualization; per-finding
-consumer attribution (`Change.affected_use_cases`); the `surface_changes`
-and `comparison_scope` sections in HTML (release/package comparisons have
-no HTML report at all today); and S4's real Action run in a lab workflow,
-which has not been executed and remains unverified.
+Landed after that note, in the same slice:
+
+- *Surface changes in HTML.* The scalar HTML report renders the
+  `surface_changes` block (additions/removals/modifications with old/new
+  declarations, per-group cap with a stated omitted count, same as
+  Markdown); computed in `html_report.build_html_document`, rendered by
+  `report/render_html_review_sections.render_surface_changes_html`.
+- *Release HTML report.* A directory/package `compare` accepts
+  `-o html=...`, rendered from the release JSON document alone
+  (`report/render_release_html.py`): headline verdict/exit, per-member
+  table, the `comparison_scope` section with reasons, release-level surface
+  changes when present, coherence findings.
+- *Dependency graph (relationship visualization).* Release schema 1.9 adds
+  `libraries[].dependencies` (per side: recorded ELF `DT_SONAME`/
+  `DT_NEEDED`), and the release HTML draws it as a layered SVG (text +
+  colour status per node, per-node/edge titles, one-side-only edges dashed,
+  a full edge table, capped at 60 nodes with omitted counts stated)
+  (`report/release_dependency_graph.py`).
+
+Tests: `tests/test_release_html_report.py` (through the CLI, the JSON is the
+oracle: members, scope entries and edges in the HTML equal those in the
+JSON, with the edge oracle derived independently; exit code identical with
+and without `-o html`; generated documents check escaping and the cap) and
+`tests/test_html_surface_changes.py`.
+
+Still open: per-finding consumer attribution (`Change.affected_use_cases`);
+release-level `surface_changes` (the release JSON carries none yet, so the
+release page renders the section only when a document has one); dependency
+facts for PE/Mach-O members (only ELF is recorded); the composite Action
+still rejects `format: html` for a directory/package operand; and S4's real
+Action run in a lab workflow, which has not been executed and remains
+unverified.
 
 ## Files & surfaces
 

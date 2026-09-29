@@ -998,13 +998,14 @@ def _format_release_summary(
     correct renders from the same already-computed ``library_results``/
     ``bundle_result``/``matrix_result``.
     """
+    if fmt == "html":  # rendered from the JSON document alone, never from live state
+        as_json = {**locals(), "fmt": "json"}
+        from .report.render_release_html import render_release_html
+
+        return render_release_html(json.loads(_format_release_summary(**as_json)))
     if fmt == "oneline":
-        # The "just tell me" flow at release cardinality -- a count fold over
-        # the already-stripped per-library summaries, through the same
-        # `format_stat_line` a single-pair `compare` renders, so the two
-        # cannot drift. See `report/release_oneline.py` for why this is the
-        # one of `compare`'s four remaining formats that generalizes without
-        # a per-member `DiffResult`.
+        # The "just tell me" flow at release cardinality, through the same
+        # `format_stat_line` a single-pair `compare` renders (`report/release_oneline.py`).
         from .report.release_oneline import (
             format_release_oneline,
             release_global_counts,

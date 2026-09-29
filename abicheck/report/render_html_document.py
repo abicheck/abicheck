@@ -63,6 +63,7 @@ from .render_html import (
     verdict_icon,
 )
 from .render_html_review_sections import (
+    render_surface_changes_html,
     render_use_case_impact_html,
     render_versioning_policy_html,
 )
@@ -360,6 +361,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
 
     versioning_html = render_versioning_policy_html(d.get("versioning_policy"))
     use_case_html = render_use_case_impact_html(d.get("use_case_impact"))
+    surface_html = render_surface_changes_html(d.get("surface_changes"))
 
     impact_html = ""
     if d["show_impact"]:
@@ -413,7 +415,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
 {summary_html}
 {filter_note}
 {redundancy_note}
-{sections_html}{use_case_html}
+{surface_html}{sections_html}{use_case_html}
 {impact_html}
 
 {render_footer("ABICC-compatible report format")}

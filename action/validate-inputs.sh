@@ -324,8 +324,8 @@ case "$MODE" in
     if [[ -n "$FORMAT" ]]; then
       if { [[ -n "$NEW_LIBRARY" ]] && _is_compare_release_operand "$NEW_LIBRARY"; } \
          || { [[ -n "$OLD_LIBRARY" ]] && _is_compare_release_operand "$OLD_LIBRARY"; }; then
-        if [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "junit" && "$FORMAT" != "oneline" ]]; then
-          _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — only 'json', 'markdown', 'junit', and 'oneline' are available for a directory/package comparison."
+        if [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "junit" && "$FORMAT" != "oneline" && "$FORMAT" != "html" ]]; then
+          _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — only 'json', 'markdown', 'junit', 'oneline', and 'html' are available for a directory/package comparison."
         fi
       elif [[ -z "$OLD_LIBRARY" && -z "${INPUT_ABI_BASELINE:-}" ]]; then
         # Audit-only shape (`compare --no-baseline`): the CLI's own

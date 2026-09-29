@@ -140,7 +140,7 @@ if TYPE_CHECKING:
 
 
 #: The formats the release fan-out actually produces.
-_ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
+_ENGINE_FORMATS = ["json", "markdown", "junit", "oneline", "html"]
 
 
 # NOTE: not registered on `main` — the user-facing `compare-release` command was
