@@ -196,7 +196,7 @@ which track closes each:
 | 2B/6B | The landed typedef and constant cohorts are *fidelity gates*, not authority transfers: both indexes are built every comparison and the legacy projection adjudicates | T3 |
 | 4B | Built, not unwired, on both paths — what is open is consumption: partial on compare (`classify_compare_pair` reads `requested_depth`), absent on dump | T4 |
 | 5B | The `vtable` "final closure" is an investigated decline of a behavioral change; the PDB fabrication path and the authority transfer are still open | T9 |
-| 7B | `action/run.sh` is partially migrated — the residual is the raw exit/stderr path | T8 |
+| 7B | `action/run.sh` is partially migrated — the residual is the raw exit/stderr path (compare/dump closed 2026-09-29; deps modes remain) | T8 |
 
 One finding bears on this plan's own guardrail design rather than on a row:
 `scripts/semantic_ir_cutover.py`'s module-level "no legacy attribute read"
@@ -1021,6 +1021,36 @@ changes). The sibling test
 pins that a pack asserting the field is still rejected as decorative when
 this release invocation passes no `--contract` at all. `run_outcome`'s
 ledger row above is updated to reflect this as closed rather than open.
+
+**7B: T8 follow-up (2026-09-29) — `mode: compare`/`dump` no longer read
+stderr.** Track T8 (2026-09-05) had kept `_is_cli_error()` as an accepted
+transport-level fallback; this slice removes it for the two modes that have a
+structured source to use instead. The last stderr-prose decision in the compare dispatch was
+`_is_cli_error()`: a `^Usage:|^Error:|^Try ` match at exit 2 turned the
+verdict into `ERROR`, and a broader match (`Traceback`, `click.`) at exit 1
+did the same. Both were redundant with, or weaker than, a structured source
+that already existed. Exit 2 can no longer be a usage error at all -- the
+root group remaps Click's usage exit to `64` (`frontends/cli/runtime.py`'s
+`_AbicheckGroup`) -- so the exit-2 check could only ever *downgrade a real
+API break* when a build step printed a `Usage:`-shaped line. At exit 1 the
+question "did an axis fire, or did the invocation fail before answering?"
+is now asked of the report (`_report_validity`, the same predicate exit 0
+already used): no readable result publishes `ERROR` with a transport-level
+diagnostic instead of an unattributed `SEVERITY_ERROR`; a readable one goes
+through the existing axis attribution unchanged. Exit `64` has its own arm.
+`tests/test_action_run_sh_no_stderr_verdict.py` states the invariant over
+the space rather than one input: for each dispatched exit code (plus an
+unknown one), with and without a report, every stderr text in a corpus of
+the heuristic's own prefixes publishes the same verdict as empty stderr,
+with a vacuity guard on that oracle.
+
+**Still open in 7B after this slice:** `deps-tree`/`deps-compare` keep
+`_is_cli_error()`, because their exit `1` (`FAIL`/`WARN`) collides with a
+crash and their JSON (`stack_to_json`) carries no verdict vocabulary
+`report_query.py` recognizes, so there is no structured source to move to
+yet -- closing it needs the deps report to carry a `run_outcome` block.
+The gate-fold *target* duplication stays with the convergence plan's P0
+`EffectiveGate` item, as recorded above.
 
 **8B's first PR landed (2026-09-03).** `storage.types_section_codec
 .TypesSection` is the `"types"` D8 legacy section's own typed DTO, wired

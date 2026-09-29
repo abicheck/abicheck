@@ -4014,6 +4014,13 @@ if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && "${ABICHECK_OUTPUT:-}" ==
   printf '%s' "$ABICHECK_OUTPUT" > "$_STDOUT_JSON_FILE"
 fi
 
+# Stderr-prose heuristic for "the CLI failed rather than answered". Used ONLY
+# by the deps-tree/deps-compare modes, whose exit 1 (deps-tree FAIL /
+# deps-compare WARN) collides with an uncaught exception's exit 1 and which
+# produce no structured report this script reads -- the named residual of
+# ADR-063 Track T8 (7B). compare and dump no longer consult it: usage errors
+# are the CLI's own exit 64, and compare's exit 1 is attributed from the
+# structured report (`_report_validity`) or not at all.
 _is_cli_error() {
   echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try |Traceback|click\.)'
 }
@@ -5135,8 +5142,8 @@ elif [[ "$MODE" == "dump" ]]; then
     VERDICT="COMPATIBLE"
   else
     VERDICT="ERROR"
-    if _is_cli_error; then
-      _error_annotation "abicheck dump failed due to a CLI argument or configuration error (exit code $ABICHECK_EXIT)."
+    if [[ $ABICHECK_EXIT -eq 64 ]]; then
+      _error_annotation "abicheck dump failed due to a CLI argument or configuration error (exit code 64)."
     else
       _error_annotation "abicheck dump failed (exit code $ABICHECK_EXIT)."
     fi
@@ -5154,168 +5161,177 @@ else
   # #1160, four rounds: the 16 arm was missing entirely at one point, so a
   # request hitting it fell into the generic `*) VERDICT="ERROR"` case
   # below, which made `_maybe_post_pr_comment`'s own ERROR guard skip
-  # posting the report). Click also uses exit code 2 for
-  # usage/argument errors — detect via stderr.
-  if [[ $ABICHECK_EXIT -eq 2 ]] && echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try )'; then
-    VERDICT="ERROR"
-    echo "::error::abicheck failed due to a CLI argument or configuration error (exit code 2)."
-    echo "::error::Check the command and inputs above. This is NOT an API break — the check did not run."
-  else
-    case $ABICHECK_EXIT in
-      0) _resolve_clean_exit_verdict ;;
-      1)
-        if _is_cli_error; then
-          VERDICT="ERROR"
-          echo "::error::abicheck failed due to a CLI argument or configuration error (exit code 1)."
-          echo "::error::Check the command and inputs above."
-        elif _coverage_gated || _assurance_gated || _scope_gated; then
-          # `compare` shares exit 1 between up to four independent axes
-          # (severity policy, ADR-049 contract coverage, P0.4 analysis
-          # assurance), so the report's pre-fold `severity.exit_code` is
-          # what tells them apart rather than a guess. Only when the
-          # severity gate itself did not produce 1 is this run gated by
-          # coverage and/or assurance *alone*.
-          _sev_exit=$(_severity_gate_exit)
-          if [[ "$_sev_exit" == "0" ]]; then
-            if _coverage_gated; then
-              VERDICT="COVERAGE_INCOMPLETE"
-              echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
-              if _assurance_gated; then
-                echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
-              fi
-              if _scope_gated; then
-                echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
-              fi
-            elif _scope_gated; then
-              # ADR-065 S2's completeness axis alone: an unchecked selected
-              # member under --on-incomplete-scope block, or a run that
-              # completed no comparison at all (D7, under every setting).
-              # Same "not a break, not a severity-policy failure" shape as
-              # the coverage branch above.
-              VERDICT="SCOPE_INCOMPLETE"
-              echo "::warning::abicheck's comparison scope was not fully checked (exit code 1): a selected member went unchecked under scope.on_incomplete: block, or no comparison completed at all. This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict covers the compared members only; see comparison_scope in the JSON report."
-              if _assurance_gated; then
-                echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
-              fi
-            else
-              # P0.4's orthogonal analysis-assurance axis alone (no
-              # contract-coverage gap this run) -- same "not a break, not a
-              # severity-policy failure" shape as the coverage branch above.
-              VERDICT="ANALYSIS_INCOMPLETE"
-              echo "::warning::abicheck's own evidence was not fully complete under assurance.require_complete (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
-            fi
-          else
-            # Either severity gated too, or there is no readable JSON report
-            # to tell. Keep the established verdict rather than overwrite it
-            # on a guess, and say that coverage/assurance also contributed.
-            VERDICT="SEVERITY_ERROR"
-            if _coverage_gated; then
-              echo "::warning::abicheck also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
-            fi
+  # posting the report). 64=usage error: the root group remaps Click's own
+  # usage exit (2) to sysexits EX_USAGE so it can never read as API_BREAK
+  # (`frontends/cli/runtime.py`'s `_AbicheckGroup`), which is why exit 2
+  # below needs no disambiguation at all. ADR-063 Track T8 (7B): no arm here
+  # reads the CLI's stderr prose -- the exit code and the structured report
+  # are the only two sources (action/AGENTS.md, "How `run.sh` resolves the
+  # verdict it publishes").
+  case $ABICHECK_EXIT in
+    0) _resolve_clean_exit_verdict ;;
+    1)
+      # Exit 1 is shared by the severity/coverage/assurance/scope axes AND
+      # by every failure that never produced a result -- an uncaught
+      # exception (Python exits 1), a non-usage ClickException, a killed
+      # interpreter. Only the report can tell them apart, so the
+      # transport-level fallback is asked first: no readable result means
+      # nothing established that any axis fired.
+      _exit1_validity=$(_report_validity)
+      if [[ "$_exit1_validity" != "ok" ]]; then
+        VERDICT="ERROR"
+        _error_annotation "abicheck exited 1 without a readable JSON result (report: ${_exit1_validity:-none located}), so no severity, coverage, assurance or scope gate can be attributed -- the invocation failed before producing one. See the command's own error output above."
+      elif _coverage_gated || _assurance_gated || _scope_gated; then
+        # `compare` shares exit 1 between up to four independent axes
+        # (severity policy, ADR-049 contract coverage, P0.4 analysis
+        # assurance), so the report's pre-fold `severity.exit_code` is
+        # what tells them apart rather than a guess. Only when the
+        # severity gate itself did not produce 1 is this run gated by
+        # coverage and/or assurance *alone*.
+        _sev_exit=$(_severity_gate_exit)
+        if [[ "$_sev_exit" == "0" ]]; then
+          if _coverage_gated; then
+            VERDICT="COVERAGE_INCOMPLETE"
+            echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
             if _assurance_gated; then
               echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
             fi
             if _scope_gated; then
               echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
             fi
-          fi
-        elif [[ "${_NO_BASELINE:-false}" == "true" ]]; then
-          # The audit-only shape (`compare --no-baseline`) has no bare
-          # severity-driven exit-1 source at all (its own four orthogonal
-          # axes are audit_gate=3, contract_coverage=1, analysis_assurance=1,
-          # evidence_contract=7 -- never a bare severity-gate 1,
-          # `docs/reference/exit-codes.md`'s `compare --no-baseline`
-          # section), unlike a two-sided compare's legacy severity scheme,
-          # which has no OTHER source for exit 1 at all (the final `else`
-          # below). So this reads the report's own pre-fold
-          # `severity.exit_code`/`run_outcome.gate` directly rather than
-          # assuming severity the way the two-sided catch-all below does: a
-          # real signal still means SEVERITY_ERROR, but "not a CLI error,
-          # and none of severity/coverage/assurance/scope claim it" is an
-          # unattributed operational failure -- ERROR, not a severity-policy
-          # guess an audit-only run could never actually produce.
-          _sev_exit=$(_severity_gate_exit)
-          if [[ "$_sev_exit" != "0" && -n "$_sev_exit" ]]; then
-            VERDICT="SEVERITY_ERROR"
+          elif _scope_gated; then
+            # ADR-065 S2's completeness axis alone: an unchecked selected
+            # member under --on-incomplete-scope block, or a run that
+            # completed no comparison at all (D7, under every setting).
+            # Same "not a break, not a severity-policy failure" shape as
+            # the coverage branch above.
+            VERDICT="SCOPE_INCOMPLETE"
+            echo "::warning::abicheck's comparison scope was not fully checked (exit code 1): a selected member went unchecked under scope.on_incomplete: block, or no comparison completed at all. This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict covers the compared members only; see comparison_scope in the JSON report."
+            if _assurance_gated; then
+              echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
+            fi
           else
-            VERDICT="ERROR"
+            # P0.4's orthogonal analysis-assurance axis alone (no
+            # contract-coverage gap this run) -- same "not a break, not a
+            # severity-policy failure" shape as the coverage branch above.
+            VERDICT="ANALYSIS_INCOMPLETE"
+            echo "::warning::abicheck's own evidence was not fully complete under assurance.require_complete (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
           fi
         else
+          # Either severity gated too, or there is no readable JSON report
+          # to tell. Keep the established verdict rather than overwrite it
+          # on a guess, and say that coverage/assurance also contributed.
           VERDICT="SEVERITY_ERROR"
+          if _coverage_gated; then
+            echo "::warning::abicheck also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
+          fi
+          if _assurance_gated; then
+            echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
+          fi
+          if _scope_gated; then
+            echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
+          fi
         fi
-        if [[ "$VERDICT" != "ERROR" ]]; then
-          _escalate_verdict_to_report
-        fi
-        ;;
-      2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
-      3)
-        # ADR-068's 2026-09-10 amendment: `compare --no-baseline`'s own
-        # orthogonal audit-gate axis (`policy/audit_gate_exit.py`). Exit `3`
-        # is unambiguous -- it is the one code this axis alone contributes
-        # (never folded together with another axis's own contribution the
-        # way exit `1` is shared between severity/coverage/assurance/scope
-        # above), so no report-based disambiguation is needed here. This
-        # arm is reached through the audit-only shape (old-library/
-        # abi-baseline both omitted) whenever the caller also opted in via
-        # `--severity-preset` (any value but `info-only`) -- the caller's
-        # own migration step per ADR-068's 2026-09-11 amendment, not
-        # something this file injects.
-        # This is NOT a two-sided compatibility verdict: an audit reports no
-        # `changes`/compatibility verdict at all (ADR-068 D2) -- the axis
-        # only says a real, BREAKING/API_BREAK-classified candidate-side
-        # finding was present against the candidate's own public surface
-        # while a severity preset (other than `info-only`) was in effect.
-        VERDICT="AUDIT_GATE"
-        echo "::warning::abicheck --no-baseline reports a gating audit finding (exit code 3): a real BREAKING/API_BREAK-classified finding was found against the candidate's own public surface while a severity preset was in effect. This is NOT a two-sided compatibility verdict — no baseline was compared; see the JSON report's findings[] for what gated."
-        ;;
-      4)
-        # A release/bundle-facts run floors its exit at 4 for an operational
-        # failure too (a library that failed to extract or compare, ADR-065
-        # D1) -- `run_outcome.operational` names it. That is not (only) a
-        # compatibility break and must not be waived by fail-on-breaking:
-        # false (Codex review), so it takes the non-waivable ERROR path.
-        if _op=$(_operational_failure_status); then
-          VERDICT="ERROR"
-          _error_annotation "abicheck reports an operational failure (run_outcome.operational: $_op): at least one library failed to extract or compare, so exit code 4 is not a plain compatibility verdict and is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
+      elif [[ "${_NO_BASELINE:-false}" == "true" ]]; then
+        # The audit-only shape (`compare --no-baseline`) has no bare
+        # severity-driven exit-1 source at all (its own four orthogonal
+        # axes are audit_gate=3, contract_coverage=1, analysis_assurance=1,
+        # evidence_contract=7 -- never a bare severity-gate 1,
+        # `docs/reference/exit-codes.md`'s `compare --no-baseline`
+        # section), unlike a two-sided compare's legacy severity scheme,
+        # which has no OTHER source for exit 1 at all (the final `else`
+        # below). So this reads the report's own pre-fold
+        # `severity.exit_code`/`run_outcome.gate` directly rather than
+        # assuming severity the way the two-sided catch-all below does: a
+        # real signal still means SEVERITY_ERROR, but "not a CLI error,
+        # and none of severity/coverage/assurance/scope claim it" is an
+        # unattributed operational failure -- ERROR, not a severity-policy
+        # guess an audit-only run could never actually produce.
+        _sev_exit=$(_severity_gate_exit)
+        if [[ "$_sev_exit" != "0" && -n "$_sev_exit" ]]; then
+          VERDICT="SEVERITY_ERROR"
         else
-          VERDICT="BREAKING"
+          VERDICT="ERROR"
         fi
-        ;;
-      7)
-        # ADR-037 D5's evidence-contract axis (`policy/exit_decision_
-        # precedence.py`'s `EXIT_EVIDENCE_CONTRACT_ERROR`, ADR-064): a
-        # pinned `--depth build`/`--depth source` whose live extraction did
-        # not reach it -- unconditional and un-spoofable, shared by
-        # `compare` (a two-sided run) and `compare --no-baseline` alike
-        # (`report/no_baseline.py`'s own `evidence_contract` axis).
-        # Before this arm existed, this exit code fell into the generic
-        # `*) VERDICT="ERROR"` case below -- which does still fail the step
-        # via the top-level `VERDICT == "ERROR"` branch further down, so
-        # this arm changes the label, not whether the step fails.
-        VERDICT="EVIDENCE_CONTRACT_ERROR"
-        echo "::error::abicheck aborted: this run's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected)."
-        ;;
-      5)
-        # ADR-068 §3 #19's budget-overflow abort (`--budget`,
-        # `cli_compare_fold.py`'s own `sys.exit(5)`). Reachable for a
-        # baseline compare's own `--budget` forwarding (this file's own
-        # compare-command assembly, gated on `_NO_BASELINE`) -- before this
-        # arm existed, exit 5 fell into the generic `*) VERDICT="ERROR"`
-        # case below, publishing `ERROR` instead of the documented
-        # `BUDGET_OVERFLOW` and skipping the budget-specific summary/comment
-        # handling (Codex review, PR #1210, round 10 -- an audit-only
-        # request never reaches this exit code at all: `compare
-        # --no-baseline` rejects `--budget` outright, and this Action's own
-        # preflight rejects the input upfront for that shape before ever
-        # invoking the CLI).
-        VERDICT="BUDGET_OVERFLOW"
-        echo "::warning::abicheck exceeded the configured --budget (exit code 5). Pin a shallower --depth or raise the budget; a budget never silently shrinks scope."
-        ;;
-      8) VERDICT="REMOVED_LIBRARY" ;;
-      16) VERDICT="NOT_COMPARABLE" ;;
-      *) VERDICT="ERROR" ;;
-    esac
-  fi
+      else
+        VERDICT="SEVERITY_ERROR"
+      fi
+      if [[ "$VERDICT" != "ERROR" ]]; then
+        _escalate_verdict_to_report
+      fi
+      ;;
+    2) VERDICT="API_BREAK"; _escalate_verdict_to_report ;;
+    3)
+      # ADR-068's 2026-09-10 amendment: `compare --no-baseline`'s own
+      # orthogonal audit-gate axis (`policy/audit_gate_exit.py`). Exit `3`
+      # is unambiguous -- it is the one code this axis alone contributes
+      # (never folded together with another axis's own contribution the
+      # way exit `1` is shared between severity/coverage/assurance/scope
+      # above), so no report-based disambiguation is needed here. This
+      # arm is reached through the audit-only shape (old-library/
+      # abi-baseline both omitted) whenever the caller also opted in via
+      # `--severity-preset` (any value but `info-only`) -- the caller's
+      # own migration step per ADR-068's 2026-09-11 amendment, not
+      # something this file injects.
+      # This is NOT a two-sided compatibility verdict: an audit reports no
+      # `changes`/compatibility verdict at all (ADR-068 D2) -- the axis
+      # only says a real, BREAKING/API_BREAK-classified candidate-side
+      # finding was present against the candidate's own public surface
+      # while a severity preset (other than `info-only`) was in effect.
+      VERDICT="AUDIT_GATE"
+      echo "::warning::abicheck --no-baseline reports a gating audit finding (exit code 3): a real BREAKING/API_BREAK-classified finding was found against the candidate's own public surface while a severity preset was in effect. This is NOT a two-sided compatibility verdict — no baseline was compared; see the JSON report's findings[] for what gated."
+      ;;
+    4)
+      # A release/bundle-facts run floors its exit at 4 for an operational
+      # failure too (a library that failed to extract or compare, ADR-065
+      # D1) -- `run_outcome.operational` names it. That is not (only) a
+      # compatibility break and must not be waived by fail-on-breaking:
+      # false (Codex review), so it takes the non-waivable ERROR path.
+      if _op=$(_operational_failure_status); then
+        VERDICT="ERROR"
+        _error_annotation "abicheck reports an operational failure (run_outcome.operational: $_op): at least one library failed to extract or compare, so exit code 4 is not a plain compatibility verdict and is not waived by fail-on-breaking. See the JSON report's per-library results / extraction_failures."
+      else
+        VERDICT="BREAKING"
+      fi
+      ;;
+    7)
+      # ADR-037 D5's evidence-contract axis (`policy/exit_decision_
+      # precedence.py`'s `EXIT_EVIDENCE_CONTRACT_ERROR`, ADR-064): a
+      # pinned `--depth build`/`--depth source` whose live extraction did
+      # not reach it -- unconditional and un-spoofable, shared by
+      # `compare` (a two-sided run) and `compare --no-baseline` alike
+      # (`report/no_baseline.py`'s own `evidence_contract` axis).
+      # Before this arm existed, this exit code fell into the generic
+      # `*) VERDICT="ERROR"` case below -- which does still fail the step
+      # via the top-level `VERDICT == "ERROR"` branch further down, so
+      # this arm changes the label, not whether the step fails.
+      VERDICT="EVIDENCE_CONTRACT_ERROR"
+      echo "::error::abicheck aborted: this run's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected)."
+      ;;
+    5)
+      # ADR-068 §3 #19's budget-overflow abort (`--budget`,
+      # `cli_compare_fold.py`'s own `sys.exit(5)`). Reachable for a
+      # baseline compare's own `--budget` forwarding (this file's own
+      # compare-command assembly, gated on `_NO_BASELINE`) -- before this
+      # arm existed, exit 5 fell into the generic `*) VERDICT="ERROR"`
+      # case below, publishing `ERROR` instead of the documented
+      # `BUDGET_OVERFLOW` and skipping the budget-specific summary/comment
+      # handling (Codex review, PR #1210, round 10 -- an audit-only
+      # request never reaches this exit code at all: `compare
+      # --no-baseline` rejects `--budget` outright, and this Action's own
+      # preflight rejects the input upfront for that shape before ever
+      # invoking the CLI).
+      VERDICT="BUDGET_OVERFLOW"
+      echo "::warning::abicheck exceeded the configured --budget (exit code 5). Pin a shallower --depth or raise the budget; a budget never silently shrinks scope."
+      ;;
+    8) VERDICT="REMOVED_LIBRARY" ;;
+    16) VERDICT="NOT_COMPARABLE" ;;
+    64)
+      VERDICT="ERROR"
+      _error_annotation "abicheck failed due to a CLI argument or configuration error (exit code 64). Check the command and inputs above. This is NOT an API break -- the check did not run."
+      ;;
+    *) VERDICT="ERROR" ;;
+  esac
 fi
 
 echo "abicheck verdict: $VERDICT (exit code $ABICHECK_EXIT)"

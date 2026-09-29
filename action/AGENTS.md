@@ -119,10 +119,21 @@ third:
    `contract_coverage_exit_contribution`, `analysis_assurance.status`) for
    a report from an older abicheck.
 2. **The process exit code**, via the `case $ABICHECK_EXIT in ...`
-   dispatch, plus `_is_cli_error()`'s stderr check for a Click usage error
-   that produces no report at all. This is the *transport-level* fallback:
-   it answers "what did the invocation itself say" when there is no result
-   to read.
+   dispatch. This is the *transport-level* fallback: it answers "what did
+   the invocation itself say" when there is no result to read. A usage
+   error is the CLI's own exit `64` (the root group remaps Click's `2`), so
+   exit `2` is always a compatibility answer; and `compare`'s exit `1` --
+   shared by four gate axes *and* by any crash -- is attributed to an axis
+   only when `_report_validity` says a readable result exists, otherwise it
+   publishes `ERROR`.
+
+**`mode: compare` and `mode: dump` never read stderr.** `_is_cli_error()`'s
+stderr-prose check survives only for `deps-tree`/`deps-compare`, whose
+exit `1` collides with a crash and which produce no report this script
+reads -- the named residual of ADR-063 Track T8.
+`tests/test_action_run_sh_no_stderr_verdict.py` pins the compare half as a
+property: for every exit code, stderr text never changes the published
+verdict.
 
 Nothing else is consulted. `run.sh` used to re-derive these facts by
 regex-matching rendered output — a `sed` over a markdown/text report's

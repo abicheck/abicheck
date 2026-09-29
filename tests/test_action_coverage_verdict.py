@@ -935,11 +935,12 @@ class TestAPromotedExitDoesNotUnderstateTheReport:
         assert outputs["_exit"] == 1, outputs["_stdout"]
 
     def test_a_usage_error_is_not_escalated(self, tmp_path: Path) -> None:
-        """Click's usage errors also exit 2. That path sets ERROR before the
-        case statement is reached, so no report reading may override it."""
+        """A usage error is the CLI's own exit 64 (Click's 2 is remapped by
+        the root group), so it never reaches the API_BREAK arm and no report
+        reading may override it -- even a stale BREAKING report on disk."""
         bindir = _stub_abicheck(
             tmp_path,
-            exit_code=2,
+            exit_code=64,
             report=self._report("BREAKING"),
             stderr="Usage: abicheck compare [OPTIONS]",
         )

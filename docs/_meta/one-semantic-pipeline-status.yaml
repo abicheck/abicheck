@@ -1530,6 +1530,14 @@ concepts:
       floors blind, since the CLI's single `--write` slot means this
       script's own JSON-targeted append always loses to the user's later,
       non-JSON one. Both track T8 and track T6 are now complete.
+      2026-09-29 T8 follow-up: _is_cli_error()'s stderr check no longer
+      decides anything for mode compare or dump. Usage errors are the CLI's
+      own exit 64 (Click's 2 is remapped at the root group, so exit 2 is
+      always API_BREAK and a forged Usage line can no longer downgrade it),
+      and compare's exit 1 is attributed from the report via
+      _report_validity or published as ERROR when no readable result
+      exists. The heuristic survives only for deps-tree/deps-compare, whose
+      report carries no run_outcome yet -- the remaining boundary item.
   sectioned_storage:
     primitive: complete
     producers: complete
