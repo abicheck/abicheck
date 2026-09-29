@@ -1,0 +1,3 @@
+### Performance
+
+- **Header graph parses alongside the primary dump** — under the default castxml frontend, the header graph's own `clang` parse depends only on the headers, not on the finished snapshot, so it now starts on a separate thread while castxml runs. Measured on a cold header cache: 11% faster on CPython 3.13 and 15% on free-threaded 3.15t for a single-library compare; neutral on a warm cache and on a release whose libraries already use every core. Results are identical. Its thread comes from `ABICHECK_MAX_THREADS`; with the budget spent it runs in the old, sequential order. Not used under `--ast-frontend clang`, where the graph already reuses the primary parse.

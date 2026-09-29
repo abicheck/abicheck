@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import Future
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -57,6 +59,22 @@ from .workflows import memory_trace
 _log = logging.getLogger(__name__)
 
 
+# G29 Phase A: the L2 header-only semantic graph (ADR-041 addendum) and its
+# include-file extension used to be strictly opt-in via ``--header-graph``/
+# ``--header-graph-includes``. They are now always attempted whenever headers
+# are available (``_attach_header_graph`` itself still no-ops without parsed
+# headers, and degrades to a declaration-only graph when clang is
+# unavailable) — no public flag controls this anymore; see
+# ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
+# TODO(header-graph-phase-D): ``header_graph_includes`` runs one extra
+# ``clang -M`` pass per top-level header on every dump/compare with no
+# caching of its own (only the aggregate AST pass is disk-cached via
+# ``_clang_header_dump``) — bounded by header count, fails soft when clang is
+# unavailable, but not yet cheap. Caching this pass is deferred to Phase D.
+_HEADER_GRAPH_ENABLED = True
+_HEADER_GRAPH_INCLUDES_ENABLED = True
+
+
 def _attach_header_graph(
     snap: AbiSnapshot,
     header_graph: bool,
@@ -68,6 +86,7 @@ def _attach_header_graph(
     public_headers: list[Path] | None,
     public_header_dirs: list[Path] | None,
     include_search_dirs: list[Path] | None = None,
+    prefetched: Future[HeaderGraphAst] | None = None,
 ) -> AbiSnapshot:
     """Build and embed the header-only (L2) semantic graph (ADR-041 addendum).
 
@@ -126,6 +145,202 @@ def _attach_header_graph(
         ClangHeaderIncludeExtractor,
         build_header_only_graph,
     )
+    from .buildsource.include_graph import augment_graph_with_includes
+    from .buildsource.model import (
+        CoverageStatus,
+        DataLayer,
+        LayerConfidence,
+        LayerCoverage,
+    )
+    from .buildsource.pack import BuildSourcePack
+    from .dumper import _resolve_clang_bin
+    from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
+
+    cc = compile if compile is not None else CompileContext()
+    _is_c = (lang or "").lower() == "c"
+    acquired = (
+        prefetched.result()
+        if prefetched is not None
+        else acquire_header_graph_ast(headers, includes, lang, compile)
+    )
+    projection = acquired.projection
+    ast_failure = acquired.ast_failure
+    resolved_headers = acquired.resolved_headers
+    eff_includes = acquired.eff_includes
+    eff_tokens = acquired.eff_tokens
+    memory_trace.mark("dump.header_graph.ast_released")
+    graph = build_header_only_graph(
+        snap,
+        ast_projection=projection,
+        public_header_paths=[str(p) for p in (public_headers or [])],
+        public_dir_paths=[str(p) for p in (public_header_dirs or [])],
+        header_paths=[str(p) for p in resolved_headers],
+        include_search_dirs=[str(p) for p in (include_search_dirs or [])],
+        # Real per-declaration provenance for a hybrid merge (empty dict on
+        # every other snapshot, a harmless no-op there) — G31 Phase C
+        # hybrid-graph provenance-tagging; see build_header_only_graph's own
+        # docstring and dumper_hybrid.merge_snapshots' "visibility" stamp.
+        fact_provenance=snap.fact_provenance,
+    )
+    # The graph build is the projection's only consumer, so let it go here
+    # rather than at function exit. Measured, not tidiness: holding it to
+    # the end left this attach retaining ~5 MiB MORE than the code it
+    # replaced (three runs above both baseline runs on oneDAL), because the
+    # projection's own indexes and edge lists -- 23.6 MiB there -- outlived
+    # the only thing that reads them. A reordering whose whole claim is
+    # "nothing is held longer than it is needed" has to hold that for its
+    # own intermediate too.
+    projection = None
+    if ast_failure is not None:
+        graph.degraded_passes[HEADER_CALL_GRAPH_PASS] = True
+        graph.finalize()
+    memory_trace.mark("dump.header_graph.build:done")
+    if header_graph_includes and resolved_headers and cc.frontend_context == "host":
+        # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header
+        # with no `-fsycl`/host-vs-device concept at all (unlike the AST pass
+        # just above, which threads `frontend_context` through and is
+        # validated against a real DPC++ capture, see sycl_context.py) --
+        # for a non-host request it would silently resolve `#ifdef
+        # __SYCL_DEVICE_ONLY__`-style guards as host and attach host-only
+        # include edges to a device snapshot's graph (Codex review). Skipping
+        # it entirely leaves the include-graph pass honestly "not collected"
+        # for this snapshot (`_include_graph_covered` false, since neither
+        # `extractor_passes` nor `degraded_passes` gets stamped) rather than
+        # confidently wrong -- the same host/device tradeoff already made for
+        # DWARF layout backfill (dumper._dump_elf) and the clang layout tool.
+        #
+        # Resolve the same clang driver `_clang_header_dump` above used
+        # (honoring `--compiler`/`--compiler-prefix`) rather than defaulting to
+        # the bare "clang++" — otherwise a hermetic/cross toolchain selected
+        # via those flags silently loses every COMPILE_UNIT_INCLUDES_FILE
+        # edge (or resolves them against the host's clang instead) even
+        # though the semantic header graph just above parsed correctly
+        # (Codex review). Non-raising here: an unresolvable driver degrades
+        # to ClangHeaderIncludeExtractor's own default, which then reports
+        # "not found" via its own .available() check rather than aborting
+        # the dump (ADR-028 D3).
+        try:
+            include_clang_bin = _resolve_clang_bin(
+                "cc" if _is_c else "c++", cc.gcc_path, cc.gcc_prefix
+            )
+        except SnapshotError:
+            include_clang_bin = "clang" if _is_c else "clang++"
+        include_map, include_diags = ClangHeaderIncludeExtractor(
+            clang_bin=include_clang_bin
+        ).extract(
+            [str(p) for p in resolved_headers],
+            [str(p) for p in eff_includes],
+            language="C" if _is_c else "CXX",
+            sysroot=str(cc.sysroot) if cc.sysroot else None,
+            nostdinc=cc.nostdinc,
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=eff_tokens,
+        )
+        if include_map:
+            augment_graph_with_includes(graph, include_map)
+        # A clean pass with an empty map (a leaf public header with no
+        # #include of its own, or every resolved include self-filtered) is
+        # a genuine zero, not a failure to collect — stamp the pass so
+        # `_include_graph_covered` doesn't mistake it for "never ran" and
+        # misreport every header on a later comparison's other side as
+        # newly entering the include graph (Codex review). Re-finalize
+        # unconditionally (even with an empty map) since `finalize()` derives
+        # `coverage["include_edges"]["collected"]` from this same marker —
+        # skipping it for the empty-map case left that field stale/false
+        # despite `extractor_passes` correctly recording the pass as run
+        # (Codex review, follow-up). A *partial* run (one header's `clang -M`
+        # failed while another's succeeded) folds real edges for the headers
+        # that did parse but must not be confirmed as a clean full pass
+        # either — mark it degraded instead, mirroring
+        # `inline_graph_fold.fold_include_graph`'s own
+        # `elif extractor.diagnostics: degraded_passes[...] = True` branch,
+        # so `_include_graph_fully_covered` never trusts the missing portion
+        # as evidence a header genuinely stopped being included (Codex
+        # review, follow-up).
+        if include_diags:
+            graph.degraded_passes[HEADER_INCLUDE_GRAPH_PASS] = True
+        else:
+            graph.extractor_passes[HEADER_INCLUDE_GRAPH_PASS] = True
+        graph.finalize()
+    memory_trace.mark("dump.header_graph.include_pass:done")
+    pack = BuildSourcePack(root=Path(""), source_graph=graph)
+    # Populate the manifest coverage row the normal collect/embed path always
+    # sets (inline.build_inline_coverage's L5 row) — otherwise the pack's
+    # default empty ``coverage`` reads as "L5 not collected" to
+    # cli_buildsource_helpers._layer_presence/_optional_coverage even though
+    # source_graph is populated, making coverage/asymmetry reporting
+    # misleading (Codex review). L3/L4 stay honestly NOT_COLLECTED — neither
+    # a build nor an L4 source-ABI replay ran in a header-only world.
+    pack.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value,
+            status=CoverageStatus.PRESENT if graph.edges else CoverageStatus.PARTIAL,
+            confidence=LayerConfidence.REDUCED
+            if graph.edges
+            else LayerConfidence.UNKNOWN,
+        ),
+    ]
+    snap.build_source = pack
+    # ADR-063 Phase 3 (D5): one shared SourceGraphSummary instance for both
+    # the L5 builder above (`graph`, already `pack.source_graph`) and the
+    # public-surface evidence graph -- never two independently-constructed
+    # summary objects that happen to agree, which is exactly the drift this
+    # phase's shared-assembly design exists to rule out. `snap.surface_graph`
+    # is the same object `pack.source_graph` already holds; the codec (
+    # `storage/surface_graph_codec.py`) relies on that identity to dedup the
+    # embedded copy on encode and restore it on decode.
+    #
+    # Deliberately NOT populated with compare/surface_graph.py's own
+    # declaration/type/header/symbol facts here: `_attach_header_graph` runs
+    # unconditionally on essentially every real dump (G31 Phase A). Paying
+    # `build_public_surface_facts`'s per-declaration walk on every dump
+    # regressed the header-graph attach-cost perf gate by 47-96% at
+    # realistic sizes (caught by CI on this phase's own PR). An earlier
+    # revision of ADR-063 Phase 3 D5's traversal migration deferred that
+    # populate step to a later enrichment call instead, keyed off this same
+    # graph object -- but a further review round found the graph's own
+    # cross-producer evidence-merge precedence could let a stale or
+    # adversarial persisted fact outrank a fresh recomputation, so the final
+    # design (`policy.public_surface_closure.py`'s
+    # `_resolve_public_surface_from_snapshot`) does not read or enrich this
+    # graph at all: it calls `compare/surface_graph.py`'s
+    # `referenced_identifiers_by_node()`, a pure function of the snapshot's
+    # own current declarations, computed fresh on every public/export-domain
+    # surface query (Codex review, PR #979) -- see that module's own
+    # docstring for the full security history.
+    snap.surface_graph = graph
+    return snap
+
+
+@dataclass(frozen=True)
+class HeaderGraphAst:
+    """What the header-graph attach needs from its own clang parse."""
+
+    projection: Any
+    ast_failure: str | None
+    resolved_headers: list[Path]
+    eff_includes: list[Path]
+    eff_tokens: tuple[str, ...]
+
+
+def acquire_header_graph_ast(
+    headers: list[Path],
+    includes: list[Path],
+    lang: str | None,
+    compile: CompileContext | None,
+) -> HeaderGraphAst:
+    """The header graph's own clang parse, projected; independent of the snapshot.
+
+    Split out of :func:`_attach_header_graph` so it can start before the
+    primary dump finishes (``prefetch_header_graph_ast``): its inputs are the
+    headers and compile context, never the snapshot it is later attached to.
+    """
     from .buildsource.header_graph_ast_projection import (
         HeaderGraphAstProjection,
         project_header_graph_ast,
@@ -138,17 +353,8 @@ def _attach_header_graph(
         load_cached_projection,
         store_cached_projection,
     )
-    from .buildsource.include_graph import augment_graph_with_includes
-    from .buildsource.model import (
-        CoverageStatus,
-        DataLayer,
-        LayerConfidence,
-        LayerCoverage,
-    )
-    from .buildsource.pack import BuildSourcePack
-    from .dumper import _clang_header_dump, _resolve_clang_bin
+    from .dumper import _clang_header_dump
     from .dumper_clang_streaming import suppress_streaming_prune
-    from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
     from .storage.derived_ast import DerivedAstArtifact, derived_ast_scope
 
     # Everything either projection path may raise on an AST that is readable
@@ -452,150 +658,56 @@ def _attach_header_graph(
     # measured `gc.collect()` on this path freeing exactly zero objects).
     ast_root = None
     memory_trace.mark("dump.header_graph.ast_released")
-    graph = build_header_only_graph(
-        snap,
-        ast_projection=projection,
-        public_header_paths=[str(p) for p in (public_headers or [])],
-        public_dir_paths=[str(p) for p in (public_header_dirs or [])],
-        header_paths=[str(p) for p in resolved_headers],
-        include_search_dirs=[str(p) for p in (include_search_dirs or [])],
-        # Real per-declaration provenance for a hybrid merge (empty dict on
-        # every other snapshot, a harmless no-op there) — G31 Phase C
-        # hybrid-graph provenance-tagging; see build_header_only_graph's own
-        # docstring and dumper_hybrid.merge_snapshots' "visibility" stamp.
-        fact_provenance=snap.fact_provenance,
+    return HeaderGraphAst(
+        projection, ast_failure, resolved_headers, eff_includes, eff_tokens
     )
-    # The graph build is the projection's only consumer, so let it go here
-    # rather than at function exit. Measured, not tidiness: holding it to
-    # the end left this attach retaining ~5 MiB MORE than the code it
-    # replaced (three runs above both baseline runs on oneDAL), because the
-    # projection's own indexes and edge lists -- 23.6 MiB there -- outlived
-    # the only thing that reads them. A reordering whose whole claim is
-    # "nothing is held longer than it is needed" has to hold that for its
-    # own intermediate too.
-    projection = None
-    if ast_failure is not None:
-        graph.degraded_passes[HEADER_CALL_GRAPH_PASS] = True
-        graph.finalize()
-    memory_trace.mark("dump.header_graph.build:done")
-    if header_graph_includes and resolved_headers and cc.frontend_context == "host":
-        # `ClangHeaderIncludeExtractor` drives a plain `clang -M` per header
-        # with no `-fsycl`/host-vs-device concept at all (unlike the AST pass
-        # just above, which threads `frontend_context` through and is
-        # validated against a real DPC++ capture, see sycl_context.py) --
-        # for a non-host request it would silently resolve `#ifdef
-        # __SYCL_DEVICE_ONLY__`-style guards as host and attach host-only
-        # include edges to a device snapshot's graph (Codex review). Skipping
-        # it entirely leaves the include-graph pass honestly "not collected"
-        # for this snapshot (`_include_graph_covered` false, since neither
-        # `extractor_passes` nor `degraded_passes` gets stamped) rather than
-        # confidently wrong -- the same host/device tradeoff already made for
-        # DWARF layout backfill (dumper._dump_elf) and the clang layout tool.
-        #
-        # Resolve the same clang driver `_clang_header_dump` above used
-        # (honoring `--compiler`/`--compiler-prefix`) rather than defaulting to
-        # the bare "clang++" — otherwise a hermetic/cross toolchain selected
-        # via those flags silently loses every COMPILE_UNIT_INCLUDES_FILE
-        # edge (or resolves them against the host's clang instead) even
-        # though the semantic header graph just above parsed correctly
-        # (Codex review). Non-raising here: an unresolvable driver degrades
-        # to ClangHeaderIncludeExtractor's own default, which then reports
-        # "not found" via its own .available() check rather than aborting
-        # the dump (ADR-028 D3).
-        try:
-            include_clang_bin = _resolve_clang_bin(
-                "cc" if _is_c else "c++", cc.gcc_path, cc.gcc_prefix
-            )
-        except SnapshotError:
-            include_clang_bin = "clang" if _is_c else "clang++"
-        include_map, include_diags = ClangHeaderIncludeExtractor(
-            clang_bin=include_clang_bin
-        ).extract(
-            [str(p) for p in resolved_headers],
-            [str(p) for p in eff_includes],
-            language="C" if _is_c else "CXX",
-            sysroot=str(cc.sysroot) if cc.sysroot else None,
-            nostdinc=cc.nostdinc,
-            gcc_options=cc.gcc_options,
-            gcc_option_tokens=eff_tokens,
-        )
-        if include_map:
-            augment_graph_with_includes(graph, include_map)
-        # A clean pass with an empty map (a leaf public header with no
-        # #include of its own, or every resolved include self-filtered) is
-        # a genuine zero, not a failure to collect — stamp the pass so
-        # `_include_graph_covered` doesn't mistake it for "never ran" and
-        # misreport every header on a later comparison's other side as
-        # newly entering the include graph (Codex review). Re-finalize
-        # unconditionally (even with an empty map) since `finalize()` derives
-        # `coverage["include_edges"]["collected"]` from this same marker —
-        # skipping it for the empty-map case left that field stale/false
-        # despite `extractor_passes` correctly recording the pass as run
-        # (Codex review, follow-up). A *partial* run (one header's `clang -M`
-        # failed while another's succeeded) folds real edges for the headers
-        # that did parse but must not be confirmed as a clean full pass
-        # either — mark it degraded instead, mirroring
-        # `inline_graph_fold.fold_include_graph`'s own
-        # `elif extractor.diagnostics: degraded_passes[...] = True` branch,
-        # so `_include_graph_fully_covered` never trusts the missing portion
-        # as evidence a header genuinely stopped being included (Codex
-        # review, follow-up).
-        if include_diags:
-            graph.degraded_passes[HEADER_INCLUDE_GRAPH_PASS] = True
-        else:
-            graph.extractor_passes[HEADER_INCLUDE_GRAPH_PASS] = True
-        graph.finalize()
-    memory_trace.mark("dump.header_graph.include_pass:done")
-    pack = BuildSourcePack(root=Path(""), source_graph=graph)
-    # Populate the manifest coverage row the normal collect/embed path always
-    # sets (inline.build_inline_coverage's L5 row) — otherwise the pack's
-    # default empty ``coverage`` reads as "L5 not collected" to
-    # cli_buildsource_helpers._layer_presence/_optional_coverage even though
-    # source_graph is populated, making coverage/asymmetry reporting
-    # misleading (Codex review). L3/L4 stay honestly NOT_COLLECTED — neither
-    # a build nor an L4 source-ABI replay ran in a header-only world.
-    pack.manifest.coverage = [
-        LayerCoverage(
-            layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
-        ),
-        LayerCoverage(
-            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED
-        ),
-        LayerCoverage(
-            layer=DataLayer.L5_SOURCE_GRAPH.value,
-            status=CoverageStatus.PRESENT if graph.edges else CoverageStatus.PARTIAL,
-            confidence=LayerConfidence.REDUCED
-            if graph.edges
-            else LayerConfidence.UNKNOWN,
-        ),
-    ]
-    snap.build_source = pack
-    # ADR-063 Phase 3 (D5): one shared SourceGraphSummary instance for both
-    # the L5 builder above (`graph`, already `pack.source_graph`) and the
-    # public-surface evidence graph -- never two independently-constructed
-    # summary objects that happen to agree, which is exactly the drift this
-    # phase's shared-assembly design exists to rule out. `snap.surface_graph`
-    # is the same object `pack.source_graph` already holds; the codec (
-    # `storage/surface_graph_codec.py`) relies on that identity to dedup the
-    # embedded copy on encode and restore it on decode.
-    #
-    # Deliberately NOT populated with compare/surface_graph.py's own
-    # declaration/type/header/symbol facts here: `_attach_header_graph` runs
-    # unconditionally on essentially every real dump (G31 Phase A). Paying
-    # `build_public_surface_facts`'s per-declaration walk on every dump
-    # regressed the header-graph attach-cost perf gate by 47-96% at
-    # realistic sizes (caught by CI on this phase's own PR). An earlier
-    # revision of ADR-063 Phase 3 D5's traversal migration deferred that
-    # populate step to a later enrichment call instead, keyed off this same
-    # graph object -- but a further review round found the graph's own
-    # cross-producer evidence-merge precedence could let a stale or
-    # adversarial persisted fact outrank a fresh recomputation, so the final
-    # design (`policy.public_surface_closure.py`'s
-    # `_resolve_public_surface_from_snapshot`) does not read or enrich this
-    # graph at all: it calls `compare/surface_graph.py`'s
-    # `referenced_identifiers_by_node()`, a pure function of the snapshot's
-    # own current declarations, computed fresh on every public/export-domain
-    # surface query (Codex review, PR #979) -- see that module's own
-    # docstring for the full security history.
-    snap.surface_graph = graph
-    return snap
+
+
+def prefetch_header_graph_ast(
+    headers: list[Path],
+    includes: list[Path],
+    lang: str | None,
+    compile: CompileContext | None,
+) -> Future[HeaderGraphAst]:
+    """Start :func:`acquire_header_graph_ast` on a budgeted thread now.
+
+    Lets the header graph's own clang parse run while the primary castxml
+    dump runs. Its thread comes from the process-wide budget
+    (``ABICHECK_MAX_THREADS``); with the budget spent it runs inline, which
+    is exactly the old, sequential order.
+    """
+    import contextvars
+
+    from .process_resources import BudgetedExecutor
+
+    pool = BudgetedExecutor(1, thread_name_prefix="abicheck-hgraph")
+    ctx = contextvars.copy_context()
+    future = pool.submit(
+        ctx.run, acquire_header_graph_ast, headers, includes, lang, compile
+    )
+    future.add_done_callback(lambda _f: pool.shutdown(wait=False))
+    return future
+
+
+def prefetch_graph_if_useful(
+    wanted: bool,
+    resolved_backend: str,
+    headers: list[Path],
+    includes: list[Path],
+    lang: str | None,
+    compile: CompileContext | None,
+) -> Future[HeaderGraphAst] | None:
+    """Start the header graph's clang parse now, when that is worth doing.
+
+    The parse depends only on the headers and compile context, never on the
+    snapshot, so under castxml -- which never produces the clang AST the
+    graph needs -- it can run alongside the primary dump. Measured on a cold
+    header cache: 11-15% off a single-library compare, neutral on a warm
+    cache and on a release whose members already fill the cores. Under the
+    clang frontend the attach reuses the primary pass's AST instead, so a
+    prefetch there would parse the same headers twice; ``None`` then, and
+    whenever the graph is not wanted at all.
+    """
+    if not (wanted and headers and resolved_backend == "castxml"):
+        return None
+    return prefetch_header_graph_ast(headers, includes, lang, compile)
