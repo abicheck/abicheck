@@ -68,7 +68,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -1084,6 +1084,27 @@ def child_environment(parent: Mapping[str, str]) -> dict[str, str]:
 _BARE_ABICHECK = re.compile(r"(?:^|[\s;&|(`])abicheck(?=\s|$|[;&|)`])")
 
 
+def _bash_command(block: object) -> str | None:
+    """`block`'s command when it is a `Bash` tool call, else `None`."""
+    if not isinstance(block, dict) or block.get("type") != "tool_use":
+        return None
+    if block.get("name") != "Bash":
+        return None
+    command = (block.get("input") or {}).get("command")
+    return command if isinstance(command, str) else None
+
+
+def _bash_commands(events: list[dict]) -> Iterator[str]:
+    """Every `Bash` tool call's `command` string, in order."""
+    for event in events:
+        if event.get("type") != "assistant":
+            continue
+        for block in (event.get("message") or {}).get("content") or []:
+            command = _bash_command(block)
+            if command is not None:
+                yield command
+
+
 def abicheck_command_count(events: list[dict]) -> int:
     """How many `Bash` blocks invoke `abicheck` as a command word.
 
@@ -1093,19 +1114,9 @@ def abicheck_command_count(events: list[dict]) -> int:
     word (`abicheck_report`) does not match; `ls abicheck` does, which only
     ever errs towards demanding a recording that the check below then finds.
     """
-    count = 0
-    for event in events:
-        if event.get("type") != "assistant":
-            continue
-        for block in (event.get("message") or {}).get("content") or []:
-            if not isinstance(block, dict) or block.get("type") != "tool_use":
-                continue
-            if block.get("name") != "Bash":
-                continue
-            command = (block.get("input") or {}).get("command")
-            if isinstance(command, str) and _BARE_ABICHECK.search(command):
-                count += 1
-    return count
+    return sum(
+        1 for command in _bash_commands(events) if _BARE_ABICHECK.search(command)
+    )
 
 
 def _shadowed_the_recorder(events: list[dict], calls: Path) -> bool:

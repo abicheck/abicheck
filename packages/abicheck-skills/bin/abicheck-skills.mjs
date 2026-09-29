@@ -61,37 +61,44 @@ The skill drives the abicheck CLI (Python). Install it with:
   pipx install abicheck      (or: pip install abicheck)
 `;
 
+const COMMANDS = ["install", "uninstall", "list", "doctor", "help", "version", "verify-package"];
+// Flag -> [option key, takes a value]; value-less flags set `true`.
+const FLAGS = {
+  "--agent": ["agents", true], "--agents": ["agents", true], "-a": ["agents", true],
+  "--dir": ["dir", true], "--path": ["path", true],
+  "--global": ["global", false], "-g": ["global", false],
+  "--force": ["force", false], "-f": ["force", false],
+  "--dry-run": ["dryRun", false], "-n": ["dryRun", false],
+};
+// Flags that are really commands.
+const COMMAND_FLAGS = { "--help": "help", "-h": "help", "--version": "version", "-v": "version", "--verify-package": "verify-package" };
+
 export function parseArgs(argv) {
   const opts = { command: "install", agents: null, global: false, dir: null, path: null, force: false, dryRun: false };
   const rest = [...argv];
   if (rest.length && !rest[0].startsWith("-")) opts.command = rest.shift();
   while (rest.length) {
     const arg = rest.shift();
-    const value = () => {
-      if (!rest.length || rest[0].startsWith("-")) throw new UsageError(`${arg} needs a value`);
-      return rest.shift();
-    };
-    switch (arg) {
-      case "--agent": case "--agents": case "-a": opts.agents = value(); break;
-      case "--global": case "-g": opts.global = true; break;
-      case "--dir": opts.dir = value(); break;
-      case "--path": opts.path = value(); break;
-      case "--force": case "-f": opts.force = true; break;
-      case "--dry-run": case "-n": opts.dryRun = true; break;
-      case "--help": case "-h": opts.command = "help"; break;
-      case "--version": case "-v": opts.command = "version"; break;
-      case "--verify-package": opts.command = "verify-package"; break;
-      default: throw new UsageError(`unknown option ${arg}`);
+    if (arg in COMMAND_FLAGS) {
+      opts.command = COMMAND_FLAGS[arg];
+      continue;
     }
+    const flag = FLAGS[arg];
+    if (!flag) throw new UsageError(`unknown option ${arg}`);
+    const [key, takesValue] = flag;
+    if (takesValue && (!rest.length || rest[0].startsWith("-"))) throw new UsageError(`${arg} needs a value`);
+    opts[key] = takesValue ? rest.shift() : true;
   }
-  if (!["install", "uninstall", "list", "doctor", "help", "version", "verify-package"].includes(opts.command)) {
-    throw new UsageError(`unknown command ${opts.command}`);
-  }
+  validateOptions(opts);
+  return opts;
+}
+
+function validateOptions(opts) {
+  if (!COMMANDS.includes(opts.command)) throw new UsageError(`unknown command ${opts.command}`);
   if (opts.global && opts.dir) throw new UsageError("--global and --dir are mutually exclusive");
   if (opts.path && (opts.global || opts.dir || opts.agents)) {
     throw new UsageError("--path names the skills directory itself; do not combine it with --global/--dir/--agent");
   }
-  return opts;
 }
 
 export class UsageError extends Error {}
@@ -226,14 +233,20 @@ function cmpVersions(a, b) {
   return 0;
 }
 
+const RELEASE_PREFIX = new RegExp("^\\d+(\\.\\d+)*");
+const CLAUSE = new RegExp("^(>=|<=|==|!=|>|<)\\s*(\\d+(?:\\.\\d+)*)$");
+const COMPARATORS = {
+  ">=": (c) => c >= 0, "<=": (c) => c <= 0, "==": (c) => c === 0,
+  "!=": (c) => c !== 0, ">": (c) => c > 0, "<": (c) => c < 0,
+};
+
 export function satisfies(version, range) {
-  const release = version.match(/^\d+(\.\d+)*/)?.[0];
+  const release = RELEASE_PREFIX.exec(version)?.[0];
   if (!release) return false;
   return range.split(",").map((s) => s.trim()).filter(Boolean).every((clause) => {
-    const m = clause.match(/^(>=|<=|==|!=|>|<)\s*(\d+(?:\.\d+)*)$/);
+    const m = CLAUSE.exec(clause);
     if (!m) throw new Error(`unsupported version clause '${clause}'`);
-    const c = cmpVersions(release, m[2]);
-    return { ">=": c >= 0, "<=": c <= 0, "==": c === 0, "!=": c !== 0, ">": c > 0, "<": c < 0 }[m[1]];
+    return COMPARATORS[m[1]](cmpVersions(release, m[2]));
   });
 }
 
