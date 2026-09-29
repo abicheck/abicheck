@@ -708,12 +708,8 @@ def _unique_promotion_target(
     Exactly one distinct qualifying scope path is required; two or more
     is ambiguous and yields ``None`` (the removal is reported, the same
     false-negative-over-false-positive default this module uses
-    throughout). The target is also *reserved*: it counts only when
-    exactly one removed experimental declaration (distinct scope path, same
-    leaf, signature and root, absent from NEW) claims it -- two removals
-    (``ccl::preview::f(int)`` and ``ccl::experimental::f(int)``) cannot
-    both be promoted to one ``ccl::v1::f(int)``, so neither is. The result
-    depends only on the *sets* of items, never on their order.
+    throughout). The result depends only on the *sets* of items, never on
+    their order.
     """
     if removed.signature is None:
         return None
@@ -742,23 +738,6 @@ def _unique_promotion_target(
             continue
         candidates.add(path)
     if len(candidates) != 1:
-        return None
-    new_decls = {
-        (_scope_path(i), i.signature) for i in new_items if i.signature is not None
-    }
-    claimants: set[tuple[str, ...]] = {removed_path}
-    for item in old_items:
-        if item.signature != removed.signature or item.leaf != removed.leaf:
-            continue
-        path = _scope_path(item)
-        if not path or path[0] != root:
-            continue
-        if not any(s in experimental_namespaces for s in path):
-            continue
-        if (path, item.signature) in new_decls:
-            continue
-        claimants.add(path)
-    if len(claimants) != 1:
         return None
     return "::".join(next(iter(candidates)))
 

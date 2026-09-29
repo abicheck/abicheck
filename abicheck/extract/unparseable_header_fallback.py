@@ -77,12 +77,12 @@ def _norm(path: str | Path) -> str:
 def attribute_failing_headers(stderr: str, headers: Sequence[Path]) -> set[int]:
     """0-based indices into *headers* whose ``#include`` chain raised an error.
 
-    Each error is attributed through its include chain: the innermost file
-    in the chain (the erroring file first) that *is* one of *headers* names
-    it; failing that, an outermost frame in the aggregate (a file that is
-    none of *headers*) at line ``N`` names ``headers[N-1]`` (the aggregate
-    includes header ``i`` on line ``i+1``). An error nothing in the chain
-    attributes is skipped, never guessed at.
+    Each error is attributed through its include chain: an outermost frame
+    in the aggregate (a file that is none of *headers*) at line ``N`` names
+    ``headers[N-1]`` (the aggregate includes header ``i`` on line ``i+1``);
+    only without such a frame does the innermost listed file in the chain
+    name it. An error nothing in the chain attributes is skipped, never
+    guessed at.
     """
     index = {_norm(h): i for i, h in enumerate(headers)}
     failing: set[int] = set()
@@ -106,16 +106,18 @@ def attribute_failing_headers(stderr: str, headers: Sequence[Path]) -> set[int]:
 def _attribute(
     located: list[tuple[str, int]], index: dict[str, int], n_headers: int
 ) -> int | None:
-    # Innermost listed header first: the file that actually failed, when it
-    # is itself one of the parsed headers.
+    # The aggregate TU's own frame names the top-level input directly: the
+    # aggregate includes header ``i`` on line ``i+1``. Prefer it over any
+    # inner listed header -- when listed A includes listed B and B fails only
+    # under a macro A set, the input to drop is A, not B.
+    outer_file, outer_line = located[0]
+    if len(located) > 1 and _norm(outer_file) not in index:
+        return outer_line - 1 if 1 <= outer_line <= n_headers else None
+    # No aggregate frame: the innermost listed header in the chain.
     for file, _line in reversed(located):
         idx = index.get(_norm(file))
         if idx is not None:
             return idx
-    outer_file, outer_line = located[0]
-    if len(located) > 1 and _norm(outer_file) not in index:
-        # Outermost frame is the aggregate TU: its line number is the header.
-        return outer_line - 1 if 1 <= outer_line <= n_headers else None
     return None
 
 
@@ -143,7 +145,10 @@ def parse_excluding_unparseable_headers(
         except SnapshotError as exc:
             if len(active) < 2 or not is_header_specific(exc):
                 raise
-            stderr = getattr(exc, "stderr", None) or str(exc)
+            # A failed language-mode retry carries the retry's diagnostics
+            # for attribution (the original mode's errors on C++ syntax
+            # would implicate every C++ header, not the failing one).
+            stderr = exc.attribution_stderr or exc.stderr or str(exc)
             bad = attribute_failing_headers(stderr, active)
             if not bad or len(bad) >= len(active):
                 raise

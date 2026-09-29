@@ -94,6 +94,118 @@ def test_drops_exactly_the_failing_headers(seed):
     assert calls2 == calls
 
 
+@pytest.mark.parametrize("seed", range(30))
+def test_transitive_listed_include_drops_only_the_aggregate_input(seed):
+    """Listed A includes listed B; B fails only under a macro A sets. The
+    aggregate frame names A as the input, so only A is dropped -- B, which
+    parses fine on its own, is kept (a retry must not exclude it)."""
+    rng = random.Random(1000 + seed)
+    headers = _headers(rng.randint(3, 10))
+    a, b = rng.sample(headers, 2)
+    calls: list[list[Path]] = []
+
+    def attempt(active: list[Path]) -> str:
+        calls.append(list(active))
+        if a in active:
+            i = active.index(a)
+            exc = SnapshotError("castxml failed")
+            setattr(
+                exc,
+                "stderr",
+                "\n".join(
+                    [
+                        f"In file included from {AGG}:{i + 1}:",
+                        f"In file included from {a}:5:",
+                        f"{b}:3:2: error: MODE_FROM_A requires C++",
+                    ]
+                ),
+            )
+            raise exc
+        return "xml"
+
+    result, excluded = parse_excluding_unparseable_headers(headers, attempt)
+    assert result == "xml"
+    assert excluded == [a]
+    assert b in calls[-1]
+    assert len(calls) == 2
+
+
+def test_inner_listed_header_used_without_aggregate_frame():
+    headers = _headers(3)
+    stderr = f"In file included from {headers[0]}:4:\n{headers[2]}:1:1: error: x"
+    # No aggregate frame: the outermost frame is itself listed, so the
+    # innermost listed file in the chain is the attribution.
+    assert attribute_failing_headers(stderr, headers) == {2}
+
+
+_VERSION_TEXT = "error: unknown type name '_Float128'"
+_PLAIN_TEXT = "error: Unsupported compiler"
+
+
+@pytest.mark.parametrize("cls", ["snapshot", "toolchain", "unsupported"])
+@pytest.mark.parametrize("retry_failed", [False, True])
+@pytest.mark.parametrize("msg_version", [False, True])
+@pytest.mark.parametrize("retry_version", [False, True, None])
+def test_castxml_retry_classification_matrix(
+    cls, retry_failed, msg_version, retry_version
+):
+    """Exhaustive small domain. Oracle: a castxml frontend-version signature
+    (in the message or in the language retry's diagnostics) or an
+    unsupported castxml is never reducible; a HeaderToolchainError is
+    reducible only when it is a failed language-mode retry; any other
+    SnapshotError is reducible."""
+    from abicheck.dumper_castxml_probe import castxml_failure_is_header_specific
+    from abicheck.errors import UnsupportedCastxmlVersionError
+
+    ctor = {
+        "snapshot": SnapshotError,
+        "toolchain": HeaderToolchainError,
+        "unsupported": UnsupportedCastxmlVersionError,
+    }[cls]
+    exc = ctor(_VERSION_TEXT if msg_version else _PLAIN_TEXT)
+    exc.language_retry_failed = retry_failed
+    if retry_version is not None:
+        exc.attribution_stderr = _VERSION_TEXT if retry_version else _PLAIN_TEXT
+    version = msg_version or bool(retry_version)
+    if cls == "unsupported" or version:
+        expected = False
+    elif cls == "toolchain":
+        expected = retry_failed
+    else:
+        expected = True
+    assert castxml_failure_is_header_specific(exc) is expected
+
+
+def test_failed_lang_retry_excludes_header_via_retry_diagnostics():
+    """--lang c over a C++ header set where one header #errors in both modes:
+    the C-mode HeaderToolchainError that dumper re-raises (marked as a failed
+    language retry) is reduced using the C++ retry's diagnostics, which
+    implicate only the failing header -- not every C++ header the C-mode
+    errors hit."""
+    from abicheck.dumper_castxml_probe import castxml_failure_is_header_specific
+
+    headers = _headers(4)
+    bad = headers[2]
+    calls: list[list[Path]] = []
+
+    def attempt(active: list[Path]) -> str:
+        calls.append(list(active))
+        if bad not in active:
+            return "xml"
+        exc = HeaderToolchainError("castxml failed (C mode)")
+        # C-mode diagnostics implicate every header (C++ syntax everywhere).
+        exc.stderr = _stderr_for(active, set(active), 0)
+        exc.language_retry_failed = True
+        exc.attribution_stderr = _stderr_for(active, {bad}, 0)
+        raise exc
+
+    result, excluded = parse_excluding_unparseable_headers(
+        headers, attempt, is_header_specific=castxml_failure_is_header_specific
+    )
+    assert (result, excluded) == ("xml", [bad])
+    assert calls[-1] == [h for h in headers if h != bad]
+
+
 def test_every_header_failing_reraises_original():
     headers = _headers(3)
     with pytest.raises(SnapshotError):

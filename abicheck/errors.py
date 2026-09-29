@@ -59,6 +59,12 @@ class SnapshotError(AbicheckError, RuntimeError):
     #: The producing tool's full, untruncated diagnostics when a header parse
     #: failed (the unparseable-header fallback attributes errors from them).
     stderr: str | None = None
+    #: Set when this error is the original-mode failure of a language-mode
+    #: retry (``--lang c`` retried as C++) that also failed: the mode was not
+    #: the cause, so the failure stays attributable to a header.
+    language_retry_failed: bool = False
+    #: The retry's diagnostics, preferred for header attribution.
+    attribution_stderr: str | None = None
 
 
 class HeaderToolchainError(SnapshotError):

@@ -288,16 +288,30 @@ def castxml_dump_excluding_unparseable(
         parse_excluding_unparseable_headers,
     )
 
-    def _header_specific(exc: SnapshotError) -> bool:
-        return not isinstance(
-            exc, (HeaderToolchainError, UnsupportedCastxmlVersionError)
-        ) and not _is_toolchain_version_failure(str(exc))
-
     return parse_excluding_unparseable_headers(
         headers,
         lambda active: castxml_dump(active, *args, **kwargs),
-        is_header_specific=_header_specific,
+        is_header_specific=castxml_failure_is_header_specific,
     )
+
+
+def castxml_failure_is_header_specific(exc: SnapshotError) -> bool:
+    """Whether a castxml failure may be reduced by dropping headers.
+
+    A frontend-version mismatch or an unsupported castxml is never about one
+    header. A ``HeaderToolchainError`` raised for a *language-mode* mismatch
+    (``--lang c`` over C++ syntax) whose C++ retry also failed on ordinary,
+    attributable diagnostics is (``language_retry_failed``, set by
+    ``dumper``): the retry proved the mode was not the problem.
+    """
+    if isinstance(exc, UnsupportedCastxmlVersionError):
+        return False
+    texts = [str(exc), exc.attribution_stderr or ""]
+    if any(_is_toolchain_version_failure(t) for t in texts):
+        return False
+    if isinstance(exc, HeaderToolchainError):
+        return exc.language_retry_failed
+    return True
 
 
 def record_unparseable_headers(parser: Any, excluded: list[Path]) -> Any:

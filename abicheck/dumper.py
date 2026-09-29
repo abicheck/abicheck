@@ -1008,10 +1008,17 @@ def _castxml_dump(
                     castxml_bin=castxml_bin,
                 )
                 final_force_cpp = True
-            except SnapshotError:
+            except SnapshotError as retry_exc:
                 # Both modes failed — surface the originally requested C-mode
                 # error (and its hint), not the fallback's, so the diagnostic
-                # matches what the user asked for.
+                # matches what the user asked for. Mark it as a failed
+                # language-mode retry and carry the retry's diagnostics, so
+                # the unparseable-header fallback can still attribute it to
+                # a header instead of treating it as a toolchain failure.
+                primary.language_retry_failed = True
+                primary.attribution_stderr = getattr(retry_exc, "stderr", None) or str(
+                    retry_exc
+                )
                 raise primary from None
         if final_force_cpp == force_cpp:
             if _make_key() != key:
