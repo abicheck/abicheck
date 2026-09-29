@@ -27,9 +27,32 @@ the real dump calls, so the preview cannot disagree with the run.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
-__all__ = ["HeaderFrontendPreflight", "preflight_header_frontend"]
+__all__ = [
+    "HeaderFrontendPreflight",
+    "operand_parses_headers",
+    "preflight_header_frontend",
+]
+
+
+def operand_parses_headers(
+    path: Path, effective_headers: Sequence[Path], dump_manifest: object | None
+) -> bool:
+    """Will the real run parse headers for this operand?
+
+    The same two facts ``resolve_input`` acts on: a stored snapshot is loaded
+    (``is_stored_snapshot_operand``), so its headers are never parsed whatever
+    ``-H`` says; anything extracted live parses headers when it has an
+    effective header list *or* a dump manifest (whose TUs carry their own).
+    """
+    from .input_resolution import is_stored_snapshot_operand
+
+    if not effective_headers and dump_manifest is None:
+        return False
+    return not is_stored_snapshot_operand(path)
 
 
 @dataclass(frozen=True)
@@ -83,6 +106,7 @@ def preflight_header_frontend(
     Tool presence is a ``PATH`` lookup only (no subprocess), matching the
     dump's own ``_resolve_selected_tool``/``_clang_available`` checks.
     """
+    from ..dumper_ast_config import _resolve_compiler_binary
     from ..dumper_clang import _resolve_clang_bin
     from ..dumper_toolchain import _ast_fallback_enabled, _auto_ast_fallback_eligible
     from ..errors import SnapshotError
@@ -102,10 +126,20 @@ def preflight_header_frontend(
     missing: list[str] = []
     if resolved in ("castxml", "hybrid"):
         required.append("castxml")
-        castxml_ok = shutil.which("castxml") is not None
+        castxml_missing = [] if shutil.which("castxml") else ["castxml"]
+        # castxml emulates a host compiler. An explicit gcc_path/gcc_prefix
+        # selects it through the dump's own resolver (``dumper._castxml_dump``
+        # passes *compiler* unchanged in that case), and castxml fails when
+        # that binary is absent. The implicit default is not asserted here:
+        # the dump picks gcc vs g++ from the parsed headers' content.
+        if gcc_path or gcc_prefix:
+            cc_bin, _ = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
+            required.append(cc_bin)
+            if shutil.which(cc_bin) is None:
+                castxml_missing.append(cc_bin)
         # An opted-in auto fallback reaches clang when castxml fails.
-        if not castxml_ok and not (fallback and _clang_tool()[1]):
-            missing.append("castxml")
+        if castxml_missing and not (fallback and _clang_tool()[1]):
+            missing.extend(castxml_missing)
     if resolved in ("clang", "hybrid"):
         name, ok = _clang_tool()
         required.append(name)

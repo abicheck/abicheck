@@ -1535,11 +1535,9 @@ def run_compare(
         )
 
         # ADR-043 D4's dry-run report must reflect the *effective* depth, not
-        # just echo `--depth` back -- the same resolution `_render_compare_
-        # dry_run` used to compute internally before it moved to
-        # `frontends/cli/compare_dry_run.py` (see that module's own
-        # docstring for why it now takes the resolved pair as parameters
-        # instead of resolving them itself).
+        # just echo `--depth` back; `frontends/cli/compare_dry_run.py`'s
+        # docstring explains why it takes the resolved pair as parameters.
+        # The parsed manifests say which operands parse headers without -H.
         collect_mode_dr, effective_depth_label_dr = _resolve_compare_collect_mode(
             depth,
             resolved_cfg.source_method,
@@ -1557,6 +1555,8 @@ def run_compare(
                 ),
                 compile_context=resolve_compile_context(**_compile_context_kwargs)[0],
                 lang=lang,
+                old_dump_manifest=old_manifest_obj,
+                new_dump_manifest=new_manifest_obj,
                 old_input=old_input,
                 new_input=new_input,
                 old_kind=old_kind,
