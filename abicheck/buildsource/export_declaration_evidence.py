@@ -333,6 +333,19 @@ def instantiated_over_owned_types(symbol: str, owned: frozenset[str]) -> bool:
     return any(_source_names(span) & owned for span in parsed.template_arg_spans)
 
 
+def _leaf_and_scope(symbol: str) -> tuple[str, str | None] | None:
+    """The entity's own name and its immediately enclosing scope, if any."""
+    parsed = entity_name_components(symbol)
+    if parsed is not None:
+        comps = [c for c in parsed.components if not c.startswith("{")]
+        if not comps:
+            return None
+        return comps[-1], comps[-2] if len(comps) >= 2 else None
+    if _IDENT.fullmatch(symbol):
+        return symbol, None  # extern "C" / C symbol
+    return None
+
+
 def textual_declaration_hint(
     symbol: str, evidence: ExportDeclarationEvidence
 ) -> DeclarationHint | None:
@@ -348,16 +361,10 @@ def textual_declaration_hint(
     """
     if not evidence.headers:
         return None
-    parsed = entity_name_components(symbol)
-    if parsed is not None:
-        comps = [c for c in parsed.components if not c.startswith("{")]
-        if not comps:
-            return None
-        leaf, scope = comps[-1], comps[-2] if len(comps) >= 2 else None
-    elif _IDENT.fullmatch(symbol):
-        leaf, scope = symbol, None  # extern "C" / C symbol
-    else:
+    names = _leaf_and_scope(symbol)
+    if names is None:
         return None
+    leaf, scope = names
     leaf_re = re.compile(rf"\b{re.escape(leaf)}\s*(\(|\[|;|=|,)")
     conditional: DeclarationHint | None = None
     for h in evidence.headers:

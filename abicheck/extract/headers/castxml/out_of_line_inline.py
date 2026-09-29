@@ -78,34 +78,46 @@ def _strip_comments(text: str) -> str:
     return _LINE_COMMENT_RE.sub("", _BLOCK_COMMENT_RE.sub(" ", text))
 
 
-def _arity(text: str, open_paren: int) -> int | None:
-    """Top-level parameter count of the list opening at *open_paren*."""
+def _matching_close(text: str, open_paren: int) -> int | None:
+    """Index of the bracket closing the one at *open_paren*, or ``None``."""
     depth = 0
-    angle = 0
-    commas = 0
-    saw_token = False
     for i in range(open_paren, len(text)):
         ch = text[i]
         if ch in "([{":
             depth += 1
-            if depth == 1:
-                continue
         elif ch in ")]}":
             depth -= 1
             if depth == 0:
-                inner = text[open_paren + 1 : i].strip()
-                if not saw_token or inner in ("", "void"):
-                    return 0
-                return commas + 1
-        elif depth == 1 and ch == "<":
-            angle += 1
-        elif depth == 1 and ch == ">" and angle:
-            angle -= 1
-        elif depth == 1 and angle == 0 and ch == ",":
-            commas += 1
-        if depth >= 1 and not ch.isspace():
-            saw_token = True
+                return i
     return None
+
+
+def _top_level_commas(inner: str) -> int:
+    """Commas in *inner* outside nested brackets and template arguments."""
+    depth = angle = commas = 0
+    for ch in inner:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0 and ch == "<":
+            angle += 1
+        elif depth == 0 and ch == ">" and angle:
+            angle -= 1
+        elif depth == 0 and angle == 0 and ch == ",":
+            commas += 1
+    return commas
+
+
+def _arity(text: str, open_paren: int) -> int | None:
+    """Top-level parameter count of the list opening at *open_paren*."""
+    close = _matching_close(text, open_paren)
+    if close is None:
+        return None
+    inner = text[open_paren + 1 : close].strip()
+    if inner in ("", "void"):
+        return 0
+    return _top_level_commas(inner) + 1
 
 
 def _normalize_member(member: str) -> str:

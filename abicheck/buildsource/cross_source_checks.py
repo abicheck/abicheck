@@ -303,6 +303,17 @@ def run_crosschecks(
 # ---------------------------------------------------------------------------
 
 
+def _leaked_dependency_origin(
+    sym: str, own_inst: bool, needed_libs: list[str], self_names: tuple[str, ...]
+) -> str | None:
+    """The external library *sym* leaked from, or ``None``; a std/vendored
+    template instantiated over the library's own types (*own_inst*) is the
+    library's own vague-linkage copy, never a statically linked dependency."""
+    if own_inst:
+        return None
+    return _external_dependency_origin(sym, needed_libs, self_names)
+
+
 def _check_exported_not_public(
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
@@ -393,11 +404,7 @@ def _check_exported_not_public(
         # A std/vendored template instantiated over the library's own types is
         # the library's own vague-linkage copy, never a statically linked dep.
         own_inst = instantiated_over_owned_types(sym, evidence.owned_namespaces)
-        origin_lib = (
-            None
-            if own_inst
-            else _external_dependency_origin(sym, needed_libs, self_names)
-        )
+        origin_lib = _leaked_dependency_origin(sym, own_inst, needed_libs, self_names)
         if origin_lib is not None:
             account[ACCOUNT_EXTERNAL_DEP] += 1
             findings.append(

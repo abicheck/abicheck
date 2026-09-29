@@ -198,6 +198,38 @@ def _read_component(rest: str, i: int, comps: list[str]) -> tuple[int, bool] | N
     return None
 
 
+def _name_encoding(symbol: str) -> tuple[str, bool]:
+    """The entity-name encoding of an ``_Z`` *symbol* and whether it is nested.
+
+    Peels artifact/thunk prefixes, the ``N`` intro and its CV/ref qualifiers,
+    or an un-nested name's internal-linkage ``L`` marker.
+    """
+    rest = _encoding_after_prefixes(symbol)
+    if rest.startswith("N"):
+        return _NESTED_QUALIFIERS_RE.sub("", rest[1:], count=1), True
+    if rest.startswith("L"):
+        return rest[1:], False
+    return rest, False
+
+
+def _skip_component_template_args(
+    rest: str, i: int, index: int, positions: set[int], spans: list[str]
+) -> int | None:
+    """Consume a template-argument list at *i*, if any, for component *index*.
+
+    Returns the index past it (or *i* unchanged when there is none), or
+    ``None`` when the list does not parse.
+    """
+    if i >= len(rest) or rest[i] != "I":
+        return i
+    args_end = skip_template_args(rest, i)
+    if args_end is None:
+        return None
+    positions.add(index)
+    spans.append(rest[i:args_end])
+    return args_end
+
+
 def entity_name_components(symbol: str) -> EntityName | None:
     """Parse an Itanium *symbol*'s entity name, or ``None`` when it cannot.
 
@@ -216,19 +248,12 @@ def entity_name_components(symbol: str) -> EntityName | None:
     """
     if not symbol.startswith("_Z"):
         return None
-    rest = _encoding_after_prefixes(symbol)
-    nested = rest.startswith("N")
-    if nested:
-        rest = _NESTED_QUALIFIERS_RE.sub("", rest[1:], count=1)
-    elif rest.startswith("L"):
-        rest = rest[1:]  # internal-linkage marker on an un-nested name
+    rest, nested = _name_encoding(symbol)
     comps: list[str] = []
     positions: set[int] = set()
     spans: list[str] = []
     i, n = 0, len(rest)
-    while i < n:
-        if nested and rest[i] == "E":
-            break
+    while i < n and not (nested and rest[i] == "E"):
         if rest.startswith("St", i):
             comps.append("std")
             i += 2
@@ -239,13 +264,12 @@ def entity_name_components(symbol: str) -> EntityName | None:
         i, stop = step
         if stop:
             break
-        if i < n and rest[i] == "I":
-            args_end = skip_template_args(rest, i)
-            if args_end is None:
-                return None
-            positions.add(len(comps) - 1)
-            spans.append(rest[i:args_end])
-            i = args_end
+        args_end = _skip_component_template_args(
+            rest, i, len(comps) - 1, positions, spans
+        )
+        if args_end is None:
+            return None
+        i = args_end
         if not nested:
             break
     if not comps:

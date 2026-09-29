@@ -120,6 +120,21 @@ def _skip_literal(s: str, i: int) -> int | None:
 _OPENERS = frozenset("INJX")
 
 
+_ATOM_STARTS = frozenset(_ASCII_DIGITS) | {"S", "T", "L"}
+
+
+def _skip_atom(s: str, i: int) -> int | None:
+    """Skip one self-delimiting unit at ``s[i]`` (a length-prefixed name, a
+    substitution/template-parameter reference, or an ``L…E`` literal)."""
+    c = s[i]
+    if c in ("S", "T"):
+        return skip_substitution(s, i)
+    if c == "L":
+        return _skip_literal(s, i)
+    name, end = read_length_prefixed_name(s, i)
+    return None if name is None else end
+
+
 def _skip_balanced(s: str, i: int, *, until_unmatched_e: bool = False) -> int | None:
     """Skip one balanced ``I``/``N``/``J``/``X`` production starting at ``s[i]``.
 
@@ -130,20 +145,12 @@ def _skip_balanced(s: str, i: int, *, until_unmatched_e: bool = False) -> int | 
     n = len(s)
     while i < n:
         c = s[i]
-        if c in _ASCII_DIGITS:
-            name, i = read_length_prefixed_name(s, i)
-            if name is None:
-                return None
-            continue
-        if c in ("S", "T"):
-            i = skip_substitution(s, i)
-            continue
-        if c == "L":
-            nxt = _skip_literal(s, i)
+        if c in _ATOM_STARTS:
+            nxt = _skip_atom(s, i)
             if nxt is None:
                 return None
             i = nxt
-            if depth == 0:
+            if c == "L" and depth == 0:
                 return i
             continue
         if c in _OPENERS:
