@@ -155,6 +155,15 @@ def _graphs_attached(
         return snap
 
     monkeypatch.setattr(native, "_attach_header_graph", _recording)
+    # Each invocation gets its own empty whole-snapshot cache: the spy only
+    # sees graphs attached by a *fresh* dump, so a warm hit served from an
+    # earlier invocation in the same test would make this run observe nothing
+    # and the parity comparison would silently compare against an empty map.
+    import tempfile
+
+    from abicheck import snapshot_cache
+
+    monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", Path(tempfile.mkdtemp()))
     CliRunner().invoke(main, argv)
     return seen
 
@@ -210,3 +219,45 @@ class TestReleaseFanOutBuildsTheHeaderGraph:
                 )
             )
         assert via_release == via_single
+
+
+@pytest.mark.integration
+def test_warm_snapshot_cache_hit_keeps_the_header_graph(
+    two_library_release: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A snapshot served from the whole-snapshot cache carries the same header
+    graph the cold dump attached: warm ``compare`` runs must not lose L5
+    evidence just because the attach step itself is skipped on a hit."""
+    from abicheck import snapshot_cache
+    from abicheck.cli import main
+
+    old_dir, new_dir, inc = two_library_release
+    argv = [
+        "compare",
+        str(old_dir / "libfoo.so"),
+        str(new_dir / "libfoo.so"),
+        "-H",
+        str(inc),
+        "-o",
+        "json=-",
+    ]
+    cold = _graphs_attached(monkeypatch, argv)
+    assert cold.get("libfoo.so"), cold
+
+    hits: list[tuple[str, ...]] = []
+    real_lookup = snapshot_cache.lookup_key
+
+    def _recording_lookup(*args: object, **kwargs: object) -> object:
+        snap = real_lookup(*args, **kwargs)
+        if snap is not None:
+            pack = getattr(snap, "build_source", None)
+            graph = getattr(pack, "source_graph", None) if pack is not None else None
+            hits.append(tuple(sorted(n.id for n in graph.nodes)) if graph else ())
+        return snap
+
+    # Same (now warm) cache directory as the cold run above.
+    monkeypatch.setattr(snapshot_cache, "lookup_key", _recording_lookup)
+    CliRunner().invoke(main, argv)
+    assert hits, "the second run never hit the cache, so nothing was compared"
+    assert all(ids == cold["libfoo.so"] for ids in hits), hits
