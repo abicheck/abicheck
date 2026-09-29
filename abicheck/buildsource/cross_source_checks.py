@@ -116,6 +116,11 @@ from .export_declaration_evidence import (
     textual_declaration_hint,
 )
 from .exported_not_public_finding import exported_not_public_finding
+from .export_obligation_linkage import (
+    inline_declared_symbols as inline_declared_symbols,
+    is_static_member_symbol,
+    owner_in_internal_namespace,
+)
 from .template_linkage import names_a_template_specialization
 
 #: Cross-check fact-schema version. Independent of every other buildsource
@@ -486,8 +491,11 @@ def _check_public_not_exported(
     # read through the one graph relation, never re-derived from paths.
     owned = contract_relations(snapshot)
     findings: list[Change] = []
+    inline_symbols = inline_declared_symbols(snapshot.functions)
     for i, fn in enumerate(snapshot.functions):
-        if not _has_export_obligation(fn) or owned.function_owes_no_export(i):
+        if not _has_export_obligation(
+            fn, inline_symbols
+        ) or owned.function_owes_no_export(i):
             continue
         if fn.mangled not in satisfied:
             findings.append(
@@ -1442,12 +1450,18 @@ def _l4_reconciled_symbols(snapshot: AbiSnapshot, exported: set[str]) -> set[str
     return reconciled
 
 
-def _has_export_obligation(fn: Function) -> bool:
+def _has_export_obligation(
+    fn: Function, inline_symbols: frozenset[str] = frozenset()
+) -> bool:
     """Whether *fn* promises a dynamic symbol (so absence from exports is a risk).
 
     Conservative on purpose (ADR-035 D4): exclude everything that legitimately
     emits no exported symbol — inline, pure-virtual, deleted, static, non-public
-    access, mangle-less, and template-shaped declarations.
+    access, mangle-less, internal-namespace, and template-shaped declarations.
+    *inline_symbols* (:func:`inline_declared_symbols`) carries inline-ness
+    declared on *another* record of the same symbol (an out-of-line
+    ``inline`` definition). A ``static`` **member** keeps its obligation;
+    only internal linkage exempts (:func:`is_static_member_symbol`).
 
     Deliberately **not** gated on ``visibility``: castxml derives
     ``Visibility.PUBLIC`` from the export table, so the very decl this check looks
@@ -1462,16 +1476,18 @@ def _has_export_obligation(fn: Function) -> bool:
     # ``static`` free functions have internal linkage and emit no dynamic
     # symbol, so a static header helper must not be read as a missing export
     # (Codex review).
-    if fn.is_static:
+    if fn.is_static and not is_static_member_symbol(fn.mangled):
         return False
-    if fn.is_inline or fn.is_pure_virtual or fn.is_deleted:
+    if fn.is_inline or fn.mangled in inline_symbols:
+        return False
+    if fn.is_pure_virtual or fn.is_deleted:
         return False
     if not fn.mangled:
         return False
     # A C++ member whose ``mangled`` is just the display name is a castxml
     # fallback (notably ctors/dtors); comparing that bare name against the
     # binary's real ``_ZN…`` symbols would false-positive (Codex review).
-    if not _looks_mangled(fn):
+    if not _looks_mangled(fn) or owner_in_internal_namespace(fn.mangled):
         return False
     # A template specialization/instantiation has vague linkage: its
     # definition is in the public header, so a consumer's own translation
@@ -1502,7 +1518,7 @@ def _var_has_export_obligation(var: Variable) -> bool:
         return False
     if not var.mangled:
         return False
-    if not _looks_mangled(var):
+    if not _looks_mangled(var) or owner_in_internal_namespace(var.mangled):
         return False
     if var.is_const:
         return False

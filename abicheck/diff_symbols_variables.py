@@ -38,10 +38,11 @@ from .elf_symbol_filter import (
     exported_symbol_names,
     is_abi_relevant_elf_symbol,
 )
-from .model import AbiSnapshot, AccessLevel, Variable
+from .model import AbiSnapshot, AccessLevel, Function, Variable
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import (
     is_abi_visible,
+    is_export_confirmed_absent,
     is_export_table_only_record,
     surface_fact_summary,
 )
@@ -370,6 +371,29 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
     ]
 
 
+def addition_evidence(decl: Function | Variable, noun: str) -> dict[str, Any]:
+    """``description``/``surface_facts`` for a ``FUNC_ADDED``/``VAR_ADDED``.
+
+    The mirror of what the removal paths already stamp. A public header can
+    add a declaration that no binary ever exports -- an inline or
+    ``constexpr`` function, a pure virtual, a ``constexpr`` constant -- and
+    when the NEW side's export table *confirms* the symbol is absent the
+    addition is a source-level API addition, not a new export. The kind stays
+    the same (it is still a compatible addition consumers can use), but the
+    finding must not read as an added exported symbol: the description says
+    so, and ``surface_facts`` records ``binary_exported: false``.
+    """
+    header_only = is_export_confirmed_absent(decl)
+    return {
+        "description": (
+            f"New public header-only {noun} (no exported symbol): {decl.name}"
+            if header_only
+            else f"New public {noun}: {decl.name}"
+        ),
+        "surface_facts": surface_fact_summary(decl),
+    }
+
+
 def _var_added(mangled: str, v_new: Variable) -> list[Change]:
     """The mirror of :func:`_var_removed`, and reconciled the same way."""
     return [
@@ -378,6 +402,7 @@ def _var_added(mangled: str, v_new: Variable) -> list[Change]:
             symbol=mangled,
             name=v_new.name,
             entity_id=v_new.entity_id,
+            **addition_evidence(v_new, "variable"),
         )
     ]
 

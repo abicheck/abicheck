@@ -424,6 +424,11 @@ struct Outer {
 };
 inline Outer::Outer() = default;
 void Outer::Nested::g() { }
+// Declared in the class, `inline` only on the out-of-line definition
+// ([dcl.inline]/6): castxml's XML reflects only the first declaration, so the
+// overload by arity is what keeps `f()` non-inline.
+struct OutOfLine { void f(int) const; void f() const; };
+inline void OutOfLine::f(int) const {}
 void free_declared(int);
 inline void free_inline(int) {}
 constexpr int free_constexpr(int x) { return x; }

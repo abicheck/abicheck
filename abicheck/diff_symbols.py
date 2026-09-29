@@ -104,6 +104,7 @@ from .diff_symbols_variables import (
     _public_variables,
     _var_added,
     _var_removed,
+    addition_evidence,
     var_access_changes,
 )
 from .elf_symbol_filter import (
@@ -1143,6 +1144,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     symbol=mangled,
                     new=f_new.name,
                     entity_id=f_new.entity_id,
+                    **addition_evidence(f_new, "function"),
                 )
             )
 

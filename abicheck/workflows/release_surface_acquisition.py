@@ -85,6 +85,7 @@ def surface_from_snapshot(
         _has_export_obligation,
         _origin_resolvable,
         _var_has_export_obligation,
+        inline_declared_symbols,
     )
     from ..compare.ownership_relations import contract_relations
     from ..model.vocabulary import ScopeOrigin
@@ -103,10 +104,13 @@ def surface_from_snapshot(
     declared: set[str] = set()
     # ADR-075 D7: the same contract relation the per-member check reads.
     owned = contract_relations(snapshot)
+    inline_symbols = inline_declared_symbols(snapshot.functions)
     for i, fn in enumerate(snapshot.functions):
         if fn.origin == ScopeOrigin.PUBLIC_HEADER:
             declared.update(_candidate_symbols(fn))
-        if _has_export_obligation(fn) and not owned.function_owes_no_export(i):
+        if _has_export_obligation(
+            fn, inline_symbols
+        ) and not owned.function_owes_no_export(i):
             obligations.append(
                 PublicObligation(
                     symbol=fn.mangled or fn.name,
