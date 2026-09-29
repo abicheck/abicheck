@@ -58,7 +58,7 @@ details summary{cursor:pointer;color:var(--accent);font-size:13px}
 </section>
 
 <section id="scope">
-  <div class="head"><h2>Scope and selection</h2><span class="src">comparison_scope (ADR-065)</span></div>
+  <div class="head"><h2>Scope and selection</h2><span class="src">comparison_scope</span></div>
   <p class="muted" style="margin:0">4 members expected. 3 compared, 1 out of scope. Selection: <code>--member libfoo*</code> (explicit). NEW inventory proven complete (package manifest).</p>
   <div class="scroll"><table>
     <tr><th>Member</th><th>OLD</th><th>NEW</th><th>State</th><th>Reason</th></tr>
@@ -72,7 +72,7 @@ details summary{cursor:pointer;color:var(--accent);font-size:13px}
 </section>
 
 <section id="consumers">
-  <div class="head"><h2>Consumer impact</h2><span class="src">use_case_impact · consumer graph (ADR-057)</span></div>
+  <div class="head"><h2>Consumer impact</h2><span class="src">use_case_impact · consumer graph</span></div>
   <p class="muted" style="margin:0">The global result above is unchanged. This section adds detail for known consumers. A change is counted once, however many consumers it affects.</p>
   <div class="scroll"><table>
     <tr><th>Consumer</th><th>Uses</th><th>Affected by</th><th>Impact</th></tr>
@@ -84,7 +84,7 @@ details summary{cursor:pointer;color:var(--accent);font-size:13px}
 </section>
 
 <section id="versioning">
-  <div class="head"><h2>Versioning policy</h2><span class="src">release_recommendation.policy_acceptance (ADR-066)</span></div>
+  <div class="head"><h2>Versioning policy</h2><span class="src">release_recommendation.policy_acceptance</span></div>
   <div class="two">
     <div class="note" style="border-color:var(--break)"><b>Release not accepted.</b> The scheme is SemVer with the <code>abi</code> promise. The version bump was minor (2.3 → 2.4), but the findings require a major bump. Enforcement is <code>advisory</code>, so the exit code is unchanged.</div>
     <div class="note">The deprecation window is 2 minor releases. <code>foo_open()</code> was deprecated in 2.2 and removed in 2.4, which honours the window. This rule applies to history reports only.</div>

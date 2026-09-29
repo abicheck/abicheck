@@ -1050,8 +1050,8 @@ bump (`major`/`minor`/`patch`/`none`) plus a SONAME action. Unconditional in
 `json`, `markdown`, and `review` (CLI cleanup phase two, PR 1 removed the
 `--recommend` opt-in flag that used to gate it): JSON always carries it under
 `release_recommendation`, and Markdown/`review` always render it as a
-section — no flag needed. `html` does not render it (the HTML report has no
-recommendation section), and `sarif`/`junit` intentionally omit it — neither
+section — no flag needed. `html` renders only the versioning-policy verdict
+described below, and `sarif`/`junit` intentionally omit it — neither
 format has a natural slot for a release verdict.
 
 ```bash
@@ -1112,13 +1112,15 @@ would still recommend even when `state` isn't `actionable`. See the
 compare-report [JSON Schema](../reference/schemas/v1/compare_report.schema.json)'s
 `release_recommendation` object for the full field contract.
 
-`policy_acceptance` is `null` for every `abicheck compare` run today (ADR-066
-D5's *unmet release policy* axis is an additive field on the Python API's
-`ReleaseRecommendation` object, not yet wired into the CLI/Action's own
-report emission): when a caller passes a versioning policy explicitly, it
-carries `accepted`/`enforcement`/`promise`/`detail` describing whether the
-release is acceptable under the project's own versioning policy — entirely
-separate from, and never changing, `version_bump`/`soname_action`/`state`.
+`policy_acceptance` is filled in when the `--policy` file states a
+`versioning:` block, and is `null` otherwise. It carries
+`accepted`/`enforcement`/`promise`/`detail`: whether the release is
+acceptable under the project's own versioning policy. It is entirely
+separate from `version_bump`/`soname_action`/`state` and never changes them,
+the verdict, the findings or the exit code. The Markdown report adds a
+"Versioning policy" row to its release-recommendation table, the review
+digest adds a "Versioning policy" line, and the HTML report shows a
+"Versioning policy" card under the verdict.
 [Rollout and Governance § Versioning policy](../learn/rollout-and-governance.md)
 owns the policy model itself.
 

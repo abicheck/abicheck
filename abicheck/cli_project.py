@@ -665,7 +665,7 @@ def project_plan_cmd(
         "(same values as `compare --policy`)."
     ),
 )
-@export_options(["json", "text"], default_format="json")
+@export_options(["json", "text", "html"], default_format="json")
 @verbose_option
 def project_history_cmd(
     snapshots: tuple[Path, ...],
@@ -739,6 +739,10 @@ def project_history_cmd(
     def _render_history(fmt: str) -> str:
         if fmt == "json":
             return json.dumps(result.to_dict(), indent=2)
+        if fmt == "html":
+            from .report.render_history_html import render_history_html
+
+            return render_history_html(result.to_dict())
         lines = [
             f"longitudinal history: {result.library} "
             f"({len(result.entries)} snapshot(s))"

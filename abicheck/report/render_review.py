@@ -54,6 +54,9 @@ class ReviewDigest:
     result_counts: dict[str, int] = field(default_factory=dict)
     evidence_summary: str = ""
     show_release_recommendation: bool = False
+    #: The project's versioning-policy verdict (``PolicyAcceptance.to_dict()``),
+    #: ``None`` when no ``versioning:`` policy was stated.
+    policy_acceptance: dict[str, Any] | None = None
 
 
 #: Per-list caps for the bounded review digest. Named rather than inline so
@@ -189,6 +192,15 @@ def render_review_digest(digest: ReviewDigest) -> str:
         lines += [
             f"**Release recommendation:** `{digest.bump_value}` version bump · "
             f"SONAME `{digest.soname_value}`",
+            "",
+        ]
+    if digest.policy_acceptance is not None:
+        from .render_markdown import versioning_policy_label
+
+        lines += [
+            "**Versioning policy:** "
+            + versioning_policy_label(digest.policy_acceptance)
+            + f" — {digest.policy_acceptance.get('detail')}",
             "",
         ]
     if digest.env_matrix_source_sha256 is not None:

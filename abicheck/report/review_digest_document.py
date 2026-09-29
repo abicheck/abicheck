@@ -161,6 +161,7 @@ def build_review_digest_document(
         "result_counts": digest.result_counts,
         "evidence_summary": digest.evidence_summary,
         "show_release_recommendation": digest.show_release_recommendation,
+        "policy_acceptance": digest.policy_acceptance,
     }
     return ReportDocument.from_mapping(d)
 
@@ -205,6 +206,7 @@ def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
         result_counts=dict(d.get("result_counts") or {}),
         evidence_summary=d.get("evidence_summary", ""),
         show_release_recommendation=bool(d.get("show_release_recommendation", False)),
+        policy_acceptance=d.get("policy_acceptance"),
     )
 
 

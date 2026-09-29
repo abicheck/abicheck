@@ -882,6 +882,10 @@ def build_html_document(
                 else None
             ),
             "impact": dataclasses.asdict(impact) if impact is not None else None,
+            "versioning_policy": compute_versioning_policy(result),
+            "use_case_impact": compute_use_case_impact(
+                result, display_changes if show_only else None
+            ),
             "sections": sections,
             "empty_state": empty_state,
         }
@@ -949,6 +953,39 @@ def generate_html_report(
         envelope=envelope,
     )
     return render_html_document(document)
+
+
+def compute_versioning_policy(result: object) -> dict[str, object] | None:
+    """The stated versioning policy's verdict on this release, or ``None``.
+
+    The same acceptance the JSON ``release_recommendation.policy_acceptance``
+    carries: it reads only the run's verdict, never the finding set.
+    """
+    from .policy.versioning_policy import evaluate_release_acceptance
+    from .semver import stated_versioning_policy
+
+    policy = stated_versioning_policy(result)  # type: ignore[arg-type]
+    if policy is None or not hasattr(result, "verdict"):
+        return None
+    return evaluate_release_acceptance(result, policy).to_dict()  # type: ignore[arg-type]
+
+
+def compute_use_case_impact(
+    result: object, displayed: list[object] | None
+) -> dict[str, object] | None:
+    """``compare --use-cases``'s attribution, projected onto what is shown.
+
+    *displayed* is the ``--show-only`` filtered list, or ``None`` when every
+    finding is displayed -- the same projection the JSON block applies.
+    """
+    from .impact.use_case_impact import UseCaseImpact
+
+    impact = getattr(result, "use_case_impact", None)
+    if not isinstance(impact, UseCaseImpact):
+        return None
+    if displayed is not None:
+        impact = impact.restricted_to(displayed)  # type: ignore[arg-type]
+    return impact.to_dict()
 
 
 def compute_not_evaluated_section(

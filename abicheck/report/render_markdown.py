@@ -41,6 +41,7 @@ re-derivation from ``DiffResult``/``Change``). See
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -606,10 +607,22 @@ class RecommendationSection:
     soname_value: str
     state_value: str
     rationale: str
+    #: The project's versioning-policy verdict on this release, or ``None``
+    #: when the project stated no ``versioning:`` policy (not evaluated).
+    policy_acceptance: dict[str, object] | None = None
+
+
+def versioning_policy_label(acceptance: Mapping[str, object]) -> str:
+    """One-line label for a policy-acceptance mapping, shared by every view."""
+    state = "accepted" if acceptance.get("accepted") else "not accepted"
+    return (
+        f"{state} (promise `{acceptance.get('promise')}`, "
+        f"enforcement `{acceptance.get('enforcement')}`)"
+    )
 
 
 def render_recommendation_section(section: RecommendationSection) -> list[str]:
-    return [
+    lines = [
         "## Release Recommendation",
         "",
         "| Field | Value |",
@@ -617,10 +630,14 @@ def render_recommendation_section(section: RecommendationSection) -> list[str]:
         f"| Version bump | {section.bump_emoji} **{section.bump_upper}** |",
         f"| SONAME action | `{section.soname_value}` |",
         f"| Recommendation state | `{section.state_value}` |",
-        "",
-        f"{section.rationale}",
-        "",
     ]
+    acceptance = section.policy_acceptance
+    if acceptance is not None:
+        lines.append(f"| Versioning policy | {versioning_policy_label(acceptance)} |")
+    lines += ["", f"{section.rationale}", ""]
+    if acceptance is not None:
+        lines += [f"Versioning policy: {acceptance.get('detail')}", ""]
+    return lines
 
 
 # ---------------------------------------------------------------------------

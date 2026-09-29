@@ -215,6 +215,13 @@ and, for a longitudinal history over several stored snapshots
 (`abicheck project history`), whether each observed removal was preceded
 by enough deprecation to satisfy `deprecation_window`.
 
+`abicheck project history` can also write an HTML page
+(`abicheck project history v1.json v2.json v3.json -o html=history.html`):
+a per-release verdict table, a timeline of every function, variable and
+type that was added, deprecated or removed across the chain (with shaded
+intervals where a release may be missing), and the complete event list as
+a table.
+
 ### Change acknowledgment and the additions review gate
 
 A policy file may also declare an `acknowledgment:` block (ADR-067 D6),

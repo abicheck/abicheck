@@ -758,6 +758,38 @@ Correlated export/vtable evidence retains every member finding and library/
 entity identity; full human and machine exports remain complete. The Action
 uses the same scalar/package default split.
 
+**2026-09-29 S2/S3 slices.** Landed:
+
+- *Versioning (B) in compare reports.* `semver.recommend_release_for_report`
+  is the one call every report projection makes; it passes the policy
+  file's stated `versioning:` block, so `release_recommendation.
+  policy_acceptance` is populated in JSON whenever one is stated (and stays
+  `null` otherwise), and Markdown (recommendation table row), the review
+  digest and HTML (a "Versioning policy" card) render the same acceptance.
+  Acceptance never moves the verdict, findings or exit code.
+- *Consumer (D) in HTML.* `compare --use-cases` is accepted with
+  `-o html=...` and renders the existing `use_case_impact` block as a
+  "Consumer impact" section (`report/render_html_review_sections.py`).
+- *History visualization (S3).* `project history -o html` renders the
+  history document as a release-step verdict table, an SVG lifecycle
+  timeline (shape + text label per event, shaded coverage gaps, SVG
+  title/description) and the complete event table
+  (`report/render_history_html.py`).
+
+Tests: `tests/unit/report/test_review_sections_html.py` (every view states
+the same acceptance across a promise × enforcement × verdict matrix against
+an independent oracle, and adding a policy leaves the verdict, findings and
+exit code unchanged; HTML consumer rows match the JSON attribution) and
+`tests/unit/report/test_render_history_html.py` (drawn presence spans equal
+the maximal presence runs for every presence pattern up to five releases;
+the page lists exactly the JSON's events).
+
+Still open: a relationship/dependency graph visualization; per-finding
+consumer attribution (`Change.affected_use_cases`); the `surface_changes`
+and `comparison_scope` sections in HTML (release/package comparisons have
+no HTML report at all today); and S4's real Action run in a lab workflow,
+which has not been executed and remains unverified.
+
 ## Files & surfaces
 
 Owners per ADR-061; new code goes to the target package, never a new root

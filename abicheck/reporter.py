@@ -112,7 +112,7 @@ from .root_cause_evidence import (
     scoped_only_evidence_lookup,
 )
 from .schemas import REPORT_SCHEMA_VERSION
-from .semver import recommend_release
+from .semver import recommend_release_for_report
 
 
 def _effective_severity_label(
@@ -226,7 +226,7 @@ def to_stat_json(
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
         )
-    d["release_recommendation"] = recommend_release(result).to_dict()
+    d["release_recommendation"] = recommend_release_for_report(result).to_dict()
     if result.redundant_count > 0:
         d["redundant_count"] = result.redundant_count
     # Confidence & evidence metadata
@@ -723,7 +723,7 @@ def _add_abi_surface_breakdown(d: dict[str, object], result: DiffResult) -> None
 def _add_evidence_fields(d: dict[str, object], result: DiffResult) -> None:
     """Add release recommendation, optional evidence coverage/metrics, and policy."""
     # Release recommendation (semver bump + soname action) — additive, machine-facing.
-    d["release_recommendation"] = recommend_release(result).to_dict()
+    d["release_recommendation"] = recommend_release_for_report(result).to_dict()
     # Evidence coverage (ADR-028 D7) — L0–L5 rows when a BuildSourcePack was
     # supplied; lets consumers tell artifact-proven from build-context-only
     # findings. Additive, present only when evidence was involved.
