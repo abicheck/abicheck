@@ -60,6 +60,7 @@ from .dwarf_utils import (
     resolve_die_ref as _resolve_die_ref,
     resolve_type_die as _resolve_type_die,
 )
+from .extract import dwarf_subtree_index as _dsi
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
@@ -156,7 +157,7 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
                 return AdvancedDwarfMetadata()
             meta = AdvancedDwarfMetadata(has_dwarf=True)
             meta.target_arch = _normalize_arch(elf)
-            dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
+            dwarf = _dsi.open_indexed_dwarf_info(elf)
             for CU in dwarf.iter_CUs():
                 try:
                     _process_cu(CU, meta)
@@ -624,9 +625,7 @@ def _extract_calling_convention(
         if _aggregate_has_unaligned_member(die, CU, cache=cache):
             meta.return_memory_classified.add(key)
     pidx = 0
-    for ch in die.iter_children():
-        if ch.tag != "DW_TAG_formal_parameter":
-            continue
+    for ch in _dsi.iter_formal_parameters(die):  # body undecoded
         ptrait = _value_abi_trait_for_typed_die(ch, CU, cache=cache)
         if ptrait is not None:
             parts.append(f"p{pidx}:{ptrait}")

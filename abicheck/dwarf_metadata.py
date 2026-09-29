@@ -73,6 +73,7 @@ from .dwarf_utils import (
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.dwarf_metadata import DwarfMetadata`` spelling keeps resolving.
+from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .model.dwarf_facts import (
     DwarfMetadata as DwarfMetadata,
     EnumInfo as EnumInfo,
@@ -139,7 +140,7 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
         return meta
 
     meta.has_dwarf = True
-    dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
+    dwarf = open_indexed_dwarf_info(elf)
 
     # Per-parse type-resolution cache: (cu_offset, die_offset) → (name, byte_size)
     type_cache: dict[tuple[int, int], tuple[str, int]] = {}
