@@ -286,7 +286,7 @@ Derive per-API lifecycle events from an ordered chain of SNAPSHOTS (offline long
 |---|:--:|---|---|
 | `--version` | no | — | Explicit release label for one SNAPSHOT, in the same order as the SNAPSHOTS arguments (repeatable — pass one per snapshot, or omit entirely). Without this, each snapshot's own recorded AbiSnapshot.version is used as its release label. |
 | `--policy` | no | `strict_abi` | Policy profile passed to each pairwise comparison in the chain (same values as `compare --policy`). |
-| `--output`, `-o` | no | — | Export this run's report as FORMAT to DESTINATION. FORMAT is one of json/text; DESTINATION is a file path, or '-' for stdout. Repeatable: every export renders the same completed analysis, so the result never depends on which (or how many) you ask for. Default: json=-. |
+| `--output`, `-o` | no | — | Export this run's report as FORMAT to DESTINATION. FORMAT is one of json/text/html; DESTINATION is a file path, or '-' for stdout. Repeatable: every export renders the same completed analysis, so the result never depends on which (or how many) you ask for. Default: json=-. |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. |
 
 ### `project plan`
