@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .review_groups import build_review_groups
 
@@ -19,6 +19,27 @@ def review_groups_for(
     findings: Sequence[ReportFinding],
 ) -> tuple[dict[str, object], ...]:
     return tuple(group.to_dict() for group in build_review_groups(findings))
+
+
+def use_cases_by_group(
+    groups: Sequence[dict[str, object]],
+    use_cases: dict[str, tuple[str, ...]] | None,
+) -> dict[str, tuple[str, ...]]:
+    """``compare --use-cases``: per review group, the sorted union of its
+    member findings' use cases (``UseCaseImpact.use_cases_by_finding``).
+
+    Only groups some use case reaches appear; ``{}`` when the attribution
+    never ran.
+    """
+    if not use_cases:
+        return {}
+    out: dict[str, tuple[str, ...]] = {}
+    for group in groups:
+        members = cast("Sequence[object]", group.get("member_finding_ids") or ())
+        names = {n for fid in members for n in use_cases.get(str(fid), ())}
+        if names:
+            out[str(group.get("group_id"))] = tuple(sorted(names))
+    return out
 
 
 def compact_coverage_warnings(warnings: Sequence[str]) -> tuple[str, ...]:

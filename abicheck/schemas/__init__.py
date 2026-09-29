@@ -1054,7 +1054,15 @@ _ARTIFACT_NAMES = frozenset(
 #:        declared ``modified``, which made every such finding read as a
 #:        modification even when identical on both sides
 #:        (``report/change_operation.operation_for_change``).
-REPORT_SCHEMA_VERSION = "5.9"
+#: 5.10 -- additive ``affected_use_cases`` on each ``changes`` entry, present
+#:        only under ``compare --use-cases MANIFEST``: the sorted names of the
+#:        use cases whose entrypoints reach that finding -- the exact inverse
+#:        of ``use_case_impact.by_use_case`` (joined on ``finding_id``), so
+#:        the two can never disagree. ``[]`` means the attribution ran and
+#:        reached the finding from no declared entrypoint; an absent key
+#:        means it never ran. Projected through ``--show-only`` with the
+#:        block.
+REPORT_SCHEMA_VERSION = "5.10"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

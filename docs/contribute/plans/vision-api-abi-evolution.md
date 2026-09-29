@@ -461,7 +461,14 @@ rather than assumed already checked out), exact-version selection against
 an existing acquisition/publishing channel, and parity for the advisory/
 required distinction in the Action's own `check-target`/`app-consumer`
 kind (today a Python-API/CLI-only distinction). **S3** declared source/
-use-case enrichment with coverage-qualified reports. **S4** separately
+use-case enrichment with coverage-qualified reports — **per-finding
+use-case attribution landed (2026-09-29):** under `compare --use-cases`,
+every JSON `changes` entry carries `affected_use_cases` (report schema
+5.10), derived once from the report-level `use_case_impact.by_use_case` by
+joining on `finding_id` so the two are exact inverses; Markdown change rows
+and the review digest's review groups and impacted-symbol list render it. Still open for S3:
+SARIF/JUnit/HTML-table carriage, coverage-qualified use-case reports, and
+the planned `USE_CASE_IMPACT_CONFIRMED` overlay. **S4** separately
 designed, opt-in compile/link/runtime validation with its own execution
 design review — never implied by S1–S3, and not a reauthorization of
 ADR-060.

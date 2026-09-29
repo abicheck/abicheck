@@ -52,6 +52,7 @@ from .checker import (
     Verdict,
 )
 from .finding_identity import missing_contract_kind, report_finding_id
+from .impact.use_case_impact import use_cases_by_finding_for as use_cases_by_finding_for
 from .model.change_catalog.kinds import HasKind
 from .policy.classification import (
     evidence_status_for_result,
@@ -1607,6 +1608,8 @@ def compute_review_digest(
     # section elsewhere in the report; this list is the digest of what gated.
     from .report.surface_changes import compute_surface_changes
 
+    uc = use_cases_by_finding_for(result)  # `compare --use-cases` only
+    groups = tuple(review_groups or _review_compute.review_groups_for(findings))
     impacted = [
         f.change
         for f in findings
@@ -1640,7 +1643,11 @@ def compute_review_digest(
         bump_value=rec.bump.value,
         soname_value=rec.soname.value,
         impacted=tuple(
-            _review.ImpactedSymbol(symbol=c.symbol or "?", kind=c.kind.value)
+            _review.ImpactedSymbol(
+                symbol=c.symbol or "?",
+                kind=c.kind.value,
+                use_cases=(uc or {}).get(_finding_id(c), ()),
+            )
             for c in impacted
         ),
         disposition_audit=(
@@ -1651,9 +1658,8 @@ def compute_review_digest(
         surface_changes=compute_surface_changes(result, findings),
         env_matrix_source_sha256=result.env_matrix_source_sha256,
         pattern_modulations=tuple(getattr(result, "pattern_modulations", ()) or ()),
-        review_groups=tuple(
-            review_groups or _review_compute.review_groups_for(findings)
-        ),
+        review_groups=groups,
+        review_group_use_cases=_review_compute.use_cases_by_group(groups, uc),
         result_counts=result_counts or {},
         policy=result.policy or "strict_abi",
         gate_exit_code=gate.exit_code if gate is not None else gate_exit_code,

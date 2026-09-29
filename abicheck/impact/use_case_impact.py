@@ -136,6 +136,23 @@ class UseCaseImpact:
             by_use_case=by_use_case,
         )
 
+    def use_cases_by_finding(self) -> dict[str, tuple[str, ...]]:
+        """The per-finding view of :attr:`by_use_case`: ``finding_id`` -> names.
+
+        The exact inverse of ``by_use_case`` -- derived from it rather than
+        from a second attribution pass, so the per-finding
+        ``affected_use_cases`` a report carries on each change and the
+        report-level block can never disagree. A finding no use case reaches
+        is absent from the mapping (its reader answers ``()``); each tuple is
+        sorted and duplicate-free, so a finding two use cases reach lists
+        both, once each.
+        """
+        inverse: dict[str, set[str]] = {}
+        for name, entries in self.by_use_case.items():
+            for entry in entries:
+                inverse.setdefault(entry.finding_id, set()).add(name)
+        return {fid: tuple(sorted(names)) for fid, names in inverse.items()}
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "manifest": self.manifest,
@@ -373,3 +390,41 @@ def add_use_case_impact(
         if displayed is not None:
             impact = impact.restricted_to(displayed)
         d["use_case_impact"] = impact.to_dict()
+        annotate_affected_use_cases(d.get("changes"), impact)
+
+
+def annotate_affected_use_cases(entries: object, impact: UseCaseImpact) -> None:
+    """Stamp ``affected_use_cases`` on each already-built change entry.
+
+    Joined on the entry's own ``finding_id`` -- the key ``by_use_case``
+    rows already carry -- so the per-finding field is the report-level
+    block read the other way round, never a second attribution. An entry no
+    use case reaches reads ``[]`` ("attribution ran, reached by none"); the
+    key is absent only when ``--use-cases`` was not given at all, which is
+    what keeps every pre-existing report byte-identical. Root-cause mode's
+    ``findings`` lists hold the same dict objects as ``changes``, so they
+    pick the field up without a second pass.
+    """
+    if not isinstance(entries, list):
+        return
+    inverse = impact.use_cases_by_finding()
+    for entry in entries:
+        if isinstance(entry, dict) and "finding_id" in entry:
+            entry["affected_use_cases"] = list(
+                inverse.get(str(entry["finding_id"]), ())
+            )
+
+
+def use_cases_by_finding_for(result: Any) -> dict[str, tuple[str, ...]] | None:
+    """*result*'s per-finding attribution, or ``None`` when none ran.
+
+    The renderer-side reader (Markdown rows, review digest): the same
+    inverse of ``by_use_case`` the JSON ``affected_use_cases`` field is
+    built from. Not projected through ``--show-only`` because it does not
+    need to be: projection only drops findings, and a displayed finding's
+    own attribution is identical before and after it.
+    """
+    impact = getattr(result, "use_case_impact", None)
+    if not isinstance(impact, UseCaseImpact):
+        return None
+    return impact.use_cases_by_finding()

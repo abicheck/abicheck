@@ -803,7 +803,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "5.9",
+  "report_schema_version": "5.10",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
@@ -957,6 +957,28 @@ omitted when no policy file (or no active rule) applies.
   }
 }
 ```
+
+### Per-finding use-case attribution (`affected_use_cases`)
+
+Under `compare --use-cases MANIFEST`, each `changes` entry carries
+`affected_use_cases` (report schema 5.10): the sorted names of the
+manifest's use cases whose declared entrypoints can be shown to reach that
+finding. It is the report-level `use_case_impact.by_use_case` block read the
+other way round, joined on `finding_id`, so a finding listed under a use case
+there lists that use case here and vice versa. A finding two use cases reach
+lists both and is still one finding in every count.
+
+- `[]` means the attribution ran and no declared entrypoint was shown to
+  reach the finding -- absence of proof, not proof the finding is harmless.
+- The key is absent entirely without `--use-cases`, so other reports are
+  unchanged.
+- Under `--view show=...` both the block and the per-finding lists describe
+  only the displayed findings.
+
+The Markdown report adds an `Affects use cases: ...` note under each
+reached finding; the review digest adds the same note under each review group
+whose findings a use case reaches, and its fallback impacted-symbol list appends
+`(affects: ...)`. SARIF, JUnit and the HTML changes table do not carry it.
 
 ### Consumer scope (`used_by`/`required_symbol_contract`/`consumer_scope`)
 
