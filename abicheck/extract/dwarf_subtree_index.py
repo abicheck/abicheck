@@ -464,7 +464,7 @@ def iter_children_tagged(die: Any, tags: frozenset[str]) -> Iterator[Any]:
     the body left undecoded. Falls back to the plain filter when the unit is
     not indexable.
     """
-    CU = getattr(die, "cu", None)
+    CU: Any = getattr(die, "cu", None)
     real = hasattr(die, "has_children") and hasattr(CU, "_get_cached_DIE")
     if real and not die.has_children:
         return
