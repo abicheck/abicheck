@@ -61,8 +61,8 @@ def _dump_is_cacheable(
     — the dominant release-baseline/CI comparison case a repeated pipeline
     re-extracts identically on every run — is cached. A PDB path, a DWARF
     debug-info root, debuginfod resolution (network-dependent), a forced
-    debug format, a symbols-only/debug-presence-only dump, or a custom
-    ``CompileContext`` all change what ``run_dump`` produces in ways not
+    debug format, a symbols-only/debug-presence-only dump, or a
+    ``CompileContext`` naming an untrackable header input all change what ``run_dump`` produces in ways not
     folded into the cache key below, so those combinations always fall
     through to a live dump rather than risk serving a stale/mismatched
     snapshot.
@@ -82,7 +82,13 @@ def _dump_is_cacheable(
     (:func:`compile_context_cache_field`, :func:`effective_header_backend`),
     and the compiler/clang identities are resolved with its
     ``gcc_path``/``gcc_prefix``. A ``None`` context and an all-default one
-    share a key, since they produce identical dumps.
+    share a key, since they produce identical dumps. The header content a
+    context makes reachable (``sysroot``, ``-I``/``-isystem``/``-include``
+    and siblings in its compiler options) is content-hashed with the same
+    include-tree walk as ``-I`` directories
+    (:func:`compile_context_header_inputs`), so a warm hit never serves a
+    snapshot parsed from stale headers; a context with an input that walk
+    cannot follow is not cached at all.
 
     A labeled ``--include`` (``include_labels`` non-empty, ADR-050 D1) is
     likewise excluded: the label rides only into ``AbiSnapshot.contract``
@@ -137,19 +143,37 @@ def _dump_is_cacheable(
 
 
 def _compile_context_is_keyable(compile: object | None) -> bool:
-    """Whether *compile* can be folded into the whole-snapshot cache key.
-
-    ``None`` and a real :class:`~abicheck.compile_context.CompileContext`
-    (default or customised) are keyable: every field of that frozen
-    dataclass is folded into the key by :func:`compile_context_cache_field`.
-    Anything else (an unknown duck-typed object) is not, and falls through
-    to a live dump. Before this, *any* non-``None`` context disabled the
-    cache -- and ``compare`` always threads one (even an all-default one),
-    so a warm ``compare`` never hit the cache at all.
-    """
+    """Whether *compile* can be folded into the whole-snapshot cache key:
+    ``None``, or a real ``CompileContext`` whose fields are keyed by
+    :func:`compile_context_cache_field` and whose header inputs are all
+    content-trackable (:func:`compile_context_header_inputs`). Anything else
+    falls through to a live dump."""
     from .compile_context import CompileContext
 
-    return compile is None or isinstance(compile, CompileContext)
+    if compile is None:
+        return True
+    return (
+        isinstance(compile, CompileContext)
+        and compile_context_header_inputs(compile) is not None
+    )
+
+
+def compile_context_header_inputs(
+    compile: object | None,
+) -> tuple[list[Path], list[Path]] | None:
+    """``(files, dirs)`` header inputs *compile* adds (``sysroot``, plus
+    ``-I``/``-include``/... in ``gcc_options`` and ``gcc_option_tokens``),
+    for :func:`cached_run_dump` to content-hash; ``None`` when one is
+    untrackable (see :mod:`abicheck.extract.compile_header_inputs`)."""
+    from ._compiler_options import split_gcc_options
+    from .extract.compile_header_inputs import compile_option_header_inputs
+
+    cc = _normalized_compile_context(compile)
+    if cc is None:
+        return [], []
+    tokens = split_gcc_options(cc.gcc_options) if cc.gcc_options else []
+    tokens += cc.gcc_option_tokens
+    return compile_option_header_inputs(tokens, sysroot=cc.sysroot)
 
 
 def _normalized_compile_context(compile: object | None) -> Any:
@@ -704,6 +728,15 @@ def cached_run_dump(
         _uses_ast = bool(_headers)
         _extra_public_headers = public_headers
         _extra_public_header_dirs = public_header_dirs
+
+    # Header inputs the compile context adds (sysroot, -I/-isystem/-include
+    # in its compiler options) reach the parser too: fold their content into
+    # the same walk, so an edit under any of them busts the key.
+    _cc_inputs = compile_context_header_inputs(compile)
+    if _cc_inputs is None:  # guarded by _dump_is_cacheable; defensive
+        return _dump_uncached()
+    _cache_headers = [*_cache_headers, *_cc_inputs[0]]
+    _cache_includes = [*_cache_includes, *_cc_inputs[1]]
 
     def _build_extra() -> str:
         base = _dump_cache_extra_key(
