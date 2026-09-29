@@ -109,8 +109,45 @@ def _top_level_commas(inner: str) -> int:
     return commas
 
 
+def _is_digit_separator(text: str, i: int) -> bool:
+    """Whether the ``'`` at *i* is a C++14 digit separator (``1'000``,
+    ``0xFF'FF``): the alphanumeric run immediately before it starts with a
+    digit, so it is part of a number literal, not a character literal."""
+    j = i
+    while j > 0 and (text[j - 1].isalnum() or text[j - 1] == "'"):
+        j -= 1
+    return j < i and text[j].isdigit()
+
+
+def _blank_literals(text: str) -> str:
+    """*text* with the contents of every string and character literal replaced
+    by spaces (quotes kept, length preserved), so a ``,``/``(``/``)`` inside a
+    default argument such as ``"a,b"`` or ``','`` is never read as syntax."""
+    out = list(text)
+    quote: str | None = None
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote is None:
+            if ch == '"' or (ch == "'" and not _is_digit_separator(text, i)):
+                quote = ch
+        elif ch == "\\":
+            out[i] = " "
+            if i + 1 < len(text):
+                out[i + 1] = " "
+            i += 2
+            continue
+        elif ch == quote:
+            quote = None
+        else:
+            out[i] = " "
+        i += 1
+    return "".join(out)
+
+
 def _arity(text: str, open_paren: int) -> int | None:
     """Top-level parameter count of the list opening at *open_paren*."""
+    text = _blank_literals(text)
     close = _matching_close(text, open_paren)
     if close is None:
         return None

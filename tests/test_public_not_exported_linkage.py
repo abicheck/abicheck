@@ -482,3 +482,40 @@ def test_header_only_additions_do_not_read_as_added_exports() -> None:
     assert "header-only" not in exported.description
     assert exported.description == "New public function: fresh"
     assert exported.surface_facts["binary_exported"] == "true"
+
+
+_PARAM_TYPES = [
+    "int",
+    "const char *s",
+    "std::map<int, long> m",
+    "void (*cb)(int, int)",
+    "char c",
+]
+_DEFAULTS = [
+    "",
+    ' = "a,b"',
+    " = ','",
+    ' = "x)(,"',
+    " = '\\''",
+    ' = "say \\"hi, there\\""',
+    " = 1'000'000",
+    " = 0xFF'FF",
+    " = f(1, 2)",
+    " = u','",
+]
+
+
+def test_generated_parameter_lists_count_only_real_separators() -> None:
+    """Parameter lists assembled from parts whose defaults put commas and
+    brackets inside string, character and numeric literals: the oracle is the
+    number of parameters the generator joined, never the text's comma count."""
+    from abicheck.extract.headers.castxml.out_of_line_inline import _arity
+
+    rng = random.Random(1411)
+    for _ in range(2000):
+        n = rng.randint(1, 5)
+        params = [rng.choice(_PARAM_TYPES) + rng.choice(_DEFAULTS) for _ in range(n)]
+        text = "inline void C::f(" + ", ".join(params) + ") const {}"
+        assert _arity(text, text.index("(")) == n, text
+    for empty in ("f()", "f(void)", "f( )"):
+        assert _arity(empty, empty.index("(")) == 0
