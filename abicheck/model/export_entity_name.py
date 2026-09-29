@@ -135,6 +135,69 @@ class EntityName:
     nested: bool
 
 
+def _read_source_name(rest: str, i: int, comps: list[str]) -> int | None:
+    """A length-prefixed source name plus any trailing ``B`` ABI tags."""
+    n = len(rest)
+    parsed = _read_decimal_length(rest, i)
+    if parsed is None:
+        return None
+    length, j = parsed
+    if length > n - j or length == 0:
+        return None
+    comps.append(rest[j : j + length])
+    i = j + length
+    while i < n and rest[i] == "B":  # GNU ABI tags
+        tag = _read_decimal_length(rest, i + 1)
+        if tag is None or tag[0] > n - tag[1]:
+            return None
+        i = tag[1] + tag[0]
+    return i
+
+
+def _read_substitution(rest: str, i: int, comps: list[str]) -> int | None:
+    end = _skip_substitution(rest, i)
+    if end == i + 1:
+        return None
+    comps.append("{subst}")
+    return end
+
+
+def _read_component(rest: str, i: int, comps: list[str]) -> tuple[int, bool] | None:
+    """Read one name component at *i* into *comps*.
+
+    Returns ``(next index, stop)`` -- *stop* when the component ends the name
+    (an inheriting constructor, a conversion operator) -- or ``None`` for a
+    form :func:`entity_name_components` does not model. ``St`` is handled by
+    the caller, since ``std`` is followed directly by the next component.
+    """
+    n = len(rest)
+    c = rest[i]
+    if "0" <= c <= "9":
+        end = _read_source_name(rest, i, comps)
+        return None if end is None else (end, False)
+    if c == "S":
+        end = _read_substitution(rest, i, comps)
+        return None if end is None else (end, False)
+    if c in "CD" and i + 1 < n and rest[i + 1] in "0123456I":
+        if not comps:
+            return None
+        comps.append("{ctor}" if c == "C" else "{dtor}")
+        # Inheriting constructor (``CI1<base>``): the base type that follows
+        # is not a name component; the ctor is the leaf.
+        return i + 2, rest[i + 1] == "I"
+    if (
+        "a" <= c <= "z"
+        and i + 1 < n
+        and rest[i + 1].isascii()
+        and rest[i + 1].isalpha()
+    ):
+        code = rest[i : i + 2]
+        comps.append(f"{{op:{code}}}")
+        # A conversion operator's target type follows; the name ends there.
+        return i + 2, code == "cv"
+    return None
+
+
 def entity_name_components(symbol: str) -> EntityName | None:
     """Parse an Itanium *symbol*'s entity name, or ``None`` when it cannot.
 
@@ -164,55 +227,18 @@ def entity_name_components(symbol: str) -> EntityName | None:
     spans: list[str] = []
     i, n = 0, len(rest)
     while i < n:
-        c = rest[i]
-        if nested and c == "E":
+        if nested and rest[i] == "E":
             break
-        if "0" <= c <= "9":
-            parsed = _read_decimal_length(rest, i)
-            if parsed is None:
-                return None
-            length, j = parsed
-            if length > n - j or length == 0:
-                return None
-            comps.append(rest[j : j + length])
-            i = j + length
-            while i < n and rest[i] == "B":  # GNU ABI tags
-                tag = _read_decimal_length(rest, i + 1)
-                if tag is None or tag[0] > n - tag[1]:
-                    return None
-                i = tag[1] + tag[0]
-        elif c == "S":
-            if rest.startswith("St", i):
-                comps.append("std")
-                i += 2
-                continue  # the next component follows directly
-            end = _skip_substitution(rest, i)
-            if end == i + 1:
-                return None
-            comps.append("{subst}")
-            i = end
-        elif c in "CD" and i + 1 < n and rest[i + 1] in "0123456I":
-            if not comps:
-                return None
-            comps.append("{ctor}" if c == "C" else "{dtor}")
-            if rest[i + 1] == "I":
-                # Inheriting constructor (``CI1<base>``): the base type that
-                # follows is not a name component; the ctor is the leaf.
-                break
+        if rest.startswith("St", i):
+            comps.append("std")
             i += 2
-        elif (
-            "a" <= c <= "z"
-            and i + 1 < n
-            and rest[i + 1].isascii()
-            and rest[i + 1].isalpha()
-        ):
-            code = rest[i : i + 2]
-            comps.append(f"{{op:{code}}}")
-            i += 2
-            if code == "cv":
-                break  # conversion target type follows; the name ends here
-        else:
+            continue  # the next component follows directly
+        step = _read_component(rest, i, comps)
+        if step is None:
             return None
+        i, stop = step
+        if stop:
+            break
         if i < n and rest[i] == "I":
             args_end = skip_template_args(rest, i)
             if args_end is None:
