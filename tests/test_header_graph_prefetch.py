@@ -197,9 +197,7 @@ def test_a_spent_budget_runs_the_prefetch_inline(
     assert pr.THREAD_BUDGET.in_use == 0
 
 
-@pytest.mark.parametrize(
-    "exc", [RuntimeError("boom"), OSError("boom"), KeyboardInterrupt()]
-)
+@pytest.mark.parametrize("exc", [RuntimeError("boom"), OSError("boom")])
 def test_a_failing_dump_settles_its_prefetch_before_returning(
     monkeypatch: pytest.MonkeyPatch, exc: BaseException
 ) -> None:
@@ -245,3 +243,31 @@ def test_a_successful_block_does_not_wait_on_the_prefetch() -> None:
     assert not pending.done()
     with attach.prefetch_settled_on_failure(None):
         pass
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt(), SystemExit(1)])
+def test_an_interrupt_never_waits_on_the_prefetch(exc: BaseException) -> None:
+    """Ctrl-C / exit must propagate at once, not after a background parse."""
+    from concurrent.futures import Future
+
+    never: Future[attach.HeaderGraphAst] = Future()  # would block forever
+    with pytest.raises(type(exc)):
+        with attach.prefetch_settled_on_failure(never):
+            raise exc
+    assert not never.done()
+
+
+def test_a_stuck_prefetch_bounds_the_failure_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ordinary failure waits at most the settle bound for a stuck parse."""
+    import time
+    from concurrent.futures import Future
+
+    monkeypatch.setattr(attach, "_PREFETCH_SETTLE_TIMEOUT_S", 0.05)
+    stuck: Future[attach.HeaderGraphAst] = Future()
+    start = time.monotonic()
+    with pytest.raises(RuntimeError):
+        with attach.prefetch_settled_on_failure(stuck):
+            raise RuntimeError("boom")
+    assert time.monotonic() - start < 2.0
