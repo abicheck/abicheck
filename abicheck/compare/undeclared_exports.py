@@ -38,6 +38,11 @@ from ..elf_symbol_filter import (
     exported_symbol_names,
 )
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.export_entity_name import (
+    PublicTemplateScopes,
+    public_template_for_symbol,
+    public_template_scopes,
+)
 from .export_owner_resolution import special_member_export_coverage
 
 if TYPE_CHECKING:
@@ -175,6 +180,9 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     # exports through the ordinary function diff (see above). The removal
     # half below is guarded separately, off OLD, because a removed symbol
     # is the one present in OLD.
+    # An export instantiating a template a public header declares is not
+    # "declared in no public header": say which public template it belongs to.
+    public_scopes = public_template_scopes(old).union(public_template_scopes(new))
     if additions_visible_here:
         for symbol_types, declaring_maps, kind in (
             (
@@ -233,6 +241,9 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
                     make_change(
                         kind,
                         symbol=mangled,
+                        description=_instantiation_wording(
+                            mangled, public_scopes, "New exported"
+                        ),
                         # `name` is what the kind's description_template renders;
                         # the export table carries only the mangled spelling, so
                         # that is the honest value for both. `new` additionally
@@ -246,9 +257,30 @@ def _diff_undeclared_exports(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
                     )
                 )
     changes.extend(
-        _export_only_removals(old, new, old_elf, new_elf, filter_transitive, changes)
+        _export_only_removals(
+            old, new, old_elf, new_elf, filter_transitive, changes, public_scopes
+        )
     )
     return changes
+
+
+def _instantiation_wording(
+    mangled: str, public_scopes: PublicTemplateScopes, lead: str
+) -> str | None:
+    """Wording for an export that instantiates a publicly declared template.
+
+    ``None`` (use the kind's own template) when the public headers do not
+    speak for it. Otherwise the description names the public template rather
+    than claiming the symbol is declared in no public header -- the claim that
+    was false for every instantiation of a public template (oneCCL/oneDNN).
+    """
+    template = public_template_for_symbol(mangled, public_scopes)
+    if template is None:
+        return None
+    return (
+        f"{lead} instantiation of public template {template} "
+        f"(no concrete declaration in the parsed headers): {mangled}"
+    )
 
 
 def _export_only_removals(
@@ -258,6 +290,7 @@ def _export_only_removals(
     new_elf: object,
     filter_transitive: bool,
     already: list[Change],
+    public_scopes: PublicTemplateScopes | None = None,
 ) -> list[Change]:
     """The mirror of the addition loop: ABI-relevant exports OLD carried that
     NEW's export table no longer has, and that no public header declares on
@@ -355,7 +388,12 @@ def _export_only_removals(
                     # a crash, not a missing finding, and invisible to a test
                     # sweep that only localized data symbols.
                     description=(
-                        f"Exported symbol not declared in any public header "
+                        _instantiation_wording(
+                            mangled,
+                            public_scopes or PublicTemplateScopes(),
+                            "Removed exported",
+                        )
+                        or f"Exported symbol not declared in any public header "
                         f"removed: {mangled}"
                     ),
                     # The export table carries only the mangled spelling, so

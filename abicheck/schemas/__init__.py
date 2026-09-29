@@ -1046,7 +1046,15 @@ _ARTIFACT_NAMES = frozenset(
 #:        different questions (across a comparison chain vs. OLD-vs-NEW
 #:        within this comparison) over the same population; ``total`` states
 #:        that population so it reconciles with ``summary.total_changes``.
-REPORT_SCHEMA_VERSION = "5.8"
+#: 5.9 -- additive: a finding's ``operation`` may read ``"unchanged"``. A
+#:        cross-source hygiene finding (``exported_not_public`` and siblings)
+#:        whose ``cross_source_evolution`` ``compare()`` stated now reports
+#:        that state -- ``introduced`` -> ``added``, ``resolved`` ->
+#:        ``removed``, ``persistent`` -> ``unchanged`` -- instead of the kind's
+#:        declared ``modified``, which made every such finding read as a
+#:        modification even when identical on both sides
+#:        (``report/change_operation.operation_for_change``).
+REPORT_SCHEMA_VERSION = "5.9"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

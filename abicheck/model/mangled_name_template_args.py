@@ -65,20 +65,68 @@ def read_length_prefixed_name(s: str, i: int) -> tuple[str | None, int]:
     return (None, i) if j == i or len(name) != n else (name, j + n)
 
 
-def skip_template_args(s: str, i: int) -> int | None:
-    """``s[i] == 'I'``: return the index past the matching ``E``, or ``None``.
+def skip_substitution(s: str, i: int) -> int:
+    """``s[i]`` is ``S`` or ``T``: index past the whole substitution/param ref.
 
-    Tracks nested template-argument (``I``) and nested-name (``N``) openers so
-    the inner ``E`` of e.g. ``Box<ns::T>`` does not close the outer list early,
-    skips length-prefixed names so their literal ``I``/``N``/``E`` letters are
-    not miscounted, and consumes ``L<type><value>E`` literal operands as a unit
-    (non-type template args, e.g. ``Array<4>`` → ``ILi4EE``) so their value
-    digits aren't read as a length and their closing ``E`` isn't counted.
-    Pathological encodings (e.g. substitutions whose base-36 index contains
-    ``E``) may mis-balance; the caller treats ``None`` as "unparseable" and
-    falls back, so a wrong guess never produces a finding.
+    ``S_``/``S<seq-id>_`` (seq-id is base-36: digits *and* upper-case
+    letters), the two-letter ``St``/``Sa``/``Sb``/``Ss``/``Si``/``So``/``Sd``
+    abbreviations, and ``T_``/``T<n>_`` template-parameter references.
+    Consumed as one unit so a seq-id digit run (``S12_``) is never read as a
+    source-name length -- which used to swallow the following twelve
+    characters of the mangling -- and a seq-id letter ``E`` (``S1E_``) is
+    never counted as a closer.
     """
-    depth = 0
+    j = i + 1
+    n = len(s)
+    if s[i] == "S" and j < n and "a" <= s[j] <= "z":
+        return j + 1  # St / Sa / Sb / Ss / Si / So / Sd
+    k = j
+    while k < n and (s[k] in _ASCII_DIGITS or "A" <= s[k] <= "Z"):
+        k += 1
+    if k < n and s[k] == "_":
+        return k + 1
+    return j  # not a well-formed reference; step over the letter only
+
+
+def _skip_literal(s: str, i: int) -> int | None:
+    """``s[i] == 'L'``: index past the matching ``E`` of an ``L…E`` literal.
+
+    ``L<builtin><value>E`` (``Li4E``), ``L<nested-type><value>E`` -- an
+    enumerator of a *namespaced* enum, ``LNS0_7attr_idE0E`` -- and an
+    external name ``L_Z<encoding>E``. The first ``E`` after ``L`` is only
+    the closer for the builtin form: for the nested form it closes the type's
+    own ``N…E``, and treating it as the literal's closer left the value and
+    its real ``E`` behind, which then closed the *enclosing* template
+    argument list early (the oneCCL ``*_attr::set``/``get`` exports).
+    """
+    n = len(s)
+    j = i + 1
+    if j < n and s[j] == "N":
+        end = _skip_balanced(s, j)
+        if end is None:
+            return None
+        close = s.find("E", end)
+        return None if close == -1 else close + 1
+    if s.startswith("_Z", j):
+        end = _skip_balanced(s, j + 2, until_unmatched_e=True)
+        return end
+    close = s.find("E", j)
+    return None if close == -1 else close + 1
+
+
+#: Productions opened by one character and closed by a matching ``E``:
+#: template args (``I``), nested names (``N``), argument packs (``J``),
+#: expressions (``X``).
+_OPENERS = frozenset("INJX")
+
+
+def _skip_balanced(s: str, i: int, *, until_unmatched_e: bool = False) -> int | None:
+    """Skip one balanced ``I``/``N``/``J``/``X`` production starting at ``s[i]``.
+
+    With *until_unmatched_e*, instead scan from ``s[i]`` until the first
+    ``E`` that closes nothing opened here, and return the index past it.
+    """
+    depth = 1 if until_unmatched_e else 0
     n = len(s)
     while i < n:
         c = s[i]
@@ -87,23 +135,45 @@ def skip_template_args(s: str, i: int) -> int | None:
             if name is None:
                 return None
             continue
-        if c == "L":
-            close = s.find("E", i + 1)
-            if close == -1:
-                return None
-            i = close + 1
+        if c in ("S", "T"):
+            i = skip_substitution(s, i)
             continue
-        if c in ("I", "N"):
+        if c == "L":
+            nxt = _skip_literal(s, i)
+            if nxt is None:
+                return None
+            i = nxt
+            if depth == 0:
+                return i
+            continue
+        if c in _OPENERS:
             depth += 1
             i += 1
         elif c == "E":
             depth -= 1
             i += 1
-            if depth == 0:
+            if depth <= 0:
                 return i
         else:
-            i += 1  # builtin type, qualifier, or substitution character
+            i += 1  # builtin type, qualifier, or other single-letter code
     return None
+
+
+def skip_template_args(s: str, i: int) -> int | None:
+    """``s[i] == 'I'``: return the index past the matching ``E``, or ``None``.
+
+    Tracks every ``E``-closed production that can appear inside a template
+    argument list -- nested template arguments (``I``), nested names (``N``),
+    argument packs (``J``) and expressions (``X``) -- so the inner ``E`` of
+    e.g. ``Box<ns::T>`` does not close the outer list early; skips
+    length-prefixed names so their literal ``I``/``N``/``E`` letters are not
+    miscounted; consumes substitutions and template-parameter references
+    (``S12_``, ``T0_``) as a unit so a seq-id is never read as a length; and
+    consumes ``L…E`` literals as a unit, including the namespaced-enumerator
+    form ``L<nested-type><value>E``. The caller treats ``None`` as
+    "unparseable" and falls back, so a wrong guess never produces a finding.
+    """
+    return _skip_balanced(s, i)
 
 
 def _collect_nested_name_candidates(

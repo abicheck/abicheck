@@ -139,3 +139,35 @@ def operation_for_kind(kind_val: str) -> str:
     """
     operation = REGISTRY.operation_for(kind_val)
     return operation.value if operation is not None else ChangeOperation.MODIFIED.value
+
+
+#: The per-finding ``operation`` a cross-source hygiene finding carries once
+#: ``compare()`` has stated how it evolved OLD -> NEW. Report-only: it is a
+#: fact about this finding's identity across the two sides, not a property of
+#: its kind, so it never enters the catalog's ``ChangeOperation``.
+UNCHANGED_OPERATION = "unchanged"
+
+
+def operation_for_change(change: object, kind_val: str) -> str:
+    """The display operation for one *finding*, not merely for its kind.
+
+    A cross-source hygiene check (``exported_not_public`` and its siblings)
+    evaluates each snapshot on its own, and its kind declares ``modified``
+    because nothing about the kind says whether the problem is new. That made
+    every such finding read ``operation: modified`` -- including one present,
+    identically, on both sides. When ``compare()`` stamped the finding's
+    :class:`~abicheck.policy.evidence_status.CrossSourceEvolution`, that state
+    is the answer: ``introduced`` -> ``added``, ``resolved`` -> ``removed``,
+    ``persistent`` -> ``unchanged``. ``not_evaluated`` (one side lacked the
+    evidence) states nothing either way, so the kind's declared operation
+    stands, exactly as for every unstamped finding.
+    """
+    evolution = getattr(change, "cross_source_evolution", None)
+    state = getattr(evolution, "value", evolution)
+    if state == "introduced":
+        return ChangeOperation.ADDED.value
+    if state == "resolved":
+        return ChangeOperation.REMOVED.value
+    if state == "persistent":
+        return UNCHANGED_OPERATION
+    return operation_for_kind(kind_val)

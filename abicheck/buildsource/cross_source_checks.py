@@ -97,9 +97,9 @@ from .export_accounting import (
     ACCOUNT_ALLOCATOR_INTERPOSER,
     ACCOUNT_CXX_ARTIFACT,
     ACCOUNT_EXTERNAL_DEP,
-    ACCOUNT_INTERNAL_NS,
+    ACCOUNT_OWN_TYPE_INSTANTIATION,
     ACCOUNT_PUBLIC,
-    ACCOUNT_TEMPLATE_INST,
+    ACCOUNT_PUBLIC_TEMPLATE,
     _account_undocumented_export,
     _external_dependency_origin,
     _library_self_names,
@@ -109,6 +109,13 @@ from .export_accounting import (
 # Export accounting (ADR-035 D4) lives in a sibling module (crosscheck hit the
 # 2000-line file cap). Re-exported so ``_check_exported_not_public`` and the tests
 # keep importing these names from ``crosscheck``.
+from .export_declaration_evidence import (
+    build_export_declaration_evidence,
+    instantiated_over_owned_types,
+    public_template_for_export,
+    textual_declaration_hint,
+)
+from .exported_not_public_finding import exported_not_public_finding
 from .template_linkage import names_a_template_specialization
 
 #: Cross-check fact-schema version. Independent of every other buildsource
@@ -354,6 +361,7 @@ def _check_exported_not_public(
     # An allocator-interposition library (malloc proxy) deliberately exports
     # malloc/operator-new/… replacements; those are native, not a leaked dependency.
     interposer = _ALLOCATOR_INTERPOSER_MARKER in exported
+    evidence = build_export_declaration_evidence(snapshot)
 
     # Account for *every* export with a precise reason so the report can state
     # "100 % accounted": documented API and compiler artifacts are legitimate;
@@ -377,11 +385,18 @@ def _check_exported_not_public(
         # ``_ZTIN3fmt…``) is that exact leaked surface these counters measure, and
         # exempting it as a class artifact would silently undercount it (Codex
         # review). Only a *native* class's artifact is then exempted below.
-        origin_lib = _external_dependency_origin(sym, needed_libs, self_names)
+        # A std/vendored template instantiated over the library's own types is
+        # the library's own vague-linkage copy, never a statically linked dep.
+        own_inst = instantiated_over_owned_types(sym, evidence.owned_namespaces)
+        origin_lib = (
+            None
+            if own_inst
+            else _external_dependency_origin(sym, needed_libs, self_names)
+        )
         if origin_lib is not None:
             account[ACCOUNT_EXTERNAL_DEP] += 1
             findings.append(
-                _exported_not_public_finding(
+                exported_not_public_finding(
                     sym, ACCOUNT_EXTERNAL_DEP, origin_lib, decl_by_sym.get(sym)
                 )
             )
@@ -389,16 +404,27 @@ def _check_exported_not_public(
         if _is_cxx_implementation_symbol(sym):
             account[ACCOUNT_CXX_ARTIFACT] += 1
             continue
-        category = _account_undocumented_export(sym)
+        # An instantiation of a publicly declared template is public API a
+        # consumer links against; "hide it" would break that consumer.
+        if public_template_for_export(sym, evidence) is not None:
+            account[ACCOUNT_PUBLIC_TEMPLATE] += 1
+            continue
+        category = (
+            ACCOUNT_OWN_TYPE_INSTANTIATION
+            if own_inst
+            else _account_undocumented_export(sym)
+        )
         account[category] += 1
+        hint = textual_declaration_hint(sym, evidence)
         findings.append(
-            _exported_not_public_finding(sym, category, None, decl_by_sym.get(sym))
+            exported_not_public_finding(sym, category, None, decl_by_sym.get(sym), hint)
         )
 
     documented = (
         account[ACCOUNT_PUBLIC]
         + account[ACCOUNT_CXX_ARTIFACT]
         + account[ACCOUNT_ALLOCATOR_INTERPOSER]
+        + account[ACCOUNT_PUBLIC_TEMPLATE]
     )
     breakdown = ", ".join(
         f"{cat}={account[cat]}" for cat in _UNDOCUMENTED_ACCOUNTS if account[cat]
@@ -409,64 +435,6 @@ def _check_exported_not_public(
         f"compiler artifact)" + (f"; by reason: {breakdown}" if breakdown else "")
     )
     return _CheckOutput(findings, "present", detail, providers, counters=dict(account))
-
-
-#: Per-category message templates for an undocumented export. Each states the
-#: precise reason and the fix, so a maintainer can triage a leaked dependency
-#: symbol differently from an internal-namespace escape (ADR-035 D4 accounting).
-def _exported_not_public_finding(
-    sym: str,
-    category: str,
-    origin_lib: str | None,
-    decl: Function | Variable | None,
-) -> Change:
-    """Build the ``exported_not_public`` finding for one undocumented export.
-
-    The message is category-specific — an external-dependency leak names the
-    originating library and points at the linkage fix, an internal-namespace or
-    template escape points at the visibility fix — so the *precise reason* rides
-    on the finding, not just the aggregate count.
-    """
-    where = ""
-    if decl is not None and category != ACCOUNT_EXTERNAL_DEP:
-        kind = "function" if isinstance(decl, Function) else "variable"
-        where = f" (declared as {kind} {decl.name!r} in a non-public header)"
-    if category == ACCOUNT_EXTERNAL_DEP:
-        message = (
-            f"Symbol {sym!r} is exported by the binary but originates from an "
-            f"external dependency ({origin_lib}) statically linked and re-exported "
-            "— not part of this library's API. Hide it (visibility/version script) "
-            "or link the dependency dynamically; a differing dependency version on "
-            "another host makes the leaked symbol an ODR/compatibility hazard."
-        )
-    elif category == ACCOUNT_INTERNAL_NS:
-        message = (
-            f"Symbol {sym!r} is exported by the binary but declared in no public "
-            f"header{where}; it belongs to an internal namespace "
-            "(impl/internal/detail/anonymous). It is accidental ABI surface — hide "
-            "it with -fvisibility=hidden or a version script."
-        )
-    elif category == ACCOUNT_TEMPLATE_INST:
-        message = (
-            f"Symbol {sym!r} is an exported C++ template instantiation with no "
-            f"matching public declaration{where} (the public headers declare the "
-            "template, the binary carries this instantiation). Confirm it is "
-            "intended surface, or hide it."
-        )
-    else:  # ACCOUNT_UNDECLARED
-        message = (
-            f"Symbol {sym!r} is exported by the binary but declared in no public "
-            f"header{where}. It is accidental ABI surface — hide it "
-            "(visibility/version script) or document it."
-        )
-    return _change(
-        ChangeKind.EXPORTED_NOT_PUBLIC,
-        sym,
-        message,
-        new_value=sym,
-        old_value=origin_lib,
-        confidence=Confidence.HIGH,
-    )
 
 
 # ---------------------------------------------------------------------------

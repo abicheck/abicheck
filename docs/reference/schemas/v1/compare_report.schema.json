@@ -2983,11 +2983,12 @@
         },
         "operation": {
           "type": "string",
-          "description": "Structured classification of the finding: which of \"added\"/\"removed\"/\"modified\" the change catalog declares for this kind (`ChangeKindMeta.operation`, the same classification --view show=...'s added/removed/changed tokens resolve through). Schema 5.0: read off that single per-kind registration rather than derived from the kind name's own suffix -- a kind whose name ends in \"_added\" while naming a trait *gained by a persisting entity* (`func_noexcept_added`, `type_field_added`, `virtual_method_added`, ...) therefore reports \"modified\" where a suffix reading said \"added\". The catalog is the contract; the name never was.",
+          "description": "Structured classification of the finding: which of \"added\"/\"removed\"/\"modified\" the change catalog declares for this kind (`ChangeKindMeta.operation`, the same classification --view show=...'s added/removed/changed tokens resolve through). Schema 5.0: read off that single per-kind registration rather than derived from the kind name's own suffix -- a kind whose name ends in \"_added\" while naming a trait *gained by a persisting entity* (`func_noexcept_added`, `type_field_added`, `virtual_method_added`, ...) therefore reports \"modified\" where a suffix reading said \"added\". The catalog is the contract; the name never was. Schema 5.7: a cross-source hygiene finding whose `cross_source_evolution` was stated reads that state instead -- introduced -> \"added\", resolved -> \"removed\", persistent -> \"unchanged\" (the one value no kind declares).",
           "enum": [
             "added",
             "removed",
-            "modified"
+            "modified",
+            "unchanged"
           ]
         },
         "entity": {
