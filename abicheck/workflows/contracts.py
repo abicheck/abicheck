@@ -61,7 +61,7 @@ from __future__ import annotations
 import math
 from dataclasses import KW_ONLY, dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..change_registry_types import Verdict
 from ..checker_types import DiffResult
@@ -93,9 +93,6 @@ from .request_inputs import (
     frontend_value_errors,
     required_path as required_path,
 )
-
-if TYPE_CHECKING:
-    from .resolved_execution_context import ResolvedExecutionContext
 
 
 @dataclass(frozen=True)
@@ -714,8 +711,11 @@ class CompareResult:
     # One Semantic Pipeline sub-phase 4B: the pair's `ResolvedExecutionContext`
     # with its `evaluation_config` filled in -- the one resolved object the
     # classification, `exit_decision` and the receipt were all scored from.
-    # `None` only for a hand-built pair that carried no context at all.
-    resolved_execution_context: ResolvedExecutionContext | None = None
+    # `None` only for a hand-built pair that carried no context at all. Typed
+    # `object` (a `ResolvedExecutionContext` by construction): importing it,
+    # even under TYPE_CHECKING, closes a contracts -> resolved_execution_context
+    # -> plan -> contracts cycle the import-cycle-growth gate rejects.
+    resolved_execution_context: object | None = None
 
     def as_tuple(self) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
         """Return ``(diff, old_snapshot, new_snapshot)`` — the pre-0.6 shape.
