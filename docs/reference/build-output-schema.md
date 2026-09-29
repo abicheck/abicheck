@@ -47,7 +47,8 @@ as-installed header root — see [Validation rules](#validation-rules) below.
     "os": "linux", "arch": "x86_64",
     "compiler": {"family": "gcc", "version": "13.2.0"},
     "cxx_abi": "itanium", "stdlib": "libstdc++",
-    "config": "release"
+    "config": "release",
+    "build_system": {"name": "cmake", "generator": "Ninja"}
   },
   "targets": [
     {
@@ -105,6 +106,24 @@ single-artifact match with no subdirectory, so the name is ambiguous by
 construction) and hard-fails the `plan` job if a file has no `profile.id`
 set. Set it explicitly if your build-output producer targets
 `check-project.yml`.
+
+### `profile.build_system`
+
+Optional `{"name", "generator"}` object naming the build system that produced
+this build: `name` is the build system (`cmake`, `bazel`, `make`, `msbuild`,
+...), `generator` its backend where one exists (CMake's `Ninja` / `Unix
+Makefiles`), empty otherwise. Absent means *unrecorded*, never "no build
+system". The validator rejects a present-but-malformed value (not an object,
+empty/non-string `name`, non-string `generator`) rather than dropping it, and
+reports a target whose `evidence.attribution_path` build evidence names a
+different build system (`BuildEvidence.generators[].kind`; a `generic` or
+generator-less evidence file never conflicts).
+
+The same identity is what the comparability gate reads off a snapshot's
+embedded L3 build evidence: two snapshots built by different build systems,
+or scoped to different root targets, are refused as not comparable
+([ADR-050](../contribute/adr/050-comparability-contract-and-multi-tu-manifest.md)'s
+build-identity amendment).
 
 ### `targets[]` fields
 

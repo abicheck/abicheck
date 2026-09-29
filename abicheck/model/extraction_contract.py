@@ -84,3 +84,132 @@ class ExtractionContract:
     # that indistinguishability from "never attempted" is exactly what
     # previously let a mismatched GCC/Clang pair compare silently.
     compiler_identity_status: str | None = None
+
+
+#: Version of the build-identity record :func:`build_identity_of` derives.
+#: Bumped when the set of components that name "the build that produced this
+#: evidence" changes, so a reader can tell an identity recorded under an older
+#: rule from one recorded under the current one.
+BUILD_IDENTITY_VERSION = 1
+
+
+@dataclass(frozen=True)
+class BuildIdentity:
+    """Which build system, generator and root-target scope produced one side's
+    L3 build evidence (WS-A / integration-lab P0.7 "build-system axis").
+
+    Derived, never stored separately: every component already lives in the
+    snapshot's own persisted ``build_source.build_evidence`` (``generators``
+    and ``target_scope``), so a snapshot written before this record existed
+    yields the same identity a fresh one does -- there is no second copy that
+    could drift from the evidence it describes.
+
+    ``build_systems`` is ``()`` when the evidence names no generator (a bare
+    ``compile_commands.json`` carries none): the build system is then
+    *unrecorded*, not "none". ``root_targets`` is ``None`` when no root-target
+    scoping was requested (a workspace-wide collection) and the sorted
+    requested labels otherwise -- the two are different extractions.
+    Generator *versions* are deliberately excluded: a CMake point release is
+    not a different build system and must not refuse a comparison.
+    """
+
+    build_systems: tuple[tuple[str, str], ...]
+    root_targets: tuple[str, ...] | None
+    version: int = BUILD_IDENTITY_VERSION
+
+    @property
+    def build_system_recorded(self) -> bool:
+        return bool(self.build_systems)
+
+    def describe_build_system(self) -> str:
+        if not self.build_systems:
+            return "unrecorded"
+        return ", ".join(
+            f"{kind} ({gen})" if gen else kind for kind, gen in self.build_systems
+        )
+
+    def describe_root_targets(self) -> str:
+        if self.root_targets is None:
+            return "unscoped (workspace-wide)"
+        return ", ".join(self.root_targets) or "<none>"
+
+
+def build_identity_of(snapshot: object) -> BuildIdentity | None:
+    """*snapshot*'s :class:`BuildIdentity`, or ``None`` when it carries no L3
+    build evidence at all (nothing it extracted is attributable to a build).
+
+    Duck-typed over ``snapshot.build_source.build_evidence`` so this model
+    module does not import ``buildsource``.
+    """
+    pack = getattr(snapshot, "build_source", None)
+    evidence = getattr(pack, "build_evidence", None) if pack is not None else None
+    if evidence is None:
+        return None
+    systems = sorted(
+        {
+            (
+                str(getattr(g, "kind", "") or "").strip().lower(),
+                str(getattr(g, "generator", "") or "").strip(),
+            )
+            for g in getattr(evidence, "generators", None) or ()
+        }
+        - {("", ""), ("generic", "")}
+    )
+    scope = getattr(evidence, "target_scope", None)
+    roots = (
+        None
+        if scope is None or not getattr(scope, "requested", None)
+        else tuple(sorted({str(r) for r in scope.requested}))
+    )
+    return BuildIdentity(build_systems=tuple(systems), root_targets=roots)
+
+
+#: What a build-identity divergence leaves unverified: the build drives the
+#: compile flags the header AST was parsed under (declaration/layout) and the
+#: L3-L5 source graph itself (source).
+BUILD_IDENTITY_DIMENSIONS = frozenset({"declaration", "layout", "source"})
+
+
+def build_identity_divergence(old: object, new: object) -> tuple[str, bool] | None:
+    """``(reason, fatal)`` when two snapshots' build identities diverge, else
+    ``None``.
+
+    * Either side carries no L3 build evidence: not applicable (``None``).
+    * Both record a build system and they differ, or both carry evidence and
+      the requested root targets differ (including scoped vs. unscoped):
+      **fatal** -- the two sides are different extractions, and diffing them
+      would report build-system drift as ABI change.
+    * Exactly one side records a build system (the other's evidence names no
+      generator, e.g. a pre-identity baseline built from a bare compile DB):
+      **non-fatal** -- the comparison runs, but that it compares the same
+      build cannot be verified, so the result is bounded rather than read as
+      a clean pass (absent is not removed; weaker evidence narrows).
+    """
+    a, b = build_identity_of(old), build_identity_of(new)
+    if a is None or b is None:
+        return None
+    if a.root_targets != b.root_targets:
+        return (
+            "build identity: root targets differ (old: "
+            f"{a.describe_root_targets()}; new: {b.describe_root_targets()}) -- "
+            "the two sides' build evidence covers different target scopes",
+            True,
+        )
+    if a.build_system_recorded and b.build_system_recorded:
+        if a.build_systems != b.build_systems:
+            return (
+                "build identity: build system differs (old: "
+                f"{a.describe_build_system()}; new: {b.describe_build_system()}) "
+                "-- produce the baseline under the same build system/generator",
+                True,
+            )
+        return None
+    if a.build_system_recorded != b.build_system_recorded:
+        return (
+            "build identity: build system recorded on one side only (old: "
+            f"{a.describe_build_system()}; new: {b.describe_build_system()}) -- "
+            "comparison runs, but that both sides come from the same build "
+            "system is unverified",
+            False,
+        )
+    return None
