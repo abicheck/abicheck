@@ -569,8 +569,9 @@ class TestCompareTellsTheTwoAxesApart:
     ) -> None:
         """The genuine "cannot tell": the report query prints nothing, so the
         mapping must not read that as a zero severity contribution. Since
-        ADR-063 Track T8 the stderr notice is not consulted either, so the
-        run keeps the verdict its exit code established."""
+        ADR-063 Track T8 the stderr notice is not consulted either. Exit 1
+        with no readable result attributes no axis at all -- not even
+        severity -- so it publishes the transport-level ERROR."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
@@ -590,7 +591,7 @@ class TestCompareTellsTheTwoAxesApart:
             },
             bindir,
         )
-        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+        assert outputs["verdict"] == "ERROR", outputs
 
     def test_the_report_is_found_when_json_goes_to_stdout(self, tmp_path: Path) -> None:
         """`format: json` with no `output-file` is the documented stdout mode:
