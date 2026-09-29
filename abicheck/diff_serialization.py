@@ -155,11 +155,13 @@ def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, tuple[str, str]]:
             # An end-of-list marker (``*_last``, ``LastSymbol``, ``*_count``)
             # is not a persisted id; its value moves whenever a member is
             # added and the enum-member detectors already report it.
+            # Cheap name test first: the sentinel check tokenizes, and almost
+            # no member of an ordinary enum is a tag candidate at all.
+            if not (type_is_tag or _looks_like_serialization_tag(m.name)):
+                continue
             if is_sentinel_enum_member(m.name):
                 continue
-            full = f"{enum_t.name}::{m.name}"
-            if type_is_tag or _looks_like_serialization_tag(m.name):
-                out.setdefault(full, (str(m.value), _ENTITY_ENUM))
+            out.setdefault(f"{enum_t.name}::{m.name}", (str(m.value), _ENTITY_ENUM))
     return out
 
 
