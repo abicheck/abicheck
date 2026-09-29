@@ -312,7 +312,10 @@ class TestGloballyRetiredInputsFailPreflight:
         """A hard removal with no deprecation window (ADR-068 D8) has to say
         what to do instead, or the error is just a wall."""
         for env, needle in (
-            ({"INPUT_NEW_LIBRARY_SET": "a.so,b.so"}, "compare each library individually"),
+            (
+                {"INPUT_NEW_LIBRARY_SET": "a.so,b.so"},
+                "compare each library individually",
+            ),
             ({"INPUT_RISK_RULES": "rules.yaml"}, "depth: source"),
             (
                 {"INPUT_CROSSCHECK": "odr_type_variant=error"},
