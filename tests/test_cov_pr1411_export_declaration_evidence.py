@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from abicheck.buildsource.export_declaration_evidence import (
     ExportDeclarationEvidence,
     build_export_declaration_evidence,
@@ -107,3 +109,27 @@ def test_instantiated_over_owned_types() -> None:
     assert not instantiated_over_owned_types(sym, frozenset())
     assert not instantiated_over_owned_types("plain_c", owned)
     assert not instantiated_over_owned_types("_ZNSt6vectorIiE5clearEv", owned)
+
+
+@pytest.mark.parametrize("sep", ["/", "\\"])
+@pytest.mark.parametrize("pattern_sep", ["/", "\\"])
+def test_exact_exclusion_is_separator_independent(sep: str, pattern_sep: str) -> None:
+    """Exact matching must not depend on which separator the platform or the
+    pattern uses: every combination of POSIX/Windows spelling of the header
+    path and of the pattern agrees with the separator-free oracle."""
+    from abicheck.buildsource.export_declaration_evidence import exact_exclusion_matches
+
+    parts = ["C:" if sep == "\\" else "", "inc", "detail", "hidden.hpp"]
+    path = sep.join(parts)
+    cases = {
+        ("detail", "hidden.hpp"): True,
+        ("hidden.hpp",): True,
+        ("inc", "detail", "hidden.hpp"): True,
+        ("etail", "hidden.hpp"): False,  # a suffix of a component is not a match
+        ("detail", "hidden.h"): False,
+        ("other", "hidden.hpp"): False,
+    }
+    for comps, expected in cases.items():
+        pattern = pattern_sep.join(comps)
+        assert exact_exclusion_matches(path, (pattern,)) is expected, (path, pattern)
+    assert exact_exclusion_matches(path, ()) is False

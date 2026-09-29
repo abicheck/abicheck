@@ -230,6 +230,23 @@ def _textual_templates(headers: list[_HeaderText]) -> frozenset[str]:
     return frozenset(names)
 
 
+def exact_exclusion_matches(path: str, patterns: tuple[str, ...]) -> bool:
+    """Whether *path* is named exactly by one of *patterns* (whole path, or a
+    trailing ``/``-separated suffix of it).
+
+    Both sides are separator-normalized first, so a native Windows path
+    (``C:\\inc\\detail\\hidden.hpp``) matches the ``detail/hidden.hpp`` a
+    pattern spells with ``/`` -- comparing raw strings silently never matched
+    on Windows.
+    """
+    norm = path.replace("\\", "/")
+    for pattern in patterns:
+        want = str(pattern).replace("\\", "/").strip("/")
+        if want and (norm == want or norm.endswith("/" + want)):
+            return True
+    return False
+
+
 def build_export_declaration_evidence(
     snapshot: AbiSnapshot,
 ) -> ExportDeclarationEvidence:
@@ -240,7 +257,7 @@ def build_export_declaration_evidence(
     for f in _candidate_header_files(snapshot):
         path = str(f)
         if exact:
-            excluded = any(path == p or path.endswith("/" + p) for p in patterns)
+            excluded = exact_exclusion_matches(path, patterns)
         else:
             excluded = header_matches_exclusion(path, patterns)
         try:
