@@ -77,7 +77,9 @@ class TestManifest:
         build.stage(rendered, tmp_path / "skills", "1.0.0")
         for key, content in rendered.items():
             assert (tmp_path / "skills" / key).read_text(encoding="utf-8") == content
-        manifest = json.loads((tmp_path / "skills" / "manifest.json").read_text())
+        manifest = json.loads(
+            (tmp_path / "skills" / "manifest.json").read_text(encoding="utf-8")
+        )
         assert manifest["package_version"] == "1.0.0"
 
 
@@ -187,7 +189,8 @@ def test_npx_install_from_packed_tarball_matches_the_renderer(tmp_path):
         assert installed == rendered, tree
         owners = list(root.glob("*/.abicheck-skill.json"))
         assert owners and all(
-            json.loads(o.read_text())["version"] == build.abicheck_version()
+            json.loads(o.read_text(encoding="utf-8"))["version"]
+            == build.abicheck_version()
             for o in owners
         )
 

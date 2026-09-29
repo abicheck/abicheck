@@ -1083,7 +1083,7 @@ class TestOpaqueRunDirectory:
                 assert word not in visible
             assert runner.workspace_path_leak(real / "workspace") is None
             (readable / "final.md").write_text("x")
-            assert (real / "final.md").read_text() == "x"
+            assert (real / "final.md").read_text(encoding="utf-8") == "x"
             runner._remove_run_dir(readable)
             assert not readable.exists() and not readable.is_symlink()
             assert not real.exists()

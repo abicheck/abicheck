@@ -73,7 +73,7 @@ def test_several_roots_grade_as_their_union(tmp_path):
         run_skill_eval.main(["--runs", str(a), "--runs", str(b), "--json", str(out)])
         == 0
     )
-    report = json.loads(out.read_text())
+    report = json.loads(out.read_text(encoding="utf-8"))
     runs = report["runs"]
     assert len(runs) == 4
     assert {r["runs_root"] for r in runs} == {str(a), str(b)}
@@ -88,7 +88,7 @@ def test_several_roots_grade_as_their_union(tmp_path):
     for root in (a, b):
         single = tmp_path / f"{root.name}.json"
         assert run_skill_eval.main(["--runs", str(root), "--json", str(single)]) == 0
-        singles += json.loads(single.read_text())["runs"]
+        singles += json.loads(single.read_text(encoding="utf-8"))["runs"]
     key = lambda r: (r["runs_root"], r["arm"], r["repetition"])  # noqa: E731
     assert sorted(singles, key=key) == sorted(runs, key=key)
 
