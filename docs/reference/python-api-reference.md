@@ -64,6 +64,7 @@ What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
 | `suppression` | `SuppressionList \| None` | `None` |
 | `exit_decision` | `ExitDecision \| None` | `None` |
 | `severity_config` | `SeverityConfig \| None` | `None` |
+| `resolved_execution_context` | `object \| None` | `None` |
 
 ## `CompileContext`
 
