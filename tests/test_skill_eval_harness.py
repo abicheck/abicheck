@@ -28,7 +28,9 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -923,3 +925,165 @@ class TestSupportedHere:
             )
             is False
         )
+
+
+def _bash_events(*commands: str, tool: str = "Bash") -> list[dict]:
+    key = "command" if tool == "Bash" else "content"
+    return [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "tool_use", "name": tool, "input": {key: c}}
+                    for c in commands
+                ]
+            },
+        }
+    ]
+
+
+class TestRecorderShadowing:
+    """The shim must be the `abicheck` that resolved, or the run is not graded.
+
+    Real incident (2026-09-29): launched from inside a Claude Code session, the
+    child `claude` resumed the parent session, re-sourced its SessionStart
+    environment file, and put the parent's dev venv ahead of the shim. Every
+    call ran and none was recorded, so both arms scored "never compared".
+    """
+
+    INVOCATIONS = (
+        "abicheck --version",
+        "abicheck compare a.so b.so",
+        "cd lib && abicheck compare a b -o json=r.json",
+        "true; abicheck dump x.so",
+        "(abicheck compare a b)",
+        "echo `abicheck --version`",
+        "x=1 | abicheck compare a b",
+    )
+    NON_INVOCATIONS = (
+        "ls /opt/abicheck-venv/bin",
+        "cat abicheck_report.json",
+        "grep -r myabicheck .",
+        "echo abichecker",
+    )
+
+    @pytest.mark.parametrize("command", INVOCATIONS)
+    def test_an_unrecorded_invocation_is_shadowing(self, tmp_path, command):
+        calls = tmp_path / "calls.jsonl"
+        assert runner.abicheck_command_count(_bash_events(command)) == 1
+        assert runner._shadowed_the_recorder(_bash_events(command), calls)
+        calls.write_text("")  # present but empty is still nothing recorded
+        assert runner._shadowed_the_recorder(_bash_events(command), calls)
+
+    @pytest.mark.parametrize("command", INVOCATIONS)
+    def test_a_recorded_invocation_is_not_shadowing(self, tmp_path, command):
+        calls = tmp_path / "calls.jsonl"
+        calls.write_text(json.dumps({"seq": 0, "argv": ["--version"]}) + "\n")
+        assert not runner._shadowed_the_recorder(_bash_events(command), calls)
+
+    @pytest.mark.parametrize("command", NON_INVOCATIONS)
+    def test_a_mention_that_is_not_a_command_word_is_ignored(self, tmp_path, command):
+        assert runner.abicheck_command_count(_bash_events(command)) == 0
+        assert not runner._shadowed_the_recorder(
+            _bash_events(command), tmp_path / "calls.jsonl"
+        )
+
+    def test_non_bash_content_naming_the_tool_is_not_an_invocation(self, tmp_path):
+        events = _bash_events("run abicheck compare a b", tool="Write")
+        assert runner.abicheck_command_count(events) == 0
+        assert not runner._shadowed_the_recorder(events, tmp_path / "calls.jsonl")
+
+    def test_child_environment_drops_every_parent_session_binding(self):
+        parent = {name: "x" for name in runner.PARENT_SESSION_VARIABLES}
+        parent |= {
+            "PATH": "/usr/bin",
+            "ANTHROPIC_BASE_URL": "http://proxy",
+            "HOME": "/root",
+        }
+        child = runner.child_environment(parent)
+        assert not set(child) & runner.PARENT_SESSION_VARIABLES
+        assert child == {
+            "PATH": "/usr/bin",
+            "ANTHROPIC_BASE_URL": "http://proxy",
+            "HOME": "/root",
+        }
+        assert "CLAUDE_CODE_SESSION_ID" in runner.PARENT_SESSION_VARIABLES
+        assert "CLAUDE_ENV_FILE" in runner.PARENT_SESSION_VARIABLES
+
+
+class TestWorkspacePathLeak:
+    """The workspace path is in the agent's system prompt, so it must be neutral.
+
+    Real incident (2026-09-29): an `--out` below a directory named after this
+    repository put the tool's name in every baseline cwd; the baseline's first
+    command was `which abicheck`.
+    """
+
+    @pytest.mark.parametrize(
+        "leaky",
+        [
+            "home/user/abicheck/runs",
+            "tmp/-home-user-abicheck-0152/scratchpad/runs",
+            "tmp/ABICheck-evals",
+            "tmp/eval/BREAKING/x",
+            "tmp/eval/compatible_runs",
+        ],
+    )
+    def test_a_path_naming_the_tool_or_a_verdict_is_a_leak(self, tmp_path, leaky):
+        assert runner.workspace_path_leak(tmp_path / leaky / "workspace") is not None
+
+    @pytest.mark.parametrize(
+        "neutral", ["skill-eval-runs", "se/removed-export/skill/0", "a/b/c"]
+    )
+    def test_a_neutral_path_is_not_a_leak(self, neutral):
+        # Built from a fixed neutral root rather than tmp_path, whose own
+        # prefix is whatever pytest's basetemp is on this host.
+        assert runner.workspace_path_leak(Path("/tmp") / neutral / "workspace") is None
+
+    def test_main_refuses_a_leaky_out_before_any_model_call(self, tmp_path, capsys):
+        rc = runner.main(
+            ["--out", str(tmp_path / "abicheck-runs"), "--repetitions", "1"]
+        )
+        assert rc == 1
+        assert "system prompt" in capsys.readouterr().err
+        assert not (tmp_path / "abicheck-runs").exists()
+
+
+class TestOpaqueRunDirectory:
+    """Every agent-visible path must name neither the scenario nor the arm.
+
+    The readable `<scenario>/<arm>/<rep>` layout used to *be* the workspace, so
+    the agent's cwd read `.../compatible-addition/baseline/0/workspace`: the
+    expected answer and the treatment, in its system prompt.
+    """
+
+    SCENARIOS = (
+        "compatible-addition",
+        "consumer-unaffected-despite-break",
+        "removed-export",
+    )
+
+    @pytest.mark.parametrize("sid", SCENARIOS)
+    @pytest.mark.parametrize("arm", ["skill", "baseline"])
+    def test_real_path_names_neither_scenario_nor_arm(self, tmp_path, sid, arm):
+        out_root = Path(tempfile.mkdtemp(prefix="neutral-", dir="/tmp"))
+        try:
+            readable = out_root / sid / arm / "0"
+            real = runner.make_opaque_run_dir(out_root, readable)
+            assert readable.is_symlink() and readable.resolve() == real.resolve()
+            visible = str(real.resolve().relative_to(out_root.resolve()))
+            for word in (sid, arm, *sid.split("-")):
+                assert word not in visible
+            assert runner.workspace_path_leak(real / "workspace") is None
+            (readable / "final.md").write_text("x")
+            assert (real / "final.md").read_text() == "x"
+            runner._remove_run_dir(readable)
+            assert not readable.exists() and not readable.is_symlink()
+            assert not real.exists()
+        finally:
+            shutil.rmtree(out_root, ignore_errors=True)
+
+    def test_two_runs_never_share_a_directory(self, tmp_path):
+        a = runner.make_opaque_run_dir(tmp_path, tmp_path / "s" / "skill" / "0")
+        b = runner.make_opaque_run_dir(tmp_path, tmp_path / "s" / "skill" / "1")
+        assert a != b
