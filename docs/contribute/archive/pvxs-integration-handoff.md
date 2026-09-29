@@ -372,7 +372,7 @@ and nothing runs contributor-authored code with elevated permissions.
 **Deployment prerequisites.** Pin every Action to the merge SHA. `workflow_run`
 still only runs the default-branch copy of a workflow file — that constraint is
 unchanged and is documented in
-[`docs/use/multi-component-ci.md`](docs/use/multi-component-ci.md), the new
+[`docs/use/multi-component-ci.md`](../../use/multi-component-ci.md), the new
 page covering this whole shape.
 
 ---
