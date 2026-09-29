@@ -883,7 +883,7 @@ def build_html_document(
             ),
             "impact": dataclasses.asdict(impact) if impact is not None else None,
             "versioning_policy": compute_versioning_policy(result),
-            "surface_changes": _surface_changes(result, display_changes),
+            "surface_changes": _surface_changes(result, display_changes, envelope),
             "use_case_impact": compute_use_case_impact(
                 result, display_changes if show_only else None
             ),
@@ -956,13 +956,21 @@ def generate_html_report(
     return render_html_document(document)
 
 
-def _surface_changes(result: object, changes: list[object]) -> dict[str, object] | None:
+def _surface_changes(
+    result: object, changes: list[object], envelope: ReportEnvelope | None
+) -> dict[str, object] | None:
     """Additions/removals/modifications over the displayed changes (``None``
-    for a duck-typed result that carries no policy to resolve them with)."""
+    for a duck-typed result that carries no policy to resolve them with).
+
+    Reads the envelope's already-resolved findings when one is given, so the
+    projection never resolves a verdict a second time."""
     from .report.surface_changes import compute_surface_changes
 
     if not hasattr(result, "_effective_kind_sets"):
         return None
+    if envelope is not None:
+        findings = envelope.findings_for(changes)  # type: ignore[arg-type]
+        return compute_surface_changes(result, findings).to_dict()  # type: ignore[arg-type]
     return compute_surface_changes(result, changes=changes).to_dict()  # type: ignore[arg-type]
 
 
