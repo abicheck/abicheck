@@ -233,9 +233,9 @@ case "$MODE" in
     # check in this script; run.sh has no `scan` case left at all to fall
     # back on.
     if [[ ( -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ) && "${INPUT_AUDIT:-false}" != "true" ]]; then
-      _fail "mode: scan is no longer supported (ADR-068). Replacement for a baseline scan: mode: compare with old-library set to the same baseline (against/abi-baseline both map onto old-library/abi-baseline unchanged), and new-library unchanged."
+      _fail "mode: scan is no longer supported. Replacement for a baseline scan: mode: compare with old-library set to the same baseline (against/abi-baseline both map onto old-library/abi-baseline unchanged), and new-library unchanged."
     else
-      _fail "mode: scan is no longer supported (ADR-068). Replacement for an audit-only scan (no baseline, or audit: true): mode: compare with old-library and abi-baseline both omitted -- new-library alone runs an audit-only compare --no-baseline. This candidate-side audit no longer gates a CI job on a BREAKING/API_BREAK-classified finding by default the way mode: scan did -- set severity-preset (e.g. 'default') to restore that gating; without it the step always exits 0/passes regardless of what the audit finds."
+      _fail "mode: scan is no longer supported. Replacement for an audit-only scan (no baseline, or audit: true): mode: compare with old-library and abi-baseline both omitted -- new-library alone runs an audit-only compare --no-baseline. This candidate-side audit no longer gates a CI job on a BREAKING/API_BREAK-classified finding by default the way mode: scan did -- set severity-preset (e.g. 'default') to restore that gating; without it the step always exits 0/passes regardless of what the audit finds."
     fi
     ;;
   dump)
@@ -279,13 +279,13 @@ case "$MODE" in
         _fail "mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not accept a directory or package for new-library ('$NEW_LIBRARY') — an audit-only run analyses exactly one artifact, it has no per-library fan-out. Point new-library at a single library, or set old-library (or abi-baseline) to run a directory/package comparison instead."
       fi
       if [[ -n "${INPUT_SINCE:-}" ]]; then
-        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --since as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports since, or drop since for this audit-only run."
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (compare --no-baseline rejects --since as a usage error). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports since, or drop since for this audit-only run."
       fi
       if [[ -n "${INPUT_CHANGED_PATH:-}" ]]; then
-        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --changed-path as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports changed-path, or drop changed-path for this audit-only run."
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (compare --no-baseline rejects --changed-path as a usage error). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports changed-path, or drop changed-path for this audit-only run."
       fi
       if [[ -n "${INPUT_BUDGET:-}" ]]; then
-        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports budget, or drop budget for this audit-only run."
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (compare --no-baseline rejects --budget as a usage error). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports budget, or drop budget for this audit-only run."
       fi
       if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
         _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support follow-deps -- compare --no-baseline's DT_NEEDED dependency walk is not wired to this path yet (rejected outright by the CLI, abicheck/frontends/cli/commands/no_baseline_rulings.py). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports follow-deps, or drop follow-deps for this audit-only run."
@@ -510,7 +510,7 @@ fi
 # workflow that still sets it fails before Python setup and the toolchain
 # install, matching this script's own fail-fast rationale.
 if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
-  _fail "build-target is retired on every mode (ADR-068 (b) retired it for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's build-config input (or let it auto-discover from sources)."
+  _fail "build-target is retired on every mode (it was retired for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's build-config input (or let it auto-discover from sources)."
 fi
 
 # new-library-set: retired outright (ADR-068 (b): scan --artifact-set is
@@ -518,7 +518,7 @@ fi
 # mode: scan) -- fails on every mode now, not just a scan-mode arm, since
 # there is no longer a mode it could ever have affected.
 if [[ -n "$NEW_LIBRARY_SET" ]]; then
-  _fail "new-library-set is no longer supported (ADR-068 (b): scan --artifact-set, and mode: scan itself, are both retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented. Remove new-library-set; compare each library individually, or wait for ADR-065 S3."
+  _fail "new-library-set is no longer supported (scan --artifact-set and mode: scan itself are both retired). Remove new-library-set and compare each library individually."
 fi
 
 # crosscheck: same shape as new-library-set directly above -- retired
@@ -527,7 +527,7 @@ fi
 # mode: scan (crosscheck has never been a `compare`/`dump`/`deps-tree`/
 # `deps-compare` input) -- fails on every mode now.
 if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
-  _fail "crosscheck is no longer supported (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax, and mode: scan itself, are both retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity). Remove crosscheck and use policy.overrides instead."
+  _fail "crosscheck is no longer supported (scan --crosscheck's KEY=error promotion syntax and mode: scan itself are both retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity). Remove crosscheck and use policy.overrides instead."
 fi
 
 # risk-rules: same shape -- retired outright (ADR-068 (b): scan
@@ -535,7 +535,7 @@ fi
 # mode: scan itself, are both gone), and it applied only to the now-removed
 # mode: scan -- fails on every mode now.
 if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
-  _fail "risk-rules is no longer supported (ADR-068 (b): scan --risk-rules, and mode: scan itself, are both retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level a risk profile used to escalate to. Remove risk-rules."
+  _fail "risk-rules is no longer supported (scan --risk-rules and mode: scan itself are both retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level a risk profile used to escalate to. Remove risk-rules."
 fi
 
 # Removed inputs, kept registered in action.yml as tombstones and rejected
@@ -562,7 +562,7 @@ fi
 # no per-mode "inert" state left to warn about (build-config is
 # unconditionally forwarded for every mode that can reach it).
 if [[ -n "${INPUT_JOBS:-}" ]]; then
-  _warn "jobs ('${INPUT_JOBS}') was removed (ADR-068 D5) and has no effect: abicheck's release fan-out auto-detects its worker count and clamps it to available memory, and the -j/--jobs flag it forwarded no longer exists. Remove jobs from your workflow. Expect higher wall time and peak RSS than a manually capped run."
+  _warn "jobs ('${INPUT_JOBS}') was removed and has no effect: abicheck's release fan-out auto-detects its worker count and clamps it to available memory, and the -j/--jobs flag it forwarded no longer exists. Remove jobs from your workflow. Expect higher wall time and peak RSS than a manually capped run."
 fi
 if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
   _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."

@@ -97,7 +97,7 @@ inputs:
       Everything recorded is a CLAIM by a possibly-unprivileged, possibly-
       fork job. Each field is shape-validated when written, and the
       publisher verifies the recorded commit's association with the pull
-      request through the API before displaying it (ADR-073). Off by
+      request through the API before displaying it. Off by
       default, so no existing caller's document changes shape.
     required: false
     default: 'false'

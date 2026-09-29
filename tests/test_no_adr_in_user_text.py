@@ -126,3 +126,85 @@ def test_no_adr_reference_in_click_help(path: str, cmd: click.Command) -> None:
         texts[f"param {param.name}"] = getattr(param, "help", None)
     offending = {k: v for k, v in texts.items() if v and "ADR" in v}
     assert not offending, f"{path}: help text cites an ADR: {offending}"
+
+
+# ── The GitHub Action layer ──────────────────────────────────────────────────
+
+REPO_ROOT = PACKAGE_ROOT.parent
+ACTION_YMLS = sorted(
+    [REPO_ROOT / "action.yml", *(REPO_ROOT / "actions").glob("*/action.yml")]
+)
+ACTION_SCRIPTS = sorted(
+    [*(REPO_ROOT / "action").glob("*.sh"), *(REPO_ROOT / "actions").rglob("*.sh")]
+)
+
+#: A shell line that emits text to a user: echo/printf, the validate-inputs
+#: helpers, or a GitHub annotation. Deliberately simple and explicit.
+_EMITS_OUTPUT_RE = re.compile(
+    r"\b(echo|printf|_fail|_warn)\b|::(error|warning|notice)::|GITHUB_STEP_SUMMARY"
+)
+
+
+def _descriptions(node: object, where: str):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "description" and isinstance(value, str):
+                yield where, value
+            else:
+                yield from _descriptions(value, f"{where}.{key}")
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _descriptions(value, f"{where}[{i}]")
+
+
+def test_action_yml_files_found() -> None:
+    assert REPO_ROOT / "action.yml" in ACTION_YMLS
+    assert len(ACTION_YMLS) > 1
+    assert any(p.name == "run.sh" for p in ACTION_SCRIPTS)
+
+
+@pytest.mark.parametrize(
+    "path", ACTION_YMLS, ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
+)
+def test_no_adr_reference_in_action_descriptions(path: Path) -> None:
+    import yaml
+
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    descriptions = list(_descriptions(doc, path.name))
+    assert descriptions, f"{path}: no description strings found"
+    offending = [(w, d[:120]) for w, d in descriptions if ADR_RE.search(d)]
+    assert not offending, f"{path}: description cites an ADR: {offending}"
+
+
+def _output_lines_citing_adr(text: str) -> list[str]:
+    hits = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if _EMITS_OUTPUT_RE.search(line) and ADR_RE.search(line):
+            hits.append(f"{lineno}: {line.strip()[:120]}")
+    return hits
+
+
+def test_output_line_detector_is_not_vacuous() -> None:
+    assert _output_lines_citing_adr('echo "::error::gone (ADR-068)."')
+    assert _output_lines_citing_adr('_fail "x (ADR-065 S1)"')
+    assert not _output_lines_citing_adr("# echo (ADR-068) in a comment")
+    assert not _output_lines_citing_adr('echo "no citation here"')
+
+
+@pytest.mark.parametrize(
+    "path", ACTION_SCRIPTS, ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
+)
+def test_no_adr_reference_in_action_script_output(path: Path) -> None:
+    hits = _output_lines_citing_adr(path.read_text(encoding="utf-8"))
+    assert not hits, f"{path}: user-visible output cites an ADR:\n" + "\n".join(hits)
+
+
+@pytest.mark.parametrize(
+    "path", ACTION_YMLS, ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
+)
+def test_no_adr_reference_in_action_yml_run_output(path: Path) -> None:
+    # Composite actions embed shell in `run:` blocks; the same rule applies.
+    hits = _output_lines_citing_adr(path.read_text(encoding="utf-8"))
+    assert not hits, f"{path}: user-visible output cites an ADR:\n" + "\n".join(hits)
