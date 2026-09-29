@@ -119,6 +119,29 @@ def _is_digit_separator(text: str, i: int) -> bool:
     return j < i and text[j].isdigit()
 
 
+def _raw_string_end(text: str, i: int) -> int | None:
+    """If the ``"`` at *i* opens a C++11 raw string (``R"delim(...)delim"``,
+    optionally prefixed ``u8``/``u``/``U``/``L``), the index just past its
+    closing quote; otherwise ``None``. Its contents may hold unescaped
+    quotes, so it must be consumed by its own delimiter, not by the next
+    ``"``. An unterminated raw string runs to the end of *text*."""
+    if i == 0 or text[i - 1] != "R":
+        return None
+    j = i - 1
+    while j > 0 and text[j - 1] in "u8UL":
+        j -= 1
+    if j > 0 and (text[j - 1].isalnum() or text[j - 1] == "_"):
+        return None  # `FOOR"..."`: the R ends an identifier, not a prefix
+    open_paren = text.find("(", i + 1)
+    if open_paren == -1 or open_paren - i - 1 > 16:
+        return None
+    delim = text[i + 1 : open_paren]
+    if any(c in delim for c in ' ()\\\t\n"'):
+        return None
+    close = text.find(")" + delim + '"', open_paren + 1)
+    return len(text) if close == -1 else close + len(delim) + 2
+
+
 def _blank_literals(text: str) -> str:
     """*text* with the contents of every string and character literal replaced
     by spaces (quotes kept, length preserved), so a ``,``/``(``/``)`` inside a
@@ -129,6 +152,12 @@ def _blank_literals(text: str) -> str:
     while i < len(text):
         ch = text[i]
         if quote is None:
+            raw_end = _raw_string_end(text, i) if ch == '"' else None
+            if raw_end is not None:
+                for k in range(i + 1, raw_end - 1):
+                    out[k] = " "
+                i = raw_end
+                continue
             if ch == '"' or (ch == "'" and not _is_digit_separator(text, i)):
                 quote = ch
         elif ch == "\\":
