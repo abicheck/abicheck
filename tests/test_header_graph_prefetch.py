@@ -157,7 +157,13 @@ def test_prefetch_runs_the_acquisition_on_its_own_thread_and_returns_it(
 ) -> None:
     import threading
 
+    from abicheck import process_resources as pr
+
     monkeypatch.setenv("ABICHECK_MAX_THREADS", max_threads)
+    # The claim below is about a *fresh* budget, so give it one: the
+    # process-wide budget carries whatever earlier tests in this process
+    # still hold (a single-process suite such as mutmut's stats run).
+    monkeypatch.setattr(pr, "THREAD_BUDGET", pr._ThreadBudget())
     sentinel = attach.HeaderGraphAst(None, None, [], [], ())
     seen: list[tuple[str, tuple[object, ...]]] = []
 
