@@ -26,8 +26,11 @@ Detectors emitted here:
   new headers while the experimental alias is kept.
 
 * ``EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT`` — a name in
-  ``experimental::`` was removed and no declaration with the same leaf
-  name exists at a stable location in the new headers.
+  ``experimental::`` was removed and no replacement exists at a stable
+  location in the new headers: neither at the same path minus the
+  experimental segment, nor (functions only) as a unique, newly added
+  declaration with the same leaf name and parameter signature under the
+  same top-level namespace (see ``_unique_promotion_target``).
 
 * ``STD_REEXPORT_REMOVED`` — a public function whose declaration is just
   a ``using std::X;`` re-export was deleted. Detection works on
@@ -163,6 +166,11 @@ class _IndexItem(NamedTuple):
     stripped: str
     leaf: str
     identity: object | None
+    #: Parameter-type signature (``Param.type`` spellings, in order) when
+    #: the producer supplied one; ``None`` when there is no signature
+    #: evidence (types). Only consulted by the promotion check
+    #: (:func:`_unique_promotion_target`), never by the paired index.
+    signature: tuple[str, ...] | None = None
 
 
 # A singleton's key is (its own raw ``stripped``, ``leaf``); a genuinely
@@ -546,7 +554,8 @@ def _func_index_items(
             if f.mangled and _looks_like_real_mangled_name(f.mangled)
             else None
         )
-        out.append(_IndexItem(qname, stripped, leaf, identity))
+        signature = tuple(p.type for p in f.params)
+        out.append(_IndexItem(qname, stripped, leaf, identity, signature))
     return out
 
 
@@ -698,6 +707,76 @@ def _identity_stable_keys(items: list[_IndexItem]) -> dict[object, set[str]]:
                 _strip_param_signature(item.stripped)
             )
     return out
+
+
+def _scope_path(item: _IndexItem) -> tuple[str, ...]:
+    """The declaration's own qualified-name segments, signature removed."""
+    return tuple(_segments(_strip_param_signature(item.qname)))
+
+
+def _unique_promotion_target(
+    removed: _IndexItem,
+    old_items: list[_IndexItem],
+    new_items: list[_IndexItem],
+    experimental_namespaces: tuple[str, ...],
+) -> str | None:
+    """Return the one stable NEW declaration *removed* was promoted to, or
+    ``None`` when the evidence does not prove a unique promotion.
+
+    Layer 1 of :func:`_paired_stable_indices` matches on the *full*
+    experimental-stripped path, so a promotion that also changes the
+    enclosing namespace (``ccl::preview::split_communicators`` ->
+    ``ccl::v1::split_communicators``, where ``v1`` is an ordinary, non-
+    inline namespace so the mangled names differ and layer 2 cannot merge
+    them either) otherwise reads as a removal without replacement even
+    though the declaration moved to a stable home. This closes that gap
+    under an evidence gate; a candidate qualifies only when **all** hold:
+
+    * it is not itself in an experimental namespace;
+    * its leaf name equals *removed*'s;
+    * both sides carry a parameter signature and the two are equal --
+      no signature evidence, no promotion;
+    * it lives under the same top-level namespace (the library root), so
+      a same-named function in an unrelated library root is never used;
+    * it is *new*: no OLD declaration had that exact scope path with that
+      signature -- an already-existing same-named function elsewhere is
+      not evidence the experimental one was promoted to it.
+
+    Exactly one distinct qualifying scope path is required; two or more
+    is ambiguous and yields ``None`` (the removal is reported, the same
+    false-negative-over-false-positive default this module uses
+    throughout). The result depends only on the *sets* of items, never on
+    their order.
+    """
+    if removed.signature is None:
+        return None
+    removed_path = _scope_path(removed)
+    if not removed_path:
+        return None
+    root = removed_path[0]
+    if root in experimental_namespaces:
+        # `preview::foo` has no library root to anchor the search to.
+        return None
+    old_decls = {
+        (_scope_path(i), i.signature) for i in old_items if i.signature is not None
+    }
+    candidates: set[tuple[str, ...]] = set()
+    for item in new_items:
+        if item.signature is None or item.signature != removed.signature:
+            continue
+        if item.leaf != removed.leaf:
+            continue
+        path = _scope_path(item)
+        if not path or path[0] != root:
+            continue
+        if any(s in experimental_namespaces for s in path):
+            continue
+        if (path, item.signature) in old_decls:
+            continue
+        candidates.add(path)
+    if len(candidates) != 1:
+        return None
+    return "::".join(next(iter(candidates)))
 
 
 def _classify_experimental_event(
@@ -926,12 +1005,24 @@ def _findings_for(
             )
             for item in old_exp_items
         )
+        # A declaration promoted to a stable namespace whose path differs
+        # by more than the experimental segment (see
+        # `_unique_promotion_target`) is not a removal without replacement.
+        # `all(...)` for the same reason as `still_linked` above: a bucket
+        # of collapsed overloads is only promoted when every one is.
+        promoted = bool(old_exp_items) and all(
+            _unique_promotion_target(
+                item, old_items or [], new_items or [], experimental_namespaces
+            )
+            is not None
+            for item in old_exp_items
+        )
         event = _classify_experimental_event(
             old_exp,
             old_stable,
             new_exp,
             new_stable,
-            still_linked=still_linked,
+            still_linked=still_linked or promoted,
         )
         if event is None:
             continue
