@@ -127,11 +127,14 @@ third:
    only when `_report_validity` says a readable result exists, otherwise it
    publishes `ERROR`.
 
-**`mode: compare` and `mode: dump` never read stderr.** `_is_cli_error()`'s
-stderr-prose check survives only for `deps-tree`/`deps-compare`, whose
-exit `1` collides with a crash and which produce no report this script
-reads -- the named residual of ADR-063 Track T8.
-`tests/test_action_run_sh_no_stderr_verdict.py` pins the compare half as a
+**No mode reads stderr.** The last stderr-prose check (`_is_cli_error`)
+is gone: usage errors are exit `64` everywhere, and an exit `1` that other
+modes share with a crash -- `compare`'s gate axes, `deps`' WARN/FAIL -- is
+read as a verdict only when `_report_validity` finds a readable result
+(for `deps`, the internal `-o json=` sidecar this script injects whenever
+the primary format is not JSON; `report_query.py` recognizes its
+`verdict.loadability`/`abi_risk` object). Otherwise the step publishes
+`ERROR`. `tests/test_action_run_sh_no_stderr_verdict.py` pins this as a
 property: for every exit code, stderr text never changes the published
 verdict.
 

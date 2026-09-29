@@ -1065,11 +1065,17 @@ unknown one), with and without a report, every stderr text in a corpus of
 the heuristic's own prefixes publishes the same verdict as empty stderr,
 with a vacuity guard on that oracle.
 
-**Still open in 7B after this slice:** `deps-tree`/`deps-compare` keep
-`_is_cli_error()`, because their exit `1` (`FAIL`/`WARN`) collides with a
-crash and their JSON (`stack_to_json`) carries no verdict vocabulary
-`report_query.py` recognizes, so there is no structured source to move to
-yet -- closing it needs the deps report to carry a `run_outcome` block.
+**Deps modes closed too (2026-09-29, same PR).** `deps-tree`/`deps-compare`
+no longer read stderr either: `run.sh` injects the same internal
+`-o json=` sidecar for them whenever the primary format is not JSON, and
+`report_query.py` recognizes the `deps` report's own `verdict.loadability`/
+`abi_risk` object (`STACK_VERDICTS`, pinned to `StackVerdict` and checked
+through the real renderer for every combination), so an exit `1` reads as
+`WARN`/`FAIL` only with a readable result and as `ERROR` otherwise; exit `64`
+is the usage error. `_is_cli_error()` and `STDERR_CONTENT` are deleted --
+nothing in `run.sh` reads the CLI's stderr any more. No `run_outcome` block
+was needed: the report already carried a structured verdict; what was
+missing was the Action requesting and recognizing it.
 The gate-fold *target* duplication stays with the convergence plan's P0
 `EffectiveGate` item, as recorded above.
 

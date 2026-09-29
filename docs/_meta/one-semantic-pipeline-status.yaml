@@ -1560,8 +1560,11 @@ concepts:
       always API_BREAK and a forged Usage line can no longer downgrade it),
       and compare's exit 1 is attributed from the report via
       _report_validity or published as ERROR when no readable result
-      exists. The heuristic survives only for deps-tree/deps-compare, whose
-      report carries no run_outcome yet -- the remaining boundary item.
+      exists. Same day, deps-tree/deps-compare too: run.sh requests their
+      JSON report as a sidecar and report_query recognizes its
+      verdict.loadability/abi_risk object, so _is_cli_error is deleted and
+      run.sh reads no stderr at all. Remaining for this gate: only the P0
+      EffectiveGate fold-target item above.
   sectioned_storage:
     primitive: complete
     producers: complete

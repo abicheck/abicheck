@@ -3713,6 +3713,13 @@ elif [[ "$MODE" == "deps-tree" ]]; then
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
     if ! _extra_args_has_export; then
       CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
+      # The structured report the verdict dispatch reads (ADR-063 T8): exit 1
+      # is `deps`' own WARN/FAIL *and* any crash's code, and only a readable
+      # result tells them apart. Same internal sidecar compare mode injects.
+      if [[ "$FORMAT" != "json" ]]; then
+        PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+        CMD+=(-o "json=$PR_JSON")
+      fi
     fi
   fi
 
@@ -3745,6 +3752,13 @@ elif [[ "$MODE" == "deps-compare" ]]; then
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
     if ! _extra_args_has_export; then
       CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
+      # The structured report the verdict dispatch reads (ADR-063 T8): exit 1
+      # is `deps`' own WARN/FAIL *and* any crash's code, and only a readable
+      # result tells them apart. Same internal sidecar compare mode injects.
+      if [[ "$FORMAT" != "json" ]]; then
+        PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+        CMD+=(-o "json=$PR_JSON")
+      fi
     fi
   fi
 
@@ -3988,10 +4002,9 @@ echo "::endgroup::"
 # ---------------------------------------------------------------------------
 # Map exit code to verdict
 # ---------------------------------------------------------------------------
-STDERR_CONTENT=""
-if [[ -s "$STDERR_FILE" ]]; then
-  STDERR_CONTENT=$(cat "$STDERR_FILE")
-fi
+# The captured stderr is echoed to the log above and never read here:
+# ADR-063 T8 -- the verdict comes from the exit code and the structured
+# report only (action/AGENTS.md, "How `run.sh` resolves the verdict").
 
 # `format: json` with no `output-file` is the documented stdout mode: the
 # report exists only in $ABICHECK_OUTPUT, so it is persisted once here for the
@@ -4014,16 +4027,6 @@ if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && "${ABICHECK_OUTPUT:-}" ==
   printf '%s' "$ABICHECK_OUTPUT" > "$_STDOUT_JSON_FILE"
 fi
 
-# Stderr-prose heuristic for "the CLI failed rather than answered". Used ONLY
-# by the deps-tree/deps-compare modes, whose exit 1 (deps-tree FAIL /
-# deps-compare WARN) collides with an uncaught exception's exit 1 and which
-# produce no structured report this script reads -- the named residual of
-# ADR-063 Track T8 (7B). compare and dump no longer consult it: usage errors
-# are the CLI's own exit 64, and compare's exit 1 is attributed from the
-# structured report (`_report_validity`) or not at all.
-_is_cli_error() {
-  echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try |Traceback|click\.)'
-}
 
 # The JSON report this run produced, if any — the primary output when
 # format=json, or (the common case: default format=markdown) the
@@ -5108,25 +5111,28 @@ _escalate_verdict_to_report() {
   fi
 }
 
-if [[ "$MODE" == "deps-compare" ]]; then
-  # deps-compare exit codes: 0=PASS, 1=WARN, 4=FAIL
-  if _is_cli_error; then
+if [[ "$MODE" == "deps-compare" || "$MODE" == "deps-tree" ]]; then
+  # deps-compare exit codes: 0=PASS, 1=WARN, 4=FAIL; deps-tree: 0=OK,
+  # 1=missing deps/symbols; 64=usage error (both). ADR-063 T8: no stderr
+  # prose is read -- exit 1 is also any crash's code, so it is attributed to
+  # the deps verdict only when the run's structured report is readable.
+  _deps_exit1_validity=""
+  if [[ $ABICHECK_EXIT -eq 1 ]]; then
+    _deps_exit1_validity=$(_report_validity)
+  fi
+  if [[ $ABICHECK_EXIT -eq 64 ]]; then
     VERDICT="ERROR"
-    _error_annotation "abicheck deps-compare failed due to a CLI error (exit code $ABICHECK_EXIT)."
-  else
+    _error_annotation "abicheck ${MODE} failed due to a CLI argument or configuration error (exit code 64)."
+  elif [[ $ABICHECK_EXIT -eq 1 && "$_deps_exit1_validity" != "ok" ]]; then
+    VERDICT="ERROR"
+    _error_annotation "abicheck ${MODE} exited 1 without a readable JSON result (report: ${_deps_exit1_validity:-none located}), so it cannot be read as a WARN/FAIL verdict -- the invocation failed before producing one. See the command's own error output above."
+  elif [[ "$MODE" == "deps-compare" ]]; then
     case $ABICHECK_EXIT in
       0) VERDICT="PASS" ;;
       1) VERDICT="WARN" ;;
       4) VERDICT="FAIL" ;;
       *) VERDICT="ERROR" ;;
     esac
-  fi
-
-elif [[ "$MODE" == "deps-tree" ]]; then
-  # deps-tree exit codes: 0=OK, 1=missing deps/symbols
-  if _is_cli_error; then
-    VERDICT="ERROR"
-    _error_annotation "abicheck deps-tree failed due to a CLI error (exit code $ABICHECK_EXIT)."
   else
     case $ABICHECK_EXIT in
       0) VERDICT="PASS" ;;

@@ -159,3 +159,54 @@ def test_exit_1_with_a_severity_report_is_severity_error_despite_error_stderr(tm
         report=_report(coverage=0, severity_exit=1),
     )
     assert out["verdict"] == "SEVERITY_ERROR", out
+
+
+# -- deps-tree / deps-compare (the last stderr reader, retired) ---------------
+
+
+def _deps_report(loadability: str = "warn", abi_risk: str = "warn") -> dict:
+    return {
+        "root_binary": "app",
+        "verdict": {"loadability": loadability, "abi_risk": abi_risk, "risk_score": 1},
+    }
+
+
+def _deps_outputs(tmp_path, mode: str, *, exit_code: int, stderr: str, report) -> dict:
+    bindir = _stub_abicheck(tmp_path, exit_code=exit_code, report=report, stderr=stderr)
+    env = {"INPUT_MODE": mode, "INPUT_NEW_LIBRARY": _lib(tmp_path, "app")}
+    if mode == "deps-compare":
+        for side in ("old", "new"):
+            (tmp_path / f"{side}_root").mkdir()
+            env[f"INPUT_{side.upper()}_ROOT"] = str(tmp_path / f"{side}_root")
+    return _run_action(tmp_path, env, bindir)
+
+
+DEPS_CASES = [
+    # (mode, exit, with_report, expected verdict)
+    ("deps-compare", 0, True, "PASS"),
+    ("deps-compare", 1, True, "WARN"),
+    ("deps-compare", 1, False, "ERROR"),
+    ("deps-compare", 4, True, "FAIL"),
+    ("deps-compare", 64, False, "ERROR"),
+    ("deps-tree", 0, True, "PASS"),
+    ("deps-tree", 1, True, "FAIL"),
+    ("deps-tree", 1, False, "ERROR"),
+    ("deps-tree", 64, False, "ERROR"),
+]
+
+
+@pytest.mark.parametrize(("mode", "code", "with_report", "expected"), DEPS_CASES)
+@pytest.mark.parametrize(
+    "stderr", ["", "Usage: forged", "Traceback (most recent call last):\n  boom"]
+)
+def test_deps_verdict_follows_exit_code_and_report_never_stderr(
+    tmp_path, mode, code, with_report, expected, stderr
+):
+    out = _deps_outputs(
+        tmp_path,
+        mode,
+        exit_code=code,
+        stderr=stderr,
+        report=_deps_report() if with_report else None,
+    )
+    assert out["verdict"] == expected, (out["verdict"], out["_stdout"][-2000:])

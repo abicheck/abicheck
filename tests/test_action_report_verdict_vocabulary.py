@@ -61,6 +61,38 @@ class TestTheVerdictVocabularyTracksTheRealEmitters:
             f"emitted by Verdict but unreadable to the Action: {missing}"
         )
 
+    def test_the_stack_verdict_scale_is_known(self) -> None:
+        """`deps` reports carry their own pass/warn/fail scale; a value added
+        to `StackVerdict` must land in `STACK_VERDICTS` or a healthy deps run
+        reads as `no_result` and its exit 1 publishes ERROR (ADR-063 T8)."""
+        from abicheck.stack_checker import StackVerdict
+
+        assert {v.value for v in StackVerdict} == rq.STACK_VERDICTS
+
+    def test_a_real_deps_report_carries_a_result(self, tmp_path) -> None:
+        """Through the real renderer, not a hand-written fixture: every
+        loadability/abi_risk combination `deps` can emit is a readable result."""
+        import json
+        from itertools import product
+
+        from abicheck.report.stack import compute_stack_report_mapping
+        from abicheck.resolver import DependencyGraph
+        from abicheck.stack_checker import StackCheckResult, StackVerdict
+
+        for load, risk in product(StackVerdict, StackVerdict):
+            result = StackCheckResult(
+                root_binary="app",
+                baseline_env="/a",
+                candidate_env="/b",
+                loadability=load,
+                abi_risk=risk,
+                baseline_graph=DependencyGraph(root="app"),
+                candidate_graph=DependencyGraph(root="app"),
+            )
+            doc = compute_stack_report_mapping(result)
+            json.loads(json.dumps(doc))
+            assert rq._carries_a_result(doc), (load, risk)
+
     def test_every_release_rollup_verdict_is_known(self) -> None:
         from abicheck.cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
 
