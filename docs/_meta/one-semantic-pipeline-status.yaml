@@ -1427,6 +1427,13 @@ concepts:
       remains open, along with evaluation_config (still None on every real
       instance) and T4's other two items (splitting backend selection from
       fallback policy; a source-only dump execution variant).
+      2026-09-29: evaluation_config is no longer None on the typed compare
+      path -- classify_compare_pair resolves it once
+      (compare_gate_receipt.resolve_request_evaluation_config) and returns
+      it on CompareResult.resolved_execution_context, the same object the
+      receipt and DiffResult.evaluation_config read. Open: the native
+      compare CLI (cli_compare_receipt) still resolves its own; dump has no
+      compatibility policy, so None there is not-applicable.
   run_outcome:
     primitive: complete
     producers: complete

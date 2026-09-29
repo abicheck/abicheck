@@ -122,38 +122,25 @@ def _project_inputs_for_request(
     return ProjectCompatibilityInputs(policy_overrides=overrides)
 
 
-def install_resolved_gate_receipt(
-    result: Any,
+def resolve_request_evaluation_config(
     request: CompareRequest,
-    gate: GateOptions,
     policy_file: PolicyFile | None,
     suppression: SuppressionList | None,
-) -> None:
-    """Install *request*'s resolved gate onto *result* in place.
+) -> CompatibilityEvaluationConfig:
+    """The ADR-049 D7 :class:`CompatibilityEvaluationConfig` for *request*.
 
-    Installs ``gate.exit_code_scheme`` directly -- since CLI cleanup phase
-    two PR G2 deleted the manual algorithm selector, `GateOptions.
-    exit_code_scheme` is unconditionally already ``"legacy"``/``"severity"``
-    (never an unresolved ``"auto"``, which `GateConfig` never accepted and
-    used to require the caller to resolve separately before calling this;
-    see this repo's git history for the account of that now-moot gap).
-
-    *suppression* is the already-loaded `SuppressionList` `classify_compare_
-    pair` scored the comparison with -- passed through rather than left for
-    this adapter to re-read `request.suppress` a second time, which could
-    digest a different file than the one that actually scored the findings
-    if it changed between the two reads (Codex review, fresh evidence).
-
-    Always stamps ``result.evaluation_config`` (a request with no
-    ``--contract`` equivalent never builds a ``PersistedContractContext``,
-    so ``effective_config_digest``'s rich tier would otherwise be silently
-    unreachable for it even though *config* is a real, fully-resolved
-    ``CompatibilityEvaluationConfig`` -- same reasoning as
-    ``record_resolved_config``'s own leading comment); additionally merges
-    the gate into ``result.contract_context`` when one exists.
+    Resolved **once** per ``classify_compare_pair`` call (One Semantic
+    Pipeline plan, sub-phase 4B) and handed to every consumer that needs it
+    -- :func:`install_resolved_gate_receipt` and the pair's
+    ``ResolvedExecutionContext.evaluation_config`` -- rather than each
+    re-deriving it from the request. *policy_file* is the already-loaded,
+    pack-folded policy (before the project-tier fold, which the resolver
+    re-derives at its own tier); *suppression* is the already-loaded list
+    the comparison is scored with (never re-read from ``request.suppress``,
+    which could digest a different file than the one that scored the
+    findings if it changed between the two reads -- Codex review).
     """
     from ..compatibility_evaluation_frontend import (
-        SEVERITY_CATEGORY_FIELDS,
         SuppressionSource,
         compatibility_config_from_compare_request,
     )
@@ -166,6 +153,36 @@ def install_resolved_gate_receipt(
     )
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         config = _with_pack_forwarded_provenance(config, request)
+    return config
+
+
+def install_resolved_gate_receipt(
+    result: Any,
+    config: CompatibilityEvaluationConfig,
+    gate: GateOptions,
+) -> None:
+    """Install the resolved *config* and *gate* onto *result* in place.
+
+    Installs ``gate.exit_code_scheme`` directly -- since CLI cleanup phase
+    two PR G2 deleted the manual algorithm selector, `GateOptions.
+    exit_code_scheme` is unconditionally already ``"legacy"``/``"severity"``
+    (never an unresolved ``"auto"``, which `GateConfig` never accepted and
+    used to require the caller to resolve separately before calling this;
+    see this repo's git history for the account of that now-moot gap).
+
+    *config* is :func:`resolve_request_evaluation_config`'s answer for this
+    comparison -- read here, never re-resolved (sub-phase 4B).
+
+    Always stamps ``result.evaluation_config`` (a request with no
+    ``--contract`` equivalent never builds a ``PersistedContractContext``,
+    so ``effective_config_digest``'s rich tier would otherwise be silently
+    unreachable for it even though *config* is a real, fully-resolved
+    ``CompatibilityEvaluationConfig`` -- same reasoning as
+    ``record_resolved_config``'s own leading comment); additionally merges
+    the gate into ``result.contract_context`` when one exists.
+    """
+    from ..compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
+
     result.evaluation_config = config
 
     # `DiffResult.contract_context` is deliberately typed `object | None`

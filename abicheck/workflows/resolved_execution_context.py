@@ -423,6 +423,17 @@ class ResolvedExecutionContext:
             compile_contexts=compile_contexts or {},
         )
 
+    def with_evaluation_config(
+        self, evaluation_config: CompatibilityEvaluationConfig
+    ) -> ResolvedExecutionContext:
+        """A new context carrying the ADR-049 D7 *evaluation_config* the run
+        was actually scored under. For a caller that built a pre-execution
+        context (:meth:`from_plan`) before the policy/suppression/pack inputs
+        the config resolves from were loaded -- ``classify_compare_pair`` is
+        the one, since those loads belong to classification, not to
+        artifact resolution. Every other field is carried over unchanged."""
+        return dataclasses.replace(self, evaluation_config=evaluation_config)
+
     def with_assurance(self, assurance: object) -> ResolvedExecutionContext:
         """A new context (frozen dataclasses don't mutate) whose
         :attr:`evidence` is the full post-execution
