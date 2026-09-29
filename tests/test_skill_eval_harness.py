@@ -1037,8 +1037,12 @@ class TestWorkspacePathLeak:
     )
     def test_a_neutral_path_is_not_a_leak(self, neutral):
         # Built from a fixed neutral root rather than tmp_path, whose own
-        # prefix is whatever pytest's basetemp is on this host.
-        assert runner.workspace_path_leak(Path("/tmp") / neutral / "workspace") is None
+        # prefix is whatever pytest's basetemp is on this host. Only the
+        # string is inspected, so the root never has to exist.
+        assert (
+            runner.workspace_path_leak(Path("/srv/eval") / neutral / "workspace")
+            is None
+        )
 
     def test_main_refuses_a_leaky_out_before_any_model_call(self, tmp_path, capsys):
         rc = runner.main(
@@ -1066,7 +1070,10 @@ class TestOpaqueRunDirectory:
     @pytest.mark.parametrize("sid", SCENARIOS)
     @pytest.mark.parametrize("arm", ["skill", "baseline"])
     def test_real_path_names_neither_scenario_nor_arm(self, tmp_path, sid, arm):
-        out_root = Path(tempfile.mkdtemp(prefix="neutral-", dir="/tmp"))
+        out_root = Path(tempfile.mkdtemp(prefix="neutral-"))
+        if runner.workspace_path_leak(out_root) is not None:
+            shutil.rmtree(out_root)
+            pytest.skip(f"this host's temp dir itself names a leak word: {out_root}")
         try:
             readable = out_root / sid / arm / "0"
             real = runner.make_opaque_run_dir(out_root, readable)
