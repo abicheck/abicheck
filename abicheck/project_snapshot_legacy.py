@@ -96,7 +96,7 @@ def package_declares_full_dependency_scope(path: str | Path) -> bool:
     with `dependency_scope="full"` (`dump --include-system-declarations`).
 
     A cheap, best-effort read of the already-persisted document -- used by
-    `scan_engine._scan_candidate_include_dependencies` so a `scan --against`
+    the retired `scan_engine._scan_candidate_include_dependencies` so a `scan --against`
     given a package directory (rather than a JSON file, which that function
     handles by content-sniffing) matches the baseline's own scope instead of
     silently defaulting to filtered and hitting the comparability gate's

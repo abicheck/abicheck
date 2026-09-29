@@ -19,7 +19,7 @@ and ``scan --against``'s baseline comparison.
 Before this module, the same "re-resolve both sides symbols-only, diff them
 unscoped, and keep only the ``func_removed_elf_only`` fact" logic was
 hand-copied in two places -- ``cli_helpers_compare.fold_l0_hard_removals``
-(direct ``compare``) and ``cli_scan_baseline._run_baseline_compare`` (``scan
+(direct ``compare``) and the since-retired ``cli_scan_baseline._run_baseline_compare`` (``scan
 --against``) -- each docstring explicitly cross-referencing the other as its
 twin. :func:`collect_l0_export_delta` is the single implementation both now
 call; this is the first concrete step of Phase 5's "route both direct compare

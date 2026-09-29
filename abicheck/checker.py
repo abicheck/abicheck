@@ -232,8 +232,8 @@ def _verdict_scored_population(
     (:func:`_apply_surface_metrics`, :func:`_apply_pattern_verdicts_step`)
     independently rebuilt ``kept + verdict_redundant`` from scratch and
     silently let a RESOLVED finding back into the verdict -- the same class
-    of omission ``cli_scan_baseline.py``'s own crosscheck-off recompute had
-    (see that module's ``verdict_scored_changes``, its sibling for the same
+    of omission the retired ``cli_scan_baseline.py``'s crosscheck-off recompute had
+    (see that deleted module's ``verdict_scored_changes``, its sibling for the same
     plan-F-9 obligation at a different chokepoint).
     """
     return [c for c in kept if not is_cross_source_resolved(c)] + verdict_redundant

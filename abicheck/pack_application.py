@@ -55,8 +55,8 @@ exact failure this module was written to prevent. Wiring a field's consumer
 is what removes it from that mapping, so the registry doubles as the list of
 what is left.
 
-A leaf: nothing here imports a ``cli*`` module, and its two consumers
-(``cli_compare_helpers``/``cli_scan``) pass what they already loaded.
+A leaf: nothing here imports a ``cli*`` module, and its consumer
+(``cli_compare_helpers``; formerly also ``cli_scan``) passes what they already loaded.
 """
 
 from __future__ import annotations

@@ -177,9 +177,9 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
         # narrow fix. The one place this call path *is* genuinely bounded
         # by an OS-level killable timeout end to end is
         # dry_run_estimate.run_scan_set_subprocess (what MCP's abi_scan uses);
-        # the CLI path (cli_scan._run_artifact_set) calls run_scan_set()
-        # directly, the same architecture the single-binary scan command
-        # already uses for run_scan_core, so this is a pre-existing CLI-
+        # the retired CLI path (cli_scan._run_artifact_set, ADR-068 Phase 6) called
+        # run_scan_set() directly, as the single-binary scan command
+        # did for run_scan_core, so this is a pre-existing CLI-
         # wide limitation (cooperative checkpoints only, no OS-level kill),
         # not one specific to bundle auditing.
         deadline.check()
@@ -1006,8 +1006,8 @@ def build_bundle_snapshot_from_metadata(
 class ArtifactSetError(ValueError):
     """Raised by :func:`discover_artifact_set` for an invalid `--artifact-set`.
 
-    A plain, framework-agnostic exception — the CLI layer (``cli_scan.py``)
-    turns this into a ``click.UsageError`` (exit 64); this module has no
+    A plain, framework-agnostic exception — the retired CLI layer (``cli_scan.py``)
+    turned this into a ``click.UsageError`` (exit 64); this module has no
     click dependency.
     """
 
@@ -1255,7 +1255,7 @@ def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:
 
     Shared by ``cli_compare_release_helpers._release_md_bundle_findings``
     (:class:`BundleDiffResult`'s two-sided findings) and
-    ``cli_scan._render_artifact_set_text`` (:class:`BundleAuditResult`'s
+    the retired ``cli_scan._render_artifact_set_text`` (:class:`BundleAuditResult`'s
     single-sided ``scan --artifact-set`` findings, ADR-056) — the rendering
     itself only ever needs the flat ``list[BundleFinding]``, never the
     wrapper object, so one function covers both call sites. Returns ``[]``

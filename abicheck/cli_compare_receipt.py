@@ -391,8 +391,8 @@ def resolve_release_pack_application(
     mirroring its logic. ``scan --against`` accepts a ``kind: gate`` pack
     too (a later "PR B" slice): unlike the release fan-out, it already has a
     real ``ResolvedCompareConfig`` to fold into directly via
-    ``apply_to_compare_config`` -- see
-    ``cli_scan._resolve_scan_evaluation_config``.
+    ``apply_to_compare_config`` -- as the retired
+    ``cli_scan._resolve_scan_evaluation_config`` did.
 
     **No longer rejects a pack asserting ``contract.unresolved`` (Track 2 7B
     residual, closed).** An earlier revision rejected it unconditionally --

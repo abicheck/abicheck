@@ -30,7 +30,7 @@ See ``exit_decision.py``'s own module docstring for what ADR-064 is and
 what stage this additive work belongs to; this module implements the same
 stage 1a resolvers, just physically split for the line-count cap. Stage 1b
 has since wired `resolve_scan_exit_decision` into real call sites --
-`scan_engine.py`'s `NOT_COMPARABLE` outcome and (via
+the since-retired `scan_engine.py`'s `NOT_COMPARABLE` outcome and (via
 `abicheck.workflows.scan_abort_result`) its `_BudgetOverflow`/
 `_EvidenceContractError` aborts -- so this module is no longer additive-only
 dead code the way it was when first split out.
@@ -246,14 +246,14 @@ def resolve_scan_exit_decision(
     of which command raises them, unlike e.g. `not_comparable_code`, which
     the release resolver below overrides to `16`.
 
-    Reproduces `scan_engine.run_scan_core`'s exact raise/check order --
+    Reproduces the retired `scan_engine.run_scan_core`'s (ADR-068 Phase 6) exact raise/check order --
     which, contrary to an earlier revision's simpler "evidence always beats
     budget" rule, puts `_BudgetOverflow` on **both** sides of
     `_EvidenceContractError` (Codex review, fresh evidence against the real
     line order): candidate-snapshot collection is deadline-guarded
-    (`scan_engine.py:1180-1221`) and raises `_BudgetOverflow` if it
+    and raised `_BudgetOverflow` if it
     overruns, *before* `_check_scan_evidence_contract` is even called
-    (`scan_engine.py:1229`) -- so a budget overflow at that specific,
+    -- so a budget overflow at that specific,
     earlier stage preempts the evidence-contract check entirely and must
     win. Only *after* that check passes does the run reach the baseline
     compare's own deadline scope and the final, unconditional
@@ -285,7 +285,7 @@ def resolve_scan_exit_decision(
     :func:`resolve_compare_exit_decision`/:func:`resolve_exit_decision`).
 
     Pure resolver logic (ADR-064's first stage); stage 1b has since wired it
-    into `scan_engine.py`'s `NOT_COMPARABLE`/`_BudgetOverflow`/
+    into the since-retired `scan_engine.py`'s `NOT_COMPARABLE`/`_BudgetOverflow`/
     `_EvidenceContractError` outcomes, always producing the same code an
     unwired caller already computed by hand -- so no existing call site's
     actually-returned exit code changed *because* this function exists. The

@@ -169,48 +169,37 @@ class TestResolveExitDecision:
             "loadability_contribution": 0,
         }
 
-    def test_crosscheck_promotion_is_a_real_contribution_not_a_patch(self) -> None:
-        """`scan_engine._promote_published_gate`'s own axis: `code` must
-        equal `max()` over *all four* contributions, `crosscheck_promotion_
-        contribution` included, exactly like the other three (Codex review
-        -- an earlier revision patched `code`/`reasons` directly without
-        this axis, which broke this invariant for a promoted scan).
+    def test_crosscheck_promotion_has_no_live_producer(self) -> None:
+        """The retired `scan --crosscheck KEY=error` was this axis's only
+        producer (ADR-068 Phase 6). The resolver no longer accepts it, and
+        every decision it builds reports it as `0`, never as a reason.
         """
-        decision = resolve_exit_decision(
-            compatibility_contribution=0,
-            crosscheck_promotion_contribution=2,
-        )
-        assert decision.code == 2
-        assert decision.reasons == (ExitReason.PROMOTED_CROSSCHECK,)
-        assert decision.code == max(
-            decision.compatibility_contribution,
-            decision.contract_coverage_contribution,
-            decision.analysis_assurance_contribution,
-            decision.crosscheck_promotion_contribution,
-        )
+        import inspect
 
-    def test_crosscheck_promotion_ties_are_named_not_dropped(self) -> None:
-        """A promotion that only *ties* the existing code must still be
-        named -- not silently omitted the way a hand-rolled strict `>`
-        check on the caller side would drop it.
-        """
-        decision = resolve_exit_decision(
-            compatibility_contribution=2,
-            crosscheck_promotion_contribution=2,
+        assert "crosscheck_promotion_contribution" not in (
+            inspect.signature(resolve_exit_decision).parameters
         )
-        assert decision.code == 2
-        assert set(decision.reasons) == {
-            ExitReason.COMPATIBILITY_GATE,
-            ExitReason.PROMOTED_CROSSCHECK,
+        for code in (0, 1, 2, 4):
+            decision = resolve_exit_decision(compatibility_contribution=code)
+            assert decision.crosscheck_promotion_contribution == 0
+            assert ExitReason.PROMOTED_CROSSCHECK not in decision.reasons
+
+    def test_stored_crosscheck_promotion_still_round_trips(self) -> None:
+        """A stored pre-0.6 `scan` report may still name the axis. Reading
+        it back must keep the value and the reason, not drop them.
+        """
+        stored = {
+            "code": 2,
+            "reasons": ["promoted_crosscheck"],
+            "compatibility_contribution": 0,
+            "contract_coverage_contribution": 0,
+            "analysis_assurance_contribution": 0,
+            "crosscheck_promotion_contribution": 2,
         }
-
-    def test_crosscheck_promotion_never_lowers_a_real_break(self) -> None:
-        decision = resolve_exit_decision(
-            compatibility_contribution=4,
-            crosscheck_promotion_contribution=2,
-        )
-        assert decision.code == 4
-        assert decision.reasons == (ExitReason.COMPATIBILITY_GATE,)
+        decision = ExitDecision.from_dict(stored)
+        assert decision.crosscheck_promotion_contribution == 2
+        assert decision.reasons == (ExitReason.PROMOTED_CROSSCHECK,)
+        assert decision.to_dict()["crosscheck_promotion_contribution"] == 2
 
     def test_default_contributions_are_zero(self) -> None:
         """A caller with neither `--contract` nor

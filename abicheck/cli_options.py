@@ -1384,8 +1384,8 @@ def merge_compile_config(
 # `frontends/cli/options/contract.py` (see that module's own note for why:
 # the one-sided `--no-baseline` dispatch needs them without joining the CLI
 # registration SCC). Re-exported here (`X as X`, so ruff keeps them) because
-# this module is their documented import path -- `cli_compare_helpers` and
-# `cli_scan` both reach them here today, and neither needs to change.
+# this module is their documented import path -- `cli_compare_helpers`
+# reaches them here (as the retired `cli_scan` did), and needn't change.
 from .frontends.cli.options.contract import (  # noqa: E402
     resolve_contract_domain as resolve_contract_domain,
     resolve_contract_evaluation as resolve_contract_evaluation,
