@@ -677,6 +677,64 @@ def _scope_path(item: _IndexItem) -> tuple[str, ...]:
     return tuple(_segments(_strip_param_signature(item.qname)))
 
 
+def _signature_decls(
+    items: list[_IndexItem],
+) -> set[tuple[tuple[str, ...], tuple[str, ...]]]:
+    return {(_scope_path(i), i.signature) for i in items if i.signature is not None}
+
+
+def _same_leaf_and_signature_under_root(
+    item: _IndexItem, removed: _IndexItem, root: str
+) -> tuple[str, ...] | None:
+    """*item*'s scope path when it shares *removed*'s leaf, signature and
+    top-level namespace, else ``None``."""
+    if item.signature is None or item.signature != removed.signature:
+        return None
+    if item.leaf != removed.leaf:
+        return None
+    path = _scope_path(item)
+    return path if path and path[0] == root else None
+
+
+def _promotion_candidates(
+    removed: _IndexItem,
+    root: str,
+    old_items: list[_IndexItem],
+    new_items: list[_IndexItem],
+    experimental_namespaces: tuple[str, ...],
+) -> set[tuple[str, ...]]:
+    """Stable, newly added NEW declarations *removed* could have moved to."""
+    old_decls = _signature_decls(old_items)
+    out: set[tuple[str, ...]] = set()
+    for item in new_items:
+        path = _same_leaf_and_signature_under_root(item, removed, root)
+        if path is None or any(s in experimental_namespaces for s in path):
+            continue
+        if (path, item.signature) not in old_decls:
+            out.add(path)
+    return out
+
+
+def _promotion_claimants(
+    removed: _IndexItem,
+    root: str,
+    old_items: list[_IndexItem],
+    new_items: list[_IndexItem],
+    experimental_namespaces: tuple[str, ...],
+) -> set[tuple[str, ...]]:
+    """Removed OLD experimental declarations that could claim the same
+    target as *removed* (always including *removed* itself)."""
+    new_decls = _signature_decls(new_items)
+    out: set[tuple[str, ...]] = {_scope_path(removed)}
+    for item in old_items:
+        path = _same_leaf_and_signature_under_root(item, removed, root)
+        if path is None or not any(s in experimental_namespaces for s in path):
+            continue
+        if (path, item.signature) not in new_decls:
+            out.add(path)
+    return out
+
+
 def _unique_promotion_target(
     removed: _IndexItem,
     old_items: list[_IndexItem],
@@ -708,8 +766,12 @@ def _unique_promotion_target(
     Exactly one distinct qualifying scope path is required; two or more
     is ambiguous and yields ``None`` (the removal is reported, the same
     false-negative-over-false-positive default this module uses
-    throughout). The result depends only on the *sets* of items, never on
-    their order.
+    throughout). The target is also *reserved*: it counts only when
+    exactly one removed experimental declaration (distinct scope path, same
+    leaf, signature and root, absent from NEW) claims it -- two removals
+    (``ccl::preview::f(int)`` and ``ccl::experimental::f(int)``) cannot
+    both be promoted to one ``ccl::v1::f(int)``, so neither is. The result
+    depends only on the *sets* of items, never on their order.
     """
     if removed.signature is None:
         return None
@@ -720,24 +782,15 @@ def _unique_promotion_target(
     if root in experimental_namespaces:
         # `preview::foo` has no library root to anchor the search to.
         return None
-    old_decls = {
-        (_scope_path(i), i.signature) for i in old_items if i.signature is not None
-    }
-    candidates: set[tuple[str, ...]] = set()
-    for item in new_items:
-        if item.signature is None or item.signature != removed.signature:
-            continue
-        if item.leaf != removed.leaf:
-            continue
-        path = _scope_path(item)
-        if not path or path[0] != root:
-            continue
-        if any(s in experimental_namespaces for s in path):
-            continue
-        if (path, item.signature) in old_decls:
-            continue
-        candidates.add(path)
+    candidates = _promotion_candidates(
+        removed, root, old_items, new_items, experimental_namespaces
+    )
     if len(candidates) != 1:
+        return None
+    claimants = _promotion_claimants(
+        removed, root, old_items, new_items, experimental_namespaces
+    )
+    if claimants != {removed_path}:
         return None
     return "::".join(next(iter(candidates)))
 

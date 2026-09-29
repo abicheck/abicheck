@@ -171,6 +171,35 @@ class TestPromotionToStableNamespace:
         )
         assert len(_removed(detect_experimental_namespace_changes(old, new))) == 1
 
+    def test_two_removals_cannot_share_one_target(self) -> None:
+        old = _snap(
+            funcs=[
+                _fn_sig("ccl::preview::a::f", "_ZA", ["int"]),
+                _fn_sig("ccl::experimental::b::f", "_ZB", ["int"]),
+            ]
+        )
+        new = _snap(funcs=[_fn_sig("ccl::v1::f", "_ZC", ["int"])])
+        # Only one could have been promoted; neither is proven, both reported.
+        assert len(_removed(detect_experimental_namespace_changes(old, new))) == 2
+        # Reordering the OLD declarations does not change the outcome.
+        old_rev = _snap(funcs=list(reversed(old.functions)))
+        assert len(_removed(detect_experimental_namespace_changes(old_rev, new))) == 2
+
+    def test_surviving_sibling_does_not_block_promotion(self) -> None:
+        old = _snap(
+            funcs=[
+                _fn_sig("ccl::preview::a::f", "_ZA", ["int"]),
+                _fn_sig("ccl::experimental::b::f", "_ZB", ["int"]),
+            ]
+        )
+        new = _snap(
+            funcs=[
+                _fn_sig("ccl::experimental::b::f", "_ZB", ["int"]),
+                _fn_sig("ccl::v1::f", "_ZC", ["int"]),
+            ]
+        )
+        assert _removed(detect_experimental_namespace_changes(old, new)) == []
+
     def test_types_never_promoted_without_signature_evidence(self) -> None:
         old = _snap(types=[_rec("ccl::preview::comm_split_attr")])
         new = _snap(types=[_rec("ccl::v1::comm_split_attr")])
@@ -244,9 +273,24 @@ class TestUniquePromotionTargetProperties:
                 )
             )
 
+        def claims(o: _IndexItem) -> bool:
+            segs = o.qname.split("::")
+            return (
+                o.signature == removed.signature
+                and segs[-1] == removed.leaf
+                and segs[0] == removed.qname.split("::")[0]
+                and any(s in self.NS for s in segs)
+                and not any(
+                    n.qname == o.qname and n.signature == o.signature for n in new
+                )
+            )
+
         expected = {i.qname for i in new if ok(i)}
+        # Reverse uniqueness: a target is reserved for exactly one removal.
+        claimants = {removed.qname} | {o.qname for o in old if claims(o)}
         got = _unique_promotion_target(removed, old, new, self.NS)
-        assert got == (next(iter(expected)) if len(expected) == 1 else None)
+        unique = len(expected) == 1 and len(claimants) == 1
+        assert got == (next(iter(expected)) if unique else None)
 
     @given(
         removed=_decl_items(),
