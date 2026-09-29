@@ -26,7 +26,9 @@ def _load_script(relpath: str) -> ModuleType:
 def test_full_matrix_load_json_missing_or_malformed_is_missing_lane(
     tmp_path: Path,
 ) -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     assert matrix._load_json(tmp_path / "missing.json") is None
     bad = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
@@ -38,14 +40,18 @@ def test_full_matrix_load_json_rejects_non_object_top_level(
     tmp_path: Path, payload: str
 ) -> None:
     """Valid JSON whose root isn't an object must not crash downstream .get() calls."""
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     non_object = tmp_path / "non_object.json"
     non_object.write_text(payload, encoding="utf-8")
     assert matrix._load_json(non_object) is None
 
 
 def test_full_matrix_results_by_case_rejects_non_list_results() -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     assert matrix._results_by_case({"results": "not-a-list"}) == {}
     assert matrix._results_by_case({"results": [1, "two", {"case_id": "case01"}]}) == {
         "case01": {"case_id": "case01"}
@@ -55,7 +61,9 @@ def test_full_matrix_results_by_case_rejects_non_list_results() -> None:
 def test_full_matrix_allow_unresolved_never_masks_failed(
     monkeypatch, tmp_path: Path
 ) -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     monkeypatch.setattr(matrix, "_load_json", lambda _path: {})
     monkeypatch.setattr(matrix, "_artifact_errors", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
@@ -129,7 +137,9 @@ def _artifact(
 def test_full_matrix_required_artifact_rejects_missing_or_wrong_identity(
     label: str,
 ) -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     cases = {"case01", "case02"}
     assert matrix._artifact_errors(label, None, expected_cases=cases)
 
@@ -140,7 +150,9 @@ def test_full_matrix_required_artifact_rejects_missing_or_wrong_identity(
 
 
 def test_full_matrix_artifact_rejects_partial_duplicate_and_stale_catalog() -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     cases = {"case01", "case02"}
     payload = _artifact(matrix, "gcc", cases)
     payload["ground_truth_sha256"] = "stale"
@@ -155,7 +167,9 @@ def test_full_matrix_artifact_rejects_partial_duplicate_and_stale_catalog() -> N
 
 
 def test_full_matrix_runtime_build_error_is_an_artifact_error() -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     payload = _artifact(matrix, "runtime", {"case01"}, status="BUILD_ERROR")
     errors = matrix._artifact_errors("runtime", payload, expected_cases={"case01"})
     assert errors == ["runtime: failing runner statuses for: case01"]
@@ -176,7 +190,9 @@ def _proof_artifact(matrix: ModuleType) -> dict[str, object]:
 
 
 def test_full_matrix_requires_machine_readable_owner_proofs() -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     assert matrix._proof_artifact_errors(None)
 
     payload = _proof_artifact(matrix)
@@ -191,7 +207,7 @@ def test_full_matrix_requires_machine_readable_owner_proofs() -> None:
 
 
 def test_owner_proof_runner_records_each_exit_code(monkeypatch) -> None:
-    proofs = _load_script("validation/scripts/run_example_owner_proofs.py")
+    proofs = _load_script("evaluation/validation/scripts/run_example_owner_proofs.py")
 
     class Completed:
         returncode = 0
@@ -208,7 +224,9 @@ def test_owner_proof_runner_records_each_exit_code(monkeypatch) -> None:
 def test_full_matrix_rejects_artifact_error_even_when_rows_are_covered(
     monkeypatch, tmp_path: Path
 ) -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     monkeypatch.setattr(matrix, "_load_json", lambda _path: {})
     monkeypatch.setattr(
         matrix,
@@ -250,7 +268,9 @@ def test_full_matrix_rejects_artifact_error_even_when_rows_are_covered(
 
 
 def test_stub_pair_case_requires_public_cli_proof() -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     result = matrix.build_matrix(
         gcc=None,
         clang=None,
@@ -264,8 +284,10 @@ def test_stub_pair_case_requires_public_cli_proof() -> None:
 
 
 def test_special_cli_cases_require_direct_cli_results() -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
-    special = _load_script("validation/scripts/run_special_cli_examples.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
+    special = _load_script("evaluation/validation/scripts/run_special_cli_examples.py")
     special_payload = {
         "results": [
             {"case_id": case_id, "status": "PASS"} for case_id in special.CASE_IDS
@@ -286,7 +308,9 @@ def test_special_cli_cases_require_direct_cli_results() -> None:
 
 
 def test_case98_has_one_expected_verdict_and_l2_miss_is_covered_by_l3() -> None:
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     case_id = "case98_cxx_standard_floor_raised"
     l2_miss = {
         "results": [
@@ -330,7 +354,7 @@ def test_run_json_command_rejects_non_object_json_root(
     monkeypatch, stdout: str
 ) -> None:
     """A CLI that emits valid-but-non-object JSON must fail the case, not crash on .get()."""
-    special = _load_script("validation/scripts/run_special_cli_examples.py")
+    special = _load_script("evaluation/validation/scripts/run_special_cli_examples.py")
     completed = subprocess.CompletedProcess(
         args=["abicheck", "compare"], returncode=0, stdout=stdout, stderr=""
     )
@@ -341,7 +365,7 @@ def test_run_json_command_rejects_non_object_json_root(
 
 
 def test_special_cli_runner_accepts_semantic_breaking_exit_code(monkeypatch) -> None:
-    special = _load_script("validation/scripts/run_special_cli_examples.py")
+    special = _load_script("evaluation/validation/scripts/run_special_cli_examples.py")
     monkeypatch.setattr(
         special,
         "_run_json_command",
@@ -370,7 +394,7 @@ def test_special_cli_runner_accepts_semantic_breaking_exit_code(monkeypatch) -> 
 def test_python_case_setup_timeout_is_a_failed_case_not_a_crash(
     monkeypatch, tmp_path: Path
 ) -> None:
-    special = _load_script("validation/scripts/run_special_cli_examples.py")
+    special = _load_script("evaluation/validation/scripts/run_special_cli_examples.py")
 
     def raise_timeout(*_args, **kwargs):
         raise subprocess.TimeoutExpired(
@@ -388,7 +412,7 @@ def test_python_case_setup_timeout_is_a_failed_case_not_a_crash(
 def test_python_case_setup_os_error_is_a_failed_case_not_a_crash(
     monkeypatch, tmp_path: Path
 ) -> None:
-    special = _load_script("validation/scripts/run_special_cli_examples.py")
+    special = _load_script("evaluation/validation/scripts/run_special_cli_examples.py")
 
     def raise_os_error(*_args, **_kwargs):
         raise FileNotFoundError("cc: command not found")
@@ -402,7 +426,7 @@ def test_python_case_setup_os_error_is_a_failed_case_not_a_crash(
 
 
 def test_bundle_runner_timeout_is_per_case_error(monkeypatch) -> None:
-    bundle = _load_script("validation/scripts/run_bundle_examples.py")
+    bundle = _load_script("evaluation/validation/scripts/run_bundle_examples.py")
 
     def raise_timeout(*_args, **_kwargs):
         raise subprocess.TimeoutExpired(
@@ -418,7 +442,7 @@ def test_bundle_runner_timeout_is_per_case_error(monkeypatch) -> None:
 def test_bundle_runner_rejects_unexpected_bundle_kinds(
     monkeypatch, tmp_path: Path
 ) -> None:
-    bundle = _load_script("validation/scripts/run_bundle_examples.py")
+    bundle = _load_script("evaluation/validation/scripts/run_bundle_examples.py")
     monkeypatch.setattr(bundle, "_build_case", lambda *_args: None)
     monkeypatch.setattr(
         bundle,
@@ -448,7 +472,7 @@ def test_bundle_runner_rejects_unexpected_bundle_kinds(
 
 
 def test_bundle_runner_validates_library_assertions() -> None:
-    bundle = _load_script("validation/scripts/run_bundle_examples.py")
+    bundle = _load_script("evaluation/validation/scripts/run_bundle_examples.py")
     payload = {
         "libraries": [
             {
@@ -493,7 +517,9 @@ def test_all_xfail_without_source_smoke_is_unresolved_not_covered(
     """An all-XFAIL known_gap case with no declared oracle must not earn free
     known-gap-oracle coverage — only a case whose own source_smoke actually
     proved the canonical verdict may skip direct detector/CLI proof."""
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     case_id = "caseXX_unproven_known_gap"
     gt = _synthetic_ground_truth(
         tmp_path,
@@ -530,7 +556,9 @@ def test_all_xfail_with_source_smoke_is_covered_known_gap_oracle(
     """The mirror case: an all-XFAIL known_gap case that DOES declare a
     source_smoke oracle is legitimately COVERED via known-gap-oracle
     provenance (this is case111's actual shape)."""
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     case_id = "caseXX_proven_known_gap"
     gt = _synthetic_ground_truth(
         tmp_path,
@@ -578,7 +606,9 @@ def test_build_source_proof_cases_cover_every_l3plus_single_library_case() -> No
     test_diff_reconcile.py), not either of these — see
     examples/README.md's "Known validation gaps". This guards against a
     newly-added single-library L3+ case silently missing both proof lanes."""
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     with open(matrix.GROUND_TRUTH) as f:
         verdicts = json.load(f)["verdicts"]
     required = {
@@ -626,8 +656,10 @@ def _build_source_artifact(
 
 
 def test_full_catalog_artifact_failures_is_clean_for_passing_lanes() -> None:
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
     proofs = _proof_artifact(matrix)
     bundle = _artifact(matrix, "bundle", bundle_cases)
@@ -643,8 +675,10 @@ def test_full_catalog_artifact_failures_is_clean_for_passing_lanes() -> None:
 
 
 def test_full_catalog_artifact_failures_surfaces_owner_proof_failure() -> None:
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
     proofs = _proof_artifact(matrix)
     proofs["results"][0]["status"] = "FAIL"
@@ -666,8 +700,10 @@ def test_full_catalog_artifact_failures_surfaces_missing_owner_proof_row() -> No
     partial run_example_owner_proofs.py output that silently drops an
     owner must still be caught, not just a present row with a bad
     status."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
     proofs = _proof_artifact(matrix)
     del proofs["results"][0]
@@ -684,8 +720,10 @@ def test_full_catalog_artifact_failures_surfaces_missing_owner_proof_row() -> No
 
 
 def test_full_catalog_artifact_failures_surfaces_runtime_build_error() -> None:
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
     proofs = _proof_artifact(matrix)
     bundle = _artifact(matrix, "bundle", bundle_cases)
@@ -706,8 +744,10 @@ def test_full_catalog_artifact_failures_surfaces_build_source_failure() -> None:
     normal compiler lane happens to pass that same case for an unrelated
     reason, the per-case matrix can still show all-COVERED -- this lane
     must be validated too, not just proofs/bundle/special_cli/runtime."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
-    matrix = _load_script("validation/scripts/collect_full_example_matrix.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
+    matrix = _load_script(
+        "evaluation/validation/scripts/collect_full_example_matrix.py"
+    )
     gt, bundle_cases, special_cli_cases = _full_catalog_case_sets(matrix)
     proofs = _proof_artifact(matrix)
     bundle = _artifact(matrix, "bundle", bundle_cases)
@@ -732,7 +772,7 @@ def test_full_catalog_has_compiler_finds_versioned_clang_only(monkeypatch) -> No
     having a usable clang -- otherwise run_full_catalog.py silently skips an
     available toolchain-sensitive retry even though
     `validate_examples.py --toolchain clang` would succeed."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
 
     def fake_which(name: str) -> str | None:
         return f"/usr/bin/{name}" if name in ("clang-18", "clang++-18") else None
@@ -749,7 +789,7 @@ def test_full_catalog_family_of_recognizes_msvc(monkeypatch) -> None:
     and _has_compiler must also treat msvc as having no real cross-family
     retry (there's no msvc entry in _ALT_COMPILER_PROBE) instead of
     crashing with a KeyError."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
     assert catalog._family_of("cl") == "msvc"
     assert catalog._family_of("cl.exe") == "msvc"
     assert catalog._family_of("gcc") == "gcc"
@@ -770,7 +810,7 @@ def test_run_compiler_lane_surfaces_failed_and_missing_retries(
     then promote the untouched primary XFAIL to COVERED via its own
     source_smoke oracle, hiding a real alternate-toolchain regression
     behind a match that never actually proved anything."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
     synthetic_gt = tmp_path / "ground_truth.json"
     synthetic_gt.write_text(
         json.dumps(
@@ -830,7 +870,7 @@ def test_run_compiler_lane_derives_retries_from_split_cc_cxx(
     cases and picks the wrong alternate family for their retry. Uses two
     real example cases (case64, a .c case; case34, a .cpp case) so
     _case_family's real _resolve_case_sources call resolves them for real."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
     synthetic_gt = tmp_path / "ground_truth.json"
     synthetic_gt.write_text(
         json.dumps(
@@ -906,7 +946,7 @@ def test_run_compiler_lane_forced_toolchain_reports_actual_fallback_compiler(
     toolchain_used=<requested> would claim clang built a case gcc actually
     built (and could wrongly promote a gcc-scoped known_gap as covered under
     a clang label the case never really ran under)."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
     primary = {
         # Requested clang, but neither compiler_c nor compiler_cxx actually
         # resolved to clang -- a clang-less host silently fell back to gcc.
@@ -944,7 +984,7 @@ def test_run_compiler_lane_rejects_retry_that_itself_fell_back(
     its PASS as real evidence for the *requested* alternate family, or a
     fallback-produced PASS could wrongly promote a gcc-scoped known_gap under
     a clang label the case never actually built under."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
     synthetic_gt = tmp_path / "ground_truth.json"
     synthetic_gt.write_text(
         json.dumps(
@@ -994,7 +1034,7 @@ def test_run_compiler_lane_desc_counts_only_attempted_retries(monkeypatch) -> No
     alternate compiler isn't on PATH must not be counted as "retried" in the
     compiler_lane description -- only groups that actually ran a retry
     subprocess should count toward the attempted figure."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
     gt = {
         "caseC": {"known_gap_toolchains": ["gcc"]},  # retried: clang present
         "caseCxx": {"known_gap_toolchains": ["clang"]},  # skipped: gcc absent
@@ -1049,7 +1089,7 @@ def test_full_catalog_resolve_single_library_threads_ground_truth_entry() -> Non
     case (Codex review). Cover both branches entry actually drives: a PASS
     lane (entry unused) and an all-XFAIL lane with no declared source_smoke
     (entry.get("source_smoke") must gate UNRESOLVED vs COVERED)."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
     entry = {"expected": "API_BREAK"}
     compiler_result = {
         "status": "PASS",
@@ -1078,7 +1118,7 @@ def test_full_catalog_resolve_single_library_threads_ground_truth_entry() -> Non
 def test_full_catalog_main_exit_code_reflects_artifact_errors(
     monkeypatch, tmp_path: Path
 ) -> None:
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
     monkeypatch.setattr(
         catalog,
         "run_full_catalog",
@@ -1107,7 +1147,7 @@ def test_full_catalog_main_creates_missing_out_parent_directory(
     """Regression (CodeRabbit review): a --out path whose parent directory
     doesn't exist yet (e.g. --out artifacts/catalog/full.json) must not
     crash -- write_text() doesn't create missing parents on its own."""
-    catalog = _load_script("validation/scripts/run_full_catalog.py")
+    catalog = _load_script("evaluation/validation/scripts/run_full_catalog.py")
     monkeypatch.setattr(
         catalog,
         "run_full_catalog",

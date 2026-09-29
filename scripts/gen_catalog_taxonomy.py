@@ -507,7 +507,7 @@ def _validation_owner(artifact_shape: str, mode: str | None) -> str:
     from a case-number bucket: `CAPABILITY_SCENARIOS` groups cases by what
     they *demonstrate* (a capability), which isn't the same split as which
     runner *executes* them --
-    `validation/scripts/run_special_cli_examples.py`'s own
+    `evaluation/validation/scripts/run_special_cli_examples.py`'s own
     `COMPARE_CASES`/`SCAN_CASES`/`EVIDENCE_CASES` split case191 (a real
     compiled pair, run through the live header-graph integration lane) and
     cases192/193 (`COMPARE_CASES`) out of the G20 `SCAN_CASES` set that

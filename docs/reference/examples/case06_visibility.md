@@ -102,7 +102,7 @@ handle the crash.
 
 **Why this case stays `BASELINE_SIGNAL` in the runtime-smoke matrix
 (intentionally, not a bug):** this `app.c` doesn't fit
-`validation/scripts/run_example_runtime_smoke.py`'s baseline-then-swap
+`evaluation/validation/scripts/run_example_runtime_smoke.py`'s baseline-then-swap
 model — it `dlopen`s `./libv1.so` *and* `./libv2.so` by name in a single
 run, independent of which library the harness's swap step substitutes. Its
 exit code 1 is overloaded: it fires both when `libv2.so` correctly hides

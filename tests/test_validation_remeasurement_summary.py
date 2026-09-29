@@ -6,7 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 
-_SCRIPT = Path("validation/scripts/summarize_remeasurement.py")
+_SCRIPT = Path("evaluation/validation/scripts/summarize_remeasurement.py")
 
 
 def _load_summary():
@@ -62,7 +62,7 @@ def test_summarizes_component_artifact(tmp_path: Path) -> None:
         json.dumps(
             {
                 "schema_version": "component_suites.v1",
-                "runner": "validation/scripts/run_component_suites.py",
+                "runner": "evaluation/validation/scripts/run_component_suites.py",
                 "platform": "linux",
                 "status_counts": {"blocked": 1, "planned": 1},
                 "records": [
@@ -128,7 +128,7 @@ def test_summarizes_real_world_artifact(tmp_path: Path) -> None:
         json.dumps(
             {
                 "schema_version": "run_matrix.v2",
-                "runner": "validation/scripts/run_matrix.py",
+                "runner": "evaluation/validation/scripts/run_matrix.py",
                 "platform": "linux",
             }
         )

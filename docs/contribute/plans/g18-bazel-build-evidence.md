@@ -23,7 +23,7 @@ parser exists, the coverage claim is not backed by a real run.
   is the opt-in tier a live `aquery` would fall under (ADR-032 D5).
 - `abicheck/buildsource/inline.py` `_run_build_query` — the `--allow-build-query`
   subprocess path (could drive `bazel aquery`).
-- Field-eval evidence: `eval/FINDINGS.md` P21; `eval/FOLLOWUPS.md` §E2.
+- Field-eval evidence: `evaluation/field/FINDINGS.md` P21; `evaluation/field/FOLLOWUPS.md` §E2.
 
 ## Approach
 

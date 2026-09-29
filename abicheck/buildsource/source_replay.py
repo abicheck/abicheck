@@ -1130,7 +1130,7 @@ def _record_replay_coverage(
 #: Hard ceiling on the L4 worker count. Each worker drives a heavyweight clang
 #: process (one TU, single-threaded); past ~2× the CPU count the processes only
 #: contend for cores and the L3/L5/serialization serial fraction dominates anyway
-#: (eval/SCALING.md saw jobs=8 on 4 CPUs *regress*). The explicit
+#: (evaluation/field/SCALING.md saw jobs=8 on 4 CPUs *regress*). The explicit
 #: ``ABICHECK_L4_JOBS`` override is clamped to this so a stray ``=64`` can't
 #: thrash the host — a warning is logged when it is.
 #:
@@ -1257,11 +1257,11 @@ def _l4_use_process_pool() -> bool:
     builds structural fingerprints — pure-Python, **GIL-bound** work. A thread
     pool therefore parallelizes only the clang subprocess wait, not that
     post-processing, so the AST work serializes on the GIL (part of the Amdahl
-    serial fraction in eval/SCALING.md). A *process* pool parallelizes both, at
+    serial fraction in evaluation/field/SCALING.md). A *process* pool parallelizes both, at
     the cost of pickling each ``SourceAbiTu`` back and per-process spawn.
 
     Opt-in via ``ABICHECK_L4_EXECUTOR=process`` (default ``thread``) so the
-    measured win can be validated (``eval/scaling.py``) before it becomes the
+    measured win can be validated (``evaluation/field/scaling.py``) before it becomes the
     default; an unrecognized value falls back to threads.
     """
     return os.environ.get("ABICHECK_L4_EXECUTOR", "thread").strip().lower() == "process"

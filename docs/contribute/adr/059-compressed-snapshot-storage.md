@@ -167,7 +167,7 @@ from the `validation` extra into `[project.dependencies]`. The
 existing `pip install "abicheck[validation]"` invocation wouldn't fail on an
 unknown extra; it has since been deleted outright in the pre-release
 historical-surface cleanup, since no first-party script, CI job, or doc ever
-referenced it. The `validation/` harness itself is unaffected -- it never
+referenced it. The `evaluation/validation/` harness itself is unaffected -- it never
 needed an extra of its own once `zstandard` became core.
 
 ### 6. Deterministic compression

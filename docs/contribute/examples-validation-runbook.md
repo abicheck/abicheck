@@ -9,11 +9,11 @@ catalog accounting.
 | Question | Runner |
 |---|---|
 | Is a single-library `v1`/`v2` case classified correctly? | `tests/validate_examples.py` |
-| Does a case demonstrate a runtime effect? | `validation/scripts/run_example_runtime_smoke.py` |
-| Are multi-library release bundles correct? | `validation/scripts/run_bundle_examples.py` |
-| Do all non-compiler, non-bundle fixtures pass through public CLI workflows? | `validation/scripts/run_special_cli_examples.py` |
+| Does a case demonstrate a runtime effect? | `evaluation/validation/scripts/run_example_runtime_smoke.py` |
+| Are multi-library release bundles correct? | `evaluation/validation/scripts/run_bundle_examples.py` |
+| Do all non-compiler, non-bundle fixtures pass through public CLI workflows? | `evaluation/validation/scripts/run_special_cli_examples.py` |
 | Are audit, BTF, L3/L4/L5, Python API, reconcile, snapshot-pair, and KABI fixtures valid? | The dedicated pytest proof artifact below |
-| Is every ground-truth case accounted for? | `validation/scripts/collect_full_example_matrix.py` |
+| Is every ground-truth case accounted for? | `evaluation/validation/scripts/collect_full_example_matrix.py` |
 | How accurate are evidence depths or external tools? | Benchmark/depth runners; measurement only |
 
 `validate_examples.py` alone is not the full catalog. A scan of directories
@@ -63,7 +63,7 @@ intentionally disabled. Without this opt-in, source-smoke-owned cases can be
 ### 1. Validate dedicated owners
 
 ```bash
-python validation/scripts/run_example_owner_proofs.py --json \
+python evaluation/validation/scripts/run_example_owner_proofs.py --json \
   > results/example-owner-proofs.json
 ```
 
@@ -78,15 +78,15 @@ python tests/validate_examples.py --toolchain clang --json > results/validate-ex
 python tests/validate_examples.py \
   case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 \
   --artifact-variant build-source --json > results/validate-examples-build-source.json
-python validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
-python validation/scripts/run_bundle_examples.py --json > results/bundle-examples.json
-python validation/scripts/run_special_cli_examples.py --json > results/special-cli-examples.json
+python evaluation/validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
+python evaluation/validation/scripts/run_bundle_examples.py --json > results/bundle-examples.json
+python evaluation/validation/scripts/run_special_cli_examples.py --json > results/special-cli-examples.json
 ```
 
 ### 3. Aggregate one row per case
 
 ```bash
-python validation/scripts/collect_full_example_matrix.py \
+python evaluation/validation/scripts/collect_full_example_matrix.py \
   --gcc results/validate-examples-gcc.json \
   --clang results/validate-examples-clang.json \
   --runtime results/example-runtime-smoke.json \

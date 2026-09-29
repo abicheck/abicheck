@@ -405,11 +405,10 @@ also_copy = [
     "action",
     "action.yml",
     "actions",
-    "agent-evals",
     "changelog.d",
     "contrib",
     "docs",
-    "eval",
+    "evaluation",
     "examples",
     "catalog",
     "mkdocs.yml",
@@ -433,7 +432,6 @@ also_copy = [
     ".agents",
     ".claude",
     ".gemini",
-    "validation",
     # Root ruff configuration. `test_changekind_stub.py::test_the_formatter_
     # leaves_the_generated_stub_alone_on_an_explicit_path` runs the real
     # `ruff format --check abicheck/` in this tree, and its whole claim is
@@ -745,7 +743,7 @@ pytest_add_cli_args = [
     # never engages and the hard `assert proc.returncode == 0` fires for a
     # commit this context simply can't see. No mutation-kill cost: this
     # file imports no `only_mutate` module (confirmed by grep) -- only
-    # stdlib, `jsonschema`, `pytest`, and `agent-evals/run_task.py` loaded
+    # stdlib, `jsonschema`, `pytest`, and `evaluation/agents/run_task.py` loaded
     # by path, none of which is mutated.
     "--ignore=tests/test_agent_evals.py",
     # Same "reads the real repository" class as `test_fact_field_readers.py`/

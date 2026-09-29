@@ -648,7 +648,7 @@ def is_test_path(path: str) -> bool:
     tests/`, so a `test_*.py`/`*_test.py` file elsewhere is never collected by
     any lane — accepting it credited a file nothing runs (Codex review). The
     one real file it matched proves the point:
-    `agent-evals/tasks/*/hidden_tests/test_*.py`, an eval fixture that the
+    `evaluation/agents/tasks/*/hidden_tests/test_*.py`, an eval fixture that the
     test suite deliberately does not execute. Every directory named `tests`
     in this repository *is* run by some lane (the root suite, the clang
     plugin's, the layout tool's), so the directory rule needs no allowlist.

@@ -1,0 +1,28 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:59ac9fd43a36360eb4c2b1fcbcb401c23543574f406d69a09efa04ece070387e",
+  "expected": {
+    "uncertainty": "contract_coverage_incomplete",
+    "verdict": "COMPATIBLE"
+  },
+  "inputs": "evaluation/agents/skills/fixtures/contract-coverage-incomplete",
+  "invocation": {
+    "contract": "exports",
+    "contract_evaluation": true
+  },
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Check this release against the last one and tell me whether anything we actually export to customers changed.",
+  "roots": [
+    "catalog/ground_truth.json",
+    "evaluation/agents/skills/fixtures/contract-coverage-incomplete",
+    "evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

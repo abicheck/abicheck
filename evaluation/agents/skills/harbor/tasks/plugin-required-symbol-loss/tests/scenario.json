@@ -1,0 +1,30 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:522ffd71374fcf1e87a33b21d1bae0779d67a949c3ab56e60926725432f160ec",
+  "expected": {
+    "consumer_verdict": "BREAKING",
+    "verdict": "BREAKING"
+  },
+  "inputs": "evaluation/agents/skills/fixtures/plugin-required-symbol-loss",
+  "invocation": {
+    "required_symbols": [
+      "plugin_register",
+      "plugin_teardown"
+    ]
+  },
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We're about to ship a new build of our plugin. Our host requires plugin_register and plugin_teardown to load a plugin at all \u2014 does the new build still satisfy that, or will it break existing installs of our host?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "evaluation/agents/skills/fixtures/plugin-required-symbol-loss",
+    "evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

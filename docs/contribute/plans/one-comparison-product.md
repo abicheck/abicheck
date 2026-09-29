@@ -768,7 +768,7 @@ section's *actual* state, not the target it originally described:
   `scanning-conda-packages.md`'s worked command had been unrunnable
   (`scan --binary`, `--audit`).
 - **Examples/eval/validation — partially landed.**
-  `eval/scan_level_scaling.py` is re-driven onto `compare` (it had been
+  `evaluation/field/scan_level_scaling.py` is re-driven onto `compare` (it had been
   exiting 64 on every rung: `--binary`/`--baseline`/`--baseline-header`/
   `--source-method` are all removed spellings) and its dead `graph` rung is
   dropped. `tests/scenarios/ci_gating.yaml`'s SC-SCAN-BINARY-DEPTH-MATRIX-ARGS
@@ -776,7 +776,7 @@ section's *actual* state, not the target it originally described:
   `examples/workflows/audit-release` and the G20 audit cases were annotated
   as blocked rather than dropped from the coverage denominator at the time;
   both moved to `compare --no-baseline` on 2026-09-09/10 once the audit path
-  reproduced `scan`'s findings; `validation/scripts/run_oneapi_scan.py` stays on `scan` for
+  reproduced `scan`'s findings; `evaluation/validation/scripts/run_oneapi_scan.py` stays on `scan` for
   the network-history reason its own docstring records.
 - **Blocker discovered while doing the above — now closed (2026-09-09).**
   `compare --no-baseline` did not reproduce `scan`'s audit-mode findings at
@@ -1044,7 +1044,7 @@ against this section's own historical claims:
 `workflows/scan_abi3_dry_run.py`, `workflows/scan_abort_result.py`,
 `workflows/scan_config.py`, `workflows/scan_gate_options.py`,
 `workflows/scan_subprocess.py`. Plus, outside `abicheck/`:
-`eval/scan_level_scaling.py`, `validation/scripts/run_oneapi_scan.py`.
+`evaluation/field/scan_level_scaling.py`, `evaluation/validation/scripts/run_oneapi_scan.py`.
 
 **B. Delete — scan-only tests (33 files, 21,111 lines):**
 

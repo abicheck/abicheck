@@ -2775,7 +2775,7 @@ looked like the obvious fix and wasn't.
     CI run only gating against a static baseline) needs a storage decision
     (artifact-based vs. external DB) and a retention/access policy before
     it's worth building.
-  - *Full behavioral baseline* — `agent-evals/` (this pass, M1-5) is a real
+  - *Full behavioral baseline* — `evaluation/agents/` (this pass, M1-5) is a real
     but minimal harness with one task; a "full behavioral baseline" implies
     a broad task suite plus a scoring/leaderboard story, which should grow
     from real usage of the one-task harness rather than being speculatively
@@ -7090,7 +7090,7 @@ either way `--no-baseline` cannot express what ADR-068 D2 promises it
 replaces.
 
 Not fixed here: this documentation/corpora slice owns `docs/`, `examples/`,
-`eval/`, `validation/`, `catalog/`, and `skills-src/` only, and the fix is
+`evaluation/field/`, `evaluation/validation/`, `catalog/`, and `skills-src/` only, and the fix is
 in `abicheck/workflows/no_baseline_compare.py` plus whatever
 `report/`-side projection has to carry a one-sided finding set. Consequences
 recorded rather than papered over: `docs/integration/scenarios/single-build-audit.md`,
@@ -8989,7 +8989,7 @@ Every G20 audit case in `catalog/ground_truth.json` declares
 (e.g. case151: `private_header_leak` from **both** `public_header_ast` and
 `source_index`; case148: `header_build_context_mismatch` from
 `build_config` + `public_header_ast`). Legacy `scan` published these as
-`crosscheck.providers`, and `validation/scripts/run_special_cli_examples.py`
+`crosscheck.providers`, and `evaluation/validation/scripts/run_special_cli_examples.py`
 checked them. ADR-068 Phase 6 retired the whole-audit orchestrator
 (`scan_engine.py`) that built that block, and no replacement projection
 landed in `report/no_baseline.py`, so the assertion is now unchecked by
@@ -9025,7 +9025,7 @@ something a repair PR folds in as a side effect.
 
 The alternative offered in review — mark rows with a non-empty
 `unvalidated_assertions` as `UNRESOLVED` — was declined for a stated
-reason, not skipped: `validation/CLAUDE.md`'s matrix contract requires one
+reason, not skipped: `evaluation/validation/CLAUDE.md`'s matrix contract requires one
 `COVERED` row per ground-truth entry and no `UNRESOLVED` rows, and *all
 ten* audit cases declare `provider_assertions`, so it turns a currently
 green required lane red for a capability removed upstream in PR #1211.

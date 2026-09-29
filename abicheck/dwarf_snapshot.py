@@ -1688,7 +1688,7 @@ class _DwarfSnapshotBuilder:
         The typedef is keyed by its *namespace-qualified* name (consistent with
         records and enums) so that standard-library typedefs nested under ``std``
         (e.g. ``std::vector<…>::size_type``) carry their ``std::`` scope and the
-        non-ABI-surface filter can recognise them (validation/REPORT.md FP-1).
+        non-ABI-surface filter can recognise them (evaluation/validation/REPORT.md FP-1).
         """
         name = _attr_str(die, "DW_AT_name")
         if not name:

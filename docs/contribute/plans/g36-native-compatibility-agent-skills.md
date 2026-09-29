@@ -1314,13 +1314,13 @@ describes what actually exists.
 > categories, the six-dimension rubric, and the split gating model (baseline/
 > non-regression for four dimensions, zero tolerance from the first run for
 > the two safety ones) — and changes four things: the harness lives in
-> `agent-evals/skills/` rather than `validation/` (G37 D8), grading runs off a
+> `evaluation/agents/skills/` rather than `evaluation/validation/` (G37 D8), grading runs off a
 > recorded transcript bundle produced through a recording shim rather than off
 > a live session (G37 D3), the safety dimensions are graded pass^k across
 > repeated runs rather than per run (G37 D4), and the live evaluation runs
 > off-CI with CI re-grading its committed evidence rather than as a CI lane
-> (G37 D2). The file names this item states below — `validation/scripts/
-> run_skill_evals.py`, `validation/data/skill_eval_scenarios.yaml` — are
+> (G37 D2). The file names this item states below — `evaluation/validation/scripts/
+> run_skill_evals.py`, `evaluation/validation/data/skill_eval_scenarios.yaml` — are
 > therefore **not** the paths to build; see G37's "Files & surfaces".
 
 **Problem:** Structural and trigger tests confirm a skill is well-formed
@@ -1355,14 +1355,14 @@ snapshot pair, not the invocation parameters (`--used-by`, `--required-
 symbol(s)`, a multi-target `project`/`aggregate` matrix, a deliberately
 malformed comparability contract) these scenarios need; they cannot be
 resolved from that index as written. Cover them with a separate, explicit
-scenario manifest (`validation/data/skill_eval_scenarios.yaml` or similar)
+scenario manifest (`evaluation/validation/data/skill_eval_scenarios.yaml` or similar)
 recording each scenario's invocation parameters and expected workflow
 outcome directly, plus whatever additional fixtures it needs beyond what
 `examples/` already provides — not folded into the case-index lookup
 above.
 
-**Files:** `validation/scripts/run_skill_evals.py` (new, alongside the
-existing `validation/scripts/run_example_owner_proofs.py`-style harness
+**Files:** `evaluation/validation/scripts/run_skill_evals.py` (new, alongside the
+existing `evaluation/validation/scripts/run_example_owner_proofs.py`-style harness
 scripts — indexes cases via **`catalog/ground_truth.json`**, the
 repository's actual canonical per-case catalog, but **not by iterating
 its top level directly**: the file's top-level keys are file-wide metadata
@@ -1372,13 +1372,13 @@ nested one level down, under `ground_truth["verdicts"]`, keyed there by
 case directory name and carrying `expected`/`expected_kinds`/
 `min_evidence` per case — this is what the named categories above, e.g.
 "removed export," "vtable change," resolve against, reached via
-`catalog["verdicts"][case_dir]`, not `catalog[case_dir]`. `validation/
+`catalog["verdicts"][case_dir]`, not `catalog[case_dir]`. `evaluation/validation/
 data/manifest.json` is a different, unrelated index — 11 real-world
 *package pairs* keyed by `pair`, not `examples/` case IDs — and cannot
 serve this item's purpose; an earlier draft of this item named it in
-error); `validation/data/skill_eval_scenarios.yaml`
+error); `evaluation/validation/data/skill_eval_scenarios.yaml`
 (new — the second-category scenario manifest above, for cases
-`ground_truth.json` structurally can't index); `validation/data/skill_eval_results.json`
+`ground_truth.json` structurally can't index); `evaluation/validation/data/skill_eval_results.json`
 (new results artifact, mirroring the existing `results.json` convention).
 
 **Tests:** a fixture-resolution test asserting the harness's `ground_truth.

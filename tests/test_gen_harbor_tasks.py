@@ -19,7 +19,7 @@ Real end-to-end grading (does `solve.sh` -> the shim -> `verify_run.py`
 actually produce reward=1 for a correct answer) is exercised directly, not
 mocked -- see `TestSolveScriptsEndToEnd`. Full trial execution (an actual
 Harbor `harbor run`, which needs Docker) is out of scope for the fast unit
-lane; see `agent-evals/skills/harbor/CLAUDE.md` for what that still leaves
+lane; see `evaluation/agents/skills/harbor/CLAUDE.md` for what that still leaves
 unverified.
 
 `TestHarborSchemaValidation` is the one class in this file that needs the
@@ -43,7 +43,7 @@ import pytest
 from _workflow_exec import bash_executable, require_bash
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL_DIR = ROOT / "agent-evals" / "skills"
+EVAL_DIR = ROOT / "evaluation" / "agents" / "skills"
 TASKS_DIR = EVAL_DIR / "harbor" / "tasks"
 
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -52,7 +52,8 @@ sys.path.insert(0, str(EVAL_DIR))
 import gen_harbor_tasks as gen  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
-    not TASKS_DIR.is_dir(), reason="agent-evals/skills/harbor/tasks/ not generated"
+    not TASKS_DIR.is_dir(),
+    reason="evaluation/agents/skills/harbor/tasks/ not generated",
 )
 
 #: Shared skip for the three test classes below that actually execute a
@@ -167,18 +168,18 @@ class TestGeneratorCheck:
         root_a = tmp_path / "a"
         root_b = tmp_path / "b"
         for root in (root_a, root_b):
-            (root / "agent-evals" / "skills" / "graders").mkdir(parents=True)
-            (root / "agent-evals" / "skills" / "shim").mkdir(parents=True)
-            (root / "agent-evals" / "skills" / "harbor").mkdir(parents=True)
-            (root / "agent-evals" / "skills" / "graders" / "dimensions.py").write_text(
-                "x = 1\n", encoding="utf-8"
-            )
-            (root / "agent-evals" / "skills" / "shim" / "abicheck").write_text(
-                "#!/bin/sh\n", encoding="utf-8"
-            )
-            (root / "agent-evals" / "skills" / "harbor" / "verify_run.py").write_text(
-                "pass\n", encoding="utf-8"
-            )
+            (root / "evaluation" / "agents" / "skills" / "graders").mkdir(parents=True)
+            (root / "evaluation" / "agents" / "skills" / "shim").mkdir(parents=True)
+            (root / "evaluation" / "agents" / "skills" / "harbor").mkdir(parents=True)
+            (
+                root / "evaluation" / "agents" / "skills" / "graders" / "dimensions.py"
+            ).write_text("x = 1\n", encoding="utf-8")
+            (
+                root / "evaluation" / "agents" / "skills" / "shim" / "abicheck"
+            ).write_text("#!/bin/sh\n", encoding="utf-8")
+            (
+                root / "evaluation" / "agents" / "skills" / "harbor" / "verify_run.py"
+            ).write_text("pass\n", encoding="utf-8")
         # Identical content, two different roots -- the digest must agree.
         assert gen._runtime_relevant_digest(root_a) == gen._runtime_relevant_digest(
             root_b
@@ -186,9 +187,9 @@ class TestGeneratorCheck:
         # A real change to a runtime-relevant file must move the digest --
         # this is the signal that replaces "is the pinned ref reachable and
         # does `git diff` against it show anything under these paths".
-        (root_b / "agent-evals" / "skills" / "graders" / "dimensions.py").write_text(
-            "x = 2\n", encoding="utf-8"
-        )
+        (
+            root_b / "evaluation" / "agents" / "skills" / "graders" / "dimensions.py"
+        ).write_text("x = 2\n", encoding="utf-8")
         assert gen._runtime_relevant_digest(root_a) != gen._runtime_relevant_digest(
             root_b
         )
@@ -206,17 +207,17 @@ class TestGeneratorCheck:
         depend on whether this repo's own `graders/` happens to have a
         pycache directory at test time."""
         root = tmp_path / "src"
-        graders = root / "agent-evals" / "skills" / "graders"
+        graders = root / "evaluation" / "agents" / "skills" / "graders"
         graders.mkdir(parents=True)
-        (root / "agent-evals" / "skills" / "shim").mkdir(parents=True)
-        (root / "agent-evals" / "skills" / "harbor").mkdir(parents=True)
+        (root / "evaluation" / "agents" / "skills" / "shim").mkdir(parents=True)
+        (root / "evaluation" / "agents" / "skills" / "harbor").mkdir(parents=True)
         (graders / "dimensions.py").write_text("x = 1\n", encoding="utf-8")
-        (root / "agent-evals" / "skills" / "shim" / "abicheck").write_text(
+        (root / "evaluation" / "agents" / "skills" / "shim" / "abicheck").write_text(
             "#!/bin/sh\n", encoding="utf-8"
         )
-        (root / "agent-evals" / "skills" / "harbor" / "verify_run.py").write_text(
-            "pass\n", encoding="utf-8"
-        )
+        (
+            root / "evaluation" / "agents" / "skills" / "harbor" / "verify_run.py"
+        ).write_text("pass\n", encoding="utf-8")
         before = gen._runtime_relevant_digest(root)
 
         pycache = graders / "__pycache__"
@@ -242,13 +243,13 @@ class TestGeneratorCheck:
         byte-level change of any kind, line endings included."""
         root = tmp_path / "src"
         for sub in ("graders", "shim", "harbor"):
-            (root / "agent-evals" / "skills" / sub).mkdir(parents=True)
-        target = root / "agent-evals" / "skills" / "harbor" / "verify_run.py"
+            (root / "evaluation" / "agents" / "skills" / sub).mkdir(parents=True)
+        target = root / "evaluation" / "agents" / "skills" / "harbor" / "verify_run.py"
         target.write_bytes(b"import sys\nprint(sys.argv)\n")
-        (root / "agent-evals" / "skills" / "graders" / "dimensions.py").write_text(
-            "x = 1\n", encoding="utf-8"
-        )
-        (root / "agent-evals" / "skills" / "shim" / "abicheck").write_text(
+        (
+            root / "evaluation" / "agents" / "skills" / "graders" / "dimensions.py"
+        ).write_text("x = 1\n", encoding="utf-8")
+        (root / "evaluation" / "agents" / "skills" / "shim" / "abicheck").write_text(
             "#!/bin/sh\n", encoding="utf-8"
         )
         before = gen._runtime_relevant_digest(root)
@@ -291,7 +292,7 @@ class TestGeneratorCheck:
         from hashlib import sha256
         from pathlib import PurePosixPath, PureWindowsPath
 
-        relative = "agent-evals/skills/graders/dimensions.py"
+        relative = "evaluation/agents/skills/graders/dimensions.py"
         content = b"x = 1\n"
 
         def _digest(path_cls):
@@ -323,20 +324,20 @@ class TestGeneratorCheck:
         against a synthetic tree, like the sibling determinism test above,
         so this doesn't depend on the real skill's current content."""
         root = tmp_path / "src"
-        (root / "agent-evals" / "skills" / "graders").mkdir(parents=True)
-        (root / "agent-evals" / "skills" / "shim").mkdir(parents=True)
-        (root / "agent-evals" / "skills" / "harbor").mkdir(parents=True)
+        (root / "evaluation" / "agents" / "skills" / "graders").mkdir(parents=True)
+        (root / "evaluation" / "agents" / "skills" / "shim").mkdir(parents=True)
+        (root / "evaluation" / "agents" / "skills" / "harbor").mkdir(parents=True)
         skill_dir = root / ".claude" / "skills" / "check-abi-compatibility"
         skill_dir.mkdir(parents=True)
-        (root / "agent-evals" / "skills" / "graders" / "dimensions.py").write_text(
-            "x = 1\n", encoding="utf-8"
-        )
-        (root / "agent-evals" / "skills" / "shim" / "abicheck").write_text(
+        (
+            root / "evaluation" / "agents" / "skills" / "graders" / "dimensions.py"
+        ).write_text("x = 1\n", encoding="utf-8")
+        (root / "evaluation" / "agents" / "skills" / "shim" / "abicheck").write_text(
             "#!/bin/sh\n", encoding="utf-8"
         )
-        (root / "agent-evals" / "skills" / "harbor" / "verify_run.py").write_text(
-            "pass\n", encoding="utf-8"
-        )
+        (
+            root / "evaluation" / "agents" / "skills" / "harbor" / "verify_run.py"
+        ).write_text("pass\n", encoding="utf-8")
         skill_md = skill_dir / "SKILL.md"
         skill_md.write_text("original workflow content\n", encoding="utf-8")
         before = gen._runtime_relevant_digest(root)
@@ -368,7 +369,7 @@ class TestGeneratorCheck:
         allowlist only needs to keep what the *agent's* image itself still
         needs, which is `abicheck/` alone. Pinned as a content assertion on
         the generated Dockerfile rather than an actual Docker build (no
-        Docker in this sandbox -- see `agent-evals/skills/harbor/
+        Docker in this sandbox -- see `evaluation/agents/skills/harbor/
         CLAUDE.md`)."""
         dockerfile = (
             TASKS_DIR / "removed-export" / "environment" / "Dockerfile"
@@ -417,7 +418,7 @@ class TestGeneratorCheck:
 
     def test_verifier_dockerfile_keeps_only_the_grader_allowlist(self):
         """`tests/Dockerfile` -- the separate verifier's own image -- must
-        clone the same pinned ref and keep exactly `agent-evals/skills/
+        clone the same pinned ref and keep exactly `evaluation/agents/skills/
         graders/`, `verify_run.py`, and `abicheck/` itself.
 
         `abicheck/` is deliberately *not* excluded here, unlike an earlier
@@ -441,11 +442,11 @@ class TestGeneratorCheck:
         assert "mv /tmp/rt-keep /opt/abicheck-src" in cleanup_block
         assert "mv abicheck /tmp/rt-keep/abicheck" in cleanup_block
         assert (
-            "mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders"
+            "mv evaluation/agents/skills/graders /tmp/rt-keep/agent-evals/skills/graders"
             in cleanup_block
         )
         assert (
-            "mv agent-evals/skills/harbor/verify_run.py "
+            "mv evaluation/agents/skills/harbor/verify_run.py "
             "/tmp/rt-keep/agent-evals/skills/harbor/verify_run.py" in cleanup_block
         )
         assert cleanup_block.count("/tmp/rt-keep/") == 4  # mkdir -p + 3 mv targets
@@ -1143,7 +1144,7 @@ class TestHarborSchemaValidation:
 
     @pytest.fixture(autouse=True)
     def _harbor(self):
-        # `agent-evals/skills/harbor/` (this repo's own generated-task tree)
+        # `evaluation/agents/skills/harbor/` (this repo's own generated-task tree)
         # is itself an implicit PEP 420 namespace package named `harbor`,
         # and this module's own `sys.path.insert(0, str(EVAL_DIR))` above
         # puts it ahead of site-packages -- `pytest.importorskip("harbor")`

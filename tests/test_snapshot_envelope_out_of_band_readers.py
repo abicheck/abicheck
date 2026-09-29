@@ -239,7 +239,7 @@ _MOVED_KEYS = frozenset(
 )
 
 #: Trees whose files read snapshot documents from outside `abicheck/`.
-_SCANNED_ROOTS = ("actions", "contrib", "scripts", "validation", "tests")
+_SCANNED_ROOTS = ("actions", "contrib", "scripts", "evaluation", "tests")
 
 #: Sites that read one of `_MOVED_KEYS` off a dict that is NOT a snapshot
 #: document some `abicheck dump` wrote (a hand-built fixture, a pack dict, a

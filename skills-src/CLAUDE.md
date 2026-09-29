@@ -141,7 +141,7 @@ intent only, that PR 4's deliverable should be an npm/npx-installable
 package published from this repository rather than a separate distribution
 repo. **PR 3 landed** under that new name (a complete G37 evaluation
 corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's "PR 3"
-amendment and `agent-evals/skills/pilot-results/README.md`; its dominant
+amendment and `evaluation/agents/skills/pilot-results/README.md`; its dominant
 finding is a harness turn-budget confound, not a skill-quality result, so
 the skill is still not behaviorally validated. PR 4 (an npm/npx-installable
 package published from this repository, removing the internal-candidate

@@ -692,7 +692,7 @@ the coverage block showing exactly what each depth proved and what it could not.
 
 ## Cost guide (rules of thumb)
 
-Measured on two UXL libraries (full data: `validation/`):
+Measured on two UXL libraries (full data: `evaluation/validation/`):
 
 | Tier | Depths | Relative cost |
 |------|--------|---------------|

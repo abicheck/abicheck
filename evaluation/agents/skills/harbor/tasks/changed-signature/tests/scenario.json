@@ -1,0 +1,29 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "A",
+  "digest": "sha256:48191272e7389709f1dd6c09eab48f8d343fe25c2744e0fc2a77345cc95ad39b",
+  "expected": {
+    "kinds": [
+      "func_params_changed"
+    ],
+    "min_evidence": "L1",
+    "resolved_from": "catalog/ground_truth.json",
+    "verdict": "BREAKING"
+  },
+  "inputs": "catalog/cases/case02_param_type_change",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Does this change break existing consumers of the library, or only require a recompile?",
+  "roots": [
+    "catalog/cases/case02_param_type_change",
+    "catalog/ground_truth.json",
+    "evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

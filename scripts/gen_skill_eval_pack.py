@@ -97,7 +97,7 @@ from skill_eval_surface import normalize_newlines  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 # The *generated* tree, deliberately not `skills-src/` — see `_skill_tree_digest`.
 PUBLISHED_SKILLS = ROOT / ".agents" / "skills"
-EVAL_DIR = ROOT / "agent-evals" / "skills"
+EVAL_DIR = ROOT / "evaluation" / "agents" / "skills"
 SCENARIOS = EVAL_DIR / "scenarios.yaml"
 RUBRIC = EVAL_DIR / "rubric.yaml"
 TRIGGER_CORPUS = ROOT / "tests" / "agent_skills" / "trigger_corpus.yaml"
@@ -129,11 +129,11 @@ BUILD_SOURCES = (
 #: is the correct behaviour, not a gap: evidence recorded under no harness and
 #: evidence recorded under the first one are not evidence about the same thing.
 HARNESS_SOURCES = (
-    Path("agent-evals/skills/runners"),
-    Path("agent-evals/skills/shim"),
-    Path("agent-evals/skills/graders"),
-    Path("agent-evals/skills/run_skill_eval.py"),
-    Path("agent-evals/skills/grade_bundle.py"),
+    Path("evaluation/agents/skills/runners"),
+    Path("evaluation/agents/skills/shim"),
+    Path("evaluation/agents/skills/graders"),
+    Path("evaluation/agents/skills/run_skill_eval.py"),
+    Path("evaluation/agents/skills/grade_bundle.py"),
 )
 
 

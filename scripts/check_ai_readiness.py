@@ -58,12 +58,12 @@ EXAMPLES = example_catalog.EXAMPLES_DIR
 CATALOG = example_catalog.CATALOG_DIR
 CASES = example_catalog.CASES_DIR
 SCRIPTS = ROOT / "scripts"
-EVAL = ROOT / "eval"
-VALIDATION = ROOT / "validation"
+EVAL = ROOT / "evaluation" / "field"
+VALIDATION = ROOT / "evaluation" / "validation"
 ACTION = ROOT / "action"
 CONTRIB_CLANG_PLUGIN = ROOT / "contrib" / "abicheck-clang-plugin"
 GITHUB_DIR = ROOT / ".github"
-AGENT_EVALS = ROOT / "agent-evals"
+AGENT_EVALS = ROOT / "evaluation" / "agents"
 SKILLS_SRC = ROOT / "skills-src"
 
 # ADR-058's generated agent-skill publication trees. Every Markdown file under
@@ -119,7 +119,7 @@ from semantic_ir_cutover import check_semantic_ir_cutover  # noqa: E402
 
 # First-party Python roots (CLAUDE.md "M1-2"): every tree of hand-written,
 # agent-editable source the size/test-ratio checks below cover. `abicheck/`
-# was previously the only root scanned — `scripts/`, `eval/`, `validation/`,
+# was previously the only root scanned — `scripts/`, `evaluation/field/`, `evaluation/validation/`,
 # `action/`, and the clang-plugin's `tests/` could grow unbounded (including
 # the readiness script itself: `check_ai_readiness.py` was 1842 lines, over
 # its own WARN threshold, before this list started covering `scripts/`).
@@ -304,7 +304,7 @@ def check_file_sizes(f: Findings) -> None:
     allow-listed); WARN at WARN_LINES regardless.
 
     Covers every FIRST_PARTY_PY_ROOTS tree (CLAUDE.md "M1-2"), not just
-    `abicheck/` — `scripts/`, `eval/`, `validation/`, `action/`, and the
+    `abicheck/` — `scripts/`, `evaluation/field/`, `evaluation/validation/`, `action/`, and the
     clang-plugin's `tests/` can grow unbounded just as easily.
     """
     for path in _iter_first_party_python_files():

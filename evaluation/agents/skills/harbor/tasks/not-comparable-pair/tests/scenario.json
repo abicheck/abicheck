@@ -1,0 +1,27 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:69cee2a9bbfc663f99b03e8d17c38e516b866273f9ff03eda25fb7a2ab6965df",
+  "expected": {
+    "uncertainty": "not_comparable",
+    "verdict": null
+  },
+  "inputs": "evaluation/agents/skills/fixtures/not-comparable-pair",
+  "invocation": {
+    "break_comparability": true
+  },
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Here are the previous and current builds of our shared library. Did this change break anything for programs already linked against it?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "evaluation/agents/skills/fixtures/not-comparable-pair",
+    "evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

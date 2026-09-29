@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-_SCRIPT = Path("validation/scripts/validate.py")
+_SCRIPT = Path("evaluation/validation/scripts/validate.py")
 
 
 def _load_module():
