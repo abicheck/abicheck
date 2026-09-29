@@ -1555,6 +1555,8 @@ def run_compare(
                 defines=effective_compare_defines(
                     resolve_compile_context, **_compile_context_kwargs
                 ),
+                compile_context=resolve_compile_context(**_compile_context_kwargs)[0],
+                lang=lang,
                 old_input=old_input,
                 new_input=new_input,
                 old_kind=old_kind,

@@ -32,6 +32,7 @@ operation with no extraction dependency at all.
 from __future__ import annotations
 
 import json
+from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 #: The rules a run may have matched its exclusion patterns by. ``glob`` is
@@ -84,7 +85,7 @@ def normalize_matching(value: object) -> str:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
 
     from .snapshot import AbiSnapshot
 
@@ -306,3 +307,141 @@ def release_exclusion_identity(
     if len(observed) == 1:
         return observed[0]
     return "mixed=" + json.dumps(observed, ensure_ascii=False, separators=(",", ":"))
+
+
+def glob_header_matches(path: str | None, patterns: Sequence[str]) -> bool:
+    """The native ``--exclude-header`` ``glob`` rule: *path* matches one of
+    *patterns* by bare file name, full path, or path under any leading
+    directory (``**/`` semantics). ``extract.header_exclusions.
+    header_matches_exclusion`` delegates here so the rule has one owner."""
+    if not path or not patterns:
+        return False
+    name = path.replace("\\", "/").rsplit("/", 1)[-1]
+    return any(
+        fnmatch(name, pat) or fnmatch(path, pat) or fnmatch(path, f"*/{pat}")
+        for pat in patterns
+    )
+
+
+def declared_header_paths(snapshot: AbiSnapshot | None) -> frozenset[str] | None:
+    """Every declaring header a snapshot's extracted declarations name.
+
+    ``None`` when the snapshot carries no header-attributed declaration at
+    all (a binary-only or pre-header dump): there is then no evidence of
+    what its header surface was, and "no header matched" would be a guess.
+    """
+    if snapshot is None:
+        return None
+    headers = frozenset(
+        str(d.source_header)
+        for group in (
+            snapshot.functions,
+            snapshot.variables,
+            snapshot.types,
+            snapshot.enums,
+        )
+        for d in group
+        if getattr(d, "source_header", None)
+    )
+    return headers or None
+
+
+def exclusion_asymmetry_is_vacuous(
+    old_patterns: Sequence[str],
+    new_patterns: Sequence[str],
+    old_matching: str,
+    new_matching: str,
+    old_declared_headers: Collection[str] | None,
+    new_declared_headers: Collection[str] | None,
+) -> bool:
+    """Whether two differing *achieved* exclusion sets narrow nothing differently.
+
+    A snapshot records the patterns that actually removed a header
+    (``extract.header_exclusions.matched_exclusion_patterns``), not the ones requested -- so one
+    ``--exclude-header "*_ze*"`` given to both sides of a release pair where
+    only the newer release ships ``dnnl_ze.h`` records the pattern on NEW
+    alone. That asymmetry is not a difference in what was compared: the
+    pattern would have removed nothing from OLD either. Refusing it (exit
+    16, after both sides were parsed) was a false "not comparable".
+
+    The asymmetry is vacuous exactly when, for every pattern only one side
+    records, the *other* side's parsed surface contains no declaration from
+    a header that pattern matches -- a manufactured finding needs such a
+    declaration to exist on the un-narrowed side. Stated from the
+    snapshots' own evidence, so a stored baseline dumped without the flag
+    that really did parse a matching header is still refused.
+
+    Fails closed: only the native ``glob`` rule is evaluated (the rule
+    :func:`glob_header_matches` implements); patterns both sides share
+    must have been matched by the same known rule; and a side with no
+    header-attributed declaration (``None``) proves nothing.
+    """
+    old_set = frozenset(p for p in old_patterns if p)
+    new_set = frozenset(p for p in new_patterns if p)
+    if old_set & new_set and (
+        old_matching != new_matching or UNKNOWN_MATCHING in (old_matching, new_matching)
+    ):
+        return False
+    for extra, own_matching, lacking_headers in (
+        (new_set - old_set, new_matching, old_declared_headers),
+        (old_set - new_set, old_matching, new_declared_headers),
+    ):
+        if not extra:
+            continue
+        if own_matching != GLOB_MATCHING or not lacking_headers:
+            return False
+        if any(glob_header_matches(h, sorted(extra)) for h in lacking_headers):
+            return False
+    return True
+
+
+#: The ``AbiSnapshot.ast_toolchain`` key recording headers the L2 parse
+#: dropped because they could not compile (a JSON list of paths; written by
+#: ``extract.unparseable_header_fallback``). ``ast_toolchain`` is free-form
+#: provenance, not a fingerprinted profile field.
+EXCLUDED_HEADERS_TOOLCHAIN_KEY = "unparseable_headers_excluded"
+
+
+def excluded_headers_from_toolchain(ast_toolchain: dict[str, str] | None) -> list[str]:
+    """The recorded dropped headers, or ``[]`` (tolerant of a malformed value)."""
+    raw = (ast_toolchain or {}).get(EXCLUDED_HEADERS_TOOLCHAIN_KEY)
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return [raw]
+    return [str(v) for v in value] if isinstance(value, list) else [str(value)]
+
+
+def unparseable_header_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> list[str]:
+    """Reduced-evidence warnings for headers a side's L2 parse had to drop.
+
+    Named per side, and flagged loudly when only one side dropped a header
+    whose basename the other side parsed: its declarations then read as
+    removed or added purely because one frontend run could not compile it.
+    """
+    sides = {
+        "old": excluded_headers_from_toolchain(getattr(old, "ast_toolchain", None)),
+        "new": excluded_headers_from_toolchain(getattr(new, "ast_toolchain", None)),
+    }
+    warnings = [
+        f"{side}: the L2 header parse excluded {len(paths)} header(s) it could "
+        f"not compile ({', '.join(paths)}); declarations only they provide were "
+        "not observed on this side (reduced evidence)."
+        for side, paths in sides.items()
+        if paths
+    ]
+    names = {
+        k: {p.replace("\\", "/").rsplit("/", 1)[-1] for p in v}
+        for k, v in sides.items()
+    }
+    one_sided = sorted(names["old"] ^ names["new"])
+    if old is not None and one_sided:
+        warnings.append(
+            "Unparseable-header exclusions differ between the two sides ("
+            + ", ".join(one_sided)
+            + "); findings on declarations from those headers may reflect the "
+            "exclusion rather than a change."
+        )
+    return warnings

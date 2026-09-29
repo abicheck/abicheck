@@ -62,11 +62,14 @@ from .dumper_castxml import (
     _vt_sort_key as _vt_sort_key,
 )
 from .dumper_castxml_probe import (
+    _castxml_cpp_retry_allowed as _castxml_cpp_retry_allowed,
     _castxml_failure_hint as _castxml_failure_hint,
     _castxml_version_note as _castxml_version_note,
     _is_toolchain_version_failure as _is_toolchain_version_failure,
     _parse_castxml_version as _parse_castxml_version,
     _validate_castxml_output as _validate_castxml_output,
+    castxml_dump_excluding_unparseable,
+    record_unparseable_headers,
 )
 from .dumper_clang import (
     _clang_available as _clang_available,
@@ -725,7 +728,8 @@ def _header_ast_parser(
     selected_castxml: list[str] = []
     selected_meta: list[tuple[str, bool]] = []
     try:
-        xml_root = _castxml_dump(
+        xml_root, _unparseable = castxml_dump_excluding_unparseable(
+            _castxml_dump,
             headers,
             extra_includes,
             compiler=compiler,
@@ -775,12 +779,15 @@ def _header_ast_parser(
     meta = selected_meta[0] if selected_meta else (None, None)
     return cast(
         _CastxmlParser,
-        _stamp_parser(
-            parser,
-            producer="castxml",
-            executable=selected_castxml[0] if selected_castxml else "castxml",
-            resolved_compiler=meta[0],
-            resolved_force_cpp=meta[1],
+        record_unparseable_headers(
+            _stamp_parser(
+                parser,
+                producer="castxml",
+                executable=selected_castxml[0] if selected_castxml else "castxml",
+                resolved_compiler=meta[0],
+                resolved_force_cpp=meta[1],
+            ),
+            _unparseable,
         ),
     )
 
@@ -815,28 +822,6 @@ def _resolve_gated_castxml_bin(castxml_bin: str | None) -> str:
         if not check.supported and not _allow_unsupported_castxml_enabled():
             raise UnsupportedCastxmlVersionError(check.message(found_at=resolved))
     return resolved
-
-
-def _castxml_cpp_retry_allowed(
-    primary: SnapshotError, *, force_cpp: bool, headers: list[Path]
-) -> bool:
-    """Whether a failed C-mode castxml run may be retried in C++ mode (G16/A3).
-
-    An explicit ``--lang c`` on a header that actually requires C++ (a stray
-    class/namespace/template, or C++20 concept/requires syntax — Codex review)
-    should degrade to a C++ retry rather than hard-fail. No retry when we are
-    already in C++ mode, when the failure is a frontend-too-old signature (a mode
-    switch won't help), or when the header has no *genuinely C++-only* construct
-    (``_CPP_ONLY_PATTERNS`` excludes ``extern "C"``: a guarded ``extern "C"``
-    header is valid C, so a C-mode failure there is real and must NOT be masked
-    by re-parsing as C++, which would skip the ``#ifndef __cplusplus`` branches —
-    Codex review).
-    """
-    if force_cpp or _is_toolchain_version_failure(str(primary)):
-        return False
-    return _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS) or _detect_cpp20_headers(
-        headers
-    )
 
 
 def _write_castxml_cache(

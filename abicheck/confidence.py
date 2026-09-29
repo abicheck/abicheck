@@ -296,6 +296,9 @@ def compute_confidence(
             warnings.append(detector_disablement_warning(dr.name, dr.coverage_gap))
 
     warnings.extend(header_exclusion_warnings(old, new))
+    from .model.header_exclusion_record import unparseable_header_warnings
+
+    warnings.extend(unparseable_header_warnings(old, new))
     warnings.extend(extraction_scope_notes(old, new))  # ADR-075 D3
 
     confidence = _determine_confidence_level(
@@ -357,8 +360,26 @@ def header_exclusion_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> list
     # runs that excluded the same headers should not read differently.
     old_matching = getattr(old, "excluded_header_matching", "glob") or "glob"
     new_matching = getattr(new, "excluded_header_matching", "glob") or "glob"
-    if old is not None and not exclusions_are_symmetric(
-        old_patterns, new_patterns, old_matching, new_matching
+    from .model.header_exclusion_record import (
+        declared_header_paths,
+        exclusion_asymmetry_is_vacuous,
+    )
+
+    if (
+        old is not None
+        and not exclusions_are_symmetric(
+            old_patterns, new_patterns, old_matching, new_matching
+        )
+        # The same relaxation the comparability gate applies: a pattern only
+        # one side achieved, matching no header the other side parsed.
+        and not exclusion_asymmetry_is_vacuous(
+            old_patterns,
+            new_patterns,
+            old_matching,
+            new_matching,
+            declared_header_paths(old),
+            declared_header_paths(new),
+        )
     ):
         return [
             f"Header exclusions differ between the two sides "
@@ -371,7 +392,7 @@ def header_exclusion_warnings(old: AbiSnapshot | None, new: AbiSnapshot) -> list
             "asymmetry rather than a change."
         ]
     return [
-        f"Headers matching {', '.join(sorted(new_patterns))} were excluded from "
+        f"Headers matching {', '.join(sorted(set(old_patterns) | set(new_patterns)))} were excluded from "
         f"the "
         f"parsed surface ({HEADER_EXCLUSION_WARNING_MARKER}); anything only "
         f"they declared was not observed, on either side."

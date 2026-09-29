@@ -88,9 +88,15 @@ class TestDumpIsCacheable:
         kwargs = _cacheable_kwargs(debug_presence_only=True)
         assert _dump_is_cacheable(**kwargs) is False
 
-    def test_compile_context_not_cacheable(self):
+    def test_unknown_compile_object_not_cacheable(self):
         kwargs = _cacheable_kwargs(compile=object())
         assert _dump_is_cacheable(**kwargs) is False
+
+    def test_real_compile_context_is_cacheable(self):
+        from abicheck.compile_context import CompileContext
+
+        for cc in (CompileContext(), CompileContext(sysroot=Path("/s"), nostdinc=True)):
+            assert _dump_is_cacheable(**_cacheable_kwargs(compile=cc)) is True
 
     def test_header_graph_no_longer_a_cacheability_parameter(self):
         """G29 Phase A: header_graph/header_graph_includes are no longer
