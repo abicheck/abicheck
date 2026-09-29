@@ -252,6 +252,13 @@ def test_parse_dwarf_output_is_unchanged_by_the_index(
         monkeypatch.setattr(
             mod, "open_indexed_dwarf_info", lambda elf: elf.get_dwarf_info()
         )
+    monkeypatch.setattr(
+        dsi,
+        "iter_formal_parameters",
+        lambda die: (
+            c for c in die.iter_children() if c.tag == "DW_TAG_formal_parameter"
+        ),
+    )
     stock = dwarf_unified.parse_dwarf(binary)
     stock_snap = build_snapshot_from_dwarf(binary, elf_meta, *stock)
 

@@ -437,9 +437,17 @@ class _ElementReader:
         self._fh = fh
         self._decoder = codecs.getincrementaldecoder("utf-8")()
         self.base: int = int(fh.tell()) - len(buf)
-        self.text = self._decoder.decode(bytes(buf))
+        self.text = self._decode(bytes(buf))
         self.eof = False
         self._cursor = (0, 0)
+
+    def _decode(self, data: bytes, final: bool = False) -> str:
+        try:
+            return str(self._decoder.decode(data, final=final))
+        except UnicodeDecodeError as exc:
+            raise ClangAstStreamError(
+                f"AST document is not valid UTF-8 (or is truncated mid-character): {exc}"
+            ) from exc
 
     def byte_offset(self, pos: int) -> int:
         if self.text.isascii():  # O(1) on a str
@@ -464,9 +472,9 @@ class _ElementReader:
         chunk = self._fh.read(max(_CHUNK, at_least))
         if not chunk:
             self.eof = True
-            self.text += self._decoder.decode(b"", final=True)
+            self.text += self._decode(b"", final=True)
         else:
-            self.text += self._decoder.decode(chunk)
+            self.text += self._decode(chunk)
         return 0
 
     def next_char(self, pos: int) -> tuple[str, int]:

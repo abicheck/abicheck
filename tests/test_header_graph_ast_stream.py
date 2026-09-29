@@ -263,6 +263,31 @@ class TestScannerAgainstStdlibJson:
         finally:
             mod._CHUNK = original
 
+    @pytest.mark.parametrize("chunk", [1, 4, 1 << 20])
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            b'{"inner": [{"k": "\xff"}]}',  # never valid UTF-8
+            b'{"inner": [{"k": "\xc3',  # cut inside a 2-byte character
+        ],
+    )
+    def test_invalid_utf8_is_a_stream_error(
+        self, tmp_path: Path, chunk: int, raw: bytes
+    ) -> None:
+        """Bad or truncated UTF-8 raises the scanner's own documented error,
+        which every caller answers with the ordinary parse."""
+        from abicheck.buildsource import header_graph_ast_stream as mod
+
+        path = tmp_path / "doc.json"
+        path.write_bytes(raw)
+        original = mod._CHUNK
+        mod._CHUNK = chunk
+        try:
+            with pytest.raises(ClangAstStreamError):
+                list(stream_top_level_decls(path))
+        finally:
+            mod._CHUNK = original
+
     @pytest.mark.parametrize("chunk", [4, 1 << 20])
     def test_a_malformed_element_is_a_decode_error_not_truncation(
         self, tmp_path: Path, chunk: int
