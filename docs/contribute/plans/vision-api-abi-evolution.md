@@ -816,13 +816,22 @@ JSON, with the edge oracle derived independently; exit code identical with
 and without `-o html`; generated documents check escaping and the cap) and
 `tests/test_html_surface_changes.py`.
 
-Still open: per-finding consumer attribution (`Change.affected_use_cases`);
+- *Per-finding consumer attribution.* Under `compare --use-cases`, each
+  JSON change carries `affected_use_cases` (report schema 5.10), derived as
+  the exact inverse of `use_case_impact.by_use_case`; Markdown and the review
+  digest render it (`tests/test_use_case_per_finding.py`).
+- *Real Action run.* `.github/workflows/test-action.yml` job
+  `test-report-policy-and-consumer-impact` runs the composite Action twice
+  (with and without a versioning policy) on a real breaking pair and asserts
+  the policy acceptance, the HTML sections, an unchanged verdict/exit code,
+  and no ADR numbers in the report files.
+
+Still open: `affected_use_cases` in the HTML changes table and SARIF;
 release-level `surface_changes` (the release JSON carries none yet, so the
 release page renders the section only when a document has one); dependency
-facts for PE/Mach-O members (only ELF is recorded); the composite Action
-still rejects `format: html` for a directory/package operand; and S4's real
-Action run in a lab workflow, which has not been executed and remains
-unverified.
+facts for PE/Mach-O members (only ELF is recorded); the step summary written
+by the Action is not itself asserted ADR-free by the new job (only the
+report files are).
 
 ## Files & surfaces
 
