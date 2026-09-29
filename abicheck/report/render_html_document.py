@@ -406,16 +406,14 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
 </div>
 
 {gate_html}
-{scoped_html}
-{versioning_html}
+{scoped_html}{versioning_html}
 {confidence_html}
 {edge_coverage_html}
 {nav_html}
 {summary_html}
 {filter_note}
 {redundancy_note}
-{sections_html}
-{use_case_html}
+{sections_html}{use_case_html}
 {impact_html}
 
 {render_footer("ABICC-compatible report format")}
