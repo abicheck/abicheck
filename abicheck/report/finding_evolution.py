@@ -104,11 +104,41 @@ class FindingEvolutionSummary:
     #: Findings from an earlier comparison in the chain that no longer
     #: appear in this one (``DiffResult.resolved_findings``).
     resolved: tuple[ResolvedFindingEntry, ...]
+    #: Whether any current finding carries a real chain comparison (i.e. a
+    #: state other than ``not_evaluated``), or any finding resolved.
+    chain_evaluated: bool = False
+
+    @property
+    def total(self) -> int:
+        """Current-side findings this block classified.
+
+        Every ``DiffResult.changes`` entry, and nothing else: ``resolved``
+        findings belong to an *earlier* comparison and are excluded. The
+        same population ``summary.total_changes`` and
+        ``summary.change_inventory`` partition, so the three reconcile by
+        construction (``total == total_changes == compatibility_changes +
+        hygiene_*``).
+        """
+        return sum(
+            n for state, n in self.counts if state != FindingEvolution.RESOLVED.value
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
+            # Which axis these counts are on. ``finding_evolution`` tracks a
+            # finding across a *chain of separate comparisons*; the
+            # same-named states in ``summary.change_inventory``/
+            # ``cross_source_evolution`` are OLD-vs-NEW *within this one*
+            # comparison. A single compare reads ``not_evaluated`` here for a
+            # finding the inventory reads ``persistent`` -- two different
+            # questions, not a contradiction; stating the basis is what
+            # keeps a reader from comparing them as one.
+            "basis": "comparison_chain",
+            "chain_evaluated": self.chain_evaluated,
+            "total": self.total,
             "counts": dict(self.counts),
             "resolved": [r.to_dict() for r in self.resolved],
+            "within_comparison_counterpart": "summary.change_inventory",
         }
 
     @classmethod
@@ -130,6 +160,7 @@ class FindingEvolutionSummary:
                 )
                 for row in d.get("resolved") or ()
             ),
+            chain_evaluated=bool(d.get("chain_evaluated", False)),
         )
 
 
@@ -178,9 +209,15 @@ def compute_finding_evolution_summary(result: DiffResult) -> FindingEvolutionSum
     # than one state permanently pinned at zero regardless of reality.
     counts[FindingEvolution.RESOLVED.value] = len(resolved)
 
+    chain_evaluated = bool(resolved) or any(
+        n
+        for state, n in counts.items()
+        if state != FindingEvolution.NOT_EVALUATED.value
+    )
     return FindingEvolutionSummary(
         counts=tuple((e.value, counts[e.value]) for e in FindingEvolution),
         resolved=resolved,
+        chain_evaluated=chain_evaluated,
     )
 
 

@@ -288,3 +288,73 @@ class TestFindingEvolutionSummary:
             "persistent": 0,
             "not_evaluated": 0,
         }
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation with the within-comparison inventory (oneDNN validation:
+# ``finding_evolution`` read ``not_evaluated: 462`` beside
+# ``change_inventory.hygiene_persistent: 414`` -- two axes over one
+# population, with nothing in the report saying so).
+# ---------------------------------------------------------------------------
+
+from abicheck.policy.evidence_status import CrossSourceEvolution  # noqa: E402
+
+_cross_states = st.one_of(st.none(), st.sampled_from(list(CrossSourceEvolution)))
+_chain_states = st.sampled_from(
+    [s for s in FindingEvolution if s is not FindingEvolution.RESOLVED]
+)
+_kinds = st.sampled_from(
+    [
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.FUNC_ADDED,
+        ChangeKind.EXPORTED_NOT_PUBLIC,
+    ]
+)
+
+
+@st.composite
+def _mixed_result(draw: st.DrawFn) -> DiffResult:
+    rows = draw(
+        st.lists(
+            st.tuples(st.sampled_from(_ALPHABET), _kinds, _cross_states, _chain_states),
+            max_size=12,
+        )
+    )
+    chain = draw(st.booleans())
+    changes = []
+    for sym, kind, cross, evo in rows:
+        c = Change(kind=kind, symbol=sym, description=f"{kind.value} {sym}")
+        c.cross_source_evolution = cross
+        if chain:
+            c.evolution = evo
+        changes.append(c)
+    return DiffResult(old_version="o", new_version="n", library="lib", changes=changes)
+
+
+class TestReconcilesWithChangeInventory:
+    @given(_mixed_result())
+    def test_both_blocks_partition_the_same_population(
+        self, result: DiffResult
+    ) -> None:
+        """Oracle: ``len(result.changes)``, counted independently of either
+        block's own summation."""
+        import json
+
+        from abicheck.reporter import to_json
+
+        doc = json.loads(to_json(result))
+        evo = doc["finding_evolution"]
+        inv = doc["summary"]["change_inventory"]
+        n = len(result.changes)
+        assert evo["basis"] == "comparison_chain"
+        assert evo["total"] == n == doc["summary"]["total_changes"]
+        assert sum(v for k, v in evo["counts"].items() if k != "resolved") == n
+        hygiene = sum(v for k, v in inv.items() if k.startswith("hygiene_"))
+        assert inv["compatibility_changes"] + hygiene == n
+        # A persistent inventory finding under a single comparison is a
+        # not-evaluated chain finding -- never a contradiction.
+        chain_stamped = any(
+            c.evolution is not FindingEvolution.NOT_EVALUATED for c in result.changes
+        )
+        assert evo["chain_evaluated"] is chain_stamped
+        assert evo["within_comparison_counterpart"] == "summary.change_inventory"
