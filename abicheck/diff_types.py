@@ -21,6 +21,7 @@ from collections.abc import Collection, Mapping
 
 from .checker_types import Change
 from .compare.base_class_diff import diff_bases as _diff_bases
+from .compare.enum_sentinel import is_sentinel_enum_member
 from .compare.typedefs import (
     diff_typedefs,
     is_version_stamped_typedef as is_version_stamped_typedef,
@@ -31,7 +32,6 @@ from .diff_cxx_rules import itanium_qualified_name
 from .diff_helpers import (
     build_type_map as _build_type_map,
     fact_known_qualified,
-    is_sentinel_enum_member,
     lookup_matched_type as _lookup_matched_type,
     make_change,
     type_map_key,

@@ -115,12 +115,12 @@ from .export_declaration_evidence import (
     public_template_for_export,
     textual_declaration_hint,
 )
-from .exported_not_public_finding import exported_not_public_finding
 from .export_obligation_linkage import (
     inline_declared_symbols as inline_declared_symbols,
     is_static_member_symbol,
     owner_in_internal_namespace,
 )
+from .exported_not_public_finding import exported_not_public_finding
 from .template_linkage import names_a_template_specialization
 
 #: Cross-check fact-schema version. Independent of every other buildsource

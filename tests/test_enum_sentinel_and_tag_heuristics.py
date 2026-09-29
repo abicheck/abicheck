@@ -13,7 +13,7 @@ import itertools
 
 import pytest
 
-from abicheck.diff_helpers import identifier_tokens, is_sentinel_enum_member
+from abicheck.compare.enum_sentinel import identifier_tokens, is_sentinel_enum_member
 from abicheck.diff_serialization import (
     _enum_type_is_tag_registry,
     detect_serialization_tag_changes,

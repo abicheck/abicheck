@@ -34,7 +34,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .checker_types import Change
-from .diff_helpers import identifier_tokens, is_sentinel_enum_member, make_change
+from .compare.enum_sentinel import identifier_tokens, is_sentinel_enum_member
+from .diff_helpers import make_change
 from .model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:

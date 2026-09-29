@@ -44,11 +44,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from ..model import Function
-from .export_accounting import (
-    _NESTED_QUALIFIERS_RE,
-    _entity_owner_is_internal,
-    _read_decimal_length,
-)
+from ..model.export_entity_name import _NESTED_QUALIFIERS_RE, _read_decimal_length
+from ..model.mangled_name_template_args import skip_substitution, skip_template_args
+from .export_accounting import _entity_owner_is_internal
 
 __all__ = [
     "inline_declared_symbols",
@@ -70,24 +68,27 @@ def _itanium_encoding(symbol: str) -> str | None:
 
 
 def _itanium_nested_has_internal_linkage(rest: str) -> bool:
-    """Whether a nested name's depth-0 components carry the ``L`` marker."""
-    i, depth = 0, 0
+    """Whether a nested name's depth-0 components carry the ``L`` marker.
+
+    Template-argument lists and substitutions are skipped with the shared
+    structural walker (``skip_template_args``/``skip_substitution``), so a
+    literal or nested name inside template arguments is never mistaken for a
+    depth-0 component.
+    """
+    i = 0
     while i < len(rest):
         c = rest[i]
-        if c == "I" or (c == "L" and depth > 0):
-            # A template-argument list, or a literal/external name inside one;
-            # both close with ``E``.
-            depth += 1
-            i += 1
-        elif c == "E":
-            if depth == 0:
+        if c == "E":
+            return False
+        if c == "I":
+            end = skip_template_args(rest, i)
+            if end is None:
                 return False
-            depth -= 1
-            i += 1
-        elif c == "L" and depth == 0:
-            if i + 1 < len(rest) and rest[i + 1].isdigit():
-                return True
-            i += 1
+            i = end
+        elif c == "S":
+            i = skip_substitution(rest, i)
+        elif c == "L" and i + 1 < len(rest) and rest[i + 1].isdigit():
+            return True
         elif c.isdigit():
             parsed = _read_decimal_length(rest, i)
             if parsed is None:
