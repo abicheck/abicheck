@@ -880,8 +880,8 @@ def _merge_group(
                 kind, name = key
                 raise TuMergeError(
                     f"translation units {acc_tu!r} and {tu_name!r} declare "
-                    f"incompatible versions of {kind} {name!r} -- ADR-050 "
-                    "Phase C's merge only reconciles a forward declaration + "
+                    f"incompatible versions of {kind} {name!r} -- the "
+                    "cross-unit merge only reconciles a forward declaration + "
                     "definition, a plain redeclaration, or a default-"
                     "argument-only difference; this pair disagrees on "
                     "something else (return type, layout, calling "
@@ -901,8 +901,8 @@ def _merge_group(
                     raise TuMergeError(
                         f"translation unit {tu_name!r} declares a repeated "
                         f"{kind} {name!r} that conflicts with the version "
-                        "every other translation unit agrees on -- ADR-050 "
-                        "Phase C's merge only reconciles a forward "
+                        "every other translation unit agrees on -- the "
+                        "cross-unit merge only reconciles a forward "
                         "declaration + definition, a plain redeclaration, "
                         "or a default-argument-only difference.",
                         code=INCONSISTENT_DECLARATION,
@@ -946,7 +946,7 @@ def _merge_scalar_group(
                 raise TuMergeError(
                     f"translation units {acc_tu!r} and {tu_name!r} declare "
                     f"{kind} {name!r} with different values ({acc_value!r} "
-                    f"vs {value!r}) -- ADR-050 Phase C cannot reconcile two "
+                    f"vs {value!r}) -- the cross-unit merge cannot reconcile two "
                     "different values for the same name.",
                     code=INCONSISTENT_DECLARATION,
                     entity_key=entity_key(kind, name),

@@ -123,12 +123,12 @@ def build_declared_selection_record(
             state, reason = (
                 AcquisitionState.OUT_OF_SCOPE,
                 "discovered but not named in the explicit --select/"
-                "--select-required selection (ADR-065 S1)",
+                "--select-required selection",
             )
         elif not old_present and not new_present:
             state, reason = (
                 AcquisitionState.EXPECTED_NOT_PRODUCED,
-                "declared expected member was not produced on either side (ADR-065 S1)",
+                "declared expected member was not produced on either side",
             )
         elif key in old_unproduced or key in new_unproduced:
             state, reason = (
@@ -160,15 +160,13 @@ def build_declared_selection_record(
             state, reason = (
                 AcquisitionState.NOT_SUPPLIED,
                 "declared member has no counterpart on NEW; NEW's inventory "
-                "is not proven complete, so this is unmatched, not removed "
-                "(ADR-065 D2)",
+                "is not proven complete, so this is unmatched, not removed",
             )
         else:
             state, reason = (
                 AcquisitionState.NOT_SUPPLIED,
                 "declared member has no counterpart on OLD; OLD's inventory "
-                "is not proven complete, so this is unmatched, not added "
-                "(ADR-065 D2)",
+                "is not proven complete, so this is unmatched, not added",
             )
         if state is AcquisitionState.NOT_SUPPLIED:
             lacking = evidence.new if old_present else evidence.old
@@ -200,7 +198,7 @@ def build_declared_selection_record(
         selection="declared",
         selection_reason=(
             f"{len(declared)} member(s) explicitly declared via "
-            f"--select/--select-required (ADR-065 S1): {required_count} required, "
+            f"--select/--select-required: {required_count} required, "
             f"{optional_count} optional"
         ),
     )
@@ -296,7 +294,7 @@ def build_release_plan(
                     required=False,
                     declared=False,
                     note="discovered but not declared in the explicit selection "
-                    "-- out of scope (ADR-065 S1)",
+                    "-- out of scope",
                 )
             )
             continue

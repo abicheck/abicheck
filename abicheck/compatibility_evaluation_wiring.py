@@ -912,7 +912,7 @@ def resolve_pack_field_assignments(
         if convert is None:
             raise PackManifestError(
                 f"{path}: a {kind.value!r} pack may not assign {field_name!r} "
-                f"(assignable fields: {sorted(routes)}) -- ADR-049 D8 keeps the "
+                f"(assignable fields: {sorted(routes)}) -- packs keep the "
                 "contract/policy/gate namespaces distinct, and an effective-"
                 "config field with no route here is one no pack of this kind "
                 "is allowed to set"

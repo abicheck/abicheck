@@ -990,7 +990,7 @@ class TestNoticeAttributesTheFailureToTheRightPolicy:
         notice = comparison_scope_notice(terms.section)
         assert notice is not None
         assert notice.startswith("No comparison completed")
-        assert "never a clean pass" in notice and "D7" in notice
+        assert "never a clean pass" in notice and "No comparison completed" in notice
         assert "(scope.on_incomplete: block)" not in notice
         assert "accepted as a warning" not in notice
 

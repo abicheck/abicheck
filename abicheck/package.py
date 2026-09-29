@@ -1516,7 +1516,7 @@ _CONTAINER_COMPLETE_PROVENANCE = (
 _CONTAINER_UNPROVEN_PROVENANCE = (
     "directory operand: no container to enumerate, so a component this tree "
     "happens not to hold may simply never have been copied in -- absence "
-    "cannot be proven (ADR-065 D2)"
+    "cannot be proven"
 )
 
 
@@ -1590,7 +1590,7 @@ def package_component_inventory(
             unproduced[key] = (
                 f"the package ships {fn!r}, but its content could not be reached "
                 "after extraction (dangling link or unreadable file) -- expected, "
-                "not produced (ADR-065 D1)"
+                "not produced"
             )
     return PackageInventory(
         components=tuple(components),

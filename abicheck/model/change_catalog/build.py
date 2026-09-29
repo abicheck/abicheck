@@ -157,7 +157,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
     _E(
         "support_promise_component_retired",
         _B,
-        impact="ADR-065 D1/S3: the release stopped shipping a component it used "
+        impact="The release stopped shipping a component it used "
         "to ship, and the NEW side's inventory is PROVEN complete, so "
         "this is evidence of a retired promise rather than a member a "
         "partial input happened not to supply. Every consumer that links "
@@ -175,7 +175,7 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         "support_promise_component_introduced",
         _C,
         is_addition=True,
-        impact="ADR-065 D1/S3: the symmetric rule -- the release now ships a "
+        impact="The release now ships a "
         "component it did not before, established against a PROVEN-"
         "complete OLD inventory (a partial old input cannot prove the "
         "component was absent). No existing consumer is affected.",

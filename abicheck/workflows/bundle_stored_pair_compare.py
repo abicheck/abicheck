@@ -326,7 +326,7 @@ def compare_stored_bundle_facts_pair(
     # the member's ELF facts, which the degraded capture does carry.
     degraded_notes = [
         f"{key}: {side} side was captured degraded ({reason}); per-library "
-        "comparison skipped (ADR-065 D8)"
+        "comparison skipped"
         for key in matched_keys
         for side, facts in (("OLD", old_facts), ("NEW", new_facts))
         for reason in (facts.degraded_members.get(key),)
@@ -464,12 +464,12 @@ def compare_stored_bundle_facts_pair(
         # review, twenty-ninth round): never a proven removal/addition, and
         # dropped with the member before the bundle graph is rebuilt.
         old_failed={
-            k: f"OLD side was captured degraded ({v}); comparison skipped (ADR-065 D8)"
+            k: f"OLD side was captured degraded ({v}); comparison skipped"
             for k, v in old_facts.degraded_members.items()
             if k not in new_facts.per_library_snapshots
         },
         new_failed={
-            k: f"NEW side was captured degraded ({v}); comparison skipped (ADR-065 D8)"
+            k: f"NEW side was captured degraded ({v}); comparison skipped"
             for k, v in new_facts.degraded_members.items()
             if k not in old_facts.per_library_snapshots
         },
@@ -513,7 +513,7 @@ def compare_stored_bundle_facts_pair(
     )
     result.analysis_errors.extend(degraded_notes)
     result.analysis_errors.extend(
-        f"{key}: not comparable ({msg}); per-library comparison skipped (ADR-050 D2)"
+        f"{key}: not comparable ({msg}); per-library comparison skipped"
         for key, (_kind, msg) in sorted(not_comparable.items())
     )
     if manifest_note is not None:

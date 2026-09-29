@@ -139,7 +139,7 @@ def build_no_baseline_dry_run_result(
     result.add(
         "Output and exit-code behavior",
         f"format: {fmt}",
-        "no compatibility verdict is reported (ADR-068 D2); exit code folds the "
+        "no compatibility verdict is reported; exit code folds the "
         "coverage, analysis-assurance and evidence-contract axes only",
     )
     if collects_source and sources is None and build_info is None:

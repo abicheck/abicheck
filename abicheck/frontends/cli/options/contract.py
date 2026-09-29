@@ -66,7 +66,7 @@ def pack_option(f: F) -> F:
         "pack_paths",
         multiple=True,
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        help="Select an ADR-049 D8 pack manifest (repeatable). A pack is a "
+        help="Select a pack manifest (repeatable). A pack is a "
         "small versioned YAML document (id/version/kind/assignments) "
         "carrying one reusable piece of configuration. 'kind: policy' "
         "assigns ChangeKind slugs to break/warn/risk/ignore, exactly as "
@@ -114,8 +114,8 @@ def contract_options(f: F) -> F:
         "contract_mode",
         type=click.Choice(["public", "exports", "all", "auto"]),
         default=None,
-        help="Which evidence domain each finding is judged against "
-        "(ADR-049 Phase 6), and the flag that turns the contract "
+        help="Which evidence domain each finding is judged against"
+        ", and the flag that turns the contract "
         "evaluator on -- omit it and nothing about the run changes. "
         "'public': the header-derived declared surface. 'exports': the "
         "binary's own export table (ELF .dynsym / PE export directory / "
@@ -139,7 +139,7 @@ def contract_options(f: F) -> F:
         "contract_context block (observed provider evidence, resolved "
         "evaluation context, decision receipt), so a decision can be "
         "replayed or re-evaluated later without re-reading the binaries. "
-        "**The decisions are authoritative** (ADR-049 Phase 7): relevance "
+        "**The decisions are authoritative**: relevance "
         "is classified before compatibility policy, and policy scores only "
         "IN_CONTRACT/NOT_APPLICABLE findings -- so this changes verdicts "
         "and exit codes. Nothing is hidden: an excluded finding stays in "

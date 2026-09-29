@@ -135,7 +135,7 @@ def stored_degraded_members(
         for key, reason in degraded.items():
             found.setdefault(
                 key,
-                f"{label} side was captured degraded ({reason}); comparison skipped (ADR-065 D8)",
+                f"{label} side was captured degraded ({reason}); comparison skipped",
             )
     result = StoredDegradedMembers()
     for key, reason in found.items():

@@ -644,7 +644,7 @@ def compare_release_against_bundle_facts(
         # An OLD-only degraded member is `failed` on OLD, never `not_supplied`
         # (Codex review, twenty-ninth round).
         old_failed={
-            k: f"OLD side was captured degraded ({v}); comparison skipped (ADR-065 D8)"
+            k: f"OLD side was captured degraded ({v}); comparison skipped"
             for k, v in old_facts.degraded_members.items()
             if k not in new_map
         },
@@ -723,21 +723,21 @@ def compare_release_against_bundle_facts(
     )
     result.analysis_errors.extend(
         f"{key}: OLD side was captured degraded ({reason}); per-library "
-        "comparison skipped (ADR-065 D8)"
+        "comparison skipped"
         for key, reason in sorted(degraded.items())
     )
     result.analysis_errors.extend(
         f"{key}: NEW artifact is unsupported by this build ({reason}); "
-        "per-library comparison skipped (ADR-065 D6)"
+        "per-library comparison skipped"
         for key, reason in sorted(unsupported.items())
     )
     result.analysis_errors.extend(
         f"{key}: NEW artifact failed extraction ({reason}); per-library "
-        "comparison skipped (ADR-065 D1)"
+        "comparison skipped"
         for key, reason in sorted(failed.items())
     )
     result.analysis_errors.extend(
-        f"{key}: not comparable ({msg}); per-library comparison skipped (ADR-050 D2)"
+        f"{key}: not comparable ({msg}); per-library comparison skipped"
         for key, (_kind, msg) in sorted(not_comparable.items())
     )
     if manifest_note is not None:

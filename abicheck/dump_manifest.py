@@ -305,7 +305,7 @@ def _parse_tu(raw: Any, *, base_dir: Path, index: int) -> TranslationUnit:
         raise ManifestValidationError(
             f"{context}: 'contributes_to_abi: true' requires 'required: true' "
             "-- a TU whose declarations feed the ABI model cannot also be "
-            "allowed to fail silently (ADR-050 D3)"
+            "allowed to fail silently"
         )
     return TranslationUnit(
         name=name,

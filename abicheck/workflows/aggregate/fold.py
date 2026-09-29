@@ -586,7 +586,7 @@ class AggregateResult:
                 )
             out.append(
                 f"  contributes {self.contract_coverage_exit} to the exit code "
-                "(ADR-049 contract-coverage axis)"
+                "(contract-coverage axis)"
             )
 
         return out
@@ -620,7 +620,7 @@ class AggregateResult:
             "Comparison scope",
             self.scope_completeness_targets,
             self.scope_completeness_exit,
-            "ADR-065 scope-completeness axis",
+            "scope-completeness axis",
         )
 
     def _render_profile_matrix_lines(self) -> list[str]:

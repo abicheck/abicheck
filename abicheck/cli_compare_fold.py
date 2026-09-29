@@ -693,7 +693,7 @@ def _report_not_comparable(
         f"Error: '{old.library}' old={old.version!r} new={new.version!r} are not "
         f"comparable: {message}\n"
         "The two snapshots were not extracted under a comparable profile/scope "
-        "contract (ADR-050 D1/D2), so no verdict was produced. Pass "
+        "contract, so no verdict was produced. Pass "
         "--diagnostic-comparison to force a tentative diff (stamped "
         'assurance: "none") if you understand the risk.',
         err=True,

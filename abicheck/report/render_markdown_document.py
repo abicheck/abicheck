@@ -364,7 +364,7 @@ def _render_not_evaluated_lines(d: Mapping[str, Any] | None) -> list[str]:
         "",
         "> These findings were detected but **not scored** by compatibility",
         "> policy: each is either proven outside the declared contract or",
-        "> unresolved for want of evidence (ADR-049). They contribute nothing",
+        "> unresolved for want of evidence. They contribute nothing",
         "> to the verdict or the gate. Incomplete evidence is reported",
         "> separately on the contract-coverage axis, which has its own exit",
         "> code — uncertainty is never silently treated as compatible.",
