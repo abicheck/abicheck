@@ -56,6 +56,10 @@ class SnapshotError(AbicheckError, RuntimeError):
     catches RuntimeError from snapshot extraction.
     """
 
+    #: The producing tool's full, untruncated diagnostics when a header parse
+    #: failed (the unparseable-header fallback attributes errors from them).
+    stderr: str | None = None
+
 
 class HeaderToolchainError(SnapshotError):
     """Raised when a header-scoped source-mode parse fails on a known,

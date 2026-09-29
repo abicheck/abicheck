@@ -103,10 +103,9 @@ def preflight_header_frontend(
     if resolved in ("castxml", "hybrid"):
         required.append("castxml")
         castxml_ok = shutil.which("castxml") is not None
-        if not castxml_ok:
-            # An opted-in auto fallback reaches clang when castxml fails.
-            if not (fallback and _clang_tool()[1]):
-                missing.append("castxml")
+        # An opted-in auto fallback reaches clang when castxml fails.
+        if not castxml_ok and not (fallback and _clang_tool()[1]):
+            missing.append("castxml")
     if resolved in ("clang", "hybrid"):
         name, ok = _clang_tool()
         required.append(name)

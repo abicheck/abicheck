@@ -239,7 +239,7 @@ def _validate_castxml_output(
         error = (HeaderToolchainError if is_toolchain else SnapshotError)(message)
         # The full diagnostics, untruncated: the unparseable-header fallback
         # attributes errors to headers from the include chains in here.
-        setattr(error, "stderr", result.stderr or "")
+        error.stderr = result.stderr or ""
         raise error
     if not out_xml.exists() or out_xml.stat().st_size == 0:
         stderr_snippet = result.stderr[:1000].strip()
@@ -311,7 +311,7 @@ def record_unparseable_headers(parser: Any, excluded: list[Path]) -> Any:
         metadata[EXCLUDED_HEADERS_TOOLCHAIN_KEY] = json.dumps(
             [str(p) for p in excluded]
         )
-        setattr(parser, "_abicheck_ast_toolchain", metadata)
+        parser._abicheck_ast_toolchain = metadata
     return parser
 
 

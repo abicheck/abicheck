@@ -337,9 +337,9 @@ def public_template_for_symbol(symbol: str, public: PublicTemplateScopes) -> str
     candidates = [comps[: p + 1] for p in sorted(parsed.template_positions)]
     if max(parsed.template_positions) == len(comps) - 1 and len(comps) >= 2:
         candidates.append(comps[:-1])  # member template of a (public) class
-    for cand in candidates:
-        if cand and cand[-1].startswith("{"):
-            cand = cand[:-1]  # a templated ctor/operator names its class
+    for raw in candidates:
+        # A templated ctor/operator names its class.
+        cand = raw[:-1] if raw and raw[-1].startswith("{") else raw
         if cand and (
             cand in public.scopes
             or (len(cand) >= 2 and (comps[0], cand[-1]) in public.heads)
