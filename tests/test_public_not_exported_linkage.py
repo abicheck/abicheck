@@ -130,6 +130,60 @@ def test_template_args_with_literals_do_not_fake_internal_linkage() -> None:
     assert is_static_member_symbol("_ZN2ns1WIiE4makeEv")
 
 
+_TEMPLATE_ARG_ATOMS = [
+    "i",
+    "Li5E",  # integer literal
+    "LN2ns4kindE0E",  # namespaced-enumerator literal
+    "N2ns1XE",  # nested name
+    "N6detail3EnvE",  # a nested name spelling `E`-heavy identifiers
+    "S_",
+    "S0_",
+    "S12_",  # seq-id that must not be read as a length
+    "St",
+    "T_",
+    "JiiE",  # argument pack
+]
+
+
+def _template_args(rng: random.Random, depth: int = 0) -> str:
+    """Generate a well-formed ``I...E`` list from the atoms above, nesting
+    further template argument lists up to three levels deep."""
+    parts = []
+    for _ in range(rng.randint(1, 4)):
+        if depth < 3 and rng.random() < 0.3:
+            parts.append(
+                _src(rng.choice(_SCOPE_NAMES)) + _template_args(rng, depth + 1)
+            )
+        else:
+            parts.append(rng.choice(_TEMPLATE_ARG_ATOMS))
+    return "I" + "".join(parts) + "E"
+
+
+def test_generated_template_arguments_never_decide_linkage() -> None:
+    """Generated manglings with templated scope components: the oracle is the
+    internal flag the generator itself placed at depth 0. Whatever literals,
+    nested names, substitutions or packs sit inside the template arguments,
+    the answer must follow that flag alone."""
+    rng = random.Random(20260929)
+    for _ in range(3000):
+        scopes = [
+            _src(rng.choice(_SCOPE_NAMES))
+            + (_template_args(rng) if rng.random() < 0.6 else "")
+            for _ in range(rng.randint(1, 3))
+        ]
+        internal = rng.random() < 0.5
+        leaf = _src(rng.choice(_LEAVES))
+        mangled = (
+            "_ZN"
+            + "".join(scopes)
+            + ("L" if internal else "")
+            + leaf
+            + "E"
+            + rng.choice(_PARAMS)
+        )
+        assert is_static_member_symbol(mangled) is (not internal), mangled
+
+
 @pytest.mark.parametrize(
     ("code", "member"),
     [(c, True) for c in "CDKLST"] + [(c, False) for c in "YZAEIMQU"],
