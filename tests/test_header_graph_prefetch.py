@@ -195,3 +195,53 @@ def test_a_spent_budget_runs_the_prefetch_inline(
         )
     assert names == [threading.current_thread().name]
     assert pr.THREAD_BUDGET.in_use == 0
+
+
+@pytest.mark.parametrize(
+    "exc", [RuntimeError("boom"), OSError("boom"), KeyboardInterrupt()]
+)
+def test_a_failing_dump_settles_its_prefetch_before_returning(
+    monkeypatch: pytest.MonkeyPatch, exc: BaseException
+) -> None:
+    """A dump that fails after starting a prefetch must not return while the
+    orphaned parse still holds a thread-budget slot: the budget is back to
+    where it started the moment the failure propagates, whatever it is."""
+    import threading
+
+    from abicheck.process_resources import THREAD_BUDGET
+
+    release = threading.Event()
+
+    def slow_acquire(*_args: object) -> attach.HeaderGraphAst:
+        release.wait(5)
+        return attach.HeaderGraphAst(None, None, [], [], ())
+
+    monkeypatch.setenv("ABICHECK_MAX_THREADS", "")
+    monkeypatch.setattr(attach, "acquire_header_graph_ast", slow_acquire)
+    before = THREAD_BUDGET.in_use
+    future = attach.prefetch_header_graph_ast([Path("a.h")], [], "c++", None)
+    assert THREAD_BUDGET.in_use == before + 1
+    threading.Timer(0.05, release.set).start()
+    with pytest.raises(type(exc)):
+        with attach.prefetch_settled_on_failure(future):
+            raise exc
+    assert future.done()
+    # The done-callback's shutdown may run a moment after result() returns.
+    for _ in range(100):
+        if THREAD_BUDGET.in_use == before:
+            break
+        threading.Event().wait(0.01)
+    assert THREAD_BUDGET.in_use == before
+
+
+def test_a_successful_block_does_not_wait_on_the_prefetch() -> None:
+    """On success the block must not block on (or consume) the prefetch --
+    the header-graph attach does that later."""
+    from concurrent.futures import Future
+
+    pending: Future[attach.HeaderGraphAst] = Future()
+    with attach.prefetch_settled_on_failure(pending):
+        pass
+    assert not pending.done()
+    with attach.prefetch_settled_on_failure(None):
+        pass

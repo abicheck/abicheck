@@ -38,7 +38,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
 from concurrent.futures import Future
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -687,6 +689,27 @@ def prefetch_header_graph_ast(
     )
     future.add_done_callback(lambda _f: pool.shutdown(wait=False))
     return future
+
+
+@contextmanager
+def prefetch_settled_on_failure(
+    future: Future[HeaderGraphAst] | None,
+) -> Iterator[None]:
+    """Wait for *future* to finish before re-raising a failure of the block.
+
+    A prefetch runs beside the primary dump; if that dump fails, nothing will
+    ever consume the prefetched graph, but its parse keeps running and keeps
+    its thread-budget slot (released only when it completes). Settling it
+    here returns the slot before the failing call returns, so a failed dump
+    never leaves an orphaned parse behind to starve a later pool.
+    """
+    try:
+        yield
+    except BaseException:
+        if future is not None:
+            with suppress(BaseException):
+                future.result()
+        raise
 
 
 def prefetch_graph_if_useful(
