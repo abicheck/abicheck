@@ -64,26 +64,38 @@ still-unrun behavioral evaluation. See
 |---|---|---|
 | [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/skills-src/check-abi-compatibility/SKILL.md) | **Internal candidate** | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
 
-## Installing them
+## Installing it
 
-`skills-src/` is the one hand-authored source; the three publication trees
-below are **generated build output, not committed to this repository**
-(2026-08-21 ADR-058 amendment) — regenerate them with
-`python scripts/gen_agent_skills.py` (writes all three) or
-`python scripts/install_dev_skill.py --target <name>` (writes one or more by
-name: `codex`, `claude`, `gemini`, or `all`):
+```bash
+npx abicheck-skills                         # into the current project
+npx abicheck-skills --global --agent claude # for every project, one agent
+npx abicheck-skills doctor                  # check the abicheck CLI it drives
+```
 
-| Tree | Read by |
-|---|---|
-| `.agents/skills/` | GitHub Copilot, OpenAI Codex, Cursor — the portable, cross-vendor convention |
-| `.claude/skills/` | Claude Code, which does not scan `.agents/skills` |
-| `.gemini/skills/` | Gemini CLI, which does not either |
+[`abicheck-skills`](https://www.npmjs.com/package/abicheck-skills) is a
+dependency-free installer published from this repository
+(`packages/abicheck-skills/`), versioned in lockstep with abicheck itself. It
+copies the skill into the directory your agent reads:
 
-Each generated skill directory is fully self-contained: after generating it,
-copy `.agents/skills/<skill-name>/` into your own project (or your personal
-skills directory) and every reference it needs comes with it. There are no
-symlinks and no cross-skill paths, so a single skill installs and works on
-its own.
+| `--agent` | Tree | Read by |
+|---|---|---|
+| `agents` (aliases `codex`, `copilot`, `cursor`) | `.agents/skills/` | GitHub Copilot, OpenAI Codex, Cursor — the portable, cross-vendor convention |
+| `claude` | `.claude/skills/` | Claude Code, which does not scan `.agents/skills` |
+| `gemini` | `.gemini/skills/` | Gemini CLI, which does not either |
+
+Without `--agent` it installs for every agent it detects in the target
+directory (`.claude/`, `AGENTS.md`/`.codex/`/`.cursor/`, `.gemini/`), else for
+Claude Code and the portable tree. `list` and `uninstall` do what they say;
+the installer records what it wrote and never replaces a directory it did not
+create unless given `--force`.
+
+**From a checkout** (contributors): `skills-src/` is the one hand-authored
+source and the three trees are generated build output, not committed
+(2026-08-21 ADR-058 amendment) — `python scripts/install_dev_skill.py
+--target <codex|claude|gemini|all>` writes them in place.
+
+Each installed skill directory is fully self-contained: every reference it
+needs comes with it, with no symlinks and no cross-skill paths.
 
 Skills are executable content. Anthropic's own guidance applies to these as
 to any others: install only from sources you trust, and read what you install.
@@ -115,7 +127,8 @@ is refused up front instead of failing partway through a workflow.
 
 ## Contributing
 
-Edit `skills-src/`, never the generated trees. `skills-src/CLAUDE.md` is the
+Edit `skills-src/`, never the generated trees or the npm package's staged
+`skills/` directory (`python scripts/build_npm_skill_package.py` restages it). `skills-src/CLAUDE.md` is the
 contributor contract — the three-layer model, the shared-fragment rules, and
 the admission bar a second public skill would have to clear. The phased plan is
 [G36](../contribute/plans/g36-native-compatibility-agent-skills.md).

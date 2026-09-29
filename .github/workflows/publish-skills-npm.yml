@@ -1,0 +1,95 @@
+name: Publish abicheck-skills to npm
+
+# ADR-058's publication step: `npx abicheck-skills` installs the Agent Skill
+# rendered from skills-src/. Published alongside the PyPI release (publish.yml)
+# with the same version, because each skill's `abicheck-version-range` names
+# the abicheck release whose CLI surface it drives.
+#
+# Authentication: npm trusted publishing (OIDC, `id-token: write`) — configure
+# this repository + workflow as a trusted publisher for `abicheck-skills` on
+# npmjs.com. `NPM_TOKEN` is used instead when that secret is set (e.g. for the
+# very first publish, before the package exists to attach a trusted publisher
+# to). Provenance is attached either way.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (build, test and pack only, do not publish)"
+        required: false
+        default: true
+        type: boolean
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Build, test and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Upgrade npm (trusted publishing needs >= 11.5)
+        run: npm install -g npm@11
+
+      - name: Install abicheck (renderer dependencies)
+        run: python -m pip install -e .
+
+      - name: Check the release tag matches the package version
+        if: github.event_name == 'release'
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          if [ "${TAG#v}" != "$version" ]; then
+            echo "::error::release tag $TAG does not match pyproject.toml version $version"
+            exit 1
+          fi
+
+      - name: Stage the skill into the package
+        run: |
+          python scripts/build_npm_skill_package.py --check
+          python scripts/build_npm_skill_package.py
+
+      - name: Test the installer
+        working-directory: packages/abicheck-skills
+        run: npm test
+
+      - name: Pack and smoke-test npx from the tarball
+        working-directory: packages/abicheck-skills
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          tarball="$(ls "$RUNNER_TEMP"/abicheck-skills-*.tgz)"
+          project="$RUNNER_TEMP/project"
+          mkdir -p "$project"
+          (cd "$project" && npx --yes --package="$tarball" abicheck-skills --agent all)
+          test -f "$project/.claude/skills/check-abi-compatibility/SKILL.md"
+          test -f "$project/.agents/skills/check-abi-compatibility/SKILL.md"
+          test -f "$project/.gemini/skills/check-abi-compatibility/SKILL.md"
+          (cd "$project" && npx --yes --package="$tarball" abicheck-skills doctor)
+
+      - name: Publish
+        if: github.event_name == 'release' || !inputs.dry_run
+        working-directory: packages/abicheck-skills
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
