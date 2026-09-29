@@ -416,13 +416,12 @@ also_copy = [
     "pixi.lock",
     "scripts",
     "skills-src",
-    # Scanned by scripts/retired_surfaces.py's tools/ sweep
+    # contrib/ is also scanned by scripts/retired_surfaces.py's contrib/ sweep
     # (test_docs_contract_retired_surfaces.py::test_the_real_tools_readmes_
     # are_in_the_target_set reads the real repository tree directly) --
-    # without this, the mutants/ sandbox copy has no tools/ directory at
+    # without the copy, the mutants/ sandbox has no contrib/ directory at
     # all, so the test's real-vs-expected comparison sees an empty set
     # (Codex review, fresh evidence: mutmut PR lane failure).
-    "tools",
     # Committed perf receipts. `test_perf_receipt.py::TestCommittedReceiptsAre
     # Honest` globs `reports/perf/*.json` and asserts at least one exists, so
     # without the copy the stats run aborts on its vacuity guard.
