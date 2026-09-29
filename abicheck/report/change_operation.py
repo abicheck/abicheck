@@ -62,13 +62,22 @@ ELEMENT_TOKEN_ENTITIES: dict[str, ChangeEntity] = {
     "analysis": ChangeEntity.ANALYSIS,
 }
 
-#: CLI ``--view show=`` action tokens -> the canonical
-#: :class:`~abicheck.model.change_catalog.registry.ChangeOperation`. The CLI
-#: has always spelled ``ChangeOperation.MODIFIED`` "changed"; that stays.
-ACTION_TOKEN_OPERATIONS: dict[str, ChangeOperation] = {
-    "added": ChangeOperation.ADDED,
-    "removed": ChangeOperation.REMOVED,
-    "changed": ChangeOperation.MODIFIED,
+#: The per-finding ``operation`` a cross-source hygiene finding carries once
+#: ``compare()`` has stated how it evolved OLD -> NEW. Report-only: it is a
+#: fact about this finding's identity across the two sides, not a property of
+#: its kind, so it never enters the catalog's ``ChangeOperation``.
+UNCHANGED_OPERATION = "unchanged"
+
+#: CLI ``--view show=`` action tokens -> the per-finding ``operation`` value
+#: they select (:func:`operation_for_change`, the same value the JSON report
+#: serializes). The CLI has always spelled ``ChangeOperation.MODIFIED``
+#: "changed"; that stays. ``unchanged`` selects a cross-source finding present
+#: identically on both sides -- a value no kind declares.
+ACTION_TOKEN_OPERATIONS: dict[str, str] = {
+    "added": ChangeOperation.ADDED.value,
+    "removed": ChangeOperation.REMOVED.value,
+    "changed": ChangeOperation.MODIFIED.value,
+    "unchanged": UNCHANGED_OPERATION,
 }
 
 
@@ -139,13 +148,6 @@ def operation_for_kind(kind_val: str) -> str:
     """
     operation = REGISTRY.operation_for(kind_val)
     return operation.value if operation is not None else ChangeOperation.MODIFIED.value
-
-
-#: The per-finding ``operation`` a cross-source hygiene finding carries once
-#: ``compare()`` has stated how it evolved OLD -> NEW. Report-only: it is a
-#: fact about this finding's identity across the two sides, not a property of
-#: its kind, so it never enters the catalog's ``ChangeOperation``.
-UNCHANGED_OPERATION = "unchanged"
 
 
 def operation_for_change(change: object, kind_val: str) -> str:

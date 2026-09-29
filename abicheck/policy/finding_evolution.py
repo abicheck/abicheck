@@ -126,7 +126,9 @@ def apply_finding_evolution(
 
     Sets ``Change.evolution`` on every entry of ``current.changes`` and
     replaces ``current.resolved_findings`` with
-    :func:`compute_resolved_findings`'s output. Returns ``current`` for
+    :func:`compute_resolved_findings`'s output. Records whether a previous
+    comparison was supplied at all on ``current.finding_evolution_evaluated``
+    -- the fact, not an inference from whatever counts result. Returns ``current`` for
     chaining.
 
     Mutates ``current`` in place, matching every other post-processing
@@ -142,4 +144,5 @@ def apply_finding_evolution(
             _identity(change), FindingEvolution.NOT_EVALUATED
         )
     current.resolved_findings = compute_resolved_findings(current, previous)
+    current.finding_evolution_evaluated = previous is not None
     return current

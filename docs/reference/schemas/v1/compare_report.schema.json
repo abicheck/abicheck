@@ -588,6 +588,53 @@
       "minimum": 0,
       "description": "G29 Phase 3 (ADR-052 slice 3, schema 2.16): present only under `--view root-cause`. Length of `root_causes`."
     },
+    "finding_evolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "ADR-068 Phase 1 item 2: each current finding's evolution across a *chain of separate comparisons* (FindingEvolution), plus the findings an earlier comparison reported that no longer appear. Always present; a single comparison reads `not_evaluated` for every finding and `chain_evaluated: false`. Schema 5.8 added `basis`, `chain_evaluated`, `total` and `within_comparison_counterpart`: `chain_evaluated` records whether an earlier comparison was supplied at all (never inferred from counts), `total` equals `summary.total_changes`, and `summary.change_inventory` is the within-this-comparison OLD-vs-NEW counterpart -- a different axis, not a contradiction.",
+      "required": [
+        "basis",
+        "chain_evaluated",
+        "total",
+        "counts",
+        "resolved",
+        "within_comparison_counterpart"
+      ],
+      "properties": {
+        "basis": {"const": "comparison_chain"},
+        "chain_evaluated": {"type": "boolean"},
+        "total": {"type": "integer", "minimum": 0},
+        "within_comparison_counterpart": {"const": "summary.change_inventory"},
+        "counts": {
+          "type": "object",
+          "required": ["introduced", "persistent", "resolved", "not_evaluated"],
+          "properties": {
+            "introduced": {"type": "integer", "minimum": 0},
+            "persistent": {"type": "integer", "minimum": 0},
+            "resolved": {"type": "integer", "minimum": 0},
+            "not_evaluated": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        },
+        "resolved": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding_id", "kind", "symbol", "description", "old_value", "new_value", "source_location"],
+            "properties": {
+              "finding_id": {"type": "string"},
+              "kind": {"type": "string"},
+              "symbol": {"type": "string"},
+              "description": {"type": "string"},
+              "old_value": {"type": ["string", "null"]},
+              "new_value": {"type": ["string", "null"]},
+              "source_location": {"type": ["string", "null"]}
+            }
+          }
+        }
+      }
+    },
     "disposition_audit": {
       "type": "object",
       "additionalProperties": true,
@@ -2983,7 +3030,7 @@
         },
         "operation": {
           "type": "string",
-          "description": "Structured classification of the finding: which of \"added\"/\"removed\"/\"modified\" the change catalog declares for this kind (`ChangeKindMeta.operation`, the same classification --view show=...'s added/removed/changed tokens resolve through). Schema 5.0: read off that single per-kind registration rather than derived from the kind name's own suffix -- a kind whose name ends in \"_added\" while naming a trait *gained by a persisting entity* (`func_noexcept_added`, `type_field_added`, `virtual_method_added`, ...) therefore reports \"modified\" where a suffix reading said \"added\". The catalog is the contract; the name never was. Schema 5.7: a cross-source hygiene finding whose `cross_source_evolution` was stated reads that state instead -- introduced -> \"added\", resolved -> \"removed\", persistent -> \"unchanged\" (the one value no kind declares).",
+          "description": "Structured classification of the finding: which of \"added\"/\"removed\"/\"modified\" the change catalog declares for this kind (`ChangeKindMeta.operation`, the same classification --view show=...'s added/removed/changed tokens resolve through). Schema 5.0: read off that single per-kind registration rather than derived from the kind name's own suffix -- a kind whose name ends in \"_added\" while naming a trait *gained by a persisting entity* (`func_noexcept_added`, `type_field_added`, `virtual_method_added`, ...) therefore reports \"modified\" where a suffix reading said \"added\". The catalog is the contract; the name never was. Schema 5.9: a cross-source hygiene finding whose `cross_source_evolution` was stated reads that state instead -- introduced -> \"added\", resolved -> \"removed\", persistent -> \"unchanged\" (the one value no kind declares).",
           "enum": [
             "added",
             "removed",

@@ -32,6 +32,7 @@ from .report.change_operation import (
     ELEMENT_TOKEN_ENTITIES as ELEMENT_TOKEN_ENTITIES,
     entity_for_change as entity_for_change,
     entity_for_kind as entity_for_kind,
+    operation_for_change as operation_for_change,
     operation_for_kind as operation_for_kind,
 )
 from .report.kind_rollup import roll_up_large_kinds
@@ -173,7 +174,7 @@ class ShowOnlyFilter:
 
     severities: frozenset[str]  # breaking, api-break, risk, compatible
     elements: frozenset[str]  # functions, variables, types, enums, elf
-    actions: frozenset[str]  # added, removed, changed
+    actions: frozenset[str]  # added, removed, changed, unchanged
 
     @classmethod
     def parse(cls, raw: str) -> ShowOnlyFilter:
@@ -268,18 +269,22 @@ class ShowOnlyFilter:
         )
 
     @staticmethod
-    def _check_action(kind_val: str, actions: frozenset[str]) -> bool:
-        """Return True if *kind_val* matches the action filter.
+    def _check_action(
+        kind_val: str, actions: frozenset[str], change: object | None = None
+    ) -> bool:
+        """Return True if the finding matches the action filter.
 
-        Plan slice 7o: resolves through the catalog's declared
-        :class:`ChangeOperation` (:func:`operation_for_kind`).
+        Resolves through :func:`operation_for_change` -- the same per-finding
+        operation the JSON report serializes -- so a cross-source finding
+        stated ``introduced``/``resolved``/``persistent`` filters as
+        ``added``/``removed``/``unchanged``, not as its kind's declared
+        ``modified``. With no *change*, the kind's declared
+        :class:`ChangeOperation` answers (plan slice 7o).
         """
         if not actions:
             return True
-        operation = operation_for_kind(kind_val)
-        return any(
-            ACTION_TOKEN_OPERATIONS[action].value == operation for action in actions
-        )
+        operation = operation_for_change(change, kind_val)
+        return any(ACTION_TOKEN_OPERATIONS[action] == operation for action in actions)
 
     def matches(
         self,
@@ -294,7 +299,7 @@ class ShowOnlyFilter:
             return False
         if not self._check_element(change, change.kind.value):
             return False
-        return self._check_action(change.kind.value, self.actions)
+        return self._check_action(change.kind.value, self.actions, change)
 
 
 #: Separator between OR'd ``ShowOnlyFilter`` groups in a single ``show_only``

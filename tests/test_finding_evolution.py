@@ -328,7 +328,13 @@ def _mixed_result(draw: st.DrawFn) -> DiffResult:
         if chain:
             c.evolution = evo
         changes.append(c)
-    return DiffResult(old_version="o", new_version="n", library="lib", changes=changes)
+    return DiffResult(
+        old_version="o",
+        new_version="n",
+        library="lib",
+        changes=changes,
+        finding_evolution_evaluated=chain,
+    )
 
 
 class TestReconcilesWithChangeInventory:
@@ -353,8 +359,38 @@ class TestReconcilesWithChangeInventory:
         assert inv["compatibility_changes"] + hygiene == n
         # A persistent inventory finding under a single comparison is a
         # not-evaluated chain finding -- never a contradiction.
-        chain_stamped = any(
-            c.evolution is not FindingEvolution.NOT_EVALUATED for c in result.changes
-        )
-        assert evo["chain_evaluated"] is chain_stamped
+        assert evo["chain_evaluated"] is result.finding_evolution_evaluated
         assert evo["within_comparison_counterpart"] == "summary.change_inventory"
+
+
+class TestChainEvaluatedIsTheRecordedFact:
+    """``chain_evaluated`` states whether a previous comparison was supplied
+    -- recorded by ``apply_finding_evolution`` -- never an inference from
+    counts. Oracle: ``previous is not None``, independent of the sets."""
+
+    @given(
+        st.sets(st.sampled_from(_ALPHABET), max_size=5),
+        st.one_of(st.none(), st.sets(st.sampled_from(_ALPHABET), max_size=5)),
+    )
+    def test_chain_evaluated_iff_previous_supplied(
+        self, cur: set[str], prev: set[str] | None
+    ) -> None:
+        current = _result_for(cur, tag="cur")
+        previous = None if prev is None else _result_for(prev, tag="prev")
+        apply_finding_evolution(current, previous)
+        summary = compute_finding_evolution_summary(current)
+        assert summary.chain_evaluated is (prev is not None)
+        assert summary.to_dict()["chain_evaluated"] is (prev is not None)
+
+    def test_two_empty_results_are_an_evaluated_chain(self) -> None:
+        current = _result_for(set(), tag="cur")
+        apply_finding_evolution(current, _result_for(set(), tag="prev"))
+        assert compute_finding_evolution_summary(current).chain_evaluated is True
+
+    def test_plain_compare_is_not_an_evaluated_chain(self) -> None:
+        assert (
+            compute_finding_evolution_summary(
+                _result_for({"a"}, tag="c")
+            ).chain_evaluated
+            is False
+        )

@@ -104,8 +104,8 @@ class FindingEvolutionSummary:
     #: Findings from an earlier comparison in the chain that no longer
     #: appear in this one (``DiffResult.resolved_findings``).
     resolved: tuple[ResolvedFindingEntry, ...]
-    #: Whether any current finding carries a real chain comparison (i.e. a
-    #: state other than ``not_evaluated``), or any finding resolved.
+    #: Whether an earlier comparison was supplied for this result
+    #: (``DiffResult.finding_evolution_evaluated``), independent of counts.
     chain_evaluated: bool = False
 
     @property
@@ -209,11 +209,10 @@ def compute_finding_evolution_summary(result: DiffResult) -> FindingEvolutionSum
     # than one state permanently pinned at zero regardless of reality.
     counts[FindingEvolution.RESOLVED.value] = len(resolved)
 
-    chain_evaluated = bool(resolved) or any(
-        n
-        for state, n in counts.items()
-        if state != FindingEvolution.NOT_EVALUATED.value
-    )
+    # Read the fact its owner recorded (`apply_finding_evolution`), never
+    # inferred from counts: an evaluated chain of two empty results has no
+    # counts to infer from, yet it was evaluated.
+    chain_evaluated = bool(getattr(result, "finding_evolution_evaluated", False))
     return FindingEvolutionSummary(
         counts=tuple((e.value, counts[e.value]) for e in FindingEvolution),
         resolved=resolved,
