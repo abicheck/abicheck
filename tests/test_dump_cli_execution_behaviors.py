@@ -56,12 +56,14 @@ executor, so a test that called the executor alone could not see them.
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
+from abicheck import snapshot_cache
 from abicheck.cli import main
 from abicheck.errors import AbicheckError
 from abicheck.model import AbiSnapshot
@@ -325,6 +327,15 @@ def test_dump_dwarf_only_does_not_stamp_build_context(
     evidence_flags = (("--sources", str(tmp_path)), ("--build-info", str(tmp_path)))
     for flags in evidence_flags:
         for from_headers in (True, False):
+            # Each run gets its own empty whole-snapshot cache. The stubbed
+            # extractor is the only thing that differs between iterations --
+            # the real inputs are identical -- and a matching compile database
+            # makes the call cacheable, so a shared cache would legitimately
+            # serve the previous iteration's snapshot and this would compare
+            # the stamp of an extraction that never ran.
+            monkeypatch.setattr(
+                snapshot_cache, "_CACHE_DIR", Path(tempfile.mkdtemp(dir=tmp_path))
+            )
             _stub_elf_parse(
                 monkeypatch,
                 AbiSnapshot(library="lib.so", version="1.0", from_headers=from_headers),
@@ -343,6 +354,9 @@ def test_dump_dwarf_only_does_not_stamp_build_context(
         # in .abicheck.yml is its only spelling now.
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("debug:\n  dwarf_only: true\n", encoding="utf-8")
+        monkeypatch.setattr(
+            snapshot_cache, "_CACHE_DIR", Path(tempfile.mkdtemp(dir=tmp_path))
+        )
         _stub_elf_parse(
             monkeypatch,
             AbiSnapshot(library="lib.so", version="1.0", from_headers=False),

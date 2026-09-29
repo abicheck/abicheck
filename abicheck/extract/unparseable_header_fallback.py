@@ -31,7 +31,12 @@ caller records the list on the snapshot (``AbiSnapshot.ast_toolchain
 evidence. Deterministic: attribution depends only on the diagnostics text
 and the ordered header list, and the retained order is the input order.
 
-It never guesses. An error it cannot attribute to a specific header (in
+It never guesses. A failure that is a *conflict between* listed headers
+(an error whose attached ``note:`` -- e.g. ``previous definition is here``
+-- attributes to a different listed header) is not self-contained: which
+header to drop would be arbitrary, so it re-raises. The criterion is
+structural (clang's diagnostic notes), so it is deterministic and costs no
+extra parse. An error it cannot attribute to a specific header (in
 the aggregate itself, in a toolchain header reached from every header, a
 toolchain-version failure), or one attributed to *every* remaining header,
 re-raises the original failure unchanged.
@@ -53,6 +58,7 @@ if TYPE_CHECKING:
 __all__ = [
     "EXCLUDED_HEADERS_TOOLCHAIN_KEY",
     "attribute_failing_headers",
+    "cross_header_conflicts",
     "parse_excluding_unparseable_headers",
 ]
 
@@ -61,10 +67,16 @@ log = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+# Include-chain frames. clang prints one ``In file included from X:N:`` line
+# per level, outermost first. GCC prints one group, innermost first:
+# ``In file included from X:N,`` then continuation lines
+# ``                 from Y:N,`` ... with the last (outermost) ending in ``:``.
 _FRAME_RE = re.compile(
-    r"^In file included from (?P<file>.+?):(?P<line>\d+)(?::\d+)?:\s*$"
+    r"^In file included from (?P<file>.+?):(?P<line>\d+)(?::\d+)?(?P<end>[,:])\s*$"
 )
+_CONT_RE = re.compile(r"^\s+from (?P<file>.+?):(?P<line>\d+)(?::\d+)?(?P<end>[,:])\s*$")
 _ERROR_RE = re.compile(r"^(?P<file>.+?):(?P<line>\d+)(?::\d+)?:\s*(?:fatal )?error:")
+_NOTE_RE = re.compile(r"^(?P<file>.+?):(?P<line>\d+)(?::\d+)?:\s*note:")
 
 
 def _norm(path: str | Path) -> str:
@@ -84,23 +96,65 @@ def attribute_failing_headers(stderr: str, headers: Sequence[Path]) -> set[int]:
     name it. An error nothing in the chain attributes is skipped, never
     guessed at.
     """
+    return _scan_diagnostics(stderr, headers)[0]
+
+
+def cross_header_conflicts(stderr: str, headers: Sequence[Path]) -> set[int]:
+    """Indices of errors' headers whose diagnostic implicates another listed header.
+
+    An error is a *conflict* -- not attributable to one header -- when any
+    ``note:`` attached to it (``previous definition is here``, ``candidate``,
+    ...) attributes to a *different* listed header than the error itself.
+    Such a failure exists only because the two headers share one
+    translation unit (a redefinition, an ODR clash); dropping either one
+    would be an arbitrary choice, so the caller must fail instead. Returns
+    the error-side indices; an empty set means every attributed error is
+    self-contained.
+    """
+    return _scan_diagnostics(stderr, headers)[1]
+
+
+def _scan_diagnostics(
+    stderr: str, headers: Sequence[Path]
+) -> tuple[set[int], set[int]]:
     index = {_norm(h): i for i, h in enumerate(headers)}
     failing: set[int] = set()
+    conflicting: set[int] = set()
     chain: list[tuple[str, int]] = []
+    current: int | None = None  # attribution of the error notes belong to
+    gcc_group: list[tuple[str, int]] | None = None  # innermost-first
     for raw in stderr.splitlines():
         line = raw.rstrip()
         frame = _FRAME_RE.match(line)
-        if frame:
-            chain.append((frame.group("file"), int(frame.group("line"))))
+        cont = _CONT_RE.match(line) if gcc_group is not None else None
+        if frame or cont:
+            m = frame or cont
+            assert m is not None
+            loc = (m.group("file"), int(m.group("line")))
+            if frame and m.group("end") == ":" and gcc_group is None:
+                chain.append(loc)  # clang style (or a one-level GCC chain)
+                continue
+            gcc_group = [*(gcc_group or []), loc]
+            if m.group("end") == ":":  # GCC group complete: store outermost-first
+                chain.extend(reversed(gcc_group))
+                gcc_group = None
             continue
+        gcc_group = None
         err = _ERROR_RE.match(line)
         if err:
             located = [*chain, (err.group("file"), int(err.group("line")))]
-            hit = _attribute(located, index, len(headers))
-            if hit is not None:
-                failing.add(hit)
+            current = _attribute(located, index, len(headers))
+            if current is not None:
+                failing.add(current)
+        else:
+            note = _NOTE_RE.match(line)
+            if note and current is not None:
+                located = [*chain, (note.group("file"), int(note.group("line")))]
+                other = _attribute(located, index, len(headers))
+                if other is not None and other != current:
+                    conflicting.add(current)
         chain = []
-    return failing
+    return failing, conflicting
 
 
 def _attribute(
@@ -149,8 +203,11 @@ def parse_excluding_unparseable_headers(
             # for attribution (the original mode's errors on C++ syntax
             # would implicate every C++ header, not the failing one).
             stderr = exc.attribution_stderr or exc.stderr or str(exc)
-            bad = attribute_failing_headers(stderr, active)
-            if not bad or len(bad) >= len(active):
+            bad, conflicts = _scan_diagnostics(stderr, active)
+            # A clash *between* listed headers is not attributable to either:
+            # which one to drop would be an arbitrary choice, and the user's
+            # explicit ``--exclude-header`` is the way to make it.
+            if not bad or conflicts or len(bad) >= len(active):
                 raise
             dropped = [active[i] for i in sorted(bad)]
             log.warning(

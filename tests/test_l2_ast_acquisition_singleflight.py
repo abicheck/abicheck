@@ -760,11 +760,21 @@ def acquisition_counters(monkeypatch: pytest.MonkeyPatch) -> _AcquisitionCounter
     # Per thread: the release fan-out runs two workers, and one worker's
     # sidecar read must not hide the other's raw decode.
     in_sidecar = threading.local()
-    _count(
-        dumper_cache.json,
-        "loads",
-        lambda: getattr(in_sidecar, "depth", 0) or counters.raw_decodes.append("json"),
-    )
+    # ``dumper_cache.json`` is the process-wide ``json`` module, so a bare
+    # wrapper would also count every unrelated ``json.loads`` -- notably each
+    # whole-snapshot cache hit deserializing a member's snapshot, which a
+    # warm ``compare`` now serves (the cache keys on the ``CompileContext``
+    # ``compare`` threads). Count only calls made *from* ``dumper_cache``'s
+    # own AST decode, identified by the calling frame's module.
+    original_loads = json.loads
+
+    def _counting_loads(*args: object, **kwargs: object) -> object:
+        caller = sys._getframe(1).f_globals.get("__name__")
+        if caller == dumper_cache.__name__ and not getattr(in_sidecar, "depth", 0):
+            counters.raw_decodes.append("json")
+        return original_loads(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dumper_cache.json, "loads", _counting_loads)
     from abicheck.buildsource import header_graph_projection_cache as _proj
 
     original_load = _proj.load_cached_projection
@@ -840,9 +850,19 @@ def test_directory_l2_compare_acquires_one_ast_per_key(
 
     from click.testing import CliRunner
 
+    from abicheck import snapshot_cache
     from abicheck.cli import main
 
     def run(tag: str) -> Path:
+        # Each run gets its own empty *whole-snapshot* cache while the AST
+        # cache (under XDG_CACHE_HOME) stays shared. ``compare`` now serves
+        # warm whole-snapshot hits (the key covers its ``CompileContext``),
+        # which would short-circuit every member dump before L2 acquisition
+        # and leave the "warm" run measuring the snapshot cache instead of
+        # the warm AST-cache path this test is about.
+        cache_dir = tmp_path / f"snapshots-{tag}"
+        cache_dir.mkdir()
+        monkeypatch.setattr(snapshot_cache, "_CACHE_DIR", cache_dir)
         report = tmp_path / f"{tag}.json"
         result = CliRunner().invoke(
             main,

@@ -18,6 +18,7 @@ import pytest
 from abicheck.errors import HeaderToolchainError, SnapshotError
 from abicheck.extract.unparseable_header_fallback import (
     attribute_failing_headers,
+    cross_header_conflicts,
     parse_excluding_unparseable_headers,
 )
 from abicheck.model.header_exclusion_record import (
@@ -305,3 +306,148 @@ def test_real_castxml_directory_with_unparseable_header(tmp_path):
     assert "good_fn" in names
     recorded = excluded_headers_from_toolchain(snap.ast_toolchain)
     assert [Path(p).name for p in recorded] == ["bad_sycl.h"]
+
+
+def _conflict_stderr(active: list[Path], pairs: list[tuple[Path, Path]]) -> str:
+    """clang-shaped redefinition diagnostics: error in *b*, note in *a*."""
+    out: list[str] = []
+    for a, b in pairs:
+        if a not in active or b not in active:
+            continue
+        out += [
+            f"In file included from {AGG}:{active.index(b) + 1}:",
+            f"{b}:1:16: error: typedef redefinition with different types",
+            "    1 | typedef double clashing_t;",
+            f"{a}:1:13: note: previous definition is here",
+            "    1 | typedef int clashing_t;",
+        ]
+    out.append("1 error generated.")
+    return "\n".join(out)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_cross_header_conflict_is_never_resolved_by_dropping(seed):
+    """A clash between two listed headers is not attributable to either one:
+    the fallback must re-raise the original failure (no arbitrary drop), even
+    when self-contained failures are mixed in -- the conflict wins, since the
+    user's ``--exclude-header`` is the only non-arbitrary resolution."""
+    rng = random.Random(seed)
+    headers = _headers(rng.randint(3, 12))
+    a, b = rng.sample(headers, 2)
+    others = [h for h in headers if h not in (a, b)]
+    self_bad = set(rng.sample(others, rng.randint(0, len(others) - 1)))
+    calls: list[list[Path]] = []
+
+    def attempt(active: list[Path]) -> str:
+        calls.append(list(active))
+        exc = SnapshotError("castxml failed")
+        setattr(
+            exc,
+            "stderr",
+            _stderr_for(active, self_bad, seed % 3)
+            + "\n"
+            + _conflict_stderr(active, [(a, b)]),
+        )
+        raise exc
+
+    with pytest.raises(SnapshotError):
+        parse_excluding_unparseable_headers(headers, attempt)
+    assert calls == [headers]  # no reduced retry was attempted
+    stderr = _conflict_stderr(headers, [(a, b)])
+    assert cross_header_conflicts(stderr, headers) == {headers.index(b)}
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_note_in_same_or_unlisted_header_stays_self_contained(seed):
+    """Notes pointing into the failing header itself or into a non-listed
+    (toolchain/private) file do not make an error a conflict."""
+    rng = random.Random(seed)
+    headers = _headers(rng.randint(2, 8))
+    h = rng.choice(headers)
+    i = headers.index(h)
+    note_file = h if seed % 2 else Path("/usr/include/c++/foo.h")
+    stderr = "\n".join(
+        [
+            f"In file included from {AGG}:{i + 1}:",
+            f"{h}:4:1: error: no matching function",
+            f"{note_file}:2:1: note: candidate function not viable",
+        ]
+    )
+    assert attribute_failing_headers(stderr, headers) == {i}
+    assert cross_header_conflicts(stderr, headers) == set()
+
+
+@pytest.mark.skipif(shutil.which("castxml") is None, reason="needs castxml")
+def test_real_castxml_redefinition_is_a_conflict(tmp_path):
+    a = tmp_path / "a.h"
+    b = tmp_path / "b.h"
+    a.write_text("typedef int clashing_t;\n")
+    b.write_text("typedef double clashing_t;\n")
+    agg = tmp_path / "agg.cpp"
+    agg.write_text(f'#include "{a}"\n#include "{b}"\n')
+    proc = subprocess.run(
+        ["castxml", "--castxml-output=1", "-o", str(tmp_path / "o.xml"), str(agg)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0
+    assert cross_header_conflicts(proc.stderr, [a, b]) == {1}
+
+
+def _chain_lines(frames: list[tuple[str, int]], style: str) -> list[str]:
+    """*frames* outermost-first, rendered as clang (one line per level,
+    outermost first) or GCC (one group, innermost first, continuation lines)."""
+    if style == "clang":
+        return [f"In file included from {f}:{n}:" for f, n in frames]
+    inner_first = list(reversed(frames))
+    out = []
+    for k, (f, n) in enumerate(inner_first):
+        end = ":" if k == len(inner_first) - 1 else ","
+        prefix = "In file included from " if k == 0 else " " * 17 + "from "
+        out.append(f"{prefix}{f}:{n}{end}")
+    return out
+
+
+@pytest.mark.parametrize("style", ["clang", "gcc"])
+@pytest.mark.parametrize("seed", range(30))
+def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
+    """Oracle: the aggregate frame's line names the input, regardless of how
+    deep the chain is, whether intermediate files are listed, or which
+    compiler's frame layout is used."""
+    rng = random.Random(seed)
+    headers = _headers(rng.randint(2, 10))
+    target = rng.randrange(len(headers))
+    depth = rng.randint(0, 4)
+    inner = [
+        (
+            str(rng.choice(headers)) if rng.random() < 0.5 else f"/inc/detail/d{j}.h",
+            j + 3,
+        )
+        for j in range(depth)
+    ]
+    frames = [(AGG, target + 1), *inner]
+    err_file = f"/inc/detail/leaf{seed}.h" if depth else str(headers[target])
+    stderr = "\n".join(
+        [
+            "some preamble",
+            *_chain_lines(frames, style),
+            f"{err_file}:1:2: error: boom",
+            "    1 | #error boom",
+            "1 error generated.",
+        ]
+    )
+    assert attribute_failing_headers(stderr, headers) == {target}
+
+
+def test_gcc_group_does_not_leak_into_the_next_diagnostic():
+    headers = _headers(3)
+    stderr = "\n".join(
+        [
+            *_chain_lines([(AGG, 1), ("/inc/detail/a.h", 2)], "gcc"),
+            "/inc/detail/b.h:1:1: error: first",
+            "    1 | x",
+            f"{headers[2]}:1:1: error: second",
+        ]
+    )
+    assert attribute_failing_headers(stderr, headers) == {0, 2}
