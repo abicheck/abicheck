@@ -38,6 +38,21 @@ the portfolio is shaped this way.
 > version isn't inside the `0.6.x` range, the installed skill will decline
 > to execute.
 
+**Status (2026-09-29): preview, installable with `npx abicheck-skills`.**
+A second evaluation pilot compared agents with and without the skill. It
+ran 14 compatibility scenarios with one model, headless Claude Code. With
+the skill:
+
+- the agent reached the right verdict in 30 of 30 runs, against 22 of 28
+  without it;
+- it ran a real comparison in 93% of runs, against 54%;
+- it made an unsupported compatibility claim in 7% of runs, against 68%.
+
+The skill was revised against that same scenario set, so this is not yet a
+held-out result, and it has not been validated on other agents. The
+methodology and caveats are in
+[the pilot report](https://github.com/abicheck/abicheck/blob/main/agent-evals/skills/pilot-results/2026-09-29.md).
+
 **Portfolio status (2026-08-20):** the portfolio was reset from four
 published skills down to **one internal candidate**. No skill has measured
 evidence yet that it improves agent behavior over a well-documented CLI
@@ -62,7 +77,7 @@ still-unrun behavioral evaluation. See
 
 | Skill | Status | The question it answers |
 |---|---|---|
-| [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/skills-src/check-abi-compatibility/SKILL.md) | **Internal candidate** | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
+| [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/skills-src/check-abi-compatibility/SKILL.md) | **Preview** (`npx abicheck-skills`) | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
 
 ## Installing it
 

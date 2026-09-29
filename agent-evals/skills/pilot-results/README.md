@@ -1,3 +1,7 @@
+> **Superseded by [the 2026-09-29 pilot](2026-09-29.md)**, which fixes this
+> run's harness defects (including the working-directory leak that exposed
+> the scenario name and arm to the agent) and re-runs the corpus.
+
 # G37 Phase 3 pilot — `review-native-library-change`, 2026-08-20
 
 The first real run of `agent-evals/skills/`'s A/B harness against the

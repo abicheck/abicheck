@@ -139,7 +139,16 @@ def summarize(runs: list[dict]) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--runs", required=True, help="The runner's --out root")
+    parser.add_argument(
+        "--runs",
+        required=True,
+        action="append",
+        help=(
+            "The runner's --out root. Repeat to grade several roots as one "
+            "batch (e.g. scenario subsets run in parallel); the one-model "
+            "check below then spans all of them."
+        ),
+    )
     parser.add_argument("--json", help="Write the full grading to this path")
     parser.add_argument(
         "--include-prototype-skills",
@@ -152,21 +161,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    root = Path(args.runs)
-    index_path = root / "index.json"
-    if not index_path.is_file():
-        print(f"no index.json under {root}", file=sys.stderr)
-        return 1
-
     pack = json.loads(PACK.read_text(encoding="utf-8"))
-    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index: list[tuple[Path, dict]] = []
+    for raw in args.runs:
+        root = Path(raw)
+        index_path = root / "index.json"
+        if not index_path.is_file():
+            print(f"no index.json under {root}", file=sys.stderr)
+            return 1
+        index.extend(
+            (root, row) for row in json.loads(index_path.read_text(encoding="utf-8"))
+        )
 
     graded: list[dict] = []
     orphaned: set[str] = set()
     excluded_prototype: set[str] = set()
     model_rows: list[dict] = []
     unknown_model: set[str] = set()
-    for row in index:
+    for root, row in index:
         sid, arm, rep = row["scenario_id"], row["arm"], row["repetition"]
         run_dir = root / sid / arm / str(rep)
         if not run_dir.is_dir():
@@ -178,9 +190,10 @@ def main(argv: list[str] | None = None) -> int:
             # printed no summary at all, discarding every other gradeable run.
             orphaned.add(sid)
             continue
-        if not args.include_prototype_skills and pack["scenarios"][sid].get(
-            "skill"
-        ) != FLAGSHIP_SKILL:
+        if (
+            not args.include_prototype_skills
+            and pack["scenarios"][sid].get("skill") != FLAGSHIP_SKILL
+        ):
             # A prototype-skill row can reach index.json even though the
             # runner no longer schedules new ones by default — an --out root
             # created before the freeze, or built with the runner's own
@@ -190,9 +203,11 @@ def main(argv: list[str] | None = None) -> int:
             excluded_prototype.add(sid)
             continue
         grade = grade_run(run_dir, pack["scenarios"][sid], arm)
-        grade.update(scenario_id=sid, arm=arm, repetition=rep)
+        grade.update(scenario_id=sid, arm=arm, repetition=rep, runs_root=str(root))
         graded.append(grade)
-        if isinstance(row.get("model"), str) or isinstance(row.get("requested_model"), str):
+        if isinstance(row.get("model"), str) or isinstance(
+            row.get("requested_model"), str
+        ):
             model_rows.append(row)
         else:
             # A timed-out run with no --model pin has a genuinely unknown
@@ -203,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
             # it contributes no identity to compare against would accept
             # exactly the batch that check exists to refuse: known model X
             # on some rows, silently-unproven model on this one.
-            unknown_model.add(f"{sid}/{arm}/{rep}")
+            unknown_model.add(f"{root}:{sid}/{arm}/{rep}")
 
     if unknown_model and model_rows:
         known = sorted({label for r in model_rows if (label := _model_label(r))})

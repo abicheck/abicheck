@@ -99,7 +99,7 @@ implied is reset → rewrite → evaluate → publish, and this is step two.
 
 | Skill | Status | Meaning |
 |---|---|---|
-| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Internal candidate — not yet validated, not for external publication.** | The sole published skill and the sole subject of any future G37 behavioral/comparative-lift evaluation. Not to be cited as validated in any user-facing claim until that evidence exists. |
+| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — published via `npx abicheck-skills`; single-agent pilot evidence only.** | The sole published skill. The 2026-09-29 pilot (`agent-evals/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
 
 **What "PR 2" integrated, over the bare rename the reset amendment left in
 place:**
@@ -143,9 +143,11 @@ repo. **PR 3 landed** under that new name (a complete G37 evaluation
 corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's "PR 3"
 amendment and `agent-evals/skills/pilot-results/README.md`; its dominant
 finding is a harness turn-budget confound, not a skill-quality result, so
-the skill is still not behaviorally validated. PR 4 (an npm/npx-installable
-package published from this repository, removing the internal-candidate
-marker) remains fully open.
+the skill is still not behaviorally validated. PR 4 has since landed (2026-09-29):
+`packages/abicheck-skills/` is the npm package, `npx abicheck-skills`
+installs the skill, and `scripts/build_npm_skill_package.py` stages it from
+this directory. Edits here reach users through that package, so the version
+range rule (7, above) now matters to real installs.
 
 `native-api-evolution`, `native-consumer-compatibility`, and
 `native-release-compatibility` are no longer published — their source is
@@ -208,7 +210,7 @@ here as they are run.
 
 | Target | Skills validated | Date | Notes |
 |---|---|---|---|
-| Claude Code | — | — | not yet run |
+| Claude Code | `check-abi-compatibility` | 2026-09-29 | Headless `claude -p`, `claude-sonnet-5-5`, 14-scenario A/B corpus; see `agent-evals/skills/pilot-results/2026-09-29.md`. Not yet exercised interactively or through a `npx`-installed copy by a person. |
 | Codex | — | — | not yet run |
 | GitHub Copilot | — | — | not yet run |
 | Gemini CLI | — | — | not yet run |
