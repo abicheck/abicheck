@@ -114,8 +114,14 @@ def _scan_typedef_integer_flips(
     """Return (descriptions, up, down) for integer-named typedefs that changed width."""
     typedef_flips: list[str] = []
     up = down = 0
-    for name, old_under in old.typedefs.items():
-        new_under = new.typedefs.get(name)
+    # ADR-063 2B: the same qualified-when-trusted maps the typedef detector
+    # diffs over (``typedef_diff_maps``), not the bare-keyed ``typedefs`` whose
+    # same-leaf member/nested typedefs collapse onto one entry, last-wins.
+    from .diff_helpers import typedef_diff_maps
+
+    old_typedefs, new_typedefs = typedef_diff_maps(old, new)
+    for name, old_under in old_typedefs.items():
+        new_under = new_typedefs.get(name)
         if new_under is None:
             continue
         if not any(h in name for h in _INT_TYPEDEF_HINTS):

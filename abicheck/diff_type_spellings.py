@@ -31,6 +31,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from .compare.template_surface import reconciled_public_function_maps
+from .diff_helpers import build_type_map, lookup_matched_type
 from .model import (
     AbiSnapshot,
     Function,
@@ -137,20 +138,23 @@ def _match_record_fields(
 ) -> Iterator[TypeSlotChange]:
     """Yield field-spelling changes for record types present in both snapshots."""
     excl = stdlib_namespaces_excluded(old, new)
-    old_types = {
-        t.name: t
-        for t in old.types
-        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
-    new_types = {
-        t.name: t
-        for t in new.types
-        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
-    }
-    for name in set(old_types) & set(new_types):
-        nt = new_types[name]
+    # Paired through the canonical old/new identity (ADR-063 2B), not bare
+    # ``name``: same-leaf records in different namespaces overwrote each other
+    # in a name-keyed dict, so one class's fields were compared against the
+    # other's. The emitted slot owner stays the bare name, as before.
+    old_types = build_type_map(
+        t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    )
+    new_types = build_type_map(
+        t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+    )
+    for ot in old_types.values():
+        nt = lookup_matched_type(old_types, new_types, ot)
+        if nt is None:
+            continue
+        name = ot.name
         new_fields = {f.name: f for f in nt.fields}
-        for ofield in old_types[name].fields:
+        for ofield in ot.fields:
             nfield = new_fields.get(ofield.name)
             if nfield is not None and _spelling_differ(ofield.type, nfield.type):
                 yield TypeSlotChange(

@@ -684,9 +684,13 @@ def _attribute_stdlib_embedding(changes: list[Change], new: AbiSnapshot) -> None
     ]
     if not owner_changes:
         return
-    by_name = {t.name: t for t in new.types}
+    # ADR-063 2B: the owner by the finding's identity, never a last-wins
+    # bare-name dict; an ambiguous owner gets no clause (informational only).
+    from .compare.record_lookup import RecordLookup
+
+    records = RecordLookup(new.types)
     for c in owner_changes:
-        rec = by_name.get(_root_type_name(c))
+        rec = records.resolve(_root_type_name(c), c.entity_id)
         if rec is None:
             continue
         embedded = _embedded_stdlib_fields(rec)

@@ -54,7 +54,13 @@ from .compare.template_surface import (
     reconciled_abi_visible_functions,
     strip_template_args as _callable_stem,  # noqa: F401
 )
-from .diff_helpers import make_change
+from .diff_helpers import (
+    TypeMap,
+    build_type_map,
+    lookup_matched_type,
+    make_change,
+    type_map_key,
+)
 
 # Re-exports — the generic detectors were extracted to dedicated modules
 # in PR-D, but are re-exported here so callers that import them from this
@@ -623,11 +629,18 @@ def _find_tag_rename_for_removed(
 
 
 def _empty_records_only_in(
-    types_a: dict[str, RecordType], types_b: dict[str, RecordType]
+    types_a: TypeMap[RecordType], types_b: TypeMap[RecordType]
 ) -> list[RecordType]:
-    """Return records that are empty and present in *types_a* but not *types_b*."""
+    """Return records that are empty and present in *types_a* but not *types_b*.
+
+    "Present in both" is the canonical old/new pairing (``lookup_matched_type``,
+    ADR-063 2B), not a bare-``name`` membership test: two header-mode tags
+    sharing a leaf spelling in different namespaces are two records, and a
+    namespace move is one removal plus one addition."""
     return [
-        t for name, t in types_a.items() if name not in types_b and _is_empty_record(t)
+        t
+        for t in types_a.values()
+        if lookup_matched_type(types_a, types_b, t) is None and _is_empty_record(t)
     ]
 
 
@@ -635,7 +648,9 @@ def _group_by_namespace(types: list[RecordType]) -> dict[str, list[RecordType]]:
     """Index a list of type objects by their parent namespace."""
     by_ns: dict[str, list[RecordType]] = defaultdict(list)
     for t in types:
-        by_ns[_parent_namespace(t.name)].append(t)
+        # The qualified identity: a header-mode ``name`` is the bare leaf, whose
+        # "parent namespace" would always read as the global one.
+        by_ns[_parent_namespace(type_map_key(t))].append(t)
     return by_ns
 
 
@@ -662,8 +677,8 @@ def detect_tag_type_renamed(
 
     old.index()
     new.index()
-    old_types = {t.name: t for t in old.types}
-    new_types = {t.name: t for t in new.types}
+    old_types = build_type_map(old.types)
+    new_types = build_type_map(new.types)
     removed_empties = _empty_records_only_in(old_types, new_types)
     added_empties = _empty_records_only_in(new_types, old_types)
     if not removed_empties or not added_empties:
@@ -679,7 +694,7 @@ def detect_tag_type_renamed(
     only_added = new_mangled - old_mangled
     findings: list[Change] = []
     for removed in removed_empties:
-        ns = _parent_namespace(removed.name)
+        ns = _parent_namespace(type_map_key(removed))
         candidates = added_by_ns.get(ns, [])
         if not candidates:
             continue
@@ -997,9 +1012,11 @@ def detect_inline_body_renamed_member(
     # Materialise the iterable once so both collection passes can use it.
     changes_list = list(changes)
 
-    # Index types by name.
-    old_types = {t.name: t for t in old.types}
-    new_types = {t.name: t for t in new.types}
+    # Canonical record maps (ADR-063 2B): a bare-``name`` dict silently dropped
+    # all but one of several same-leaf records, so a pimpl holder in another
+    # namespace could vanish from the scan below.
+    old_types = build_type_map(old.types)
+    new_types = build_type_map(new.types)
 
     # Gather rename candidates from two complementary signals.
     rename_candidates = _collect_field_rename_candidates(changes_list, namespaces)

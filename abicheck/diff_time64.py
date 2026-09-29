@@ -231,10 +231,15 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # comparisons have none, and the surface scan below must not run for them
     # (it walks every signature/record and would tax the scaling benchmarks).
     candidates: list[tuple[str, str, str, str]] = []
-    for name, old_under in old.typedefs.items():
+    # ADR-063 2B: qualified-when-trusted maps (``typedef_diff_maps``), so a
+    # library's own ``ns::time_t`` can no longer collapse onto libc's.
+    from .diff_helpers import typedef_diff_maps
+
+    old_typedefs, new_typedefs = typedef_diff_maps(old, new)
+    for name, old_under in old_typedefs.items():
         if name not in _FAMILY:
             continue
-        new_under = new.typedefs.get(name)
+        new_under = new_typedefs.get(name)
         if new_under is None:
             continue
         ob = _bucket(old_under, old_32)

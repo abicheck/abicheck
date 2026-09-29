@@ -428,6 +428,23 @@ concepts:
       contribution without an entity_id, stable tier restricted to
       cross-snapshot-stable ids) -- see
       tests/test_opaque_identity_tiers.py.
+      2026-09-29 (2B consumer sweep): an inventory of every remaining
+      cross-snapshot or finding-to-record lookup keyed by bare
+      RecordType.name found eleven; the ones deciding findings now resolve
+      through the canonical record identity -- diff_vtable_layout (pairing
+      and base lookups via TypeMap/lookup_matched_type, previously
+      last-wins on same-leaf records), diff_cpp_patterns' tag-rename and
+      detail::-leak scans, diff_type_spellings' field pass,
+      diff_reconcile and diff_filtering's stdlib attribution (the new
+      compare.record_lookup.RecordLookup: entity_id first, bare name only
+      when unambiguous), diff_stdlib_impl's leaf fallback (unique leaves
+      only), and diff_integer_model/diff_time64's typedef scans
+      (typedef_diff_maps). Deliberately left: diff_platform's DWARF
+      StructLayout dicts (no entity_id in that model),
+      compare/opaque_struct_types' existence sets (spelling questions by
+      design), buildsource/source_diff's concept map (SourceEntity has no
+      identity model), and export-name maps (the export name is the
+      symbol identity).
     investigated_declined:
       - item: >-
           Promoting the `entity:` alias into a real match tier in

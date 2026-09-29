@@ -223,6 +223,27 @@ when a first PR lands against a sub-phase:
 | **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary); the release fan-out's gate-pack-fold duplication (a distinct residual, not ADR-064's own `GateOptions` rewrite, which already landed 2026-09-02); the release fan-out's explicit rejection of a `--pack`-asserted `contract.unresolved` | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; a real per-pair executor for depth/suppression/policy/compile-context/`--contract` mode-and-domain already exists (`service.run_compare`) and ADR-064's `GateOptions` already resolves the release fan-out's severity/exit-code-scheme gate config exactly once (confirmed by the 2026-09-03 investigation below) — what remains is narrower still, since T6 landed 2026-09-05: `apply_release_gate_pack` no longer mirrors `pack_application.apply_to_compare_config` — both call one shared `policy/gate_pack_fold.fold_gate_pack_severity`, leaving only the two callers' different fold targets (raw strings vs. a resolved `SeverityConfig`) for the duplication-and-convergence-assessment plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig` target; and `resolve_release_pack_application` unconditionally rejects `contract.unresolved` for a release comparison — not for lack of a per-library `PersistedContractContext` (`service.run_compare` already creates one, `record_release_resolved_config` already merges into it after every pair), but as the rejection's own deliberate choice, unverified whether still necessary — no landed fix or confirmed-necessary rationale yet |
 | **8B — Multi-artifact canonical storage** | in progress | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
 
+**2B consumer sweep (2026-09-29).** A repository-wide inventory of
+cross-snapshot and finding-to-record lookups still keyed by bare
+`RecordType.name` (or the bare `typedefs` map) moved every one that decides
+a finding onto the canonical identity: `diff_vtable_layout` (pairing and base
+resolution via `TypeMap`/`lookup_matched_type`), `diff_cpp_patterns`'
+empty-tag rename and `detail::` field-leak scans, `diff_type_spellings`'
+field pass, `diff_reconcile` and `diff_filtering`'s stdlib-embedding
+attribution (new `compare/record_lookup.RecordLookup`: the finding's own
+`entity_id` first, the bare name only when exactly one record carries it,
+otherwise no answer), `diff_stdlib_impl`'s leaf fallback (unique leaves
+only), and `diff_integer_model`/`diff_time64`'s typedef scans
+(`typedef_diff_maps`). Each bare-name dict answered "whichever same-leaf
+record was listed last". Tests state the contract over every listing order
+(`tests/test_vtable_layout_identity_pairing.py`,
+`tests/test_record_lookup_identity.py`); each fails against the pre-sweep
+code. Left on spellings deliberately, with the reason: `diff_platform`'s
+DWARF `StructLayout` maps (that model carries no identity),
+`compare/opaque_struct_types`' existence sets (spelling questions by design),
+`buildsource/source_diff`'s concept map (`SourceEntity` has no identity
+model) and export-name maps (the export name is the symbol identity).
+
 **2B's bare-name-collision narrowing landed (2026-09-03).** The gap
 `compare/opaque_types.py`'s own docstring named as still-open since the
 opaque-type suppression migration: two unrelated types sharing a bare leaf

@@ -146,13 +146,23 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
     it. There is no pairwise comparison here for
     :func:`~abicheck.compare.fact_comparison.compare_facts` to gate.
     """
+    from .diff_helpers import build_type_map
     from .model import RecordType, resolved_fact_value
     from .model.type_identifiers import type_identifiers as _type_identifiers
 
-    record_by_name: dict[str, RecordType] = {rec.name: rec for rec in snap.types}
+    # ADR-063 2B: resolve a signature spelling through the canonical record map
+    # (qualified key, bare alias only when unambiguous), then a leaf of a
+    # DWARF-qualified name -- again only when exactly one record owns that
+    # leaf. The old ``setdefault`` leaf map answered first-wins, so an
+    # unrelated same-leaf record could stand in for the named one.
+    type_map = build_type_map(snap.types)
+    leaf_owners: dict[str, list[RecordType]] = {}
     for rec in snap.types:
         if "::" in rec.name:
-            record_by_name.setdefault(rec.name.rsplit("::", 1)[1], rec)
+            leaf_owners.setdefault(rec.name.rsplit("::", 1)[1], []).append(rec)
+    record_by_name: dict[str, RecordType] = {
+        leaf: recs[0] for leaf, recs in leaf_owners.items() if len(recs) == 1
+    }
 
     def _add_type(queue: list[str], type_name: str | None) -> None:
         if _is_indirect_type(type_name):
@@ -180,7 +190,7 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
         target = snap.typedefs.get(name)
         if target:
             _add_type(queue, target)
-        record: RecordType | None = record_by_name.get(name)
+        record: RecordType | None = type_map.get(name) or record_by_name.get(name)
         if record is None:
             continue
         public_by_value.add(record.name)
