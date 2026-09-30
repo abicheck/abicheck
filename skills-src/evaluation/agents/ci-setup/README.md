@@ -17,7 +17,7 @@ compatibility **verdict** claim; this skill's outcome is a **configuration**
 | `grader.py` | Deterministic checks over the resulting `.github/workflows/*.yml` and the agent's final message. No model is called. |
 | `reference/<scenario>/` | Hand-written good workflows; the grader's positive oracle. |
 | `run_eval.py` | Two-arm runner: materializes each fixture as a fresh git repo (commits, tags, `origin` remote) outside this checkout, installs the skill into `.claude/skills/` for the `skill` arm only, runs `claude -p`, grades. |
-| `results/` | Committed evidence from real runs. |
+| `results/` | Committed evidence from real runs — start with [`2026-09-30.md`](results/2026-09-30.md): skill 15/15 runs without a critical failure vs 0/15 without it. |
 
 `tests/test_ci_setup_skill_eval.py` pins the grader's contract: every
 reference passes every check, an untouched fixture never succeeds, and each
@@ -50,11 +50,17 @@ workflow, is caught by the check named for it.
 ```bash
 python scripts/gen_agent_skills.py        # the runner installs skills/<name>
 python skills-src/evaluation/agents/ci-setup/run_eval.py \
-    --out /tmp/ci-setup-eval --repetitions 3 --jobs 6 --model claude-sonnet-5-5
+    --out /tmp/ci-setup-eval --repetitions 3 --jobs 6 --model claude-sonnet-5-5 \
+    --abicheck-venv /opt/abicheck-eval-venv   # isolation: see below
 python skills-src/evaluation/agents/ci-setup/run_eval.py --out /tmp/ci-setup-eval --report-only
 ```
 
-`--out` must be outside the checkout. Both arms get identical tools,
+`--out` must be outside the checkout. **Use `--abicheck-venv`** (a venv with
+abicheck installed from a wheel, not editable): it runs each agent in a
+private mount namespace (`unshare --mount`, Linux, root) where this checkout,
+other runs' outputs, and the parent session's transcripts are hidden. Without
+it an agent can `find /` its way into abicheck's own sources — observed in a
+real run, see `results/2026-09-30.md`. Both arms get identical tools,
 including web access, so the baseline can read abicheck's public
 documentation the way an unequipped agent in a real repository would.
 
