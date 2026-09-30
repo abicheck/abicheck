@@ -1103,9 +1103,7 @@ class TestRendererOrderIndependence:
         new = _snapshot("2.0")
         envelope = self._envelope(_result([]), old, new)
 
-        assert envelope.old.declarations.functions[0] is not func, (
-            "Function object shared"
-        )
+        assert envelope.old.declarations.functions[0] is not func, "Function not copied"
 
         junit_before = render_envelope("junit", envelope)
         func.mangled = "_Z9renamed_ev"

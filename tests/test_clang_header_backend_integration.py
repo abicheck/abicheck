@@ -270,13 +270,10 @@ def test_clang_and_castxml_snapshots_agree_on_public_surface(
     # The exported (public) function set must match between frontends.
     assert public_funcs(clang_snap) == public_funcs(castxml_snap)
     # Both see the same named record and enum types.
-    assert {t.name for t in clang_snap.declarations.types} >= {"Point", "Widget"}
-    assert {t.name for t in castxml_snap.declarations.types} & {
-        t.name for t in clang_snap.declarations.types
-    } >= {
-        "Point",
-        "Widget",
-    }
+    clang_types = {t.name for t in clang_snap.declarations.types}
+    assert clang_types >= {"Point", "Widget"}
+    castxml_types = {t.name for t in castxml_snap.declarations.types}
+    assert castxml_types & clang_types >= {"Point", "Widget"}
     assert {e.name for e in clang_snap.declarations.enums} == {
         e.name for e in castxml_snap.enums
     }
@@ -945,11 +942,8 @@ def test_clang_backend_does_not_widen_extern_c_function_virtuality(
     # which carries clang's own `virtual` keyword directly, node.get
     # ("virtual") -- untouched by this fix). Before the fix, BOTH read as
     # virtual (the free function widened purely from the name collision).
-    f_funcs = [
-        fn
-        for fn in old_snap.declarations.functions
-        if fn.name == "f" and fn.mangled == "f"
-    ]
+    old_funcs = old_snap.declarations.functions
+    f_funcs = [fn for fn in old_funcs if fn.name == "f" and fn.mangled == "f"]
     assert len(f_funcs) == 2
     assert sum(fn.is_virtual for fn in f_funcs) == 1
 
@@ -1393,10 +1387,12 @@ def test_dump_request_and_compare_request_lang_explicit_forces_cpp_mode(
         lang_explicit=True,
         header_backend="clang",
     )
-    auto_widget = next(t for t in auto_snap.declarations.types if t.name == "Widget")
-    explicit_widget = next(
-        t for t in explicit_snap.declarations.types if t.name == "Widget"
-    )
+
+    def _widget(snap):
+        return next(t for t in snap.declarations.types if t.name == "Widget")
+
+    auto_widget = _widget(auto_snap)
+    explicit_widget = _widget(explicit_snap)
     assert auto_widget.is_standard_layout is None
     assert explicit_widget.is_standard_layout is True
 
@@ -1411,16 +1407,8 @@ def test_dump_request_and_compare_request_lang_explicit_forces_cpp_mode(
         lang_explicit=True,
         frontend="clang",
     )
-    dr_auto_widget = next(
-        t
-        for t in run_dump_request(dump_req_auto).declarations.types
-        if t.name == "Widget"
-    )
-    dr_explicit_widget = next(
-        t
-        for t in run_dump_request(dump_req_explicit).declarations.types
-        if t.name == "Widget"
-    )
+    dr_auto_widget = _widget(run_dump_request(dump_req_auto))
+    dr_explicit_widget = _widget(run_dump_request(dump_req_explicit))
     assert dr_auto_widget.is_standard_layout is None
     assert dr_explicit_widget.is_standard_layout is True
 

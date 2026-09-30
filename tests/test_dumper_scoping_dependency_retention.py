@@ -1480,10 +1480,8 @@ class TestDirectlyReferencedDependencyRetention:
                 ),
             ],
         )
-        scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.declarations.types] == [
-            "vendor::Outer::Inner"
-        ]
+        scoped = scope_snapshot_excluding_dependencies(snap).declarations
+        assert [t.qualified_name for t in scoped.types] == ["vendor::Outer::Inner"]
 
     def test_typedef_derived_spelling_colliding_with_kept_type_not_trusted(self):
         """Codex review (P2, third round): a scope-losing typedef entry

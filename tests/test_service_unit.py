@@ -3994,11 +3994,9 @@ class TestPeHeaderScoping:
             result = _dump_pe(p, "1.0")
 
         assert not mock_dump.called  # castxml path never taken
-        names = {f.name for f in result.declarations.functions}
+        names = {f.name for f in (funcs := result.declarations.functions)}
         assert names == {"PublicApiFunc", "InternalPrivateFunc"}
-        assert all(
-            f.visibility == Visibility.PUBLIC for f in result.declarations.functions
-        )
+        assert all(f.visibility == Visibility.PUBLIC for f in funcs)
 
     def test_pdb_debug_preserved_on_scoped_snapshot(self, tmp_path):
         from abicheck.service import _dump_pe

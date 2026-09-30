@@ -335,8 +335,9 @@ class TestSidecarIsPersisted:
         reloaded = snapshot_from_dict(
             json.loads(json.dumps(snapshot_to_dict(original)))
         )
-        assert reloaded.declarations.typedef_entity_ids == original.declarations.typedef_entity_ids
-        assert reloaded.declarations.constant_entity_ids == original.declarations.constant_entity_ids
+        new, old = reloaded.declarations, original.declarations
+        assert new.typedef_entity_ids == old.typedef_entity_ids
+        assert new.constant_entity_ids == old.constant_entity_ids
 
     def test_scope_kind_survives_rather_than_a_rendered_string(self) -> None:
         # The same counterexample the declaration carrier's own round-trip
@@ -350,13 +351,9 @@ class TestSidecarIsPersisted:
             },
         )
         reloaded = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
-        assert (
-            reloaded.declarations.typedef_entity_ids["ns::Alias"]
-            == snap.declarations.typedef_entity_ids["ns::Alias"]
-        )
-        assert reloaded.declarations.typedef_entity_ids[
-            "ns::Alias"
-        ] != entity_id_for_typedef((Namespace("ns"),), "Alias")
+        new_id = reloaded.declarations.typedef_entity_ids["ns::Alias"]
+        assert new_id == snap.declarations.typedef_entity_ids["ns::Alias"]
+        assert new_id != entity_id_for_typedef((Namespace("ns"),), "Alias")
 
     def test_pre_v31_snapshot_loads_with_empty_sidecars(self) -> None:
         d = snapshot_to_dict(_snapshot_with_sidecars())
@@ -442,16 +439,11 @@ class TestCarrierIsPersisted:
         reloaded = snapshot_from_dict(
             json.loads(json.dumps(snapshot_to_dict(original)))
         )
-        assert (
-            reloaded.declarations.functions[0].entity_id
-            == original.declarations.functions[0].entity_id
-        )
-        assert (
-            reloaded.declarations.variables[0].entity_id
-            == original.declarations.variables[0].entity_id
-        )
-        assert reloaded.declarations.types[0].entity_id == original.declarations.types[0].entity_id
-        assert reloaded.declarations.enums[0].entity_id == original.declarations.enums[0].entity_id
+        new, old = reloaded.declarations, original.declarations
+        assert new.functions[0].entity_id == old.functions[0].entity_id
+        assert new.variables[0].entity_id == old.variables[0].entity_id
+        assert new.types[0].entity_id == old.types[0].entity_id
+        assert new.enums[0].entity_id == old.enums[0].entity_id
 
     def test_record_nested_in_record_survives_the_round_trip(self) -> None:
         # The exact counterexample the wire-schema-v2 Design section's own
@@ -473,10 +465,9 @@ class TestCarrierIsPersisted:
             ],
         )
         reloaded = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
-        assert reloaded.declarations.types[0].entity_id == snap.declarations.types[0].entity_id
-        assert reloaded.declarations.types[0].entity_id != entity_id_for_type(
-            (Namespace("ns"),), "A"
-        )
+        new_id = reloaded.declarations.types[0].entity_id
+        assert new_id == snap.declarations.types[0].entity_id
+        assert new_id != entity_id_for_type((Namespace("ns"),), "A")
 
     def test_declaration_with_no_resolved_identity_reloads_as_none(self) -> None:
         # A direct, non-producer construction never fabricates an identity

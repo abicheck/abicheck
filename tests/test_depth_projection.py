@@ -936,10 +936,8 @@ class TestProjectPairToDepthJointFloor:
         projected = project_snapshot_to_depth(self._header_derived(), "binary")
         assert projected.declarations.functions[0].params == []
         dwarf_projected = project_snapshot_to_depth(self._dwarf_derived(), "binary")
-        assert (
-            dwarf_projected.declarations.functions[0].params[0].kind
-            is ParamKind.POINTER
-        )
+        dwarf_param = dwarf_projected.declarations.functions[0].params[0]
+        assert dwarf_param.kind is ParamKind.POINTER
 
 
 class TestProjectPairToDepthPreservesDwarfPublicScope:
