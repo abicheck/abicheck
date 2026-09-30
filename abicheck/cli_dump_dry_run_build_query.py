@@ -454,7 +454,7 @@ def _reject_dump_manifest_for_non_elf(
 
             raise click.UsageError(
                 f"--dump-manifest is not yet supported for {_binary_fmt.upper()} "
-                "binaries (ADR-050 D3); use a single-header dump for this format."
+                "binaries; use a single-header dump for this format."
             )
 
 

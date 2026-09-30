@@ -104,8 +104,8 @@ CI even without floors can do that independently via the severity knobs
 
 ### A project-wide setting, not a per-invocation flag
 
-The environment matrix (ADR-020b) describes a **deployment target**, and
-since ADR-068 D5 that declaration lives directly in `.abicheck.yml`'s
+The environment matrix describes a **deployment target**, and
+that declaration lives directly in `.abicheck.yml`'s
 `deployment:` block, alongside the rest of the project's stable contract
 (`severity:`, `scope:`, …) — there is no separate `--env-matrix FILE` flag
 any more. A team checking the same pair of binaries against several

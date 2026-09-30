@@ -83,7 +83,7 @@ class BaselineReuseContext:
     baseline, or must the baseline fall back to the caller's plain, unfolded
     one?
 
-    That decision was hand-rolled inline in ``scan_engine.run_scan_core`` as a
+    That decision was hand-rolled inline in the retired ``scan_engine.run_scan_core`` as a
     four-clause boolean expression, and it took three separate review rounds to
     get right (the twelfth, thirteenth and fifteenth findings on the root
     ``AGENTS.md``'s L3→L2-fold entry: gating on ``baseline_headers``
@@ -102,12 +102,12 @@ class BaselineReuseContext:
     out of the per-input layer rather than pretending they don't exist.
     """
 
-    #: The old side's resolved header list (``cli_scan``'s
+    #: The old side's resolved header list (the retired ``cli_scan``'s
     #: ``header_both + header_old``). Empty means "no old-side header scope of
     #: its own", which reuses the candidate's.
     baseline_headers: tuple[Path, ...] = ()
     #: The old side's resolved include list (``include_both + include_old``),
-    #: built by ``cli_scan`` completely independently of the header list —
+    #: built by the retired ``cli_scan`` completely independently of the header list —
     #: which is why both have to be checked, not just one.
     baseline_includes: tuple[Path, ...] = ()
 
@@ -125,7 +125,7 @@ class BaselineReuseContext:
         Content, not truthiness, on the header axis: a bare, shared ``-H
         api.h`` (no ``old=`` scoping — the ordinary, most common
         ``scan --against`` usage) already makes ``baseline_headers`` truthy
-        and equal to the candidate's, since ``cli_scan`` builds it as
+        and equal to the candidate's, since the retired ``cli_scan`` built it as
         ``header_both + header_old``. Gating on mere truthiness treats every
         scan with any headers at all as old-side-scoped and drops the fold for
         the common case, which is the whole ``NOT_COMPARABLE`` bug this fold
@@ -161,7 +161,7 @@ def resolve_baseline_compile_context(
 
     The one implementation of :meth:`BaselineReuseContext.
     folded_context_is_reusable`'s consequence, shared by
-    ``scan_engine.run_scan_core`` (which calls it directly today) and by
+    the retired ``scan_engine.run_scan_core`` (which called it directly) and by
     :func:`_resolve_side_snapshot_impl`'s ``baseline_reuse_hint`` parameter
     (which reports the same answer on :class:`SideResolution` for whichever
     slice finally routes ``scan``'s candidate resolution through the shared
@@ -267,7 +267,7 @@ def _gated_build_query_inputs(
     (*allow_build_query*) that also silently drops every *passive*,
     non-executable setting the config carries (``build.compile_db``,
     ``build.internal_namespaces``, ...) whenever that signal is not exactly
-    ``True`` -- which, for ``scan``, is the common case: ``cli_scan_helpers.
+    ``True`` -- which, for ``scan``, was the common case: the retired ``cli_scan_helpers.
     resolve_effective_allow_query`` (ADR-037 D4 "level-implies-query") only
     ever answers ``True`` when the config *itself* declares a ``build.query``
     key AND an explicitly-pinned deep evidence level, so an ordinary
@@ -452,7 +452,7 @@ def _seeded_includes_and_compile_context(
     the other three call sites converged on is exactly the kind of drift PR
     C exists to close. This is the one piece of that convergence safely
     landable on its own, without restructuring ``perform_elf_dump``/
-    ``scan_engine._build_new_snapshot`` themselves to route through
+    the since-retired ``scan_engine._build_new_snapshot`` themselves to route through
     :func:`resolve_side_snapshot` -- their own pipelines have hooks (a
     second header-graph/clang-layout-tool pass, a side-aware ``-H
     old=PATH`` baseline) this function's shared primitive does not yet

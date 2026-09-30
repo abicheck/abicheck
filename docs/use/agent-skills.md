@@ -20,9 +20,7 @@ user asks a compatibility question in their own words.
 The skills are named after the **user's job**, not after abicheck commands.
 Someone who has never heard of abicheck can ask "will this change break
 existing consumers?" and get a workflow that reaches for abicheck as its
-deterministic verification engine. See
-[ADR-058](../contribute/adr/058-native-compatibility-agent-skills.md) for why
-the portfolio is shaped this way.
+deterministic verification engine.
 
 > **Requires unreleased abicheck 0.6.x to run.** You can install this skill
 > (copying a directory works regardless of your abicheck version)
@@ -68,10 +66,7 @@ is an **internal candidate**: working, reviewed content, but not yet
 validated and not for external publication or citation as validated in any
 user-facing claim, pending
 [G37](../contribute/plans/g37-agent-skill-quality-evaluation.md)'s
-still-unrun behavioral evaluation. See
-[ADR-058](../contribute/adr/058-native-compatibility-agent-skills.md)'s
-2026-08-20 amendment for the full rationale (the same status is also kept in
-`skills-src/CLAUDE.md`, the skill's own source tree).
+still-unrun behavioral evaluation. The same status is also kept in `skills-src/CLAUDE.md`, the skill's own source tree.
 
 ## The catalogue
 
@@ -99,8 +94,8 @@ The skill drives the abicheck CLI, so install that too:
 `pipx install abicheck` (or `pip install abicheck`).
 
 **From a checkout** (contributors): `skills-src/` is the one hand-authored
-source and the three trees are generated build output, not committed
-(2026-08-21 ADR-058 amendment) — `python scripts/install_dev_skill.py
+source and the three trees are generated build output, not committed —
+`python scripts/install_dev_skill.py
 --target <codex|claude|gemini|all>` writes them in place.
 
 Each installed skill directory is fully self-contained: every reference it
@@ -109,10 +104,7 @@ needs comes with it, with no symlinks and no cross-skill paths.
 Skills are executable content. Anthropic's own guidance applies to these as
 to any others: install only from sources you trust, and read what you install.
 The rules these skills hold *themselves* to — never manufacture a green
-result, never widen a suppression, never mutate a project silently — are in
-[ADR-058's safety invariants](../contribute/adr/058-native-compatibility-agent-skills.md),
-with the operational copy shipped inside every skill as
-`references/shared/safety-invariants.md`.
+result, never widen a suppression, never mutate a project silently — ship inside every skill as `references/shared/safety-invariants.md`.
 
 ## Prerequisites
 
@@ -121,9 +113,7 @@ needs — see [CLI usage](cli-usage.md) for installation and
 [evidence and build-context flags](dump-compare-flags.md) for what deeper
 `--depth` levels require. Local CLI invocation is the only execution path a
 skill uses, so a skill works in any agent with shell access and needs no
-protocol server or other setup beyond installing the skill itself. (ADR-058
-wrote this as "CLI normative, MCP an optional adapter"; abicheck has since
-removed its MCP server, so the CLI is simply the backend.)
+protocol server or other setup beyond installing the skill itself. (abicheck has no MCP server; the CLI is simply the backend.)
 
 Each skill declares, in its frontmatter, the abicheck version range it
 requires — the releases that actually provide the CLI surface it drives — and

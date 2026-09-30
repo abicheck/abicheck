@@ -23,7 +23,7 @@ list ``policy``, so a CLI module that needs ``SuppressionList`` to load a
 instead of importing ``suppression.py`` directly. ``service.py`` (itself
 ``workflows``-classified) already gets this right in
 ``load_suppression_and_policy`` -- this module gives the flat CLI helpers
-(``cli_params.py``, ``cli_scan_baseline.py``) the same route.
+(``cli_params.py``, and formerly ``cli_scan_baseline.py``) the same route.
 
 Re-export only, deliberately: the point is that there is one owner per
 operation and the frontend reaches it through the workflow layer, not that a

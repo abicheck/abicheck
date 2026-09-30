@@ -162,9 +162,14 @@ def test_parse_falls_back_to_the_per_entry_read_with_identical_output(
     import abicheck.elf_metadata as elf_metadata
 
     lib = hidden_version_lib or _libs(None)[0]
-    fast = repr(elf_metadata.parse_elf_metadata(lib))
+    fast = elf_metadata.parse_elf_metadata(lib)
     monkeypatch.setattr(elf_metadata, "decode_versym", lambda _s, _n: None)
-    assert repr(elf_metadata.parse_elf_metadata(lib)) == fast
+    slow = elf_metadata.parse_elf_metadata(lib)
+    # Dataclass equality, not ``repr``: a ``frozenset`` field (e.g. the
+    # CET feature set) renders in iteration order, which can differ between
+    # two equal sets, so a ``repr`` comparison failed intermittently (seen
+    # under the mutation lane) without any real difference.
+    assert slow == fast, (repr(slow), repr(fast))
 
 
 def test_an_unreadable_section_is_declined_not_raised() -> None:

@@ -125,11 +125,10 @@ generated: true
 
 {GENERATED_NOTE}
 
-Every model field converted to `Fact[T]` (ADR-063 D2) is declared exactly
+Every model field converted to `Fact[T]` is declared exactly
 once in `abicheck/model/fact_registry.py`'s `FACT_REGISTRY` — its value
 type, producing backends, persistence, and whether it participates in
-identity/comparison/suppression/reporting. See
-[ADR-063](../contribute/adr/063-one-semantic-pipeline.md) D7 and the
+identity/comparison/suppression/reporting. See the
 [implementation plan](../contribute/plans/one-semantic-pipeline.md)'s
 Phase 5 section for the design this page's data comes from.
 

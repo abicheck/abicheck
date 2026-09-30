@@ -448,7 +448,7 @@ class GateInfo:
             raise _MalformedGate("scan report 'exit_code' is missing or not an integer")
         # A scan report's `exit_code` is already a *fold* of two orthogonal
         # axes — its own compatibility gate and ADR-049 Phase 7's
-        # contract-coverage contribution, which `cli_scan_baseline` folds in
+        # contract-coverage contribution, which the retired `cli_scan_baseline` folded in
         # with `max`. Reading the folded number as the compatibility gate
         # therefore double-counts a coverage-only failure: it landed the
         # target in `blocking_targets` and made its profile `affected`, so a
@@ -510,7 +510,7 @@ def _scan_severity_gate(data: Mapping[str, Any]) -> GateInfo | None:
     top-level ``exit_code`` path to answer.
 
     Delegates to :meth:`GateInfo.from_report_data` rather than re-validating:
-    ``cli_scan_baseline`` builds this block with the same
+    the retired ``cli_scan_baseline`` built this block with the same
     ``reporter._build_severity_json`` that writes ``compare``'s, so a second
     validator here could only ever disagree with the first. That also means a
     *corrupt* scan gate block fails closed (``_MalformedGate``) exactly as a
@@ -547,8 +547,8 @@ def _contract_coverage_exit(data: Mapping[str, Any]) -> int:
     the aggregate block on reports that never asked the question.
 
     A ``scan --against`` report carries the field one level down, inside its
-    ``diff`` block (``cli_scan_baseline`` writes it into the summary that
-    becomes ``ScanOutcome.to_dict()['diff']``), so that block is consulted for
+    ``diff`` block (the retired ``cli_scan_baseline`` wrote it into the summary that
+    became ``ScanOutcome.to_dict()['diff']``), so that block is consulted for
     a scan report too. Without it the aggregate still *failed* -- the scan's
     own top-level ``exit_code`` already folds the contribution -- but reported
     ``contract_coverage.exit_contribution: 0`` and an empty

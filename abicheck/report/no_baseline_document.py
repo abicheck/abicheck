@@ -225,13 +225,12 @@ NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
     "audit_gate": (
         "**Audit-gate finding** -- `--severity-preset` opted this audit into "
         "gating, and at least one candidate-side finding is classified "
-        "`BREAKING`/`API_BREAK` (ADR-068 2026-09-10 amendment). This is "
+        "`BREAKING`/`API_BREAK`. This is "
         "orthogonal to the compatibility family: an audit never emits `2`/`4`."
     ),
     "contract_coverage": (
         "**Contract coverage incomplete** -- the selected `--contract` domain's "
-        "required evidence was not fully available on this candidate "
-        "(ADR-049 Phase 7)."
+        "required evidence was not fully available on this candidate."
     ),
     "analysis_assurance": (
         "**Analysis assurance incomplete** -- the evidence behind this audit was "
@@ -242,15 +241,15 @@ NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
     "evidence_contract": (
         "**Evidence contract not met** -- a pinned `--depth build`/`--depth "
         "source` requested evidence this run did not reach; it did not silently "
-        "degrade to shallower evidence (ADR-064)."
+        "degrade to shallower evidence."
     ),
     "incomplete_scope": (
         "**Comparison scope incomplete** -- a selected, expected member never "
-        "reached a completed audit (ADR-065 D6/D7)."
+        "reached a completed audit."
     ),
     "no_comparison_completed": (
         "**No audit completed** -- this run examined nothing, which never reads "
-        "as a clean pass (ADR-065)."
+        "as a clean pass."
     ),
 }
 

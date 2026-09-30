@@ -111,8 +111,7 @@ any entry. In every one of those cases the finding is exactly what it was
 before: absence of an explanation is never evidence that a dependency is
 absent.
 
-This is [ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md)
-(G29 Phase 4, slice 1). It adds no `ChangeKind`, changes no verdict, and adds
+This is G29 Phase 4, slice 1. It adds no `ChangeKind`, changes no verdict, and adds
 no report field — it fills in fields the schema already had.
 
 ## What this does not cover yet
@@ -144,9 +143,7 @@ for why the underlying grouping stays a report-level decision
 (`--view root-cause` above) rather than something a detector sets
 directly. Adding empty placeholder fields for data no producer can populate
 would misrepresent what abicheck actually knows, so unimplemented fields are
-left out of the schema entirely rather than always-`null`. See
-[ADR-052](../contribute/adr/052-unified-impact-assessment-model.md) for the
-full list of what this slice deliberately does not implement.
+left out of the schema entirely rather than always-`null`. 
 
 ---
 

@@ -8,7 +8,7 @@ one-comparison-product.md`` §3 rows #6/#8, Phase 2b).
 Before this module existed, ``buildsource.pattern_facts.find_pattern_facts`` and
 ``buildsource.preprocessor_facts.collect_preprocessor_facts`` had exactly one
 production caller anywhere under ``abicheck/``: ``scan_engine.py`` (ADR-068
-§1). This module gives them a second, ``compare()``-reachable caller,
+§1; since deleted by ADR-068 Phase 6). This module gives them a second, ``compare()``-reachable caller,
 mirroring ``workflows/cross_source_evolution.py``'s own shape for the
 cross-source checks: run the primitive independently on OLD and NEW, then
 fold the two one-sided results into a single, evolution-stated summary

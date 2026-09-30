@@ -84,7 +84,7 @@ from .workflows.request_inputs import InputSpec
 # (service.py is at the file-size cap). Bound via importlib rather than a static
 # `from .service_header_scoped import ...` -- service_header_scoped reaches
 # dry_run_estimate, which reaches back to service through the pre-existing,
-# already-baselined cli_buildsource/scan_engine SCC (AGENTS.md "M1-3"/CLAUDE.md
+# already-baselined cli_buildsource SCC (scan_engine was retired by ADR-068 Phase 6) (AGENTS.md "M1-3"/CLAUDE.md
 # "What NOT to do"); a static import here would pull this new leaf module into
 # that same cycle, which the AI-readiness import-cycle-growth gate rejects. An
 # `importlib.import_module` call is a plain function call, not an

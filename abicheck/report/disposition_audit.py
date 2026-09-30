@@ -548,7 +548,7 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
     if audit.acknowledgments:
         lines.append(
             f"**Acknowledged:** {audit.acknowledged_total} "
-            "(keeps its verdict class and gate contribution; ADR-067 D5)"
+            "(keeps its verdict class and gate contribution)"
         )
         lines.append("")
         for record_id, count in audit.acknowledgments[:_REVIEW_RULE_CAP]:
@@ -565,7 +565,7 @@ def render_disposition_audit_lines(audit: DispositionAudit) -> list[str]:
         if unacked:
             lines.append(
                 f"**Unacknowledged public additions ({policy}):** {len(unacked)} "
-                "(ADR-067 D6 — an orthogonal review gate; never reclassifies "
+                "(an orthogonal review gate; never reclassifies "
                 "the addition)"
             )
             lines.append("")

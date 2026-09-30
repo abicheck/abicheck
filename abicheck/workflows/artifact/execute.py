@@ -25,7 +25,7 @@ claims about it:
 * **Extraction occurs once per artifact.** :func:`resolve_side_snapshot` is the
   single entry point every front end reaches (``dump`` through
   ``service_dump_pipeline``, both ``compare`` sides through
-  ``service_compare_pipeline``, ``scan``'s candidate through
+  ``service_compare_pipeline``, the retired ``scan``'s candidate through
   ``scan_engine._build_new_snapshot``), and it calls ``service.resolve_input``
   exactly once. A front end that wanted a second opinion would have to call
   this again, not fork the logic.
@@ -94,7 +94,7 @@ class SideResolution:
     ``includes`` and the folded :class:`CompileContext`, both discarded after
     use -- but callers with a post-resolution hook that must agree with the
     primary parse (``perform_elf_dump``'s ADR-039 build-context collector and
-    header-graph second pass; ``scan_engine``'s pair-aware baseline-context
+    header-graph second pass; the retired ``scan_engine``'s pair-aware baseline-context
     reuse decision) need these values themselves, not just the snapshot. See
     :func:`_resolve_side_snapshot_impl`.
 
@@ -106,7 +106,7 @@ class SideResolution:
     ``finally`` drains that cleanup right after the primary parse has
     consumed it, deliberately, to release its exclusive lock before a
     sibling collection (e.g. ``embed_build_source``'s own inferred query)
-    can run. Safe for *identity/comparison* (e.g. ``scan_engine``'s own
+    can run. Safe for *identity/comparison* (e.g. the retired ``scan_engine``'s
     pair-aware baseline-context-reuse decision, which only compares these
     values against another side's resolved header/include sets, never reads
     a file under them) -- **not** safe for a caller intending to re-read a
@@ -166,7 +166,7 @@ def resolve_side_snapshot(
     defaults, so every pre-existing caller (``compare``, ``dump``'s typed
     pipeline) is unaffected — only ``scan``'s candidate-side resolution,
     which supports a binary-depth/debug-presence-only scan, needs to pass a
-    non-default value. Before this, only ``scan_engine._build_new_snapshot``
+    non-default value. Before this, only the (now retired) ``scan_engine._build_new_snapshot``
     (which calls :func:`abicheck.service.resolve_input` directly, bypassing
     this shared primitive entirely) could express either flag — see
     ``AGENTS.md``'s PR C entry for the gap this closes.
@@ -294,7 +294,7 @@ def _resolve_side_snapshot_impl(
     *build_config_locally_trusted* -- ``False`` keeps ``build_config``'s
     presence fully gated by *allow_build_query* (unchanged for ``dump``/
     ``compare``'s typed pipelines). ``scan`` passes ``True``: its own CLI-side
-    consent gate (``cli_scan_helpers.resolve_effective_allow_query``, ADR-037
+    consent gate (the retired ``cli_scan_helpers.resolve_effective_allow_query``, ADR-037
     D4) only ever authorizes a config's *executable* ``build.query`` field,
     never its bare presence, and blanket-nulling ``build_config`` here for
     every other case would drop an ordinary ``--config`` file's *passive*
@@ -369,8 +369,8 @@ def _resolve_side_snapshot_impl(
         _artifact_plan.pending_cleanups.extend(_seed_cleanups)
         # Drained as soon as the L2 parse below has consumed the seeded dirs --
         # *before* the embed step further down, not after it (PR 3A, dump/scan
-        # resolver convergence; the ordering `scan_engine._build_new_snapshot`
-        # already proved). An inferred build query holds its deterministic
+        # resolver convergence; the ordering the retired `scan_engine._build_new_snapshot`
+        # had proved). An inferred build query holds its deterministic
         # per-source-tree build dir under an exclusive `flock` until its own
         # cleanup runs, and `embed_side_build_source` below runs its *own*
         # inferred query in the same call -- so draining only at the end of
@@ -472,7 +472,7 @@ def _resolve_side_snapshot_impl(
         # `dump` CLI's own `perform_elf_dump` (one call site) -- now available
         # to every caller of this shared primitive (compare's implicit-dump
         # operand, dump's typed `run_dump_request` API), and, since this
-        # helper was extracted, to `scan_engine._build_new_snapshot` too. Every
+        # helper was extracted, to the since-retired `scan_engine._build_new_snapshot` too. Every
         # gate the three call sites used to hand-write now lives in one place;
         # see `attach_build_context_for_parsed_headers`' own docstring for what
         # each of them is and why.

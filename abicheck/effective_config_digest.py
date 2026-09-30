@@ -448,8 +448,8 @@ def effective_config_fields_from_full_config(
     from_severity`` or a direct construction when it has its own
     already-resolved scheme, e.g. ``scan --against``'s own
     ``resolve_scan_config`` deliberately blanking ``resolved_config.gate``'s
-    fields regardless of the run's real ``--severity-preset``/scheme, see
-    ``cli_scan_receipt._without_gate_settings``) -- *never* from
+    fields regardless of the run's real ``--severity-preset``/scheme, see the
+    retired ``cli_scan_receipt._without_gate_settings``) -- *never* from
     *resolved_config.gate* directly: that is D7's own resolved copy, and
     using it here instead of the value that actually scored this run's
     real process exit is exactly the class of drift the module docstring

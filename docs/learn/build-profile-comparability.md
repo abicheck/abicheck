@@ -62,7 +62,7 @@ addition" / "broken"), not folded into it:
    below don't explain — the comparison itself is not trustworthy, independent
    of whether the library's own source changed at all. This is
    deliberately not "silently downgrade to a warning" — abicheck's stance
-   (ADR-050 D2) is that a genuinely incomparable pair is a **hard
+   is that a genuinely incomparable pair is a **hard
    failure**: no verdict, exit `16`/`not_comparable`, with a structured
    reason explaining which axis disagreed. Reporting an ordinary verdict
    here would be answering a question nobody asked ("is GCC's ABI
@@ -107,7 +107,7 @@ extractions*, not a guarantee that every comparison checked comparability.
 
 ## What actually gets fingerprinted
 
-abicheck's comparability gate (ADR-050 D1/D2) doesn't
+abicheck's comparability gate doesn't
 guess at "did the build environment change" impressionistically — it hashes
 two separate, named fingerprints out of every dump that went through an L2
 header/AST frontend, and refuses to produce a verdict when they disagree

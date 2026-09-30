@@ -120,7 +120,7 @@ L0–L5 presence/absence without writing a snapshot); the build/source layers
 | 2 | **+ Debug symbols** | **L1** | a `-g` build (DWARF/PDB) or sidecar debug file | Type **layout**: struct/class sizes, field offsets, enum *values*, vtable slots, calling convention, packing/alignment | **Authoritative** (matched to binary) |
 | 3 | **+ Public headers** | **L2** | `-H include/` (parsed by castxml or clang — `--ast-frontend`) | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, declared default args, public/internal **scoping** | **Authoritative** for header-visible API |
 | 4 | **+ Build system data & options** | **L3** | `-p build/` (compile DB, CMake/Ninja/Bazel/Make) | The **flags the library was actually built with**: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`, toolchain/sysroot, target graph, export maps | Corroborating |
-| 5 | **+ Sources** | **L4** | a build/source pack (per-TU source ABI replay, ADR-030) | Facts that never reach the binary: macro constants, `constexpr` values, default-argument *values*, inline/template **bodies**, uninstantiated templates | Corroborating (→ `API_BREAK`/risk) |
+| 5 | **+ Sources** | **L4** | a build/source pack (per-TU source ABI replay) | Facts that never reach the binary: macro constants, `constexpr` values, default-argument *values*, inline/template **bodies**, uninstantiated templates | Corroborating (→ `API_BREAK`/risk) |
 
 Read this staircase-shaped **for the common case**: each step up the table
 *usually* both finds breaks the step below is blind to and prevents false
@@ -221,7 +221,7 @@ So the honest shape is not "false positives fall monotonically" — L1 actually
 *introduces* false positives that L0 was too blind to raise, and L2 clears them.
 What holds monotonically, and what the gate enforces, is the **false-negative**
 side: **more evidence never hides a break a weaker tier already caught** (the
-[*authority rule*](build-source-data.md), ADR-028 — corroborating evidence may
+[*authority rule*](build-source-data.md) — corroborating evidence may
 scope away a false positive, but never delete an artifact-proven break). With
 full evidence every case is correct (0 FP, 0 FN); CI publishes this matrix on
 every run, so each layer's contribution is a tracked number, not a claim.
@@ -239,7 +239,7 @@ every run, so each layer's contribution is a tracked number, not a claim.
 > each example's `min_evidence` tier in `catalog/ground_truth.json`.
 >
 > **The derived sixth layer, `L5`.** Beyond the five sources above, abicheck
-> *derives* an `L5` source/build graph (include/type/call reachability, ADR-031)
+> *derives* an `L5` source/build graph (include/type/call reachability)
 > from L3 (and any L4 surface) to **localize and explain** findings and
 > prioritize cross-symbol impact. It is covered with the other build/source
 > layers in [Build Info & Sources](build-source-data.md).
@@ -308,7 +308,7 @@ and "tier" or "level" would imply the wrong ones:
   *corroborating*** — it explains, localizes, scopes, adds confidence, removes
   false positives, and can raise its *own* source-/API-level findings, but it can
   **never overturn or silently delete an artifact-proven break**. This is the
-  *authority rule* ([ADR-028](../contribute/adr/028-source-build-evidence-pack.md)).
+  *authority rule*.
 - **Honest about what it had.** Because the verdict is only as strong as the
   evidence behind it, every run reports the evidence it actually collected (the
   `layer_coverage` table and the "checks enabled… and why others are not"
@@ -328,7 +328,7 @@ finding's `evidence_status` field spells out in machine-readable form — see
 
 The layers above describe *what* abicheck can see. `dump` and `compare`
 share **one** knob that decides how much of it to gather — `--depth`,
-each rung **named by the evidence you get** (ADR-037 D5) and additive over the
+each rung **named by the evidence you get** and additive over the
 one below it. As of the pre-1.0 CLI reset, the ladder has **exactly four
 public rungs — no more, no fewer:**
 
@@ -365,8 +365,7 @@ for the full removal list and migration mapping.
 state "you didn't pin a rung"; it resolves to the fixed **`headers`** rung,
 the same default `compare` has always used. It is *not* risk-driven: through
 2026-09-09 an omitted depth was scored from the `--since`/`--changed-path`
-seed and could escalate to `build`/`source` on a high-risk diff, but
-ADR-068's second 2026-09-09 amendment retired that along with `--risk-rules`.
+seed and could escalate to `build`/`source` on a high-risk diff, but 0.6 retired that along with `--risk-rules`.
 **Nothing escalates on your behalf any more** — a run that needs L3-L5
 evidence must pin `--depth build` or `--depth source` explicitly, or it will
 not collect it. A seed (`--since`/`--changed-path`) now only *scopes* a rung
@@ -383,8 +382,7 @@ two sides.
     is nothing to collect L3/L4/L5 from. Pass the evidence, or pin
     `--depth binary`/`--depth headers` for a shallower run that is honest
     about its rung. Omitting `--depth` is *not* the way to ask for a
-    best-effort binary run any more: since ADR-068's second 2026-09-09
-    amendment it resolves to a fixed `headers`, not to whatever the inputs
+    best-effort binary run any more: since 0.6 it resolves to a fixed `headers`, not to whatever the inputs
     happen to support.
 
 The resolved depth selects an internal collection mode, which decides which
@@ -415,8 +413,7 @@ flowchart LR
 Three properties of the dial worth internalizing:
 
 - **There is no `graph` rung.** The L5 reachability graph is an internal
-  consequence of `--depth source`, never its own user-facing rung (ADR-037
-  D6) — you do not select the graph directly.
+  consequence of `--depth source`, never its own user-facing rung — you do not select the graph directly.
 - **Cost has exactly one cliff, at L4.** `binary`/`headers`/`build` are one
   cheap price; `source` pays for clang per-TU AST replay, and the cliff
   height tracks C++ template/STL instantiation depth, not TU count. On
@@ -472,8 +469,7 @@ the five **independent, additive** sources of
 [§0 above](#0-the-five-sources-of-information) — plus the derived `L5` graph —
 for **six evidence layers in all** (`L0`–`L5`; see the
 [§0 table](#0-the-five-sources-of-information) for what each layer reveals, and
-[Architecture](architecture.md) and ADR-003 / ADR-028 for how they are
-reconciled).
+[Architecture](architecture.md) and [Source & Build Data](build-source-data.md) for how they are reconciled).
 
 The best input you can give it is therefore:
 
@@ -748,7 +744,7 @@ you.
 ## Removed scan axes
 
 Earlier releases selected evidence with `--source-method s0…s6`, `--mode`
-and `--max`; all three are gone (ADR-043). The migration table lives with
+and `--max`; all three are gone. The migration table lives with
 the other retired-surface maps, in
 [Migrating to the Current CLI § Removed scan axes](../use/companion-commands.md#removed-scan-axes-s0s6-mode-source-method-max).
 

@@ -66,7 +66,7 @@ def pack_option(f: F) -> F:
         "pack_paths",
         multiple=True,
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        help="Select an ADR-049 D8 pack manifest (repeatable). A pack is a "
+        help="Select a pack manifest (repeatable). A pack is a "
         "small versioned YAML document (id/version/kind/assignments) "
         "carrying one reusable piece of configuration. 'kind: policy' "
         "assigns ChangeKind slugs to break/warn/risk/ignore, exactly as "
@@ -114,8 +114,8 @@ def contract_options(f: F) -> F:
         "contract_mode",
         type=click.Choice(["public", "exports", "all", "auto"]),
         default=None,
-        help="Which evidence domain each finding is judged against "
-        "(ADR-049 Phase 6), and the flag that turns the contract "
+        help="Which evidence domain each finding is judged against"
+        ", and the flag that turns the contract "
         "evaluator on -- omit it and nothing about the run changes. "
         "'public': the header-derived declared surface. 'exports': the "
         "binary's own export table (ELF .dynsym / PE export directory / "
@@ -139,7 +139,7 @@ def contract_options(f: F) -> F:
         "contract_context block (observed provider evidence, resolved "
         "evaluation context, decision receipt), so a decision can be "
         "replayed or re-evaluated later without re-reading the binaries. "
-        "**The decisions are authoritative** (ADR-049 Phase 7): relevance "
+        "**The decisions are authoritative**: relevance "
         "is classified before compatibility policy, and policy scores only "
         "IN_CONTRACT/NOT_APPLICABLE findings -- so this changes verdicts "
         "and exit codes. Nothing is hidden: an excluded finding stays in "
@@ -165,8 +165,8 @@ def contract_options(f: F) -> F:
 # (`frontends/cli/commands/compare_no_baseline.py`) must reach them to activate
 # the evaluator the same way `cli_compare_helpers.run_compare` does, and an
 # import edge from that module to `cli_options` pulls the whole
-# `cli_options -> dry_run_estimate -> scan_engine -> cli_scan_baseline ->
-# cli_compare_helpers` CLI-registration SCC in with it -- new members of that
+# CLI-registration SCC (historically via `scan_engine -> cli_scan_baseline`,
+# both retired by ADR-068 Phase 6) in with it -- new members of that
 # cluster are exactly what the AI-readiness `import-cycle-growth` gate rejects
 # (`AGENTS.md` "What NOT to do": fix the direction or move the shared logic to
 # a leaf module; never extend `IMPORT_CYCLE_ALLOWLIST` to unblock it). This
@@ -221,7 +221,7 @@ def resolve_contract_domain(
     Normalizing the local value alone is not enough: the two front ends read
     the raw parameters differently -- ``compare`` hands
     ``cli_compare_receipt.resolve_and_apply`` explicit values, but
-    ``cli_scan._resolve_scan_evaluation_config`` rebuilds its inputs from
+    the retired ``cli_scan._resolve_scan_evaluation_config`` rebuilt its inputs from
     ``ctx.params`` and its typed-parameter set from
     ``ctx.get_parameter_source``. Given *ctx*, the normalization is applied
     there too, and the parameter source is demoted from ``COMMANDLINE`` to

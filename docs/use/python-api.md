@@ -25,7 +25,7 @@ abicheck's functionality is available as a Python library through the
 `abicheck.service` module. This is the **supported public entry point** — the
 same Tier-2 service layer the CLI calls. Front-ends should route through
 `service` rather than importing the internal `abicheck.checker` core
-directly (ADR-037). Agent and script integrations use this API (or the
+directly. Agent and script integrations use this API (or the
 CLI's structured JSON/SARIF output) directly — there is no separate
 protocol server.
 
@@ -65,7 +65,7 @@ unrecognised input format (both from `abicheck.errors`).
     `tuple[DiffResult, AbiSnapshot, AbiSnapshot]` before 0.6. A struct can gain
     a field without breaking positional callers, which a tuple cannot — so the
     typed result became the only shape rather than a second one alongside it
-    (ADR-055 D2). To migrate a positional caller in one line:
+   . To migrate a positional caller in one line:
 
     ```python
     result, old_snapshot, new_snapshot = run_compare(...).as_tuple()
@@ -193,7 +193,7 @@ directly buys you two things a keyword shim can't:
 | Compare | `run_compare(...)` | `run_compare_request(CompareRequest(...))` | `CompareResult` |
 
 `scan` has no typed request of its own. `ScanRequest`/`ScanResult` and
-`run_scan`/`run_scan_set` were removed in ADR-068 Phase 4 — `CompareRequest`
+`run_scan`/`run_scan_set` were removed in 0.6 — `CompareRequest`
 → `CompareResult` is the one typed contract now. See
 [Scanning from Python](#scanning-from-python) below.
 
@@ -275,9 +275,7 @@ normally just wants `run_compare_request`.
 ### Scanning from Python
 
 **There is no typed scan request.** `ScanRequest`, `ScanResult` and
-`run_scan`/`run_audit`/`run_scan_set` were removed in
-[ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-Phase 4: two request/result pairs is what made the "equivalent input,
+`run_scan`/`run_audit`/`run_scan_set` were removed in 0.6: two request/result pairs is what made the "equivalent input,
 equivalent answer, whichever front end" rule impossible to check, and
 `compare`'s own pair covers the capability. Importing any of those names now
 raises `ImportError`.
@@ -308,12 +306,11 @@ opt-in via `--severity-preset`, its exit-code gating too. Concretely: all
 eleven cross-source hygiene checks and the pattern/preprocessor pre-scan run
 on the self-compared candidate, and everything they find lands in the
 report's `findings[]` — `changes` stays empty, since an audit reports no
-addition, removal or comparison verdict at all (ADR-068 D2). A consumer
+addition, removal or comparison verdict at all. A consumer
 reading only `changes` therefore sees an empty audit; read `findings`. Until a typed
 `CompareRequest`/`CompareResult`-shaped entry point exists for it, call the
 CLI directly (`subprocess`, or `abicheck.service`'s CLI-adjacent helpers) --
-the `abicheck scan` CLI this migration replaced no longer exists (ADR-068
-Phase 6).
+the `abicheck scan` CLI this migration replaced no longer exists.
 
 `estimate_scan` — the dry-run per-layer cost projection — survives, but takes
 an `InputSpec` plus the run-scoped level arguments rather than a request:

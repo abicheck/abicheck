@@ -103,7 +103,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         _B,
         impact="A real consumer binary's own dynamic-symbol table (ELF undefined "
         "symbol / PE import / Mach-O undefined symbol, collected via "
-        "--used-by, ADR-005/043) required this exact symbol from the "
+        "--used-by) required this exact symbol from the "
         "library at load time — empirical ground truth independent of "
         "any header/namespace/visibility reasoning. The new library no "
         "longer exports it: the consumer's existing binary will fail to "
@@ -251,7 +251,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         impact="A policy require_evidence layer (build context, source ABI, or "
         "source graph) was declared mandatory but is absent from this "
         "compare, so the run is failed rather than passing on a silently "
-        "degraded scan (ADR-033 D7). Supply the missing evidence pack or "
+        "degraded scan. Supply the missing evidence pack or "
         "relax the policy.",
         entity=_ENT.ANALYSIS,
         operation=_OP.MODIFIED,
@@ -314,7 +314,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "qualified_name#signature_hash, else the bare qualified name) — proven "
         "distinct because each carries a different clang-computed USR. The "
         "identity fallback chain accepts this rare collision by design for "
-        "unmangled cross-scope declarations (ADR-041 P1 #5); when it happens, "
+        "unmangled cross-scope declarations; when it happens, "
         "the two declarations were folded together in the linked surface, so "
         "any L4/L5 finding attributed to that identity may actually describe "
         "either one. A source-tooling-confidence risk, never an artifact-proven "
@@ -497,7 +497,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "types, enums) increased between versions. Informational only — the "
         "individual additions are reported separately; this is the net "
         "signal for CI dashboards and release notes. Computed "
-        "unconditionally as of ADR-027 Phase 5's later default flip; "
+        "unconditionally; "
         "--surface-metrics is accepted for compatibility but no longer "
         "changes whether this finding is emitted.",
         description_template="public surface grew: {old} → {new} declarations (+{detail})",
@@ -510,7 +510,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         impact="The aggregate count of public declarations decreased between "
         "versions. Informational roll-up only — individual removals are "
         "reported (and may be breaking) on their own. Computed "
-        "unconditionally as of ADR-027 Phase 5's later default flip; "
+        "unconditionally; "
         "--surface-metrics is accepted for compatibility but no longer "
         "changes whether this finding is emitted.",
         description_template="public surface shrank: {old} → {new} declarations ({detail})",
@@ -606,7 +606,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "source checkout does not correspond to the shipped binary (e.g. a "
         "wrong tag/commit). All L4/L5 source findings for this pair are then "
         "untrustworthy; re-check the source out at the binary's build tag. "
-        "Per ADR-028 D3 this is a context risk, never a proven binary break.",
+        "This is a context risk, never a proven binary break.",
         entity=_ENT.SOURCE,
         operation=_OP.MODIFIED,
     ),
@@ -628,8 +628,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "produced by incompatible producers/fact-set versions — a mandatory "
         "fact family (functions, macros, templates, inline bodies, "
         "constexpr values, ...) was 'partial' or 'failed' on one or both "
-        "sides, or the old/new fact-set version or producer differ. Per "
-        "ADR-038 C.8, absence of another L4 finding must not be read as "
+        "sides, or the old/new fact-set version or producer differ. "
+        "Absence of another L4 finding must not be read as "
         "proof nothing changed in that family; treat this pair's other "
         "source-replay findings as unreliable until re-collected with a "
         "consistent, complete fact set.",
@@ -678,7 +678,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         _R,
         impact="A namespace/source_location suppression rule matched this change, "
         "but it was not applied because the change is reachable from the "
-        "public ABI surface (ADR-044) — suppressing it would hide a real "
+        "public ABI surface — suppressing it would hide a real "
         "break rather than internal noise. Review the finding; if the "
         "suppression is intentional even though the symbol is "
         "public-reachable, add `allow_public_break: true` to that rule.",
@@ -702,7 +702,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         "template_body_changed",
         _R,
         impact="The implementation of an uninstantiated public template changed. "
-        "No binary symbol exists to compare (the ADR-026 case122 residual), "
+        "No binary symbol exists to compare, "
         "so this is invisible to artifact comparison; consumers that "
         "instantiate the template pick up the new body on recompile. A "
         "source-visible risk surfaced only by source replay.",
@@ -716,8 +716,8 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         impact="The fraction of exported symbols with no public-header declaration "
         "(EXPORT_ONLY origin) rose between versions — a packaging-hygiene "
         "regression: a symbol was exported without a corresponding public "
-        "header. Informational; computed unconditionally as of ADR-027 "
-        "Phase 5's later default flip -- --surface-metrics is accepted "
+        "header. Informational; computed unconditionally -- "
+        "--surface-metrics is accepted "
         "for compatibility but no longer changes whether this finding "
         "is emitted.",
         description_template="undocumented-export ratio rose: {old} → {new} (symbols exported without a public header)",

@@ -798,7 +798,7 @@ def _compute_appcompat_verdict(
     let that already-fixed issue keep reporting ``COMPATIBLE_WITH_RISK``/
     counting the consumer as affected -- the identical class of bug
     ``checker._verdict_scored_population`` (see its own docstring) and
-    ``cli_scan_baseline.verdict_scored_changes`` already close at their own
+    the retired ``cli_scan_baseline.verdict_scored_changes`` closed at their own
     chokepoints, just reached here through the consumer-scoping path
     instead. Filtered at the one place both call sites (app and host) score
     a verdict from this list, leaving the list itself -- and every other

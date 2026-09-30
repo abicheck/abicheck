@@ -662,7 +662,7 @@ class DumpRequest:
 
 @dataclass(frozen=True)
 class CompareResult:
-    """What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
+    """What one :class:`CompareRequest` produced — the typed result.
 
     Returned by :func:`abicheck.service.run_compare_request` and by the
     ``run_compare`` kwargs shim. Both returned a bare

@@ -20,7 +20,7 @@ CI wires together building, publishing baselines, and gating pull requests
 over time, for however many libraries/consumers/plugin contracts your project
 ships and however many build profiles it supports.
 
-The underlying model is [ADR-047](../contribute/adr/047-github-actions-integration-model.md):
+The underlying model:
 a project's ABI/API surface is checked as one or more **checks** — each an
 application of policy to `target × profile × baseline channel × evidence
 requirement` — not as one implicit `aggregate` report. See
@@ -32,8 +32,7 @@ channel, check, run plan, ...).
 > this index links there instead of duplicating it into a thin wrapper page.
 > The scenario ID (`S`-number) is the stable cross-reference either way: it
 > names a row in
-> [ADR-047 §8](../contribute/adr/047-github-actions-integration-model.md#8-condensed-scenario-catalog-s1s28)'s
-> full catalog, independent of which page currently hosts the answer.
+> the full scenario catalog, independent of which page currently hosts the answer.
 
 ## Which Actions building block do I use?
 
@@ -126,8 +125,7 @@ large migration to it.
 
 - [Concepts](concepts.md) — the domain-model glossary (target, profile,
   baseline channel, check, run plan, ...) every scenario above is expressed in.
-- [ADR-047](../contribute/adr/047-github-actions-integration-model.md) — the
-  full design rationale and decision log behind this model.
+
 - [Choose Your Workflow](../start/choose-your-workflow.md) — the
   CLI-command-level decision guide, for when you already know what you're
   comparing and just need the right flags.

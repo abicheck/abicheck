@@ -80,7 +80,7 @@ supply it, for two different situations:
 
 ```bash
 # One-off run, experiment, or an integration that builds the compile context
-# at invocation time (ADR-074). Repeatable; applies to both sides of a compare.
+# at invocation time. Repeatable; applies to both sides of a compare.
 abicheck dump libpvxs.so -H include/ -DPVXS_ENABLE_EXPERT_API -o pvxs.json
 abicheck dump libpcre2.so -H include/ -DPCRE2_CODE_UNIT_WIDTH=8 -o pcre2.json
 ```
@@ -237,9 +237,7 @@ python3 -c "import json; r=json.load(open('result.json')); print(r['verdict']); 
 
 ## "old and new snapshots keep dependency declarations differently" / "were narrowed by different frontend prefilters"
 
-Two refusals from the extraction-scope check
-([ADR-075](../contribute/adr/075-target-ownership-and-extraction-scope.md)
-D3). Each side records the rules its declarations were classified under;
+Two refusals from the extraction-scope check. Each side records the rules its declarations were classified under;
 a pair that recorded a different `scope.dependency_evidence`, or a
 different frontend prefilter, did not keep the same declarations, so a
 dependency declaration present on one side only would read as an addition

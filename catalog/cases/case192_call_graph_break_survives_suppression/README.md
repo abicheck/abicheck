@@ -99,7 +99,7 @@ and the walk finds a `DECL_CALLS_DECL` edge straight to
 `detail::compute_avx2`. When a suppression rule would hide a change to a
 symbol that walk proved is public-reachable, abicheck raises
 `suppression_would_hide_public_break` instead of silently applying the rule
-(ADR-044).
+.
 
 ## Runtime failure demonstration
 
@@ -122,7 +122,7 @@ changes are ABI events, not baked-in call sites), or review and explicitly
 acknowledge the break with `allow_public_break: true` plus a tracking
 reference, as `suppress-acknowledged.yaml` does here.
 
-**Real-world example:** this is the headline scenario ADR-044 was built for
+**Real-world example:** this is the headline scenario reachability-aware suppression was built for
 — oneDAL-style dispatchers that `inline`-forward to internal
 architecture-specific specializations (`compute_avx2`, `compute_sse42`,
 ...), where a specialization only "looks" internal by namespace convention.

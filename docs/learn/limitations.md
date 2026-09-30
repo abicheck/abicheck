@@ -205,8 +205,7 @@ Use `abicheck compare -o json=-` for precise machine-readable `API_BREAK` verdic
 Functions defined entirely in headers (inline, `constexpr`, template) may not appear
 in the `.so` symbol table. By **default** (binary + headers only, no `--sources`),
 abicheck analyzes the public exported ABI — header-only changes that don't affect
-exported symbols will not be detected. **L4 source ABI replay** (`--sources`,
-ADR-030) substantially closes this gap; see [Source & Build
+exported symbols will not be detected. **L4 source ABI replay** (`--sources`) substantially closes this gap; see [Source & Build
 Data](build-source-data.md#source-abi-replay-findings-l4) for the full list of
 L4-only change kinds, and the next section for the residual that even L4 cannot see.
 
@@ -240,8 +239,7 @@ everywhere else in the docs (see
 
 So whether a change is detectable depends on the evidence you give abicheck. The
 first three columns are the **artifact tiers** (L0–L2, no source parsing); the
-fourth is abicheck's own **L4 source ABI replay** (`--sources`,
-ADR-030) — not a separate external tool:
+fourth is abicheck's own **L4 source ABI replay** (`--sources`) — not a separate external tool:
 
 | Change | object/DWARF | header (castxml) | abicheck L4 (`--sources`) |
 |--------|:---:|:---:|:---:|
