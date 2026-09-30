@@ -57,6 +57,19 @@ _LFS_TYPEDEFS = frozenset(
 _FAMILY = _TIME64_TYPEDEFS | _LFS_TYPEDEFS
 
 
+def _family_leaf(name: str) -> str | None:
+    """The libc family member *name* spells, or ``None``.
+
+    ``typedef_diff_maps`` may key by qualified name (``std::time_t`` from
+    ``<ctime>``). Only the global and ``std`` scopes are libc's: a library's
+    own ``app::time_t`` is not the glibc typedef this detector is about.
+    """
+    scope, _, leaf = name.rpartition("::")
+    if scope not in ("", "std"):
+        return None
+    return leaf if leaf in _FAMILY else None
+
+
 def _is_32bit_elf(snap: AbiSnapshot) -> bool:
     """True when the snapshot targets a 32-bit ELF image.
 
@@ -237,7 +250,7 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     old_typedefs, new_typedefs = typedef_diff_maps(old, new)
     for name, old_under in old_typedefs.items():
-        if name not in _FAMILY:
+        if _family_leaf(name) is None:
             continue
         new_under = new_typedefs.get(name)
         if new_under is None:
@@ -256,7 +269,9 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     flipped: list[str] = []
     up = down = 0
     for name, old_under, new_under, nb in candidates:
-        if name not in surface_tokens:
+        # A signature spells the family member by its leaf (``time_t``) or by
+        # the qualified key (``std::time_t``); either reaches the surface.
+        if name not in surface_tokens and _family_leaf(name) not in surface_tokens:
             # Present-but-unused system typedef — not part of this library's
             # public ABI, so its resize must not roll up to a break.
             continue
@@ -270,9 +285,9 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
 
     macros = []
-    if any(f.split(" ", 1)[0] in _TIME64_TYPEDEFS for f in flipped):
+    if any(_family_leaf(f.split(" ", 1)[0]) in _TIME64_TYPEDEFS for f in flipped):
         macros.append("_TIME_BITS=64")
-    if any(f.split(" ", 1)[0] in _LFS_TYPEDEFS for f in flipped):
+    if any(_family_leaf(f.split(" ", 1)[0]) in _LFS_TYPEDEFS for f in flipped):
         macros.append("_FILE_OFFSET_BITS=64")
     direction = (
         "32-bit → 64-bit (time64/LFS enabled)"

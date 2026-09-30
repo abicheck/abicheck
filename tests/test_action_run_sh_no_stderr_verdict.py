@@ -210,3 +210,23 @@ def test_deps_verdict_follows_exit_code_and_report_never_stderr(
         report=_deps_report() if with_report else None,
     )
     assert out["verdict"] == expected, (out["verdict"], out["_stdout"][-2000:])
+
+
+@pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
+def test_deps_sidecar_survives_a_caller_non_json_export(tmp_path, mode):
+    """A caller's own `-o markdown=...` suppresses the primary export but must
+    not suppress the JSON sidecar the verdict reads (CodeRabbit review)."""
+    bindir = _stub_abicheck(tmp_path, exit_code=1, report=_deps_report(), stderr="")
+    env = {
+        "INPUT_MODE": mode,
+        "INPUT_NEW_LIBRARY": _lib(tmp_path, "app"),
+        "INPUT_EXTRA_ARGS": f"-o markdown={tmp_path / 'out.md'}",
+    }
+    if mode == "deps-compare":
+        for side in ("old", "new"):
+            (tmp_path / f"{side}_root").mkdir()
+            env[f"INPUT_{side.upper()}_ROOT"] = str(tmp_path / f"{side}_root")
+    out = _run_action(tmp_path, env, bindir)
+    assert out["verdict"] == ("WARN" if mode == "deps-compare" else "FAIL"), out[
+        "_stdout"
+    ][-1500:]

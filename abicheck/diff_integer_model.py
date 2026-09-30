@@ -124,7 +124,9 @@ def _scan_typedef_integer_flips(
         new_under = new_typedefs.get(name)
         if new_under is None:
             continue
-        if not any(h in name for h in _INT_TYPEDEF_HINTS):
+        # The hint is about the alias's own name, not its scope: a qualified
+        # key such as ``api_int::value_type`` must not match on ``_int``.
+        if not any(h in name.rsplit("::", 1)[-1] for h in _INT_TYPEDEF_HINTS):
             continue
         ob = _int_width_bucket(old_under, is_llp64)
         nb = _int_width_bucket(new_under, is_llp64)

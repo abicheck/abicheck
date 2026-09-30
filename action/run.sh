@@ -3713,13 +3713,15 @@ elif [[ "$MODE" == "deps-tree" ]]; then
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
     if ! _extra_args_has_export; then
       CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
-      # The structured report the verdict dispatch reads (ADR-063 T8): exit 1
-      # is `deps`' own WARN/FAIL *and* any crash's code, and only a readable
-      # result tells them apart. Same internal sidecar compare mode injects.
-      if [[ "$FORMAT" != "json" ]]; then
-        PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-        CMD+=(-o "json=$PR_JSON")
-      fi
+    fi
+    # The structured report the verdict dispatch reads (ADR-063 T8): exit 1
+    # is `deps`' own WARN/FAIL *and* any crash's code, and only a readable
+    # result tells them apart. Decided separately from the primary export: a
+    # caller's own non-JSON `-o` still needs it, while a caller's own
+    # `-o json=PATH` already is the report (`_json_report_src` reads it).
+    if [[ "$FORMAT" != "json" ]] && ! _extra_args_write_would_conflict "single"; then
+      PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+      CMD+=(-o "json=$PR_JSON")
     fi
   fi
 
@@ -3752,13 +3754,15 @@ elif [[ "$MODE" == "deps-compare" ]]; then
     OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
     if ! _extra_args_has_export; then
       CMD+=(-o "$FORMAT=${OUTPUT_FILE:--}")
-      # The structured report the verdict dispatch reads (ADR-063 T8): exit 1
-      # is `deps`' own WARN/FAIL *and* any crash's code, and only a readable
-      # result tells them apart. Same internal sidecar compare mode injects.
-      if [[ "$FORMAT" != "json" ]]; then
-        PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
-        CMD+=(-o "json=$PR_JSON")
-      fi
+    fi
+    # The structured report the verdict dispatch reads (ADR-063 T8): exit 1
+    # is `deps`' own WARN/FAIL *and* any crash's code, and only a readable
+    # result tells them apart. Decided separately from the primary export: a
+    # caller's own non-JSON `-o` still needs it, while a caller's own
+    # `-o json=PATH` already is the report (`_json_report_src` reads it).
+    if [[ "$FORMAT" != "json" ]] && ! _extra_args_write_would_conflict "single"; then
+      PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+      CMD+=(-o "json=$PR_JSON")
     fi
   fi
 

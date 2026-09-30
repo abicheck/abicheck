@@ -579,8 +579,7 @@ def classify_compare_pair(
             ),
             base_policy=request.policy,
         )
-    # Sub-phase 4B: the D7 config, resolved once from the loaded inputs (before
-    # the project fold, whose tier the resolver re-derives) and read by the receipt + context below.
+    # 4B: one D7 config from the loaded inputs, pre-project-fold; read by the receipt and context below.
     from .workflows.compare_gate_receipt import resolve_request_evaluation_config
 
     evaluation_config = resolve_request_evaluation_config(request, pf, suppression)
@@ -744,6 +743,8 @@ def classify_compare_pair(
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
     install_resolved_gate_receipt(result, evaluation_config, gate)
+    if context is not None:
+        context = context.for_classification(evaluation_config, result.requested_depth)
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
@@ -755,9 +756,7 @@ def classify_compare_pair(
         suppression=suppression,
         exit_decision=exit_decision,
         severity_config=gate.severity,
-        resolved_execution_context=(
-            context.with_evaluation_config(evaluation_config) if context else None
-        ),
+        resolved_execution_context=context,
     )
 
 

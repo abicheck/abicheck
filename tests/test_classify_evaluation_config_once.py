@@ -180,3 +180,25 @@ def test_a_hand_built_pair_without_context_gets_none(tmp_path):
     result = classify_compare_pair(request, pair)
     assert result.resolved_execution_context is None
     assert result.diff.evaluation_config is not None
+
+
+def test_returned_context_reports_the_depth_classification_used(tmp_path):
+    """A pair resolved under one depth and classified under another must not
+    return a context -- or a resolution digest -- for the depth it never used
+    (CodeRabbit review, PR #1415)."""
+    import dataclasses
+
+    from abicheck.service_compare_pipeline import (
+        classify_compare_pair,
+        resolve_compare_request,
+    )
+
+    resolved_under = _request(tmp_path, depth="binary")
+    pair = resolve_compare_request(resolved_under)
+    classified_under = dataclasses.replace(resolved_under, depth=None)
+    result = classify_compare_pair(classified_under, pair)
+    ctx = result.resolved_execution_context
+    assert ctx.requested_depth == result.diff.requested_depth
+    same = classify_compare_pair(resolved_under, pair).resolved_execution_context
+    assert same.requested_depth == "binary"
+    assert ctx.resolution_digest() != same.resolution_digest()

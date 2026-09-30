@@ -136,3 +136,54 @@ def test_integer_typedef_scan_still_reports_a_real_flip():
     )
     flips, up, down = _scan_typedef_integer_flips(old, new, False)
     assert (len(flips), up, down) == (1, 1, 0) and flips[0].startswith("A::my_int32_t")
+
+
+# -- review follow-ups (CodeRabbit, PR #1415) ----------------------------------
+
+
+def test_integer_hint_reads_the_alias_leaf_not_its_scope():
+    """Negative control: an integer-like *namespace* must not arm the scan
+    for an unrelated alias name now that keys can be qualified."""
+    from abicheck.diff_integer_model import _scan_typedef_integer_flips
+
+    old = _td_snap({"value_type": "int"}, {"api_int::value_type": "int"})
+    new = _td_snap({"value_type": "long long"}, {"api_int::value_type": "long long"})
+    assert _scan_typedef_integer_flips(old, new, False) == ([], 0, 0)
+
+
+def test_stdlib_closure_keeps_qualified_identity():
+    """``ns1::S`` reaching a public signature must not admit an unrelated
+    header-mode ``ns2::S`` that shares ``name="S"``."""
+    from abicheck.diff_stdlib_impl import _public_by_value_type_closure
+    from abicheck.model import Function, Visibility
+
+    fn = Function(
+        name="make",
+        mangled="_Z4makev",
+        return_type="ns1::S",
+        visibility=Visibility.PUBLIC,
+    )
+    snap = AbiSnapshot(
+        library="l.so",
+        version="1",
+        functions=[fn],
+        types=[_rec("ns1", "S"), _rec("ns2", "S", "std::string")],
+    )
+    closure = _public_by_value_type_closure(snap)
+    assert "ns1::S" in closure and "ns2::S" not in closure, closure
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+        ("time_t", "time_t"),
+        ("std::time_t", "time_t"),
+        ("std::off_t", "off_t"),
+        ("app::time_t", None),
+        ("time_t_wrapper", None),
+    ],
+)
+def test_time64_family_member_by_scope(key, expected):
+    from abicheck.diff_time64 import _family_leaf
+
+    assert _family_leaf(key) == expected

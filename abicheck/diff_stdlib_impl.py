@@ -101,6 +101,7 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
     falsely claim a public layout change exists when the global stdlib filter has
     kept all the matching records out of the surface (Codex review #345).
     """
+    from .diff_helpers import type_map_key
     from .model import is_non_abi_surface_type
     from .surface import compute_public_surface
 
@@ -112,7 +113,7 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
         # std:: fields are not a *public* type embedding the stdlib by value.
         if is_non_abi_surface_type(rec.name):
             continue
-        if public_types is not None and rec.name not in public_types:
+        if public_types is not None and type_map_key(rec) not in public_types:
             continue
         for fld in rec.fields:
             tname = (fld.type or "").strip()
@@ -146,7 +147,7 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
     it. There is no pairwise comparison here for
     :func:`~abicheck.compare.fact_comparison.compare_facts` to gate.
     """
-    from .diff_helpers import build_type_map
+    from .diff_helpers import build_type_map, type_map_key
     from .model import RecordType, resolved_fact_value
     from .model.type_identifiers import type_identifiers as _type_identifiers
 
@@ -193,7 +194,9 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
         record: RecordType | None = type_map.get(name) or record_by_name.get(name)
         if record is None:
             continue
-        public_by_value.add(record.name)
+        # The qualified identity, so ``ns1::S`` reaching the surface does not
+        # admit an unrelated header-mode ``ns2::S`` sharing ``name="S"``.
+        public_by_value.add(type_map_key(record))
         for fld in record.fields:
             _add_type(queue, fld.type)
         bases = resolved_fact_value(record.bases_fact, [])

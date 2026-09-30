@@ -434,6 +434,25 @@ class ResolvedExecutionContext:
         artifact resolution. Every other field is carried over unchanged."""
         return dataclasses.replace(self, evaluation_config=evaluation_config)
 
+    def for_classification(
+        self,
+        evaluation_config: CompatibilityEvaluationConfig,
+        requested_depth: str | None,
+    ) -> ResolvedExecutionContext:
+        """The context a classification actually ran under: *evaluation_config*
+        attached, and *requested_depth* (the depth the classification projected
+        both sides to) replacing a different pre-execution one. A caller may
+        classify a pair under a different request than resolved it
+        (``classify_compare_pair``'s two-phase split), and the returned context
+        must not report a depth -- or a ``resolution_digest`` -- the
+        classification never saw."""
+        ctx = self.with_evaluation_config(evaluation_config)
+        if ctx.requested_depth != requested_depth:
+            ctx = dataclasses.replace(
+                ctx, evidence=EvidenceView.for_request(requested_depth)
+            )
+        return ctx
+
     def with_assurance(self, assurance: object) -> ResolvedExecutionContext:
         """A new context (frozen dataclasses don't mutate) whose
         :attr:`evidence` is the full post-execution
