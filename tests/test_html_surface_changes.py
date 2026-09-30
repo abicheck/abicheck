@@ -88,16 +88,16 @@ def test_cli_html_lists_exactly_the_json_surface_changes(tmp_path: Path) -> None
         f"json={tmp_path / 'p.json'}",
     )
     assert code == code_plain  # rendering never changes a gate
-    section = json.loads(out_json.read_text())["surface_changes"]
+    section = json.loads(out_json.read_text(encoding="utf-8"))["surface_changes"]
     assert section["total"] >= 3
-    groups = _section_rows(out_html.read_text())
+    groups = _section_rows(out_html.read_text(encoding="utf-8"))
     for label, key in (
         ("Additions", "additions"),
         ("Removals", "removals"),
         ("Modifications", "modifications"),
     ):
         assert groups[label] == [e["symbol"] for e in section[key]]
-    assert "added&lt;T&gt;" in out_html.read_text()
+    assert "added&lt;T&gt;" in out_html.read_text(encoding="utf-8")
 
 
 def test_no_surface_changes_renders_no_section() -> None:
