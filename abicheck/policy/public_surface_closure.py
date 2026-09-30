@@ -113,6 +113,7 @@ from ..model.graph_join import EDGE_KIND_EXPORTS
 from ..model.surface_facts import in_public_surface
 from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..model.vocabulary import ScopeOrigin
+from .header_origin_evidence import collect_header_origin_unknown_types
 from .public_surface import (
     _DEMOTE_ORIGINS,
     PublicSurface,
@@ -699,6 +700,14 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
         for rec in snap.types
         if _record_is_confirmed_public_seed(rec, record_identities)
     }
+    collect_header_origin_unknown_types(
+        snap,
+        surface,
+        lambda q: (
+            not _is_internal_type(q)
+            and not _record_nested_in_known_record(q, record_identities)
+        ),
+    )
 
     # Provenance is available iff some declaration was classified to a real
     # origin (only happens when the snapshot was dumped with a public-header

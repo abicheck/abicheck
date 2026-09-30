@@ -61,6 +61,7 @@ Design constraints (ADR-024 §D5, anti-hiding):
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -330,6 +331,10 @@ def compute_public_surface(
 SCOPE_NOTE_MANGLING_FALLBACK = "mangling-fallback"  # MSVC C++ name-mangling gap
 SCOPE_NOTE_HEADER_BACKEND_UNAVAILABLE = "header-backend-unavailable"
 SCOPE_NOTE_NO_PROVENANCE = "no-provenance"  # surface resolved without provenance
+# A finding was demoted through a type whose header origin was not read
+# (``PublicSurface.header_origin_unknown_types``): the demotion rests on
+# missing evidence, not on a confirmed non-public origin.
+SCOPE_NOTE_HEADER_ORIGIN_UNKNOWN = "header-origin-unknown"
 
 
 def surface_scope_confidence(
@@ -339,8 +344,13 @@ def surface_scope_confidence(
     scope_enabled: bool,
     surf_old: PublicSurface | None = None,
     surf_new: PublicSurface | None = None,
+    demoted: Iterable[Change] = (),
 ) -> tuple[str, list[str]]:
     """Summarise confidence in the header-scope resolution (ADR-024 §D5.3).
+
+    *demoted* is the run's out-of-surface ledger; any entry demoted as
+    :data:`REASON_HEADER_ORIGIN_UNKNOWN` adds
+    :data:`SCOPE_NOTE_HEADER_ORIGIN_UNKNOWN`.
 
     Returns ``(confidence, notes)`` where *confidence* is ``"high"`` or
     ``"reduced"`` and *notes* is a deduplicated, order-stable list of structured
@@ -371,8 +381,27 @@ def surface_scope_confidence(
         # must fire unless every resolvable side carries provenance.
         if any(s.resolvable and not s.has_provenance for s in (s_old, s_new)):
             _add(SCOPE_NOTE_NO_PROVENANCE)
+        if any(
+            c.surface_exclusion_reason == REASON_HEADER_ORIGIN_UNKNOWN for c in demoted
+        ):
+            _add(SCOPE_NOTE_HEADER_ORIGIN_UNKNOWN)
 
     return ("reduced" if notes else "high"), notes
+
+
+def scope_note_coverage_warnings(notes: Iterable[str]) -> list[str]:
+    """Human-readable ``coverage_warnings`` for the scope notes that mean a
+    finding may have been hidden on missing evidence (today:
+    :data:`SCOPE_NOTE_HEADER_ORIGIN_UNKNOWN`), so every report format states
+    the gap, not only the structured ``surface_scope`` block."""
+    if SCOPE_NOTE_HEADER_ORIGIN_UNKNOWN in notes:
+        return [
+            "public-surface scoping demoted finding(s) through type(s) whose "
+            "header origin was not collected (header-origin-unknown): those "
+            "findings are listed out-of-surface, but whether the types are "
+            "public could not be established"
+        ]
+    return []
 
 
 def change_in_public_surface(
@@ -404,6 +433,13 @@ REASON_SYSTEM_HEADER = "system-header"  # decl originates in a toolchain/system 
 # snapshot but not for this type — the demotion is reachability-based, not
 # provenance-confirmed (reduced confidence; ADR-024 §D5.1 / §D5.3).
 REASON_NO_PROVENANCE = "no-provenance"
+# A type was demoted by reachability, but its header origin (or, for a
+# record, its qualified name) was not read on the side(s) that would have
+# seeded it -- the demotion rests on unread evidence, so it is labelled
+# rather than reported as a confirmed ``non-public-type`` (F1 evidence
+# ablation: an unknown ``source_header_fact`` used to scope a real break
+# away to NO_CHANGE with no stated gap).
+REASON_HEADER_ORIGIN_UNKNOWN = "header-origin-unknown"
 # An internal-namespace (``detail::``/``impl::``/``internal::``) type's layout
 # churn that the internal-leak detector confirmed is NOT reachable from any
 # public API root, so it is truly private and must not drive a hard ABI verdict
@@ -1068,6 +1104,12 @@ def _demote_by_reachability(
     # recovered from a PDB. Keep the finding in that case (ADR-024 §D5.2).
     if not (surf_old.has_typed_roots and surf_new.has_typed_roots):
         return True, None
+    # A demotion resting on an unread header origin is labelled first: it
+    # outranks the provenance reasons below, which assume the origin was read.
+    if known & (
+        surf_old.header_origin_unknown_types | surf_new.header_origin_unknown_types
+    ):
+        return False, REASON_HEADER_ORIGIN_UNKNOWN
     # Reachability demotion. If provenance was available for the snapshot but
     # none of the implicated types carried it, disclose the reduced confidence
     # (ADR-024 §D5.3) rather than implying a provenance-confirmed verdict.
