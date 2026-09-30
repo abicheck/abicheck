@@ -133,31 +133,47 @@ def _events(*pairs):
             "python3 -m abicheck compare a b",
             "/usr/bin/python3: No module named abicheck",
         ),
-        ("which abicheck", "abicheck not installed"),
-        ("readelf -Ws lib.so", "Symbol table ..."),
-        ("nm -D lib.so | grep widget", [{"type": "text", "text": "T widget_area"}]),
+        # Both observed for real: looking prints nothing that matches.
+        (
+            "pip list 2>/dev/null | grep -i abi || command -v abicheck || echo none",
+            "none",
+        ),
+        ("nm -D lib.so; which abi-compat abicheck 2>&1 | head", "0000 T widget_area\n"),
+        ("readelf -Ws lib.so", [{"type": "text", "text": "Symbol table '.dynsym'"}]),
+        ("abicheck compare a b", None),
+        ("cat notes.txt", "we should try abicheck later"),
     ],
 )
-def test_looking_for_the_tool_and_not_finding_it_is_not_a_leak(command, output):
+def test_looking_for_the_tool_is_not_a_leak(command, output):
     assert runner.reached_the_tool(_events((command, output))) == []
 
 
 @pytest.mark.parametrize(
-    ("command", "output"),
+    "output",
     [
-        ("abicheck compare a.so b.so", '{"verdict": "BREAKING"}'),
-        ("/opt/venv/bin/abicheck --version", "abicheck 0.6.0"),
-        ("python3 -m abicheck --version", "abicheck 0.6.0"),
-        ("pip install abicheck", "Successfully installed abicheck-0.6.0"),
-        (
-            "cd x && abicheck compare a b",
-            [{"type": "text", "text": "Verdict: BREAKING"}],
-        ),
-        ("abicheck compare a b", None),  # no result recorded: not provably absent
+        "abicheck 0.6.0 (abicheck/abicheck)",
+        " Usage: abicheck [OPTIONS] COMMAND [ARGS]...",
+        '{\n  "report_schema_version": "5.10",\n  "verdict": "BREAKING"}',
+        "Successfully installed abicheck-0.6.0 pyelftools-0.31",
+        [{"type": "text", "text": "abicheck 0.7.1"}],
     ],
 )
-def test_running_or_installing_the_tool_is_a_leak(command, output):
-    assert runner.reached_the_tool(_events((command, output))) == [command]
+def test_output_only_a_reachable_tool_produces_is_a_leak(output):
+    assert runner.reached_the_tool(_events(("anything", output))) != []
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        "a string",
+        {"message": "a string"},
+        {"message": {"content": "text"}},
+        {"message": {"content": [None, 3]}},
+        None,
+    ],
+)
+def test_odd_event_shapes_are_ignored_not_fatal(event):
+    assert runner.reached_the_tool([event]) == []
 
 
 @pytest.mark.parametrize(

@@ -944,45 +944,57 @@ def no_tool_environment(parent: Mapping[str, str]) -> dict[str, str]:
     return env
 
 
-#: Output that means an attempt to run the tool did *not* reach it.
-_TOOL_ABSENT = re.compile(
-    r"command not found|No module named|No such file or directory|not installed",
-    re.IGNORECASE,
+#: Output only a reachable abicheck produces: its version banner, its usage
+#: line, a JSON report's own fields, or an install that put it on the machine.
+_TOOL_OUTPUT = re.compile(
+    r"\babicheck \d+\.\d+\.\d+"
+    r"|Usage: abicheck\b"
+    r'|"report_schema_version"'
+    r"|Successfully installed[^\n]*\babicheck-\d",
 )
-#: A command that would run or install the tool, however it is spelled.
-_TOOL_ATTEMPT = re.compile(
-    r"(?:^|[\s;&|(`/])abicheck\b|-m\s+abicheck|install\b.*\babicheck"
-)
+
+
+def _blocks(event: object) -> list[dict]:
+    """An event's content blocks; `[]` for any shape that carries none."""
+    if not isinstance(event, dict):
+        return []
+    message = event.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return (
+        [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+    )
+
+
+def _result_text(block: dict) -> str:
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(part.get("text", "")) for part in content if isinstance(part, dict)
+        )
+    return ""
 
 
 def reached_the_tool(events: list[dict]) -> list[str]:
-    """Commands in a `no_tool` run that ran or installed abicheck anyway.
+    """Tool outputs in a `no_tool` run that only a reachable abicheck produces.
 
-    Each `Bash` call that names the tool is matched to its own result; one
-    whose output does not say the tool is missing is a leak. Conservative in
-    the direction that matters: a run that merely *looked* for the tool and
-    was told it is absent is kept, and anything else that names it is
-    reported, so a leak cannot be graded as the no-tool condition.
+    Judged by what came back, not by what was typed: looking for the tool
+    (`which abicheck`, `pip list | grep abi`) is ordinary behaviour when it is
+    absent and prints nothing that matches, while running or installing it
+    anyway prints its banner, usage, report or install line. An earlier
+    version judged the command text and aborted batches on runs that had
+    merely looked. Returns each offending output's first line.
     """
-    commands: dict[str, str] = {}
     leaked: list[str] = []
     for event in events:
-        for block in (event.get("message") or {}).get("content") or []:
-            if not isinstance(block, dict):
+        for block in _blocks(event):
+            if block.get("type") != "tool_result":
                 continue
-            if block.get("type") == "tool_use":
-                command = _bash_command(block)
-                if command is not None and _TOOL_ATTEMPT.search(command):
-                    commands[str(block.get("id"))] = command
-            elif block.get("type") == "tool_result":
-                command = commands.pop(str(block.get("tool_use_id")), None)
-                if command is None:
-                    continue
-                content = block.get("content")
-                text = content if isinstance(content, str) else json.dumps(content)
-                if not _TOOL_ABSENT.search(text):
-                    leaked.append(command)
-    return leaked + list(commands.values())
+            match = _TOOL_OUTPUT.search(_result_text(block))
+            if match:
+                leaked.append(match.group(0))
+    return leaked
 
 
 def _recorded_environment(out_dir: Path) -> dict[str, str]:
@@ -1379,8 +1391,14 @@ def _recovered_record(
             problem = "the workspace names the tool or states the answer: " + "; ".join(
                 leaks
             )
-    if problem is None and _bypassed_the_recorder(
-        events, out_dir / "calls.jsonl", interposed
+    if problem is None and arm == "no_tool" and reached_the_tool(events):
+        # The no-tool counterpart: a leaked run was rejected after writing
+        # `final.md`, so a resume must not index it as the no-tool condition.
+        problem = "the no-tool arm reached abicheck anyway"
+    elif (
+        problem is None
+        and arm != "no_tool"
+        and _bypassed_the_recorder(events, out_dir / "calls.jsonl", interposed)
     ):
         # The same reasoning as the treatment check, for the other rejection
         # `_run_once` can raise after writing `final.md`. On a host without the
