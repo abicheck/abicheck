@@ -1654,6 +1654,10 @@ concepts:
       config/CLI wiring (A1.6, `project capture-variants`), stored/live and
       stored/stored release-comparison reachability from the standard CLI
       (A1.7) and non-ELF artifact membership (A1.8) have landed.
+      **2026-09-30: sub-phase 8B closed within ADR-063.** The remaining
+      `authority: mixed` is the product question of making a package the
+      default dump/compare shape plus A2.1/A2.5's decoded-size work, both
+      owned by docs/contribute/plans/storage-format-v2.md.
 
   report_document:
     primitive: complete

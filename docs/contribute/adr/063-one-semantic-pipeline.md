@@ -1,7 +1,7 @@
 # ADR-063: One Semantic Pipeline — Unifying Application, Fact, Identity, and Outcome Models
 
 **Date:** 2026-08-27
-**Status:** Accepted — roadmap ADR, partially implemented. Decisions D1–D10 are accepted; sub-phases 2B, 4B, 5B, 6B and 7B are complete; 8B (tracked in the storage-format-v2 plan) and the Phase 10 accounting remain open (see the plan).
+**Status:** Accepted — roadmap ADR, partially implemented. Decisions D1–D10 are accepted; all six sub-phases (2B, 4B, 5B, 6B, 7B, 8B) are complete; the Phase 10 accounting remains open, and the residuals handed to other plans are named in the plan (see the plan).
 
 *Per-phase implementation status used to live here as a consolidated,
 hand-maintained bullet list. It was removed 2026-09-02 (per an external
