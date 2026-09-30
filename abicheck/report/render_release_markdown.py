@@ -273,7 +273,7 @@ def _release_md_evidence_contract(
         "",
         "The pinned `--depth` rung was not met for the members above, so their "
         "findings rest on shallower evidence than was asked for. Contributes 7 "
-        "to the release exit code (ADR-064 evidence-contract axis).",
+        "to the release exit code.",
     ]
 
 

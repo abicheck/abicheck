@@ -83,7 +83,7 @@ from .workflows.history import HistoryError, run_history_request
 
 @main.group("project")
 def project_group() -> None:
-    """Advanced multi-target project integration (ADR-047).
+    """Advanced multi-target project integration.
 
     \b
     Subcommands:
@@ -91,7 +91,7 @@ def project_group() -> None:
                        config, an abicheck-build/ directory, or an
                        impact-use-cases.yaml manifest.
       plan             Derive run-plan.json from .abicheck.yml + build-output.json.
-      history          Derive lifecycle events + coverage from N stored snapshots (ADR-066 S1).
+      history          Derive lifecycle events + coverage from N stored snapshots.
 
     Most libraries never need this group — it exists for projects that check
     several targets/build profiles/baseline channels together, wired through
@@ -152,18 +152,17 @@ def project_validate_cmd(
     toolchain_bindings: Path | None,
     verbose: bool,
 ) -> None:
-    """Validate INPUT, a project-integration document (ADR-047, ADR-057).
+    """Validate INPUT, a project-integration document.
 
     INPUT defaults to ``.abicheck.yml``. Which validation runs is decided by
     INPUT's own shape, never by its name:
 
     \b
       a YAML mapping           -> a project config's targets:/bundles:/
-                                  profiles:/baseline: block (ADR-047 §3)
+                                  profiles:/baseline: block
       a directory, or a
-      build-output.json        -> that build output (ADR-047 §11.1)
+      build-output.json        -> that build output
       a YAML list              -> an impact-use-cases.yaml manifest
-                                  (G29 Phase 4, ADR-057 amendment)
 
     **Project config.** Every target's ``kind``-specific required fields are
     set (and no kind-inappropriate field is); ``app-consumer``/
@@ -492,9 +491,9 @@ def project_plan_cmd(
     actually apply: an explicit ``checks[].profiles:`` selector must resolve
     against that profile's ``--build-output``, or it's an error; an implicit
     "every contract profile" sweep silently skips a profile that doesn't
-    build the target (never a blind cross-product, ADR-047 §3). Each
+    build the target (never a blind cross-product). Each
     resolved cell's ``check_id`` is
-    ``target@profile#baseline_channel@requested_depth`` (ADR-047 §7).
+    ``target@profile#baseline_channel@requested_depth``.
 
     With ``--toolchain-bindings``, each resolved cell's profile
     ``compile.binding`` (if declared; ``consumer_compile.binding`` is
@@ -665,7 +664,7 @@ def project_plan_cmd(
         "(same values as `compare --policy`)."
     ),
 )
-@export_options(["json", "text"], default_format="json")
+@export_options(["json", "text", "html"], default_format="json")
 @verbose_option
 def project_history_cmd(
     snapshots: tuple[Path, ...],
@@ -675,12 +674,12 @@ def project_history_cmd(
     verbose: bool,
 ) -> None:
     """Derive per-API lifecycle events from an ordered chain of SNAPSHOTS
-    (ADR-066 S1: offline longitudinal compatibility history).
+    (offline longitudinal compatibility history).
 
     SNAPSHOTS are two or more stored ``AbiSnapshot`` files (any format
     ``compare``/``dump --dump-manifest`` write, including the compressed
-    ADR-059 storage envelope), given **oldest first — this order IS the
-    release order** (ADR-066 D1: history never infers or reorders from
+    storage envelope), given **oldest first — this order IS the
+    release order** (history never infers or reorders from
     version labels or file timestamps).
 
     abicheck composes its existing pairwise ``compare()`` engine across each
@@ -688,16 +687,16 @@ def project_history_cmd(
     diff) and derives, per function/variable/type entity: ``first_observed``
     (present in the very first supplied snapshot — its true introduction
     point may predate this history, unlike a proven ``introduced``),
-    ``introduced``, ``deprecated``, ``removed``, and ``reintroduced`` events
-    (ADR-066 D2). A ``removed`` event carries ``evidence_uncertain: true``
+    ``introduced``, ``deprecated``, ``removed``, and ``reintroduced`` events.
+    A ``removed`` event carries ``evidence_uncertain: true``
     when the backing comparison's own evidence confidence was not HIGH — a
     coarse proxy that this snapshot's evidence may not have been complete
     enough to prove absence, not a claim that it was.
 
     Each ``pairwise[]`` entry also carries ``evolution_counts`` (how many of
     that pair's own findings are ``introduced``/``resolved``/``persistent``/
-    ``not_evaluated`` relative to the *previous* pair in this same chain --
-    ADR-068 Phase 1's ``FindingEvolution`` primitive) and ``resolved`` (the
+    ``not_evaluated`` relative to the *previous* pair in this same chain)
+    and ``resolved`` (the
     findings that were present in the previous pair's diff but no longer
     appear in this one). The first pair in a chain has no earlier comparison
     to classify against, so its own findings read ``not_evaluated``.
@@ -706,19 +705,18 @@ def project_history_cmd(
     intermediate release: two adjacent, SemVer-parseable labels that are not
     consecutive under the ordinary major/minor/patch increment rule. A
     non-SemVer label pair reports no gap verdict at all (there is no
-    project-declared version scheme yet to check against — ADR-066 D4/S2).
+    project-declared version scheme yet to check against).
 
-    Deliberately narrower than ADR-066's full design (recorded in the ADR's
-    own S0 amendment): entity correspondence uses each finding's own
-    resolved identity as-is, not the ADR's full signature-discriminator
-    overload disambiguation with provenance corroboration — a function
+    Limitation: entity correspondence uses each finding's own
+    resolved identity as-is, without signature-based overload
+    disambiguation — a function
     whose signature changes is conservatively read as removed+introduced
     rather than asserted as one continuous, changed declaration.
 
     \b
     Exit codes:
       0   History generated (lifecycle events and coverage are reported
-          facts, not a pass/fail gate — ADR-066 D5: this command never
+          facts, not a pass/fail gate — this command never
           decides acceptance, only observes).
       64  Usage error (fewer than one snapshot, a snapshot fails to load, or
           --version was given a different number of times than SNAPSHOTS).
@@ -739,6 +737,10 @@ def project_history_cmd(
     def _render_history(fmt: str) -> str:
         if fmt == "json":
             return json.dumps(result.to_dict(), indent=2)
+        if fmt == "html":
+            from .report.render_history_html import render_history_html
+
+            return render_history_html(result.to_dict())
         lines = [
             f"longitudinal history: {result.library} "
             f"({len(result.entries)} snapshot(s))"

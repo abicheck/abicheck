@@ -6,7 +6,7 @@ portable, project-owned surface that declares a project's CI-integration
 topology: which libraries/consumers/plugin-contracts exist, how they group
 into release bundles, which build profiles are ABI contracts, which baseline
 channels exist, and exactly which `{channel, depth, required, gate_mode}`
-checks run against each target (G30/ADR-047 §3).
+checks run against each target (G30).
 
 > **Status.** This page documents the schema and the
 > `abicheck project validate` command shipped in G30 P1.5. The
@@ -74,7 +74,7 @@ so no custom YAML tags are ever evaluated.
 
 A mapping of target id → target entry. Every id must match
 `^[A-Za-z0-9][A-Za-z0-9._-]*$` — the same charset the report-identity
-envelope (ADR-047 §7) requires for `check_id`'s
+envelope requires for `check_id`'s
 `target@profile#baseline_channel@depth` components, so a valid id here can
 never produce an ambiguous identifier downstream.
 
@@ -102,22 +102,21 @@ Common optional fields for `kind: library`:
 |-------|------|---------|
 | `consumer_binary_pattern` | string | (`app-consumer` only) Path pattern to the consumer binary under test. |
 | `contract_file` | string | (`plugin-contract` only) A **`.syms` file** — one required linker symbol per line, `#` comments allowed. This is `--required-symbol @FILE`'s actual on-disk format (`abicheck/cli_helpers_compare.py`'s `load_required_symbols`), not YAML. |
-| `library` | string | The `kind: library` target this entry resolves its baseline **and** candidate-artifact lookup through (ADR-047 §3's "unstated rule" correction). Must name a real, declared `kind: library` target — never another `app-consumer`/`plugin-contract` entry. The check's own reporting identity (`check_id`/`target_id`) stays this entry's own name; only the *lookup* redirects to `library`. |
+| `library` | string | The `kind: library` target this entry resolves its baseline **and** candidate-artifact lookup through . Must name a real, declared `kind: library` target — never another `app-consumer`/`plugin-contract` entry. The check's own reporting identity (`check_id`/`target_id`) stays this entry's own name; only the *lookup* redirects to `library`. |
 
 ### `checks:`
 
 Each `targets:<id>.checks[]` entry is a `{channel, depth, required,
-gate_mode, profiles, allow_new_target, id, analysis}` tuple — the assignment
-ADR-047 §3 itself identifies as missing from the plain `targets:`/`baseline:
+gate_mode, profiles, allow_new_target, id, analysis}` tuple — the assignment missing from the plain `targets:`/`baseline:
 channels:` excerpt: declaring which channels *exist* doesn't say which
 channel/depth/policy a given target actually runs.
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `channel` | string | — (required) | A `baseline.channels` id, or the literal `"none"` for a no-baseline audit check (ADR-047 §6 S5 — `check-target` must skip `resolve-baseline` entirely for this sentinel, never look it up as a declared channel). `channel: "none"` is only supported for a `kind: library` target — rejected at validation time for `app-consumer`/`plugin-contract` (no `--used-by`/`--required-symbol` equivalent for a one-build audit) and for any [`bundles:` check](#bundles) (a bundle's candidate is always a staged directory of member binaries, which `compare`'s audit-only shape rejects outright). |
+| `channel` | string | — (required) | A `baseline.channels` id, or the literal `"none"` for a no-baseline audit check (scenario S5 — `check-target` must skip `resolve-baseline` entirely for this sentinel, never look it up as a declared channel). `channel: "none"` is only supported for a `kind: library` target — rejected at validation time for `app-consumer`/`plugin-contract` (no `--used-by`/`--required-symbol` equivalent for a one-build audit) and for any [`bundles:` check](#bundles) (a bundle's candidate is always a staged directory of member binaries, which `compare`'s audit-only shape rejects outright). |
 | `depth` | string | — (required) | One of `binary`, `headers`, `build`, `source` — the same four rungs `--depth`/the report envelope's `requested_depth` accept. |
 | `required` | boolean | `true` | Whether this check gates `aggregate`'s coverage requirement. |
-| `gate_mode` | string | `local` (`advisory` when `channel: "none"`) | One of `local`, `deferred`, `advisory` (ADR-047 §4/§7). A `channel: "none"` no-baseline audit check defaults to `advisory`, not `local` — it has no baseline-drift verdict to gate CI on, so a minimal `{channel: none, depth: ...}` entry must not unexpectedly block CI (ADR-047 §8's S5 row: "Advisory by default"). Set `gate_mode` explicitly to override either default. |
+| `gate_mode` | string | `local` (`advisory` when `channel: "none"`) | One of `local`, `deferred`, `advisory`. A `channel: "none"` no-baseline audit check defaults to `advisory`, not `local` — it has no baseline-drift verdict to gate CI on, so a minimal `{channel: none, depth: ...}` entry must not unexpectedly block CI (scenario S5: "Advisory by default"). Set `gate_mode` explicitly to override either default. |
 | `profiles` | list of string | *(unset)* | An **explicit** profile-id selector — see [Profile scoping](#profile-scoping-for-checks) below. A profile with `contract: false` may only be named here by a `channel: "none"` audit check — a real-channel check can never resolve a baseline on a lane that's documented to never get one (S17). |
 | `allow_new_target` | boolean | `false` | Forwarded as `check-target`'s `allow-new-target` input — `true` turns a target genuinely absent from this check's otherwise-resolved baseline-set into the advisory `new_target` outcome instead of `ambiguous` (e.g. a new library's first release). Pair with `required: false`, or a required-coverage gate would still block on the target's first appearance. Rejected at validation time for any [`bundles:` check](#bundles) — a bundle comparison needs one coherent release where every member already coexisted, so there is no well-defined old side for a member that's new. See [Baseline Management → A new library's first release](../use/baseline-management.md#a-new-librarys-first-release). |
 | `id` | string | *(unset)* | (G42) An explicit, project-owned logical id for this check, appended to the generated `check_id` as a `~<id>` tail. Two `checks[]` entries that would otherwise generate the identical `target@profile#channel@depth` string (most commonly two entries differing only in `analysis:`) must each declare a distinct `id:` — `abicheck project plan` rejects an unresolved collision outright, naming which entries collide and pointing at `id:` as the fix. |
@@ -125,7 +124,7 @@ channel/depth/policy a given target actually runs.
 
 ### Profile scoping for `checks:`
 
-ADR-047 §3 flags an open gap: naively crossing every `checks:` entry with
+There is an open gap: naively crossing every `checks:` entry with
 every `contract: true` profile produces impossible cells for a target that
 doesn't exist on every profile (a Windows-only library, a Linux-only `.so`).
 This schema resolves it with two complementary mechanisms:
@@ -152,8 +151,7 @@ flags a mismatch (e.g. a target claims `bundle: bundle-a` but only
 inconsistency.
 
 `checks:` on a bundle uses the exact same `{channel, depth, required,
-gate_mode, profiles}` shape [described above](#checks) for a target — the
-ADR-047 §5 run-plan emits a `kind: "bundle"` check entry alongside
+gate_mode, profiles}` shape [described above](#checks) for a target — the run plan emits a `kind: "bundle"` check entry alongside
 per-target ones (S14 bundle-scoped analysis, e.g. soname/provider-set
 checks across the whole release), and that cell needs its own
 baseline-channel/depth/gate policy independent of its member targets'.
@@ -402,13 +400,13 @@ convention.
 Currently one recognized sub-key, `channels:` — a mapping of channel id →
 `{source, asset_pattern, key_prefix}`:
 
-| `source` | Requires | Backend (ADR-047 §10) |
+| `source` | Requires | Backend |
 |----------|----------|------------------------|
 | `github-release` | `asset_pattern` | A GitHub Release asset — atomic single-tarball upload. |
 | `actions-cache` | `key_prefix` | GitHub Actions cache — cheap, no push, naturally ages out. |
 | `git` | *(neither)* | Committed to the repo — S1's minimal case only, must go through a PR. |
 
-An external object store (a fourth backend ADR-047 §10 lists) is out of
+An external object store (a fourth possible backend) is out of
 scope for P0/P1 and not a valid `source` value here.
 
 ## `aggregate:`
@@ -484,7 +482,7 @@ relying on a gap having closed.
 ## Validation
 
 `abicheck project validate [CONFIG]` (`CONFIG` defaults to
-`.abicheck.yml` in the current directory) checks, per ADR-047 §3:
+`.abicheck.yml` in the current directory) checks:
 
 1. Every target's `kind`-specific required fields are set, and no
    kind-inappropriate field is (see the table above).
@@ -518,7 +516,7 @@ including a misspelled top-level block like `tagrets:`, checked against the
 *full* `.abicheck.yml` key set, not just this block's five keys — or a
 value of the wrong type, e.g. `contract: "yes"` instead of a boolean) fail
 immediately, as a usage error, matching `.abicheck.yml`'s existing
-strict-parsing convention (ADR-043) — the validation report above only
+strict-parsing convention — the validation report above only
 covers cross-reference/semantic issues on an already-well-formed block.
 
 ### CLI

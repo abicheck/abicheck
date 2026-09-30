@@ -322,8 +322,6 @@
         "abicheck/bundle_analysis.py",
         "abicheck/bundle_detector_heuristics.py",
         "abicheck/bundle_detectors.py",
-        "abicheck/bundle_facts_serialization.py",
-        "abicheck/bundle_facts_store.py",
         "abicheck/bundle_models.py",
         "abicheck/bundle_multibuild.py",
         "abicheck/bundle_resolution_reachability.py",
@@ -361,9 +359,7 @@
         "abicheck/service_input_resolution.py",
         "abicheck/dry_run_estimate.py",
         "abicheck/stack_checker.py",
-        "abicheck/product_baseline.py",
-        "abicheck/aggregate_findings.py",
-        "abicheck/aggregate_manifest.py"
+        "abicheck/product_baseline.py"
       ]
     },
     "report": {
@@ -571,8 +567,7 @@
       "bundle_soname.py",
       "bundle_soname.py"
     ],
-    "aggregate_": [
-    ],
+    "aggregate_": [],
     "dumper_": [
       "dumper_ast_config.py",
       "dumper_ast_config_cpp20.py",
@@ -824,7 +819,6 @@
     "junit_report.py",
     "l0_export_delta.py",
     "macho_metadata.py",
-    "model.py",
     "name_classification.py",
     "numpy_capi.py",
     "pack_application.py",

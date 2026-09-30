@@ -291,7 +291,7 @@ DEFAULT_REPORT_PREFIX = "abi-report-"
 _OPERATIONAL_ERROR_VERDICT = "ERROR"
 
 #: ``scan``'s own four abort verdicts (ADR-064 stage 1b's native-CLI abort
-#: report, ``cli_scan._emit_scan_abort_report``, plus the two ADR-050 D2/P2
+#: report, the retired ``cli_scan._emit_scan_abort_report``, plus the two ADR-050 D2/P2
 #: sentinels below) -- none is a :class:`Verdict` enum member, so like
 #: ``_OPERATIONAL_ERROR_VERDICT`` above (and unlike
 #: ``_BOOTSTRAP_VERDICT``/``_NEW_TARGET_VERDICT`` below, which are
@@ -315,7 +315,7 @@ _OPERATIONAL_ERROR_VERDICT = "ERROR"
 #: without inventing that verdict.
 _SCAN_BUDGET_OVERFLOW_VERDICT = "BUDGET_OVERFLOW"
 _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT = "EVIDENCE_CONTRACT_ERROR"
-#: ADR-050 D2's comparability refusal (`scan_engine.run_baseline_diff`'s own
+#: ADR-050 D2's comparability refusal (the retired `scan_engine.run_baseline_diff`'s own
 #: `ProfileMismatchError`/`ScopeMismatchError` handling) -- scan's legacy
 #: exit 6, mirroring `OperationalStatus.NOT_COMPARABLE`.
 _SCAN_NOT_COMPARABLE_VERDICT = "NOT_COMPARABLE"

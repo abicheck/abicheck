@@ -2,10 +2,8 @@
 
 You don't have (or don't want) a source checkout in this job at all — only
 prebuilt packages (RPM, Deb, conda, wheel, tar, an SDK drop). No build step,
-no compile database, no build integration.
-[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
-§8's S13 folds into the same [`check-project.yml`](../../reference/reusable-workflows.md)
-flow as [S3](existing-build-artifact.md): "no separate workflow" (D5) — a
+no compile database, no build integration. Scenario S13 folds into the same [`check-project.yml`](../../reference/reusable-workflows.md)
+flow as [S3](existing-build-artifact.md): "no separate workflow" — a
 package is just another way to populate a
 [build-output.json](../../reference/build-output-schema.md) directory,
 not a new primitive.

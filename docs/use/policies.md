@@ -149,8 +149,7 @@ guidance, not invented heuristics.
 > so a profile mostly adds a named entry point, primary-source documentation, and the few
 > genuine per-ecosystem divergences. Managed-runtime ecosystems (Java class-file linkage,
 > .NET assembly metadata) and source-only ecosystems (Go, non-FFI Rust) need dedicated
-> format frontends rather than a policy file — see
-> [ADR-034](../contribute/adr/034-managed-runtime-and-non-c-abi-frontends.md).
+> format frontends rather than a policy file.
 
 ## Custom Policy Files (`--policy`)
 
@@ -224,8 +223,7 @@ want to see).
 
 ### Evidence-aware controls (`evidence_policy`)
 
-When a compare also carries build/source evidence (build-info / source packs,
-ADR-028..033), an optional `evidence_policy` block tunes how each *category* of
+When a compare also carries build/source evidence (build-info / source packs), an optional `evidence_policy` block tunes how each *category* of
 evidence finding is classified — independent of the per-`ChangeKind` `overrides`
 above:
 
@@ -249,10 +247,10 @@ evidence_policy:
 - `graph_risk_findings` — L5 reachability/impact risks. `fail` → `API_BREAK`.
 - `require_evidence` — when a listed layer is `true` but absent from either the
   baseline or target side of the compare, an `evidence_required_missing` finding
-  (`API_BREAK`) fails the run so a silently-degraded scan can't pass (ADR-033 D7).
+  (`API_BREAK`) fails the run so a silently-degraded scan can't pass.
 
 Each knob is **unset by default**: leaving it out keeps the finding's normal
-category, so existing runs are unchanged. Per ADR-028 D3 these knobs never turn
+category, so existing runs are unchanged. By the authority rule these knobs never turn
 a source/build-only finding into a hard (artifact-proven) `BREAKING` verdict —
 the strongest they reach is `API_BREAK`.
 
@@ -313,7 +311,7 @@ Because the `EXPERIMENTAL_*` finding is an overlay, dropping `v0` from the
 default cannot hide anything: a removal under `v0` still reports
 `func_removed` and still yields a `BREAKING` verdict and the same exit code.
 What the default no longer does is add an annotation asserting the removal was
-*expected*. See [ADR-069](../contribute/adr/069-name-shape-is-not-contract-membership.md).
+*expected*.
 
 ---
 
@@ -382,11 +380,10 @@ is one more source for that same gate.
 A `kind: policy`/`kind: contract`/`kind: gate` pack's `policy.overrides`/
 `surface.internal_namespaces`/`contract.unresolved`/`gate.*`, similarly, all
 apply uniformly to every library on a directory/package (release) `compare`
-— the gate half folds into the release fan-out's own resolved `GateOptions`
-object (ADR-064, landed 2026-09-02), and `contract.unresolved` still needs
+— the gate half folds into the release fan-out's own resolved `GateOptions` object, and `contract.unresolved` still needs
 `--contract` on that same release comparison, exactly as above (see the
 "7B's release-fan-out investigation landed" section of
-[the ADR-063 implementation plan](../contribute/plans/one-semantic-pipeline.md)
+[the one-semantic-pipeline plan](../contribute/plans/one-semantic-pipeline.md)
 for the history of that rejection's own removal).
 `scan --pack` also requires `--against`, since a pack's only application
 there is the baseline comparison. Each rejection above is a usage error

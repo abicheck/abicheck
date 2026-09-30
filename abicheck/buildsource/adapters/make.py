@@ -136,7 +136,7 @@ class MakeAdapter:
                 "make dry-run transcript — reduced confidence (heuristic argv "
                 "recognition, not an authoritative target graph); feeds "
                 "abicheck.buildsource.link_attribution's TU-to-output "
-                "attribution (ADR-053), not build_diff directly."
+                "attribution, not build_diff directly."
             )
         return ev
 

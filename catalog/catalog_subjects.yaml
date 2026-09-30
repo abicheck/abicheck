@@ -224,7 +224,7 @@ subjects:
 
   multi-library-bundle-topology:
     title: "Multi-library bundle topology"
-    blurb: "The break is between libraries in one multi-library release cohort (ADR-023) -- a SONAME skew, an intra-bundle dependency removed, a provider migrated, or a manifest instantiation drift -- not inside any single library's own diff."
+    blurb: "The break is between libraries in one multi-library release cohort -- a SONAME skew, an intra-bundle dependency removed, a provider migrated, or a manifest instantiation drift -- not inside any single library's own diff."
     cases:
       - case84_bundle_soname_skew
       - case90_bundle_intra_dep_removed

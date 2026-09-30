@@ -2775,7 +2775,7 @@ looked like the obvious fix and wasn't.
     CI run only gating against a static baseline) needs a storage decision
     (artifact-based vs. external DB) and a retention/access policy before
     it's worth building.
-  - *Full behavioral baseline* — `agent-evals/` (this pass, M1-5) is a real
+  - *Full behavioral baseline* — `skills-src/evaluation/agents/` (this pass, M1-5) is a real
     but minimal harness with one task; a "full behavioral baseline" implies
     a broad task suite plus a scoring/leaderboard story, which should grow
     from real usage of the one-task harness rather than being speculatively
@@ -7090,7 +7090,7 @@ either way `--no-baseline` cannot express what ADR-068 D2 promises it
 replaces.
 
 Not fixed here: this documentation/corpora slice owns `docs/`, `examples/`,
-`eval/`, `validation/`, `catalog/`, and `skills-src/` only, and the fix is
+`skills-src/evaluation/field/`, `skills-src/evaluation/validation/`, `catalog/`, and `skills-src/` only, and the fix is
 in `abicheck/workflows/no_baseline_compare.py` plus whatever
 `report/`-side projection has to carry a one-sided finding set. Consequences
 recorded rather than papered over: `docs/integration/scenarios/single-build-audit.md`,
@@ -7348,7 +7348,7 @@ threading the resolved `contract_mode`/`contract_evaluation` config through
 `_run_no_baseline_compare_cmd` into `run_no_baseline_compare`, the same way
 the two-sided `compare` path already does via
 `compatibility_evaluation_frontend`/`contract_pipeline`. Recorded in
-[`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact)
+[`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-single-artifact)
 rather than left as a silent behavioral gap in the doc that would otherwise
 claim the axis "applies exactly as it would for a two-sided run."
 
@@ -8989,7 +8989,7 @@ Every G20 audit case in `catalog/ground_truth.json` declares
 (e.g. case151: `private_header_leak` from **both** `public_header_ast` and
 `source_index`; case148: `header_build_context_mismatch` from
 `build_config` + `public_header_ast`). Legacy `scan` published these as
-`crosscheck.providers`, and `validation/scripts/run_special_cli_examples.py`
+`crosscheck.providers`, and `skills-src/evaluation/validation/scripts/run_special_cli_examples.py`
 checked them. ADR-068 Phase 6 retired the whole-audit orchestrator
 (`scan_engine.py`) that built that block, and no replacement projection
 landed in `report/no_baseline.py`, so the assertion is now unchecked by
@@ -9025,7 +9025,7 @@ something a repair PR folds in as a side effect.
 
 The alternative offered in review — mark rows with a non-empty
 `unvalidated_assertions` as `UNRESOLVED` — was declined for a stated
-reason, not skipped: `validation/CLAUDE.md`'s matrix contract requires one
+reason, not skipped: `skills-src/evaluation/validation/CLAUDE.md`'s matrix contract requires one
 `COVERED` row per ground-truth entry and no `UNRESOLVED` rows, and *all
 ten* audit cases declare `provider_assertions`, so it turns a currently
 green required lane red for a capability removed upstream in PR #1211.
@@ -9385,7 +9385,7 @@ changelog entry and `tests/test_one_comparison_product_parity.py`.
 
 **1. The format set.** `compare` renders
 `json`/`markdown`/`sarif`/`html`/`junit`/`review`/`oneline`; a directory or
-package operand renders `json`/`markdown`/`junit`/`oneline` and rejects the
+package operand renders `json`/`markdown`/`junit`/`oneline`/`html` and rejects the
 rest
 (`frontends/cli/commands/compare.py`'s `_RELEASE_FORMATS`). The rejection is
 loud rather than silent, and it is not arbitrary — the missing formats are
@@ -9397,21 +9397,23 @@ the ones whose renderers take a single `DiffResult`:
   across a whole release). Producing a real release SARIF means either
   keeping every member's findings live or projecting SARIF per member and
   merging runs — a design choice, not a wiring gap.
-- `html` and `review` are narrative renderings of *one* comparison (a
-  verdict badge, an OLD→NEW headline, a release recommendation, a
-  root-cause graph). `review` in particular is a PR-comment digest whose
-  aggregate shape ("which of 40 libraries broke, and how badly") is a
-  product question nobody has answered yet.
+- `review` is a narrative rendering of *one* comparison, a PR-comment
+  digest whose aggregate shape ("which of 40 libraries broke, and how
+  badly") is a product question nobody has answered yet.
 `oneline` was the fourth of that list and is **closed**: it never needed a
 `DiffResult` at all (it is a count summary, and the release summary already
 carries every count), so `report/release_oneline.py` folds the per-library
 counts through the same `format_stat_line` a single-pair `compare` renders
 and the release path accepts `-o oneline=...`/`-o oneline=...` like
-any other.
+any other. `html` is **closed** the same way: `report/render_release_html.py`
+renders the release JSON document itself (headline, per-member table,
+comparison scope, release coherence findings and the recorded dependency
+graph), so it needs no member `DiffResult` either. It is a release page, not
+the single-pair HTML report; per-member finding detail stays in the JSON.
 
-So library count still changes which of `sarif`/`html`/`review` are
+So library count still changes which of `sarif`/`review` are
 available -- a real parity gap, stated here rather than implied by a usage
-error -- and no longer changes anything about `oneline`.
+error -- and no longer changes anything about `oneline` or `html`.
 
 **2. Scope policy at bundle level.** ADR-065's scope policy is fully
 expressible for a directory/package `compare` — `--select`,

@@ -6,7 +6,7 @@
 ADR-068 D3 / ``docs/contribute/plans/one-comparison-product.md`` P2 and §3
 row 3: :mod:`abicheck.buildsource.cross_source_checks` diffs one snapshot's evidence
 sources against each other -- it carries no baseline of its own. Before this
-module existed it ran only from ``scan_engine.py`` against the candidate
+module existed it ran only from ``scan_engine.py`` (since retired) against the candidate
 binary alone, unreachable from ``compare()``; this module moves that class
 of check onto ``compare()``'s own pipeline: it runs a check independently on
 OLD and NEW and folds the two one-sided results into a single,
@@ -49,8 +49,8 @@ _resolve_compare_snapshots``'s ``config_public_header_dirs`` parameter into
 the same ``InputSpec.public_header_dirs`` / ``apply_provenance`` machinery a
 ``-H`` directory already reaches -- one shared boundary primitive, fed from
 two input sources; a config entry is always a directory, so it can never
-weaken the directory-vs-file asymmetry ``scan --public-header-dir`` itself
-still implements verbatim via ``cli_scan_baseline._public_provenance_set``
+weaken the directory-vs-file asymmetry the retired ``scan --public-header-dir``
+implemented verbatim via ``cli_scan_baseline._public_provenance_set``
 (``workflows.scan_config.public_provenance_set``). With neither source
 present, every declaration stays ``ScopeOrigin.UNKNOWN`` exactly as before,
 and each of those four checks evidence-gates to ``NOT_EVALUATED`` per side

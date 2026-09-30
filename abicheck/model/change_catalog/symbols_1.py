@@ -650,7 +650,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         "is conceptually internal, it is part of the effective public "
         "ABI: an application built against the old public entry point "
         "can fail to resolve it at load time. Call-graph analogue of "
-        "INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API (ADR-044 P1 items 1-2), for "
+        "INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, for "
         "the pure-call shape that walk's layout-only reachability model "
         "cannot see (no field/base/signature evidence, only a call "
         "edge).",

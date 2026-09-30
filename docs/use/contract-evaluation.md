@@ -105,8 +105,7 @@ error naming the field and the reason.
 `compare --used-by APP` or `--required-symbol(s)` layered on top of
 `--contract` promotes a finding to `IN_CONTRACT` whenever it
 matches the app's actual imports or the plugin host's required entrypoints
-— stronger evidence than anything a header/export scan alone can infer,
-per ADR-049 §4.3:
+— stronger evidence than anything a header/export scan alone can infer:
 
 ```bash
 abicheck compare old.so new.so --used-by ./myapp \

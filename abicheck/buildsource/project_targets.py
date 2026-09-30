@@ -1445,7 +1445,7 @@ def _identifier_issues(kind: str, name: str) -> list[str]:
     if not _IDENTIFIER_RE.match(name):
         return [
             f"{kind} id {name!r} is not a valid identifier — must match "
-            f"{_IDENTIFIER_RE.pattern!r} (the same charset ADR-047 §7's "
+            f"{_IDENTIFIER_RE.pattern!r} (the same charset "
             "check_id components require, so every id stays embeddable in a "
             "target@profile#baseline_channel@depth string without ambiguity)."
         ]
@@ -1592,7 +1592,7 @@ def _library_reference_issues(
             f"target {target.id!r}: library {target.library!r} must be a "
             f"kind: library target, not kind: {referenced.kind!r} — "
             "app-consumer/plugin-contract targets resolve their baseline/"
-            "candidate lookup through a real library target only (ADR-047 §3)."
+            "candidate lookup through a real library target only."
         ]
     return []
 
@@ -1612,7 +1612,7 @@ def _check_issues(
         issues.append(
             f"{where}: channel {check.channel!r} is not declared under "
             f"baseline.channels: (use {NO_BASELINE_CHANNEL!r} for a no-baseline "
-            "audit check, ADR-047 §6 S5)."
+            "audit check)."
         )
     if check.depth not in CHECK_DEPTHS:
         issues.append(
@@ -1767,7 +1767,7 @@ def _baseline_channel_issues(channel: BaselineChannelSpec) -> list[str]:
     if channel.id == NO_BASELINE_CHANNEL:
         issues.append(
             f"baseline channel {channel.id!r} is reserved as the no-baseline "
-            "sentinel (ADR-047 §6 S5) and cannot be declared as a real "
+            "sentinel and cannot be declared as a real "
             "channel — a checks[].channel: 'none' entry would then be "
             "ambiguous between 'skip resolve-baseline' and 'resolve this "
             "declared channel', and check-target always takes the former."
@@ -1775,12 +1775,12 @@ def _baseline_channel_issues(channel: BaselineChannelSpec) -> list[str]:
     if channel.source == "github-release" and not channel.asset_pattern:
         issues.append(
             f"baseline channel {channel.id!r}: source: github-release requires "
-            "asset_pattern (ADR-047 §10)."
+            "asset_pattern."
         )
     if channel.source == "actions-cache" and not channel.key_prefix:
         issues.append(
             f"baseline channel {channel.id!r}: source: actions-cache requires "
-            "key_prefix (ADR-047 §10)."
+            "key_prefix."
         )
     return issues
 

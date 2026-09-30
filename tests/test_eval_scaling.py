@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pure-logic tests for the C1 parallel-L4 scaling harness (eval/scaling.py).
+"""Pure-logic tests for the C1 parallel-L4 scaling harness (skills-src/evaluation/field/scaling.py).
 
 The live driver shells out to git/cmake/abicheck (covered by the scheduled CI
 lane, not here). These tests pin the *pure* halves — the speedup/efficiency
 table, the Amdahl serial-fraction estimate, and the markdown renderer — so the
 scaling curve in SCALING.md cannot silently misreport. The harness lives in
-``eval/``, imported by adding that directory to ``sys.path``.
+``skills-src/evaluation/field/``, imported by adding that directory to ``sys.path``.
 """
 
 from __future__ import annotations
@@ -28,11 +28,15 @@ from pathlib import Path
 
 import pytest
 
-_EVAL_DIR = Path(__file__).resolve().parent.parent / "eval"
+_EVAL_DIR = (
+    Path(__file__).resolve().parent.parent / "skills-src" / "evaluation" / "field"
+)
 if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
-scaling = pytest.importorskip("scaling", reason="eval/scaling.py importable")
+scaling = pytest.importorskip(
+    "scaling", reason="skills-src/evaluation/field/scaling.py importable"
+)
 
 
 def test_speedup_rows_are_relative_to_serial_baseline():

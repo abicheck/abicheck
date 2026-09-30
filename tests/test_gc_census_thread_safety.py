@@ -172,7 +172,7 @@ _CENSUS_CALLS = {"get_objects", "get_referrers"}
 
 
 def _first_party_files() -> list[Path]:
-    roots = ("abicheck", "scripts", "tests", "eval", "validation", "action")
+    roots = ("abicheck", "scripts", "tests", "skills-src/evaluation", "action")
     return sorted(
         p for r in roots if (_REPO / r).is_dir() for p in (_REPO / r).rglob("*.py")
     )

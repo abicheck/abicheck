@@ -301,7 +301,7 @@ def _diff_fact_coverage(
                 "L4 source-fact evidence for this comparison is incomplete or used "
                 "incompatible producers/fact-set versions: "
                 + "; ".join(parts)
-                + ". Per ADR-038 C.8, treat this pair's other source-replay "
+                + ". Treat this pair's other source-replay "
                 "findings as unreliable until re-collected with a consistent, "
                 "complete fact set." + suppression
             ),

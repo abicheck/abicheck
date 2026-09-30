@@ -29,7 +29,7 @@ of relevant findings across every ``--used-by`` consumer, and
 once per consumer (``apply_scope`` only demotes, so per-consumer calls would
 intersect the consumers' sets). See that function's own docstring.
 ``record_suppressed_change``/``override_suppressed_change`` joined it for a
-second and third reason: ``cli_scan_baseline._run_baseline_compare`` records
+second and third reason: the retired ``cli_scan_baseline._run_baseline_compare`` recorded
 a baseline scan's ``--crosscheck KEY=off`` disposition the same way
 ``checker._filter_suppressed_changes`` records an ordinary ``--suppress``
 rule (AGENTS.md's "record before disposing" rule) -- the observed finding

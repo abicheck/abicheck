@@ -61,6 +61,7 @@ from abicheck.buildsource.header_graph_ast_projection import (
 from abicheck.buildsource.header_graph_ast_stream import (
     ClangAstStreamError,
     project_header_graph_ast_file,
+    stream_recorded_decls,
     stream_top_level_decls,
 )
 
@@ -211,6 +212,103 @@ class TestScannerAgainstStdlibJson:
             doc = {"id": "0x1", "kind": "TranslationUnitDecl", "inner": elements}
             path = _write(tmp_path, doc, indent=2)
             assert list(stream_top_level_decls(path)) == json.load(path.open())["inner"]
+        finally:
+            mod._CHUNK = original
+
+    @settings(max_examples=120, deadline=None)
+    @given(
+        elements=st.lists(
+            st.dictionaries(
+                st.text(alphabet="abé", min_size=1, max_size=3),
+                st.one_of(
+                    _VALUES,
+                    st.text(alphabet='aé😀\u2028"\\{}[],', max_size=12),
+                ),
+                max_size=4,
+            ),
+            max_size=6,
+        ),
+        indent=st.sampled_from([None, 2]),
+        chunk=st.sampled_from([1, 2, 3, 5, 64]),
+    )
+    def test_extents_address_each_element_in_non_ascii_documents(
+        self, elements: list[dict], indent: int | None, chunk: int, tmp_path_factory
+    ) -> None:
+        """Byte extents stay exact when the file is not ASCII.
+
+        The scanner decodes the document to text and reports extents in
+        *bytes*, so every multi-byte character before an element shifts the
+        two apart -- a case `json.dumps`' default ASCII escaping never
+        produces, which is why the tests above cannot reach it. The oracle
+        for an extent is the file's own bytes: the slice must decode, alone,
+        to the element it was recorded for, and `stream_recorded_decls` must
+        re-yield the same list.
+        """
+        from abicheck.buildsource import header_graph_ast_stream as mod
+
+        original = mod._CHUNK
+        mod._CHUNK = chunk
+        try:
+            tmp_path = tmp_path_factory.mktemp("utf8")
+            path = tmp_path / "doc.json"
+            doc = {"kind": "TranslationUnitDecl", "inner": elements}
+            path.write_text(
+                json.dumps(doc, indent=indent, ensure_ascii=False), encoding="utf-8"
+            )
+            extents: list[tuple[int, int]] = []
+            assert list(stream_top_level_decls(path, extents)) == elements
+            raw = path.read_bytes()
+            assert [json.loads(raw[a:b]) for a, b in extents] == elements
+            assert list(stream_recorded_decls(path, extents)) == elements
+        finally:
+            mod._CHUNK = original
+
+    @pytest.mark.parametrize("chunk", [1, 4, 1 << 20])
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            b'{"inner": [{"k": "\xff"}]}',  # never valid UTF-8
+            b'{"inner": [{"k": "\xc3',  # cut inside a 2-byte character
+        ],
+    )
+    def test_invalid_utf8_is_a_stream_error(
+        self, tmp_path: Path, chunk: int, raw: bytes
+    ) -> None:
+        """Bad or truncated UTF-8 raises the scanner's own documented error,
+        which every caller answers with the ordinary parse."""
+        from abicheck.buildsource import header_graph_ast_stream as mod
+
+        path = tmp_path / "doc.json"
+        path.write_bytes(raw)
+        original = mod._CHUNK
+        mod._CHUNK = chunk
+        try:
+            with pytest.raises(ClangAstStreamError):
+                list(stream_top_level_decls(path))
+        finally:
+            mod._CHUNK = original
+
+    @pytest.mark.parametrize("chunk", [4, 1 << 20])
+    def test_a_malformed_element_is_a_decode_error_not_truncation(
+        self, tmp_path: Path, chunk: int
+    ) -> None:
+        """A grammar error inside an element surfaces as the element's own
+        `JSONDecodeError`, wherever the read boundary falls -- not as a
+        "truncated" document, and not only once the rest of the file has
+        been read looking for an end that would not fix it."""
+        from abicheck.buildsource import header_graph_ast_stream as mod
+
+        tail = ", ".join('{"kind": "Ok"}' for _ in range(200))
+        path = tmp_path / "doc.json"
+        path.write_text(
+            '{"inner": [{"kind": "A"}, {"kind": tru}, ' + tail + "]}",
+            encoding="utf-8",
+        )
+        original = mod._CHUNK
+        mod._CHUNK = chunk
+        try:
+            with pytest.raises(json.JSONDecodeError):
+                list(stream_top_level_decls(path))
         finally:
             mod._CHUNK = original
 

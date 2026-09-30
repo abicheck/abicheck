@@ -52,7 +52,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 
 ## `CompareResult`
 
-What one :class:`CompareRequest` produced — the typed result (ADR-055 D2).
+What one :class:`CompareRequest` produced — the typed result.
 
 *Dataclass.*
 
@@ -85,7 +85,7 @@ L2 header-AST compile context — shared by ``dump`` and ``scan``.
 
 ## `CostEstimate`
 
-Projected cost of one L-layer for *this* project (ADR-035 D10 dry-run).
+Projected cost of one L-layer for *this* project (dry-run).
 
 *Dataclass.*
 
@@ -305,7 +305,7 @@ Detect binary format from magic bytes.
 
 ## `estimate_scan`
 
-Dry-run: projected per-layer cost of one comparison operand for this project (ADR-035 D10). Probes the project (TU count, header fan-out, collect mode) and returns one :class:`CostEstimate` per L-layer the level would touch -- **without running any compiler or parsing any binary**. Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a precise wall-clock prediction.
+Dry-run: projected per-layer cost of one comparison operand for this project. Probes the project (TU count, header fan-out, collect mode) and returns one :class:`CostEstimate` per L-layer the level would touch -- **without running any compiler or parsing any binary**. Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a precise wall-clock prediction.
 
 | Parameter | Type | Default |
 |---|---|---|

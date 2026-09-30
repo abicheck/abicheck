@@ -442,7 +442,10 @@ class _ScopedFold:
 #: the fold below is gated on ``TEXT_REPORT_FORMATS``, which includes it,
 #: so leaving it out here rejected ``--use-cases`` on a default-format run
 #: whose output would in fact have carried the attribution.
-_USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json"}) | TEXT_REPORT_FORMATS
+#: ``html`` renders the block as its own "Consumer impact" section
+#: (``report/render_html_review_sections.py``), reading the same attribution
+#: off the result the JSON path does.
+_USE_CASE_IMPACT_BEARING_FORMATS = frozenset({"json", "html"}) | TEXT_REPORT_FORMATS
 
 
 def format_carries_use_case_impact(fmt: str | None) -> bool:
@@ -690,7 +693,7 @@ def _report_not_comparable(
         f"Error: '{old.library}' old={old.version!r} new={new.version!r} are not "
         f"comparable: {message}\n"
         "The two snapshots were not extracted under a comparable profile/scope "
-        "contract (ADR-050 D1/D2), so no verdict was produced. Pass "
+        "contract, so no verdict was produced. Pass "
         "--diagnostic-comparison to force a tentative diff (stamped "
         'assurance: "none") if you understand the risk.',
         err=True,

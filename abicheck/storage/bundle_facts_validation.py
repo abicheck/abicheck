@@ -369,7 +369,7 @@ def require_degraded_marker_version(
     if degraded_members and schema_version < DEGRADED_MARKER_SCHEMA_VERSION:
         raise ValueError(
             f"{what}: a non-empty 'degraded_members' marker requires "
-            f"schema_version {DEGRADED_MARKER_SCHEMA_VERSION} (ADR-065 D8); "
+            f"schema_version {DEGRADED_MARKER_SCHEMA_VERSION}; "
             f"this document declares schema_version {schema_version}, which a "
             "reader that cannot honor the marker would still accept"
         )

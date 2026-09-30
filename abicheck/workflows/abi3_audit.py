@@ -62,7 +62,7 @@ def abi3_precondition_failure(
 ) -> str | None:
     """The precondition message when *snapshot* cannot be abi3-audited, else ``None``.
 
-    Same test ``scan_engine._run_abi3_audit`` applies (a snapshot carrying no
+    Same test the retired ``scan_engine._run_abi3_audit`` applied (a snapshot carrying no
     recognised ``python_ext``, or one recognised as a non-extension), and the
     same shared spelling (``python_ext.abi3_precondition_message``), so the
     two commands describe the identical failure identically.

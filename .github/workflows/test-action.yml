@@ -799,6 +799,109 @@ jobs:
             exit 1
           fi
 
+  # ── Test: report-only features through the real Action (versioning policy,
+  # consumer impact, no internal decision-record ids in user-facing output) ──
+  # A `versioning:` block in the policy file must reach the rendered reports
+  # (JSON `release_recommendation.policy_acceptance`, the HTML
+  # `versioning-policy` card) WITHOUT moving the gate: the verdict and
+  # exit-code outputs are compared against an otherwise-identical run with no
+  # policy file. `--use-cases` needs a source graph, and the always-on
+  # header-only graph needs castxml, so this job provisions the default
+  # conda-forge dependency source instead of `install-deps: false`.
+  test-report-policy-and-consumer-impact:
+    name: 'Compare: versioning policy and consumer impact reach the reports without moving the gate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Build test binaries and write the policy/use-case inputs
+        run: |
+          cd catalog/cases/case01_symbol_removal
+          gcc -shared -fPIC v1.c -o libv1.so
+          gcc -shared -fPIC v2.c -o libv2.so
+          cd "$GITHUB_WORKSPACE"
+          printf 'versioning:\n  promise: abi_within_major\n  enforcement: block\n' > versioning-policy.yml
+          printf -- '- use_case: compute path\n  entrypoints: [compute]\n- use_case: helper path\n  entrypoints: [helper]\n' > impact-use-cases.yaml
+
+      # 1.0 -> 1.1 with a removed export: a break inside a major line, which
+      # `abi_within_major` + `enforcement: block` must record as not accepted.
+      - name: Run abicheck compare with a versioning policy and use cases
+        id: with-policy
+        uses: ./
+        with:
+          old-library: catalog/cases/case01_symbol_removal/libv1.so
+          new-library: catalog/cases/case01_symbol_removal/libv2.so
+          old-header: catalog/cases/case01_symbol_removal/v1.h
+          new-header: catalog/cases/case01_symbol_removal/v2.h
+          old-version: '1.0'
+          new-version: '1.1'
+          policy-file: versioning-policy.yml
+          extra-args: --use-cases impact-use-cases.yaml -o json=policy-report.json -o markdown=policy-report.md -o html=policy-report.html
+          fail-on-breaking: false
+
+      - name: Run the same comparison without the policy file
+        id: without-policy
+        uses: ./
+        with:
+          old-library: catalog/cases/case01_symbol_removal/libv1.so
+          new-library: catalog/cases/case01_symbol_removal/libv2.so
+          old-header: catalog/cases/case01_symbol_removal/v1.h
+          new-header: catalog/cases/case01_symbol_removal/v2.h
+          old-version: '1.0'
+          new-version: '1.1'
+          format: json
+          output-file: baseline-report.json
+          fail-on-breaking: false
+
+      - name: Verify reports carry the policy/consumer sections and the gate is unchanged
+        shell: bash
+        env:
+          WITH_VERDICT: ${{ steps.with-policy.outputs.verdict }}
+          WITH_EXIT: ${{ steps.with-policy.outputs.exit-code }}
+          WITHOUT_VERDICT: ${{ steps.without-policy.outputs.verdict }}
+          WITHOUT_EXIT: ${{ steps.without-policy.outputs.exit-code }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+
+          errors = []
+          def check(cond, msg):
+              if not cond:
+                  errors.append(msg)
+
+          env = os.environ
+          print(f"with policy:    verdict={env['WITH_VERDICT']} exit-code={env['WITH_EXIT']}")
+          print(f"without policy: verdict={env['WITHOUT_VERDICT']} exit-code={env['WITHOUT_EXIT']}")
+          check(env["WITH_VERDICT"] == "BREAKING", f"expected verdict BREAKING, got {env['WITH_VERDICT']!r}")
+          check(env["WITH_VERDICT"] == env["WITHOUT_VERDICT"], "the versioning policy changed the verdict output")
+          check(env["WITH_EXIT"] == env["WITHOUT_EXIT"], "the versioning policy changed the exit-code output")
+
+          report = json.load(open("policy-report.json"))
+          acceptance = (report.get("release_recommendation") or {}).get("policy_acceptance")
+          check(isinstance(acceptance, dict), f"release_recommendation.policy_acceptance missing: {acceptance!r}")
+          if isinstance(acceptance, dict):
+              check(acceptance.get("accepted") is False, f"expected accepted=false, got {acceptance.get('accepted')!r}")
+              check(acceptance.get("promise") == "abi_within_major", f"unexpected promise {acceptance.get('promise')!r}")
+          baseline = json.load(open("baseline-report.json"))
+          check(baseline["verdict"] == report["verdict"], "JSON verdict differs between the two runs")
+          check((baseline.get("release_recommendation") or {}).get("policy_acceptance") is None,
+                "policy_acceptance populated on a run without a versioning policy")
+
+          html = open("policy-report.html", encoding="utf-8").read()
+          check("id='versioning-policy'" in html, "HTML report has no versioning-policy section")
+          check("id='use-case-impact'" in html, "HTML report has no use-case-impact (consumer impact) section")
+
+          for path in ("policy-report.json", "policy-report.md", "policy-report.html", "baseline-report.json"):
+              check("ADR-" not in open(path, encoding="utf-8").read(), f"{path} mentions an internal ADR id")
+
+          for e in errors:
+              print(f"::error::{e}")
+          sys.exit(1 if errors else 0)
+          PY
+
   # One stable, always-added-when-triggered required check representing this
   # whole workflow's pass/fail state (CLI cleanup phase two, PR A/PR 0B) --
   # requiring every job above individually goes stale on every matrix/job
@@ -836,6 +939,7 @@ jobs:
       - test-extra-args-value-shaped-like-a-flag
       - test-dependency-source-conda-forge
       - test-dependency-source-none-and-legacy-alias
+      - test-report-policy-and-consumer-impact
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:

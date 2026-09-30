@@ -2,7 +2,7 @@
 
 `build-output.json` is a standardized, producer-agnostic contract for a
 project's *existing* build to publish once — "build once, scan many"
-(G30/ADR-047 §2). abicheck never owns the build: a project's own build
+(G30). abicheck never owns the build: a project's own build
 system, or an `install` step, populates an `abicheck-build/` directory that
 downstream tooling then validates and consumes.
 
@@ -93,8 +93,7 @@ missing/inconsistent fields into an actionable report.
 exactly one OS/arch/compiler/config combination, so one `build-output.json`
 can only ever describe one profile — never a list. A project matrixing over
 several profiles publishes one uniquely-named
-`abicheck-build-<profile.id>/` artifact per profile (S17 in the ADR-047
-scenario catalog), not one artifact holding several.
+`abicheck-build-<profile.id>/` artifact per profile (scenario S17 in the [project integration](../integration/index.md) catalog), not one artifact holding several.
 
 **`profile.id` is required, not just recommended, for [`check-project.yml`](reusable-workflows.md) callers.**
 Every other field really is optional-and-defaulted per the note above, but
@@ -161,7 +160,7 @@ for the practical consequence of this rule).
 
 ## Validation rules
 
-`abicheck project validate DIRECTORY` checks, per ADR-047 §11.1 (the
+`abicheck project validate DIRECTORY` checks (the
 directory is recognized by its own `build-output.json` schema tag, not by
 its name):
 
@@ -195,7 +194,7 @@ its name):
 
 None of these ever *downgrade* to a warning — every one is a hard,
 non-zero-exit failure, matching the "fail-loud, no silent shallow success"
-principle ADR-047 §11 states for every G30 validator.
+principle every G30 validator follows.
 
 ### CLI
 

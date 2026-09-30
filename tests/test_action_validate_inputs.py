@@ -312,7 +312,10 @@ class TestGloballyRetiredInputsFailPreflight:
         """A hard removal with no deprecation window (ADR-068 D8) has to say
         what to do instead, or the error is just a wall."""
         for env, needle in (
-            ({"INPUT_NEW_LIBRARY_SET": "a.so,b.so"}, "ADR-065 S3"),
+            (
+                {"INPUT_NEW_LIBRARY_SET": "a.so,b.so"},
+                "compare each library individually",
+            ),
             ({"INPUT_RISK_RULES": "rules.yaml"}, "depth: source"),
             (
                 {"INPUT_CROSSCHECK": "odr_type_variant=error"},
@@ -556,7 +559,7 @@ class TestCompareFormatAllowlists:
     just sarif/html) for both cases. See TestCompareFormatAllowlistMatchesCli
     for the drift guard against the live CLI."""
 
-    @pytest.mark.parametrize("fmt", ["sarif", "html", "review", "xml"])
+    @pytest.mark.parametrize("fmt", ["sarif", "review", "xml"])
     def test_directory_new_library_rejects_non_release_format(
         self, tmp_path: Path, fmt: str
     ) -> None:
@@ -573,7 +576,7 @@ class TestCompareFormatAllowlists:
         assert result.returncode == 1
         assert "directory/package comparison" in result.stdout
 
-    @pytest.mark.parametrize("fmt", ["sarif", "html", "review", "xml"])
+    @pytest.mark.parametrize("fmt", ["sarif", "review", "xml"])
     def test_directory_old_library_rejects_non_release_format(
         self, tmp_path: Path, fmt: str
     ) -> None:
@@ -590,7 +593,7 @@ class TestCompareFormatAllowlists:
         assert result.returncode == 1
         assert "directory/package comparison" in result.stdout
 
-    @pytest.mark.parametrize("fmt", ["json", "markdown", "junit"])
+    @pytest.mark.parametrize("fmt", ["json", "markdown", "junit", "oneline", "html"])
     def test_directory_operand_accepts_release_formats(
         self, tmp_path: Path, fmt: str
     ) -> None:
@@ -673,7 +676,7 @@ class TestCompareFormatAllowlistMatchesCli:
 
     def test_release_style_allowlist_matches_cli_constant(self) -> None:
         validator_formats = self._extract_allowlist(
-            "only 'json', 'markdown', 'junit', and 'oneline' are available"
+            "only 'json', 'markdown', 'junit', 'oneline', and 'html' are available"
         )
         # ADR-061 Phase 4 moved `compare`'s body out of the `cli.py` facade.
         cmd = "abicheck/frontends/cli/commands/compare.py"

@@ -18,14 +18,15 @@ test modules under this package) is now a **compare-only regression
 corpus** instead -- the finding sets/verdicts/exit codes/identities that
 used to be *proven* equal to a live ``scan`` invocation are now pinned
 directly as ``compare``'s own expected behavior. The scan-invoking half of
-this harness (``scan_json``/``scan_finding_set``/``RunOutcome``/
-``scan_outcome``/``compare_outcome``/``assert_full_parity``) was deleted
-along with the tests that were its only callers; ``FindingSet``/
-``ParityReport``/``diff_findings``/``assert_no_capability_loss`` survive
-because ``test_cross_source_checks_parity.py`` still uses them to diff a
-direct ``run_crosschecks()`` call against ``compare``'s own automatic
-cross-source-checks stage -- a real, still-current two-implementation
-comparison, not a scan/compare one.
+this harness (``scan_json``/``scan_finding_set``/``scan_outcome``/
+``compare_outcome``/``assert_full_parity``) was deleted along with the
+tests that were its only callers. ``ParityReport``/``diff_findings``/
+``assert_no_capability_loss`` and the ``gaps.py`` registry they read were
+deleted too (2026-09-29): with ``scan`` gone, their only caller was a test
+parametrized over an empty table, so they never ran. ``test_cross_source_
+checks_parity.py`` now compares a direct ``run_crosschecks()`` call with
+``compare``'s own automatic cross-source stage through plain ``kinds_of``
+assertions.
 """
 
 from __future__ import annotations
@@ -40,8 +41,6 @@ from click.testing import CliRunner
 from abicheck.change_registry import REGISTRY
 from abicheck.checker_policy import ChangeKind
 from abicheck.cli import main as abicheck_main
-
-from .gaps import EXPECTED_GAPS
 
 
 @dataclass(frozen=True)
@@ -96,10 +95,11 @@ def severity_for_kind(kind_value: str) -> str:
 
 
 def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
-    """The finding set ``scan``'s cross-source checks produce for *snapshot*.
+    """The finding set the cross-source checks produce for *snapshot*.
 
-    Calls :func:`abicheck.buildsource.cross_source_checks.run_crosschecks` directly —
-    the same production function ``scan_engine.py`` is the sole caller of.
+    Calls :func:`abicheck.buildsource.cross_source_checks.run_crosschecks`
+    directly -- the primitive ``compare()``'s automatic cross-source stage
+    (``workflows/cross_source_evolution.py``) runs.
     """
     from abicheck.buildsource.cross_source_checks import run_crosschecks
     from abicheck.finding_identity import report_finding_id
@@ -248,8 +248,7 @@ def _outcome_from_findings(
 #: `compare` now (ADR-027 A1/D1.2's aggregate roll-ups) -- these are
 #: expected, permanent compare-only "richer" noise for any scenario whose
 #: public-surface count changes. Excluded from the source-depth (F-3/F-4)
-#: exact-identity checks the same way `assert_no_capability_loss` already
-#: treats every compare-only finding.
+#: exact-identity checks.
 SURFACE_METRIC_KINDS = frozenset(
     {
         ChangeKind.PUBLIC_SURFACE_GREW.value,
@@ -269,103 +268,3 @@ def write_snapshot(snapshot: Any, path: Path) -> Path:
 
     path.write_text(snapshot_to_json(snapshot), encoding="utf-8")
     return path
-
-
-@dataclass(frozen=True)
-class ParityReport:
-    """The outcome of comparing two finding sets (e.g. a direct
-    ``run_crosschecks()`` call against ``compare``'s own automatic
-    cross-source-checks stage) -- the ``scan``/``compare`` naming below
-    predates ``scan``'s deletion (ADR-068 Phase 6) but the shape is
-    generic: "left-hand finding set" vs. "right-hand finding set".
-
-    Diffs happen over whole :class:`Finding` values (kind + identity +
-    severity + evidence), not just kinds — two findings of the same kind
-    but different resolved identity (e.g. ``func_removed`` for symbols A
-    and B) are distinguishable, so a partial gap closure (compare now
-    reaches one of the two, not both) stays visible instead of reading as
-    full parity the moment either instance shows up on both sides.
-    """
-
-    #: Present under scan, absent under compare, and *not* a recorded gap —
-    #: an unexplained capability loss. Must always be empty.
-    unexplained_losses: frozenset[Finding]
-    #: Present under scan, absent under compare, matching a recorded gap —
-    #: the expected red state (may be a subset of that kind's scan findings
-    #: when the gap is only partially closed).
-    expected_losses: frozenset[Finding]
-    #: A gap kind is only "healed" once EVERY scan finding of that kind is
-    #: also produced by compare — not merely once any one instance is.
-    healed_gaps: frozenset[str]
-    #: Present under compare but not under scan — richer, always allowed.
-    compare_only: frozenset[Finding]
-
-
-def diff_findings(
-    *, scan_findings: FindingSet, compare_findings: FindingSet
-) -> ParityReport:
-    """Classify every finding difference between a scan-side and compare-side set.
-
-    Gap membership (``EXPECTED_GAPS``, never ``ALL_EXPECTED_GAPS`` --
-    ``finding_evolution`` there is a "not implemented anywhere" tracking
-    entry, not a scan-vs-compare capability comparison, and no real
-    ``Finding.kind`` is ever spelled that way) is checked per finding by
-    its own ``kind``, but "healed" is computed over the whole kind: it only
-    fires once every scan finding of that kind also appears on the compare
-    side, so closing the gap for one identity while another of the same
-    kind is still lost does not falsely read as a completed migration.
-    """
-    lost = scan_findings - compare_findings
-    expected_kinds = frozenset(EXPECTED_GAPS)
-    lost_kinds = kinds_of(lost)
-    scan_kinds = kinds_of(scan_findings)
-    return ParityReport(
-        unexplained_losses=frozenset(f for f in lost if f.kind not in expected_kinds),
-        expected_losses=frozenset(f for f in lost if f.kind in expected_kinds),
-        healed_gaps=frozenset(
-            k for k in expected_kinds if k in scan_kinds and k not in lost_kinds
-        ),
-        compare_only=compare_findings - scan_findings,
-    )
-
-
-def assert_no_capability_loss(
-    *, scan_findings: FindingSet, compare_findings: FindingSet, context: str
-) -> ParityReport:
-    """Fail loudly, naming the check, for any loss `gaps.py` doesn't explain.
-
-    Also fails when a *registered* gap turns out to no longer be a gap
-    (``compare`` now produces every one of that kind's findings too) — the
-    harness must not keep asserting a red state the migration already
-    turned green, or the registry silently stops being "the migration's
-    definition of done".
-    """
-    report = diff_findings(
-        scan_findings=scan_findings, compare_findings=compare_findings
-    )
-    if report.unexplained_losses:
-        names = ", ".join(
-            f"{f.kind}({f.identity!r})"
-            for f in sorted(
-                report.unexplained_losses, key=lambda f: (f.kind, f.identity)
-            )
-        )
-        raise AssertionError(
-            f"{context}: capability loss -- present under `scan`, absent under "
-            f"`compare`, and NOT a recorded parity gap: {names}. Either this is "
-            "a real regression (fix it), or it belongs in "
-            "tests/parity/gaps.py's EXPECTED_GAPS with the plan phase that "
-            "will close it."
-        )
-    if report.healed_gaps:
-        entries = ", ".join(
-            f"{k} ({EXPECTED_GAPS[k].plan_phase})" for k in sorted(report.healed_gaps)
-        )
-        raise AssertionError(
-            f"{context}: parity gap closed but tests/parity/gaps.py still "
-            f"lists it as scan-only: {entries}. Delete the EXPECTED_GAPS "
-            "entry -- once `compare` produces the finding, the registry "
-            "must shrink to match (that shrinking IS the migration's "
-            "definition of done, plan §6 Phase 0/3)."
-        )
-    return report

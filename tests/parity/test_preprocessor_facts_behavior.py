@@ -3,8 +3,9 @@
 Phase 2b).
 
 ``test_engine_primitive_call_sites.py`` proves ``collect_preprocessor_facts``
-has exactly two production callers now: ``scan_engine.py`` and
-``workflows/pattern_preprocessor_scan.py``. This module proves the positive
+has exactly one production caller now,
+``workflows/pattern_preprocessor_scan.py`` (``scan_engine.py`` was the
+other until ADR-068 Phase 6 deleted it). This module proves the positive
 side concretely: it really does capture a private-header leak via a real
 ``clang -E`` invocation. Needs a real ``clang++`` on PATH
 (``ClangPreprocessorExtractor``), so it's ``integration``-marked per this
@@ -24,7 +25,6 @@ from abicheck.buildsource.preprocessor_facts import (
     collect_preprocessor_facts,
 )
 
-from .gaps import EXPECTED_GAPS
 from .runner import compare_json, invoke_cli
 
 
@@ -59,12 +59,6 @@ def test_run_preprocessor_scan_finds_a_private_header_leak(tmp_path: Path) -> No
     assert any(str(private) == leak.leaked_header for leak in result.leaks), (
         result.leaks
     )
-
-
-def test_preprocessor_scan_no_longer_a_registered_gap() -> None:
-    """`gaps.py` is the migration's definition of done: a capability
-    `compare` has reached must not still be listed as scan-only."""
-    assert "preprocessor_scan" not in EXPECTED_GAPS
 
 
 def test_compare_has_no_preprocessor_scan_cli_surface() -> None:

@@ -13,7 +13,7 @@ generated: false
 
 abicheck does not only diff symbols one at a time — it also reasons about the
 *shape* of your public API as a typed declaration graph. This page describes the
-**idiom-aware** features introduced in [ADR-027](../contribute/adr/027-api-surface-intelligence.md):
+**idiom-aware** features:
 single-snapshot surface metrics, idiom & anti-pattern recognition, and
 **pattern-aware verdicts** that modulate a diff using that knowledge.
 
@@ -22,13 +22,13 @@ These metrics and idioms run over your **public surface** — see
 counts as public vs. internal and how scoping decides it.
 
 > **History note:** this used to be a standalone `abicheck surface-report`
-> command. The ADR-043 CLI reset removed it with no direct replacement command
+> command. The pre-1.0 CLI reset removed it with no direct replacement command
 > (it was judged below the five-command bar) — the underlying functions below
 > remain directly callable from Python for anyone who needs a single-snapshot
 > report outside of a `compare`.
 
 These features are **opt-in** and **auditable**. The governing rule, inherited
-from the public-surface work in ADR-024, is:
+from the public-surface work, is:
 
 > Pattern inference may **demote with a disclosed reason** or **raise** a
 > finding; it may **never silently delete** one.
@@ -77,7 +77,7 @@ verdict modulation are:
 ## Pattern-aware verdicts
 
 A post-processing pass always modulates findings using the idiom evidence
-from **both** snapshots (unconditional, ADR-068 D4 — there is no flag to
+from **both** snapshots (unconditional — there is no flag to
 enable or disable it):
 
 | Rule | Effect | Guard |
@@ -104,9 +104,9 @@ Every modulation is disclosed:
   `effective_verdict` / `modulation_reason` recorded — re-categorised in place,
   never dropped;
 - The idiom evidence behind each modulation is always printed (plan slice 7o:
-  disclosure is unconditional, ADR-067).
+  disclosure is unconditional).
 
-Modulation itself is unconditional (ADR-068 D4): it runs automatically
+Modulation itself is unconditional: it runs automatically
 wherever idiom evidence exists, and there is no flag to disable it — the
 former `--pattern-verdicts`/`--no-pattern-verdicts` pair (and, later,
 `--explain-patterns`, whose disclosure is now unconditional) are both gone.
@@ -137,8 +137,7 @@ code honour it — the same demote-don't-delete contract as A4.
 Every `compare` always emits aggregate, informational `COMPATIBLE`
 roll-ups — `public_surface_grew` / `public_surface_shrank` and
 `undocumented_export_ratio_increased` — computed from the same
-`compute_surface_metrics()` used above (unconditional, ADR-068 D4/Phase 5,
-which also removed the `--surface-metrics` flag outright -- passing it is a
+`compute_surface_metrics()` used above (unconditional; 0.6 also removed the `--surface-metrics` flag outright -- passing it is a
 usage error, not an accepted no-op). They never drive a verdict on their own (the
 individual additions/removals are reported per-symbol); they are a trendable
 signal for CI dashboards and release notes.

@@ -2042,7 +2042,7 @@ case exercising the reconciliation path end-to-end.
 - "How to extend clang parsing" roadmap comparing JSON AST dump vs.
   `clang.cindex` vs. LibTooling vs. preprocessor callbacks vs.
   `VTableContext` — when each is the right tool, referencing G28 Phase 4's
-  own LibTooling companion-tool experience (`tools/clang-layout-tool/`) as
+  own LibTooling companion-tool experience (`contrib/clang-layout-tool/`) as
   a worked example of the LibTooling option's cost/benefit.
 
 **What shipped, and the one design decision worth recording.** The matrix is

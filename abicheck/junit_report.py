@@ -1203,8 +1203,8 @@ def to_junit_xml_not_comparable(
     err.set(
         "message",
         f"Not comparable: '{library}' old={old_version!r} new={new_version!r} "
-        f"were not extracted under a comparable profile/scope contract "
-        f"(ADR-050 D1/D2): {message}",
+        f"were not extracted under a comparable profile/scope contract"
+        f": {message}",
     )
     err.set("type", kind)
     err.text = message

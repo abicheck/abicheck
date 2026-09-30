@@ -1,6 +1,6 @@
 # Case 119: Internal Struct Loses a Field (Non-Public, Scoped)
 
-**Category:** Public-Surface Scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE
+**Category:** Public-Surface Scoping | **Verdict:** ✅ NO_CHANGE
 
 ## Verdict and consumer impact
 
@@ -60,7 +60,7 @@ produce that evidence, since castxml itself isn't installed here.
 With `-H`/`--header` the header AST parser records which declarations are
 public. abicheck resolves the public surface — exported symbols plus their
 reachable type closure — and evaluates `InternalStats`'s field removal
-against that closure (ADR-024). Because `InternalStats` is never reached
+against that closure. Because `InternalStats` is never reached
 from `translate()` or any other exported declaration, the removal is routed
 to the filtered/audit ledger and the verdict stays `NO_CHANGE`.
 Internal-type *leaks* are never hidden this way — a type reachable from a
@@ -94,7 +94,7 @@ declaration.
 
 ## Cross-tool comparison
 
-`abidiff`/ABICC have no equivalent of ADR-024 public-surface scoping — both
+`abidiff`/ABICC have no equivalent of abicheck's public-surface scoping — both
 diff every type present in the debug info regardless of reachability from an
 exported declaration, so a plain `abidiff v1.xml v2.xml` on these two `.so`
 files would report the `InternalStats` field removal as a breaking change

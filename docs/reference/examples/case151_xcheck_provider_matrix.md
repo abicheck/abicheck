@@ -18,7 +18,7 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline. An audit reports no compatibility verdict at all (ADR-068 D2) —
+baseline. An audit reports no compatibility verdict at all —
 there is no baseline to compare against — but the audit's
 `private_header_leak` finding (public
 function `make_widget()` returns a private-header type, same shape as
@@ -69,7 +69,7 @@ OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the candi
 
 The provider list is where the two fixtures diverge. It is **not** carried
 by the audit report in any format today — the one-sided report states each
-finding and its ADR-068 D3 evolution state, not the per-check coverage rows
+finding and its evolution state, not the per-check coverage rows
 (status/detail/providers) legacy `scan`'s own `crosscheck` block carried;
 that difference is recorded in
 [`docs/contribute/known-gaps.md`](../../contribute/known-gaps.md).

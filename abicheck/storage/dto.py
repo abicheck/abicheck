@@ -220,7 +220,7 @@ def _bundle_composition_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any
         if raw:
             raise ValueError(
                 f"{BUNDLE_COMPOSITION_SECTION_KIND!r} section v1 carries a non-empty "
-                "'degraded_members' marker, which requires section version 2 (ADR-065 D8)"
+                "'degraded_members' marker, which requires section version 2"
             )
     return {**payload, "degraded_members": {}}
 

@@ -17,6 +17,6 @@ edit `AGENTS.md`, not this file.
   managed by the environment/user, not by this file.
 - `scripts/check_ai_readiness.py`'s `claude-md-coverage` check requires a
   real `CLAUDE.md` inside each major sub-tree (`abicheck/`, `tests/`,
-  `docs/`, `scripts/`, `eval/`, `validation/`, `abicheck/compat/`). Those are
+  `docs/`, `scripts/`, `skills-src/evaluation/field/`, `skills-src/evaluation/validation/`, `abicheck/compat/`). Those are
   scoped, per-area context — not adapters to this root file — so add
   substantive content there, not another `@AGENTS.md` import.

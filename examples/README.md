@@ -41,7 +41,7 @@ rather than as seven undifferentiated peers.
 | [`workflows/suppressions/`](workflows/suppressions/README.md) | I renamed a function on purpose — how do I stop CI from failing on it? |
 
 Each one carries a `workflow.yaml` stating the commands, the expected exit
-code, and the expected verdict; `validation/scripts/run_workflow_examples.py`
+code, and the expected verdict; `skills-src/evaluation/validation/scripts/run_workflow_examples.py`
 executes exactly those documented commands in CI, so a walkthrough cannot rot
 into something that no longer works. See
 [`docs/contribute/catalog-coverage.md`](../docs/contribute/catalog-coverage.md)

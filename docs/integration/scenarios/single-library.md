@@ -3,9 +3,7 @@
 You maintain one shared library. Its previous accepted ABI/API surface is a
 snapshot file (`baseline.json`, `abicheck dump`'s output) checked directly
 into the repository — no release process, no separate baseline-storage
-backend, nothing to fetch. This is the minimal onboarding case
-[ADR-047](../../contribute/adr/047-github-actions-integration-model.md) §8
-calls S1: "the root Action alone suffices, no new primitive needed."
+backend, nothing to fetch. This is the minimal onboarding case, scenario S1: "the root Action alone suffices, no new primitive needed."
 
 ## What you need
 

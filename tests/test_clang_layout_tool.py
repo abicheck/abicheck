@@ -18,7 +18,7 @@ Covers the optional/opt-in binary resolution, the ast-dump-command ->
 compile-flags slicing, the subprocess invocation (mocked, no real compiler
 needed), and the fact-application merge logic. No test here requires the
 real compiled companion tool or a real clang -- that lives in
-tools/clang-layout-tool/tests/ (built + run only when explicitly requested).
+contrib/clang-layout-tool/tests/ (built + run only when explicitly requested).
 """
 
 from __future__ import annotations

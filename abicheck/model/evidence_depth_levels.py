@@ -35,7 +35,7 @@ Two internal axes drive resolution (ADR-035 D1), but only one is public:
   internally to resolve a depth into a concrete collection mode. The old
   ``--source-method``/``--mode`` CLI flags that let a caller pin an S-method or
   preset directly are **deprecated, hidden aliases for one release**
-  (:func:`abicheck.cli_scan._warn_deprecated_scan_aliases`); they still parse
+  (the retired ``cli_scan._warn_deprecated_scan_aliases``, ADR-068 Phase 6); they still parse
   and, for backward compatibility, still resolve through this module's
   precedence — the S→L map is **lossy** (``build``→S1 not S2, and S3 has no
   ``--depth`` form), so an explicitly-passed ``--source-method`` is the more

@@ -286,7 +286,7 @@ def two_sided_input_options(func: F) -> F:
         type=SIDED_DUMP_MANIFEST_PARAM,
         help="A strict YAML document describing multiple translation units to "
         "compile and merge into one side's snapshot, instead of a single "
-        "-H/--header list (ADR-050 D3). Side-scoped: repeat the flag with an "
+        "-H/--header list. Side-scoped: repeat the flag with an "
         "'old='/'new=' prefix per side (e.g. --dump-manifest old=v1/abi.yml "
         "--dump-manifest new=v2/abi.yml); a bare value applies to both. "
         "Mutually exclusive with -H/--header for that side (declare the "
@@ -301,7 +301,7 @@ def two_sided_input_options(func: F) -> F:
         help="Version label used when an input is a bare .so file. Scope to one "
         "side with an 'old='/'new=' prefix, repeating the flag per side (e.g. "
         "--version old=1.0 --version new=2.0); a bare value applies to both. "
-        "Defaults: old side 'old', new side 'new' (ADR-040).",
+        "Defaults: old side 'old', new side 'new'.",
     )(func)
     func = click.option(
         "-I",
@@ -311,12 +311,12 @@ def two_sided_input_options(func: F) -> F:
         type=SIDED_INCLUDE_PATH_PARAM,
         help="Extra include directory for castxml. Applies to both sides; scope "
         "to one side with an 'old='/'new=' prefix, repeating the flag per side "
-        "(e.g. --include old=inc1 --include new=inc2). Repeatable (ADR-040). "
+        "(e.g. --include old=inc1 --include new=inc2). Repeatable. "
         "A labeled 'old:LABEL=PATH'/'new:LABEL=PATH' form (e.g. --include "
         "old:support=old/src --include new:support=new/src) names a "
         "side-specific support root under one shared logical identity, so a "
         "genuine two-checkout compare doesn't spuriously PROFILE_MISMATCH on "
-        "it (ADR-050 D1).",
+        "it.",
     )(func)
     func = click.option(
         "-H",
@@ -329,7 +329,7 @@ def two_sided_input_options(func: F) -> F:
         "recognised from the operand's content rather than its name. Applies "
         "to both sides; scope to "
         "one side with an 'old='/'new=' prefix, repeating the flag per side "
-        "(e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable (ADR-040). "
+        "(e.g. --header old=v1/foo.h --header new=v2/foo.h). Repeatable. "
         "Recommended for full ABI analysis; without headers, abicheck uses whatever "
         "artifact evidence is available instead (ELF may add DWARF/BTF/CTF, PE may add PDB, "
         "Mach-O stays limited to binary metadata: exports plus load-command facts "
@@ -700,7 +700,7 @@ def scope_options(func: F) -> F:
         "scope_public_headers",
         default=True,
         show_default=True,
-        help="Restrict findings to the public-header ABI surface (ADR-024): "
+        help="Restrict findings to the public-header ABI surface: "
         "changes to symbols/types not reachable from public-header-declared "
         "exported API are recorded as filtered, not reported. Internal-type "
         "leaks are never hidden. On by default; use --no-scope-public-headers "
@@ -855,8 +855,8 @@ def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]
             default="host",
             show_default=True,
             type=click.Choice(["host", "device"], case_sensitive=False),
-            help="Which AST context the L2 header frontend should target (ADR-050 "
-            "D3/D5). 'device' selects the SYCL/DPC++ offload-device AST from a "
+            help="Which AST context the L2 header frontend should target. "
+            "'device' selects the SYCL/DPC++ offload-device AST from a "
             "DPC++-capable compiler (icx/icpx/dpcpp) invoked with -fsycl; it fails "
             "loudly if the configured frontend cannot produce a device context. "
             "Matches a manifest's own frontend_context field for the legacy, "
@@ -959,7 +959,7 @@ def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]
                 if sided_frontend
                 else ""
             )
-            + "C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) "
+            + "C/C++ AST frontend: castxml (default schema reference) "
             "or clang (-ast-dump=json; for hosts where castxml is absent or its "
             "bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges "
             "them (dumper_hybrid.merge_snapshots) — needs both tools installed and "
@@ -1384,8 +1384,8 @@ def merge_compile_config(
 # `frontends/cli/options/contract.py` (see that module's own note for why:
 # the one-sided `--no-baseline` dispatch needs them without joining the CLI
 # registration SCC). Re-exported here (`X as X`, so ruff keeps them) because
-# this module is their documented import path -- `cli_compare_helpers` and
-# `cli_scan` both reach them here today, and neither needs to change.
+# this module is their documented import path -- `cli_compare_helpers`
+# reaches them here (as the retired `cli_scan` did), and needn't change.
 from .frontends.cli.options.contract import (  # noqa: E402
     resolve_contract_domain as resolve_contract_domain,
     resolve_contract_evaluation as resolve_contract_evaluation,
@@ -1640,8 +1640,8 @@ def set_input_options(func: F) -> F:
         multiple=True,
         metavar="KEY",
         help="Declare a required expected release member by its canonical "
-        "release-matching key (e.g. 'libfoo.so', never a raw filename stem "
-        "-- ADR-065 S1; directory/package inputs only). Repeatable. With "
+        "release-matching key (e.g. 'libfoo.so', never a raw filename stem; "
+        "directory/package inputs only). Repeatable. With "
         "any --select/--select-required given, only declared members are "
         "compared. A missing declared-required member contributes to "
         "the .abicheck.yml scope.on_incomplete completeness gate; a plain "

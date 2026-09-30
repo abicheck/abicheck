@@ -35,7 +35,7 @@ native ``compare`` CLI command (``cli_compare_helpers.run_compare`` — a
 report, exit ``16``), ``cli_compare_release.py``'s directory/package fan-out
 (a per-library ``"not_comparable"`` verdict string, dominating the release
 rollup, exit ``16``), ``compat/cli.py``'s ``compat check`` (exit ``9``),
-``cli_scan.py``'s ``scan --against`` via ``scan_engine.run_scan_core`` (a
+the retired ``scan --against`` (``cli_scan.py``/``scan_engine.py``, a
 ``NOT_COMPARABLE`` verdict, exit ``6``), ``stack_checker.py``'s
 ``deps compare`` (``StackChange.not_comparable_reason``, exit ``5``), the
 ``abi_compare`` MCP tool (a dedicated ``{"status": "not_comparable", ...}``

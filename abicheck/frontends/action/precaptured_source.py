@@ -131,8 +131,8 @@ def verify_precaptured_producer(
             "a contributor's own tree. A release-contract baseline is what "
             "every future comparison is measured against, on an immutable "
             "channel, so it may never be minted from a pull-request build -- "
-            "this is not configurable, and widening it would make ADR-047 "
-            "section 12's trigger restriction decorative.",
+            "this is not configurable, and widening it would make the "
+            "trigger restriction decorative.",
         )
     return run
 

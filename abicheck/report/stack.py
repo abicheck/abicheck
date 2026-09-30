@@ -30,7 +30,7 @@ from ..stack_checker import StackCheckResult
 from .document import ReportDocument
 
 #: Cap on embedded per-library findings in stack JSON -- mirrors
-#: `cli_scan_baseline._MAX_BASELINE_FINDINGS`'s rationale: a large diff must
+#: the retired `cli_scan_baseline._MAX_BASELINE_FINDINGS`'s rationale: a large diff must
 #: not blow up the always-on stack-check output, but a bare count
 #: (`abi_breaking: 3`) leaves no way to tell *which* symbols broke without a
 #: separate `compare` run.
@@ -39,7 +39,7 @@ MAX_STACK_FINDINGS_PER_LIBRARY = 10
 
 def stack_finding_dicts(diff: object) -> list[dict[str, object]]:
     """Project a library's gating findings (breaking/api_break/risk) into
-    small, capped dicts -- same shape as `cli_scan_baseline._baseline_finding_dicts`.
+    small, capped dicts -- same shape as the retired `cli_scan_baseline._baseline_finding_dicts`.
 
     Counts (not already-built dicts) decide the cap so a large diff never
     builds more dicts than the cap can ever keep.

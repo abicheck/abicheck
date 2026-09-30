@@ -2942,7 +2942,7 @@ matches (that part stands), but `docs/contribute/adr/044-reachability-aware-supp
 Context section documents a real field review of oneDAL PR #3693 that found
 a genuine tool-correctness defect and drove that ADR's entire redesign;
 `docs/contribute/plans/g21-oneshot-deep-compare.md` and
-`validation/REPORT.md` document the same evaluation's CLI-UX findings. That
+`skills-src/evaluation/validation/REPORT.md` document the same evaluation's CLI-UX findings. That
 review is real and valuable — but it is a **package/binary-level compare
 evaluation** (conda-forge release artifacts, no source checkout, no build
 reuse, no CI workflow), not a **GitHub-Actions CI-integration pilot** in

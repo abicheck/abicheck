@@ -191,10 +191,7 @@ def comparison_scope_notice(section: Mapping[str, Any]) -> str | None:
         lead = "No comparison completed"
         if names:
             lead += f"; unchecked: {names}"
-        return (
-            lead
-            + " -- never a clean pass, under either scope.on_incomplete setting (ADR-065 D7)"
-        )
+        return lead + " -- never a clean pass, under either scope.on_incomplete setting"
     lead = f"Comparison scope incompletely checked; unchecked: {names}"
     blocking = int(section.get("incomplete_scope_exit_contribution") or 0)
     policy = section.get("policy", "warn")
@@ -217,7 +214,7 @@ def render_comparison_scope_markdown(section: Mapping[str, Any]) -> list[str]:
     if section.get("no_comparison_completed"):
         lines.append(
             "**No comparison completed** — the selected scope produced no valid "
-            "comparison, which is never a clean pass (ADR-065 D7)."
+            "comparison, which is never a clean pass."
         )
         lines.append("")
     lines.append(
@@ -320,6 +317,6 @@ def release_scope_warnings(record: ScopeAcquisitionRecord) -> list[str]:
     if record.no_comparison_completed:
         messages.append(
             "Warning: no matching library pairs found between OLD and NEW inputs -- "
-            "no comparison completed (ADR-065 D7)."
+            "no comparison completed."
         )
     return messages
