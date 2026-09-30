@@ -72,6 +72,9 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from graders.efficiency import token_usage  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[5]
 EVAL_DIR = ROOT / "skills-src" / "evaluation" / "agents" / "skills"
 
@@ -96,20 +99,27 @@ PUBLISHED_SKILLS = ROOT / ".claude" / "skills"
 SKILLS_SRC = ROOT / "skills-src"
 PACK = EVAL_DIR / "skill-eval-pack.json"
 
-ARMS = ("skill", "baseline")
+#: `no_tool` is the third, opt-in arm: no skill *and* no abicheck. The
+#: baseline arm has abicheck on PATH, as a user who installed it would, so
+#: skill-vs-baseline measures the skill's instructions alone; `no_tool`
+#: measures what the agent does with only the system's own tools (`nm`,
+#: `readelf`, `ldd`, `gdb`), which is what the tool itself adds.
+ARMS = ("skill", "baseline", "no_tool")
+#: What `--arms` selects by default. `no_tool` costs a third more runs and
+#: answers a different question, so it is asked for explicitly.
+DEFAULT_ARMS = ("skill", "baseline")
 
-#: G37's 2026-08-11 scope note (docs/contribute/plans/
-#: g37-agent-skill-quality-evaluation.md) named
-#: `native-binary-compatibility-review` (renamed `review-native-library-
-#: change`) as the sole flagship subject for every phase. ADR-058's
-#: 2026-08-20 portfolio-reset amendment went further and removed the other
-#: three shipped skills from the published portfolio entirely, so this
-#: filter is now a no-op in practice — every scenario in `scenarios.yaml`
-#: already names this one skill — but is kept rather than removed: it is
-#: what re-scopes a future second skill's scenarios out of a
-#: still-flagship-only run the moment one is added, without needing this
-#: filter re-introduced from scratch.
-FLAGSHIP_SKILL = "check-abi-compatibility"
+
+#: The skills this harness evaluates: exactly the published portfolio, read
+#: from `skills-src/` (see `_published_skill_names`). A scenario naming any
+#: other skill (a retired prototype from before ADR-058's 2026-08-20 reset)
+#: is excluded unless `--include-prototype-skills` is passed. This used to be
+#: one hard-coded flagship name; with a second published skill
+#: (`explain-abi-change`, ADR-058's 2026-09-30 amendment) that would have
+#: silently dropped every one of its scenarios from a default run.
+def evaluated_skills() -> frozenset[str]:
+    return frozenset(p.name for p in SKILLS_SRC.iterdir() if (p / "SKILL.md").is_file())
+
 
 #: Identical for both arms — the treatment must be the skill, nothing else.
 #: `Skill` is included so the skill arm can actually invoke what it finds;
@@ -175,6 +185,29 @@ Optionally, also add `"decision"` — one of `VERIFIED_COMPATIBLE`,
 is the vocabulary a compatibility-review skill's own final decision uses; it
 must agree with `verdict`/`confident`, not merely restate the raw verdict).
 """
+
+#: Appended after `ANSWER_CONTRACT` for explain-abi-change scenarios (those whose
+#: `expected` names a `cause`). Identical for both arms, like the contract
+#: itself: it states the answer format, and the cause list is the grading
+#: vocabulary, so the baseline arm is told the same candidate causes the
+#: skill arm is.
+DIAGNOSIS_CONTRACT = """
+This asks what changed between a program and its libraries, so also add a
+`"diagnosis"` object naming the mechanism: `{"cause": "<one of
+symbol_removed, library_older_than_build, symbol_version_missing,
+layout_changed, stale_library_loaded, cxx_abi_mismatch, not_an_abi_problem>"}`.
+Here `"verdict"` compares the library the program was built against with the
+library that actually gets loaded when it runs (`NO_CHANGE` when they are
+ABI-identical).
+"""
+
+
+def answer_contract(scenario: dict) -> str:
+    """The answer-format instructions appended to this scenario's prompt."""
+    if (scenario.get("expected") or {}).get("cause") is not None:
+        return ANSWER_CONTRACT + DIAGNOSIS_CONTRACT
+    return ANSWER_CONTRACT
+
 
 #: `python -m abicheck ...` is a documented, supported entry point
 #: (`abicheck/__main__.py`), and it does not go through a `PATH` shim named
@@ -798,8 +831,8 @@ def check_treatment(arm: str, scenario: dict, visible: list[str] | None) -> str 
     """The reason this run is not evidence about its arm, if it is not."""
     if visible is None:
         return "the CLI never reported which skills it could see"
-    if arm == "baseline" and visible:
-        return f"baseline arm could see published skill(s): {', '.join(visible)}"
+    if arm in ("baseline", "no_tool") and visible:
+        return f"{arm} arm could see published skill(s): {', '.join(visible)}"
     if arm == "skill" and visible != [scenario["skill"]]:
         return (
             f"skill arm should see exactly ['{scenario['skill']}'], saw: "
@@ -822,8 +855,7 @@ def _usage(events: list[dict], elapsed: float) -> dict[str, Any]:
             continue
         counts = event.get("usage") or {}
         usage["turns"] = event.get("num_turns")
-        usage["tokens_in"] = counts.get("input_tokens")
-        usage["tokens_out"] = counts.get("output_tokens")
+        usage.update(token_usage(counts))
         usage["cost_usd"] = event.get("total_cost_usd")
         break
     usage["tool_calls"] = sum(
@@ -871,6 +903,102 @@ def _run_once(
             "so neither arm's result would be about the skill:\n  " + "\n  ".join(leaks)
         )
 
+    if arm == "no_tool":
+        env = no_tool_environment(os.environ)
+    else:
+        env = _recorded_environment(out_dir)
+
+    prompt = scenario["prompt"] + answer_contract(scenario)
+    (out_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
+    return _invoke(
+        out_dir, work, env, prompt, scenario, scenario_id, arm, rep, model, timeout
+    )
+
+
+def _tool_directories(path: str) -> set[str]:
+    """The `PATH` entries holding an executable named `abicheck`."""
+    return {
+        entry
+        for entry in path.split(os.pathsep)
+        if entry and os.access(os.path.join(entry, "abicheck"), os.X_OK)
+    }
+
+
+def no_tool_environment(parent: Mapping[str, str]) -> dict[str, str]:
+    """The `no_tool` arm's environment: the tool genuinely absent.
+
+    Not a stub that answers "command not found": `which abicheck` would still
+    find it, and an agent reading that is being told something false about
+    its machine. Every `PATH` entry that holds `abicheck` is dropped instead,
+    together with the virtual environment that put it there, so the Python
+    left on `PATH` is one without the package. Whatever the agent still
+    reaches is caught after the run by `reached_the_tool`.
+    """
+    env = child_environment(parent)
+    dropped = _tool_directories(env.get("PATH", ""))
+    env["PATH"] = os.pathsep.join(
+        entry for entry in env.get("PATH", "").split(os.pathsep) if entry not in dropped
+    )
+    for name in ("VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"):
+        env.pop(name, None)
+    return env
+
+
+#: Output only a reachable abicheck produces: its version banner, its usage
+#: line, a JSON report's own fields, or an install that put it on the machine.
+_TOOL_OUTPUT = re.compile(
+    r"\babicheck \d+\.\d+\.\d+"
+    r"|Usage: abicheck\b"
+    r'|"report_schema_version"'
+    r"|Successfully installed[^\n]*\babicheck-\d",
+)
+
+
+def _blocks(event: object) -> list[dict]:
+    """An event's content blocks; `[]` for any shape that carries none."""
+    if not isinstance(event, dict):
+        return []
+    message = event.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return (
+        [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+    )
+
+
+def _result_text(block: dict) -> str:
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(part.get("text", "")) for part in content if isinstance(part, dict)
+        )
+    return ""
+
+
+def reached_the_tool(events: list[dict]) -> list[str]:
+    """Tool outputs in a `no_tool` run that only a reachable abicheck produces.
+
+    Judged by what came back, not by what was typed: looking for the tool
+    (`which abicheck`, `pip list | grep abi`) is ordinary behaviour when it is
+    absent and prints nothing that matches, while running or installing it
+    anyway prints its banner, usage, report or install line. An earlier
+    version judged the command text and aborted batches on runs that had
+    merely looked. Returns each offending output's first line.
+    """
+    leaked: list[str] = []
+    for event in events:
+        for block in _blocks(event):
+            if block.get("type") != "tool_result":
+                continue
+            match = _TOOL_OUTPUT.search(_result_text(block))
+            if match:
+                leaked.append(match.group(0))
+    return leaked
+
+
+def _recorded_environment(out_dir: Path) -> dict[str, str]:
+    """The skill and baseline arms' environment: the tool behind the recorder."""
     bin_dir = out_dir / "bin"
     bin_dir.mkdir()
     shim = bin_dir / "abicheck"
@@ -898,10 +1026,22 @@ def _run_once(
             interposer.write_text(_PYTHON_INTERPOSER, encoding="utf-8")
             interposer.chmod(0o755)
         env["SKILL_EVAL_REAL_PYTHON"] = real_python
+    return env
 
-    prompt = scenario["prompt"] + ANSWER_CONTRACT
-    (out_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
+def _invoke(
+    out_dir: Path,
+    work: Path,
+    env: dict[str, str],
+    prompt: str,
+    scenario: dict,
+    scenario_id: str,
+    arm: str,
+    rep: int,
+    model: str | None,
+    timeout: int,
+) -> dict:
+    """Run the agent once and validate that the run is evidence about `arm`."""
     started = time.monotonic()
     proc = subprocess.run(  # noqa: S603
         [
@@ -946,7 +1086,15 @@ def _run_once(
     usage = _usage(events, elapsed)
     (out_dir / "usage.json").write_text(json.dumps(usage, indent=2), encoding="utf-8")
 
-    if _bypassed_the_recorder(events, out_dir / "calls.jsonl"):
+    if arm == "no_tool":
+        leaked = reached_the_tool(events)
+        if leaked:
+            raise RuntimeError(
+                f"{scenario_id}/{arm}/{rep}: the no-tool arm reached abicheck "
+                f"anyway ({'; '.join(leaked)}), so this run is not the no-tool "
+                f"condition."
+            )
+    elif _bypassed_the_recorder(events, out_dir / "calls.jsonl"):
         raise RuntimeError(
             f"{scenario_id}/{arm}/{rep}: the run reached the tool through "
             f"`python -m abicheck`, which the recorder never saw, so its "
@@ -954,7 +1102,7 @@ def _run_once(
             f"the PATH interposer applies."
         )
 
-    if _shadowed_the_recorder(events, out_dir / "calls.jsonl"):
+    if arm != "no_tool" and _shadowed_the_recorder(events, out_dir / "calls.jsonl"):
         raise RuntimeError(
             f"{scenario_id}/{arm}/{rep}: the agent ran `abicheck` but the "
             f"recorder logged nothing, so something earlier on the agent's "
@@ -1243,8 +1391,14 @@ def _recovered_record(
             problem = "the workspace names the tool or states the answer: " + "; ".join(
                 leaks
             )
-    if problem is None and _bypassed_the_recorder(
-        events, out_dir / "calls.jsonl", interposed
+    if problem is None and arm == "no_tool" and reached_the_tool(events):
+        # The no-tool counterpart: a leaked run was rejected after writing
+        # `final.md`, so a resume must not index it as the no-tool condition.
+        problem = "the no-tool arm reached abicheck anyway"
+    elif (
+        problem is None
+        and arm != "no_tool"
+        and _bypassed_the_recorder(events, out_dir / "calls.jsonl", interposed)
     ):
         # The same reasoning as the treatment check, for the other rejection
         # `_run_once` can raise after writing `final.md`. On a host without the
@@ -1272,29 +1426,40 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--arms",
-        default=",".join(ARMS),
+        default=",".join(DEFAULT_ARMS),
         help=f"Comma-separated subset of {','.join(ARMS)}",
     )
     parser.add_argument(
         "--scenarios",
         default="",
         help=(
-            "Comma-separated ids; default: every ready scenario for the "
-            f"flagship skill ({FLAGSHIP_SKILL})"
+            "Comma-separated ids; default: every ready scenario for a "
+            "published skill (one with a skills-src/ directory)"
         ),
     )
     parser.add_argument(
         "--include-prototype-skills",
         action="store_true",
         help=(
-            "Also select ready scenarios for prototype-status skills (all "
-            f"skills other than {FLAGSHIP_SKILL}). Off by default per G37's "
-            "2026-08-11 scope note — the portfolio is frozen and only the "
-            "flagship skill is a live evaluation target."
+            "Also select ready scenarios for skills that are no longer "
+            "published (retired prototypes). Off by default: only the "
+            "published portfolio is a live evaluation target."
         ),
     )
     parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument(
+        "--skill-tree",
+        help=(
+            "Install the skill arm's skill from this directory (one "
+            "subdirectory per skill, like .claude/skills/) instead of the "
+            "generated tree: for measuring a candidate variant against the "
+            "published one. Recorded on every row as `skill_tree`."
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.skill_tree:
+        global PUBLISHED_SKILLS
+        PUBLISHED_SKILLS = Path(args.skill_tree).resolve()
 
     # These checks run before the first model call: a run that discovers any of
     # them afterwards has spent real money producing output that *looks* like a
@@ -1370,12 +1535,12 @@ def main(argv: list[str] | None = None) -> int:
         prototype_wanted = sorted(
             sid
             for sid in wanted
-            if pack["scenarios"].get(sid, {}).get("skill") != FLAGSHIP_SKILL
+            if pack["scenarios"].get(sid, {}).get("skill") not in evaluated_skills()
         )
         if prototype_wanted:
             print(
-                f"{', '.join(prototype_wanted)}: not the flagship skill "
-                f"({FLAGSHIP_SKILL}) — G37's 2026-08-11 scope note excludes "
+                f"{', '.join(prototype_wanted)}: not a published skill "
+                f"({', '.join(sorted(evaluated_skills()))}) — G37's scope note excludes "
                 f"prototype-status skills from evaluation by default. Pass "
                 f"--include-prototype-skills to run them anyway.",
                 file=sys.stderr,
@@ -1386,7 +1551,7 @@ def main(argv: list[str] | None = None) -> int:
         for sid, entry in sorted(pack["scenarios"].items())
         if entry["status"] == "ready"
         and (not wanted or sid in wanted)
-        and (args.include_prototype_skills or entry.get("skill") == FLAGSHIP_SKILL)
+        and (args.include_prototype_skills or entry.get("skill") in evaluated_skills())
     }
     if not scenarios:
         print("no ready scenarios selected", file=sys.stderr)
@@ -1473,7 +1638,7 @@ def main(argv: list[str] | None = None) -> int:
         return [
             row
             for row in in_pack
-            if pack["scenarios"][row["scenario_id"]].get("skill") == FLAGSHIP_SKILL
+            if pack["scenarios"][row["scenario_id"]].get("skill") in evaluated_skills()
         ]
 
     for sid, scenario in scenarios.items():
@@ -1519,6 +1684,8 @@ def main(argv: list[str] | None = None) -> int:
                     record = _run_once(
                         sid, scenario, arm, rep, out_dir, args.timeout, args.model
                     )
+                    if args.skill_tree:
+                        record["skill_tree"] = str(PUBLISHED_SKILLS)
                 except subprocess.TimeoutExpired as exc:
                     # subprocess.run() kills the process and still populates
                     # TimeoutExpired.stdout/.stderr with whatever had already

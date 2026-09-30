@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:9cb7d653d13241b4bb542bd79c3b271985147f209e094d6e75d594894e41c1d5",
+  "expected": {
+    "cause": "stale_library_loaded",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-rpath-overrides-path",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Our launcher points LD_LIBRARY_PATH at env/lib, where the current libwidget is installed, yet the app still fails to start. Run ./setup.sh once, then ./env/run.sh. Why, and what should we change?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-rpath-overrides-path",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}

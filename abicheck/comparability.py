@@ -848,7 +848,8 @@ class ComparabilityMismatch:
     the product rule "weaker evidence narrows conclusions" applied
     literally.
 
-    **No axis produces one today.** The single producer was
+    **Produced today by the build-identity axis** (one side records its
+    build system, the other does not). An earlier producer was
     ``comparability_profile``'s declared-header-INSERTION branch, which
     priced an added public header's incidental sort position as reduced
     ``declaration``/``layout`` assurance; that branch was wrong (a declared
@@ -1437,12 +1438,15 @@ def check_contracts_comparable(
         lambda: _surface_refusal("scope", extraction_scope_refusal(old, new)),
         lambda: _check_scope_fingerprint_comparable(old.contract, new.contract),
         lambda: _check_profile_fingerprint_comparable(old, new),
+        lambda: _importlib.import_module(
+            ".comparability_profile", __package__
+        ).check_build_identity_comparable(old, new),
     )
     # A non-fatal descriptor (ComparabilityMismatch.fatal=False) is neither
     # raised nor allowed to end the scan: it bounds the comparison instead of
     # refusing it, so a genuinely fatal mismatch on a later axis must still
-    # win over it. Only the profile axis produces one today (and it is checked
-    # last), so this loop shape is future-proofing, not a live case.
+    # win over it. The build-identity axis (checked last) produces one when
+    # only one side records its build system.
     bounded: ComparabilityMismatch | None = None
     for check in checks:
         mismatch = check()

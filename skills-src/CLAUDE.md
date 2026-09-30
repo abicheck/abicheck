@@ -103,7 +103,8 @@ implied is reset → rewrite → evaluate → publish, and this is step two.
 
 | Skill | Status | Meaning |
 |---|---|---|
-| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The sole published skill. The 2026-09-29 pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
+| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The first published skill. The 2026-09-29 pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
+| `explain-abi-change` | **Preview — same install; single-agent pilot evidence only.** | Admitted by ADR-058's 2026-09-30 amendment (all five admission criteria, stated there). For a developer working out what changed between a program and the shared libraries it uses — a failure or just a library update — worked back to one of seven named mechanisms. Renamed from `debug-abi-failure` before release, when the framing widened from "a program stopped working" to "a developer wants to understand an ABI change". Evaluated on 10 scenarios (`skills-src/evaluation/agents/skills/scenarios.yaml`, `explain-*`); results in `skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md`. |
 | `set-up-abi-compatibility-ci` | **Preview — second candidate, admitted by ADR-058's 2026-09-30 amendment.** | Onboards a GitHub repository onto abicheck via GitHub Actions: repository inventory → baseline strategy → gate/rollout → workflow files → validation → setup report. Evaluated by its own static-grading A/B harness, `skills-src/evaluation/agents/ci-setup/` (results in `results/`); same caveats: one model, corpus written with the skill. |
 
 **What "PR 2" integrated, over the bare rename the reset amendment left in
@@ -169,13 +170,12 @@ scope. See the ADR amendment for the full accounting of what was deferred.
 
 **What this means in practice:**
 
-- Don't add a third published skill. Rebuilding
-  `native-release-compatibility` (or anything else) as a public skill needs
-  its own pass through ADR-058's five-criteria admission bar, informed by
-  whatever this one candidate's evaluation actually finds — not a
-  restoration from git history.
-- Don't cite `check-abi-compatibility` as validated in any user-facing
-  claim; no behavioral evidence exists yet.
+- Don't add another published skill without its own ADR-058 amendment
+  stating the five admission criteria and an evaluation corpus of its own,
+  the way `explain-abi-change` was added (2026-09-30). Rebuilding
+  `native-release-compatibility` from git history is not a shortcut.
+- Don't cite either skill as validated in any user-facing claim; each has
+  single-agent pilot evidence only, with the caveats its pilot report states.
 - This reset does not reopen ADR-058's five-criteria admission bar for a
   *new* skill on its own — see "Adding a public skill" below, unchanged.
 
@@ -189,8 +189,8 @@ domain knowledge to justify a skill. A candidate failing any one becomes a
 P2 candidates and the evidence each needs are recorded in
 `docs/contribute/plans/g36-native-compatibility-agent-skills.md`. The
 portfolio status above is a stronger, additional bar on top of this one:
-even a candidate that clears all five criteria should not be pursued while
-the sole candidate skill's own evaluation is still open.
+a new skill ships with scenarios in `skills-src/evaluation/agents/skills/scenarios.yaml` and a
+pilot run against the no-skill baseline, like both published skills did.
 
 ## Workflow
 
@@ -216,6 +216,7 @@ here as they are run.
 
 | Target | Skills validated | Date | Notes |
 |---|---|---|---|
+| Claude Code | `explain-abi-change` | 2026-09-30 | Headless `claude -p`, `claude-sonnet-5-5`, 10-scenario A/B corpus; see `skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md`. |
 | Claude Code | `check-abi-compatibility` | 2026-09-29 | Headless `claude -p`, `claude-sonnet-5-5`, 14-scenario A/B corpus; see `skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`. Not yet exercised interactively or through a `npx`-installed copy by a person. |
 | Codex | — | — | not yet run |
 | GitHub Copilot | — | — | not yet run |

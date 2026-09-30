@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:aff2cd5630592838cc370631856be22e1b1baf6b3ec7cc48ecff2017c073d997",
+  "expected": {
+    "cause": "not_an_abi_problem",
+    "verdict": "NO_CHANGE"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-not-an-abi-problem",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Our app started failing after we reinstalled libwidget; it now exits with an error. Run ./setup.sh once, then ./env/run.sh. Is the library the problem, and what should we do?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-not-an-abi-problem",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}

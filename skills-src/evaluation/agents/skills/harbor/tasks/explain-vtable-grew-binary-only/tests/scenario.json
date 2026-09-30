@@ -1,0 +1,27 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [
+    "x86_64"
+  ],
+  "category": "B",
+  "digest": "sha256:4b69afbdf233bb80c73cc0a7e2f1af9d09a4b76d7cc1ff594f5bc6544f128db9",
+  "expected": {
+    "cause": "layout_changed",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-vtable-grew-binary-only",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "The vendor shipped a new libwidget (binary only, no headers). Their release note says the update only adds functions, and comparing the exported symbols confirms nothing was removed. Since we installed it, our app crashes. Run ./setup.sh once, then ./env/run.sh. What changed, and what do we need to do?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-vtable-grew-binary-only",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}

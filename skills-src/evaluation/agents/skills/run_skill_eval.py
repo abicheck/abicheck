@@ -39,20 +39,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from graders.dimensions import grade_run  # noqa: E402
+from graders.efficiency import run_efficiency  # noqa: E402
 
 PACK = Path(__file__).resolve().parent / "skill-eval-pack.json"
 
-#: Mirrors runners/claude_code.py's FLAGSHIP_SKILL. The runner already keeps
-#: a fresh --out root from *producing* new prototype-skill rows by default,
-#: but that filter cannot retroactively clean an --out root created before
-#: the 2026-08-11 scope freeze (docs/contribute/plans/
-#: g37-agent-skill-quality-evaluation.md), or one built with
-#: --include-prototype-skills. index.json still indexes every recorded row
-#: regardless of which skill it belongs to, so this grading step is the
-#: second, independent place the freeze must be enforced — without it, an
-#: old or explicitly-opted-in prototype-skill row would silently fold into a
-#: nominally flagship-only aggregate.
-FLAGSHIP_SKILL = "check-abi-compatibility"
+SKILLS_SRC = Path(__file__).resolve().parents[4] / "skills-src"
+
+
+def evaluated_skills() -> frozenset[str]:
+    """The published portfolio; mirrors runners/claude_code.py's own.
+
+    The runner keeps a fresh --out root from *producing* rows for skills that
+    are no longer published, but cannot retroactively clean an older root or
+    one built with --include-prototype-skills. index.json indexes every row
+    regardless of skill, so grading is the second, independent place the
+    filter applies: a retired skill's row must not fold into the published
+    skills' aggregates.
+    """
+    return frozenset(p.name for p in SKILLS_SRC.iterdir() if (p / "SKILL.md").is_file())
 
 
 def _model_label(row: dict) -> str | None:
@@ -137,6 +141,108 @@ def summarize(runs: list[dict]) -> dict:
     }
 
 
+def _mean(runs: list[dict], field: str) -> float | None:
+    """Mean of one efficiency field over the runs that recorded it."""
+    values = [
+        v
+        for r in runs
+        if isinstance(v := (r.get("efficiency") or {}).get(field), int | float)
+    ]
+    return sum(values) / len(values) if values else None
+
+
+def _fmt(value: float | None, digits: int) -> str:
+    return "—" if value is None else f"{value:,.{digits}f}"
+
+
+#: Column order for the arms a batch may contain (runners/claude_code.py ARMS).
+ARM_ORDER = ("skill", "baseline", "no_tool")
+
+
+def _print_efficiency(by_arm: dict[str, list[dict]]) -> None:
+    """What each arm spent, next to what it got right.
+
+    Means per run, plus the cost of one *correct* answer: an arm that is
+    cheaper per run but wrong more often can still cost more per answer
+    worth having. Tokens in include prompt-cache reads and writes.
+    """
+    rows = [
+        ("mean wall time, s", "wall_clock_seconds", 1),
+        ("mean turns", "turns", 1),
+        ("mean tool calls", "tool_calls", 1),
+        ("mean tokens in", "tokens_in_total", 0),
+        ("mean tokens out", "tokens_out", 0),
+        ("mean cost, $", "cost_usd", 3),
+    ]
+    for label, field, digits in rows:
+        cells = "".join(
+            f"{_fmt(_mean(runs, field), digits):>12}" for runs in by_arm.values()
+        )
+        print(f"{label:<26}{cells}")
+    cells = ""
+    for runs in by_arm.values():
+        total = sum(
+            v
+            for r in runs
+            if isinstance(v := (r.get("efficiency") or {}).get("cost_usd"), int | float)
+        )
+        correct = sum(1 for r in runs if r["correct"])
+        cells += f"{_fmt(total / correct if correct else None, 3):>12}"
+    print(f"{'cost per correct answer, $':<26}{cells}")
+
+
+def _print_table(graded: list[dict]) -> None:
+    """One skill's arm-by-arm table plus its per-scenario detail.
+
+    Printed per skill: the skills answer different questions, and one table
+    pooling them would let a strong result on one hide a weak one on the
+    other. "correct answer" is the verdict, plus the root cause for a
+    scenario that names one (see graders.dimensions.grade_run). One column
+    per arm present, in `ARM_ORDER`.
+    """
+    by_arm = {
+        arm: [g for g in graded if g["arm"] == arm]
+        for arm in ARM_ORDER
+        if any(g["arm"] == arm for g in graded)
+    }
+    print(f"{'':<26}" + "".join(f"{arm:>12}" for arm in by_arm))
+    rows = [
+        ("correct answer", lambda r: r["correct"]),
+        ("ran a comparison", lambda r: r["comparisons"] > 0),
+        ("claim well-formed", lambda r: r["claim_status"] == "ok"),
+        ("zero-tolerance failures", lambda r: bool(r["zero_tolerance_failed"])),
+    ]
+    print(
+        f"{'runs graded':<26}" + "".join(f"{len(runs):>12}" for runs in by_arm.values())
+    )
+    for label, test in rows:
+        cells = ""
+        for runs in by_arm.values():
+            count = sum(1 for r in runs if test(r))
+            cells += f"{f'{count} ({_pct(count, len(runs))})':>12}"
+        print(f"{label:<26}{cells}")
+    _print_efficiency(by_arm)
+
+    arms = " vs ".join(by_arm)
+    print(f"\nper scenario (correct answer | mean seconds | mean $, {arms}):")
+    for sid in sorted({g["scenario_id"] for g in graded}):
+        per_arm = [
+            [g for g in runs if g["scenario_id"] == sid] for runs in by_arm.values()
+        ]
+        first = next(g for runs in per_arm for g in runs)
+        expected = first["expected_verdict"]
+        if first.get("expected_cause"):
+            expected = f"{expected}, {first['expected_cause']}"
+        correct = " ".join(
+            f"{sum(1 for g in runs if g['correct'])}/{len(runs)}" for runs in per_arm
+        )
+        seconds = " ".join(
+            _fmt(_mean(runs, "wall_clock_seconds"), 0) for runs in per_arm
+        )
+        cost = " ".join(_fmt(_mean(runs, "cost_usd"), 3) for runs in per_arm)
+        print(f"  {sid:<34} {correct} | {seconds} | {cost}   (expected {expected})")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
@@ -154,9 +260,8 @@ def main(argv: list[str] | None = None) -> int:
         "--include-prototype-skills",
         action="store_true",
         help=(
-            "Also grade recorded rows for prototype-status skills (all "
-            f"skills other than {FLAGSHIP_SKILL}). Off by default per G37's "
-            "2026-08-11 scope note."
+            "Also grade recorded rows for skills that are no longer "
+            "published (retired prototypes). Off by default."
         ),
     )
     args = parser.parse_args(argv)
@@ -192,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if (
             not args.include_prototype_skills
-            and pack["scenarios"][sid].get("skill") != FLAGSHIP_SKILL
+            and pack["scenarios"][sid].get("skill") not in evaluated_skills()
         ):
             # A prototype-skill row can reach index.json even though the
             # runner no longer schedules new ones by default — an --out root
@@ -203,7 +308,14 @@ def main(argv: list[str] | None = None) -> int:
             excluded_prototype.add(sid)
             continue
         grade = grade_run(run_dir, pack["scenarios"][sid], arm)
-        grade.update(scenario_id=sid, arm=arm, repetition=rep, runs_root=str(root))
+        grade.update(
+            scenario_id=sid,
+            arm=arm,
+            repetition=rep,
+            runs_root=str(root),
+            skill=pack["scenarios"][sid].get("skill"),
+            efficiency=run_efficiency(run_dir),
+        )
         graded.append(grade)
         if isinstance(row.get("model"), str) or isinstance(
             row.get("requested_model"), str
@@ -276,52 +388,23 @@ def main(argv: list[str] | None = None) -> int:
 
     report = {
         "arms": {arm: summarize(runs) for arm, runs in sorted(by_arm.items())},
+        "skills": {
+            name: {
+                arm: summarize([g for g in runs if g["skill"] == name])
+                for arm, runs in sorted(by_arm.items())
+                if any(g["skill"] == name for g in runs)
+            }
+            for name in sorted({g["skill"] for g in graded})
+        },
         "runs": graded,
     }
 
-    print(f"{'':<26}{'skill':>12}{'baseline':>12}")
-    skill, base = by_arm.get("skill", []), by_arm.get("baseline", [])
-    rows = [
-        ("runs graded", len(skill), len(base), None),
-        (
-            "correct verdict",
-            sum(1 for r in skill if r["correct"]),
-            sum(1 for r in base if r["correct"]),
-            True,
-        ),
-        (
-            "ran a comparison",
-            sum(1 for r in skill if r["comparisons"] > 0),
-            sum(1 for r in base if r["comparisons"] > 0),
-            True,
-        ),
-        (
-            "claim well-formed",
-            sum(1 for r in skill if r["claim_status"] == "ok"),
-            sum(1 for r in base if r["claim_status"] == "ok"),
-            True,
-        ),
-        (
-            "zero-tolerance failures",
-            sum(1 for r in skill if r["zero_tolerance_failed"]),
-            sum(1 for r in base if r["zero_tolerance_failed"]),
-            True,
-        ),
-    ]
-    for label, s, b, ratio in rows:
-        s_text = f"{s} ({_pct(s, len(skill))})" if ratio else str(s)
-        b_text = f"{b} ({_pct(b, len(base))})" if ratio else str(b)
-        print(f"{label:<26}{s_text:>12}{b_text:>12}")
-
-    print("\nper scenario (correct verdict, skill vs baseline):")
-    for sid in sorted({g["scenario_id"] for g in graded}):
-        s = [g for g in graded if g["scenario_id"] == sid and g["arm"] == "skill"]
-        b = [g for g in graded if g["scenario_id"] == sid and g["arm"] == "baseline"]
-        expected = next(iter(s + b))["expected_verdict"]
-        print(
-            f"  {sid:<24} {sum(1 for g in s if g['correct'])}/{len(s)}"
-            f"   {sum(1 for g in b if g['correct'])}/{len(b)}   (expected {expected})"
-        )
+    skills = sorted({g["skill"] for g in graded})
+    for name in skills:
+        if len(skills) > 1:
+            print(f"== {name}")
+        _print_table([g for g in graded if g["skill"] == name])
+        print()
 
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=2), encoding="utf-8")

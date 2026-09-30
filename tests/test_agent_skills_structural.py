@@ -85,14 +85,14 @@ def _version_tuple(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in core.group(1).split("."))
 
 
-def test_candidate_skill_portfolio_is_exactly_the_admitted_set():
-    """ADR-058's 2026-08-20 portfolio-reset amendment left one internal
-    candidate; its 2026-09-30 amendment admitted a second
-    (`set-up-abi-compatibility-ci`) against all five admission criteria.
-    Any further skill needs the same recorded admission, not a drive-by
-    directory."""
+def test_the_published_portfolio_is_exactly_the_admitted_skills():
+    """ADR-058: every public skill passes the five-criteria admission bar in
+    an ADR amendment of its own. `check-abi-compatibility` survived the
+    2026-08-20 portfolio reset; `explain-abi-change` and
+    `set-up-abi-compatibility-ci` were admitted by 2026-09-30 amendments. A new directory here without that record fails."""
     assert [d.name for d in SKILL_DIRS] == [
         "check-abi-compatibility",
+        "explain-abi-change",
         "set-up-abi-compatibility-ci",
     ]
 

@@ -31,7 +31,8 @@
         },
         "skill": {
           "enum": [
-            "check-abi-compatibility"
+            "check-abi-compatibility",
+            "explain-abi-change"
           ]
         },
         "status": {
@@ -95,6 +96,18 @@
             "consumer_verdict": {
               "description": "Consumer-scoped scenarios only: the informational, purely additional consumer-scoped result the report carries in `consumer_scope.verdict` (workstream D-S1). Recorded because the interesting scenarios are exactly the ones where it diverges from `verdict`, and a grader that cannot see the distractor value cannot tell a correct, fully-reported answer from an agent that silently drops the consumer's own result.",
               "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
+            },
+            "cause": {
+              "enum": [
+                "symbol_removed",
+                "library_older_than_build",
+                "symbol_version_missing",
+                "layout_changed",
+                "stale_library_loaded",
+                "cxx_abi_mismatch",
+                "not_an_abi_problem"
+              ],
+              "description": "explain-abi-change scenarios only: the root cause the answer must name (claim `diagnosis.cause`). Identical to the claim schema's cause vocabulary; tests/test_skill_eval_diagnosis.py keeps the two, and the skill's own cause table, in step. `verdict` alongside it compares the library the program was built against with the library the loader actually used."
             },
             "uncertainty": {
               "enum": [

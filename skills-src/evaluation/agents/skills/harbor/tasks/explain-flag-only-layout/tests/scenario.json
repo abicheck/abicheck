@@ -1,0 +1,27 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [
+    "x86_64"
+  ],
+  "category": "B",
+  "digest": "sha256:8ba0b436f4cc080476ea08e2ce53291e498f4bb20e05211462d54415a83326b1",
+  "expected": {
+    "cause": "layout_changed",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-flag-only-layout",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We switched to the vendor's build of libwidget. They ship its sources and headers too, and those are byte-for-byte identical to our SDK's; the exported symbols match as well. Yet our app now prints the wrong area for a 3x4 widget; it should print 12. Run ./setup.sh once, then ./env/run.sh. What is actually different?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-flag-only-layout",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}

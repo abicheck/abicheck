@@ -671,6 +671,57 @@ class TestRecoveryRechecksEveryRejection:
         )
         assert record["recovered"] is True
 
+    def _no_tool_run(self, tmp_path: Path, output: str) -> Path:
+        out_dir = tmp_path / "sid" / "no_tool" / "0"
+        out_dir.mkdir(parents=True)
+        (out_dir / "final.md").write_text("done", encoding="utf-8")
+        events = (
+            {"type": "system", "subtype": "init", "skills": []},
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "t0",
+                            "name": "Bash",
+                            "input": {"command": "python -m abicheck --version"},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {"type": "tool_result", "tool_use_id": "t0", "content": output}
+                    ]
+                },
+            },
+        )
+        (out_dir / "events.jsonl").write_text(
+            "\n".join(json.dumps(e) for e in events), encoding="utf-8"
+        )
+        return out_dir
+
+    def test_a_no_tool_run_that_only_tried_the_tool_is_recovered(self, tmp_path):
+        # No recorder exists in this arm, so an unrecorded module entry is the
+        # expected shape, not a bypass.
+        out_dir = self._no_tool_run(
+            tmp_path, "/usr/bin/python: No module named abicheck"
+        )
+        record = runner._recovered_record(
+            out_dir, "sid", "no_tool", 0, SCENARIO_BREAKING, interposed=True
+        )
+        assert record["recovered"] is True
+
+    def test_a_no_tool_run_that_reached_the_tool_is_not_recovered(self, tmp_path):
+        out_dir = self._no_tool_run(tmp_path, "abicheck 0.6.0 (abicheck/abicheck)")
+        with pytest.raises(RuntimeError, match="no-tool arm reached abicheck"):
+            runner._recovered_record(
+                out_dir, "sid", "no_tool", 0, SCENARIO_BREAKING, interposed=True
+            )
+
 
 class TestModuleEntryDetection:
     """What counts as reaching the tool by a route the recorder does not wrap."""

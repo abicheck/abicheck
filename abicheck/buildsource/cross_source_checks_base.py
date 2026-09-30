@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from ..checker_policy import ChangeKind, Confidence
 from ..checker_types import Change
 from ..compare.edge_query import export_table_covered
+from ..elf_symbol_filter import is_linker_reserved_symbol
 from ..model import AbiSnapshot
 from ..model.export_index import (
     build_raw_export_index,
@@ -108,7 +109,22 @@ def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
     index = build_raw_export_index(snapshot)
     if index is None or not export_table_covered(snapshot, index.platform):
         return None
-    return set(default_versioned_names(index))
+    return _without_linker_reserved(set(default_versioned_names(index)), index.platform)
+
+
+def _without_linker_reserved(names: set[str], platform: str) -> set[str]:
+    """Drop ELF linker-reserved symbols (``__bss_start``/``_edata``/``_end``/...).
+
+    Every export-table-walking cross-source check reads the table through
+    :func:`_exported_symbol_names` or :func:`_linked_export_symbols`, so this is
+    the one place the class is excluded: a gold- or Bazel-linked library
+    exports these whatever its headers say, and ``exported_not_public`` used
+    to report each one as an undocumented export (a RISK on every such build).
+    The predicate is the shared ``elf_symbol_filter`` one, not a local list.
+    """
+    if platform != "elf":
+        return names
+    return {n for n in names if not is_linker_reserved_symbol(n)}
 
 
 def _linked_export_symbols(snapshot: AbiSnapshot) -> set[str] | None:
@@ -125,4 +141,4 @@ def _linked_export_symbols(snapshot: AbiSnapshot) -> set[str] | None:
     index = build_raw_export_index(snapshot)
     if index is None:
         return None
-    return set(linked_export_names(index))
+    return _without_linker_reserved(set(linked_export_names(index)), index.platform)

@@ -2,7 +2,7 @@
 #
 # The positive prompts are NOT authored here. ADR-058's "Product positioning"
 # section is their one canonical source; `tests/test_agent_skills_triggers.py`
-# extracts the eight verbatim strings from that section and fails if any entry
+# extracts the verbatim strings from that section and fails if any entry
 # below does not match one of them — so an ADR wording change that is not
 # mirrored here is a failing test, not silent staleness.
 #
@@ -10,7 +10,7 @@
 # expected-target-skill label per prompt, the discriminating keywords each
 # target skill's own `description` must carry, and the negative set.
 #
-# Two of the eight (OS/container upgrade, compiler/client profiles) are P1
+# Two of them (OS/container upgrade, compiler/client profiles) are P1
 # candidates ADR-058 deliberately did not admit. They are labelled
 # `expected_skill: null`: no P0 skill should exclusively claim them, and
 # forcing one to trigger on out-of-scope phrasing would itself be a false
@@ -77,6 +77,26 @@ positive:
       Compiler/client ABI compatibility across profiles is a P1 candidate
       (ADR-058). The Layer-B fragment `compiler-and-build-profiles.md` covers
       the domain knowledge, but no P0 skill's decision tree is this question.
+
+  - prompt: "My program fails with 'undefined symbol' after we updated a library. Why?"
+    # Added with the second skill (ADR-058 2026-09-30 amendment): a runtime
+    # failure in an existing environment, not a change under review.
+    expected_skill: explain-abi-change
+    description_keywords:
+      - undefined symbol
+      - updated
+
+  - prompt: "Our program crashes after a shared library was updated. What changed?"
+    expected_skill: explain-abi-change
+    description_keywords:
+      - crash
+      - shared-library
+
+  - prompt: "A shared library we depend on was bumped and its symbols look different. What changed, and does our program care?"
+    expected_skill: explain-abi-change
+    description_keywords:
+      - shared-library update
+      - does our program care
 
   - prompt: "Set up ABI compatibility checks for our library in GitHub Actions."
     expected_skill: set-up-abi-compatibility-ci

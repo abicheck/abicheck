@@ -1,0 +1,1 @@
+WIDGET_1.0 { global: widget_create; widget_resize; local: *; };

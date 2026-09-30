@@ -77,6 +77,7 @@ from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-export
 )
 from ....report.report_modes import normalize_report_mode
 from ..dump_debug_config import DumpDebugConfig, resolve_stored_bundle_lang
+from ..inline_evidence_routing import inline_dump_evidence_routing
 from ..options.evidence_roles import reject_unsupported_detached_debug
 from ..options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
@@ -413,10 +414,9 @@ def _embed_inline_source_side(
             err=True,
         )
         return input_path, kept_sources, kept_build_info
-    # Only the raw inputs are consumed by the inline dump; pack-shaped sources /
-    # build-info ride through to the out-of-band path.
-    dump_sources = sources if sources_raw else None
-    dump_build_info = build_info if build_info_raw else None
+    dump_sources, dump_build_info, kept_sources, kept_build_info = (
+        inline_dump_evidence_routing(sources, build_info, sources_raw, build_info_raw)
+    )
     out = out_dir / f"{label}.abi.json"
     # Merge the side's source-root .abicheck.yml `compile:` block into compare's
     # resolved context — exactly what `dump --sources` / the old deep-compare did —
