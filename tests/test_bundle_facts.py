@@ -1541,5 +1541,4 @@ class TestWriteBundleFactsOutCapturesARealSnapshot:
         # A bare ElfMetadata fallback would never populate .functions from
         # DWARF -- this is the whole point of routing through
         # service.resolve_input() instead of parse_elf_metadata() alone.
-        funcs = snap.declarations.functions
-        assert any(f.name == "add" for f in funcs), funcs
+        assert "add" in [f.name for f in snap.declarations.functions]
