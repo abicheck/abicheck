@@ -444,10 +444,9 @@ def test_large_graph_is_capped_with_a_disclosed_count() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
 @pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="builds ELF shared objects with -Wl,-soname and reads DT_NEEDED; gcc on macOS/Windows links Mach-O/PE",
+    not sys.platform.startswith("linux") or shutil.which("gcc") is None,
+    reason="needs gcc with an ELF linker (GNU ld: -Wl,--no-as-needed/-soname, DT_NEEDED)",
 )
 def test_real_shared_libraries_record_dt_needed_edges(tmp_path: Path) -> None:
     src = {

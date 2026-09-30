@@ -73,9 +73,9 @@ sys.path.insert(0, str(EVAL_DIR))
 
 from runners.claude_code import (  # noqa: E402
     _PYTHON_INTERPOSER,
-    ANSWER_CONTRACT,
     EXPLANATORY_FILES,
     SOURCE_SUFFIXES,
+    answer_contract,
     demo_app_sources,
     strip_comments,
 )
@@ -544,7 +544,9 @@ mcp_servers = []
 
 
 def _instruction_md(scenario: dict) -> str:
-    return scenario["prompt"].strip() + "\n" + ANSWER_CONTRACT + _FILE_ADDENDUM
+    return (
+        scenario["prompt"].strip() + "\n" + answer_contract(scenario) + _FILE_ADDENDUM
+    )
 
 
 def _readme(scenario_id: str, scenario: dict) -> str:

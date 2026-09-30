@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:751802c394f8579afe96cdb4dd82926403556480085c2335840d37784c9946dc",
+  "expected": {
+    "cause": "stale_library_loaded",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-stale-copy-loaded",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We installed the latest libwidget into env/opt/widget, but our app still fails to start. Run ./setup.sh once, then ./env/run.sh shows the error. Why is this happening and what should we change?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-stale-copy-loaded",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}

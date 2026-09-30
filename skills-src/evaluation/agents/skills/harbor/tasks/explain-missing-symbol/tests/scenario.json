@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:ab54df20bb66eab966c52d06f449794c47c93cd046d567956b15f175e3aad9cf",
+  "expected": {
+    "cause": "symbol_removed",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-missing-symbol",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "After we updated libwidget on our dev box, our app won't start any more. Run ./setup.sh once to build the environment, then ./env/run.sh shows the error. What is wrong, and how do we fix it?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-missing-symbol",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}

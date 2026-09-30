@@ -44,7 +44,7 @@ from . import claim as claim_mod, evidence as ev
 #: portfolio-reset amendment reduced the portfolio from four skills to one
 #: (`native-binary-compatibility-review` renamed to
 #: `check-abi-compatibility`); the other three are no longer published.
-KNOWN_SKILLS = ("check-abi-compatibility",)
+KNOWN_SKILLS = ("check-abi-compatibility", "explain-abi-change")
 
 
 @dataclass
@@ -818,11 +818,19 @@ def grade_run(run_dir: Path, scenario: dict, arm: str | None = None) -> dict:
 
     expected = (scenario.get("expected") or {}).get("verdict")
     claimed = parsed["verdict"] if parsed else None
+    # A runtime-failure diagnosis is right only when it names the right cause
+    # too: the same BREAKING comparison is the evidence for a removed symbol
+    # and for a stale copy winning the search, and those need opposite fixes.
+    expected_cause = (scenario.get("expected") or {}).get("cause")
+    claimed_cause = ((parsed or {}).get("diagnosis") or {}).get("cause")
+    cause_ok = expected_cause is None or claimed_cause == expected_cause
     return {
         "claim_status": status,
         "claimed_verdict": claimed,
         "expected_verdict": expected,
-        "correct": bool(parsed) and claimed == expected,
+        "claimed_cause": claimed_cause,
+        "expected_cause": expected_cause,
+        "correct": bool(parsed) and claimed == expected and cause_ok,
         "reported_verdict": ev.strongest_reported_verdict(run_dir, calls),
         "calls": len(calls),
         "comparisons": sum(1 for c in calls if ev.ran_to_a_verdict(c)),

@@ -7,6 +7,35 @@ generated: false
 
 # G41 — Baseline/candidate context parity and a declarative assurance contract
 
+## Status: WS-A first slice (2026-09-29)
+
+**Landed** (profile-identity prerequisite for Phase 1's selection key):
+
+- `build-output.json` `profile.build_system: {name, generator}` — parsed,
+  round-tripped, shape-validated, and cross-checked against a target's
+  `attribution_path` evidence (`buildsource/build_output_profile.py`).
+- Build-identity comparability axis (ADR-050 2026-09-29 amendment): build
+  system/generator and requested root targets read off persisted L3 evidence
+  (`model/extraction_contract.build_identity_of`); differing identities are
+  refused, one-sided identity is bounded. No snapshot schema change.
+
+**Remaining for WS-A** (not in that slice):
+
+1. Phase 1 proper: baseline generation through the same
+   `ResolvedExtractionContext` as the candidate; baseline-manifest selection
+   key `(target, profile, channel, depth, evidence-producer, fingerprint)`;
+   `publish-baseline.yml`/`update-main-baseline.yml`/`actions/baseline`
+   artifact naming widened to the profile id so a per-profile (e.g.
+   `clang18-cmake`) accepted baseline exists.
+2. Carry `profile.build_system` from `build-output.json` into run-plan cells
+   (`RunPlanCheck`) and the report, so a cell's findings are attributed to
+   its own profile (lab gap `producer-attribution-through-project-path`).
+3. Stamp build identity when evidence is used only for compile flags and not
+   embedded (today the axis sees only embedded L3 evidence), and surface it
+   in the report's effective-config digest.
+4. G34 consumer-compile leftovers (`toolchain_bindings.py` per-profile
+   consumer compile in the baseline job).
+
 ## Problem
 
 An external upstream-only review (base commit `327df7b5616bcfaea8c330aad418b796c17f3970`,

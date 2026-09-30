@@ -46,6 +46,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .build_evidence import BuildEvidence
+from .build_output_profile import BuildOutputProfile, build_system_issues
 from .inputs_pack import is_inputs_pack, load_inputs_manifest, read_source_facts
 from .link_attribution import attribute_sources_to_targets, normalize_source_path
 
@@ -84,55 +85,6 @@ def _opt_str(value: Any, default: str = "") -> str:
 def _str_list(d: dict[str, Any], key: str) -> list[str]:
     raw = d.get(key)
     return [str(x) for x in raw if x] if isinstance(raw, list) else []
-
-
-@dataclass
-class BuildOutputProfile:
-    """One build's OS/arch/compiler/config identity (ADR-047 §2).
-
-    Singular by design: a single build produces binaries for exactly one
-    profile, never a list — see ADR-047 §2's "one build-output.json = one
-    build profile, always" note. A project matrixing over profiles publishes
-    one uniquely-named ``abicheck-build-<profile.id>/`` artifact per profile
-    (S17), not one artifact holding several.
-    """
-
-    id: str = ""
-    os: str = ""
-    arch: str = ""
-    compiler: dict[str, str] = field(default_factory=dict)
-    cxx_abi: str = ""
-    stdlib: str = ""
-    config: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "os": self.os,
-            "arch": self.arch,
-            "compiler": dict(self.compiler),
-            "cxx_abi": self.cxx_abi,
-            "stdlib": self.stdlib,
-            "config": self.config,
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> BuildOutputProfile:
-        compiler_raw = d.get("compiler")
-        compiler = (
-            {str(k): str(v) for k, v in compiler_raw.items()}
-            if isinstance(compiler_raw, dict)
-            else {}
-        )
-        return cls(
-            id=_opt_str(d.get("id")),
-            os=_opt_str(d.get("os")),
-            arch=_opt_str(d.get("arch")),
-            compiler=compiler,
-            cxx_abi=_opt_str(d.get("cxx_abi")),
-            stdlib=_opt_str(d.get("stdlib")),
-            config=_opt_str(d.get("config")),
-        )
 
 
 @dataclass
@@ -771,6 +723,11 @@ def validate_build_output(root: Path | str) -> BuildOutputValidationReport:
 
     if not build_output.targets:
         report.warnings.append("build-output.json declares no targets[].")
+    report.errors.extend(
+        build_system_issues(
+            root, manifest_path, build_output, resolve_under_root=_resolve_under_root
+        )
+    )
 
     for target in build_output.targets:
         if not target.id:

@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
 # own scope; see skills-src/evaluation/agents/skills/harbor/CLAUDE.md.
-ARG ABICHECK_REF=d6233cb6a4a07eb680bee13e33f5a8bffb63b301
-# ABICHECK_RUNTIME_DIGEST=74b71b9faef13a5e602d57d0fdc991a0d8ef1019939b5ccdf88662949fdb49f2
+ARG ABICHECK_REF=90ece09e30e7f55476ea6267dbeeb5b649fd2a2a
+# ABICHECK_RUNTIME_DIGEST=0ec51cbf1770c7b126a2222428c8324671468983580971565b8222f1ff584d96
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
 # `--check` (scripts/gen_harbor_tasks.py) actually compares to detect real
 # staleness, independent of whether ABICHECK_REF above is still a

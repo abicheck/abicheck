@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:34b075046aea153131b6632f9be8af888d71f1010fdd4d5631866e5fe7b198e8",
+  "expected": {
+    "cause": "not_an_abi_problem",
+    "verdict": "COMPATIBLE"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-additions-only",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Our dev environment picked up a newer libwidget than the one our app was built against, and its exported symbols look different. The app still seems to run. Run ./setup.sh once, then ./env/run.sh. What actually changed, and do we need to rebuild or change anything?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-additions-only",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}
