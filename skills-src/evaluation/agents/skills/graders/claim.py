@@ -117,7 +117,46 @@ def decision_inconsistency(claim: dict) -> str | None:
     return None
 
 
-_FENCE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL)
+#: A fence line: up to three spaces, a run of three or more backticks or
+#: tildes, then an optional info string (CommonMark's fenced code block).
+_FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)[^`]*$")
+
+
+def fenced_blocks(text: str) -> list[tuple[str, str]]:
+    """Every fenced code block as `(info word, body)`, paired line by line.
+
+    Fences are matched as CommonMark does: a block opens on a fence line and
+    closes on the next line made of the same fence character, at least as
+    long, with no info string. A single regular expression over the whole
+    text used to pair a block's *closing* fence with the next block's
+    *opening* one, so a `bash` block ahead of the JSON envelope swallowed the
+    envelope's opening fence and a well-formed answer graded as `absent`. An
+    unclosed block runs to the end of the text, as CommonMark specifies.
+    """
+    blocks: list[tuple[str, str]] = []
+    fence: str | None = None
+    info = ""
+    body: list[str] = []
+    for line in text.splitlines():
+        match = _FENCE_LINE.match(line)
+        if fence is None:
+            if match:
+                fence, info, body = match.group(1), match.group(2).lower(), []
+            continue
+        if (
+            match
+            and match.group(1)[0] == fence[0]
+            and len(match.group(1)) >= len(fence)
+            and not match.group(2)
+            and line.strip() == match.group(1)
+        ):
+            blocks.append((info, "\n".join(body)))
+            fence = None
+            continue
+        body.append(line)
+    if fence is not None:
+        blocks.append((info, "\n".join(body)))
+    return blocks
 
 
 def _outside(value: object, vocab: frozenset[str]) -> bool:
@@ -157,9 +196,11 @@ def rank(verdict: str | None) -> int | None:
 def _candidate_blocks(text: str) -> list[Any]:
     """Every fenced block that parses as a JSON object carrying a verdict."""
     found: list[Any] = []
-    for match in _FENCE.finditer(text):
+    for info, body in fenced_blocks(text):
+        if info not in ("", "json"):
+            continue
         try:
-            parsed = json.loads(match.group(1))
+            parsed = json.loads(body)
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, dict) and "verdict" in parsed:
