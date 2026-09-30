@@ -480,7 +480,10 @@ class TestTypedApiParity:
     def test_a_value_carrying_define_selects_the_right_declaration(
         self, tmp_path: Path
     ) -> None:
-        names = {f.name for f in self._dump(tmp_path, defines=("MODE=2",)).functions}
+        names = {
+            f.name
+            for f in self._dump(tmp_path, defines=("MODE=2",)).declarations.functions
+        }
         assert "guarded_mode_two" in names
         assert "guarded_mode_other" not in names
 
@@ -506,6 +509,6 @@ class TestTypedApiParity:
         so, include = _build(cli_root)
         out = cli_root / "cli.json"
         _dump(cli_root, so, include, "-DFEATURE_API", "-DMODE=2", out=out)
-        assert {f.name for f in api.functions if f.name.startswith("guarded_")} == (
-            _guarded_names(out)
-        )
+        assert {
+            f.name for f in api.declarations.functions if f.name.startswith("guarded_")
+        } == (_guarded_names(out))
