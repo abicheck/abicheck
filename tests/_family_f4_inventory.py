@@ -42,6 +42,8 @@ import ast
 import re
 from pathlib import Path
 
+from _mutmut_names import canonical_def_name
+
 REPO = Path(__file__).resolve().parents[1]
 PKG = REPO / "abicheck"
 
@@ -122,11 +124,13 @@ class _Visitor(ast.NodeVisitor):
         self.generic_visit(node)
         self.stack.pop()
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._scoped(node, node.name)
+    def _visit_def(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        name = canonical_def_name(node.name)
+        if name is not None:  # skip mutmut's per-mutant copies
+            self._scoped(node, name)
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._scoped(node, node.name)
+    visit_FunctionDef = _visit_def
+    visit_AsyncFunctionDef = _visit_def
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._scoped(node, node.name)

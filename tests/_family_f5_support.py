@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import ast
 import contextvars
+import copy
 import functools
 import importlib
 import json
@@ -51,6 +52,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _mutmut_names import canonical_def_name, is_mutmut_artifact
 
 REPO = Path(__file__).resolve().parent.parent
 PKG = REPO / "abicheck"
@@ -97,6 +99,12 @@ class _Scanner(ast.NodeVisitor):
         return ".".join([*self.stack, name])
 
     def _visit_def(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        canonical = canonical_def_name(node.name)
+        if canonical is None:  # a mutmut per-mutant copy, not a source site
+            return
+        if canonical != node.name:
+            node = copy.copy(node)
+            node.name = canonical
         for deco in node.decorator_list:
             target = deco.func if isinstance(deco, ast.Call) else deco
             callee = _last(ast.unparse(target))
@@ -154,6 +162,8 @@ def _module_memo_sites(module: str, tree: ast.Module) -> list[Site]:
         ):
             name, value = node.target.id, node.value
         else:
+            continue
+        if is_mutmut_artifact(name):
             continue
         named = "cache" in name.lower() or "memo" in name.lower()
         callee = _last(ast.unparse(value.func)) if isinstance(value, ast.Call) else ""
