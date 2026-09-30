@@ -120,6 +120,13 @@ class BuildOutputProfile:
         )
 
 
+def build_system_cell_fields(profile: BuildOutputProfile) -> tuple[str, str]:
+    """A run-plan cell's ``(build_system, build_generator)`` (WS-A): the
+    profile's declared identity, or ``("", "")`` when unrecorded."""
+    bs = profile.build_system
+    return (bs.name, bs.generator) if bs else ("", "")
+
+
 def build_system_issues(
     root: Path,
     manifest_path: Path,

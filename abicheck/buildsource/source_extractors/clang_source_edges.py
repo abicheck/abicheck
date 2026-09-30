@@ -17,8 +17,7 @@
 AI-readiness line-count cap).
 
 Reuses the existing pure parsers from ``call_graph.py``/``type_graph.py`` (the
-same ones the live ``ClangCallGraphExtractor``/``ClangTypeGraphExtractor``
-feed) on an AST dict the caller already parsed — never a second ``clang``
+same ones ``l5_ast_pass`` applies to its live dump) on an AST dict the caller already parsed — never a second ``clang``
 invocation ("Collect relationships during the existing compilation AST
 traversal", not another frontend pass).
 """

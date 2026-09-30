@@ -30,15 +30,15 @@ Architecture mirrors ``type_graph.py``/``call_graph.py`` deliberately:
 
 - :func:`parse_clang_ast_templates` is a **pure function** over a
   ``clang -Xclang -ast-dump=json`` tree — unit-tested without a compiler.
-- :class:`ClangTemplateGraphExtractor` is the thin, side-effecting wrapper
-  that shells out to ``clang`` for a translation unit. Only exercised on the
-  ``integration`` lane; a missing compiler degrades gracefully.
+- :func:`merge_template_instantiations` folds every TU's records; the live
+  clang run is ``l5_ast_pass`` (integration-only; a missing compiler degrades
+  gracefully).
 - :func:`~abicheck.buildsource.template_graph_fold.augment_graph_with_templates`
   folds the resulting facts into a
   :class:`~abicheck.model.source_graph.SourceGraphSummary` -- split out into
   its own sibling module, ``template_graph_fold.py`` (this module's own
-  2000-line hard cap), the same way ``ClangTemplateGraphExtractor`` and the
-  TEMPLATE_USES_DECL argument-indexing helpers already were; see that
+  2000-line hard cap), the same way the TEMPLATE_USES_DECL
+  argument-indexing helpers already were; see that
   module's own docstring.
 
 This is a **third**, independent AST pass over the same TU (alongside the
@@ -1727,18 +1727,34 @@ def _merge_template_instantiations(
     )
 
 
-# ── Back-compat re-export shim (lazy, to avoid an import cycle) ────────────
-# ClangTemplateGraphExtractor moved to template_graph_extractor.py (this
-# module's own 2000-line hard cap) -- see that module's docstring. A static
-# `from .template_graph_extractor import ClangTemplateGraphExtractor` here
-# would form a real cycle (that module imports names from this one at its
-# own module level); this lazy `__getattr__` (PEP 562) preserves the
-# historical `from .template_graph import ClangTemplateGraphExtractor` path
-# without one.
-def __getattr__(name: str) -> Any:
-    if name == "ClangTemplateGraphExtractor":
-        import importlib
+def merge_template_instantiations(
+    per_unit: Iterable[Iterable[TemplateInstantiation]],
+) -> list[TemplateInstantiation]:
+    """Fold every TU's instantiations into one list, in TU order.
 
-        module = importlib.import_module(".template_graph_extractor", __package__)
-        return module.ClangTemplateGraphExtractor
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    Dedup by ``(kind, template_qname, label)`` -- two TUs instantiating the
+    identical template with the identical arguments (a shared public header)
+    must not double the graph's edge count. A later TU seeing the same
+    instantiation is merged in (:func:`_merge_template_instantiations`), not
+    dropped: one TU may resolve an argument's ``target_qname`` or reach more
+    of the instantiated members than another. A function-kind instantiation
+    is keyed by its own mangled name instead of its label, since two
+    overloads of one function template instantiated with identical template
+    arguments share a label (arity is not a template argument); a class
+    template cannot be overloaded, so it keeps the plain key.
+    """
+    merged: list[TemplateInstantiation] = []
+    seen: dict[tuple[str, str, str], int] = {}
+    for instantiations in per_unit:
+        for inst in instantiations:
+            if inst.kind == _FUNCTION_KIND and inst.emitted_symbols:
+                key = (inst.kind, inst.template_qname, inst.emitted_symbols[0])
+            else:
+                key = (inst.kind, inst.template_qname, inst.label)
+            idx = seen.get(key)
+            if idx is None:
+                seen[key] = len(merged)
+                merged.append(inst)
+            else:
+                merged[idx] = _merge_template_instantiations(merged[idx], inst)
+    return merged

@@ -741,7 +741,24 @@ def main(argv: list[str] | None = None) -> int:
         "produced this manifest, recorded in generator.action_ref. Omit to "
         "leave unset.",
     )
+    parser.add_argument(
+        "--extraction-context",
+        default="",
+        help=(
+            "G41 Phase 1: JSON object naming the compile context every "
+            "library in this set was dumped under (baseline_extraction_"
+            "context.BaselineExtractionContext.to_dict()), recorded verbatim "
+            "as the manifest's extraction_context. Omit to leave it unset "
+            "(unrecorded -- never read as the default context)."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    extraction_context = None
+    if args.extraction_context:
+        extraction_context = json.loads(args.extraction_context)
+        if not isinstance(extraction_context, dict):
+            raise SystemExit("--extraction-context must be a JSON object.")
 
     baseline_generation: int | None = None
     if args.baseline_generation:
@@ -767,6 +784,8 @@ def main(argv: list[str] | None = None) -> int:
         generator_git_sha=args.generator_git_sha,
         generator_action_ref=args.generator_action_ref,
     )
+    if extraction_context is not None:
+        manifest["extraction_context"] = extraction_context
     args.manifest_out.write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )

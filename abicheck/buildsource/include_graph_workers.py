@@ -469,8 +469,9 @@ def _run_probe_in_worker(
     ``contextvars`` do not cross a ``ThreadPoolExecutor`` boundary, so
     without ``with_deadline_ts`` a worker would see no active deadline and
     ``run_bounded`` would silently fall back to the fixed local timeout
-    regardless of ``--budget`` -- the same wiring ``source_replay``'s and
-    ``call_graph``'s own ``_deadline_bound_worker`` helpers exist for.
+    regardless of ``--budget`` -- the same wiring ``source_replay``'s
+    ``_deadline_bound_worker`` and ``parallel_probe.run_parallel_probes``
+    exist for.
     """
     with deadline.with_deadline_ts(deadline_ts):
         return _run_probe(unit, aggregate_deadline, per_unit_timeout_s, slots)

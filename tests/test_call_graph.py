@@ -29,7 +29,6 @@ from abicheck.buildsource.call_graph import (
     RESOLUTION_OVERAPPROX,
     RESOLUTION_UNKNOWN,
     CallEdge,
-    ClangCallGraphExtractor,
     _call_graph_jobs,
     augment_graph_with_calls,
     parse_clang_ast_calls,
@@ -1019,20 +1018,41 @@ def test_no_call_edges_means_no_call_finding() -> None:
     )
 
 
-# ── live extractor degrades gracefully ──────────────────────────────────────
+# ── the shared L5 AST pass degrades gracefully (l5_ast_pass) ────────────────
+
+
+def _call_pass():
+    from abicheck.buildsource.l5_ast_pass import L5_AST_PASSES
+
+    return [p for p in L5_AST_PASSES if p.name == "call_graph"]
+
+
+def _run_call_pass(build: BuildEvidence):
+    """Run only the call-graph family of the shared L5 AST pass."""
+    from abicheck.buildsource.l5_ast_pass import run_ast_passes
+
+    return run_ast_passes(build, "clang++", passes=_call_pass())["call_graph"]
+
+
+def _one_unit() -> BuildEvidence:
+    return BuildEvidence(compile_units=[CompileUnit(id="cu://x", source="x.cpp")])
 
 
 def test_extractor_missing_clang_returns_empty() -> None:
-    ext = ClangCallGraphExtractor(clang_bin="definitely-not-a-real-clang-xyz")
-    assert ext.available() is False
-    assert ext.extract_from_args(["foo.cpp"]) == []
-    assert (
-        ext.extract_from_build(
-            BuildEvidence(compile_units=[CompileUnit(id="cu://x", source="x.cpp")])
-        )
-        == []
-    )
-    assert ext.diagnostics  # a reason was recorded
+    from abicheck.buildsource.inline_graph_fold import fold_call_graph
+    from abicheck.buildsource.l5_ast_pass import run_l5_ast_pass
+
+    build = _one_unit()
+    run = run_l5_ast_pass(build, "definitely-not-a-real-clang-xyz")
+    assert run.clang_available is False
+    assert run.outcomes == {}
+    graph = SourceGraphSummary()
+    rows: list = []
+    fold_call_graph(graph, build, run, rows)
+    assert not any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
+    # a reason was recorded
+    assert [r.status for r in rows] == ["failed"]
+    assert "not found" in rows[0].detail
 
 
 class _FakeProc:
@@ -1042,24 +1062,17 @@ class _FakeProc:
         self.returncode = returncode
 
 
-def _patch_clang(
-    monkeypatch, *, available: bool = True, proc=None, raises=None
-) -> None:
-    import abicheck.buildsource.call_graph as cg
-
-    monkeypatch.setattr(
-        cg.shutil, "which", lambda _b: "/usr/bin/clang++" if available else None
-    )
+def _patch_clang(monkeypatch, *, proc=None, raises=None) -> None:
 
     def fake_run(*_a, **_k):
         if raises is not None:
             raise raises
         return proc
 
-    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
 
 
-def test_extract_from_args_parses_mocked_clang(monkeypatch) -> None:
+def test_run_ast_passes_parses_mocked_clang(monkeypatch) -> None:
     import json as _json
 
     ast = {
@@ -1071,71 +1084,53 @@ def test_extract_from_args_parses_mocked_clang(monkeypatch) -> None:
         ],
     }
     _patch_clang(monkeypatch, proc=_FakeProc(_json.dumps(ast)))
-    edges = ClangCallGraphExtractor().extract_from_args(["x.cpp"])
-    assert edges == [CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)]
+    outcome = _run_call_pass(_one_unit())
+    assert outcome.result == [
+        CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    ]
 
 
-def test_extract_from_args_reconstructs_safe_parse_command(
-    monkeypatch, tmp_path
-) -> None:
-    import json as _json
+def test_safe_clang_args_drop_plugin_flags_and_keep_parse_flags() -> None:
+    # Formerly pinned on the deleted raw-argv builder; the surviving argv
+    # builder replays only normalized fields, so a plugin-loading flag that
+    # reached `abi_relevant_flags` must still be dropped.
+    from abicheck.buildsource.call_graph import _safe_clang_args_from_compile_unit
 
-    import abicheck.buildsource.call_graph as cg
-
-    ast = {"kind": "TranslationUnitDecl", "inner": []}
-    captured: dict[str, list[str]] = {}
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
-
-    def fake_run(cmd, **_kwargs):
-        captured["cmd"] = cmd
-        return _FakeProc(_json.dumps(ast))
-
-    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
-    src = tmp_path / "victim.cpp"
-    src.write_text("int main() { return 0; }", encoding="utf-8")
-
-    ClangCallGraphExtractor().extract_from_args(
-        [
-            "/usr/bin/g++",
+    cu = CompileUnit(
+        id="cu://v",
+        source="victim.cpp",
+        standard="c++20",
+        defines={"FEATURE": "1"},
+        include_paths=["include"],
+        abi_relevant_flags=[
             "-Xclang",
             "-load",
             "-Xclang",
             "./evil.so",
             "-fplugin=./evil.so",
-            "-I",
-            "include",
-            "-D",
-            "FEATURE=1",
-            "-std=c++20",
-            str(src),
         ],
-        cwd=str(tmp_path),
     )
-
-    cmd = captured["cmd"]
+    cmd = _safe_clang_args_from_compile_unit(cu)
     assert "-fplugin=./evil.so" not in cmd
     assert "-load" not in cmd
     assert "./evil.so" not in cmd
-    assert "-I" in cmd and str(tmp_path / "include") in cmd
+    assert "-I" in cmd and "include" in cmd
     assert "-DFEATURE=1" in cmd
     assert "-std=c++20" in cmd
-    assert cmd[-2:] == ["--", str(src)]
+    assert cmd[-2:] == ["--", "victim.cpp"]
 
 
-def test_extract_from_build_ignores_compile_unit_raw_argv(monkeypatch) -> None:
+def test_run_ast_passes_ignores_compile_unit_raw_argv(monkeypatch) -> None:
     import json as _json
-
-    import abicheck.buildsource.call_graph as cg
 
     ast = {"kind": "TranslationUnitDecl", "inner": []}
     captured: dict[str, list[str]] = {}
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
 
     def fake_run(cmd, **_kwargs):
         captured["cmd"] = cmd
         return _FakeProc(_json.dumps(ast))
 
-    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(
@@ -1151,7 +1146,7 @@ def test_extract_from_build_ignores_compile_unit_raw_argv(monkeypatch) -> None:
         ]
     )
 
-    ClangCallGraphExtractor().extract_from_build(build)
+    _run_call_pass(build)
 
     cmd = captured["cmd"]
     assert "-fplugin=./evil.so" not in cmd
@@ -1163,7 +1158,7 @@ def test_extract_from_build_ignores_compile_unit_raw_argv(monkeypatch) -> None:
     assert cmd[-2:] == ["--", "victim.cpp"]
 
 
-def test_extract_from_build_unredacts_home_placeholder_in_source_and_cwd(
+def test_run_ast_passes_unredacts_home_placeholder_in_source_and_cwd(
     monkeypatch,
 ) -> None:
     """A normalized ``BuildEvidenceCompileUnit`` always carries its home-dir
@@ -1179,8 +1174,6 @@ def test_extract_from_build_unredacts_home_placeholder_in_source_and_cwd(
     import json as _json
     import os
 
-    import abicheck.buildsource.call_graph as cg
-
     # Assert against the real, current home (like test_unredact_home_expands_tilde
     # in test_source_extractors.py) rather than a monkeypatched fake one: HOME is
     # not consulted by os.path.expanduser on Windows (it reads USERPROFILE/
@@ -1188,14 +1181,13 @@ def test_extract_from_build_unredacts_home_placeholder_in_source_and_cwd(
     home = os.path.expanduser("~")
     ast = {"kind": "TranslationUnitDecl", "inner": []}
     captured: dict[str, object] = {}
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["cwd"] = kwargs.get("cwd")
         return _FakeProc(_json.dumps(ast))
 
-    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(
@@ -1210,21 +1202,21 @@ def test_extract_from_build_unredacts_home_placeholder_in_source_and_cwd(
         ]
     )
 
-    ClangCallGraphExtractor().extract_from_build(build)
+    _run_call_pass(build)
 
     cmd = captured["cmd"]
     assert cmd[-2:] == ["--", f"{home}/AppData/Local/Temp/t.cpp"]
     assert captured["cwd"] == f"{home}/AppData/Local/Temp"
 
 
-def test_extract_from_args_empty_stdout(monkeypatch) -> None:
+def test_run_ast_passes_empty_stdout(monkeypatch) -> None:
     _patch_clang(monkeypatch, proc=_FakeProc("", stderr="boom"))
-    ext = ClangCallGraphExtractor()
-    assert ext.extract_from_args(["x.cpp"]) == []
-    assert any("no AST" in d for d in ext.diagnostics)
+    outcome = _run_call_pass(_one_unit())
+    assert outcome.result == []
+    assert any("no AST" in d for d in outcome.diagnostics)
 
 
-def test_extract_from_args_nonzero_exit_records_diagnostic_but_salvages_edges(
+def test_run_ast_passes_nonzero_exit_records_diagnostic_but_salvages_edges(
     monkeypatch,
 ) -> None:
     # Ninth Codex review: clang can exit non-zero (real compile errors in the
@@ -1247,37 +1239,38 @@ def test_extract_from_args_nonzero_exit_records_diagnostic_but_salvages_edges(
         monkeypatch,
         proc=_FakeProc(_json.dumps(ast), stderr="error: bad thing", returncode=1),
     )
-    ext = ClangCallGraphExtractor()
-    edges = ext.extract_from_args(["x.cpp"])
-    assert edges == [CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)]
-    assert any("exited 1" in d for d in ext.diagnostics)
+    outcome = _run_call_pass(_one_unit())
+    assert outcome.result == [
+        CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    ]
+    assert any("exited 1" in d for d in outcome.diagnostics)
 
 
-def test_extract_from_args_zero_exit_records_no_diagnostic(monkeypatch) -> None:
+def test_run_ast_passes_zero_exit_records_no_diagnostic(monkeypatch) -> None:
     import json as _json
 
     ast = {"kind": "TranslationUnitDecl", "inner": []}
     _patch_clang(monkeypatch, proc=_FakeProc(_json.dumps(ast), returncode=0))
-    ext = ClangCallGraphExtractor()
-    assert ext.extract_from_args(["x.cpp"]) == []
-    assert ext.diagnostics == []
+    outcome = _run_call_pass(_one_unit())
+    assert outcome.result == []
+    assert outcome.diagnostics == []
 
 
-def test_extract_from_args_bad_json(monkeypatch) -> None:
+def test_run_ast_passes_bad_json(monkeypatch) -> None:
     _patch_clang(monkeypatch, proc=_FakeProc("{not json"))
-    ext = ClangCallGraphExtractor()
-    assert ext.extract_from_args(["x.cpp"]) == []
-    assert any("could not parse" in d for d in ext.diagnostics)
+    outcome = _run_call_pass(_one_unit())
+    assert outcome.result == []
+    assert any("could not parse" in d for d in outcome.diagnostics)
 
 
-def test_extract_from_args_subprocess_error(monkeypatch) -> None:
+def test_run_ast_passes_subprocess_error(monkeypatch) -> None:
     _patch_clang(monkeypatch, raises=OSError("no exec"))
-    ext = ClangCallGraphExtractor()
-    assert ext.extract_from_args(["x.cpp"]) == []
-    assert any("invocation failed" in d for d in ext.diagnostics)
+    outcome = _run_call_pass(_one_unit())
+    assert outcome.result == []
+    assert any("invocation failed" in d for d in outcome.diagnostics)
 
 
-def test_extract_from_build_dedupes_across_units(monkeypatch) -> None:
+def test_run_ast_passes_dedupes_across_units(monkeypatch) -> None:
     import json as _json
 
     ast = {
@@ -1296,8 +1289,21 @@ def test_extract_from_build_dedupes_across_units(monkeypatch) -> None:
             CompileUnit(id="cu://nosrc", source=""),  # skipped (no source)
         ]
     )
-    edges = ClangCallGraphExtractor().extract_from_build(build)
-    assert edges == [CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)]
+    outcome = _run_call_pass(build)
+    assert outcome.result == [
+        CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    ]
+
+
+def test_merge_call_edges_dedupes_first_seen_by_caller_callee_kind() -> None:
+    from abicheck.buildsource.call_graph import merge_call_edges
+
+    a = CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    a_again = CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_OVERAPPROX)
+    b = CallEdge("_Zc", "_Zcallee", CALL_KIND_VIRTUAL, RESOLUTION_OVERAPPROX)
+    c = CallEdge("_Zd", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    assert merge_call_edges([[a, b], [a_again, c], []]) == [a, b, c]
+    assert merge_call_edges([]) == []
 
 
 def test_call_graph_jobs_env_override_is_bounded(monkeypatch) -> None:
@@ -1357,23 +1363,35 @@ def test_call_graph_mem_cap_shares_l4_budget(monkeypatch) -> None:
     assert cg._call_graph_mem_cap() is None
 
 
-def test_extract_from_build_parallelizes_and_dedupes(monkeypatch) -> None:
-    import abicheck.buildsource.call_graph as cg
+def _patch_dump(monkeypatch, fake) -> None:
+    import abicheck.buildsource.l5_ast_pass as l5
 
-    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "2")
-    # This test exercises parallel extraction, not the independently tested
-    # host-memory clamp. Pin the cap so low-RAM CI/dev hosts remain deterministic.
-    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: 2)
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    monkeypatch.setattr(l5, "run_clang_ast_dump", fake)
+
+
+_EMPTY_TU = {"kind": "TranslationUnitDecl", "inner": []}
+
+
+def test_run_ast_passes_parallelizes_and_dedupes(monkeypatch) -> None:
+    import abicheck.buildsource.call_graph as cg
+    import abicheck.buildsource.l5_ast_pass as l5
+
+    # Force a real pool (l5_ast_pass imports _call_graph_jobs by name).
+    monkeypatch.setattr(
+        "abicheck.buildsource.l5_ast_pass._call_graph_jobs", lambda _n: 2
+    )
     seen_sources: list[str] = []
 
-    def fake_extract(self, argv, cwd=None, *, diagnostics=None):
-        del self, cwd, diagnostics
+    def fake_dump(_clang, argv, *, cwd, diagnostics):
+        del cwd, diagnostics
         seen_sources.append(argv[-1])
-        return [CallEdge("caller", "callee")]
+        return _EMPTY_TU
 
-    monkeypatch.setattr(
-        cg.ClangCallGraphExtractor, "_extract_from_safe_args", fake_extract
+    _patch_dump(monkeypatch, fake_dump)
+    call_pass = l5.AstPass(
+        "call_graph",
+        lambda _ast, _cu: [CallEdge("caller", "callee")],
+        cg.merge_call_edges,
     )
     build = BuildEvidence(
         compile_units=[
@@ -1383,36 +1401,33 @@ def test_extract_from_build_parallelizes_and_dedupes(monkeypatch) -> None:
         ]
     )
 
-    ext = ClangCallGraphExtractor()
-    edges = ext.extract_from_build(build)
+    outcome = l5.run_ast_passes(build, "clang++", passes=[call_pass])["call_graph"]
 
-    assert ext.last_jobs == 2
-    assert ext.last_elapsed_s >= 0.0
+    assert outcome.last_jobs == 2
+    assert outcome.last_elapsed_s >= 0.0
     assert sorted(seen_sources) == ["a.cpp", "b.cpp", "c.cpp"]
-    assert edges == [CallEdge("caller", "callee")]
+    assert outcome.result == [CallEdge("caller", "callee")]
 
 
-def test_extract_from_build_propagates_deadline_into_pool_workers(monkeypatch) -> None:
+def test_run_ast_passes_propagates_deadline_into_pool_workers(monkeypatch) -> None:
     """Codex review (PR #591): contextvars don't cross a ThreadPoolExecutor
     boundary, so a worker submitted from inside deadline.deadline_scope()
     used to see no active deadline at all — each clang subprocess call
     inside it would run to its full fixed 120s regardless of --budget."""
-    import abicheck.buildsource.call_graph as cg
     from abicheck import deadline
 
-    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "2")
-    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: 2)
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    # Force a real pool (l5_ast_pass imports _call_graph_jobs by name).
+    monkeypatch.setattr(
+        "abicheck.buildsource.l5_ast_pass._call_graph_jobs", lambda _n: 2
+    )
     seen_remaining: list[float | None] = []
 
-    def fake_extract(self, argv, cwd=None, *, diagnostics=None):
-        del self, cwd, diagnostics
+    def fake_dump(_clang, _argv, *, cwd, diagnostics):
+        del cwd, diagnostics
         seen_remaining.append(deadline.remaining())
-        return []
+        return None
 
-    monkeypatch.setattr(
-        cg.ClangCallGraphExtractor, "_extract_from_safe_args", fake_extract
-    )
+    _patch_dump(monkeypatch, fake_dump)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://a", source="a.cpp"),
@@ -1420,9 +1435,8 @@ def test_extract_from_build_propagates_deadline_into_pool_workers(monkeypatch) -
             CompileUnit(id="cu://c", source="c.cpp"),
         ]
     )
-    ext = ClangCallGraphExtractor()
     with deadline.deadline_scope(30.0):
-        ext.extract_from_build(build)
+        _run_call_pass(build)
     assert len(seen_remaining) == 3
     assert all(r is not None for r in seen_remaining), (
         "pool worker saw no active deadline (remaining()=None) — the scan "
@@ -1431,47 +1445,41 @@ def test_extract_from_build_propagates_deadline_into_pool_workers(monkeypatch) -
     assert all(0 < r <= 30.0 for r in seen_remaining)
 
 
-def test_extract_from_build_diagnostics_deterministic_under_real_thread_pool(
+def test_run_ast_passes_diagnostics_deterministic_under_real_thread_pool(
     monkeypatch,
 ) -> None:
-    # Codex review: extract_from_build's parallel workers used to append
-    # straight to the shared self.diagnostics list, recording entries in
-    # subprocess-completion order rather than input order -- nondeterministic
-    # across runs of identical, pinned inputs. Each unit's diagnostics are
-    # now collected into a fresh per-call list and only folded into
-    # self.diagnostics on the single driving thread, in pool.map's own
-    # input-ordered result iteration.
+    # Codex review: the parallel workers used to append straight to a shared
+    # diagnostics list, recording entries in subprocess-completion order
+    # rather than input order -- nondeterministic across runs of identical,
+    # pinned inputs. Each unit's diagnostics are collected per call and
+    # folded on the single driving thread, in pool.map's input order.
     import time
 
-    import abicheck.buildsource.call_graph as cg
-
-    monkeypatch.setenv("ABICHECK_CALL_GRAPH_JOBS", "4")
-    monkeypatch.setattr(cg, "_call_graph_mem_cap", lambda: 4)
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+    # Force a real pool (l5_ast_pass imports _call_graph_jobs by name).
+    monkeypatch.setattr(
+        "abicheck.buildsource.l5_ast_pass._call_graph_jobs", lambda _n: 4
+    )
     n = 8
 
-    def fake_extract(self, argv, cwd=None, *, diagnostics=None):
-        del self, cwd
+    def fake_dump(_clang, argv, *, cwd, diagnostics):
+        del cwd
         # Reverse-staggered sleep: the LAST-dispatched unit tends to finish
         # FIRST -- the opposite of input order.
         idx = int(argv[-1].removesuffix(".cpp"))
         time.sleep((n - idx) * 0.01)
-        if diagnostics is not None:
-            diagnostics.append(f"failed for cu {idx}")
-        return []
+        diagnostics.append(f"failed for cu {idx}")
+        return None
 
-    monkeypatch.setattr(
-        cg.ClangCallGraphExtractor, "_extract_from_safe_args", fake_extract
-    )
+    _patch_dump(monkeypatch, fake_dump)
     build = BuildEvidence(
         compile_units=[CompileUnit(id=f"cu://{i}", source=f"{i}.cpp") for i in range(n)]
     )
 
     first_diagnostics = set()
     for _ in range(5):
-        ext = ClangCallGraphExtractor()
-        ext.extract_from_build(build)
-        first_diagnostics.add(tuple(ext.diagnostics))
+        outcome = _run_call_pass(build)
+        assert outcome.last_jobs == 4
+        first_diagnostics.add(tuple(outcome.diagnostics))
 
     assert len(first_diagnostics) == 1, (
         f"diagnostics order varied across identical runs: {first_diagnostics}"
@@ -1481,60 +1489,48 @@ def test_extract_from_build_diagnostics_deterministic_under_real_thread_pool(
     )
 
 
-def test_extract_from_args_deadline_exceeded_degrades_to_diagnostic(
+def test_run_ast_passes_deadline_exceeded_degrades_to_diagnostic(
     monkeypatch,
 ) -> None:
     # Codex review (PR #591): this pass is advisory (ADR-028 D3) — a
     # DeadlineExceeded from the now-bounded clang subprocess must degrade to
     # the same diagnostic+[] contract as any other probe failure, not
     # propagate and abort the whole L5 call-graph fold.
-    import abicheck.buildsource.call_graph as cg
     from abicheck import deadline
 
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
-
-    def _raise(*_a, **_k):
-        raise deadline.DeadlineExceeded(-1.0)
-
-    monkeypatch.setattr(cg.deadline, "run_bounded", _raise)
-    ext = ClangCallGraphExtractor()
-    edges = ext.extract_from_args(["x.cpp"])
-    assert edges == []
-    assert any("clang invocation failed" in d for d in ext.diagnostics)
+    _patch_clang(monkeypatch, raises=deadline.DeadlineExceeded(-1.0))
+    outcome = _run_call_pass(_one_unit())
+    assert outcome.result == []
+    assert any("clang invocation failed" in d for d in outcome.diagnostics)
 
 
-def test_extract_from_args_bounded_by_local_cap_not_full_scan_budget(
+def test_run_ast_passes_bounded_by_local_cap_not_full_scan_budget(
     monkeypatch,
 ) -> None:
     """Codex review (PR #591), round 8: deadline.run_bounded() honors an
     active outer deadline verbatim (not min(timeout, left)), so a bare
     timeout=120 on this L5 clang call alone did nothing once a scan
     --budget was active: the call stayed bound by the FULL remaining scan
-    budget instead of this pass's own 120s local cap. A hung per-TU clang
-    call under a generous --budget could therefore eat the whole remaining
-    scan instead of degrading after 120s. Assert the ContextVar deadline
-    observed inside run_bounded is capped near the local cap, not the much
-    larger outer scan budget."""
-    import abicheck.buildsource.call_graph as cg
+    budget instead of this pass's own 120s local cap. Assert the ContextVar
+    deadline observed inside run_bounded is capped near the local cap, not
+    the much larger outer scan budget."""
     from abicheck import deadline
 
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
     seen_remaining: list[float | None] = []
 
     def fake_run_bounded(*_a, **_k):
         seen_remaining.append(deadline.remaining())
         raise deadline.DeadlineExceeded(-1.0)
 
-    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run_bounded)
-    ext = ClangCallGraphExtractor()
+    monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run_bounded)
     with deadline.deadline_scope(1800.0):  # a generous 30-minute --budget
-        ext.extract_from_args(["x.cpp"])
+        _run_call_pass(_one_unit())
 
     assert seen_remaining
     assert seen_remaining[0] is not None and 0 < seen_remaining[0] <= 120.5
 
 
-def test_extract_from_args_rechecks_deadline_before_parsing_ast(monkeypatch) -> None:
+def test_run_ast_passes_rechecks_deadline_before_parsing_ast(monkeypatch) -> None:
     """Codex review (PR #591): the same post-subprocess gap as the L2/L4
     clang paths — clang can exit successfully right as the budget expires,
     but json.loads()+parse_clang_ast_calls() used to run unbounded. Must
@@ -1542,29 +1538,25 @@ def test_extract_from_args_rechecks_deadline_before_parsing_ast(monkeypatch) -> 
     import json as _json
     import time
 
-    import abicheck.buildsource.call_graph as cg
     from abicheck import deadline
-
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
-    ast = {"kind": "TranslationUnitDecl", "inner": []}
 
     def fake_run(*_a, **_k):
         # Simulate the budget running out while clang was still parsing: by
         # the time it exits successfully, the deadline has already passed.
         time.sleep(0.05)
-        return _FakeProc(_json.dumps(ast))
+        return _FakeProc(_json.dumps(_EMPTY_TU))
 
-    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
-    ext = ClangCallGraphExtractor()
+    monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
     with deadline.deadline_scope(0.03):
-        edges = ext.extract_from_args(["x.cpp"])
-    assert edges == []
+        outcome = _run_call_pass(_one_unit())
+    assert outcome.result == []
     assert any(
-        "scan deadline exceeded before parsing clang AST" in d for d in ext.diagnostics
+        "scan deadline exceeded before parsing clang AST" in d
+        for d in outcome.diagnostics
     )
 
 
-def test_extract_from_args_rechecks_deadline_before_walking_ast(monkeypatch) -> None:
+def test_run_ast_passes_rechecks_deadline_before_walking_ast(monkeypatch) -> None:
     """Codex review (PR #591, round 4): json.loads() on a huge L5 call-graph
     AST can itself consume the rest of the budget -- the existing pre-load
     deadline.check() doesn't catch that; must re-check again after the load,
@@ -1572,17 +1564,13 @@ def test_extract_from_args_rechecks_deadline_before_walking_ast(monkeypatch) -> 
     import json as _json
     import time
 
-    import abicheck.buildsource.call_graph as cg
     from abicheck import deadline
     from abicheck.buildsource import clang_ast_run
 
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
-    ast = {"kind": "TranslationUnitDecl", "inner": []}
-
     def fake_run(*_a, **_k):
-        return _FakeProc(_json.dumps(ast))
+        return _FakeProc(_json.dumps(_EMPTY_TU))
 
-    monkeypatch.setattr(cg.deadline, "run_bounded", fake_run)
+    monkeypatch.setattr("abicheck.deadline.run_bounded", fake_run)
     real_loads = clang_ast_run.json.loads
 
     def _slow_loads(text: str) -> object:
@@ -1590,58 +1578,32 @@ def test_extract_from_args_rechecks_deadline_before_walking_ast(monkeypatch) -> 
         return real_loads(text)
 
     monkeypatch.setattr(clang_ast_run.json, "loads", _slow_loads)
-    ext = ClangCallGraphExtractor()
     with deadline.deadline_scope(0.03):
-        edges = ext.extract_from_args(["x.cpp"])
-    assert edges == []
+        outcome = _run_call_pass(_one_unit())
+    assert outcome.result == []
     assert any(
-        "scan deadline exceeded before walking clang AST" in d for d in ext.diagnostics
+        "scan deadline exceeded before walking clang AST" in d
+        for d in outcome.diagnostics
     )
 
 
 # ── collect: call-graph folds automatically (inline_graph_fold.fold_call_graph) ──
 #
 # `collect`'s call/type/include-graph folding is the exact same
-# `inline_graph_fold.fold_call_graph`/`fold_type_graph`/`fold_include_graph`
-# the inline `dump --sources` path uses (no more separate
-# `cli_buildsource_helpers._collect_call_graph` near-duplicate) — the
-# pass-ran/degraded/empty-build/missing-clang scenarios for that shared
-# function are exercised in `tests/test_inline_changed_paths.py`
-# (`test_inline_graph_folds_call_edges_for_l4_l5_mode`,
-# `test_inline_graph_no_call_edges_when_clang_absent`, etc.). Only the
+# `l5_ast_pass.fold_semantic_graphs` the inline `dump --sources` path uses
+# — the pass-ran/degraded/empty-build/missing-clang scenarios for that shared
+# function are exercised in `tests/test_inline_changed_paths.py`. Only the
 # `collect`-specific end-to-end wiring is tested here: no `--call-graph`
 # flag exists any more — `--source-abi` + `--source-graph summary` together
 # fold call edges in automatically, mirroring `dump --sources`.
 
 
-class _FakeExtractor:
-    """Stand-in for ClangCallGraphExtractor with a controllable result."""
+def _patch_l5_pass(monkeypatch, edges: list[CallEdge]) -> None:
+    """Make the shared L5 AST pass "run" and yield *edges* for the call graph
+    (every other family empty), without a real clang."""
+    from tests._fake_l5_ast_pass import install_fake_l5
 
-    def __init__(
-        self,
-        *,
-        available: bool,
-        edges: list[CallEdge] | None = None,
-        clang_bin: str = "clang++",
-    ) -> None:
-        self.clang_bin = clang_bin
-        self._available = available
-        self._edges = edges or []
-        self.diagnostics: list[str] = []
-        self.last_jobs = 1
-        self.last_elapsed_s = 0.0
-
-    def available(self) -> bool:
-        return self._available
-
-    def extract_from_build(self, _build: BuildEvidence) -> list[CallEdge]:
-        return self._edges
-
-
-def _patch_extractor(monkeypatch, fake: _FakeExtractor) -> None:
-    import abicheck.buildsource.call_graph as cg
-
-    monkeypatch.setattr(cg, "ClangCallGraphExtractor", lambda **_k: fake)
+    install_fake_l5(monkeypatch, results={"call_graph": lambda _t: edges})
 
 
 def _write_call_graph_source_tree(tmp_path):
@@ -1679,9 +1641,7 @@ def test_collect_evidence_call_graph_automatic_with_source_abi_and_graph(
     from abicheck.serialization import load_snapshot
 
     tree = _write_call_graph_source_tree(tmp_path)
-    _patch_extractor(
-        monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")])
-    )
+    _patch_l5_pass(monkeypatch, [CallEdge("_Za", "_Zb")])
 
     out = tmp_path / "out.json"
     res = CliRunner().invoke(
@@ -1708,9 +1668,7 @@ def test_collect_evidence_source_graph_alone_does_not_fold_call_graph(
     from abicheck.buildsource.inline import collect_inline_pack
 
     tree = _write_call_graph_source_tree(tmp_path)
-    _patch_extractor(
-        monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")])
-    )
+    _patch_l5_pass(monkeypatch, [CallEdge("_Za", "_Zb")])
 
     pack = collect_inline_pack(sources=tree, build_info=None, layers=("L3", "L5"))
     assert pack is not None

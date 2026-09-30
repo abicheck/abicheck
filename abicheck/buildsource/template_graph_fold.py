@@ -25,9 +25,8 @@ describes as architecturally distinct from parsing: ``template_graph.py``
 keeps :func:`~abicheck.buildsource.template_graph.parse_clang_ast_templates`
 (a pure function over a ``clang -ast-dump=json`` tree, producing
 :class:`~abicheck.buildsource.template_graph.TemplateInstantiation` records)
-and :class:`~abicheck.buildsource.template_graph_extractor.
-ClangTemplateGraphExtractor` (the live-clang wrapper, already its own
-sibling module); this module owns the second half --
+and :func:`~abicheck.buildsource.template_graph.merge_template_instantiations`
+(the cross-TU merge ``l5_ast_pass`` applies); this module owns the second half --
 :func:`augment_graph_with_templates`, which folds those already-parsed
 records into a :class:`~abicheck.model.source_graph.SourceGraphSummary` --
 mirroring the identical parse-vs-fold split ``type_graph.py``/

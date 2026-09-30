@@ -187,6 +187,17 @@ inputs:
       generator-git-sha. Omit to leave it unset.
     required: false
     default: ''
+  extraction-context:
+    description: >
+      G41 Phase 1: JSON object naming the compile context this set's
+      libraries were dumped under (the profile's consumer_compile or compile
+      overlay, as resolved by
+      abicheck.buildsource.baseline_extraction_context). Recorded verbatim
+      as manifest.json's extraction_context. The compile context itself
+      reaches dump through build-config; this input only records it. Omit
+      to leave it unrecorded.
+    required: false
+    default: ''
   previous-manifest:
     description: >
       Path to a previous manifest.json to diff against for the
@@ -335,6 +346,7 @@ runs:
         INPUT_GENERATOR_GIT_SHA: ${{ inputs.generator-git-sha }}
         INPUT_GENERATOR_ACTION_REF: ${{ inputs.generator-action-ref }}
         INPUT_PREVIOUS_MANIFEST: ${{ inputs.previous-manifest }}
+        INPUT_EXTRACTION_CONTEXT: ${{ inputs.extraction-context }}
         INPUT_VALIDATION: ${{ inputs.validation }}
         INPUT_SNAPSHOT_COMPRESSION: ${{ inputs.snapshot-compression }}
         ACTION_PATH: ${{ github.action_path }}
