@@ -34,10 +34,10 @@ from __future__ import annotations
 
 from .checker_types import Change
 from .compare.fact_comparison import compare_facts
+from .compare.fact_gate import both_facts_present
 from .detector_registry import registry
 from .diff_helpers import (
     build_type_map as _build_type_map,
-    fact_known_qualified,
     fact_same_producer_qualified,
     lookup_matched_type as _lookup_matched_type,
     make_change,
@@ -49,7 +49,7 @@ from .diff_types_surface import (
     _directly_referenced,
     _is_abi_surface_type,
 )
-from .fact_provenance import enum_fact_key, field_fact_key, type_fact_key
+from .fact_provenance import field_fact_key
 from .model import (
     AbiSnapshot,
     TypeField,
@@ -392,6 +392,10 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
             f_new = new_fields.get(fname)
             if f_new is None or f_old.default is None:
                 continue
+            # 5B: availability is the status; the same-producer check below
+            # stays, answering representation comparability, not availability.
+            if not both_facts_present(f_old, f_new, "default", f"{name}::{fname}"):
+                continue
             fact_key_args = (
                 old,
                 new,
@@ -477,7 +481,7 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     #582).
 
     Header-tier only, gated per-field on
-    :func:`fact_provenance.both_known_backed_fact_qualified` like the other four
+    :func:`compare.fact_gate.both_facts_present` (ADR-063 5B: the per-declaration ``FactStatus``) like the other four
     deprecated detectors (both backends populate ``TypeField.deprecated``
     today, G31 Phase C, with directly cross-comparable values; per-field
     gating is what correctly supports a ``--ast-frontend hybrid`` snapshot,
@@ -533,16 +537,7 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             f_new = new_fields.get(fname)
             if f_new is None:
                 continue
-            if not fact_known_qualified(
-                old,
-                new,
-                old_map,
-                new_map,
-                name,
-                field_fact_key(type_map_key(t_old), fname, "deprecated"),
-                field_fact_key(type_map_key(t_new), fname, "deprecated"),
-                field_fact_key(name, fname, "deprecated"),
-            ):
+            if not both_facts_present(f_old, f_new, "deprecated", f"{name}::{fname}"):
                 continue
             if f_old.deprecated is None and f_new.deprecated is not None:
                 changes.append(
@@ -576,7 +571,7 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     Header-tier only — see ``FIELD_DEFAULT_INITIALIZER_REMOVED``'s docstring
     above / ``Function.deprecated``'s in model.py for why this gates
-    per-type on :func:`fact_provenance.both_known_backed_fact_qualified` rather than a
+    per-type on :func:`compare.fact_gate.both_facts_present` (ADR-063 5B: the per-declaration ``FactStatus``) rather than a
     per-pair None check or plain ``_both_header_aware`` (both backends
     populate ``RecordType.deprecated`` today, G31 Phase C, with directly
     cross-comparable values; per-type gating is what correctly supports a
@@ -604,18 +599,9 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         t_new = _lookup_matched_type(old_map, new_map, t_old)
         if t_new is None:
             continue
-        # Bare for Change.symbol; fact_known_qualified handles the key below.
+        # Bare for Change.symbol; the status gate below needs no key.
         name = t_old.name
-        if not fact_known_qualified(
-            old,
-            new,
-            old_map,
-            new_map,
-            name,
-            type_fact_key(type_map_key(t_old), "deprecated"),
-            type_fact_key(type_map_key(t_new), "deprecated"),
-            type_fact_key(name, "deprecated"),
-        ):
+        if not both_facts_present(t_old, t_new, "deprecated", name):
             continue
         if t_old.deprecated is None and t_new.deprecated is not None:
             changes.append(
@@ -646,7 +632,7 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect an enum gaining or losing `[[deprecated]]` (header-tier only).
 
-    Gates per-enum on :func:`fact_provenance.both_known_backed_fact_qualified` — see
+    Gates per-enum on :func:`compare.fact_gate.both_facts_present` (ADR-063 5B: the per-declaration ``FactStatus``) — see
     ``TYPE_DEPRECATED_ADDED``'s docstring above (both backends populate
     ``EnumType.deprecated`` today, G31 Phase C, with directly cross-
     comparable values; per-enum gating supports ``--ast-frontend hybrid``).
@@ -669,16 +655,7 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         e_new = _lookup_matched_type(old_map, new_map, e_old)
         if e_new is None:
             continue
-        if not fact_known_qualified(
-            old,
-            new,
-            old_map,
-            new_map,
-            name,
-            enum_fact_key(type_map_key(e_old), "deprecated"),
-            enum_fact_key(type_map_key(e_new), "deprecated"),
-            enum_fact_key(name, "deprecated"),
-        ):
+        if not both_facts_present(e_old, e_new, "deprecated", name):
             continue
         if e_old.deprecated is None and e_new.deprecated is not None:
             changes.append(

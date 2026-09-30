@@ -334,9 +334,13 @@ class TestFuncDeprecatedChanged:
     def test_skipped_when_not_header_aware(self):
         f_old = _pub_func("legacy_api", "_Z10legacy_apiv", deprecated="msg")
         f_new = _pub_func("legacy_api", "_Z10legacy_apiv", deprecated=None)
+        # ADR-063 5B: the detector reads the fact's status, which a stored
+        # non-header document derives on load -- so go through the load.
+        from tests._legacy_snapshot_doc import load_as_legacy
+
         r = compare(
-            _snap(functions=[f_old], from_headers=False),
-            _snap(functions=[f_new], from_headers=False),
+            load_as_legacy(_snap(functions=[f_old], from_headers=False)),
+            load_as_legacy(_snap(functions=[f_new], from_headers=False)),
         )
         assert ChangeKind.FUNC_DEPRECATED_REMOVED not in _kinds(r)
 
@@ -567,8 +571,14 @@ class TestDeprecatedCrossProducerNowComparable:
         # confirmed backend behind this value.
         f_old = _pub_func("old_api", "_Z7old_apiv", deprecated="use new_api")
         f_new = _pub_func("old_api", "_Z7old_apiv", deprecated=None)
-        unknown_producer_new = _snap(functions=[f_new], ast_producer="some_future_tool")
-        r = compare(_snap(functions=[f_old]), unknown_producer_new)
+        # ADR-063 5B: an unrecognized producer is corrected on load
+        # (storage.fact_backfill), so the scenario goes through the load.
+        from tests._legacy_snapshot_doc import load_as_legacy
+
+        unknown_producer_new = load_as_legacy(
+            _snap(functions=[f_new], ast_producer="some_future_tool")
+        )
+        r = compare(load_as_legacy(_snap(functions=[f_old])), unknown_producer_new)
         assert ChangeKind.FUNC_DEPRECATED_REMOVED not in _kinds(r)
 
 

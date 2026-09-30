@@ -183,11 +183,12 @@ concepts:
       (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list) -- not the
       implementation-consolidation removal gate, which stays open for the
       vtable/TYPE_VTABLE_CHANGED cluster (see the 2026-09-05 re-assessment
-      correction below). Residual,
-      separately tracked: seven case-(a) fields (default, the five
-      deprecated/is_scoped surfaces) left on the existing fact_provenance
-      mechanism after their own fourth-through-seventh-slice investigation
-      found no safe conversion without a legacy-hybrid load-path fix.
+      correction below). The seven case-(a)
+      fields (default, the five deprecated/is_scoped surfaces) left on
+      fact_provenance by the fourth-through-seventh slices moved onto
+      FactStatus on 2026-09-30 (compare/fact_gate.both_facts_present) once
+      T9's load-path fix closed the legacy-hybrid blocker; TypeField.default
+      keeps its same-producer check for value comparability only.
       **2026-09-05 re-assessment correction:** the vtable/
       TYPE_VTABLE_CHANGED "final closure" is an *investigated decline* of a
       behavioral change, which does not close this concept's implementation
@@ -278,11 +279,10 @@ concepts:
           already treats any non-PRESENT status as incomplete via
           _fact_str_list_confirmed. vptr_offset_bits_fact is deliberately
           left untouched (see compare/vtable_evidence.py's own "NOT
-          consulted here" note). What remains open: the seven case-(a)
-          fields still on the fact_provenance mechanism (a separate,
-          blocked item -- no safe conversion without a legacy-hybrid
-          load-path fix, not a decline), and the shared declined-comparison
-          accounting this item's text also calls for.
+          consulted here" note). The seven case-(a) fields formerly on
+          the fact_provenance mechanism moved onto FactStatus (2026-09-30,
+          compare/fact_gate.py), and the shared declined-comparison
+          accounting landed with T9.
         tracked_as: >-
           duplication-and-convergence-assessment.md Phase 6 item 4 / track
           T9; the full three-round reasoning lives once, canonically, in

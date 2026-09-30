@@ -22,6 +22,7 @@ from collections.abc import Collection, Mapping
 from .checker_types import Change
 from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.enum_sentinel import is_sentinel_enum_member
+from .compare.fact_gate import both_facts_present
 from .compare.typedefs import (
     diff_typedefs,
     is_version_stamped_typedef as is_version_stamped_typedef,
@@ -31,10 +32,8 @@ from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name
 from .diff_helpers import (
     build_type_map as _build_type_map,
-    fact_known_qualified,
     lookup_matched_type as _lookup_matched_type,
     make_change,
-    type_map_key,
     typedef_diff_maps as _typedef_diff_maps,
 )
 from .diff_symbols import (
@@ -84,7 +83,6 @@ from .elf_symbol_filter import (
 )
 from .fact_provenance import (
     both_known_backed_fact,
-    enum_fact_key,
     type_fact_key,
 )
 from .model import (
@@ -1168,16 +1166,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         # Per-enum key, not a whole-snapshot gate: supports --ast-frontend
         # hybrid (G28 Phase 3); both backends populate is_scoped (G31 Phase C).
-        if fact_known_qualified(
-            old,
-            new,
-            old_map,
-            new_map,
-            name,
-            enum_fact_key(type_map_key(e_old), "is_scoped"),
-            enum_fact_key(type_map_key(e_new), "is_scoped"),
-            enum_fact_key(name, "is_scoped"),
-        ):
+        if both_facts_present(e_old, e_new, "is_scoped", name):
             _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}

@@ -50,7 +50,10 @@ def _snap(functions: list[Function] | None = None, **kwargs: object) -> AbiSnaps
 
 
 def _func(name: str, mangled: str, **kwargs: object) -> Function:
-    defaults: dict[str, object] = dict(return_type="int", visibility=Visibility.PUBLIC)
+    # deprecated stated, as a header dump states it (ADR-063 5B).
+    defaults: dict[str, object] = dict(
+        return_type="int", visibility=Visibility.PUBLIC, deprecated=None
+    )
     defaults.update(kwargs)
     return Function(name=name, mangled=mangled, **defaults)  # type: ignore[arg-type]
 

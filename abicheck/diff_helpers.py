@@ -45,7 +45,6 @@ from .checker_types import Change
 from .compare.dedup_key import hashable_value
 from .compare.qualified_name_normalization import strip_inline_abi_namespaces
 from .fact_provenance import (
-    both_known_backed_fact_qualified,
     same_producer_backed_fact_qualified,
 )
 from .model import AbiSnapshot, debug_info_present
@@ -458,34 +457,6 @@ def lookup_matched_type(own: TypeMap[Q], other: TypeMap[Q], t: Q) -> Q | None:
         ) == strip_inline_abi_namespaces(candidate_key):
             return candidate
     return None
-
-
-def fact_known_qualified(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-    old_map: TypeMap[Any],
-    new_map: TypeMap[Any],
-    name: str,
-    old_qualified_key: str,
-    new_qualified_key: str,
-    bare_key: str,
-) -> bool:
-    """:func:`fact_provenance.both_known_backed_fact_qualified`, deriving its
-    ambiguity flags from *old_map*/*new_map* (``TypeMap.bare_name_is_unambiguous``)
-    — same bare-name-retry shape as :func:`lookup_matched_type` above, applied
-    to a fact-provenance dict key instead of an old/new type match. Takes
-    *old_qualified_key*/*new_qualified_key* separately (not derived from
-    *name* alone) since a matched pair's two sides can carry different
-    qualified identities."""
-    return both_known_backed_fact_qualified(
-        old,
-        new,
-        old_qualified_key,
-        new_qualified_key,
-        bare_key,
-        old_bare_unambiguous=old_map.bare_name_is_unambiguous(name),
-        new_bare_unambiguous=new_map.bare_name_is_unambiguous(name),
-    )
 
 
 def fact_same_producer_qualified(

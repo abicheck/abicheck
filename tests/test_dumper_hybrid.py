@@ -1503,37 +1503,6 @@ class TestNamespaceQualifiedMerging:
         # single bare key below.
         assert type_fact_key("Foo", "deprecated") not in merged.fact_provenance
 
-    def test_legacy_bare_keyed_hybrid_baseline_still_detects_transition(self):
-        """End-to-end regression for the exact scenario Codex flagged: a
-        `--ast-frontend hybrid` baseline persisted BEFORE the provenance-key
-        qualification fix has real provenance recorded under the former
-        bare key. Comparing it against a freshly-merged snapshot must still
-        detect a genuine deprecated transition, not silently suppress it."""
-        from abicheck.checker import ChangeKind, compare
-
-        old_foo = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
-        # Simulates a snapshot persisted by the pre-fix merge code: real
-        # castxml-sourced provenance, but under the bare key.
-        old_legacy_hybrid = replace(
-            merge_snapshots(
-                _snap(types=[old_foo], ast_producer="castxml"),
-                _snap(ast_producer="clang"),
-            ),
-            fact_provenance={type_fact_key("Foo", "deprecated"): "castxml"},
-        )
-
-        new_foo = RecordType(
-            name="Foo", qualified_name="ns::Foo", kind="class", deprecated="use Bar"
-        )
-        new_merged = merge_snapshots(
-            _snap(types=[new_foo], ast_producer="castxml"),
-            _snap(ast_producer="clang"),
-        )
-
-        result = compare(old_legacy_hybrid, new_merged)
-        assert ChangeKind.TYPE_DEPRECATED_ADDED in {c.kind for c in result.changes}
-
-
 class TestTypedefsQualifiedMerge:
     """Codex review, fresh evidence (schema v25 follow-up): unlike bare
     ``typedefs`` (deliberately left verbatim from castxml_snap, same as

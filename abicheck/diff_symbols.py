@@ -30,6 +30,7 @@ from .compare.elf_only_demangle import (
     prewarm_elf_only_demangling,
 )
 from .compare.fact_comparison import compare_facts
+from .compare.fact_gate import both_facts_present
 from .compare.functions import function_identity_index
 from .compare.surface_reconcile import (
     RECONCILED_FUNCTIONS,
@@ -117,7 +118,6 @@ from .fact_provenance import (
     both_known_backed_fact,
     fact_producer,
     func_fact_key,
-    var_fact_key,
 )
 from .finding_identity import SymbolIdentityIndex
 from .finding_identity_ctor_dtor import (
@@ -1706,32 +1706,20 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a function gaining or losing `[[deprecated]]`.
 
-    Header-tier only, gated at the snapshot level like ``param_defaults``:
-    ``Function.deprecated`` is ``None`` both for "not deprecated" and "the
-    dumper doesn't capture this" (see its docstring in model.py), so a
-    per-pair None check would silently miss every real transition (one side
-    of a real add/remove is always None by construction). Gates per-pair on
-    :func:`fact_provenance.both_known_backed_fact` (not the narrower
-    ``both_castxml_backed_fact``): both castxml and the direct-clang backend
-    populate ``Function.deprecated`` today (G31 Phase C — see
-    ``dumper_clang._clang_deprecated_message``), and the two backends'
-    values are directly cross-comparable (a plain message string, not a
-    backend-specific encoding), so a clang-vs-clang or clang-vs-castxml
-    pair is just as comparable as a castxml-vs-castxml one. A per-pair
-    check (rather than a whole-snapshot gate) also correctly handles a
-    ``--ast-frontend hybrid`` snapshot (G28 Phase 3), where this fact's
-    producer is recorded per *declaration*, not uniformly across the
-    whole snapshot. Looks each side up under ITS OWN ``mangled`` (PR #761
-    finding 3): a reconciled ctor/dtor pair's provenance lives under two
-    different keys.
+    ``Function.deprecated`` is ``None`` both for "not deprecated" and for
+    "never extracted", so the pair is compared only when both sides state
+    ``deprecated_fact`` ``PRESENT`` (:func:`compare.fact_gate.
+    both_facts_present`, ADR-063 5B). That status replaces the old
+    per-declaration ``fact_provenance`` lookup: a fresh castxml/clang/hybrid
+    dump states it per declaration, and a stored document is corrected on
+    load (``storage.fact_backfill``). Both backends' values are plain message
+    strings, so a cross-backend pair is comparable.
     """
     changes: list[Change] = []
     old_map, new_map = _reconciled_function_surfaces(old, new)
 
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        if fact_producer(old, func_fact_key(f_old.mangled, "deprecated")) is None:
-            continue
-        if fact_producer(new, func_fact_key(f_new.mangled, "deprecated")) is None:
+        if not both_facts_present(f_old, f_new, "deprecated", mangled):
             continue
         if f_old.deprecated is None and f_new.deprecated is not None:
             changes.append(
@@ -1815,7 +1803,7 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
 def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect a variable gaining or losing `[[deprecated]]` (header-tier only).
 
-    Gates per-pair on :func:`fact_provenance.both_known_backed_fact` — see
+    Gates per-pair on :func:`compare.fact_gate.both_facts_present` — see
     ``FUNC_DEPRECATED_ADDED``'s docstring above (both castxml and the
     direct-clang backend populate ``Variable.deprecated`` today, G31 Phase C,
     with directly cross-comparable values; per-declaration gating is what
@@ -1828,7 +1816,7 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         v_new = new_map.get(mangled)
         if v_new is None:
             continue
-        if not both_known_backed_fact(old, new, var_fact_key(mangled, "deprecated")):
+        if not both_facts_present(v_old, v_new, "deprecated", mangled):
             continue
         if v_old.deprecated is None and v_new.deprecated is not None:
             changes.append(
