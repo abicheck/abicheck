@@ -274,7 +274,7 @@ def release_assurance_diagnostic(
             f"Contributes {floor}, below the compatibility axis's own exit "
             f"{base_exit}, which stands"
         )
-    return f"{what} {effect} (ADR-071 release analysis-assurance axis). {mitigation}"
+    return f"{what} {effect}. {mitigation}"
 
 
 def _grouped_members(members: tuple[MemberAssurance, ...]) -> str:

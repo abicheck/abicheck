@@ -439,8 +439,8 @@ def _decompress_gzip(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
                         f"{source}: decompressed gzip payload exceeds the "
                         f"{max_decoded_bytes} byte safety limit — refusing "
                         "to continue decompressing (possible decompression "
-                        "bomb, or a genuinely oversized snapshot; see "
-                        "ADR-059 for how to raise the limit)."
+                        "bomb, or a genuinely oversized snapshot; set "
+                        "ABICHECK_SNAPSHOT_MAX_DECODED_BYTES to raise the limit)."
                     )
     except SnapshotError:
         raise
@@ -473,8 +473,8 @@ def _decompress_zstd(data: bytes, *, max_decoded_bytes: int, source: str) -> byt
                         f"{source}: decompressed zstd payload exceeds the "
                         f"{max_decoded_bytes} byte safety limit — refusing "
                         "to continue decompressing (possible decompression "
-                        "bomb, or a genuinely oversized snapshot; see "
-                        "ADR-059 for how to raise the limit)."
+                        "bomb, or a genuinely oversized snapshot; set "
+                        "ABICHECK_SNAPSHOT_MAX_DECODED_BYTES to raise the limit)."
                     )
     except SnapshotError:
         raise

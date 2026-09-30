@@ -817,7 +817,7 @@ def evaluate_deprecation_compliance(
                         "history, but the policy requires at least "
                         f"{min_releases} release(s) of deprecation -- the "
                         "entity may have been deprecated before this "
-                        "history's earliest supplied snapshot (ADR-066 D2: "
+                        "history's earliest supplied snapshot ("
                         "an unobserved deprecation is 'unknown', not a "
                         "proven violation)."
                     )

@@ -12,7 +12,7 @@ that application's own (informational) verdict.
 
 > **History note:** this used to be a standalone `abicheck appcompat`
 > command. The pre-1.0 CLI reset folded it into `compare --used-by`
-> (ADR-043). An interim design (2026, since reverted — see workstream D-S1
+>. An interim design (2026, since reverted — see workstream D-S1
 > in `docs/contribute/plans/vision-api-abi-evolution.md`) had the worst
 > app-scoped result *replace* the primary verdict/exit code, with the
 > full-library result kept only as context; that design is gone precisely
@@ -113,7 +113,7 @@ itself is always the full-library one. (Exact rendering depends on
 ## What's no longer directly available
 
 Two pieces of the old standalone `appcompat` command don't have a CLI
-replacement after the ADR-043 reset — both were narrower diagnostic modes
+replacement after the pre-1.0 CLI reset — both were narrower diagnostic modes
 that didn't fit the unified `compare` surface:
 
 - **Weak mode** (`appcompat APP --check-against LIB`, checking symbol
@@ -243,7 +243,7 @@ All other changes are classified as **irrelevant** — the library changed, but 
 ## Why does this consumer depend on the changed declaration?
 
 The relevance test above tells you *whether* a change touches the app's
-imports. When the old library side also carries a **source graph** (ADR-057),
+imports. When the old library side also carries a **source graph**,
 abicheck can additionally explain *why* — the chain of calls inside the old
 library that connects a symbol the app actually imports to the internal
 declaration that changed.

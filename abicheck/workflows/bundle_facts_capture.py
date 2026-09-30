@@ -155,7 +155,7 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
         raise ValueError(
             f"bundle facts mark {len(facts.degraded_members)} member(s) degraded "
             f"({', '.join(sorted(facts.degraded_members))}): an ELF-only stand-in "
-            "is not bundle evidence (ADR-065 D8); resolve the scope with "
+            "is not bundle evidence; resolve the scope with "
             "workflows.release_scope.restrict_bundle_facts first"
         )
     metadata = {}

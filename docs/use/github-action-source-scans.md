@@ -40,7 +40,7 @@ below). `new-library-set` (the multi-library audit mode) and `risk-rules`
 (the risk-driven `auto` depth escalation) are retired outright with no
 replacement input — see the depth table below for `risk-rules`'
 replacement, and compare each library individually for `new-library-set`
-until ADR-065 S3's component inventories land. `build-target` is retired
+until package component inventories land. `build-target` is retired
 too, on every mode: `mode: scan`'s own retirement of it went first, and
 `mode: dump`'s `build-target` input (the only other mode that ever forwarded
 it) was retired outright next, once that removal resolved the routing
@@ -52,8 +52,7 @@ compare`'s two-sided shape.
 
 ### `mode: scan` is retired — use `mode: compare`
 
-[ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-retired `scan` as a second analysis product. The CLI command was removed
+0.6 retired `scan` as a second analysis product. The CLI command was removed
 outright first (no deprecation window, D8); its Action-input-lifecycle
 amendment then closed the last gap: **`mode: scan` itself is now retired on
 the composite Action too.** Setting `mode: scan` on a step fails it
@@ -177,14 +176,14 @@ checked against the pin, while a live one is.
 |-------|-----|
 | Cheap build-flag drift only (L3) | `depth: build` |
 | Source semantics on changed TUs (+ L5 graph) | `depth: source` + `since:` |
-| Full source-ABI replay of the whole library | `depth: source` with no `since:`/`changed-path` (an unseeded `depth: source` already analyses the whole current target — ADR-043) |
+| Full source-ABI replay of the whole library | `depth: source` with no `since:`/`changed-path` (an unseeded `depth: source` already analyses the whole current target) |
 | Risk-driven depth selection (`auto`) | *Retired*, along with `mode: scan` itself. An omitted `depth` infers from `sources`/`build-info` as the table above describes; nothing is risk-scored any more — pin `depth: build`/`source` for the rung the risk score used to escalate to. |
-| A `budget:` wall-clock guard (`BUDGET_OVERFLOW` rather than overrun) | `mode: compare`'s two-sided shape only — the audit-only shape (old-library/abi-baseline both omitted) rejects `budget:` upfront, since `compare --no-baseline`'s wall-clock guard isn't wired to that path (ADR-068 D2) |
+| A `budget:` wall-clock guard (`BUDGET_OVERFLOW` rather than overrun) | `mode: compare`'s two-sided shape only — the audit-only shape (old-library/abi-baseline both omitted) rejects `budget:` upfront, since `compare --no-baseline`'s wall-clock guard isn't wired to that path |
 
 !!! note "The old `scan-mode`/`source-method` inputs and the `full` depth are gone"
     Earlier releases exposed `scan-mode` (`pr`/`pr-deep`/`baseline`/`audit`) and
     `source-method` (`s0…s6`) Action inputs, plus a fifth `depth: full` rung.
-    As of the ADR-043 pre-1.0 CLI reset all three are removed outright, not
+    As of the pre-1.0 CLI reset all three are removed outright, not
     deprecated — the CLI's `--depth` no longer accepts `full`/`--mode`/
     `--source-method`/`--max` at all (a plain usage error). Use `depth`
     (omitting `old-library`/`abi-baseline` for an audit-only run);
@@ -202,7 +201,7 @@ replacement for legacy `mode: scan` with no baseline (see
 [Scenario S5](../integration/scenarios/single-build-audit.md)):
 
 > `compare`'s audit-only shape (this whole recipe) ships in `v0.6.0`,
-> alongside `mode: scan`'s retirement (ADR-068). Pin `v0.6.0` or its commit
+> alongside `mode: scan`'s retirement. Pin `v0.6.0` or its commit
 > SHA to run this example as written; `v0.5.0` used legacy `mode: scan` with
 > no baseline (see [Migrating from mode: scan](github-action.md#migrating-from-mode-scan)
 > for the migration details).
@@ -298,7 +297,7 @@ such snapshots) carries the L3/L4/L5 findings — no out-of-band directories:
           new-library: build/libfoo.so
           header: include/
           sources: .
-          depth: source                 # whole-library L3+L4+L5 for a baseline (unseeded `source` already analyses the whole target — ADR-043)
+          depth: source                 # whole-library L3+L4+L5 for a baseline (unseeded `source` already analyses the whole target)
           output-file: abi-baseline.json
 ```
 
@@ -309,8 +308,7 @@ evidence diffs automatically.
 
 The `collect`/`merge` commands that used to combine a binary-side dump with a
 separately-produced source-side dump (or an `abicheck-cc`-emitted
-`abicheck_inputs/` Flow-2 pack) were removed from the public CLI in the
-ADR-043 reset with no replacement command, and the Action's `mode: merge`
+`abicheck_inputs/` Flow-2 pack) were removed from the public CLI in the pre-1.0 CLI reset with no replacement command, and the Action's `mode: merge`
 dispatch went with them. Section A (inline embedding) above is the only
 Action-supported flow today.
 
@@ -351,7 +349,7 @@ is independent of the shared pack). It is **not** enough to claim per-target
 *source*-depth coverage: nothing here proves library A's embedded L3/L4/L5
 facts didn't actually come from library B's translation units. Recording
 that distinction (a `build-output.json` `evidence.projection: "declared"` vs.
-`"inferred"` tag, per [ADR-047 §9](../contribute/adr/047-github-actions-integration-model.md))
+`"inferred"` tag)
 needs the per-target projection validator tracked as G30 plan item P1.1,
 not yet implemented — until then, treat this recipe's `depth: source` dumps
 as build-wide source evidence applied uniformly, not as independently-proven

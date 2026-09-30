@@ -70,8 +70,7 @@ sides disagree.
 
 **Severity: RISK (not a proven break)**
 
-This is a build-mode signal, not an artifact-proven binary break (ADR-028
-D3). `compute()` has no `thread_local` data, so nothing observably fails in
+This is a build-mode signal, not an artifact-proven binary break. `compute()` has no `thread_local` data, so nothing observably fails in
 this minimal case either way; the real risk applies to a library exporting
 `thread_local` state that gets `dlopen`ed after program start with
 `initial-exec`. No swap-in-place crash demo is included for that reason.

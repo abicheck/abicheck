@@ -120,10 +120,9 @@ opt out with `--no-scope-public-headers`). Findings about symbols/types not reac
 the public-header-declared exported API are recorded as *filtered* rather than reported, while
 internal-type *leaks* are never hidden. Source-header provenance (distinguishing a
 privately-included header from a public one independently of reachability) is implemented
-across castxml, DWARF, and PDB (ADR-024 Phase 1); the one residual gap is MSVC C++ name
+across castxml, DWARF, and PDB; the one residual gap is MSVC C++ name
 mangling on PE, where castxml can't match a mangled export and the surface falls back to
-the export table with a `mangling-fallback` confidence note. See
-[ADR-024](../contribute/adr/024-public-abi-surface-resolution.md).
+the export table with a `mangling-fallback` confidence note.
 
 See also: [Limitations & Known Boundaries](limitations.md) for the rest of
 abicheck's practical boundary list, and

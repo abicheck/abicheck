@@ -89,7 +89,7 @@ exercises against the committed fixtures. Struct packing's compiler default
 is target-dependent (GCC/Clang natural packing vs. MSVC's `/Zp8`/`/Zp16`),
 so abicheck reports a flip only when **both** sides state the packing
 explicitly, avoiding a false finding on a Visual Studio project that merely
-records its platform default. Per ADR-028 D3 this build-evidence finding
+records its platform default. By the authority rule, this build-evidence finding
 never decides a shipped-ABI break on its own — it flags the elevated risk
 and localizes the cause; an artifact diff of the actual built layout is
 what would confirm a concrete break.

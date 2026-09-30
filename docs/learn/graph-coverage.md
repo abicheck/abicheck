@@ -74,9 +74,7 @@ Because of this, `Change.reachability_state` is not the boolean
 | `unknown` | No walk reached a verdict at all, or the only walk that could have was itself narrowed/degraded coverage — the honest "we don't know" answer. |
 
 `MarkReachability` (the pipeline step that computes this, before suppression
-runs) sets this alongside the existing `public_reachable` boolean — see
-[ADR-044](../contribute/adr/044-reachability-aware-suppression.md) for the
-boolean's original design.
+runs) sets this alongside the existing `public_reachable` boolean.
 
 ## What this means for suppression
 
@@ -168,9 +166,7 @@ plain add/remove, exactly as before reconciliation existed. A match produces a
 never overriding or suppressing an artifact-proven finding elsewhere in the
 comparison (the same authority rule as everywhere else on this page).
 
-See [ADR-048](../contribute/adr/048-canonical-entity-identity-and-graph-reconciliation.md)
-for the full design, and
-[`examples/case194_header_graph_rename_reconciled`](../reference/examples/case194_header_graph_rename_reconciled.md)/
+See [`examples/case194_header_graph_rename_reconciled`](../reference/examples/case194_header_graph_rename_reconciled.md)/
 [`examples/case195_header_graph_ambiguous_rename_not_reconciled`](../reference/examples/case195_header_graph_ambiguous_rename_not_reconciled.md)
 for a reconciled rename and its deliberately-unreconciled ambiguous
 counterpart.

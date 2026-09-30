@@ -390,9 +390,7 @@ def _finalize_release_output(
                 )
             click.echo(
                 "Contract coverage incomplete for the selected --contract "
-                "domain in: "
-                + ", ".join(_affected)
-                + f". {_effect} (ADR-049 contract-coverage axis). See "
+                "domain in: " + ", ".join(_affected) + f". {_effect}. See "
                 "contract_coverage_failure_count in -o json=... output "
                 "for per-library detail.",
                 err=True,

@@ -75,7 +75,7 @@ public_api_internal_dependency_added demo::compute() no internal dependency -> r
 ```
 
 Verdict: COMPATIBLE_WITH_RISK — a `public_api_internal_dependency_added`
-risk finding, not a hard break; per ADR-028 D3 this class of finding never
+risk finding, not a hard break; by the authority rule this class of finding never
 decides a shipped-ABI break on its own, it flags elevated risk and localizes
 the cause for review.
 
@@ -129,7 +129,7 @@ behavior only for consumers who happen to recompile.
 info; neither has an equivalent to abicheck's L5 source-graph pass, so
 neither tool can see this finding at all — there is nothing to diff (no
 symbol, no DWARF entry, no header AST delta). This finding is unique to
-abicheck's build-source evidence layers (ADR-028 through ADR-033).
+abicheck's build-source evidence layers (L3–L5).
 
 ---
 

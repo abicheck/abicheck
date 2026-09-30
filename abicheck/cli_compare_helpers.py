@@ -508,7 +508,7 @@ def _reject_manifest_non_elf(
         if manifest is not None and fmt != "elf":
             raise click.UsageError(
                 f"--dump-manifest {side}=... requires the {side} input to be an "
-                f"ELF binary (ADR-050 D3); got {fmt or 'a non-binary input'}."
+                f"ELF binary; got {fmt or 'a non-binary input'}."
             )
 
 

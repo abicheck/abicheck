@@ -4,8 +4,7 @@ You have public headers for your library, not just the binary — and you want
 that to matter: an internal symbol being removed is not the same finding as a
 *public* one being removed, and a header-only change (an inline function body,
 a default argument) can break API compatibility with no change to the binary
-at all. [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
-§8's S6 is "any" baseline channel plus one requirement: the check must
+at all. Scenario S6 is "any" baseline channel plus one requirement: the check must
 actually reach the header parse, not silently fall back to a binary-only
 comparison.
 

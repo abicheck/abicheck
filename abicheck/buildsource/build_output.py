@@ -493,7 +493,7 @@ def _header_root_issues(
             issues.append(
                 f"target {target_id!r}: {label} root {rel!r} exists but is "
                 "empty — an empty declared header root is a hard failure, "
-                "not a warning (ADR-047 §2's S10 guard: this usually means a "
+                "not a warning (this usually means a "
                 "codegen/configure step that was supposed to populate it "
                 "never actually ran)."
             )
@@ -521,7 +521,7 @@ def _binary_issues(
         return [
             f"target {target.id!r}: no digests[{target.binary!r}] entry — "
             "every targets[].binary must have a matching digest so a "
-            "consumer can detect a stale/tampered artifact (ADR-047 §11.1)."
+            "consumer can detect a stale/tampered artifact."
         ]
     actual_digest = _file_sha256(resolved)
     expected_normalized = expected_digest.removeprefix("sha256:")
@@ -591,8 +591,8 @@ def _inferred_evidence_projection_issues(
             issues.append(
                 f"target {t.id!r}: evidence.projection is 'inferred' but no "
                 "evidence.attribution_path is set — an inferred claim needs "
-                "a TU->link-unit->DSO attribution source to derive from "
-                "(ADR-053 D4), not just an assertion."
+                "a TU->link-unit->DSO attribution source to derive from"
+                ", not just an assertion."
             )
             continue
         attribution_file = _resolve_under_root(root, evidence.attribution_path)
@@ -707,8 +707,8 @@ def _declared_evidence_sharing_issues(
                 f"{shared_path} is referenced by more than one target "
                 f"({', '.join(sorted(target_ids))}) with projection: "
                 f"{DECLARED_PROJECTION!r} — a pack shared across targets is "
-                "exactly the unprojected, build-wide evidence ADR-047 §9's "
-                "safe model says must never satisfy a per-target 'declared' "
+                "exactly the unprojected, build-wide evidence that "
+                "must never satisfy a per-target 'declared' "
                 "claim; each target needs its own pack, or the shared build-"
                 "wide claim must be dropped to projection-less/no per-target "
                 "source-depth claim."

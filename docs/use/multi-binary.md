@@ -27,7 +27,7 @@ Most ABI tools answer one question: *"did this `.so` file's ABI change?"*
 Real-world releases — oneDAL, libtorch, Intel MKL, the bundled CUDA
 runtime — ship **several `.so` files that depend on each other**.
 Per-library compare misses entire classes of breakage that live in the
-relationships between siblings. The **bundle layer** (ADR-023) fixes
+relationships between siblings. The **bundle layer** fixes
 that.
 
 This page covers:
@@ -132,8 +132,7 @@ specific kinds they promote (`func_params_changed`/`func_return_changed`/
 they scan is `diff.changes` **plus** `diff.out_of_surface_changes`, not
 `diff.changes` alone. `--scope-public-headers` (on by default) never
 *drops* a non-public-surface finding — `post_processing.
-FilterNonPublicSurface` moves it to `out_of_surface_changes` instead (ADR-024
-§D4/D5's "recorded, never silently dropped" ledger) — so an internal,
+FilterNonPublicSurface` moves it to `out_of_surface_changes` instead (a "recorded, never silently dropped" ledger) — so an internal,
 headerless C export with no public header naming either side still reaches
 these three detectors, exactly as it should: the standalone per-library
 report correctly excludes it from that library's own *public* API, but the
@@ -199,8 +198,7 @@ to suppress upstream of them at all, so the only lever is, for a symbol
 that genuinely comes from outside the release, `.abicheck.yml`'s
 `bundle.system_providers:` (see below). `--no-bundle-analysis` (which used
 to turn off bundle analysis for the whole run) is gone — bundle-level
-analysis always runs now (Phase 7d, one-comparison-product.md §4.1,
-ADR-068 D5): a run-wide analysis opt-out was exactly the "escape hatch that
+analysis always runs now (Phase 7d, one-comparison-product.md §4.1): a run-wide analysis opt-out was exactly the "escape hatch that
 disables real analysis" D5 rules out.
 
 **The sibling-consumption gate covers most, but not all, kinds — and even
@@ -479,7 +477,7 @@ or exit code.
 
 `--no-bundle-analysis` (the whole-run bundle-analysis opt-out this used to
 be a no-op alongside) is gone: bundle-level analysis always runs now
-(Phase 7d, one-comparison-product.md §4.1, ADR-068 D5).
+(Phase 7d, one-comparison-product.md §4.1).
 
 ## JSON output schema additions
 
@@ -490,18 +488,18 @@ analysis ran:
 {
   "verdict": "BREAKING",                  // existing: worst of per-lib × bundle
   "libraries": [...],                     // existing
-  "unmatched_old": [],                    // existing -- the raw set difference (ADR-065 D2: unmatched, not removed)
+  "unmatched_old": [],                    // existing -- the raw set difference (unmatched, not removed)
   "unmatched_new": [],                    // existing
   "warnings": [],                         // existing
-  "comparison_scope": { ... },            // ADR-065 S2 (schema 2.50): per-member acquisition record,
+  "comparison_scope": { ... },            // (schema 2.50): per-member acquisition record,
                                           //   completeness, policy, proven_removed/proven_added
-  "analysis_assurance": { ... },          // ADR-071 (release schema 1.3): the per-member assurance fold --
+  "analysis_assurance": { ... },          // (release schema 1.3): the per-member assurance fold --
                                           //   present only under assurance.require_complete
   "public_surface_reconciliation": { ... },// release schema 1.8: the product's ONE public
                                           //   contract reconciled against the union of its
                                           //   members' exports -- see below
-  "bundle_verdict": "BREAKING",           // new (ADR-023)
-  "bundle_findings": [                    // new (ADR-023)
+  "bundle_verdict": "BREAKING",           // new
+  "bundle_findings": [                    // new
     {
       "kind": "bundle_intra_dep_removed",
       "symbol": "core_mul",
@@ -696,8 +694,8 @@ Same as before, but a bundle finding can promote the verdict:
 | 0 | All clear — no per-library or bundle findings above COMPATIBLE_WITH_RISK |
 | 2 | At least one library or bundle finding is API_BREAK |
 | 4 | At least one library or bundle finding is BREAKING |
-| 1 | No compatibility break, but the completeness axis contributed (ADR-065): `.abicheck.yml`'s `scope.on_incomplete: block` with an unchecked member, or a run that completed no comparison at all (under either setting) |
-| 8 | Library **proven** removed from the bundle (only with `.abicheck.yml`'s `gate.fail_on_removed_library: true`, and only when NEW's inventory is proven complete — see [Comparison scope and completeness](#comparison-scope-and-completeness-adr-065)) |
+| 1 | No compatibility break, but the completeness axis contributed: `.abicheck.yml`'s `scope.on_incomplete: block` with an unchecked member, or a run that completed no comparison at all (under either setting) |
+| 8 | Library **proven** removed from the bundle (only with `.abicheck.yml`'s `gate.fail_on_removed_library: true`, and only when NEW's inventory is proven complete — see [Comparison scope and completeness](#comparison-scope-and-completeness)) |
 
 If you previously had a green CI on a release and bundle analysis now
 flips it red, the finding section in the markdown / JSON tells you what
@@ -708,7 +706,7 @@ can be silenced with a [suppression](suppressions.md) if it's expected; a
 to fix the intra-bundle contract, or (for a genuinely external provider)
 `.abicheck.yml`'s `bundle.system_providers:` as described below.
 
-## Comparison scope and completeness (ADR-065)
+## Comparison scope and completeness
 
 A directory/package `compare` records, for every library discovered on
 either side, what happened to it in *this* run — its **acquisition state**
@@ -759,7 +757,7 @@ or document without the assertion is as unproven as a live directory, and
 the same document decides identically whether compared directly or after
 import into a package.
 
-A **package archive** operand proves it too, since ADR-065 S3: an archive
+A **package archive** operand proves it too: an archive
 extractor unpacks its whole container or raises, so `package.py` now returns
 a declared component inventory beside the extracted directory
 (`package_component_inventory`) and its `complete` flag is that statement.
@@ -769,15 +767,15 @@ produced*, an acquisition failure on the completeness axis, never an absence
 the other side's proof may read as a removal.
 
 The JSON key `unmatched_old` lists the members with no counterpart, as its
-name says — read off the acquisition record since ADR-065 S4, which deleted
+name says — read off the acquisition record, which replaced
 the old-minus-new set difference it used to be computed from. The fan-out's
 stderr notices come from that same record, so `library removed: X` (naming
 the inventory that proved it) and `library unmatched (no counterpart on
 NEW): X` are now two different lines rather than one wording for both. See
 the migration notes in
-[Exit codes](../reference/exit-codes.md#the-completeness-axis-adr-065-d6d7-directorypackage-compare-only).
+[Exit codes](../reference/exit-codes.md#the-completeness-axis-directorypackage-compare-only).
 
-## Analysis assurance across a bundle (ADR-071)
+## Analysis assurance across a bundle
 
 The completeness axis above asks whether every *selected member* was compared
 at all. A second, independent question is whether the comparisons that **did**
@@ -812,8 +810,7 @@ never opted in is unchanged. See
 [Exit codes](../reference/exit-codes.md#analysis-assurance-contribution-p04).
 
 **Support-promise findings (`release.support_promise` in `.abicheck.yml`).**
-A proven inventory change is a change to what the project *promises to
-ship*, and ADR-065 D1 requires it to be emitted under a policy rather than
+A proven inventory change is a change to what the project *promises to ship*, so it must be emitted under a policy rather than
 inferred — a stable project property, not a per-invocation flag, so
 one-comparison-product.md Phase 7i moved it out of the CLI. `off` (the
 default) emits nothing. `release: {support_promise: declared}` reports each proven
@@ -836,7 +833,7 @@ directory/package `compare` fan-out skips a marked member on either side and
 reports it with verdict `failed`. Such a document declares `schema_version: 3` (a clean document keeps
 `2`), so an older abicheck rejects it instead of comparing the stand-in as
 real evidence. The stored/stored and stored/live drivers also record a
-matched pair whose extraction contracts disagree (ADR-050 D2) per member,
+matched pair whose extraction contracts disagree per member,
 as the fan-out does: that member is `failed` on the completeness axis with
 a `not comparable` reason, listed under `not_comparable_members` in the
 JSON document, its siblings' comparisons are kept, and the run exits `16`
@@ -937,7 +934,7 @@ is a hard error, not a silent no-op. The flag is meaningless — and rejected
 
 ## Platform support
 
-Bundle analysis is **ELF/Linux-only** (ADR-018, ADR-023). Mach-O and
+Bundle analysis is **ELF/Linux-only**. Mach-O and
 PE/COFF bundles are out of scope for this iteration — the resolution
 graph relies on DT_NEEDED edges and `.gnu.version_r` / `.gnu.version_d`
 sections that PE and Mach-O don't have direct equivalents for. On
@@ -1000,8 +997,8 @@ result = compare_bundle_from_facts(old_facts, new, per_library_results)
 
 ## References
 
-- [ADR-023](../contribute/adr/023-bundle-aware-multi-binary-analysis.md) — design rationale
-- [ADR-008](../contribute/adr/008-full-stack-dependency-validation.md) — the resolver/binder engine the bundle layer reuses
+
+
 - Example cases:
   `case90_bundle_intra_dep_removed` — intra-bundle removed symbol,
   `case91_bundle_intra_signature_drift` — extern-C signature drift,

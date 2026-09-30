@@ -107,7 +107,7 @@ from .workflows.aggregate.expected_input import (
     "rather than in a sidecar file a publisher would have to parse in "
     "privileged shell. Every field is a CLAIM and is shape-validated here, "
     "never trusted: a publisher verifies it against the API before "
-    "displaying it (ADR-073).",
+    "displaying it.",
 )
 @export_options(["text", "json"], default_format="text")
 @verbose_option
@@ -144,7 +144,7 @@ def aggregate_cmd(
     addition-or-quality finding, or a non-verdict per-report failure (e.g. a
     `scan` budget overflow) / 2 a source-API break / 4 an ABI break / 64 usage
     error. Each target's own recorded gate decision is used — the gate is never
-    recomputed from the compatibility verdict (ADR-042).
+    recomputed from the compatibility verdict.
     """
     _setup_verbosity(verbose)
 

@@ -135,7 +135,7 @@ Examples:
 
 ## Contract evaluation and the verdict
 
-`compare --contract` (ADR-049 Phase 7) doesn't add a sixth
+`compare --contract` doesn't add a sixth
 verdict — it changes which findings the five verdicts above are computed
 *over*. Three separate questions are worth keeping apart, because collapsing
 them is the most common source of confusion once this flag is in play:
@@ -168,7 +168,7 @@ declared public surface). Separately — not part of the verdict computation
 at all — a run can still fail even with the worst evaluated *decision* at
 `COMPATIBLE` if the selected domain's evidence was incomplete: contract
 coverage (see [Exit Codes → Contract-coverage
-contribution](../reference/exit-codes.md#contract-coverage-contribution-adr-049))
+contribution](../reference/exit-codes.md#contract-coverage-contribution))
 folds an independent exit `1` in with `max`, without touching any finding's
 `compatibility_decision` or the verdict itself.
 

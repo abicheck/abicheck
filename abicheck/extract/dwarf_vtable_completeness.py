@@ -345,7 +345,7 @@ def finalize_vtable_evidence_completeness(builder: Any) -> None:
         "cross-translation-unit disagreement: another compilation unit's "
         "own definition of this class disagreed on this field's own "
         "membership, so this side's evidence may not reflect the complete "
-        "set (ADR-063 Phase 5B / T9 DWARF per-TU completeness slice)"
+        "set"
     )
     for rec in builder.types:
         fields = conflicts.get(rec.name)

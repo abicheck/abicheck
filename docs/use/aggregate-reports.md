@@ -84,7 +84,7 @@ flowchart TD
 - **coverage** — did every **required** expected target actually report at
   all? A required target with no report is a coverage gap, exit `1` — never
   promoted to a fake ABI-break exit `4`.
-- **contract_coverage** (ADR-049 Phase 7, `abicheck.workflows.aggregate.AGGREGATE_SCHEMA_VERSION`
+- **contract_coverage** (`abicheck.workflows.aggregate.AGGREGATE_SCHEMA_VERSION`
   is the versioned fact owner) — for a target that
   *did* report, was its own selected `--contract` domain's evidence
   complete? Read back from that report's own
@@ -233,7 +233,7 @@ it answers "is this break universal, or specific to one compiler/platform?"
 
 A finding's identity for reconciliation is the same tiered
 canonical/normalized/reduced identity `diff_filtering.py` already uses as
-its own cross-detector dedup key (ADR-049 Phase 2) — computed from `kind`,
+its own cross-detector dedup key — computed from `kind`,
 `symbol`, `description`, `old_value`/`new_value`, `source_location`, and
 `affected_symbols`, read back off each report's `changes[]` entries. Two
 reports naming the *same* symbol removal on GCC and on Clang reconcile to
@@ -292,8 +292,7 @@ one.
 ### Per-profile contract decisions (`profile_contract`)
 
 `scope`/`affected_profiles` answer *whether* a profile has a finding, not
-*why compatibility policy did or didn't act on it* — a question ADR-049's
-contract-relevance model (see [Compatibility Evaluation
+*why compatibility policy did or didn't act on it* — a question the contract-relevance model (see [Compatibility Evaluation
 Config](../reference/compatibility-evaluation-config.md)) already answers
 per finding on a single-pair `compare`, and that a matrix can disagree on
 just as easily as it can disagree on the finding itself. Two profiles
@@ -312,7 +311,7 @@ to report), each with that profile's own `contract_relevance`,
 `compatibility_evaluation_status`, `compatibility_decision`, and
 `gate_contribution`, read back verbatim from that profile's own report. A
 comparison where no profile ever evaluated a contract omits the field
-entirely, so `finding_matrix` for an ADR-049-unaware CI matrix renders
+entirely, so `finding_matrix` for a contract-unaware CI matrix renders
 exactly as before:
 
 ```json

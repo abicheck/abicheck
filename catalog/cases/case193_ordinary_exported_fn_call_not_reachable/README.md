@@ -125,4 +125,4 @@ removals as their bread-and-butter case), but neither has a call-graph
 reachability model to distinguish "this internal call is baked into
 consumer binaries" (case192) from "this internal call never leaves the
 library" (this case) — that distinction, and the suppression-refusal
-behavior it enables, is unique to abicheck's L5 evidence layer (ADR-044).
+behavior it enables, is unique to abicheck's L5 evidence layer.

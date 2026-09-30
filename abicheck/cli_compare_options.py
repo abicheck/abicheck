@@ -152,7 +152,7 @@ def _reject_set_input_flags(
         raise click.UsageError(
             "--diagnostic-comparison is not supported for directory/package "
             "(release) comparisons yet: the per-library fan-out does not "
-            "wire the ADR-050 D2 comparability gate's diagnostic escape "
+            "wire the comparability gate's diagnostic escape "
             "hatch (a mismatch there still raises unhandled). Compare the "
             "specific library individually to use it."
         )
@@ -188,14 +188,14 @@ def _reject_set_input_flags(
             "A labeled --include (old:LABEL=PATH/new:LABEL=PATH/"
             "both:LABEL=PATH) is not supported for directory/package "
             "(release) comparisons yet: the per-library fan-out does not "
-            "thread ADR-050 D1's project_include_labels into its per-library "
+            "thread the include labels into its per-library "
             "dumps, so the label would be silently dropped. Compare the "
             "specific library individually to use it."
         )
     if budget is not None:
         raise click.UsageError(
             "--budget is not supported for directory/package (release) "
-            "comparisons yet (ADR-068 §3 #19, Codex review): the per-library "
+            "comparisons yet: the per-library "
             "fan-out dispatches each member through its own process/thread, "
             "so a single ambient deadline set here would not reach any of "
             "them, silently ignoring the budget instead of enforcing it. "

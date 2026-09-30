@@ -210,7 +210,11 @@ def _resolve_displayed_changes(
 # ---------------------------------------------------------------------------
 
 
-def _change_row(c: Any, evidence_tiers: Sequence[str] = ()) -> dict[str, Any]:
+def _change_row(
+    c: Any,
+    evidence_tiers: Sequence[str] = (),
+    use_cases: Mapping[str, tuple[str, ...]] | None = None,
+) -> dict[str, Any]:
     """A JSON-safe row for one ``Change``, carrying every field
     ``_render_change_row``/``_render_change_row_oneline``/
     ``_render_leaf_type_change_row`` need -- including ``impact_for(kind)``,
@@ -228,6 +232,7 @@ def _change_row(c: Any, evidence_tiers: Sequence[str] = ()) -> dict[str, Any]:
     every pre-existing caller -- which has no evidence_tiers to hand --
     byte-identical to before this parameter existed.
     """
+    from ..finding_identity import report_finding_id
     from ..policy.classification import evidence_status_for_result, impact_for
 
     kind = getattr(c, "kind", None)
@@ -257,6 +262,15 @@ def _change_row(c: Any, evidence_tiers: Sequence[str] = ()) -> dict[str, Any]:
         # finding, so a `persistent` (pre-existing) finding rendered
         # indistinguishably from newly `introduced` drift.
         "cross_source_evolution": getattr(cse, "value", None),
+        # `compare --use-cases`: the per-finding inverse of the
+        # `use_case_impact` block (`UseCaseImpact.use_cases_by_finding`),
+        # present only when the attribution ran so every other report's
+        # rows are unchanged.
+        **(
+            {"affected_use_cases": list(use_cases.get(report_finding_id(c), ()))}
+            if use_cases is not None
+            else {}
+        ),
     }
 
 
@@ -287,13 +301,20 @@ def _row_cross_source_evolution_suffix(row: Mapping[str, Any]) -> str:
     return f"\n  > Cross-source hygiene: {tag}"
 
 
+def _row_use_cases_suffix(row: Mapping[str, Any]) -> str:
+    """``compare --use-cases``'s per-finding note; empty when no use case
+    reaches the finding or the attribution never ran."""
+    names = row.get("affected_use_cases")
+    return f"\n  > Affects use cases: {', '.join(names)}" if names else ""
+
+
 def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
     line = f"- **{row['kind']}**: {row['description']}"
     correlated = row.get("correlated_change_kind")
     if correlated:
         line += f"\n  > See also: `{correlated}` finding for the same symbol"
     line += _row_cross_source_evolution_suffix(row)
-    return line
+    return line + _row_use_cases_suffix(row)
 
 
 def _render_change_row(row: Mapping[str, Any]) -> str:
@@ -327,7 +348,7 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
     if correlated:
         line += f"\n  > See also: `{correlated}` finding for the same symbol"
     line += _row_cross_source_evolution_suffix(row)
-    return line
+    return line + _row_use_cases_suffix(row)
 
 
 def _not_evaluated_mapping(
@@ -364,7 +385,7 @@ def _render_not_evaluated_lines(d: Mapping[str, Any] | None) -> list[str]:
         "",
         "> These findings were detected but **not scored** by compatibility",
         "> policy: each is either proven outside the declared contract or",
-        "> unresolved for want of evidence (ADR-049). They contribute nothing",
+        "> unresolved for want of evidence. They contribute nothing",
         "> to the verdict or the gate. Incomplete evidence is reported",
         "> separately on the contract-coverage axis, which has its own exit",
         "> code — uncertainty is never silently treated as compatible.",
@@ -455,6 +476,10 @@ def build_markdown_document(
         model.compatible,
     )
 
+    # `compare --use-cases`: the per-finding inverse of the attached
+    # `UseCaseImpact` (reached through the result, since `report` may not
+    # import the unclassified `impact` package); `None` when none ran.
+    use_cases = rm.use_cases_by_finding_for(result)
     severity_data = rm.compute_severity_sections(
         breaking, source_breaks, risk, compatible, severity_config=severity_config
     )
@@ -523,7 +548,9 @@ def build_markdown_document(
                 "heading": g.heading,
                 "oneline": g.oneline,
                 "note_lines": list(g.note_lines),
-                "rows": [_change_row(c, result.evidence_tiers) for c in g.changes],
+                "rows": [
+                    _change_row(c, result.evidence_tiers, use_cases) for c in g.changes
+                ],
             }
             for g in severity_data.groups
         ],
