@@ -43,16 +43,19 @@ inside every skill as `references/shared/safety-invariants.md`).
 From the repository root:
 
 ```bash
-npx skills add abicheck/abicheck                              # all three skills
-npx skills add abicheck/abicheck -s check-abi-compatibility    # just one
+npx skills add abicheck/abicheck --copy                              # all three skills
+npx skills add abicheck/abicheck --copy -s check-abi-compatibility    # just one
 npx skills add abicheck/abicheck -l                           # list what is offered
 ```
 
 Without `-g` the [`skills` CLI](https://www.npmjs.com/package/skills)
 installs into the *project*, into the directory each agent reads (for
 example `.claude/skills/` for Claude Code, `.agents/skills/` for Codex and
-other agents that follow the portable layout). Each installed skill is a
-self-contained directory — no symlinks back to anything outside it.
+other agents that follow the portable layout). Use `--copy` so each agent
+directory gets real files: in its default symlink mode the CLI links agent
+directories to a canonical `.agents/skills/` copy, and committing only the
+links would hand contributors broken links. (If you do keep symlinks, commit
+`.agents/skills/` together with them.)
 
 **Commit the installed directories.** That is what turns a per-developer
 setup into a repository setting:
@@ -87,8 +90,10 @@ Each skill checks `abicheck --version` against its declared range (currently
   hook, e.g. `pip install "abicheck>=0.6,<0.7"`. An agent that has the skill
   but not the CLI will correctly refuse to give a verdict — which is safe,
   but not useful.
-- **Header-level analysis** needs `castxml` (or clang) and your library's
-  build configuration; see [evidence and build-context flags](dump-compare-flags.md).
+- **Header-level analysis** uses `castxml` by default; installing clang
+  alone does not switch backends. To use clang instead, set
+  `ABICHECK_AST_FRONTEND=clang` (or pass `--ast-frontend clang`). Either way
+  it needs your library's build configuration; see [evidence and build-context flags](dump-compare-flags.md).
   Without them the skill still works on binaries alone, and says the
   conclusion is narrower.
 

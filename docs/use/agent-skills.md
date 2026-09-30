@@ -113,7 +113,10 @@ The skill drives the abicheck CLI, so install that too:
 `pipx install abicheck` (or `pip install abicheck`).
 
 **From a checkout** (contributors): `skills-src/` is the one hand-authored
-source and the three trees are generated build output, not committed —
+source. The committed `skills/` tree above is what `npx skills add`
+installs; the three agent-specific trees (`.agents/skills/`,
+`.claude/skills/`, `.gemini/skills/`) are generated build output, not
+committed —
 `python scripts/install_dev_skill.py
 --target <codex|claude|gemini|all>` writes them in place.
 
