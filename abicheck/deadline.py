@@ -413,7 +413,15 @@ def _enter_registration_window() -> None:
 def _exit_registration_window() -> None:
     global _deferred_sigterm
     _registration_window.depth = _registration_window_depth() - 1
-    if _registration_window.depth == 0 and _deferred_sigterm:
+    # Only the main thread can have deferred the handler (CPython runs it
+    # nowhere else), and only the main thread may replay it: the handler
+    # calls signal.signal(), which raises off the main thread. A worker
+    # closing its own window leaves the flag for the main thread.
+    if (
+        _registration_window.depth == 0
+        and _deferred_sigterm
+        and threading.current_thread() is threading.main_thread()
+    ):
         _deferred_sigterm = False
         _sigterm_cleanup_handler(signal.SIGTERM, None)
 

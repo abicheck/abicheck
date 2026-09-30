@@ -559,6 +559,37 @@ def test_sigterm_inside_registration_window_is_deferred_until_registered(
     assert deadline._deferred_sigterm is False
 
 
+def test_a_worker_closing_its_window_leaves_the_deferred_replay_to_main(
+    monkeypatch,
+) -> None:
+    # The deferred flag is process-wide, but the replay calls signal.signal(),
+    # which only the main thread may do. A worker thread exiting its own
+    # registration window while the flag is set must neither replay nor
+    # clear it; the main thread's own window exit replays it.
+    calls: list[str] = []
+    monkeypatch.setattr(
+        deadline,
+        "_sigterm_cleanup_handler",
+        lambda signum, frame: calls.append(threading.current_thread().name),
+    )
+    monkeypatch.setattr(deadline, "_deferred_sigterm", True)
+
+    def _worker() -> None:
+        deadline._enter_registration_window()
+        deadline._exit_registration_window()
+
+    worker = threading.Thread(target=_worker, name="worker")
+    worker.start()
+    worker.join(timeout=5)
+    assert calls == []
+    assert deadline._deferred_sigterm is True
+
+    deadline._enter_registration_window()
+    deadline._exit_registration_window()
+    assert calls == [threading.main_thread().name]
+    assert deadline._deferred_sigterm is False
+
+
 def test_registration_window_replays_only_at_the_outermost_exit(monkeypatch) -> None:
     calls: list[int] = []
     monkeypatch.setattr(
