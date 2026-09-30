@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .buildsource.source_inputs import granting_live_source_licence
-from .errors import ValidationError
+from .errors import AbicheckError, SnapshotError, ValidationError
 from .workflows.artifact import ResolvedArtifactPlan
 from .workflows.artifact.compile_context_gate import side_effective_compile_context
 from .workflows.artifact.dump_execution_options import (
@@ -474,9 +474,17 @@ def execute_dump_request(
     # not a set of tokens a front end pre-derived (see compile_db_match).
     compile_db = _CompileDbMatch()
     if options.compile_db is not None:
-        compile_db = match_compile_db(
-            options.compile_db, side.headers, options.compile_db_filter
-        )
+        try:
+            compile_db = match_compile_db(
+                options.compile_db, side.headers, options.compile_db_filter
+            )
+        except (AbicheckError, OSError) as exc:
+            # An unreadable or malformed database is an operational failure
+            # (exit 1), as it was when the CLI ran this match itself -- not a
+            # usage error (exit 64), which a bare ValidationError maps to.
+            raise SnapshotError(
+                f"cannot use compile database {options.compile_db}: {exc}"
+            ) from exc
         _announce_compile_db_match(notify, options.compile_db, compile_db)
     resolution = _resolve_side_snapshot_impl(
         side,

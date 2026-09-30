@@ -12,3 +12,5 @@
   are removed, and `DumpExecutionOptions.legacy_compile_db_tokens` /
   `legacy_compile_db_matched` are replaced by `compile_db`. The dry-run line
   now reads "compile-db flags: N derived (matched|no match)".
+  An unreadable or malformed compile database now fails the dump as an
+  operational error (exit 1), as it did before, rather than a usage error.

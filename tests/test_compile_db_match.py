@@ -271,3 +271,30 @@ def test_try_match_compile_db_false_for_malformed_json(tmp_path):
     db = tmp_path / "compile_commands.json"
     db.write_text("{ this is not json", encoding="utf-8")
     assert _dry(db, (), None) is False
+
+
+@pytest.mark.parametrize("content", ["{ not json", "{}", '"a string"'], ids=repr)
+def test_a_bad_database_is_an_operational_failure_not_a_usage_error(tmp_path, content):
+    """`execute_dump_request` turns any unusable compile database into a
+    `SnapshotError` (exit 1), never a bare `ValidationError` (usage, 64) --
+    the exit the CLI-side resolver gave before the match moved into the
+    pipeline. A missing file is covered too."""
+    from unittest import mock
+
+    from abicheck.errors import SnapshotError, ValidationError
+    from abicheck.service_dump_pipeline import (
+        DumpExecutionOptions,
+        execute_dump_request,
+    )
+
+    db = tmp_path / "compile_commands.json"
+    db.write_text(content, encoding="utf-8")
+    resolved = mock.MagicMock()
+    resolved.request.input.headers = ()
+    resolved.execution_options = None
+    for path in (db, tmp_path / "missing.json"):
+        with pytest.raises(SnapshotError) as info:
+            execute_dump_request(
+                resolved, options=DumpExecutionOptions(compile_db=path)
+            )
+        assert not isinstance(info.value, ValidationError)
