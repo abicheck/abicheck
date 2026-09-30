@@ -12,12 +12,12 @@ compatibility **verdict** claim; this skill's outcome is a **configuration**
 
 | Path | Role |
 |---|---|
-| `fixtures/<name>/` | Five small GitHub-shaped repositories (CMake C, CMake C++ with a static default, Makefile with two libraries, an existing broken `mode: scan` workflow, Meson with fork contributors). Each builds for real. |
+| `fixtures/<name>/` | Ten small GitHub-shaped repositories: CMake C, CMake C++ with a static default, Makefile with two libraries, an existing broken `mode: scan` workflow, Meson with fork contributors, a declared RHEL 8 glibc floor, an inline/template-heavy C++ API (source depth), Autotools/libtool, Bazel, and an aarch64 cross-compiled library. |
 | `scenarios.yaml` | Fixture + the request a maintainer would type (one in Russian) + the checks that apply, and which checks are zero-tolerance (`critical`). |
 | `grader.py` | Deterministic checks over the resulting `.github/workflows/*.yml` and the agent's final message. No model is called. |
 | `reference/<scenario>/` | Hand-written good workflows; the grader's positive oracle. |
 | `run_eval.py` | Two-arm runner: materializes each fixture as a fresh git repo (commits, tags, `origin` remote) outside this checkout, installs the skill into `.claude/skills/` for the `skill` arm only, runs `claude -p`, grades. |
-| `results/` | Committed evidence from real runs — start with [`2026-09-30.md`](results/2026-09-30.md): skill 15/15 runs without a critical failure vs 0/15 without it. |
+| `results/` | Committed evidence from real runs — start with [`2026-09-30.md`](results/2026-09-30.md): across ten scenarios the skill arm had no critical failure in every run; without it, 1/30. |
 
 `tests/test_ci_setup_skill_eval.py` pins the grader's contract: every
 reference passes every check, an untouched fixture never succeeds, and each
@@ -42,6 +42,11 @@ workflow, is caught by the check named for it.
 | `shared_build` | a static-by-default library checked without a shared build |
 | `toolchain_via_action` | distribution CastXML, below abicheck's supported range |
 | `debug_info` | check build without debug info (scored, not critical) |
+| `runtime_floors_declared`, `runner_pinned` | a stated glibc floor never declared (floor raises stay exit-0 warnings); a floating runner image |
+| `source_depth_complete`, `baseline_has_source_evidence` | L4 requested without clang/build evidence, or only on the new side |
+| `cross_toolchain` | a cross-compiled library's headers parsed with the host compiler |
+| `library_path_plausible` | pointing at a path the build system never writes (`.libs/`, `bazel-bin/`) |
+| `pins_are_commits` | a SHA pin to an annotated tag object, which `uses:` cannot run |
 | `single_abi_workflow` | a second workflow added next to a broken one instead of repairing it |
 | `report_mentions` | the summary omits a fact the user needs (fork-PR limitation, why the old check never failed) |
 
