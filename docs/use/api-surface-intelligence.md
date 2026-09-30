@@ -45,9 +45,15 @@ from abicheck.idioms import recognise_idioms, detect_antipatterns
 
 snap = load_snapshot("libfoo.so.abi.json")  # from `abicheck dump`
 graph = build_surface_graph(snap)
-metrics = compute_surface_metrics(snap)     # header coverage, fan-in, undocumented-export ratio
-idioms = recognise_idioms(graph)            # opaque pointer / PIMPL / handle / factory / callback ABI
-antipatterns = detect_antipatterns(graph)   # std:: by-value crossings, missing virtual dtor
+metrics = compute_surface_metrics(
+    snap
+)  # header coverage, fan-in, undocumented-export ratio
+idioms = recognise_idioms(
+    graph
+)  # opaque pointer / PIMPL / handle / factory / callback ABI
+antipatterns = detect_antipatterns(
+    graph
+)  # std:: by-value crossings, missing virtual dtor
 ```
 
 Dump the library first (`abicheck dump libfoo.so -H include/ -o libfoo.so.abi.json`),

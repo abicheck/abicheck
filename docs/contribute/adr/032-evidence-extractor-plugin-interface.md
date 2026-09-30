@@ -92,7 +92,9 @@ class EvidenceExtractor(Protocol):
     def collect(self, context: CollectionContext, output_dir: Path) -> CollectionResult:
         """Collect raw artifacts. Must not normalize verdicts."""
 
-    def normalize(self, raw_artifacts: list[RawArtifact], output_dir: Path) -> NormalizationResult:
+    def normalize(
+        self, raw_artifacts: list[RawArtifact], output_dir: Path
+    ) -> NormalizationResult:
         """Convert raw artifacts into abicheck-owned schema."""
 
     def validate(self, normalized_artifacts: list[Path]) -> ValidationResult:
@@ -112,7 +114,11 @@ class CollectionContext:
     target_selectors: list[str]
     changed_files: list[Path]
     mode: Literal["baseline", "pr", "nightly", "manual"]
-    allowed_actions: set[Literal["inspect", "query_build_system", "run_compiler", "run_build", "wrap_build"]]
+    allowed_actions: set[
+        Literal[
+            "inspect", "query_build_system", "run_compiler", "run_build", "wrap_build"
+        ]
+    ]
     redaction_policy: RedactionPolicy
     cache_dir: Path
 ```

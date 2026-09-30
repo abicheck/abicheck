@@ -400,7 +400,7 @@ _TYPEDEF_ALIAS_RE = re.compile(r"^typedef\s+(.+?)\s+([A-Za-z_][\w:]*)$")
 # toolchain (libstdc++ / libc++ / Itanium C++ ABI), not by the library under
 # inspection. These leak into DWARF when a library inlines STL usage; the layout
 # the compiler emits varies by compiler/LTO, so diffing them produces
-# toolchain-artifact false positives (validation/REPORT.md FP-1).
+# toolchain-artifact false positives (skills-src/evaluation/validation/REPORT.md FP-1).
 STDLIB_TYPE_NAMESPACE_PREFIXES: tuple[str, ...] = (
     "std::",
     "__gnu_cxx::",
@@ -410,7 +410,7 @@ STDLIB_TYPE_NAMESPACE_PREFIXES: tuple[str, ...] = (
 )
 
 # Substrings marking an anonymous / local type with no stable cross-version ABI
-# identity — lambdas and unnamed struct/union/enum (validation/REPORT.md FP-2).
+# identity — lambdas and unnamed struct/union/enum (skills-src/evaluation/validation/REPORT.md FP-2).
 _ANONYMOUS_TYPE_MARKERS: tuple[str, ...] = (
     "<lambda",
     "{lambda",

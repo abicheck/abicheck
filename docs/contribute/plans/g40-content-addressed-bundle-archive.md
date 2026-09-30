@@ -577,9 +577,9 @@ ships:
 # shipped primitives (storage/bundle_archive.py's BundleArchiveReader) --
 # not a class this format defines.
 with BundleArchiveReader.open(path) as reader:
-    manifest = reader.read_manifest()            # reads only manifest.json
+    manifest = reader.read_manifest()  # reads only manifest.json
     content_hash = manifest["library_blobs"][name]
-    payload = reader.read_blob(content_hash)      # reads only that library's blob
+    payload = reader.read_blob(content_hash)  # reads only that library's blob
     snapshot = snapshot_from_dict(json.loads(payload))
 ```
 

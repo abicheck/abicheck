@@ -67,8 +67,11 @@ actually *filling in* the attribution-relevant fields:
 New module `abicheck/buildsource/link_attribution.py`:
 
 ```python
-def attribute_sources_to_targets(evidence: BuildEvidence) -> dict[str, frozenset[str]]:
-    ...  # normalized source path -> the set of target_ids it feeds
+def attribute_sources_to_targets(
+    evidence: BuildEvidence,
+) -> dict[
+    str, frozenset[str]
+]: ...  # normalized source path -> the set of target_ids it feeds
 ```
 
 Combines two independent channels, each individually sufficient where it

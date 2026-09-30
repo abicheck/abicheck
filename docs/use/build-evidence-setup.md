@@ -112,14 +112,20 @@ make CXXFLAGS="$CXXFLAGS $ABICHECK_PLUGIN_FLAGS"
 
 ```python
 cc_library(
-    name = "foo",
+    name="foo",
     # ... srcs/hdrs ...
-    copts = [
+    copts=[
         "-fplugin=$(location //tools:libabicheck-facts.so)",
         # Absolute out= (see the notes below) — a relative path scatters across
         # per-target working dirs and is discarded by Bazel's sandbox.
-        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "out=/abs/path/to/abicheck_inputs",
-        "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "public-roots=include",
+        "-Xclang",
+        "-plugin-arg-abicheck-facts",
+        "-Xclang",
+        "out=/abs/path/to/abicheck_inputs",
+        "-Xclang",
+        "-plugin-arg-abicheck-facts",
+        "-Xclang",
+        "public-roots=include",
     ],
 )
 ```
@@ -370,7 +376,8 @@ outputs:
 from pathlib import Path
 from abicheck.buildsource.extractor import CollectionContext, DEFAULT_ALLOWED_ACTIONS
 from abicheck.buildsource.extractor_manifest import (
-    load_extractor_manifest, run_external_extractor,
+    load_extractor_manifest,
+    run_external_extractor,
 )
 
 manifest = load_extractor_manifest(Path("my-extractor.yaml"))
@@ -381,7 +388,9 @@ context = CollectionContext(
     # allowed_actions defaults to DEFAULT_ALLOWED_ACTIONS (inspect only); add
     # CollectionAction.QUERY_BUILD_SYSTEM etc. explicitly to permit more.
 )
-result, ledger_record = run_external_extractor(manifest, context, Path("libfoo.evidence"))
+result, ledger_record = run_external_extractor(
+    manifest, context, Path("libfoo.evidence")
+)
 ```
 
 The security model has three pillars, enforced the same way whether the

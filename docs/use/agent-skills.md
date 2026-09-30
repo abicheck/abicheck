@@ -49,7 +49,7 @@ the skill:
 The skill was revised against that same scenario set, so this is not yet a
 held-out result, and it has not been validated on other agents. The
 methodology and caveats are in
-[the pilot report](https://github.com/abicheck/abicheck/blob/main/agent-evals/skills/pilot-results/2026-09-29.md).
+[the pilot report](https://github.com/abicheck/abicheck/blob/main/skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md).
 
 **Second skill (2026-09-30): `debug-abi-failure`**, for a program that
 already fails at runtime. It was evaluated on 8 scenarios in the same way.
@@ -57,7 +57,7 @@ With the skill, the agent always backed its diagnosis with a real comparison
 and graded severity correctly (18 of 18 runs, against 16 of 18). Without it,
 the agent named the right cause just as often, so the skill's measured value
 so far is evidence and correct severity, not a better guess at the cause.
-See [its pilot report](https://github.com/abicheck/abicheck/blob/main/agent-evals/skills/pilot-results/2026-09-30-debug-abi-failure.md).
+See [its pilot report](https://github.com/abicheck/abicheck/blob/main/skills-src/evaluation/agents/skills/pilot-results/2026-09-30-debug-abi-failure.md).
 
 **Portfolio status (2026-08-20):** the portfolio was reset from four
 published skills down to **one internal candidate**. No skill has measured

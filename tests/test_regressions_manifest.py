@@ -379,7 +379,7 @@ def _is_collected_test_path(rel_path: str) -> bool:
     Resolves both sides before checking containment (Codex review,
     fresh evidence, same PR): `Path.relative_to()` is a purely lexical
     check that never collapses `..` or follows a symlink, so an
-    unresolved `rel_path` like `tests/../agent-evals/tasks/.../
+    unresolved `rel_path` like `tests/../skills-src/evaluation/agents/tasks/.../
     hidden_tests/test_foo.py` satisfied the old `relative_to(tests/)`
     check while naming a file the root `testpaths = ["tests"]` suite
     never collects.
@@ -406,7 +406,7 @@ class TestIsCollectedTestPathBoundary:
         # that lexically satisfies `tests/../...`.relative_to("tests") but
         # resolves outside the tests/ tree the root suite actually collects.
         traversal = (
-            "tests/../agent-evals/tasks/add-change-kind-small/"
+            "tests/../skills-src/evaluation/agents/tasks/add-change-kind-small/"
             "hidden_tests/test_type_nodiscard_detection.py"
         )
         assert (REPO_ROOT / traversal).is_file(), "fixture for this test moved/renamed"

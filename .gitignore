@@ -38,4 +38,4 @@ mutants/
 mutation-receipt.json
 mutmut-results.txt
 # debug-abi-failure eval fixtures build their environment in place (setup.sh)
-agent-evals/skills/fixtures/*/env/
+skills-src/evaluation/agents/skills/fixtures/*/env/

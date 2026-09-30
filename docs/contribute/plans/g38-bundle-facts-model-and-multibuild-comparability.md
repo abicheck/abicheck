@@ -272,11 +272,20 @@ class BundleFacts:
     """Serializable projection of everything compare_bundle() derives from
     live .so files, decoupled from filesystem paths — the bundle-level
     counterpart to AbiSnapshot for a single library."""
+
     schema_version: int
-    variant_fingerprint: str  # see Phase 3 — always present, "default" for a non-multibuild bundle
-    artifacts: list[BundleArtifactFacts]  # per-DSO: soname, aliases, build-id/hash, path label (ADR-032 D7 redaction rules apply)
-    resolution_graph: ResolutionGraph  # already exists — just needs schema_version + serialization
-    per_library_snapshots: dict[str, AbiSnapshot]  # one per bundle member — see below for why this is mandatory, not optional
+    variant_fingerprint: (
+        str  # see Phase 3 — always present, "default" for a non-multibuild bundle
+    )
+    artifacts: list[
+        BundleArtifactFacts
+    ]  # per-DSO: soname, aliases, build-id/hash, path label (ADR-032 D7 redaction rules apply)
+    resolution_graph: (
+        ResolutionGraph  # already exists — just needs schema_version + serialization
+    )
+    per_library_snapshots: dict[
+        str, AbiSnapshot
+    ]  # one per bundle member — see below for why this is mandatory, not optional
     manifest: InstantiationManifest | None
 ```
 
@@ -465,7 +474,9 @@ deliberately no `compiler_version`, see that note), not the
 `(evidence, env)` sketch below.
 
 ```python
-def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix | None) -> str:
+def variant_fingerprint(
+    evidence: BuildEvidence | None, env: EnvironmentMatrix | None
+) -> str:
     """Stable fingerprint over LOGICAL VARIANT IDENTITY only — which
     distinct build configuration this is (target triple, feature toggles
     such as ONEDAL_DATA_PARALLEL that mean "this is the DPC build, not the
@@ -502,6 +513,7 @@ def variant_fingerprint(evidence: BuildEvidence | None, env: EnvironmentMatrix |
        compiled — which can and does change release to release — to the
        ordinary per-library comparability/diff layers to classify once
        `pair_variants` has matched the pair."""
+
 
 def pair_variants(
     old: dict[str, BundleFacts], new: dict[str, BundleFacts]

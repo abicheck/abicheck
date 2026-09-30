@@ -70,7 +70,9 @@ policy system — every change is either "compatible" or "incompatible."
 Each profile produces four disjoint kind sets via `policy_kind_sets(policy)`:
 
 ```python
-def policy_kind_sets(policy: str) -> tuple[
+def policy_kind_sets(
+    policy: str,
+) -> tuple[
     frozenset[ChangeKind],  # breaking
     frozenset[ChangeKind],  # api_break
     frozenset[ChangeKind],  # compatible
@@ -152,9 +154,12 @@ assert SDK_VENDOR_COMPAT_KINDS <= API_BREAK_KINDS
 assert PLUGIN_ABI_DOWNGRADED_KINDS <= BREAKING_KINDS
 
 # RISK_KINDS must be disjoint from all other sets (explicit raises, not assert)
-if not RISK_KINDS.isdisjoint(BREAKING_KINDS): raise AssertionError(...)
-if not RISK_KINDS.isdisjoint(COMPATIBLE_KINDS): raise AssertionError(...)
-if not RISK_KINDS.isdisjoint(API_BREAK_KINDS): raise AssertionError(...)
+if not RISK_KINDS.isdisjoint(BREAKING_KINDS):
+    raise AssertionError(...)
+if not RISK_KINDS.isdisjoint(COMPATIBLE_KINDS):
+    raise AssertionError(...)
+if not RISK_KINDS.isdisjoint(API_BREAK_KINDS):
+    raise AssertionError(...)
 ```
 
 These constraints use `raise` (not `assert`) for safety-critical checks to

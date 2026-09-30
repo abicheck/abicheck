@@ -671,7 +671,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             KnownGap(
                 description=(
                     "The scan covers `actions/`, `contrib/`, `scripts/`, "
-                    "`validation/` and `tests/` -- first-party trees only. "
+                    "`skills-src/evaluation/validation/` and `tests/` -- first-party trees only. "
                     "A downstream consumer (a user's CI script, a "
                     "third-party integration) reading `build_source` off a "
                     "dump-written baseline has the identical bug and "

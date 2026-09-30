@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "debug-abi-failure"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:279f24ffc3434cfa7e5a02099228e41e035514dc11dbc49bd97be99094bcd3f2",
+  "expected": {
+    "cause": "symbol_version_missing",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/debug-missing-version-node",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Our app fails at startup on the test machine with a message about a version not being found. Run ./setup.sh once, then ./env/run.sh to see it. What is going on and what do we do about it?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/debug-missing-version-node",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "debug-abi-failure",
+  "status": "ready"
+}

@@ -145,7 +145,7 @@ and the doc corpus in `docs/use/`:
    finding that drove ADR-044's entire reachability-aware-suppression
    redesign (`Suppression.reachability`, `internal_symbol_required_by_public_api`,
    `--verify-runtime`). `docs/contribute/plans/g21-oneshot-deep-compare.md`
-   ("the oneDAL field evaluation (2026-06)") and `validation/REPORT.md`
+   ("the oneDAL field evaluation (2026-06)") and `skills-src/evaluation/validation/REPORT.md`
    document the same underlying evaluation from a different angle (CLI
    staging friction — six manual pipeline stages to reach L4/L5 confidence
    — which drove the G21 one-shot-compare UX plan).
@@ -1618,7 +1618,7 @@ second pilot. Unlike "Vandal," oneDAL PR #3693 **is** a real, locatable
 field review in this repository (finding 5, corrected) —
 `docs/contribute/adr/044-reachability-aware-suppression.md`'s Context
 section, `docs/contribute/plans/g21-oneshot-deep-compare.md`, and
-`validation/REPORT.md` all document it, and it drove real code changes
+`skills-src/evaluation/validation/REPORT.md` all document it, and it drove real code changes
 (ADR-044). An earlier draft of this ADR understated that evidence (finding
 5's original wording said oneDAL "appears only as a scan-timing data
 point," missing ADR-044 entirely) — corrected upon review rather than left

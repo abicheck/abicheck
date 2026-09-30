@@ -8,7 +8,7 @@ on:
       - "catalog/**"
       - "abicheck/**"
       - "tests/**"
-      - "validation/scripts/**"
+      - "skills-src/evaluation/validation/scripts/**"
       - "scripts/workflow_examples.py"
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
@@ -43,7 +43,7 @@ on:
       - "catalog/**"
       - "abicheck/**"
       - "tests/**"
-      - "validation/scripts/**"
+      - "skills-src/evaluation/validation/scripts/**"
       - "scripts/workflow_examples.py"
       - "scripts/check_examples_validation_status_sync.py"
       - "scripts/check_build_source_release_proof.py"
@@ -147,7 +147,7 @@ jobs:
       - name: Run workflow examples
         run: |
           mkdir -p results
-          PYTHONPATH=. python validation/scripts/run_workflow_examples.py \
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_workflow_examples.py \
             --require compare-release --require audit-release \
             --require suppressions --require python-api \
             --require github-actions --require compare-project \
@@ -302,7 +302,7 @@ jobs:
       - name: Runtime smoke examples
         if: ${{ always() && matrix.toolchain == 'gcc' && matrix.shard == 1 }}
         run: |
-          PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
 
       - name: Upload shard results
         if: always()
@@ -321,7 +321,7 @@ jobs:
 
   # Reassembles the sharded legs into the one whole-catalog artifact per
   # toolchain that everything downstream expects. This is not bookkeeping:
-  # validation/scripts/collect_full_example_matrix.py deliberately rejects an
+  # skills-src/evaluation/validation/scripts/collect_full_example_matrix.py deliberately rejects an
   # artifact whose case set isn't exactly the catalog (no missing ids, no
   # duplicates, selected_cases == catalog size), so a bare shard artifact
   # cannot be consumed and the merge is what restores that contract.
@@ -645,25 +645,25 @@ jobs:
       - name: Validate non-default example owners
         continue-on-error: true
         run: |
-          PYTHONPATH=. python validation/scripts/run_example_owner_proofs.py --json \
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_owner_proofs.py --json \
             > results/example-owner-proofs.json
 
       - name: Validate bundle examples
         continue-on-error: true
         run: |
-          PYTHONPATH=. python validation/scripts/run_bundle_examples.py --json \
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_bundle_examples.py --json \
             > results/bundle-examples.json
 
       - name: Validate special-shape examples through public CLI
         continue-on-error: true
         run: |
-          PYTHONPATH=. python validation/scripts/run_special_cli_examples.py --json \
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_special_cli_examples.py --json \
             > results/special-cli-examples.json
 
       - name: Build full example matrix
         if: always()
         run: |
-          PYTHONPATH=. python validation/scripts/collect_full_example_matrix.py \
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/collect_full_example_matrix.py \
             --gcc downloaded/examples-validation-results-gcc/validate_examples-gcc.json \
             --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
             --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \

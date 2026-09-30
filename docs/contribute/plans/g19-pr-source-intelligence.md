@@ -407,49 +407,53 @@ class ScanRequest:
     sources: Path | None = None
     inputs_pack: Path | None = None
     baseline: str | Path | None = None
-    mode: ScanMode = ScanMode.PR            # PR | PR_DEEP | BASELINE | AUDIT (fixed preset)
+    mode: ScanMode = ScanMode.PR  # PR | PR_DEEP | BASELINE | AUDIT (fixed preset)
     # source_method is precise (S-axis); depth is a coarse L-axis selector (lossy
     # S→L: can't express S2/S3). source_method wins if both set. AUTO = opt-in.
-    source_method: SourceMethod | None = None   # S0..S6 | AUTO; None = use mode preset
-    depth: EvidenceLayer | None = None          # coarse L target; None = use mode preset
+    source_method: SourceMethod | None = None  # S0..S6 | AUTO; None = use mode preset
+    depth: EvidenceLayer | None = None  # coarse L target; None = use mode preset
     changed_paths: list[str] = field(default_factory=list)
     budget: Budget = field(default_factory=Budget)  # total_timeout, max_tus, partial_ok
     risk_rules: RiskRules | None = None
     crosschecks: dict[str, Severity] = field(default_factory=dict)
 
+
 @dataclass(frozen=True)
 class CostEstimate:
-    method: SourceMethod | None        # S-axis: S0..S6; None for intrinsic L0-L2
-    layer: EvidenceLayer               # L-axis it populates: L0_BINARY..L5_SOURCE_GRAPH
+    method: SourceMethod | None  # S-axis: S0..S6; None for intrinsic L0-L2
+    layer: EvidenceLayer  # L-axis it populates: L0_BINARY..L5_SOURCE_GRAPH
     tus: int
     est_seconds: float
     cache_hit_rate: float
     note: str
 
+
 @dataclass(frozen=True)
 class LayerResult:
-    method: SourceMethod | None        # which S-method ran; None for intrinsic L0-L2
-    layer: EvidenceLayer               # which L-layer it populated
-    coverage: LayerCoverage            # reuse buildsource.model
+    method: SourceMethod | None  # which S-method ran; None for intrinsic L0-L2
+    layer: EvidenceLayer  # which L-layer it populated
+    coverage: LayerCoverage  # reuse buildsource.model
     facts: int
     elapsed_s: float
     skipped_reason: str | None = None
 
+
 @dataclass(frozen=True)
 class ScanResult:
-    diff: DiffResult | None            # whole comparison; None in --audit (no baseline)
-    findings: list[Change]             # individual Change objects, incl. new
-                                       # crosscheck ChangeKinds (D4); == diff.changes
-                                       # when a baseline is given
-    layers: list[LayerResult]          # per-layer coverage (D3/D10)
-    confidence: dict[str, str]         # provider-agreement matrix (§6.8)
-    estimate: list[CostEstimate]       # projected vs. actual
+    diff: DiffResult | None  # whole comparison; None in --audit (no baseline)
+    findings: list[Change]  # individual Change objects, incl. new
+    # crosscheck ChangeKinds (D4); == diff.changes
+    # when a baseline is given
+    layers: list[LayerResult]  # per-layer coverage (D3/D10)
+    confidence: dict[str, str]  # provider-agreement matrix (§6.8)
+    estimate: list[CostEstimate]  # projected vs. actual
     verdict: Verdict
     exit_code: int
 
+
 def run_scan(req: ScanRequest) -> ScanResult: ...
-def estimate_scan(req: ScanRequest) -> list[CostEstimate]: ...   # no scanning
-def run_audit(req: ScanRequest) -> ScanResult: ...               # mode=AUDIT
+def estimate_scan(req: ScanRequest) -> list[CostEstimate]: ...  # no scanning
+def run_audit(req: ScanRequest) -> ScanResult: ...  # mode=AUDIT
 ```
 
 ### Per-layer provider protocol — `abicheck/buildsource/`
@@ -468,15 +472,17 @@ produced by an S-method:
 
 ```python
 class LayerProvider(Protocol):
-    method: SourceMethod | None          # S-axis method, or None for intrinsic L0-L2
-    layer: EvidenceLayer                 # L-axis: which evidence layer it populates
+    method: SourceMethod | None  # S-axis method, or None for intrinsic L0-L2
+    layer: EvidenceLayer  # L-axis: which evidence layer it populates
+
     def capabilities(self) -> ProviderCapabilities: ...
     def estimate(self, ctx: ScanContext) -> CostEstimate: ...
     def run(self, ctx: ScanContext, poi: PointsOfInterest) -> LayerFacts: ...
 
+
 @dataclass(frozen=True)
-class ScanContext:                      # shared, read-only inputs to every level
-    snapshot: AbiSnapshot               # L0–L2 already parsed
+class ScanContext:  # shared, read-only inputs to every level
+    snapshot: AbiSnapshot  # L0–L2 already parsed
     compile_db: Path | None
     changed_paths: list[str]
     budget: Budget

@@ -141,8 +141,8 @@ class GraphNode:
     id: str
     kind: str
     label: str = ""
-    facts: list[NodeFact] = field(default_factory=list)   # NEW
-    resolved: dict[str, Any] = field(default_factory=dict) # NEW
+    facts: list[NodeFact] = field(default_factory=list)  # NEW
+    resolved: dict[str, Any] = field(default_factory=dict)  # NEW
     conflicts: list[FactConflict] = field(default_factory=list)  # NEW
     # attrs/provenance/confidence become derived *views* over facts[0]
     # (the highest-confidence fact) for read-compatibility with v1 code.
@@ -206,10 +206,11 @@ New `abicheck/buildsource/entity_resolver.py`:
 class EntityResolver:
     """Canonical identity for one real declaration/definition, resolved
     across every evidence source that can name it."""
-    canonical_id: str            # clang USR when available, else a v1-style hash
-    aliases: list[str]           # old_v1_node_id, mangled_symbol, qualified_name,
-                                  # signature_hash, source_location — every signal
-                                  # any producer used to name this entity
+
+    canonical_id: str  # clang USR when available, else a v1-style hash
+    aliases: list[str]  # old_v1_node_id, mangled_symbol, qualified_name,
+    # signature_hash, source_location — every signal
+    # any producer used to name this entity
     kind: str
 ```
 
@@ -251,12 +252,12 @@ drift) — as one shared type:
 ```python
 @dataclass
 class TraversalPolicy:
-    allowed_edges: frozenset[str]        # which EDGE_KINDS this walk may follow
+    allowed_edges: frozenset[str]  # which EDGE_KINDS this walk may follow
     stop_conditions: Callable[[GraphNode], bool]  # e.g. is_consumer_compiled_node
-    effect_transitions: dict[str, str]   # how "effect" changes crossing an edge kind
-                                          # (e.g. crossing DECL_CALLS_DECL:virtual
-                                          # downgrades exact-path to over-approximation)
-    minimum_confidence: str              # walk ignores an edge below this confidence
+    effect_transitions: dict[str, str]  # how "effect" changes crossing an edge kind
+    # (e.g. crossing DECL_CALLS_DECL:virtual
+    # downgrades exact-path to over-approximation)
+    minimum_confidence: str  # walk ignores an edge below this confidence
 ```
 
 `compute_leak_paths`/`compute_call_graph_leak_paths` become thin callers that

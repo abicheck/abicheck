@@ -76,7 +76,7 @@ new = run_probe_matrix(spec, library_name="onedpl", version="2023.0")
 # are captured in the matrix as per-result errors; run_probe_matrix does
 # not abort on them.
 
-findings = diff_matrix(old, new)   # list[Change]: the three kinds above
+findings = diff_matrix(old, new)  # list[Change]: the three kinds above
 ```
 
 ```python

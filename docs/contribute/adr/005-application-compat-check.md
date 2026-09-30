@@ -124,13 +124,16 @@ abicheck appcompat myapp libfoo.so.1 libfoo.so.2
 @dataclass
 class AppRequirements:
     """Symbols and versions an application binary requires from a library."""
-    needed_libs: list[str]              # DT_NEEDED / import table entries
-    undefined_symbols: set[str]         # mangled symbol names the app imports
-    required_versions: dict[str, str]   # symbol → version tag (ELF only)
+
+    needed_libs: list[str]  # DT_NEEDED / import table entries
+    undefined_symbols: set[str]  # mangled symbol names the app imports
+    required_versions: dict[str, str]  # symbol → version tag (ELF only)
+
 
 @dataclass
 class AppCompatResult:
     """Result of checking app compatibility with a library update."""
+
     app_path: str
     old_lib_path: str
     new_lib_path: str
@@ -142,8 +145,8 @@ class AppCompatResult:
     # Filtered results
     breaking_for_app: list[Change]
     irrelevant_for_app: list[Change]
-    missing_symbols: list[str]          # app needs X, new lib doesn't have X
-    missing_versions: list[str]         # app needs version tag, new lib doesn't provide
+    missing_symbols: list[str]  # app needs X, new lib doesn't have X
+    missing_versions: list[str]  # app needs version tag, new lib doesn't provide
 
     # Full library diff (for reference)
     full_diff: DiffResult
@@ -159,7 +162,8 @@ class AppCompatResult:
 
 ```python
 def parse_app_requirements(
-    app_path: str, library_soname: str,
+    app_path: str,
+    library_soname: str,
 ) -> AppRequirements:
     """Extract app's requirements for a specific library."""
 ```

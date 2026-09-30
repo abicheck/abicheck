@@ -125,7 +125,7 @@ from abicheck.post_manifest import validate_from_binary, format_validation_repor
 
 result = validate_from_binary(Path("manifest.json"), Path("libmylib.so"))
 print(format_validation_report(result))
-if not result.passed:          # a promised symbol is missing from the binary
+if not result.passed:  # a promised symbol is missing from the binary
     raise SystemExit(1)
 ```
 
@@ -153,9 +153,11 @@ increase.
 ```python
 from abicheck.post_manifest import load_manifest, check_version_gate, format_gate_report
 
-gate = check_version_gate(load_manifest(Path("v1.json")), load_manifest(Path("v2.json")))
+gate = check_version_gate(
+    load_manifest(Path("v1.json")), load_manifest(Path("v2.json"))
+)
 print(format_gate_report(gate, "v1", "v2"))
-if gate.violated:              # breaking change without a post_abi bump
+if gate.violated:  # breaking change without a post_abi bump
     raise SystemExit(1)
 ```
 

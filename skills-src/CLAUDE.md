@@ -14,6 +14,10 @@ skills-src/
   <skill-name>/
     SKILL.md              Layer A — the skill itself (frontmatter + workflow)
     references/           material specific to this one skill only
+  evaluation/             not a skill (no SKILL.md, never published) — see its README
+    agents/               coding-agent tasks + the G37 skill evaluation harness
+    field/                conda-forge field benchmark of abicheck
+    validation/           real-library validation runs
 ```
 
 Generated output, per skill, per target tree:
@@ -99,8 +103,8 @@ implied is reset → rewrite → evaluate → publish, and this is step two.
 
 | Skill | Status | Meaning |
 |---|---|---|
-| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The first published skill. The 2026-09-29 pilot (`agent-evals/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
-| `debug-abi-failure` | **Preview — same install; single-agent pilot evidence only.** | Admitted by ADR-058's 2026-09-30 amendment (all five admission criteria, stated there). Starts from a runtime symptom in an existing environment and works back to one of six named causes. Evaluated on 8 scenarios (`agent-evals/skills/scenarios.yaml`, `debug-*`); results in `agent-evals/skills/pilot-results/2026-09-30-debug-abi-failure.md`. |
+| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The first published skill. The 2026-09-29 pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
+| `debug-abi-failure` | **Preview — same install; single-agent pilot evidence only.** | Admitted by ADR-058's 2026-09-30 amendment (all five admission criteria, stated there). Starts from a runtime symptom in an existing environment and works back to one of six named causes. Evaluated on 8 scenarios (`skills-src/evaluation/agents/skills/scenarios.yaml`, `debug-*`); results in `skills-src/evaluation/agents/skills/pilot-results/2026-09-30-debug-abi-failure.md`. |
 
 **What "PR 2" integrated, over the bare rename the reset amendment left in
 place:**
@@ -142,7 +146,7 @@ intent only, that PR 4's deliverable should be an npm/npx-installable
 package published from this repository rather than a separate distribution
 repo. **PR 3 landed** under that new name (a complete G37 evaluation
 corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's "PR 3"
-amendment and `agent-evals/skills/pilot-results/README.md`; its dominant
+amendment and `skills-src/evaluation/agents/skills/pilot-results/README.md`; its dominant
 finding is a harness turn-budget confound, not a skill-quality result, so
 the skill is still not behaviorally validated. PR 4 has since landed (2026-09-29):
 `npx skills add abicheck/abicheck` installs the skill from the committed
@@ -184,7 +188,7 @@ domain knowledge to justify a skill. A candidate failing any one becomes a
 P2 candidates and the evidence each needs are recorded in
 `docs/contribute/plans/g36-native-compatibility-agent-skills.md`. The
 portfolio status above is a stronger, additional bar on top of this one:
-a new skill ships with scenarios in `agent-evals/skills/scenarios.yaml` and a
+a new skill ships with scenarios in `skills-src/evaluation/agents/skills/scenarios.yaml` and a
 pilot run against the no-skill baseline, like both published skills did.
 
 ## Workflow
@@ -211,8 +215,8 @@ here as they are run.
 
 | Target | Skills validated | Date | Notes |
 |---|---|---|---|
-| Claude Code | `debug-abi-failure` | 2026-09-30 | Headless `claude -p`, `claude-sonnet-5-5`, 8-scenario A/B corpus; see `agent-evals/skills/pilot-results/2026-09-30-debug-abi-failure.md`. |
-| Claude Code | `check-abi-compatibility` | 2026-09-29 | Headless `claude -p`, `claude-sonnet-5-5`, 14-scenario A/B corpus; see `agent-evals/skills/pilot-results/2026-09-29.md`. Not yet exercised interactively or through a `npx`-installed copy by a person. |
+| Claude Code | `debug-abi-failure` | 2026-09-30 | Headless `claude -p`, `claude-sonnet-5-5`, 8-scenario A/B corpus; see `skills-src/evaluation/agents/skills/pilot-results/2026-09-30-debug-abi-failure.md`. |
+| Claude Code | `check-abi-compatibility` | 2026-09-29 | Headless `claude -p`, `claude-sonnet-5-5`, 14-scenario A/B corpus; see `skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`. Not yet exercised interactively or through a `npx`-installed copy by a person. |
 | Codex | — | — | not yet run |
 | GitHub Copilot | — | — | not yet run |
 | Gemini CLI | — | — | not yet run |

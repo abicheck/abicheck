@@ -49,7 +49,7 @@ result = run_compare(
     new_headers=[Path("include/v2/foo.h")],
 )
 
-print(result.diff.verdict)       # Verdict.BREAKING, Verdict.COMPATIBLE, ...
+print(result.diff.verdict)  # Verdict.BREAKING, Verdict.COMPATIBLE, ...
 print(len(result.diff.changes))  # number of detected changes
 for change in result.diff.changes:
     print(change.kind, change.name)
@@ -108,7 +108,9 @@ from abicheck.service import resolve_input, compare_snapshots
 from abicheck.serialization import save_snapshot, load_snapshot
 
 # Build and persist a baseline snapshot.
-baseline = resolve_input(Path("libfoo.so.1"), headers=[Path("include/foo.h")], version="1.0")
+baseline = resolve_input(
+    Path("libfoo.so.1"), headers=[Path("include/foo.h")], version="1.0"
+)
 save_snapshot(baseline, Path("baseline.abi.json"))
 
 # Later — compare a fresh build against the saved baseline.
@@ -209,7 +211,7 @@ request = DumpRequest(
         headers=[Path("include/foo.h")],
         version="1.0",
     ),
-    depth="headers",     # a floor, not a target — see below
+    depth="headers",  # a floor, not a target — see below
 )
 snapshot = run_dump_request(request)
 ```
@@ -259,12 +261,12 @@ request = CompareRequest(
 )
 
 # One call, the normal case:
-result = run_compare_request(request)          # -> CompareResult
+result = run_compare_request(request)  # -> CompareResult
 
 # Or the same thing in two steps, e.g. to inspect the resolved snapshots
 # before classifying:
-pair = resolve_compare_request(request)        # -> ResolvedComparePair (old/new snapshots)
-result = classify_compare_pair(request, pair)   # -> CompareResult
+pair = resolve_compare_request(request)  # -> ResolvedComparePair (old/new snapshots)
+result = classify_compare_pair(request, pair)  # -> CompareResult
 ```
 
 `run_compare_request(request)` does both steps in one call — the two-step
@@ -288,13 +290,15 @@ from pathlib import Path
 from abicheck.service import CompareRequest, InputSpec
 from abicheck.service import run_compare_request
 
-result = run_compare_request(CompareRequest(
-    old=InputSpec.of(Path("baseline.json")),
-    new=InputSpec.of(Path("build/libfoo.so"), headers=[Path("include/")]),
-    depth="headers",
-    contract_evaluation=True,
-    contract_mode="exports",
-))
+result = run_compare_request(
+    CompareRequest(
+        old=InputSpec.of(Path("baseline.json")),
+        new=InputSpec.of(Path("build/libfoo.so"), headers=[Path("include/")]),
+        depth="headers",
+        contract_evaluation=True,
+        contract_mode="exports",
+    )
+)
 ```
 
 The one-sided audit (`compare --no-baseline`, formerly the retired `scan`

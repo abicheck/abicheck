@@ -41,7 +41,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL_DIR = ROOT / "agent-evals" / "skills"
+EVAL_DIR = ROOT / "skills-src" / "evaluation" / "agents" / "skills"
 SKILL_DIR = ROOT / "skills-src" / "debug-abi-failure"
 sys.path.insert(0, str(EVAL_DIR))
 

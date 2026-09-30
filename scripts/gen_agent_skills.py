@@ -626,6 +626,18 @@ def discover_skills(src_dir: Path | None = None) -> list[Path]:
     )
 
 
+def published_source_files(src_dir: Path | None = None) -> list[Path]:
+    """Every source Markdown file whose content can reach a published skill.
+
+    That is each discovered skill's own tree plus `shared/`. Anything else under
+    `skills-src/` (its contributor `CLAUDE.md`, `evaluation/`) never ships, so
+    source-level gates that protect what an agent reads scope themselves here.
+    """
+    src_dir = SRC_DIR if src_dir is None else src_dir
+    roots = [*discover_skills(src_dir), src_dir / "shared"]
+    return sorted(p for root in roots if root.is_dir() for p in root.rglob("*.md"))
+
+
 def _markdown_files(skill_dir: Path) -> list[Path]:
     files = [skill_dir / "SKILL.md"]
     references = skill_dir / "references"

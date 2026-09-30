@@ -324,7 +324,7 @@ result = run_compare(
     new_headers=[Path("include/v2/foo.h")],
 )
 
-print(result.diff.verdict)       # e.g. Verdict.BREAKING
+print(result.diff.verdict)  # e.g. Verdict.BREAKING
 print(len(result.diff.changes))  # number of detected changes
 ```
 

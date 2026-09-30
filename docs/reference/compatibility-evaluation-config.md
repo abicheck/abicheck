@@ -271,11 +271,13 @@ from abicheck.compatibility_evaluation_frontend import (
 )
 
 cfg = resolve_compatibility_evaluation_config(
-    explicit=ExplicitCompatibilityInputs(contract_mode="exports", policy_base="sdk_vendor")
+    explicit=ExplicitCompatibilityInputs(
+        contract_mode="exports", policy_base="sdk_vendor"
+    )
 )
-cfg.contract.mode                          # ContractMode.EXPORTS
-cfg.provenance["contract.mode"].layer      # SelectorLayer.EXPLICIT_CLI
-cfg.provenance["policy.base"].reference    # "sdk_vendor"
+cfg.contract.mode  # ContractMode.EXPORTS
+cfg.provenance["contract.mode"].layer  # SelectorLayer.EXPLICIT_CLI
+cfg.provenance["policy.base"].reference  # "sdk_vendor"
 ```
 
 An entry records the winning layer, the kind of source, its reference/path/
@@ -299,7 +301,7 @@ whichever front end asked. It is checked, not asserted:
 ```python
 from abicheck.compatibility_evaluation_frontend import cross_front_end_differences
 
-cross_front_end_differences(cli_config, api_config)   # [] when equivalent
+cross_front_end_differences(cli_config, api_config)  # [] when equivalent
 ```
 
 The only permitted difference is *which* front end stated a value
@@ -344,8 +346,10 @@ deliberately normalizes option spellings away and so is blind to it:
 ```python
 from abicheck.compatibility_evaluation_frontend import unstatable_selectors
 
-unstatable_selectors(api_config)                               # no CLI flag at an API tier
-unstatable_selectors(api_config, request_type=CompareRequest)  # ...and every name is a real field
+unstatable_selectors(api_config)  # no CLI flag at an API tier
+unstatable_selectors(
+    api_config, request_type=CompareRequest
+)  # ...and every name is a real field
 ```
 
 Without `request_type` it reports any `api_request` hop labelled with a CLI

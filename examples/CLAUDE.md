@@ -45,7 +45,7 @@ the output) — not calibration fixtures a gate scores. Consequently:
   `workflow_examples.readme_drift`, in the fast lane
   (`tests/test_workflow_examples.py`) and again in the runner.
 - Verify every command and every excerpted output block against a real run
-  before writing it down — `validation/scripts/run_workflow_examples.py`
+  before writing it down — `skills-src/evaluation/validation/scripts/run_workflow_examples.py`
   does exactly that in CI (scratch copy, real shell, real `abicheck`), and
   the `workflow-examples` job in `examples-validation.yml` gates it. See
   `compare-release/README.md` + `compare-release/workflow.yaml` for the

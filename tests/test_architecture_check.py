@@ -116,6 +116,37 @@ def test_unlisted_flat_root_module_is_rejected(tmp_path: Path) -> None:
     assert "root-module" in _rules(root)
 
 
+@pytest.mark.parametrize(
+    ("section", "entry"),
+    [
+        ("legacy_root_modules", "moved_away.py"),
+        ("layer_path", "abicheck/moved_away.py"),
+        ("layer_path", "abicheck/old_pkg/moved_away.py"),
+        ("layer_path", "abicheck/old_pkg"),
+    ],
+)
+def test_legacy_inventory_entry_without_a_file_is_stale(
+    tmp_path: Path, section: str, entry: str
+) -> None:
+    root = _tree(tmp_path)
+    config = json.loads((root / "architecture/modules.yaml").read_text())
+    if section == "legacy_root_modules":
+        config["legacy_root_modules"].append(entry)
+    else:
+        config["layers"]["model"]["legacy_paths"] = [entry]
+    _write(root / "architecture/modules.yaml", json.dumps(config))
+
+    assert "stale-root-inventory" in _rules(root)
+
+    # The same entry is accepted once the file (or package) it names exists.
+    target = root / ("abicheck/" + entry if section == "legacy_root_modules" else entry)
+    if target.suffix:
+        _write(target, "VALUE = 1\n")
+    else:
+        _write(target / "__init__.py")
+    assert "stale-root-inventory" not in _rules(root)
+
+
 def test_new_forbidden_prefix_sibling_is_actionable(tmp_path: Path) -> None:
     root = _tree(tmp_path)
     _write(root / "abicheck/cli_more.py", "VALUE = 1\n")

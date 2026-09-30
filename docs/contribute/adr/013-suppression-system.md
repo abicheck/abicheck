@@ -67,14 +67,14 @@ construction.
 ```python
 @dataclass
 class SuppressionRule:
-    symbol: str | None           # Exact symbol match
-    symbol_pattern: str | None   # Regex (fullmatch semantics)
-    type_pattern: str | None     # Regex for type-level changes only
-    change_kind: str | None      # Filter by ChangeKind value
-    reason: str | None           # Documentation
-    label: str | None            # Grouping tag (e.g., "workaround")
+    symbol: str | None  # Exact symbol match
+    symbol_pattern: str | None  # Regex (fullmatch semantics)
+    type_pattern: str | None  # Regex for type-level changes only
+    change_kind: str | None  # Filter by ChangeKind value
+    reason: str | None  # Documentation
+    label: str | None  # Grouping tag (e.g., "workaround")
     source_location: str | None  # fnmatch glob against source path
-    expires: date | None         # ISO 8601 date — inactive after expiry
+    expires: date | None  # ISO 8601 date — inactive after expiry
 ```
 
 ### Matching semantics

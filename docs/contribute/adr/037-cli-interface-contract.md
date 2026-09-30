@@ -145,13 +145,14 @@ class InputSpec:
     pdb: Path | None = None
     debug_roots: tuple[Path, ...] = ()
 
+
 @dataclass(frozen=True)
 class CompareRequest:
     old: InputSpec
     new: InputSpec
     lang: str = "c++"
-    frontend: str = "auto"            # D8
-    depth: AnalysisDepth = AnalysisDepth.AUTO   # D5
+    frontend: str = "auto"  # D8
+    depth: AnalysisDepth = AnalysisDepth.AUTO  # D5
     policy: PolicySpec = field(default_factory=PolicySpec.default)
     suppression: SuppressionSpec | None = None
     scope_public: bool = True

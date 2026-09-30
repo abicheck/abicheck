@@ -83,20 +83,23 @@ strategies:
 @dataclass
 class SyclPluginInfo:
     """Metadata for a single backend plugin (PI or UR)."""
-    name: str                          # e.g. "level_zero", "opencl", "cuda"
-    library: str                       # e.g. "libpi_level_zero.so" or "libur_adapter_level_zero.so"
-    interface_type: str = "pi"         # "pi" (Plugin Interface) or "ur" (Unified Runtime)
-    pi_version: str                    # interface version (heuristic from symbols)
-    entry_points: list[str]            # exported pi*/ur* function names
-    backend_type: str                  # "level_zero" | "opencl" | "cuda" | "hip"
-    min_driver_version: str | None     # minimum backend driver version if known
+
+    name: str  # e.g. "level_zero", "opencl", "cuda"
+    library: str  # e.g. "libpi_level_zero.so" or "libur_adapter_level_zero.so"
+    interface_type: str = "pi"  # "pi" (Plugin Interface) or "ur" (Unified Runtime)
+    pi_version: str  # interface version (heuristic from symbols)
+    entry_points: list[str]  # exported pi*/ur* function names
+    backend_type: str  # "level_zero" | "opencl" | "cuda" | "hip"
+    min_driver_version: str | None  # minimum backend driver version if known
+
 
 @dataclass
 class SyclMetadata:
     """SYCL runtime + plugin interface metadata."""
-    implementation: str = ""           # "dpcpp" | "adaptivecpp" | "computecpp"
-    runtime_version: str = ""          # e.g. "2025.2.0"
-    pi_version: str = ""               # PI interface version of the runtime
+
+    implementation: str = ""  # "dpcpp" | "adaptivecpp" | "computecpp"
+    runtime_version: str = ""  # e.g. "2025.2.0"
+    pi_version: str = ""  # PI interface version of the runtime
     plugins: list[SyclPluginInfo] = field(default_factory=list)
     plugin_search_paths: list[str] = field(default_factory=list)
     # Future: SPIR-V module metadata for device-code compat
@@ -149,18 +152,21 @@ Detects:
 @dataclass
 class EnvironmentMatrix:
     """Declared deployment constraints — shared across SYCL, CUDA, etc."""
+
     # Host toolchain
-    compilers: list[str] = field(default_factory=list)       # ["gcc-13", "clang-17"]
-    abi_version: str | None = None                           # -fabi-version value
-    libstdcxx_dual_abi: str | None = None                    # "cxx11" | "old"
+    compilers: list[str] = field(default_factory=list)  # ["gcc-13", "clang-17"]
+    abi_version: str | None = None  # -fabi-version value
+    libstdcxx_dual_abi: str | None = None  # "cxx11" | "old"
 
     # SYCL-specific
-    sycl_backends: list[str] = field(default_factory=list)   # ["level_zero", "opencl"]
-    sycl_implementation: str | None = None                   # "dpcpp"
+    sycl_backends: list[str] = field(default_factory=list)  # ["level_zero", "opencl"]
+    sycl_implementation: str | None = None  # "dpcpp"
 
     # CUDA-specific (future)
-    cuda_gpu_architectures: list[str] = field(default_factory=list)  # ["sm_80", "sm_90"]
-    cuda_driver_range: tuple[str, str] | None = None         # ("525.0", "580.0")
+    cuda_gpu_architectures: list[str] = field(
+        default_factory=list
+    )  # ["sm_80", "sm_90"]
+    cuda_driver_range: tuple[str, str] | None = None  # ("525.0", "580.0")
     cuda_toolkit_version: str | None = None
 
     # Generic

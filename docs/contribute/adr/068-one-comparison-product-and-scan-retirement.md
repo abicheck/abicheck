@@ -1079,6 +1079,7 @@ ordering constraint against side acquisition, and no ambiguity to encode.
 
 ```python
 from abicheck.workflows.input_resolution import load_env_matrix
+
 request = CompareRequest(..., env_matrix=load_env_matrix(Path("env.yaml")))
 ```
 

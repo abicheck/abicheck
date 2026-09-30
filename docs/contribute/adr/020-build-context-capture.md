@@ -157,19 +157,23 @@ the existing `force_cpp` detection logic in `dumper.py`.
 @dataclass
 class BuildContext:
     """Compilation context derived from compile_commands.json."""
-    defines: dict[str, str | None]   # -D macro=value pairs (None = defined without value)
-    undefines: set[str]              # -U macros
-    include_paths: list[Path]        # -I paths (ordered)
-    system_includes: list[Path]      # -isystem paths
-    language_standard: str | None    # -std=c++17, -std=c11, etc.
-    target_triple: str | None        # --target=x86_64-linux-gnu
-    sysroot: Path | None             # --sysroot=
-    extra_flags: list[str]           # Remaining flags passed through to CastXML
-    compile_db_path: Path            # Path to compile_commands.json (for diagnostics)
+
+    defines: dict[
+        str, str | None
+    ]  # -D macro=value pairs (None = defined without value)
+    undefines: set[str]  # -U macros
+    include_paths: list[Path]  # -I paths (ordered)
+    system_includes: list[Path]  # -isystem paths
+    language_standard: str | None  # -std=c++17, -std=c11, etc.
+    target_triple: str | None  # --target=x86_64-linux-gnu
+    sysroot: Path | None  # --sysroot=
+    extra_flags: list[str]  # Remaining flags passed through to CastXML
+    compile_db_path: Path  # Path to compile_commands.json (for diagnostics)
 
     # Conflict tracking
     define_conflicts: dict[str, list[str]]  # macro → [value1, value2, ...]
-    standard_variants: list[str]            # all -std= values seen
+    standard_variants: list[str]  # all -std= values seen
+
 
 def build_context_for_header(
     compile_db: list[dict],
@@ -177,6 +181,7 @@ def build_context_for_header(
     source_filter: str | None = None,
 ) -> BuildContext:
     """Find the best TU for a header and derive its build context."""
+
 
 def build_context_union_fallback(
     compile_db: list[dict],
@@ -258,7 +263,9 @@ header. This matches the existing cache behavior in `dumper.py` which walks
 include directories and hashes mtimes of `.h`/`.hpp` files.
 
 ```python
-def _cache_key(header_path: Path, context: BuildContext, header_dirs: list[Path]) -> str:
+def _cache_key(
+    header_path: Path, context: BuildContext, header_dirs: list[Path]
+) -> str:
     """Content-addressed cache key for deterministic header parsing.
 
     Every BuildContext field that affects CastXML output must be included.

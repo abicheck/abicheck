@@ -34,7 +34,9 @@ from pathlib import Path
 from abicheck.debian_symbols import generate_from_binary
 
 symbols_file = generate_from_binary(
-    Path("libfoo.so"), package="libfoo1", version="1.0",
+    Path("libfoo.so"),
+    package="libfoo1",
+    version="1.0",
 )
 Path("debian/libfoo1.symbols").write_text(symbols_file.format())
 ```
@@ -91,7 +93,11 @@ Symbols tagged `(optional)` are not required — their absence does not cause fa
 ## Diff two symbols files
 
 ```python
-from abicheck.debian_symbols import load_symbols_file, diff_symbols_files, format_diff_report
+from abicheck.debian_symbols import (
+    load_symbols_file,
+    diff_symbols_files,
+    format_diff_report,
+)
 
 old = load_symbols_file("old/libfoo1.symbols")
 new = load_symbols_file("new/libfoo1.symbols")

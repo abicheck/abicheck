@@ -15,7 +15,8 @@ and the [implementation plans](plans/index.md).
 > [config-key review](config-key-review.md),
 > [architecture-deepening plan](architecture-deepening-plan.md),
 > [user scenarios & flows](user-scenarios.md), and the archived
-> [data-source process remediation plan](archive/data-source-process-remediation-plan.md).
+> [data-source process remediation plan](archive/data-source-process-remediation-plan.md)
+> and the [PVXS integration handoff](archive/pvxs-integration-handoff.md).
 
 ---
 
