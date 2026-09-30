@@ -319,8 +319,8 @@ def _classify_and_reject_operands(
     return old_kind, new_kind
 
 
-#: ADR-068 §3 #19: mirrors ``cli_scan._DURATION_UNITS`` (kept as its own
-#: copy, not imported from there -- ``scan`` is scheduled for deletion).
+#: ADR-068 §3 #19: mirrored ``cli_scan._DURATION_UNITS`` (kept as its own
+#: copy -- ``scan`` has since been deleted by ADR-068 Phase 6).
 _DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
 
 

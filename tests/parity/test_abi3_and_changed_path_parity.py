@@ -6,8 +6,7 @@ changed-path localization (``--since``/``--changed-path``).
 Neither is a cross-source check, so neither goes through
 ``run_crosschecks`` -- but both were, just as concretely, capabilities a
 ``compare`` user could not reach at all. Phase 2c/2d moved them: ``compare``
-now accepts ``--since``, ``--changed-path`` and ``--abi3``, and the two
-``EXPECTED_GAPS`` entries are gone from ``gaps.py``. The tests below used to
+now accepts ``--since``, ``--changed-path`` and ``--abi3``. The tests below used to
 also prove parity against a live ``scan`` invocation directly
 (``test_abi3_audit_fires_under_scan``, ``test_scan_supports_changed_path_
 localization``, and half of ``test_abi3_audit_fires_under_compare_as_
@@ -24,7 +23,6 @@ from pathlib import Path
 
 import pytest
 
-from .gaps import EXPECTED_GAPS
 from .runner import compare_json, invoke_cli, write_snapshot
 
 
@@ -49,13 +47,6 @@ def _plain_snapshot():
     from abicheck.model import AbiSnapshot
 
     return AbiSnapshot(library="libfoo.so", version="1.0")
-
-
-def test_the_two_gaps_are_closed_and_deregistered() -> None:
-    """`gaps.py` is the migration's definition of done: a capability
-    `compare` has reached must not still be listed as scan-only."""
-    assert "abi3_audit" not in EXPECTED_GAPS
-    assert "changed_path_localization" not in EXPECTED_GAPS
 
 
 def test_abi3_audit_fires_under_compare_as_candidate_side_enrichment(

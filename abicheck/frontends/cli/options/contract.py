@@ -165,8 +165,8 @@ def contract_options(f: F) -> F:
 # (`frontends/cli/commands/compare_no_baseline.py`) must reach them to activate
 # the evaluator the same way `cli_compare_helpers.run_compare` does, and an
 # import edge from that module to `cli_options` pulls the whole
-# `cli_options -> dry_run_estimate -> scan_engine -> cli_scan_baseline ->
-# cli_compare_helpers` CLI-registration SCC in with it -- new members of that
+# CLI-registration SCC (historically via `scan_engine -> cli_scan_baseline`,
+# both retired by ADR-068 Phase 6) in with it -- new members of that
 # cluster are exactly what the AI-readiness `import-cycle-growth` gate rejects
 # (`AGENTS.md` "What NOT to do": fix the direction or move the shared logic to
 # a leaf module; never extend `IMPORT_CYCLE_ALLOWLIST` to unblock it). This
@@ -221,7 +221,7 @@ def resolve_contract_domain(
     Normalizing the local value alone is not enough: the two front ends read
     the raw parameters differently -- ``compare`` hands
     ``cli_compare_receipt.resolve_and_apply`` explicit values, but
-    ``cli_scan._resolve_scan_evaluation_config`` rebuilds its inputs from
+    the retired ``cli_scan._resolve_scan_evaluation_config`` rebuilt its inputs from
     ``ctx.params`` and its typed-parameter set from
     ``ctx.get_parameter_source``. Given *ctx*, the normalization is applied
     there too, and the parameter source is demoted from ``COMMANDLINE`` to

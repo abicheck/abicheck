@@ -174,7 +174,7 @@ def backfill_run_outcome(out: dict[str, Any]) -> None:
             )
         report: dict[str, Any] = out
         if "exit" not in out:
-            # `cli_scan._emit_scan_abort_report`'s own persisted JSON shape
+            # The retired `cli_scan._emit_scan_abort_report`'s persisted JSON shape
             # (pre-1.24, before that writer carried `run_outcome` itself)
             # nests the abort's preserved exit decision under `diff.exit`,
             # not the top-level `exit` key `scan_report_abort_compatibility_

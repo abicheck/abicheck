@@ -15,7 +15,7 @@
 """Scan-wide deadline propagation + process-group-safe subprocess execution.
 
 Closes the P0 header-scan defect (real-world Intel SVS field report): ``scan
---budget`` was only checked once, in ``scan_engine.run_scan_core``, *after*
+--budget`` was only checked once, in the since-retired ``scan_engine.run_scan_core``, *after*
 the expensive L2 header AST parse had already run to completion — a
 pathological header (deep ``#include``/template complexity) could run for
 hours regardless of ``--budget``. Worse, the clang/castxml ``subprocess.run``
@@ -32,7 +32,7 @@ Two independent pieces close that gap:
   deadline threaded via a ``contextvars.ContextVar`` so any subprocess call
   site *anywhere* in the L2 parse can ask "how much time do I actually have
   left", without threading a new parameter through every intermediate
-  function signature between ``scan_engine.run_scan_core`` and
+  function signature between the (retired) ``scan_engine.run_scan_core`` and
   ``dumper.py``'s clang/castxml invocations. A deadline that has already
   passed raises immediately, *before* a new subprocess is spawned — the
   "checked inside the stage, not only after it" requirement.
@@ -48,7 +48,7 @@ Two independent pieces close that gap:
   guarantee, without depending on that ``multiprocessing`` machinery.
 
 This module has no dependency on ``click``/CLI/service types — pure process +
-time-budget plumbing, safe to import from ``dumper.py``, ``scan_engine.py``,
+time-budget plumbing, safe to import from ``dumper.py``
 or any future L3/L4 subprocess call site that wants the same treatment.
 """
 
@@ -104,7 +104,7 @@ def deadline_scope(seconds: float | None) -> Iterator[None]:
 
     *seconds* is a duration from *now* (``time.monotonic() + seconds``), not an
     absolute timestamp — callers pass the same ``--budget`` seconds value
-    ``scan_engine._check_scan_budget`` already receives. ``None`` means "no
+    the retired ``scan_engine._check_scan_budget`` received. ``None`` means "no
     budget": :func:`remaining`/:func:`bounded_timeout` see no deadline inside
     the scope, matching today's unbounded behaviour exactly (no regression
     when ``--budget`` is not given).

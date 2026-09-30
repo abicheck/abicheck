@@ -716,8 +716,8 @@ def fold_l0_hard_removals(
 
     Delegates the actual "resolve both inputs symbols-only and diff them
     unscoped" extraction to :func:`abicheck.l0_export_delta.collect_l0_export_delta`
-    (ADR-049 Phase 5 §6.3) -- the same function ``cli_scan_baseline._run_baseline_compare``
-    now calls for ``scan --against`` (PR #494 originally hand-copied this
+    (ADR-049 Phase 5 §6.3) -- the same function the retired ``cli_scan_baseline._run_baseline_compare``
+    called for ``scan --against`` (PR #494 originally hand-copied this
     logic in both places, locked in by ``tests/test_pr494_scan_regressions.py``;
     this function's own contribution beyond that shared core is only the
     staleness check below, since only this call site re-derives paths from
@@ -826,7 +826,7 @@ def fold_l0_hard_removals(
 # verdict ranking, and the JSON-safe summaries the renderer reads back off
 # ``result``. A pure relocation -- ``cli_compare_helpers`` re-exports every name
 # below, so ``cli_compare_helpers._verdict_exit_code`` (which
-# ``cli_scan_baseline`` imports) and the existing test patch targets keep
+# the retired ``cli_scan_baseline`` imported) and the existing test patch targets keep
 # resolving unchanged, and a bare-name call there still goes through that
 # module's namespace. This module, not a new one, because a *new* module
 # reaching ``service``/``appcompat`` would join the allowlisted CLI

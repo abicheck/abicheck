@@ -85,6 +85,12 @@ unaffected, per that design's own account of what remained genuinely open).
 See ADR-064's own "Stage 1b, further split" section for the full account.
 The atomic `--exit-code-scheme` removal remains stage 2.
 
+**Historical note (2026-09-29).** The two paragraphs above describe the
+`scan`-era wiring as it was built. `scan`, `scan_engine.py` and
+`cli_scan*.py` were deleted by ADR-068 Phase 6, and `--exit-code-scheme`
+by PR G2. The precedence functions still apply to `compare`'s abort axes
+and the release fan-out.
+
 `docs/contribute/plans/one-comparison-product.md` P3: native `compare` gains
 the same `evidence_contract_error`/`budget_overflow` axes. The sibling
 :mod:`abicheck.policy.exit_decision_precedence` module's
@@ -136,48 +142,30 @@ class ExitReason(str, Enum):
     CONTRACT_COVERAGE = "contract_coverage"
     ANALYSIS_ASSURANCE = "analysis_assurance"
     CLEAN = "clean"
-    #: `scan --against` only. A maintainer-promoted `--crosscheck KEY=error`
-    #: finding (`scan_engine._crosscheck_severity_exit`) raised the exit code
-    #: past what the three compatibility/coverage/assurance axes would have
-    #: produced on their own. :func:`resolve_exit_decision` *does* model
-    #: this as a real fourth contribution
-    #: (`ExitDecision.crosscheck_promotion_contribution`) when a caller
-    #: passes one in -- `resolve_compare_exit_decision` (native `compare`)
-    #: never does, since crosscheck promotion has no meaning outside
-    #: `scan --against`, so it is always `0`/absent there. The scan-only
-    #: half that stays true is *when* the contribution is known:
-    #: `scan_engine._promote_published_gate` re-resolves the whole decision
-    #: through `resolve_exit_decision` (with the crosscheck contribution
-    #: filled in) only *after* the fact, once a promotion actually fires --
-    #: mirroring how that same function already patches the persisted
-    #: `severity` block for the identical reason -- a published `exit`
-    #: block that still named `compatibility_gate` for a code the
-    #: crosscheck promotion actually produced would be exactly the kind of
-    #: "explains nothing about why the exit is N" trap this enum exists to
-    #: avoid.
+    #: **Read-only, retired producer.** The retired `scan --against`'s
+    #: maintainer-promoted `--crosscheck KEY=error` finding raised the exit
+    #: code through this axis. `scan` and `--crosscheck` were deleted by
+    #: ADR-068 Phase 6, so no current run can produce it and
+    #: :func:`resolve_exit_decision` no longer takes a contribution for it.
+    #: The member stays so :meth:`ExitDecision.from_dict` can still read a
+    #: stored pre-0.6 `scan` report whose `exit.reasons` names it.
     PROMOTED_CROSSCHECK = "promoted_crosscheck"
 
-    #: `scan` today; native `compare` gains the identical axis as of
-    #: `one-comparison-product.md` P3 (ADR-037 D5). A pinned, non-`auto`
-    #: `--depth`/`--source-method` had no source evidence to satisfy it
-    #: (`scan_engine._EvidenceContractError` for `scan`;
-    #: `DiffResult.evidence_contract_error` for `compare`, currently never
-    #: set by any CLI-reachable path -- see that field's own docstring) --
-    #: raised during evidence collection, before a candidate/baseline
-    #: comparison is even attempted. Dominates every other axis below it in
+    #: `compare` (`one-comparison-product.md` P3, ADR-037 D5; this axis
+    #: originated in the retired `scan`). A pinned, non-`auto` `--depth`
+    #: had no source evidence to satisfy it (`DiffResult.
+    #: evidence_contract_error`, set by `policy/depth_evidence_contract.py`)
+    #: -- detected before a finding can be trusted. Dominates every other axis below it in
     #: ADR-064's precedence order, since none of them were ever computed for
     #: this run.
     EVIDENCE_CONTRACT_ERROR = "evidence_contract_error"
-    #: `scan` today; native `compare` gains the identical axis as of
-    #: `one-comparison-product.md` P3. `--budget` overflowed
-    #: (`scan_engine._BudgetOverflow` for `scan`; `DiffResult.budget_overflow`
-    #: for `compare`, currently never set by any CLI-reachable path -- `compare`
-    #: has no `--budget` flag yet, see that field's own docstring). Checked
-    #: *after* a `not_comparable` result may already have been decided for
-    #: the same run, and -- per ADR-064's "budget dominates not-comparable"
-    #: rule, reproducing `scan_engine.run_scan_core`'s own unconditional
-    #: post-comparison budget check -- discards that result rather than
-    #: losing to it.
+    #: `compare --budget` overflowed (the CLI exits through
+    #: `cli_compare_fold._exit_on_budget_overflow`; a `DiffResult` can also
+    #: carry `budget_overflow`; `one-comparison-product.md` P3 -- this axis
+    #: originated in the retired `scan`). Checked *after* a
+    #: `not_comparable` result may already have been decided for the same
+    #: run, and -- per ADR-064's "budget dominates not-comparable" rule --
+    #: discards that result rather than losing to it.
     BUDGET_OVERFLOW = "budget_overflow"
     #: OLD and NEW (or, for a release, at least one library pair) were not
     #: extracted under a comparable profile/scope contract (ADR-050 D2), so
@@ -252,9 +240,10 @@ class ExitDecision:
     first three are the identical value today's ad hoc fold chain in
     ``cli._exit_with_severity_or_verdict`` already produces, computed once
     here instead of via three separately-called functions; the fourth
-    exists only for `scan --against`'s own maintainer-promoted
-    `--crosscheck KEY=error` finding and is always `0` for a native
-    `compare` report (see :class:`ExitReason.PROMOTED_CROSSCHECK`).
+    belonged to the retired `scan --against`'s `--crosscheck KEY=error`
+    promotion and is always `0` for every current producer -- it is kept
+    only so stored reports round-trip (see
+    :class:`ExitReason.PROMOTED_CROSSCHECK`).
     ``reasons`` names every axis tied for that maximum; see
     :class:`ExitReason` for why a lower, non-winning contribution is
     excluded.
@@ -314,20 +303,13 @@ class ExitDecision:
     compatibility_contribution: int
     contract_coverage_contribution: int
     analysis_assurance_contribution: int
-    #: `scan --against` only -- what a maintainer-promoted `--crosscheck
-    #: KEY=error` finding contributes (`0` for every other caller, and for
-    #: a scan run where no promotion fired). A *fourth* axis, not a
-    #: bolt-on mutation of `code`/`reasons` after the fact (Codex review,
-    #: fresh evidence): `scan_engine._promote_published_gate` used to patch
-    #: only those two fields, leaving the three contributions above
-    #: summing to less than the new `code` -- silently breaking this
-    #: class's own documented invariant that `code == max(the
-    #: contributions)`, and also never adding `PROMOTED_CROSSCHECK` to
-    #: `reasons` on an exact tie (a hand-rolled strict `>` check, unlike
-    #: this function's own tie-inclusive fold). Modeling it as a real
-    #: contribution lets `_promote_published_gate` reconstruct the whole
-    #: decision through :func:`resolve_exit_decision` instead of hand-
-    #: patching two of its five fields.
+    #: Retired producer: what the deleted `scan --against`'s
+    #: maintainer-promoted `--crosscheck KEY=error` finding contributed.
+    #: Always `0` for every current producer -- :func:`resolve_exit_decision`
+    #: no longer accepts it. Kept as a field, not deleted, because it is part
+    #: of the persisted report `exit` block (schema 2.42+): a stored pre-0.6
+    #: `scan` report still carries it, :meth:`from_dict` still reads it, and
+    #: `exit_decision_precedence` still preserves a prior decision's value.
     crosscheck_promotion_contribution: int = 0
     #: A directory/package release comparison only (ADR-064). What one
     #: library's operational `ERROR` sentinel (a dump/extract/compare
@@ -467,9 +449,9 @@ class ExitDecision:
         the JSON-serialized form available -- e.g. a raw ``diff_summary
         ["exit"]`` dict a scan engine persisted earlier in a run, carried
         across an exception boundary that cannot hold the dataclass itself
-        (`abicheck.scan_engine._BudgetOverflow`'s own ``prior_decision``,
-        ADR-064's "preserve prior contributions on a later budget overflow"
-        follow-up).
+        (ADR-064's "preserve prior contributions on a later budget overflow"
+        follow-up, first built for the retired `scan`), or a stored report
+        read back by `aggregate`/`check_report`.
         """
         return cls(
             code=d["code"],
@@ -502,7 +484,6 @@ def resolve_exit_decision(
     compatibility_contribution: int,
     contract_coverage_contribution: int = 0,
     analysis_assurance_contribution: int = 0,
-    crosscheck_promotion_contribution: int = 0,
     operational_error_contribution: int = 0,
     evidence_contract_error_contribution: int = 0,
     budget_overflow_contribution: int = 0,
@@ -534,12 +515,10 @@ def resolve_exit_decision(
     default, or `SCOPED_GATE` when the caller's compatibility contribution
     is the scoped application/plugin-host gate rather than the full-library
     one; every other axis's reason is unaffected either way.
-    *crosscheck_promotion_contribution* defaults to ``0`` (every caller but
-    `scan_engine._promote_published_gate`, which is the only place a
-    maintainer-promoted `--crosscheck KEY=error` finding's own exit
-    contribution is known) -- see :class:`ExitDecision`'s own field
-    docstring for why this has to be a real axis rather than a post-hoc
-    patch to `code`/`reasons`.
+    There is no crosscheck-promotion parameter: its only producer, the
+    retired `scan --crosscheck KEY=error`, is gone (ADR-068 Phase 6), so
+    the resolved decision's ``crosscheck_promotion_contribution`` is always
+    ``0``. See :class:`ExitReason.PROMOTED_CROSSCHECK`.
     *operational_error_contribution* defaults to ``0`` (every caller but
     `resolve_release_exit_decision`, ADR-064's release resolver) --
     :class:`ExitReason.OPERATIONAL_ERROR`'s own fixed reason, unlike
@@ -577,7 +556,6 @@ def resolve_exit_decision(
         compatibility_reason: compatibility_contribution,
         ExitReason.CONTRACT_COVERAGE: contract_coverage_contribution,
         ExitReason.ANALYSIS_ASSURANCE: analysis_assurance_contribution,
-        ExitReason.PROMOTED_CROSSCHECK: crosscheck_promotion_contribution,
         ExitReason.OPERATIONAL_ERROR: operational_error_contribution,
         ExitReason.EVIDENCE_CONTRACT_ERROR: evidence_contract_error_contribution,
         ExitReason.BUDGET_OVERFLOW: budget_overflow_contribution,
@@ -601,7 +579,6 @@ def resolve_exit_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=contract_coverage_contribution,
         analysis_assurance_contribution=analysis_assurance_contribution,
-        crosscheck_promotion_contribution=crosscheck_promotion_contribution,
         operational_error_contribution=operational_error_contribution,
         evidence_contract_error_contribution=evidence_contract_error_contribution,
         budget_overflow_contribution=budget_overflow_contribution,
@@ -630,25 +607,13 @@ def resolve_compare_exit_decision(
     real process exit code cannot read two different numbers for the same
     comparison.
 
-    **`scan --against` also calls this function (CLI cleanup phase two, PR
-    E), from `cli_scan_baseline._run_baseline_compare`, which nests the
-    result at ``diff.exit`` rather than the report's top level -- matching
-    where its own constituent `analysis_assurance_exit_contribution`/
-    `contract_coverage_exit_contribution` fields already live, not
-    `ScanOutcome`'s own top-level ``verdict``/``exit_code``.** That
-    top-level pair folds strictly more than this function ever will for a
-    scan: budget overflow, `NOT_COMPARABLE`, and a maintainer-promoted
-    `--crosscheck KEY=error` finding (`scan_engine._crosscheck_severity_
-    exit`) are scan-only axes raised through their own code paths, not
-    modeled by this resolver (see this module's own docstring for why).
-    `scan_engine._promote_published_gate` keeps the persisted ``diff.exit``
-    block honest for the one of those three that can happen *after* this
-    function already ran -- crosscheck promotion -- by raising its ``code``
-    and re-stamping ``reasons`` to ``PROMOTED_CROSSCHECK``, the same way it
-    already patches the persisted ``severity`` block. Budget overflow
-    aborts before a report is built at all; `NOT_COMPARABLE` has no
-    `DiffResult` for this resolver to read from, so no ``exit`` block is
-    emitted for that case either.
+    **This is also the resolver the retired `scan --against` called**
+    (CLI cleanup phase two, PR E), which nested its result at
+    ``diff.exit``. `scan` was deleted by ADR-068 Phase 6; its budget-
+    overflow and evidence-contract axes are now `compare`'s own
+    (`DiffResult.budget_overflow`/`evidence_contract_error`), and its
+    `--crosscheck` promotion axis has no producer left (see
+    :class:`ExitReason.PROMOTED_CROSSCHECK`).
 
     **`--used-by`/`--required-symbol(s)` scoped gating no longer overrides
     the compatibility axis (workstream D-S1, vision-api-abi-evolution.md

@@ -168,9 +168,9 @@ def _expand_header_directories(headers: Sequence[Path]) -> list[Path]:
 
     Deliberately *not* a call to ``dry_run_estimate.expand_header_inputs``
     itself: that function lives in the CLI/service import-cycle-allowlisted
-    cluster, and (transitively, via ``scan_engine`` -> ``buildsource.
+    cluster, and (transitively, via the since-retired ``scan_engine`` -> ``buildsource.
     l2_seed``) importing it from here -- a `buildsource/` leaf module
-    `l2_seed.py` itself calls into -- closes a real import cycle
+    `l2_seed.py` itself calls into -- closed a real import cycle (until ADR-068 Phase 6 deleted ``scan_engine``)
     (``header_compile_context`` -> ``dry_run_estimate`` -> ``scan_engine`` ->
     ``buildsource.l2_seed`` -> ``header_compile_context``), exactly what
     AGENTS.md's "What NOT to do" asks a change to avoid rather than

@@ -29,7 +29,7 @@ this module gives the flat CLI helpers (``cli_params.py``,
 ``cli_buildsource_helpers.py``, ``cli_compare_helpers.py``,
 ``cli_compare_receipt.py``, ``cli_compare_release.py``,
 ``cli_compare_release_helpers.py``, ``cli_helpers_compare.py``,
-``cli_scan_baseline.py``) the same route for the names they type-check or
+and formerly ``cli_scan_baseline.py``) the same route for the names they type-check or
 call directly.
 
 Re-export only, deliberately: the point is that there is one owner per

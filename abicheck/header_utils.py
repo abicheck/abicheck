@@ -734,7 +734,7 @@ def dedup_paths_preserve_order(paths: Sequence[Path]) -> list[Path]:
     entry — so the resulting ``include_sequence`` carries an extra token a
     `scan --against` candidate resolution (which folds the seed and the L3
     context in one pass, with no separate ``inc_extra`` add — see
-    ``scan_engine._build_new_snapshot``) never produces for the identical
+    the retired ``scan_engine._build_new_snapshot``) never produced for the identical
     project, and the two sides spuriously fail ``profile_fingerprint``
     comparability on ``include_sequence`` alone (AGENTS.md's "nineteenth
     finding" on the L3->L2-fold known gap, candidate mechanism (b) —

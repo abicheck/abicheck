@@ -204,7 +204,7 @@ def compare_stored_bundle_facts_pair(
     -- the same floor-then-ceiling pairing ``classify_compare_pair``
     (``service_compare_pipeline.py``) applies for every other
     resolved-snapshot comparison path (``cli_compare_helpers.py``,
-    ``cli_scan_baseline.py``). Only ``binary``/``headers`` are reachable
+    formerly ``cli_scan_baseline.py``). Only ``binary``/``headers`` are reachable
     here at all, since ``--depth build``/``source`` are rejected
     unconditionally for a stored OLD_INPUT elsewhere: this driver has no
     channel to *collect* L3-L5 evidence, only to enforce and project

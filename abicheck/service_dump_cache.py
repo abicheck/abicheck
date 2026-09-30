@@ -48,7 +48,7 @@ def _dump_is_cacheable(
     debug_presence_only: bool,
     # Untyped (not `CompileContext | None`): the type lives in dry_run_estimate.py,
     # and importing it here — even under TYPE_CHECKING — closes an import
-    # cycle back through service.py/scan_engine.py. Only ever compared to
+    # cycle back through service.py (and formerly scan_engine.py). Only ever compared to
     # `None` below, so no real type-safety is lost.
     compile: object | None,
     include_labels: dict[Path, str] | None = None,

@@ -127,8 +127,8 @@ def expand_public_header_inputs(headers: Iterable[Path]) -> list[str]:
     it started, so ``service_input_resolution.embed_side_build_source`` can
     reach it without an engine-imports-CLI edge (CLI cleanup phase two, PR 3A --
     the migration that routed ``scan``'s candidate resolution through that
-    shared primitive). ``cli_scan_baseline._expand_public_headers`` is now a
-    thin delegate, so there is one implementation rather than two.
+    shared primitive). ``cli_scan_baseline._expand_public_headers`` was a thin
+    delegate until ADR-068 Phase 6 deleted it, so there is one implementation rather than two.
     """
     hdrs = list(headers)
     try:

@@ -1307,8 +1307,8 @@ def release_finding_entry(
     built inline, with one addition: ``reclassified_by`` (schema 2.31) when a
     ``reclassify:`` rule decided this change's effective verdict, resolved
     through the identical :func:`_reclassified_by_for_change` helper
-    ``_change_to_dict``/``_leaf_entry``/``cli_scan_baseline.
-    _baseline_finding_dicts`` already use -- so all four entry builders agree
+    ``_change_to_dict``/``_leaf_entry``/the retired ``cli_scan_baseline.
+    _baseline_finding_dicts`` use -- so all four entry builders agree
     on which rule (if any) fired for a shared finding, instead of the release
     fan-out's own projection never computing the field at all. Lives here
     (not in ``cli_compare_release_matrix.py``, which sits at its own

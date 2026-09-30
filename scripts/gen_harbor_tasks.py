@@ -644,7 +644,7 @@ def _readme_abicheck_command(fixture: Path) -> tuple[str, str] | None:
     evidence, so a reference solution that dropped them would silently
     reproduce the wrong verdict rather than the documented one. `None`
     when the block is missing or carries no `abicheck compare` line (e.g.
-    a case documented only via `abicheck scan`), in which case `_solve_sh`
+    a case documented only via some other command), in which case `_solve_sh`
     falls back to its unimplemented stub rather than guessing.
     """
     readme = fixture / "README.md"

@@ -436,7 +436,7 @@ def run_outcome_for_scan_fields(
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> RunOutcome:
     """Build a :class:`RunOutcome` for one of ``scan``'s ``(verdict,
-    exit_code)`` report shapes -- :class:`~abicheck.scan_engine.ScanOutcome`
+    exit_code)`` report shapes -- the retired ``scan_engine.ScanOutcome``
     since ADR-068 Phase 4 retired the typed ``ScanResult``/``ScanSetResult``
     envelopes that also used it.
 
@@ -487,7 +487,7 @@ def run_outcome_for_scan_fields(
     cross-library bundle audit itself never ran.
 
     *assurance*, when given, is the report's own already-serialized
-    ``analysis_assurance`` block (``cli_scan_baseline.py``'s
+    ``analysis_assurance`` block (the retired ``cli_scan_baseline.py``'s
     ``diff_summary["analysis_assurance"]``) -- stored as-is, accepted
     directly by :func:`analysis_assurance_dict`.
 
@@ -647,7 +647,7 @@ def scan_report_coverage_contribution(report: object) -> object:
 
 def scan_report_assurance_block(report: object) -> object:
     """The report's already-serialized ``diff.analysis_assurance`` block
-    (``cli_scan_baseline.py``'s ``analysis_assurance_report_dict(diff).
+    (the retired ``cli_scan_baseline.py``'s ``analysis_assurance_report_dict(diff).
     to_dict()``)."""
     return _scan_report_diff_field(report, "analysis_assurance")
 
@@ -662,7 +662,7 @@ def scan_report_assurance_contribution(report: object) -> object:
 def run_outcome_dict_for_scan_outcome(
     verdict: str, exit_code: int, diff_summary: object
 ) -> dict[str, Any]:
-    """One-call convenience for :class:`~abicheck.scan_engine.ScanOutcome`
+    """One-call convenience for the retired ``scan_engine.ScanOutcome``
     specifically: its own ``diff_summary`` carries ``severity`` directly
     (unlike the ``{"diff": {"severity": ...}}`` shape
     :func:`scan_report_severity_exit_code` reads), so this reads one level
@@ -786,7 +786,7 @@ def analysis_assurance_dict(assurance: object | None) -> dict[str, Any] | None:
     evidence): ``scan``'s own writers never hold a live ``AnalysisAssurance``
     object at the point they build ``RunOutcome`` -- only its own already-
     serialized ``diff_summary["analysis_assurance"]`` block
-    (``cli_scan_baseline.py``'s ``analysis_assurance_report_dict(diff).
+    (the retired ``cli_scan_baseline.py``'s ``analysis_assurance_report_dict(diff).
     to_dict()`` result) -- so :attr:`RunOutcome.assurance` legitimately holds
     either shape depending on the writer, and this is the one place both are
     unwrapped to the same report-JSON shape.
