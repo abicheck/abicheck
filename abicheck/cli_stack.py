@@ -242,7 +242,7 @@ def deps_compare_cmd(
       1  WARN — loads but ABI risk detected
       4  FAIL — load failure or binary ABI break
       5  At least one dependency's before/after DSOs were not extracted
-         under a comparable profile/scope contract (ADR-050 D2) — its
+         under a comparable profile/scope contract — its
          per-library ABI diff never ran
 
     \b
@@ -310,7 +310,7 @@ def deps_compare_cmd(
             "Output and exit-code behavior",
             f"exports: {', '.join(t.spelling or f'{t.fmt}=-' for t in exports.targets)}",
             "exit codes: 0 pass, 1 warn (ABI risk), 4 fail (load/ABI break), "
-            "5 not_comparable (ADR-050 D2)",
+            "5 not_comparable",
         )
         emit_dry_run(dry_result)
 

@@ -199,8 +199,7 @@ class Acknowledgment:
             raise ValueError(
                 "Acknowledgment must have 'finding_id' or 'symbol' — a bounded, "
                 "specific match. A broad selector (pattern/namespace/"
-                "source_location) is a suppression, not an acknowledgment "
-                "(ADR-067 D5)."
+                "source_location) is a suppression, not an acknowledgment."
             )
         # `finding_id`/`symbol`/`change_kind` are exactly the bounded subset
         # of SelectorSet's grammar this record type permits — see the module
@@ -363,8 +362,8 @@ class AcknowledgmentList:
                 raise ValueError(
                     f"Acknowledgment entry {i} uses suppression-only broad "
                     f"selector(s) {sorted(forbidden)}, which an acknowledgment "
-                    "may never use (ADR-067 D5 / vision.md: "
-                    '"a broad regex is a suppression, not an acknowledgment"). '
+                    "may never use (a broad regex is a suppression, not an "
+                    "acknowledgment). "
                     "Use 'finding_id' or an exact 'symbol' instead, or write "
                     "this rule as a suppression."
                 )
@@ -427,7 +426,7 @@ class AcknowledgmentList:
                 "More than one acknowledgment record matches "
                 f"{getattr(change, 'symbol', '<unknown>')!r} "
                 f"({getattr(getattr(change, 'kind', None), 'value', None)}): "
-                f"{[m.record_id() for m in matches]}. ADR-067 D5: an ambiguous "
+                f"{[m.record_id() for m in matches]}. An ambiguous "
                 "match requires review and is never resolved automatically."
             )
         return matches[0]

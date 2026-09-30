@@ -466,6 +466,13 @@ def _compare_one_library(
             ),
         }
         add_member_review_summary(entry, result, severity_config)
+        # Release schema 1.9: the recorded DT_SONAME/DT_NEEDED facts, per side.
+        from .report.release_dependency_graph import member_dependencies
+
+        if deps := member_dependencies(
+            compare_result.old_snapshot, compare_result.new_snapshot
+        ):
+            entry["dependencies"] = deps
         # ADR-067's structured half; see `reporter.disposition_ledger_blocks`.
         entry.update(disposition_ledger_blocks(result))
         if pattern_modulations_text is not None:

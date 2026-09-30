@@ -861,7 +861,7 @@ def dump_cmd(
         if parsed_dump_manifest is not None:
             raise click.UsageError(
                 f"--dump-manifest is not yet supported for {binary_fmt.upper()} "
-                "binaries (ADR-050 D3); use a single-header dump for this format."
+                "binaries; use a single-header dump for this format."
             )
         if follow_deps:
             click.echo(

@@ -320,8 +320,8 @@ def _library_notes(model: CommentModel) -> list[str]:
         out += [
             "> ↔️ Unmatched libraries (present on one side only; a removal or "
             "addition needs the lacking side's inventory proven complete, and a "
-            "failed acquisition is never one -- see the comparison scope, "
-            "ADR-065 D2): " + "; ".join(parts),
+            "failed acquisition is never one -- see the comparison scope"
+            "): " + "; ".join(parts),
             "",
         ]
     return out

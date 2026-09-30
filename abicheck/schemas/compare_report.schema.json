@@ -339,7 +339,7 @@
     },
     "profile_build_system": {
       "type": "object",
-      "description": "Schema 5.10 (WS-A). check-target envelope only: the build system (and generator/backend, empty when it has none) that produced the build-output.json profile this check cell ran under, from that document's profile.build_system. Absent when the profile declared none (unrecorded).",
+      "description": "Schema 5.11 (WS-A). check-target envelope only: the build system (and generator/backend, empty when it has none) that produced the build-output.json profile this check cell ran under, from that document's profile.build_system. Absent when the profile declared none (unrecorded).",
       "required": ["name", "generator"],
       "additionalProperties": false,
       "properties": {
@@ -3065,6 +3065,11 @@
         "finding_id": {
           "type": "string",
           "description": "Stable, deterministic fingerprint (sha256 of kind/symbol/old_value/new_value/source_location/description, truncated to 16 hex chars; report_schema_version 2.53 adds a seventh, conditional component -- see below) \u2014 lets a consumer correlate the same finding across two report runs without relying on array order. description disambiguates otherwise-identical findings on the same symbol (e.g. the same pointer-depth change on two different parameters). Excludes policy-derived fields (severity, evidence_status) so the same underlying finding hashes identically under any --policy. As of report_schema_version 2.53, a finding whose internal occurrence-identity discriminator is set (only ever true for a typedef/constant occurrence-level finding needing collision disambiguation -- not itself a reported field) has that discriminator appended as the seventh hash input; every other finding's id is computed exactly as before."
+        },
+        "affected_use_cases": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Schema 5.10, present only under `compare --use-cases MANIFEST`: the sorted, duplicate-free names of the manifest's use cases whose declared entrypoints can be shown to reach this finding. The exact inverse of `use_case_impact.by_use_case` (joined on `finding_id`). An empty list means the attribution ran and no declared entrypoint was shown to reach the finding (absence of proof, not proof of absence); the key is absent when no manifest was given."
         },
         "canonical_finding_id": {
           "type": "string",

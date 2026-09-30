@@ -256,7 +256,7 @@ Recovered by passing two `Module.symvers` manifests to `compare` (recognized by 
 | `kabi_symbol_namespace_changed` | A kernel-exported symbol gained or moved its export namespace (`EXPORT_SYMBOL_NS*`). A module without the matching `MODULE_IMPORT_NS()` fails to load. |
 | `kabi_export_type_changed` (`API_BREAK`) | A symbol changed between `EXPORT_SYMBOL` and `EXPORT_SYMBOL_GPL`. A non-GPL module can no longer link against a now-GPL-only symbol — a license-gated availability break. |
 
-### API-surface intelligence transitions (ADR-027)
+### API-surface intelligence transitions
 
 These breaks are recognised from the declaration *graph* (idioms), not a single per-symbol diff. They fire when an opacity or handle guarantee that callers relied on is lost between versions. See the [API Surface Intelligence](../use/api-surface-intelligence.md) guide.
 
@@ -320,7 +320,7 @@ These changes break the source-level API contract but do not affect already-comp
 
 | Kind | Description |
 |------|-------------|
-| `public_typedef_target_changed` | A public typedef/alias now resolves to a different underlying type (e.g. `typedef int32_t handle_t;` became `typedef int64_t handle_t;`). A bare typedef leaves no exported symbol, so source replay (the clang L4 backend, ADR-030) surfaces the change; source relying on the old aliased type may change overload resolution or fail to compile while already-linked binaries are unaffected. |
+| `public_typedef_target_changed` | A public typedef/alias now resolves to a different underlying type (e.g. `typedef int32_t handle_t;` became `typedef int64_t handle_t;`). A bare typedef leaves no exported symbol, so source replay (the clang L4 backend) surfaces the change; source relying on the old aliased type may change overload resolution or fail to compile while already-linked binaries are unaffected. |
 
 ### Template and Overload Set Changes
 
@@ -375,8 +375,8 @@ library from loading in some deployment environments. Manual review is required.
 | `elf_osabi_changed` | The ELF `EI_OSABI` (target OS ABI) changed (e.g. SYSV ↔ GNU/Linux ↔ FreeBSD). This can alter the meaning of OS-specific symbol types and relocations; consumers may resolve or load differently. |
 | `symbol_binding_became_unique` | An exported symbol's binding became `STB_GNU_UNIQUE`. GNU-unique symbols are enforced process-wide unique by the loader, and a library defining one becomes non-unloadable — `dlclose()` is inhibited for it. Changes loader semantics for consumers that rely on unloading. |
 | `symbol_binding_lost_unique` | An exported symbol was `STB_GNU_UNIQUE` and is no longer. The process-wide ODR-uniqueness guarantee (a single shared instance of an inline/template static across all DSOs) is gone; duplicate per-DSO instances may reappear. |
-| `public_api_exposes_stl_by_value` | A public function takes or returns a `std::` type by value across the library boundary. Standard-library layouts differ across toolchains, standard-library versions, and the C++11 dual-ABI setting, so a consumer built with a different STL silently reads the wrong layout. A graph-shaped anti-pattern (ADR-027 A2): reported by `surface-report`, and at diff time only when newly introduced. |
-| `polymorphic_type_non_virtual_dtor` | A type with virtual methods (it has a vtable) is used as a factory return or base class but declares no virtual destructor. Deleting a derived object through a base pointer is undefined behaviour. A graph-shaped anti-pattern (ADR-027 A2): reported by `surface-report`, and at diff time only when newly introduced. |
+| `public_api_exposes_stl_by_value` | A public function takes or returns a `std::` type by value across the library boundary. Standard-library layouts differ across toolchains, standard-library versions, and the C++11 dual-ABI setting, so a consumer built with a different STL silently reads the wrong layout. A graph-shaped anti-pattern: reported by `surface-report`, and at diff time only when newly introduced. |
+| `polymorphic_type_non_virtual_dtor` | A type with virtual methods (it has a vtable) is used as a factory return or base class but declares no virtual destructor. Deleting a derived object through a base pointer is undefined behaviour. A graph-shaped anti-pattern: reported by `surface-report`, and at diff time only when newly introduced. |
 | `unnamed_type_in_public_abi` | A newly-exported symbol embeds an unnamed type in its mangled name — a lambda closure (`Ul…E_`) or an unnamed struct/enum (`Ut…_`). The Itanium mangling of unnamed types is per-translation-unit and compiler-ordering dependent (recompiling, or merely reordering unrelated declarations, can renumber `{lambda#1}` → `{lambda#2}`), so exporting one is an ABI time bomb: a rebuilt consumer can fail to resolve the symbol. Hygiene RISK, reported when newly introduced. |
 | `stdlib_implementation_changed` | The two artifacts were built against **different C++ standard-library implementations** (e.g. libstdc++ vs libc++, or vs the MSVC STL) — a third compatibility axis the standard never guarantees, alongside backward and forward compatibility. Any public type embedding a `std::` container/string **by value** (`class A { std::vector<T> v; };`) is laid out differently across implementations, and inline `std::` code can ODR-conflict. Derived from the normalized `BuildMode` capture; stays silent when build-mode evidence is absent rather than guessing. RISK, never breaking on its own: when an embedded `std::` type's layout actually differs, the type diff emits the concrete size/offset `BREAKING` finding separately. **Recommended action:** pin a single standard-library implementation or rebuild consumers against the matching runtime. |
 | `libcpp_abi_version_changed` | The libc++ ABI version changed (e.g. `_LIBCPP_ABI_VERSION` 1 → 2). libc++ selects incompatible internal layouts for `std::` types via an inline namespace (`std::__1` vs `std::__2`), so types embedding them by value are laid out differently. **Recommended action:** rebuild consumers against the matching libc++ ABI version. |
@@ -476,9 +476,9 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | `glibcxx_dual_abi_flip_detected` | Mass symbol churn matches a libstdc++ dual ABI toggle (`_GLIBCXX_USE_CXX11_ABI`). Individual removed/added symbols are likely caused by this single root cause rather than intentional API changes — the underlying per-symbol findings are reported separately. |
 | `abi_surface_explosion` | The public ABI surface grew or shrank dramatically (e.g. a lost `-fvisibility=hidden` flag). This is a configuration/packaging signal, not a per-symbol break, but may indicate an unintended visibility regression. |
 
-### Surface-metric drift (ADR-027)
+### Surface-metric drift
 
-Aggregate roll-up signals computed from the [API surface metrics](../use/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own. Computed unconditionally on every comparison (ADR-068 D4/Phase 5) — no flag selects them; they are ordinary `changes[]` entries every projection already renders.
+Aggregate roll-up signals computed from the [API surface metrics](../use/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own. Computed unconditionally on every comparison — no flag selects them; they are ordinary `changes[]` entries every projection already renders.
 
 | Kind | Description |
 |------|-------------|
@@ -557,7 +557,7 @@ retargeted — rather than a single library's own declaration diff.
 | `pe_ordinal_retargeted` | A consumer imports a DLL function purely by ordinal number (no name in its import table). The DLL still exports that ordinal, but it now names a **different** function — PE ordinals are commonly auto-assigned and reused when the export table shifts, so an ordinal-only consumer silently calls the wrong function with no link or load error. Detected by `compare --used-by APP` by cross-referencing the app's ordinal imports against both DLLs' export directories (`BREAKING`). |
 | `pe_import_load_mode_changed` | An imported DLL function moved between the eager import table (resolved at process load) and the delay-load table (resolved on first call). The two have different failure-timing contracts even though the DLL and symbol both still exist (`COMPATIBLE_WITH_RISK`). |
 | `wchar_model_changed` | The `-fshort-wchar` compiler flag drifted between builds (from `DW_AT_producer`). GCC/Clang document that objects built with and without `-fshort-wchar` are not binary compatible: it switches `wchar_t` between the platform default and a 2-byte unsigned type, changing the size/signedness of any public `wchar_t` parameter, field, or return value with no symbol-level signal (`COMPATIBLE_WITH_RISK`). |
-| `consumer_required_symbol_removed` | A real consumer binary's own dynamic-symbol table (ELF undefined symbol / PE import / Mach-O undefined symbol) required this exact symbol from the library at load time, and the new library no longer exports it — empirical ground truth from `compare --used-by APP`, independent of any header/namespace/visibility reasoning. Promotes what used to be an ad-hoc "missing symbol" string into a first-class, suppressible finding (ADR-044 P2 item 1) (`BREAKING`). |
+| `consumer_required_symbol_removed` | A real consumer binary's own dynamic-symbol table (ELF undefined symbol / PE import / Mach-O undefined symbol) required this exact symbol from the library at load time, and the new library no longer exports it — empirical ground truth from `compare --used-by APP`, independent of any header/namespace/visibility reasoning. Promotes what used to be an ad-hoc "missing symbol" string into a first-class, suppressible finding (`BREAKING`). |
 
 ### Platform Identity and Deployment Floors
 

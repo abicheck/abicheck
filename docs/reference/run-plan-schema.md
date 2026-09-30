@@ -1,8 +1,6 @@
 # `run-plan.json` Schema Reference
 
-`run-plan.json` is the ordered list of concrete checks
-[ADR-047](../contribute/adr/047-github-actions-integration-model.md) §4/§5
-describes: one cell per `(target-or-bundle, profile, checks[] entry)`, each
+`run-plan.json` is the ordered list of concrete checks a project resolves to: one cell per `(target-or-bundle, profile, checks[] entry)`, each
 already carrying its own `check_id`. `abicheck project plan` derives it
 from a project's [`.abicheck.yml` `targets:`/`bundles:`/`profiles:`/
 `baseline:` block](project-targets-schema.md) (G30 P1.5) plus each `contract:
@@ -12,7 +10,7 @@ true` profile's [`build-output.json`](build-output-schema.md) (G30 P1.1).
 
 > **Status.** This page documents the `run-plan.json` schema and the
 > `abicheck project plan` command shipped in G30 P1.4 (consolidated from a
-> former standalone `run-plan` CLI group by [ADR-054](../contribute/adr/054-cli-project-integration-surface-consolidation.md)).
+> former standalone `run-plan` CLI group).
 > See the [reusable workflows reference](reusable-workflows.md) for how
 > `check-project.yml` drives this generator and consumes its output.
 
@@ -38,7 +36,7 @@ as its own artifact means:
 ## Never a blind cross-product
 
 [`project_targets.py`](project-targets-schema.md)'s own docstring flags the
-gap ADR-047 §3 warns about: crossing every `checks:` entry with every
+gap: crossing every `checks:` entry with every
 `contract: true` profile would produce impossible cells for a target that
 doesn't exist on every profile. `project plan` resolves this as follows,
 per `checks[]` entry:
@@ -65,7 +63,7 @@ a profile with no build-output artifact at all never got that far).
 Neither `target-kind: app-consumer` nor `plugin-contract` ever gets its own
 `build-output.json` `targets[]` entry — `build-output.json` describes real
 build products, and an app-consumer/plugin-contract target is a *check*, not
-a build product (ADR-047 §3). A redirected check's cell existence is gated
+a build product. A redirected check's cell existence is gated
 on the *referenced library*'s presence on that profile instead, and its
 `binary_pattern` is sourced from that library's own `binary_pattern` (never
 the contract target's, which doesn't have one) — see `baseline_target` and
@@ -81,7 +79,7 @@ dicts can forward each field through with no renaming.
 
 | Field | Present for | Meaning |
 |-------|-------------|---------|
-| `check_id` | always | `target@profile#baseline_channel@requested_depth` (ADR-047 §7) — this cell's own reporting identity. |
+| `check_id` | always | `target@profile#baseline_channel@requested_depth` — this cell's own reporting identity. |
 | `kind` | always | `target` or `bundle`. |
 | `name` | always | The target or bundle id. |
 | `profile_id` | always | Which profile this cell resolved against. |
@@ -93,7 +91,7 @@ dicts can forward each field through with no renaming.
 | `baseline_target` | `target_kind: app-consumer`/`plugin-contract` | The referenced `kind: library` target's id (empty otherwise — `check-target`'s own `baseline-target` input treats empty as "use `name`"). |
 | `binary_pattern` | `kind: target` | Glob pattern (resolved against the *current* build's candidate artifacts by the calling workflow, never by this generator) locating the candidate binary. For a redirected check, the referenced library's own pattern. |
 | `header` | `kind: target`, and the target (or, for a redirected check, the referenced library) declares `public_headers:` | That target's `public_headers:`, newline-joined so a header root containing whitespace survives `action/run.sh`'s `add_flag()` multi-value input handling intact. Empty (field omitted) when the target declares none — a caller then falls back to its own workflow-global `header` input. Never set for `kind: bundle` (no per-bundle-member header staging exists yet — see `BUNDLE_CHECK_DEPTHS` in `project_targets.py`). |
-| `public_header_roots` | `kind: target`, and this profile's `build-output.json` entry for the target declares `public_header_roots` | (G41 Phase 2) That entry's `public_header_roots`, newline-joined the same way. Distinct from `header`: `header` is `.abicheck.yml`'s *declared*, same-for-every-profile value; this is `build-output.json`'s *concrete*, per-profile, validated-to-exist-and-non-empty set (ADR-047 §2's S10 guard) — the real header roots this profile's own build actually produced. A caller should prefer this over `header` when non-empty. Never set for `kind: bundle`. |
+| `public_header_roots` | `kind: target`, and this profile's `build-output.json` entry for the target declares `public_header_roots` | (G41 Phase 2) That entry's `public_header_roots`, newline-joined the same way. Distinct from `header`: `header` is `.abicheck.yml`'s *declared*, same-for-every-profile value; this is `build-output.json`'s *concrete*, per-profile, validated-to-exist-and-non-empty set (the S10 guard) — the real header roots this profile's own build actually produced. A caller should prefer this over `header` when non-empty. Never set for `kind: bundle`. |
 | `generated_header_roots` | `kind: target`, and this profile's `build-output.json` entry for the target declares `generated_header_roots` | (G41 Phase 2) That entry's `generated_header_roots` (a codegen-produced header root, S10-validated the same way), newline-joined. Has no `.abicheck.yml`-level counterpart at all. Never set for `kind: bundle`. |
 | `build_system` / `build_generator` | this profile's `build-output.json` declares `profile.build_system` | (WS-A) That profile's declared build system and generator (generator empty when it has none), forwarded to `check-target`'s `build-system`/`build-generator` inputs and recorded in the report as `profile_build_system`. Omitted when the profile declares none (unrecorded). `kind: target` cells only today (bundle cells: not yet). |
 | `consumer_binary_pattern` | `target_kind: app-consumer` | The consumer binary/binaries pattern. |
@@ -280,19 +278,18 @@ profile's `abicheck-build-<profile>/` directory (containing
 | Exit | Meaning |
 |------|---------|
 | `0` | Generated with no coverage-gap errors (warnings may still exist), and at least one check resolved — or `CONFIG` declared no `checks[]` at all, which is an *explained skipped plan* (see `skipped` below). |
-| `1` | A required/explicit check could not be resolved against the supplied `--build-output` directories, or `CONFIG` declared `checks[]` that resolved to zero cells (ADR-054's fail-closed default, so a consumer with no guard of its own doesn't silently skip every downstream check). There is no flag that accepts this case. |
+| `1` | A required/explicit check could not be resolved against the supplied `--build-output` directories, or `CONFIG` declared `checks[]` that resolved to zero cells (a fail-closed default, so a consumer with no guard of its own doesn't silently skip every downstream check). There is no flag that accepts this case. |
 | `64` | Usage error — `CONFIG` or a `--build-output` value is unreadable, or `CONFIG` fails `project validate`. |
 
 ```bash
 abicheck aggregate REPORTS_DIR --manifest RUN_PLAN_JSON [...]
 ```
 
-`aggregate --manifest` (ADR-054; plan slice 7q folded the former separate
+`aggregate --manifest` (plan slice 7q folded the former separate
 run-plan flag into it, recognizing the plan by its own `schema` rather than
 by its filename) projects `run-plan.json` down to the
 expected-target set internally — `abicheck aggregate --manifest`'s
-`{"targets": [{"id", "required"}]}` wire shape (ADR-047 §5's required
-sub-task) — using each check's own `check_id` as the expected target id,
+`{"targets": [{"id", "required"}]}` wire shape — using each check's own `check_id` as the expected target id,
 **never** the bare target/bundle name. `abicheck/workflows/aggregate/`'s target
 matching is an exact string comparison against each report's own
 `target_id`, and `check-target` (G30 P1.3) always writes that field as the

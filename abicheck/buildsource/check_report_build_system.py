@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 """The check-target envelope's ``profile_build_system`` block (WS-A, report
-schema 5.10): which build system/generator produced the profile a check cell
+schema 5.11): which build system/generator produced the profile a check cell
 ran under, so a cell's findings are attributed to its own build lane rather
 than to whatever build a sibling cell of the same target used.
 """

@@ -83,8 +83,8 @@ resolves to collect mode ``"off"`` and silently clears the header list
 (:func:`abicheck.service_compare_evidence._headers`,
 :func:`abicheck.cli_dump_depth.resolve_dump_collect_context`) — is
 intentional, already-shipped, reviewed behavior with its own dedicated
-regression tests (``tests/test_cli_scan.py::test_depth_binary_clears_headers_in_scan``,
-``tests/test_service_unit.py::test_depth_binary_clears_headers``,
+regression tests (``tests/test_service_unit.py::test_depth_binary_clears_headers``,
+``tests/test_cli_compare_release_stranded_depth.py``,
 ``tests/test_typed_dump_request.py``, ``tests/test_depth_vocabulary.py``),
 not an acknowledged gap. Turning it into a hard :class:`~abicheck.errors.PlanningError`
 would be a real, unreviewed behavior change to already-tested surface, not a
@@ -340,7 +340,7 @@ def bazel_target_scoping_failure(
 
     A free function, not a method on :class:`SidePlan`/:class:`AnalysisPlan`
     — the known-gap entry names this same silent no-op on ``scan --against``
-    too, and ``scan_engine.py``'s own candidate resolution (``_build_new_snapshot``)
+    too, and the retired ``scan_engine.py``'s candidate resolution (``_build_new_snapshot``)
     builds a raw ``InputSpec`` directly rather than a :class:`~abicheck.workflows.contracts.CompareRequest`/
     :class:`~abicheck.workflows.contracts.DumpRequest`, so it has no :class:`AnalysisPlan`
     of its own to resolve through. Exposing the check itself, over plain
@@ -412,9 +412,9 @@ def scan_bazel_scoping_failure(
 ) -> PlanningFailure | None:
     """The shared ``scan`` pre-flight guard for :func:`bazel_target_scoping_failure`.
 
-    Used by ``scan_engine.run_scan_core`` (per-member), ``dry_run_estimate.
+    Was used by the retired ``scan_engine.run_scan_core`` (per-member), ``dry_run_estimate.
     run_scan_set`` (once, before discovery), and both of ``cli_scan.py``'s
-    own CLI-reachable pre-flight checks (``scan_cmd``'s single-binary path,
+    CLI-reachable pre-flight checks (``scan_cmd``'s single-binary path,
     ``_run_artifact_set``'s own) so every caller shares one exemption rule,
     and the depth=binary header-clearing it depends on, rather than
     independently-maintained copies. Exempt only when
@@ -481,9 +481,9 @@ def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
     # no-ops before ever calling `collect_inline_pack` at that mode -- so
     # `build_info`/`build_targets` are never actually consulted regardless
     # of what they name, and rejecting them here would be a false positive
-    # (`cli_scan.py`'s own `_normalize_depth_inputs` already prunes
+    # (the retired `cli_scan.py`'s `_normalize_depth_inputs` pruned
     # `build_info` to `None` for this same depth on the `scan` side, which
-    # is why this same false positive can't reach `scan_engine.py`'s call
+    # is why this same false positive couldn't reach `scan_engine.py`'s call
     # to the free `bazel_target_scoping_failure` function below).
     #
     # A later Codex round found that raw depth alone is not the whole

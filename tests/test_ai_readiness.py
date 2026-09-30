@@ -98,6 +98,26 @@ def test_no_unapproved_import_cycle_growth(car):
     assert f.errors == [], f"Unapproved import-cycle growth detected: {f.errors}"
 
 
+def test_import_cycle_allowlist_names_only_existing_modules(car):
+    """Every allowlisted SCC member must still name a real ``abicheck`` module.
+
+    ``short <= allowed`` matching means a member naming a deleted module is
+    never noticed: it only widens the approved cluster. Ten such members
+    (``cli_doctor``, ``cli_probe``, ...) had built up in the CLI
+    registration cluster after their commands were removed. This test fails
+    on the next one, so a deletion PR has to shrink the allowlist too.
+    """
+    pkg = ROOT / "abicheck"
+    stale = sorted(
+        member
+        for scc in car.IMPORT_CYCLE_ALLOWLIST
+        for member in scc
+        if not (pkg / (member.replace(".", "/") + ".py")).is_file()
+        and not (pkg / member.replace(".", "/") / "__init__.py").is_file()
+    )
+    assert stale == [], f"IMPORT_CYCLE_ALLOWLIST names deleted modules: {stale}"
+
+
 def test_adr_index_and_nav_sync_holds(car):
     f = car.Findings()
     car.check_adr_index_and_nav_sync(f)
@@ -936,12 +956,9 @@ def test_first_party_roots_agree_with_the_readiness_script(car, ass):
     """adr_status_sync keeps a local copy of the first-party root names to
     stay a leaf module; this is the check that keeps the copy honest, so a
     root added to FIRST_PARTY_PY_ROOTS can't silently go untracked here."""
-    from_script = {p.name for p in car.FIRST_PARTY_PY_ROOTS}
-    # CONTRIB_CLANG_PLUGIN is nested (contrib/abicheck-clang-plugin); the
-    # status-sync side keys on the *top* path segment, so it lists "contrib".
-    from_script = {
-        "contrib" if name.startswith("abicheck-") else name for name in from_script
-    }
+    # Nested roots (contrib/abicheck-clang-plugin, skills-src/evaluation/*) are keyed on
+    # their *top* path segment by the status-sync side.
+    from_script = {p.relative_to(car.ROOT).parts[0] for p in car.FIRST_PARTY_PY_ROOTS}
     assert from_script <= set(ass.FIRST_PARTY_ROOT_NAMES), (
         f"first-party roots drifted: {from_script - set(ass.FIRST_PARTY_ROOT_NAMES)}"
     )
@@ -1558,7 +1575,7 @@ def test_file_sizes_covers_first_party_roots_beyond_abicheck(
     """An oversized script outside abicheck/ must fail the gate.
 
     Regression guard for the exact gap M1-2 describes: before first-party
-    scanning covered `scripts/`/`eval/`/`validation/`/`action/`/the clang
+    scanning covered `scripts/`/`skills-src/evaluation/field/`/`skills-src/evaluation/validation/`/`action/`/the clang
     plugin's `tests/`, an oversized file there was invisible to this check.
     """
     fake_root = tmp_path / "scripts"

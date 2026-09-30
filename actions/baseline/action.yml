@@ -23,8 +23,7 @@ inputs:
       boolean (default false): when true, this library's real ELF binary is
       additionally copied into `<output-dir>/binaries/<name>` and recorded
       in the manifest (`binary`/`binary_sha256`) -- set it for any library
-      that is a member of a release bundle (ADR-047 section 6/section 8 S14
-      correction), since bundle-scoped analysis
+      that is a member of a release bundle, since bundle-scoped analysis
       (`abicheck/bundle.py`'s `build_bundle_snapshot()`) reads real ELF
       binaries and skips non-ELF inputs, including this Action's own
       `.abicheck.json` snapshots.
@@ -217,7 +216,7 @@ inputs:
     default: 'strict'
   snapshot-compression:
     description: >
-      Storage encoding (ADR-059) for each library's dumped snapshot: 'none'
+      Storage encoding for each library's dumped snapshot: 'none'
       (default, plain .abicheck.json -- unchanged behavior), 'gzip', or
       'zstd'. A large multi-library baseline-set's combined snapshot size
       can dominate CI artifact storage/transfer time; compression is a

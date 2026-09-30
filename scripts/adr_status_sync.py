@@ -37,11 +37,9 @@ FIRST_PARTY_ROOT_NAMES: tuple[str, ...] = (
     "abicheck",
     "scripts",
     "tests",
-    "eval",
-    "validation",
+    "skills-src",
     "action",
     "contrib",
-    "agent-evals",
 )
 
 

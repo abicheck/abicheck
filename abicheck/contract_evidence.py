@@ -132,7 +132,7 @@ def _require_version_int(value: object, *, owner: str, field_name: str) -> None:
     if value < 1:
         raise ValueError(
             f"{owner}.{field_name} must be >= 1, not {value!r} -- version "
-            "counters start at 1 (ADR-049 D6); 0/negative has no defined meaning."
+            "counters start at 1; 0/negative has no defined meaning."
         )
 
 
@@ -169,7 +169,7 @@ class InputIdentity:
             raise ValueError(
                 "InputIdentity.sha256 must be a non-empty digest -- an empty "
                 "string cannot detect content drift on replay, the exact "
-                "guarantee this field exists for (ADR-049 D6)."
+                "guarantee this field exists for."
             )
         if self.path is not None and not isinstance(self.path, str):
             raise TypeError(
@@ -597,7 +597,7 @@ class UnsupportedSchemaVersionError(ValueError):
             f"{block_name}: persisted version {observed_version} is newer "
             f"than this build's supported version {supported_version} -- "
             "refusing to reinterpret data written by a newer, unrecognized "
-            "schema (ADR-049 D6)."
+            "schema."
         )
 
 

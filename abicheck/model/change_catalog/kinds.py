@@ -110,7 +110,7 @@ ChangeKind = Enum(
     qualname="ChangeKind",
 )
 ChangeKind.__doc__ = (
-    "One kind of detected ABI/API change (397 members, ADR-061 D9).\n\n"
+    "One kind of detected ABI/API change (397 members).\n\n"
     "See ``abicheck/change_registry.py`` for the single-declaration metadata "
     "registry (impact text, default verdict, policy overrides) each member "
     "here has exactly one corresponding entry in -- this enum carries only "

@@ -427,7 +427,7 @@ def build_release_scope_record(
             state, reason = (
                 AcquisitionState.OUT_OF_SCOPE,
                 f"unselected baseline member: NEW named one artifact ({candidate}) "
-                "explicitly, so this run is a current-artifact comparison (ADR-065 D9)"
+                "explicitly, so this run is a current-artifact comparison"
                 + (f"; OLD acquisition also failed: {failure}" if failure else ""),
             )
         elif key in old_unproduced or key in new_unproduced:
@@ -460,13 +460,13 @@ def build_release_scope_record(
             state, reason = (
                 AcquisitionState.NOT_SUPPLIED,
                 "no counterpart supplied on NEW; NEW's inventory is not proven "
-                "complete, so this is unmatched, not removed (ADR-065 D2)",
+                "complete, so this is unmatched, not removed",
             )
         else:
             state, reason = (
                 AcquisitionState.NOT_SUPPLIED,
                 "no counterpart supplied on OLD; OLD's inventory is not proven "
-                "complete, so this is unmatched, not added (ADR-065 D2)",
+                "complete, so this is unmatched, not added",
             )
         if state is AcquisitionState.NOT_SUPPLIED:
             lacking = evidence.new if old_present else evidence.old
@@ -491,7 +491,7 @@ def build_release_scope_record(
             "current_artifact",
             f"NEW named exactly one artifact ({candidate}) explicitly, with exactly "
             f"one OLD counterpart; the other {len(old_unselected)} OLD member(s) are "
-            "out of scope (ADR-065 D9)",
+            "out of scope",
         )
     else:
         selection, selection_reason = (
@@ -786,7 +786,7 @@ def scope_manifest_to_members(
         "manifest drift check withheld for "
         f"{len(withheld)} promise(s) ({', '.join(withheld)}): "
         f"{len(excluded)} member(s) absent from bundle analysis "
-        f"({', '.join(m.name for m in excluded)}) may provide them (ADR-065 D2)"
+        f"({', '.join(m.name for m in excluded)}) may provide them"
     )
     return (replace(manifest, entries=kept) if kept else None), note
 

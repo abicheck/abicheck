@@ -31,7 +31,7 @@ that file may just as well be gzip- or zstd-compressed on disk
 the filename, so a compressed baseline is a drop-in replacement for a plain
 one everywhere on this page. It's a pure storage/transport envelope around
 identical JSON content — see [Snapshot Format's storage encoding
-section](../reference/snapshot-format.md#storage-encoding-adr-059) for the
+section](../reference/snapshot-format.md#storage-encoding) for the
 format details and the file suffix each encoding canonically uses.
 
 Recipe C (Actions Cache) and Recipe D (an external artifact store) are where

@@ -146,7 +146,7 @@ jobs:
       # itself (`harbor-schema`) is still routed through verify.py's step
       # catalog like every other gate here (CLAUDE.md "M0-3"), just run
       # under `--profile full` since it's FULL-only there.
-      - name: Harbor schema validation (real harbor package, agent-evals/skills/harbor/CLAUDE.md)
+      - name: Harbor schema validation (real harbor package, skills-src/evaluation/agents/skills/harbor/CLAUDE.md)
         run: |
           pip install harbor
           python scripts/verify.py --profile full --only harbor-schema

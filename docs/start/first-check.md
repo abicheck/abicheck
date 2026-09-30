@@ -38,7 +38,7 @@ abicheck compare libmathutils_v1.so libmathutils_v2.so \
 
 `examples/workflows/compare-release/README.md` walks through the same run in
 more detail, and CI executes those exact commands on every change
-(`validation/scripts/run_workflow_examples.py`), so what you read is what
+(`skills-src/evaluation/validation/scripts/run_workflow_examples.py`), so what you read is what
 runs.
 
 > **Looking for a catalogue rather than a tutorial?** The repository also

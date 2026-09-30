@@ -38,9 +38,10 @@ reach a given changed symbol. Two CLI surfaces use it:
 structure, and `abicheck compare --use-cases <manifest> OLD NEW` resolves
 each use case's entrypoints against the comparison's own snapshots and
 reports which of its findings each use case reaches
-(`impact/use_case_impact.py`). There is still no per-`Change`
-`affected_use_cases` field and no `USE_CASE_IMPACT_CONFIRMED` finding kind
-— see "What this does not cover yet" below.
+(`impact/use_case_impact.py`). Each finding in the JSON report also
+carries its own `affected_use_cases` list (report schema 5.10) — the same
+attribution read per finding. There is still no `USE_CASE_IMPACT_CONFIRMED`
+finding kind — see "What this does not cover yet" below.
 
 ## Checking a manifest with the CLI
 
@@ -248,12 +249,17 @@ governs everything").
 
 ## What this does not cover yet
 
-- **No per-finding field.** `impact_assessment` (see
-  [Unified Impact Assessment](../learn/impact-analysis.md)) has no
-  `affected_use_cases` field yet. `compare --use-cases` emits the
-  attribution as one report-level `use_case_impact` block (schema 2.39) and
-  a text/markdown section, never attached to an individual `Change` object,
-  and SARIF/JUnit carry nothing. The use-case graph (and now
+- **Per-finding field is a report projection, not a `Change` field.**
+  `compare --use-cases` emits the attribution as one report-level
+  `use_case_impact` block (schema 2.39), a text/markdown section, and — since
+  schema 5.10 — an `affected_use_cases` list on each JSON `changes` entry,
+  rendered as an "Affects use cases" note on Markdown change rows and in the
+  review digest's review groups and impacted-symbol list. The per-finding list is derived from
+  `use_case_impact.by_use_case` by joining on `finding_id`
+  (`UseCaseImpact.use_cases_by_finding`), never by a second attribution, so
+  the two are exact inverses. It is not stored on the `Change` object itself
+  and not inside `impact_assessment`; SARIF, JUnit and the HTML changes table
+  carry nothing yet. The use-case graph (and now
   this read-only explain step) exist as evidence a future `Change`-level
   field could be built from, the same position the consumer graph was in
   before ADR-057's D5/D8 wiring enriched `CONSUMER_REQUIRED_SYMBOL_REMOVED`

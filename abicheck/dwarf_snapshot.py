@@ -66,6 +66,7 @@ from .extract.dwarf_scope import (
     record_scope_segment as _record_scope_segment,
     variable_entity_id as _dwarf_variable_entity_id,
 )
+from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
     AbiSnapshot,
@@ -359,7 +360,7 @@ class _DwarfSnapshotBuilder:
                 elf = ELFFile(f)  # type: ignore[no-untyped-call]
                 if not has_real_dwarf_info(elf):
                     return
-                self._walk_dwarf(elf.get_dwarf_info())  # type: ignore[no-untyped-call]
+                self._walk_dwarf(open_indexed_dwarf_info(elf))
 
         except (ELFError, OSError, ValueError) as exc:
             log.warning(
@@ -1688,7 +1689,7 @@ class _DwarfSnapshotBuilder:
         The typedef is keyed by its *namespace-qualified* name (consistent with
         records and enums) so that standard-library typedefs nested under ``std``
         (e.g. ``std::vector<…>::size_type``) carry their ``std::`` scope and the
-        non-ABI-surface filter can recognise them (validation/REPORT.md FP-1).
+        non-ABI-surface filter can recognise them (skills-src/evaluation/validation/REPORT.md FP-1).
         """
         name = _attr_str(die, "DW_AT_name")
         if not name:

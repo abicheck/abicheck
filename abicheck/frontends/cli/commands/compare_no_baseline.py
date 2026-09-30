@@ -652,8 +652,8 @@ def _unsupported_format_message(fmt: str) -> str:
         return (
             f"-o {fmt}=... is not available with --no-baseline: it renders a "
             "compatibility comparison (verdict, OLD -> NEW counts, release "
-            "recommendation), and a single-build audit has none of those "
-            f"(ADR-068 D2). Use one of {supported} instead; oneline is the "
+            "recommendation), and a single-build audit has none of those"
+            f". Use one of {supported} instead; oneline is the "
             "closest equivalent to a review digest."
         )
     return (

@@ -217,7 +217,7 @@ def merge_unproduced(
     missing = {
         c.member: (
             f"declared by the package inventory as {c.path!r} but not present "
-            "after extraction (ADR-065 D1: expected, not produced)"
+            "after extraction (expected, not produced)"
         )
         for c in inventory.library_components
         if c.member not in have

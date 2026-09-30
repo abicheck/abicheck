@@ -4,9 +4,7 @@ Your libraries ship together, as a set, with dependencies *between* them —
 not as independent artifacts someone could reasonably compare one at a time.
 Removing a symbol from one library that another library in the same release
 still calls is a real break, but it's a **cross-library** finding no
-single-library comparison can see.
-[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
-§8's S14 is deliberately distinct from
+single-library comparison can see. Scenario S14 is deliberately distinct from
 [S15](multi-dso-project.md) (multiple *independent* targets, N separate
 reports): a bundle is **one report**, with cross-library findings (soname
 skew, provider-set changes, missing-library detection) as first-class

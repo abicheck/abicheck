@@ -2,9 +2,8 @@
 
 `actions/check-target` composes [`resolve-baseline`](resolve-baseline.md) +
 `collect-facts` + the root `abicheck/abicheck` Action into **one resolved
-check** — [ADR-047](../contribute/adr/047-github-actions-integration-model.md)
-§4's single high-level primitive — and, once its own input validation
-passes, always emits the [report envelope](#report-envelope-adr-047-7)
+check** — the single high-level primitive — and, once its own input validation
+passes, always emits the [report envelope](#report-envelope)
 (§7), regardless of whether the baseline resolved, was a bootstrap "no
 baseline yet" pass, a "target new to this baseline-set" pass
 (`allow-new-target: true`), or failed outright. An invalid invocation (e.g. a
@@ -18,14 +17,14 @@ up front, before any of that, and produces no report or outputs at all.
 > separately — see the
 > [run-plan schema](run-plan-schema.md) and the
 > [reusable workflows reference](reusable-workflows.md). `check-target` can
-> also still be called directly as a step (ADR-047's S4 shortcut) or from a
+> also still be called directly as a step (the S4 shortcut) or from a
 > hand-written per-target workflow (S1/S2/S5/S6/S15/S21) without either.
 
 ## What it does
 
 1. **Resolves the baseline** by composing [`resolve-baseline`](resolve-baseline.md)
    — skipped entirely when `baseline-channel: none` (a single-build audit
-   with no baseline, ADR-047 §8 S5).
+   with no baseline).
 2. **Composes `collect-facts`** when `evidence-producer` requests build/source
    evidence: `phase: verify` for `wrapper`/`clang-plugin` (the caller's own
    workflow must run `collect-facts phase: prepare` *before* its build step,
@@ -39,7 +38,7 @@ up front, before any of that, and produces no report or outputs at all.
 4. **Writes the report envelope**, once input validation (the very first
    step) has passed — even when steps 1 or 3 above then fail, since the
    internal resolve/analysis steps run with `continue-on-error: true`
-   specifically so this step always runs afterward (ADR-047 §7). A
+   specifically so this step always runs afterward. A
    validation failure short-circuits before any of steps 1-4 run at all.
 5. **Owns its own composite exit code**, per `gate-mode` (below) — the very
    last thing this Action does, never an implicit pass-through of an
@@ -70,7 +69,7 @@ comments/SARIF, just never in the field `aggregate` gates on.
 never producing a report always fails this job's own exit code, exactly
 like `resolve-baseline`'s own fail-loud contract requires.
 
-## Target kinds (ADR-047 §3)
+## Target kinds
 
 `target-kind` selects which `compare` flags this check builds — only
 meaningful when `kind: target` (never `kind: bundle`):
@@ -81,7 +80,7 @@ meaningful when `kind: target` (never `kind: bundle`):
 | `app-consumer` | `compare --used-by` (S22, application compatibility). | `consumer-binary` |
 | `plugin-contract` | `compare --required-symbol @FILE` (S23, plugin/dlopen contract). | `contract-file` — a `.syms` file, one required linker symbol per line, `#` comments allowed; **not** YAML |
 
-**The "library redirect" (ADR-047 §3):** `app-consumer`/`plugin-contract`
+**The "library redirect":** `app-consumer`/`plugin-contract`
 targets have no binary/baseline of their own — they resolve *through* the
 library they scope. Set `baseline-target` to that library's id so
 `resolve-baseline` looks up the right baseline, while `name` stays the
@@ -110,8 +109,8 @@ contributions, and either can hold without the other.
 
 | Axis | Question | Owner |
 |---|---|---|
-| **Inventory / scope completeness** | Were the required *selected members* actually compared? | `scope.on_incomplete` (ADR-065) |
-| **Analysis assurance** | For the comparisons that **did** run, how trustworthy was the evidence? | `assurance.require_complete` (ADR-071) |
+| **Inventory / scope completeness** | Were the required *selected members* actually compared? | `scope.on_incomplete` |
+| **Analysis assurance** | For the comparisons that **did** run, how trustworthy was the evidence? | `assurance.require_complete` |
 
 Neither is the compatibility verdict. A release can be scope-`complete`
 with `partial` assurance (every member compared, one missing its headers) or
@@ -122,7 +121,7 @@ The assurance fold is `max` over compared members: **an incomplete member is
 never hidden by complete siblings**, and over a one-member package the fold
 is the identity, so it gates exactly as comparing that one library alone
 would. See
-[Multi-binary → Analysis assurance across a bundle](../use/multi-binary.md#analysis-assurance-across-a-bundle-adr-071).
+[Multi-binary → Analysis assurance across a bundle](../use/multi-binary.md#analysis-assurance-across-a-bundle).
 
 ### Three bundle paths, three sets of restrictions
 
@@ -149,7 +148,7 @@ path that does not exist — not a documentation choice:
 `analysis-assurance-complete` is **not** in that list — see its row in
 [Inputs](#inputs). Supporting a release-level assurance gate is a different
 capability from supporting historical header-aware bundle capture; the first
-landed (ADR-071), the second has not.
+landed, the second has not.
 
 ## Inputs
 
@@ -168,7 +167,7 @@ landed (ADR-071), the second has not.
 | `allow-new-target` | no | `false` | Forwarded to `resolve-baseline`'s `allow-new-target` — `false` means a target absent from an otherwise-resolved baseline-set always fails `ambiguous`; `true` opts this check into the `new_target` outcome instead, an advisory, non-fatal lifecycle state for a target checked before it has ever been published in a baseline-set (e.g. a new library's first release). Only meaningful for `kind: target`; rejected outright for `kind: bundle` (a bundle comparison needs one coherent release where every member already coexisted). Pair with `baseline-required: false`, or a required-coverage gate would still block on the target's first appearance. |
 | `requested-depth` | yes | — | `binary` \| `headers` \| `build` \| `source` — for `kind: bundle`, only `binary` is supported (`headers`/`build`/`source` are all rejected: a bundle's baseline is always raw binaries with no historical header/build/source evidence staged per member). |
 | `explicit-id` | no | `''` | (G42 "Explicit check identifiers") This check's `checks[].id`, if the project declared one — folded into `check-id`'s `~<explicit_id>` tail so two checks sharing (`name`, `profile`, `baseline-channel`, `requested-depth`) but declaring different analysis method/policy/assurance each produce a distinct, non-colliding `check-id`/report. Omit (default) for the pre-G42, unqualified `check-id` shape. |
-| `build-system` / `build-generator` | no | `''` | (WS-A) This cell's `build-output.json` `profile.build_system` name and generator. When `build-system` is set the report envelope carries `profile_build_system: {name, generator}` (report schema 5.10) in every mode, so the cell's findings name the build lane that produced them. `check-project.yml` forwards them from the run-plan cell. |
+| `build-system` / `build-generator` | no | `''` | (WS-A) This cell's `build-output.json` `profile.build_system` name and generator. When `build-system` is set the report envelope carries `profile_build_system: {name, generator}` (report schema 5.11) in every mode, so the cell's findings name the build lane that produced them. `check-project.yml` forwards them from the run-plan cell. |
 | `gate-mode` | no | `local` | `local` \| `deferred` \| `advisory`. |
 | `project` | no | `${{ github.repository }}` | Recorded in the report envelope. |
 | `head-sha` | no | `${{ github.sha }}` | Recorded in the report envelope. |
@@ -179,7 +178,7 @@ landed (ADR-071), the second has not.
 | `consumer-binary` | when `target-kind: app-consumer` | — | Forwarded as `--used-by`. |
 | `contract-file` | when `target-kind: plugin-contract` | — | Forwarded as the root Action's `required-symbols` input (translated to the CLI's `--required-symbol @FILE`). |
 | `require-complete-analysis` | no | `false` | RETIRED (rulings.py deferred-option followup — hard removal, no deprecation window, mirroring the root Action's own `require-complete-analysis` retirement, which this input forwarded to). The root Action's input it mapped onto is gone: P0.4's orthogonal `ANALYSIS_INCOMPLETE` axis is config-only now, `.abicheck.yml`'s `assurance.require_complete: true`, with no CLI or Action-input override. Still declared so a workflow that sets it gets an explicit `::error::` instead of a silently-ignored input. See `analysis-assurance-complete` below for how `checks[].analysis.assurance: complete` (product-gaps audit §3) is now enforced instead. |
-| `analysis-assurance-complete` | no | `false` | Set to `'true'` when this cell declared `checks[].analysis.assurance: complete` (`RunPlanCheck.analysis_assurance`, validated at run-plan generation time by `project_targets.py`'s `analysis_assurance_gate.py`, which still accepts only `'complete'`). This is the config-overlay replacement `require-complete-analysis` names as its successor: since neither a CLI flag nor an Action input can carry `assurance.require_complete` any more, this Action merges an `assurance: {require_complete: true}` fragment into whichever `build-config` the internal analysis step would otherwise read — the same config-only mechanism a project author's own `.abicheck.yml` line would produce. `check-project.yml` is the intended caller; a direct `check-target` caller may also set it explicitly. **Supported for `kind: bundle` too** (ADR-071): the release fan-out a bundle check runs folds every compared member's own `analysis_assurance` with `max` into the same exit axis a single-library check uses, so a one-member bundle gates identically to a `kind: target` check and any member that fell short floors the whole bundle. It was rejected outright for a bundle before ADR-071; that guard is retired. |
+| `analysis-assurance-complete` | no | `false` | Set to `'true'` when this cell declared `checks[].analysis.assurance: complete` (`RunPlanCheck.analysis_assurance`, validated at run-plan generation time by `project_targets.py`'s `analysis_assurance_gate.py`, which still accepts only `'complete'`). This is the config-overlay replacement `require-complete-analysis` names as its successor: since neither a CLI flag nor an Action input can carry `assurance.require_complete` any more, this Action merges an `assurance: {require_complete: true}` fragment into whichever `build-config` the internal analysis step would otherwise read — the same config-only mechanism a project author's own `.abicheck.yml` line would produce. `check-project.yml` is the intended caller; a direct `check-target` caller may also set it explicitly. **Supported for `kind: bundle` too**: the release fan-out a bundle check runs folds every compared member's own `analysis_assurance` with `max` into the same exit axis a single-library check uses, so a one-member bundle gates identically to a `kind: target` check and any member that fell short floors the whole bundle. It used to be rejected outright for a bundle; that guard is retired. |
 | `header`, `old-header`, `new-header`, `include`, `old-include`, `new-include`, `lang`, `ast-frontend`, `gcc-path`, `gcc-prefix`, `gcc-options`, `sysroot`, `sources`, `build-info`, `compile-db`, `build-config`, `policy`, `policy-file`, `suppress`, `severity-preset`, `severity-addition`, `extra-args`, `python-version`, `install-deps`, `dependency-source` | no | (mirror the root Action) | Forwarded straight through to the internal analysis step. `dependency-source` (G34 Phase C) is what `check-project.yml` sets per cell from the profile's own `dependency_source:`; the root Action owns its accepted-value list and its fallback to `install-deps`. |
 
 ## Outputs
@@ -187,13 +186,13 @@ landed (ADR-071), the second has not.
 | Output | Meaning |
 |--------|---------|
 | `outcome` | The `resolve-baseline` outcome, or `skipped` when `baseline-channel: none`. |
-| `check-id` | `target@profile#baseline_channel@requested_depth` — always includes the depth suffix, even in the common single-depth case (ADR-047 §7). Gains a `~<explicit_id>` tail when `explicit-id` is set (G42), e.g. `target@profile#baseline_channel@requested_depth~my-id`. |
+| `check-id` | `target@profile#baseline_channel@requested_depth` — always includes the depth suffix, even in the common single-depth case. Gains a `~<explicit_id>` tail when `explicit-id` is set (G42), e.g. `target@profile#baseline_channel@requested_depth~my-id`. |
 | `verdict` | The legacy `verdict` field: one of the five `Verdict` values, `ERROR` (operational failure), `NO_BASELINE` (bootstrap pass), or `NEW_TARGET` (`allow-new-target: true` pass) — the latter two are deliberately not `Verdict` members, never a compatibility verdict. |
 | `compatibility-verdict` | Mirrors `verdict`'s casing, empty when unavailable (an operational-failure or bootstrap report). |
 | `policy-gate-decision` | `pass` or `fail` — this check's own real gate decision, computed before any `gate-mode: advisory` neutralization. |
 | `report-path` | Path to the final, enriched report JSON. |
 
-## Report envelope (ADR-047 §7)
+## Report envelope
 
 Every run writes a single JSON report at
 `check-target-report-<name>-<profile>-<baseline_channel>-<requested_depth>-<digest>.json`

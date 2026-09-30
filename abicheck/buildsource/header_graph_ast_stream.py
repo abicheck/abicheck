@@ -48,9 +48,10 @@ What it does
 The root of a clang AST dump is one ``TranslationUnitDecl`` whose ``inner``
 array holds every top-level declaration. Those elements are independent
 documents as far as the *reader* is concerned, so
-:func:`stream_top_level_decls` finds each one's byte extent with a scanner
-that never holds more than the current element, hands it to ``json.loads``
-alone, and lets it be freed before the next one starts.
+:func:`stream_top_level_decls` decodes them one at a time with the stdlib's C
+decoder (``JSONDecoder.raw_decode``, which also reports where each element
+ended), never holding more than the current element and one read chunk, and
+lets each be freed before the next one starts.
 :func:`project_header_graph_ast_file` then drives the *same four readers*
 over that stream instead of over a whole tree.
 
@@ -63,7 +64,12 @@ Measured on that same document, three runs per side, fresh process each:
 :func:`project_header_graph_ast_file`      298 MiB   13.1 s
 ======================================  ==========  ========
 
-**-57% peak, at 2.9x the wall time of the parse it replaces.** The trade is
+**-57% peak, at 2.9x the wall time of the parse it replaces** -- as first
+measured, with element boundaries found by a Python loop over every string
+and structural byte in the document. Handing boundary-finding to
+``raw_decode`` instead removed that loop: on a 125 MB oneDNN AST the stream
+went from 8.95 s to 1.92 s (a whole-document ``json.load`` of the same file
+takes 2.9 s), with byte-identical extents. The trade is
 deliberate and is the whole point: the attach is memory-bound, not
 CPU-bound -- a 2 GiB member is what makes a release fan-out overcommit and
 what a cache-cold CI container has least of, while the seconds here sit
@@ -155,8 +161,8 @@ A third rule is about what this scanner *refuses*. It must never accept a
 document ``json.loads`` would reject, because then this module answers
 where the whole-tree path raises -- and the two would disagree exactly when
 an AST cache entry is corrupt, which is the one case the equivalence claim
-most needs to hold. So the element separators are *counted*, not merely
-allowed (:func:`_check_gap`), and a top-level element that is not a JSON
+most needs to hold. So exactly one comma is required between two elements
+and none before the first or after the last, and a top-level element that is not a JSON
 object is rejected rather than skipped, and so is a **truncated** one --
 including a document cut off after a *complete* element, which is the
 likeliest corruption of all, since a half-written cache file truncates far
@@ -177,13 +183,14 @@ compares this module's projection against
 
 from __future__ import annotations
 
+import codecs
 import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from ..storage.acyclic_json import loads_acyclic
+from ..storage.acyclic_json import gc_paused, loads_acyclic
 from .ast_special_members import collect_special_member_names
 from .call_graph import (
     _dedupe_edges as _dedupe_call_edges,
@@ -219,15 +226,6 @@ _STRING_END = re.compile(rb'(?<!\\)(?:\\\\)*"')
 _CHUNK = 1 << 20
 
 
-#: Pretty-printing whitespace, the only thing that may sit around an
-#: element separator. The separating comma itself is counted rather than
-#: merely allowed -- see :func:`_check_gap`.
-_JSON_WHITESPACE = frozenset(b" \t\r\n")
-
-#: The element separator itself, as the integer a ``bytearray`` iterates.
-_COMMA = ord(",")
-
-
 class ClangAstStreamError(ValueError):
     """The document is not a clang AST dump this scanner can walk.
 
@@ -236,50 +234,6 @@ class ClangAstStreamError(ValueError):
     element, and degrade the same way every other AST acquisition failure
     does rather than aborting the dump.
     """
-
-
-def _check_gap(
-    buf: bytearray, start: int, end: int, *, expected: int, carried: int = 0
-) -> None:
-    """Validate the bytes between two top-level tokens.
-
-    Two different malformations hide here, and only counting the commas
-    catches both.
-
-    A top-level element that is **not an object** is invisible to this
-    scanner: element boundaries are object braces, so a bare ``1`` or
-    ``true`` produces no structural token to stop on and would simply be
-    skipped, leaving the projection silently short.
-
-    A **wrong number of separators** is subtler, and is what makes this a
-    count rather than a membership test. ``[{...} {...}]`` (none),
-    ``[,{...}]`` (leading), ``[{...},,{...}]`` (doubled) and ``[{...},]``
-    (trailing) are all rejected by ``json.loads`` and were all silently
-    accepted here while any number of commas was allowed -- which would
-    make this module answer where the whole-tree path raises, breaking the
-    one property everything else rests on (*the same projection, however it
-    was derived*) precisely when a cache entry is corrupt.
-
-    *expected* is 1 before every element after the first, and 0 before the
-    first element and before the closing ``]`` -- so a leading and a
-    trailing comma are each rejected by the same rule that rejects a
-    missing one.
-
-    Raising is always safe: every caller falls back to parsing the document
-    normally, so being wrong here costs a slow run, never a wrong answer.
-    """
-    gap = buf[start:end]
-    if not _JSON_WHITESPACE.issuperset(set(gap) - {_COMMA}):
-        raise ClangAstStreamError("top-level AST element is not a JSON object")
-    # *carried* counts separators already seen in an earlier part of this
-    # same gap that had to be discarded before the token deciding how many
-    # were due had been read, so the comparison is over the whole gap.
-    found = carried + gap.count(b",")
-    if found != expected:
-        raise ClangAstStreamError(
-            f"malformed separator between top-level AST elements: expected "
-            f"{expected} comma(s), found {found}"
-        )
 
 
 def _find_root_inner(fh: Any, buf: bytearray) -> bool:
@@ -443,6 +397,104 @@ def _after_colon_bracket(fh: Any, buf: bytearray, pos: int) -> int | None:
         buf.extend(chunk)
 
 
+def _incomplete(exc: json.JSONDecodeError, text: str) -> bool:
+    """Whether *exc* may just mean "the element runs past what has been read".
+
+    A decode that ran off the end of the buffer fails at (or within a token
+    of) its last character, except for an open string, which the stdlib
+    reports at the string's *opening* quote. Anything else is a real
+    grammar error inside the element, reported as soon as it is seen rather
+    than after reading the rest of the file looking for an end that would
+    not fix it.
+    """
+    return exc.pos >= len(text) - _TOKEN_TAIL or exc.msg.startswith(
+        "Unterminated string"
+    )
+
+
+#: How close to the end of the buffer a decode error must sit to count as
+#: "ran out of input" rather than "malformed": the longest JSON token a
+#: truncation can cut short and still leave the decoder pointing at its
+#: start (a literal such as ``false``, a ``\uXXXX`` escape, a number).
+_TOKEN_TAIL = 64
+
+#: Inter-element whitespace, as JSON defines it (not ``str.isspace``).
+_WS = re.compile(r"[ \t\n\r]*")
+
+_DECODER = json.JSONDecoder()
+
+
+class _ElementReader:
+    """The ``inner`` array's text, read incrementally and tracked in bytes.
+
+    ``text`` holds decoded characters from file offset ``base`` on;
+    ``byte_offset`` converts a position in it back to a file offset for
+    :func:`stream_recorded_decls`, in O(1) when (as always for the compacted
+    documents this reads) the buffer is ASCII.
+    """
+
+    def __init__(self, fh: Any, buf: bytearray) -> None:
+        self._fh = fh
+        self._decoder = codecs.getincrementaldecoder("utf-8")()
+        self.base: int = int(fh.tell()) - len(buf)
+        self.text = self._decode(bytes(buf))
+        self.eof = False
+        self._cursor = (0, 0)
+
+    def _decode(self, data: bytes, final: bool = False) -> str:
+        try:
+            return str(self._decoder.decode(data, final=final))
+        except UnicodeDecodeError as exc:
+            raise ClangAstStreamError(
+                f"AST document is not valid UTF-8 (or is truncated mid-character): {exc}"
+            ) from exc
+
+    def byte_offset(self, pos: int) -> int:
+        if self.text.isascii():  # O(1) on a str
+            return self.base + pos
+        # Positions are asked for in increasing order within one buffer, so
+        # a cursor keeps a non-ASCII document linear rather than re-encoding
+        # the buffer's whole prefix per element.
+        if pos < self._cursor[0]:
+            self._cursor = (0, 0)
+        cpos, bpos = self._cursor
+        bpos += len(self.text[cpos:pos].encode("utf-8"))
+        self._cursor = (pos, bpos)
+        return self.base + bpos
+
+    def refill(self, keep_from: int, at_least: int) -> int:
+        """Drop ``text[:keep_from]``, read at least *at_least* more bytes, and
+        answer the new index of what was ``keep_from``. Sets ``eof`` instead
+        of reading when the file is exhausted."""
+        self.base = self.byte_offset(keep_from)
+        self.text = self.text[keep_from:]
+        self._cursor = (0, 0)
+        chunk = self._fh.read(max(_CHUNK, at_least))
+        if not chunk:
+            self.eof = True
+            self.text += self._decode(b"", final=True)
+        else:
+            self.text += self._decode(chunk)
+        return 0
+
+    def next_char(self, pos: int) -> tuple[str, int]:
+        """The next non-whitespace character at or after *pos* (``""`` at end
+        of input) and its index, reading more as needed."""
+        while True:
+            pos = _WS.match(self.text, pos).end()  # type: ignore[union-attr]
+            if pos < len(self.text):
+                return self.text[pos], pos
+            if self.eof:
+                return "", pos
+            pos = self.refill(pos, 0)
+
+    def remaining_bytes(self, pos: int) -> bytearray:
+        """Everything unread from *pos* on, re-encoded for the byte-level
+        suffix check (plus any partial character the decoder still holds)."""
+        pending = self._decoder.getstate()[0]
+        return bytearray(self.text[pos:].encode("utf-8") + pending)
+
+
 def stream_top_level_decls(
     path: Path, record_extents: list[tuple[int, int]] | None = None
 ) -> Iterator[dict[str, Any]]:
@@ -452,139 +504,93 @@ def stream_top_level_decls(
     end)`` byte offset in the file, for :func:`stream_recorded_decls` to
     re-read without scanning again.
 
-    Only the element currently being yielded is held: its bytes are dropped
-    from the read buffer as soon as it is decoded, and the caller is expected
-    to drop the element itself before asking for the next. Nothing
-    accumulates here, which is the entire point -- see the module docstring
-    for what that is worth and where the remaining floor comes from.
+    Only the element currently being yielded is held, plus at most one read
+    chunk around it; the caller is expected to drop the element itself before
+    asking for the next. Nothing accumulates here, which is the entire point
+    -- see the module docstring for what that is worth and where the
+    remaining floor comes from.
+
+    Each element is found *and* decoded by the stdlib's C decoder
+    (``JSONDecoder.raw_decode``), which reports where the element ended. An
+    earlier version located element boundaries with a Python loop over every
+    structural byte and string in the document and then decoded the slice --
+    two regex calls per string, ~9.7M strings on a 155 MB oneCCL AST, 7x the
+    cost of a plain ``json.load`` of the same file. An element that runs past
+    the buffer fails to decode near its end (:func:`_incomplete`), and is
+    retried after reading at least as much again, so a large element costs
+    at most about twice its own decode.
+
+    The only grammar left to check by hand is *between* elements: exactly one
+    comma between two objects, none before the first or after the last, and
+    nothing but objects -- every one of which ``json.loads`` of the whole
+    document rejects, and so must this.
 
     Raises :class:`ClangAstStreamError` if the document is not shaped like a
-    clang AST dump, and lets :class:`json.JSONDecodeError` from an individual
-    element propagate: a malformed element is a real parse failure, and
-    silently skipping one would produce a quietly incomplete edge set, which
-    is the one outcome this codebase treats as worse than no evidence at all
-    (ADR-028 D3).
+    clang AST dump or is truncated, and lets :class:`json.JSONDecodeError`
+    from an individual element propagate: a malformed element is a real parse
+    failure, and silently skipping one would produce a quietly incomplete
+    edge set, which is the one outcome this codebase treats as worse than no
+    evidence at all (ADR-028 D3).
     """
     with path.open("rb") as fh:
         buf = bytearray()
         if not _find_root_inner(fh, buf):
             return
-        # File offset of ``buf[0]``, maintained across every truncation, so
-        # an element's extent can be reported in the file's own coordinates.
-        base = fh.tell() - len(buf)
-        depth = 0
+        reader = _ElementReader(fh, buf)
+        del buf
         pos = 0
-        # Separator bookkeeping (see `_check_gap`). `carried_commas` holds
-        # separators already seen in a gap that had to be discarded before
-        # the token deciding how many were due had been read.
-        yielded_any = False
-        carried_commas = 0
+        first = True
         while True:
-            match = _STRUCTURAL.search(buf, pos)
-            if match is None:
-                if depth == 0:
-                    # Nothing in flight, so everything left is between two
-                    # elements and can go -- but validate it *before*
-                    # discarding it, or a bare scalar element that happens
-                    # to carry no structural byte (`1`, `true`, `null`)
-                    # would be dropped silently here rather than rejected.
-                    # Separator counting cannot happen yet (the next token
-                    # decides how many are due), so only the byte set is
-                    # checked here and the commas are carried forward.
-                    if not _JSON_WHITESPACE.issuperset(set(buf[pos:]) - {_COMMA}):
-                        raise ClangAstStreamError(
-                            "top-level AST element is not a JSON object"
-                        )
-                    # Carry the separators *and* drop the bytes holding
-                    # them. Discarding only `buf[:pos]` left them in the
-                    # buffer, so the next gap check counted the same comma
-                    # a second time and rejected a valid document -- found
-                    # by the tiny-chunk property test, which is the only
-                    # thing that reaches this branch. Dropping the whole
-                    # buffer is safe precisely here: the search found no
-                    # structural byte from `pos` on, and the check above
-                    # just proved the remainder is whitespace and commas.
-                    carried_commas += buf[pos:].count(b",")
-                    base += len(buf)
-                    del buf[:]
-                    pos = 0
-                else:
-                    pos = len(buf)
-                chunk = fh.read(_CHUNK)
-                if not chunk:
-                    # Reaching the end of the file is *always* truncation
-                    # here, at any depth: a well-formed document returns on
-                    # the `inner` array's own closing bracket and never
-                    # gets this far. Returning cleanly at depth 0 instead
-                    # accepted a document `json.loads` rejects -- the same
-                    # "answers where the whole-tree path raises" failure as
-                    # a malformed separator, and the likelier one in
-                    # practice, since a half-written cache file truncates
-                    # after a complete element far more often than it
-                    # grows a stray comma.
-                    raise ClangAstStreamError("truncated AST document")
-                buf.extend(chunk)
-                continue
-            token = match.group()
-            at = match.start()
-            if token == b'"':
-                if depth == 0:
-                    # A string *element* -- see `_check_gap`.
+            char, pos = reader.next_char(pos)
+            if char == "]":
+                # End of the root's `inner` -- but not yet the end of the
+                # document, and what follows can still contradict what was
+                # just yielded. See `_validate_root_suffix`.
+                _validate_root_suffix(fh, reader.remaining_bytes(pos + 1), 0)
+                return
+            if not first:
+                if char != ",":
+                    if char == "":
+                        raise ClangAstStreamError("truncated AST document")
                     raise ClangAstStreamError(
-                        "top-level AST element is not a JSON object"
+                        "malformed separator between top-level AST elements: "
+                        "expected a comma"
                     )
-                end = _STRING_END.search(buf, at + 1)
-                while end is None:
-                    chunk = fh.read(_CHUNK)
-                    if not chunk:
-                        raise ClangAstStreamError("unterminated string in AST document")
-                    buf.extend(chunk)
-                    end = _STRING_END.search(buf, at + 1)
-                pos = end.end()
-                continue
-            if depth == 0:
-                # 1 comma before every element after the first; 0 before the
-                # first and before the closing `]`.
-                due = 0 if (token == b"]" or not yielded_any) else 1
-                _check_gap(buf, pos, at, expected=due, carried=carried_commas)
-                carried_commas = 0
-            if depth == 0 and token != b"{":
-                if token == b"]":
-                    # End of the root's `inner` -- but not yet the end of
-                    # the document, and what follows can still contradict
-                    # what was just yielded. See `_validate_root_suffix`.
-                    _validate_root_suffix(fh, buf, at + 1)
-                    return
-                # A top-level element that is not a JSON object. clang never
-                # emits one, and this scanner's element boundaries are
-                # object braces, so continuing would hand `json.loads` a
-                # slice that starts in the wrong place -- a silently wrong
-                # projection, which is the one outcome worse than no
-                # projection. Decline loudly instead; every caller falls
-                # back to parsing the document normally.
+                char, pos = reader.next_char(pos + 1)
+                if char == "]":
+                    raise ClangAstStreamError(
+                        "malformed separator between top-level AST elements: "
+                        "trailing comma"
+                    )
+            if char == "":
+                # Reaching the end of the file is *always* truncation here: a
+                # well-formed document returns on the `inner` array's own
+                # closing bracket and never gets this far.
+                raise ClangAstStreamError("truncated AST document")
+            if char != "{":
+                # A top-level element that is not a JSON object (or a
+                # doubled/leading comma). clang never emits one; decline
+                # loudly and every caller falls back to an ordinary parse.
                 raise ClangAstStreamError("top-level AST element is not a JSON object")
-            if token in (b"{", b"["):
-                if depth == 0 and token == b"{":
-                    # Drop the separator bytes before this element so it
-                    # starts at index 0 and the buffer never carries a
-                    # growing prefix of already-consumed document.
-                    del buf[:at]
-                    base += at
-                    at = 0
-                    pos = 0
-                depth += 1
-                pos = at + 1
-                continue
-            depth -= 1
-            pos = at + 1
-            if depth == 0:
-                if record_extents is not None:
-                    record_extents.append((base, base + pos))
-                yield loads_acyclic(buf[:pos])
-                yielded_any = True
-                del buf[:pos]
-                base += pos
-                pos = 0
+            while True:
+                try:
+                    with gc_paused():
+                        element, end = _DECODER.raw_decode(reader.text, pos)
+                    break
+                except json.JSONDecodeError as exc:
+                    if not _incomplete(exc, reader.text):
+                        raise
+                    if reader.eof:
+                        raise ClangAstStreamError("truncated AST document") from exc
+                    pos = reader.refill(pos, len(reader.text) - pos)
+            if record_extents is not None:
+                record_extents.append(
+                    (reader.byte_offset(pos), reader.byte_offset(end))
+                )
+            yield element
+            del element
+            first = False
+            pos = end
 
 
 def stream_recorded_decls(

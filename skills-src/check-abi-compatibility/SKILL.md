@@ -76,6 +76,22 @@ workflow's own evidence, and report the "does it actually load there" half as
 compare` — do not let a clean `compare` verdict read as a full runtime
 `VERIFIED_COMPATIBLE`.
 
+**Which surface does the promise cover?** The user's own words usually say
+so, and each wording has its own abicheck contract domain:
+
+| The user asks about | Contract domain |
+|---|---|
+| "what we export", "what's in the binary customers link against", the export table | `--contract exports` |
+| "our public API", "what's in our headers", the documented surface | `--contract public` |
+| everything the artifact carries, internal or not | `--contract all` |
+| no particular surface | no `--contract`: the canonical comparison's header scoping |
+
+Naming a domain turns on per-finding contract relevance **and** a coverage
+ledger for that domain, which step 5 reads. Without it, a question about
+exports is answered against the headers instead, and a gap in export-table
+evidence is never reported. The invocation is in
+[the abicheck adapter](references/abicheck-adapter.md#the-canonical-comparison).
+
 Also confirm what the answer is actually *for*: ship this PR as-is, restore
 a removed entry point, decide a version bump, or clear one named consumer.
 That decision is what step 10's report exists to serve — everything before
@@ -129,6 +145,16 @@ Do not read the verdict first. In order:
    Anything short of what step 4 asked for is `NOT_VERIFIED` for that part
    of the answer, not evidence of a clean result
    ([safety invariants](../shared/safety-invariants.md) item 1).
+
+   **Too shallow is not the same as not comparable.** When the tool ran the
+   comparison and produced a verdict, but the evidence cannot see what the
+   user asked about, keep that verdict and report exactly what it covers.
+   For example, a stripped old side with no headers or debug info still
+   compares exports, but cannot see struct layout. Mark the user's actual
+   question `NOT_VERIFIED`, with the reason "evidence too shallow", and say
+   what would answer it. Never replace an observed verdict with `null` or
+   "not comparable": `null` means the tool refused to compare, and
+   reporting it here hides the result the tool did produce.
 3. `verdict` and `summary` → the compatibility answer, only now.
 4. `severity.*` → the grading of that answer, present whenever
    severity-aware grading was resolved from any source (a flag, the
@@ -272,7 +298,7 @@ End with this shape, not a command transcript:
 | `COMPATIBLE_WITH_DEPLOYMENT_RISK` | `COMPATIBLE_WITH_RISK` | no break, but a risk finding remains — most commonly a raised runtime/symbol-version floor |
 | `SOURCE_BREAK` | `API_BREAK` | consumers must recompile; no already-compiled binary is affected |
 | `BINARY_BREAK` | `BREAKING` | an already-compiled, already-linked consumer stops working without a rebuild |
-| `NOT_VERIFIED` | `verdict: null` (comparability refused), or an evidence tier short of what step 4 required, or a combination outside this skill's [candidate evaluation v0.1 scope](#candidate-evaluation-scope-v01), or a runtime contract's dependency-graph-loadability half when no `deps tree`/`deps compare` was run | the question was not actually answered — state why, and what would answer it |
+| `NOT_VERIFIED` | `verdict: null` (comparability refused), or an evidence tier short of what step 4 required (report the observed verdict alongside it — step 5), or a non-empty `contract_coverage_failures` for the domain the question named, or a combination outside this skill's [candidate evaluation v0.1 scope](#candidate-evaluation-scope-v01), or a runtime contract's dependency-graph-loadability half when no `deps tree`/`deps compare` was run | the question was not actually answered — state why, and what would answer it |
 
 A *raised symbol-version floor* is **not** a "remaining unknown": `compare`
 emits `runtime_floor_raised` as a risk and can promote it to a break against

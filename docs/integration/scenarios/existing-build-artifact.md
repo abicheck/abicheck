@@ -3,9 +3,7 @@
 Your project already has a build — possibly a slow one (a large C++ codebase,
 a from-scratch toolchain bootstrap, a cross-compile). You don't want abicheck
 re-building anything, and you don't want to hand-wire binary/header paths
-into every check. This is
-[ADR-047](../../contribute/adr/047-github-actions-integration-model.md) §8's
-S3: "build once, scan many" — the preferred flow for any repository beyond
+into every check. This is scenario S3: "build once, scan many" — the preferred flow for any repository beyond
 S1's single-file minimal case.
 
 ## The model

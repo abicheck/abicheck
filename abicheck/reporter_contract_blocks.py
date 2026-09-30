@@ -238,7 +238,7 @@ def add_effective_config_digest(
     :func:`add_contract_context`), the directory/package release fan-out
     (same call), :func:`~abicheck.reporter.to_stat_json` (which bypasses
     :func:`add_contract_context` entirely, so it calls this directly), and
-    `scan --against` (:mod:`abicheck.cli_scan_baseline`, same function).
+    the retired `scan --against` (``cli_scan_baseline``, same function).
     :func:`~abicheck.effective_config_digest.effective_config_fields` itself
     picks the richest tier this comparison actually resolved (a full
     ``CompatibilityEvaluationConfig`` under ``--contract``/``--pack``, else

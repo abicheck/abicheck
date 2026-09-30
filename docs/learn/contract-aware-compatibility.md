@@ -26,7 +26,7 @@ narrow what actually gets scored — but none of that asks about a
 *declared contract*: it's about whether a change is public/reachable or
 explicitly waived, not whether it belongs to a promise you've made about
 what stays stable. **Contract-aware compatibility**
-(`compare --contract`, ADR-049) adds that narrower, more useful
+(`compare --contract`) adds that narrower, more useful
 question on top: *does this change even touch the compatibility contract
 you actually promised?*
 
@@ -124,7 +124,7 @@ abicheck calls `compatibility_evaluation_status` — **`EVALUATED`** or
 | `NOT_APPLICABLE` | `EVALUATED` | Not a domain-membership question at all (e.g. a SONAME/loader/security-hardening finding) — scored normally, same as always. |
 | `PROVEN_OUT_OF_CONTRACT` | `NOT_EVALUATED` | Confidently excluded — abicheck can *prove* this entity is outside the domain. |
 | `UNKNOWN_UNRESOLVED` | `NOT_EVALUATED` | Can't tell, because the evidence needed to decide is missing or incomplete. |
-| `UNKNOWN_UNPROVEN` | `NOT_EVALUATED` | *Reserved* by the vocabulary (ADR-049 D1) for "searched but genuinely ambiguous" — today's evaluator doesn't have a per-domain "did we search everything" signal precise enough to emit this distinct from `UNKNOWN_UNRESOLVED`, so it downgrades every such case to `UNKNOWN_UNRESOLVED` instead. Don't expect to see this value in a real report yet. |
+| `UNKNOWN_UNPROVEN` | `NOT_EVALUATED` | *Reserved* by the vocabulary for "searched but genuinely ambiguous" — today's evaluator doesn't have a per-domain "did we search everything" signal precise enough to emit this distinct from `UNKNOWN_UNRESOLVED`, so it downgrades every such case to `UNKNOWN_UNRESOLVED` instead. Don't expect to see this value in a real report yet. |
 
 Only `IN_CONTRACT`/`NOT_APPLICABLE` findings reach compatibility policy —
 everything else has `compatibility_decision: null` in the report: not a
@@ -276,7 +276,7 @@ for that last one).
 - [Contract Evaluation](../use/contract-evaluation.md) — commands, flags, and CI recipes
 - [Compatibility Evaluation Config](../reference/compatibility-evaluation-config.md) — the full field vocabulary and precedence
 - [CI Gating](../use/ci-gating.md) — where this stage sits in the overall pipeline
-- [Exit Codes → Contract-coverage contribution](../reference/exit-codes.md#contract-coverage-contribution-adr-049)
+- [Exit Codes → Contract-coverage contribution](../reference/exit-codes.md#contract-coverage-contribution)
 - [Verdicts → Contract evaluation and the verdict](verdicts.md#contract-evaluation-and-the-verdict)
 
 ---

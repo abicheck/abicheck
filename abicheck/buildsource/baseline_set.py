@@ -609,7 +609,7 @@ def _evidence_incompatibility(
             f"candidate build's evidence producer is {candidate_kind!r} -- "
             "comparing source-depth evidence across different producers "
             "(e.g. wrapper vs. replay) is an infrastructure incompatibility, "
-            "not an ABI finding (ADR-047 section 6)."
+            "not an ABI finding."
         )
     return None
 
@@ -1255,8 +1255,8 @@ def resolve_bundle(
             message=(
                 f"bundle {bundle!r} could not be resolved -- {detail} -- a "
                 "bundle-scoped baseline must stage every member's ELF "
-                "binary under a validated binaries/ directory (ADR-047 "
-                "section 6/section 8 S14), not just its snapshot."
+                "binary under a validated binaries/ directory, "
+                "not just its snapshot."
             ),
             manifest_path=manifest_path,
         )

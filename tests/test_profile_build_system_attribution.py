@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """WS-A per-profile attribution: build-output.json ``profile.build_system``
 travels into the run-plan cell for that profile and into the check-target
-report envelope (``profile_build_system``, report schema 5.10), so a cell's
+report envelope (``profile_build_system``, report schema 5.11), so a cell's
 findings name the build lane that produced them."""
 
 from __future__ import annotations

@@ -81,8 +81,7 @@ abicheck compare v1.abi.json v2.abi.json --no-scope-public-headers
 
 (`compile.frontend`/`compile.compiler` in `.abicheck.yml`) select the
 supported Clang AST frontend because castxml isn't installed in this
-environment; drop them on a host with castxml. The standalone `collect` CLI command was removed in the
-ADR-043 CLI reset, so `collect_inline_pack()` is called directly here to
+environment; drop them on a host with castxml. The standalone `collect` CLI command was removed in the pre-1.0 CLI reset, so `collect_inline_pack()` is called directly here to
 build the evidence pack for this hand-written, non-CMake compile database —
 a real project instead points `dump --sources <tree> --depth source` at its
 actual build.)

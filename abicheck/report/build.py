@@ -309,7 +309,7 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
     the time a later projection reads it -- but ``DiffResult`` itself is an
     ordinary mutable dataclass (``contract_pipeline``/``post_manifest``
     legitimately append to ``.changes`` *during* ``compare()``, and
-    ``cli_scan_baseline`` reassigns it afterward for its own filtering
+    the retired ``cli_scan_baseline`` reassigned it afterward for its own filtering
     pass). A caller handing this same, still-live object to a later,
     unrelated mutation after the envelope was built would otherwise
     desynchronize ``document``/``findings``/``gate`` (built from the

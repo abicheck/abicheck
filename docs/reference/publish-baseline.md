@@ -4,9 +4,7 @@ These two reusable workflows produce the baseline-sets [`resolve-baseline`](reso
 resolves against, one per contract profile: `publish-baseline.yml` writes an
 immutable `release-contract` archive as a GitHub Release asset;
 `update-main-baseline.yml` refreshes a mutable `accepted-main` entry in
-GitHub Actions cache on every default-branch push. Both implement
-[ADR-047](../contribute/adr/047-github-actions-integration-model.md)
-§6/§10's baseline lifecycle.
+GitHub Actions cache on every default-branch push. Both implement the baseline lifecycle.
 
 > **Status.** Shipped in G30 P1.6. Neither workflow builds anything itself
 > ("build once, scan many," the same boundary
@@ -40,8 +38,8 @@ entry per target, `stage_binary: true` set exactly for targets whose
 `bundle` field is non-empty.
 
 > **Not a CLI command.** This used to be `abicheck build-output
-> baseline-libraries DIRECTORY`; [ADR-054](../contribute/adr/054-cli-project-integration-surface-consolidation.md)
-> removed it from the public CLI — it was a wire-format adapter for exactly
+> baseline-libraries DIRECTORY`; it was
+> removed from the public CLI — it was a wire-format adapter for exactly
 > these two workflows' `actions/baseline` input, not a general-purpose
 > operation. Both workflows now call the function directly:
 
@@ -91,10 +89,7 @@ depends on.
 
 **Depth scope, unchanged by this item.** A bundle-scoped check is still
 restricted to `requested-depth: binary` (`abicheck/buildsource/
-project_targets.py`'s `BUNDLE_CHECK_DEPTHS`) — this predates P1.6 and closes
-[ADR-047 §8's "binaries only is not the full answer for every requested
-depth"](../contribute/adr/047-github-actions-integration-model.md#8-condensed-scenario-catalog-s1s28)
-open gap by construction: since a bundle check never requests header/build/
+project_targets.py`'s `BUNDLE_CHECK_DEPTHS`) — this predates P1.6 and closes the "binaries only is not the full answer for every requested depth" open gap by construction: since a bundle check never requests header/build/
 source depth in the first place, the archive never needs a per-member
 `headers/` directory or a `compare-release` snapshot-consuming input path
 either. If a future item lifts that restriction, staging old-side headers
@@ -105,7 +100,7 @@ to rediscover.
 
 Reusable workflow (`workflow_call`); wire it to a `release: types:
 [published]` trigger in your own repository — never `pull_request`/
-`pull_request_target` ([ADR-047 §12](../contribute/adr/047-github-actions-integration-model.md#12-security-and-reproducibility)).
+`pull_request_target`.
 
 | Input | Default | Meaning |
 |-------|---------|---------|
@@ -125,7 +120,7 @@ Reusable workflow (`workflow_call`); wire it to a `release: types:
 | `baseline-set-expect-workflow` | `''` | Workflow the source run must be, as a file path or a name. Strongly recommended. |
 | `baseline-set-expect-event` | `''` | Event the source run must have been triggered by, narrowing beyond the unconditional pull-request refusal. |
 | `baseline-set-allowed-conclusions` | `success` | Conclusions the source run may have; empty allows any. |
-| `snapshot-compression` | `none` | Forwarded to `actions/baseline`'s `snapshot-compression` input (ADR-059) — independent of this workflow's own archive packaging of the *whole* baseline-set directory (encoding chosen from `asset-name-template`'s extension, via [`actions/stage-baseline`](#actionsstage-baseline)); see [Storing Baselines](../use/baseline-storage.md#compressing-stored-snapshots). |
+| `snapshot-compression` | `none` | Forwarded to `actions/baseline`'s `snapshot-compression` input — independent of this workflow's own archive packaging of the *whole* baseline-set directory (encoding chosen from `asset-name-template`'s extension, via [`actions/stage-baseline`](#actionsstage-baseline)); see [Storing Baselines](../use/baseline-storage.md#compressing-stored-snapshots). |
 
 Secret: `github-token` (optional) — falls back to the job's own
 `GITHUB_TOKEN` (`permissions: contents: write` on the `publish` job).
@@ -154,7 +149,7 @@ metadata, both of which differ on every run even when the underlying
 baseline-set is logically identical). Matching digests are treated as a safe
 retry (e.g. after a transient failure) and no re-upload happens; a differing
 digest hard-fails rather than silently replacing a published
-`release-contract` asset — `release-contract` is documented (ADR-047 §10)
+`release-contract` asset — `release-contract` is documented
 as immutable once published, and a re-run silently overwriting it would
 mean an already-resolved consumer's "compatible with v1.0.0" comparison
 quietly stopped meaning what it said. To genuinely change a
@@ -191,8 +186,7 @@ to name the producer. That turns on real verification:
 
 * the run's repository, workflow identity, event, id, attempt and conclusion
   are each checked against what was declared;
-* a **pull-request-triggered producer is refused unconditionally**. ADR-047
-  §12 forbids a baseline-publishing workflow from triggering on a pull
+* a **pull-request-triggered producer is refused unconditionally**. A baseline-publishing workflow must never trigger on a pull
   request; a capture taken from one reaches the same immutable channel by a
   longer route, so the restriction holds for the producer too and is not
   configurable;
@@ -371,5 +365,5 @@ there. A later run, or a retried restore, resolves it.
   these two workflows produce.
 - [`check-target` Action Reference](check-target.md)
 - [Reusable Workflows Reference](reusable-workflows.md) — `check-single.yml`/`check-project.yml`.
-- [ADR-047 §6](../contribute/adr/047-github-actions-integration-model.md#6-baseline-lifecycle) — the baseline lifecycle this implements.
-- [ADR-047 §10](../contribute/adr/047-github-actions-integration-model.md#10-baseline-storage-backends-compared) — storage backend comparison + the cache-key contract.
+
+

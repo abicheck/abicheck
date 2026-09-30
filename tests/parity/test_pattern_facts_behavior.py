@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Behavioral half of the (now closed) pattern_scan gap (plan §3 #6, Phase 2b).
 
-``test_engine_primitive_call_sites.py`` proves ``find_pattern_facts`` has exactly
-two production callers now: ``scan_engine.py`` and
-``workflows/pattern_preprocessor_scan.py``. This module proves the positive
+``test_engine_primitive_call_sites.py`` proves ``find_pattern_facts`` has exactly one production caller now,
+``workflows/pattern_preprocessor_scan.py`` (``scan_engine.py`` was the
+other until ADR-068 Phase 6 deleted it). This module proves the positive
 side concretely and cheaply -- ``find_pattern_facts`` is pure lexical text scanning
-(no compiler, no castxml) and really does find an ABI-risk construct scan
-surfaces today, over a tiny fixture file, and that the same construct now
+(no compiler, no castxml) and really does find an ABI-risk construct over a tiny fixture file, and that the same construct now
 also reaches ``compare()``'s own JSON report.
 """
 
@@ -16,7 +15,6 @@ from pathlib import Path
 
 from abicheck.buildsource.pattern_facts import find_pattern_facts
 
-from .gaps import EXPECTED_GAPS
 from .runner import compare_json, invoke_cli
 
 
@@ -28,12 +26,6 @@ def test_scan_files_finds_explicit_template_instantiation(tmp_path: Path) -> Non
     kinds = {f.kind.value for f in result.facts}
     assert "explicit_template_instantiation" in kinds
     assert result.files_scanned == 1
-
-
-def test_pattern_scan_no_longer_a_registered_gap() -> None:
-    """`gaps.py` is the migration's definition of done: a capability
-    `compare` has reached must not still be listed as scan-only."""
-    assert "pattern_scan" not in EXPECTED_GAPS
 
 
 def test_compare_has_no_pattern_scan_cli_surface() -> None:

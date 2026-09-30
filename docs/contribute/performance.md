@@ -635,7 +635,7 @@ actually verifying nothing. Both are fixed; recorded here so a future reader
 doesn't rediscover them from scratch.
 
 **The `eval-suite.yml` source-tier (L3/L4/L5) lane reported success while
-scanning zero libraries.** `eval/runner.py`'s `_dump_sources()` called
+scanning zero libraries.** `skills-src/evaluation/field/runner.py`'s `_dump_sources()` called
 `abicheck dump --sources ... --depth full` — a rung retired from the public
 CLI (ADR-043 D2, collapsed into `--depth source`; see the "Scan-level
 scalability sweep" note above for the same retirement). Every source-tier
@@ -647,7 +647,7 @@ passing, green job, with `REPORT.md`'s source-tier table still published
 looking like real coverage. Fixed two ways, matching this page's own
 "gate on the systemic signal, not the individual one" pattern: the `--depth
 full` → `--depth source` argv fix itself, and a new
-`eval/runner.py --fail-on-empty-source` gate (`source_tier_broken()`) that
+`skills-src/evaluation/field/runner.py --fail-on-empty-source` gate (`source_tier_broken()`) that
 fails only when the *whole* tier is broken — zero libraries scanned
 successfully, or every "successful" scan captured zero real L3 build
 evidence — while still tolerating one library's own failure exactly as
@@ -682,8 +682,8 @@ convention — root `AGENTS.md`):
   the scaling/header-graph harnesses cover `compare()` and the L2 attach cost
   well; there is no equivalent maintained CI matrix over binary / headers
   (clang + castxml) / build (CMake + Bazel scoped/fallback) / source (seeded +
-  unseeded) × cold/warm cache. `eval/scan_level_scaling.py` sweeps the level
-  axis but is manual-only (real clang time), and `eval/scaling.py`'s
+  unseeded) × cold/warm cache. `skills-src/evaluation/field/scan_level_scaling.py` sweeps the level
+  axis but is manual-only (real clang time), and `skills-src/evaluation/field/scaling.py`'s
   `ABICHECK_L4_JOBS` sweep is likewise manual.
 - **Per-run performance receipts — now implemented for the L2 CLI path**
   (`scripts/perf_receipt.py`, consumed by `scripts/check_l2_cli_perf.py`). A
@@ -898,7 +898,7 @@ regression math can't independently drift.
 ### Scan level cost model: one cliff at L4
 
 A real `scan`-level sweep on two UXL libraries (oneTBB v2021.12→.13, C++;
-UMF v0.10→v0.11, C; raw data in `validation/data/uxl_scan_results_2026-06.json`)
+UMF v0.10→v0.11, C; raw data in `skills-src/evaluation/validation/data/uxl_scan_results_2026-06.json`)
 shows the cost has **one cliff, at the L4 AST-replay boundary**, and the cheap
 tier below it is dominated by the binary dump + always-on pattern scan, *not* by
 the source layer:
@@ -943,7 +943,7 @@ want source-body semantics or PR localization for humans.**
 
 The UXL run above fixed the corpus (two real libs) and varied the level. The
 complementary question — how each level scales as a project's *complexity*
-grows — is swept by [`eval/scan_level_scaling.py`](https://github.com/abicheck/abicheck/blob/main/eval/scan_level_scaling.py),
+grows — is swept by [`skills-src/evaluation/field/scan_level_scaling.py`](https://github.com/abicheck/abicheck/blob/main/eval/scan_level_scaling.py),
 a self-contained harness (no network/repo) that synthesises STL/template-heavy
 C++ trees of increasing TU count, builds them with the host compiler, and runs
 `scan` at each level against a slightly-changed baseline — recording wall time
@@ -981,7 +981,7 @@ docstrings). The harness's own seedless `"source"` entry *is* the shape the
 old `"full"` entry measured — keeping both would just re-run the identical
 `--depth source` argv twice under two names. (Concretely, before this fix
 `--depth full` was a hard `click.BadParameter` — a harness bug in the same
-family as the `eval/runner.py` one described in "Coverage gaps this workflow
+family as the `skills-src/evaluation/field/runner.py` one described in "Coverage gaps this workflow
 does not close" below, just in a manual-only harness rather than a scheduled
 CI lane, so it never produced a false-green.)
 
@@ -1177,7 +1177,7 @@ owner of oneDAL/SVS/PVXS claims.
 
 The scaling harness above is pure-Python and times the *compare* pipeline. The
 **dump-side L4 source ABI replay** (clang per-TU AST extraction) is a separate
-cost, timed by [`eval/scaling.py`](https://github.com/abicheck/abicheck/blob/main/eval/scaling.py)
+cost, timed by [`skills-src/evaluation/field/scaling.py`](https://github.com/abicheck/abicheck/blob/main/eval/scaling.py)
 on real source trees (it needs clang + a built tree, so it is manual, not in CI).
 
 Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
@@ -1185,7 +1185,7 @@ Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
 - **`ABICHECK_L4_JOBS`** — worker count for the per-TU extract pool. Auto =
   `min(TUs, cpu_count, 8)`. An explicit override is **clamped** to
   `max(8, 2×cpu_count)` (logged when it fires) so a stray `=64` can't
-  oversubscribe a host into thrash (`eval/SCALING.md` already saw jobs=8 on 4
+  oversubscribe a host into thrash (`skills-src/evaluation/field/SCALING.md` already saw jobs=8 on 4
   CPUs *regress*). Set `=1` to force serial (determinism).
 - **Memory cap (auto + override).** A single template-heavy C++ TU's
   `clang -ast-dump=json` output — and its in-Python parse — can reach several
@@ -1209,10 +1209,10 @@ Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
   structural fingerprints: pure-Python, **GIL-bound** work. A thread pool
   parallelizes only the clang *subprocess wait*, so that post-processing
   serializes on the GIL — part of the ~60–83 % "serial fraction" in
-  `eval/SCALING.md`. `process` runs the extract phase in a `ProcessPoolExecutor`,
+  `skills-src/evaluation/field/SCALING.md`. `process` runs the extract phase in a `ProcessPoolExecutor`,
   parallelizing the AST work too (at the cost of pickling each `SourceAbiTu` and
   per-process spawn). It is opt-in pending a measured win — compare the curves
-  with `python eval/scaling.py --jobs 1,2,4 --executor process` vs `thread`. The
+  with `python skills-src/evaluation/field/scaling.py --jobs 1,2,4 --executor process` vs `thread`. The
   driver falls back to serial if a process pool can't start (sandbox, spawn
   import error), so it never aborts L4.
 - **Concurrent AST memory: clang's output is spilled to a temp file, not captured.**
@@ -1344,7 +1344,7 @@ superlinear in this specific run) or is simply what clang-frontend L4 replay
 genuinely costs per TU on a template-heavy real C++ codebase without castxml
 — the first report's equivalent pass completed in 129s, but that ran *with*
 castxml, not available on the pvxs scan's host. Distinguishing those two
-needs a dedicated profiling pass on a real or `eval/scan_level_scaling.py`-
+needs a dedicated profiling pass on a real or `skills-src/evaluation/field/scan_level_scaling.py`-
 synthesized multi-TU tree with a `--budget` sweep added to that harness
 (mirroring how the L2 pathological-header investigation above was profiled),
 not assumed from a single real-world data point. Until profiled, the safe

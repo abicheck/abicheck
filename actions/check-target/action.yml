@@ -1,9 +1,9 @@
 name: 'abicheck check-target'
 description: >-
   Compose resolve-baseline + collect-facts + the root abicheck Action for
-  ONE resolved check (target or bundle), always emitting the ADR-047 §7
+  ONE resolved check (target or bundle), always emitting the
   report envelope regardless of outcome. Accepts gate-mode: local|deferred|
-  advisory (ADR-047 §4/§7): local sets this job's own exit code (today's
+  advisory: local sets this job's own exit code (today's
   root-action behavior); deferred/advisory always emit the report and only
   fail this job on an operational error (resolve-baseline failure), leaving
   the compatibility gate to check-project.yml's trailing aggregate job
@@ -21,8 +21,8 @@ inputs:
     default: 'target'
   target-kind:
     description: >
-      'library' (default), 'app-consumer', or 'plugin-contract' (ADR-047
-      §3's targets: kind discriminator) -- only meaningful when kind:
+      'library' (default), 'app-consumer', or 'plugin-contract' (the
+      targets: kind discriminator) -- only meaningful when kind:
       target. Selects which compare flags this check builds: a plain
       compare for library, --used-by for app-consumer, --required-symbols
       for plugin-contract. Never used for kind: bundle.
@@ -34,13 +34,13 @@ inputs:
       check's own reporting identity (check_id/target_id). For target-kind
       app-consumer/plugin-contract this is the contract target's own name
       (e.g. "myapp-consumer"), NOT the library it resolves through -- see
-      baseline-target below (ADR-047 §3's "library redirect").
+      baseline-target below (the "library redirect").
     required: true
   baseline-target:
     description: >
       Which target's baseline actually gets resolved -- defaults to name.
       Set this to the referenced library's id for target-kind: app-consumer/
-      plugin-contract (ADR-047 §3: "resolve-baseline resolves the baseline
+      plugin-contract ("resolve-baseline resolves the baseline
       for the target's library field ... while the check's own identity
       stays the contract target's name"). Ignored for kind: bundle (use
       bundle-members instead).
@@ -53,15 +53,15 @@ inputs:
     required: false
     default: '[]'
   profile:
-    description: 'The build profile.id this check runs under (ADR-047 §2/§3/§7).'
+    description: 'The build profile.id this check runs under.'
     required: true
   baseline-channel:
     description: >
       Baseline channel name (release-contract, accepted-main, explicit, or a
       project-defined custom channel), or the literal 'none' for a
-      single-build audit with no baseline (ADR-047 §8 S5) -- when 'none',
+      single-build audit with no baseline -- when 'none',
       resolve-baseline is skipped entirely and this check runs mode: compare
-      with old-library/abi-baseline both omitted (ADR-068 D2's audit-only
+      with old-library/abi-baseline both omitted (the audit-only
       shape -- the root Action's retired mode: scan, no --against, used to
       be this path) instead of a two-sided compare.
     required: true
@@ -133,7 +133,7 @@ inputs:
     required: false
     default: 'false'
   requested-depth:
-    description: 'Evidence-depth this check asks for: binary, headers, build, or source (ADR-047 §7).'
+    description: 'Evidence-depth this check asks for: binary, headers, build, or source.'
     required: true
   explicit-id:
     description: >
@@ -157,7 +157,7 @@ inputs:
     required: false
     default: ''
   gate-mode:
-    description: "'local' (default), 'deferred', or 'advisory' (ADR-047 §7)."
+    description: "'local' (default), 'deferred', or 'advisory'."
     required: false
     default: 'local'
   project:
@@ -301,8 +301,8 @@ inputs:
       see the real BREAKING/API_BREAK verdict and derive a blocking gate
       regardless of gate-mode. For a baseline-channel: none audit, this now
       also selects whether the audit-only compare's own AUDIT_GATE axis
-      gates on a BREAKING/API_BREAK-classified finding (ADR-068's
-      2026-09-10 amendment) -- the default 'default' preserves the exit
+      gates on a BREAKING/API_BREAK-classified finding
+      -- the default 'default' preserves the exit
       behavior the retired mode: scan audit path always had.
     required: false
     default: 'default'
@@ -339,13 +339,13 @@ inputs:
       is the intended caller (it already validates and carries
       `checks[].analysis.assurance` on the run-plan); a direct check-target
       caller may also set this explicitly. Ignored (no overlay generated)
-      when not exactly 'true'. Supported for `kind: bundle` too, as of
-      ADR-071: the release fan-out the internal `compare` runs for a bundle
+      when not exactly 'true'. Supported for `kind: bundle` too:
+      the release fan-out the internal `compare` runs for a bundle
       folds every compared member's own `analysis_assurance` with `max` into
       the same exit axis a single-library check uses, so a one-member bundle
       gates identically to a `kind: target` check and any member that fell
       short floors the whole bundle. It used to be rejected outright for a
-      bundle (`validate-inputs.sh`), which is the guard ADR-071 retired.
+      bundle (`validate-inputs.sh`), a guard that has since been retired.
     required: false
     default: 'false'
   extra-args:
@@ -411,7 +411,7 @@ outputs:
     description: 'The legacy verdict field (a Verdict enum value, "ERROR" for an operational failure, "NO_BASELINE" for a bootstrap pass, or "NEW_TARGET" for an allow-new-target-opted-in pass).'
     value: ${{ steps.finalize.outputs.verdict }}
   compatibility-verdict:
-    description: 'ADR-047 §7''s new compatibility_verdict field (empty when unavailable).'
+    description: 'The report envelope''s compatibility_verdict field (empty when unavailable).'
     value: ${{ steps.finalize.outputs.compatibility-verdict }}
   policy-gate-decision:
     description: '"pass" or "fail" -- this check''s own real gate decision, before any advisory neutralization.'
@@ -1004,7 +1004,7 @@ runs:
         _ct_require_cli_value_options_or_fail() {
           [[ "${_ct_cli_value_options_derived:-false}" == "true" ]] && return 0
           [[ -z "${EXTRA_ARGS:-}" ]] && return 0
-          echo "::error::extra-args is set, but this step cannot determine which abicheck compare options take a value, so it cannot tell a real --config in extra-args from another option's literal value (interpreter: '${PY:-<none resolved>}'; it must be able to import abicheck). Guessing is not safe -- see ADR-070 D3. Install abicheck into this step's interpreter, or remove extra-args." >&2
+          echo "::error::extra-args is set, but this step cannot determine which abicheck compare options take a value, so it cannot tell a real --config in extra-args from another option's literal value (interpreter: '${PY:-<none resolved>}'; it must be able to import abicheck). Guessing is not safe. Install abicheck into this step's interpreter, or remove extra-args." >&2
           exit 1
         }
 

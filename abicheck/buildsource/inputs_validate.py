@@ -192,7 +192,7 @@ def _resolve_pack_fact_set(
         return fact_set, []
     return {}, [
         "no fact_set identity found (manifest nor any TU record) — this "
-        "pack predates ADR-038 C.8 coverage/fact-set reporting, or mixes "
+        "pack predates coverage/fact-set reporting, or mixes "
         "producers inconsistently."
     ]
 

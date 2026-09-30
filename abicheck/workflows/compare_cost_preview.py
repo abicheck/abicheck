@@ -16,8 +16,8 @@
 """``compare --dry-run``'s "Cost preview" section -- the *compute* half
 (one-comparison-product.md #3, plan item #35, Phase 2f).
 
-``scan --dry-run`` already projects L0-L5 evidence-collection cost via
-:func:`abicheck.dry_run_estimate.estimate_scan` (see ``cli_scan.py``'s own
+The retired ``scan --dry-run`` projected L0-L5 evidence-collection cost via
+:func:`abicheck.dry_run_estimate.estimate_scan` (the deleted ``cli_scan.py``'s
 ``--dry-run`` branch); ``compare --dry-run`` had no equivalent preview. This
 module reuses :func:`~abicheck.dry_run_estimate.estimate_scan` directly -- no
 new cost model -- and adds only the compare-specific glue: resolving
@@ -66,7 +66,7 @@ def _resolve_compare_estimate_level(
     resolved ``(SourceMethod, EvidenceDepth)`` pair rather than a
     collect-mode string -- the shape
     :func:`~abicheck.dry_run_estimate.estimate_scan`'s ``resolved_level`` takes,
-    mirroring how ``cli_scan.py`` pre-resolves its own ``(resolved,
+    mirroring how the retired ``cli_scan.py`` pre-resolved its own ``(resolved,
     eff_depth_enum)`` before calling it rather than letting the callee
     re-derive a level from ``estimate_scan``'s own mode-preset default, which
     has no notion of compare's --sources/--build-info inference rule (or of
@@ -152,7 +152,7 @@ def estimate_compare_dry_run_cost(
     """Combined old+new per-layer cost preview for ``compare --dry-run``.
 
     Returns ``(estimates, None)`` on success or ``(None, error)`` when the
-    probe itself raised -- mirroring ``cli_scan.py``'s own best-effort
+    probe itself raised -- mirroring the retired ``cli_scan.py``'s best-effort
     ``estimate_scan`` call, which the dry run must never let a probe failure
     turn into a hard crash."""
     from ..dry_run_estimate import estimate_scan

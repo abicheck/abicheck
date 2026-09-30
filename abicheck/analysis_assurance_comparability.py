@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 #: that; the dataclass is not.
 NOT_COMPARABLE_NOTE = (
     "old and new snapshots were not provably comparable "
-    "(ADR-050 ProfileMismatchError/ScopeMismatchError waived by "
+    "(profile/scope mismatch waived by "
     "--diagnostic-comparison); every other assurance axis is "
     "unreliable for this run"
 )
