@@ -131,6 +131,11 @@ from step 1. Non-negotiable properties of the result (each is explained in
 - **Pin** `abicheck/abicheck@v0.6.0` (an exact tag, never `@main`); pin every
   action by commit SHA with the tag in a comment when the job holds an
   elevated permission such as `security-events: write` or `contents: write`.
+  A pin must be a **commit** SHA: resolve it with
+  `git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>*'` and,
+  when a `refs/tags/<tag>^{}` line is listed (an annotated tag), take that
+  line's SHA — the plain `refs/tags/<tag>` line is then the tag object, which
+  `uses:` cannot run. Never type a SHA from memory.
 - **Least privilege**, declared per job: `contents: read` always;
   `pull-requests: write` only for the PR comment; `contents: write` only in
   the release job that uploads the snapshot.

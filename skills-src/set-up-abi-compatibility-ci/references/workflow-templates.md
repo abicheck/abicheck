@@ -57,7 +57,9 @@ jobs:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       # contents: write is an elevated permission -> pin every action by SHA
-      # (resolve with: git ls-remote https://github.com/<owner>/<action> refs/tags/<tag>)
+      # (resolve with: git ls-remote https://github.com/<owner>/<action> 'refs/tags/<tag>*'
+      #  and prefer the `<tag>^{}` line when present: that is the commit, the
+      #  plain line of an annotated tag is the tag object and will not resolve)
       - uses: actions/checkout@<sha>  # v6
         with:
           ref: ${{ env.TAG }}

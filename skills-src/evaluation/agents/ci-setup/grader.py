@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shlex
 import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -74,8 +75,14 @@ class Step:
         return value if isinstance(value, dict) else {}
 
     @property
+    def is_cli(self) -> bool:
+        """A synthetic step standing for a direct `abicheck` CLI call found in
+        a `run:` block (see `cli_steps`), rather than the composite Action."""
+        return bool(self.raw.get("_cli"))
+
+    @property
     def is_abicheck(self) -> bool:
-        return bool(ABICHECK_USES.match(self.uses.strip()))
+        return self.is_cli or bool(ABICHECK_USES.match(self.uses.strip()))
 
     @property
     def mode(self) -> str:
@@ -158,6 +165,87 @@ class Workflow:
                     yield step
 
 
+_CLI_CALL = re.compile(r"(?:^|[\s;&|(])abicheck\s+(compare|dump)\b")
+_SIDE = re.compile(r"^(old|new)=")
+
+
+def _parse_cli(mode: str, argv: list[str]) -> dict[str, Any]:
+    """Map one `abicheck compare|dump` argv onto the Action's input names,
+    so every check judges a CLI call and an Action step by the same rule."""
+    inputs: dict[str, Any] = {"mode": mode}
+    positional: list[str] = []
+    headers: dict[str, list[str]] = {"header": [], "old-header": [], "new-header": []}
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("&&", "||", ";", "|") or arg.startswith(("#", ">")):
+            break
+        value = None
+        if "=" in arg and arg.startswith("--"):
+            arg, value = arg.split("=", 1)
+        if arg in ("-H", "--header", "-o", "--output", "--config", "-I", "--include", "--version",
+                   "--policy", "--suppress", "--severity-preset", "--depth", "--contract",
+                   "--used-by", "--sources", "--build-info", "--debug-info"):
+            if value is None:
+                i += 1
+                value = argv[i] if i < len(argv) else ""
+            if arg in ("-H", "--header"):
+                side = _SIDE.match(value)
+                key = f"{side.group(1)}-header" if side else "header"
+                headers[key].append(_SIDE.sub("", value))
+            elif arg in ("-o", "--output"):
+                inputs["output-file"] = value.split("=", 1)[-1] if re.match(r"^[a-z]+=", value) else value
+        elif not arg.startswith("-"):
+            positional.append(arg)
+        i += 1
+    for key, vals in headers.items():
+        if vals:
+            inputs[key] = " ".join(vals)
+    if mode == "compare":
+        if len(positional) >= 2:
+            inputs["old-library"], inputs["new-library"] = positional[0], positional[1]
+        elif positional:
+            inputs["new-library"] = positional[0]
+    elif positional:
+        inputs["new-library"] = positional[0]
+    return inputs
+
+
+def cli_steps(raw: dict[str, Any], job: Job) -> list[Step]:
+    """Synthetic steps for every `abicheck compare|dump` call in a `run:`."""
+    run = raw.get("run")
+    if not isinstance(run, str):
+        return []
+    text = run.replace("\\\n", " ")
+    out = []
+    for match in _CLI_CALL.finditer(text):
+        line_end = text.find("\n", match.end())
+        rest = text[match.end(): line_end if line_end != -1 else None]
+        try:
+            argv = shlex.split(rest, comments=True)
+        except ValueError:
+            argv = rest.split()
+        inputs = _parse_cli(match.group(1), argv)
+        out.append(Step({"_cli": True, "uses": "", "with": inputs, "run": run}, job))
+    return out
+
+
+_PIP_PIN = re.compile(r"(pip3?|pipx|uv pip|uv tool)\s+install[^\n]*?\babicheck(?P<spec>[=<>~!]=?[\w.]+)?")
+
+
+def cli_pin(text: str) -> str | None:
+    """`==X.Y.Z` when the workflow installs an exact abicheck, `""` when it
+    installs an unpinned one, `None` when it installs none this way."""
+    found = None
+    for m in _PIP_PIN.finditer(text):
+        spec = m.group("spec") or ""
+        if spec.startswith("==") and re.match(r"^==\d+\.\d+\.\d+$", spec):
+            found = found if found == "" else spec
+        else:
+            found = ""
+    return found
+
+
 def load_workflows(workspace: Path) -> list[Workflow]:
     root = workspace / ".github" / "workflows"
     out: list[Workflow] = []
@@ -178,7 +266,12 @@ def load_workflows(workspace: Path) -> list[Workflow]:
             if not isinstance(job, dict):
                 continue
             j = Job(str(name), job, wf)
-            j.steps = [Step(s, j) for s in job.get("steps") or [] if isinstance(s, dict)]
+            j.steps = []
+            for raw in job.get("steps") or []:
+                if not isinstance(raw, dict):
+                    continue
+                j.steps.append(Step(raw, j))
+                j.steps.extend(cli_steps(raw, j))
             wf.jobs.append(j)
         out.append(wf)
     return out
@@ -256,10 +349,24 @@ def _pinned(ctx: Context) -> tuple[bool, str]:
         return False, "no abicheck step"
     loose = []
     for s in steps:
+        if s.is_cli:
+            pin = cli_pin(s.job.workflow.text)
+            if not pin:
+                loose.append("unpinned abicheck install" if pin == "" else "abicheck never installed")
+            continue
         ref = ABICHECK_USES.match(s.uses.strip()).group("ref")  # type: ignore[union-attr]
         if not (_SHA.match(ref) or _EXACT_TAG.match(ref)):
             loose.append(ref)
     return (not loose, f"unpinned refs: {loose}" if loose else "all pinned")
+
+
+@check("pins_are_commits")
+def _pins_are_commits(ctx: Context) -> tuple[bool, str]:
+    tag_objects = ctx.params.get("tag_object_shas") or {}
+    bad = sorted(
+        {m for w in ctx.workflows for m in re.findall(r"uses:\s*\S+@([0-9a-f]{40})", w.text) if m in tag_objects}
+    )
+    return (not bad, f"pinned to annotated-tag objects, not commits: {[tag_objects[b] for b in bad]}" if bad else "ok")
 
 
 @check("no_pull_request_target")
@@ -354,6 +461,11 @@ def _debug(ctx: Context) -> tuple[bool, str]:
 # --------------------------------------------------------------------------
 
 
+def _repo_config(ctx: Context) -> str:
+    path = ctx.workspace / ".abicheck.yml"
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
 @check("lang")
 def _lang(ctx: Context) -> tuple[bool, str]:
     expect = ctx.params.get("expect", "c++")
@@ -362,6 +474,13 @@ def _lang(ctx: Context) -> tuple[bool, str]:
         return False, "no compare/dump step"
     wrong = []
     for s in steps:
+        if s.is_cli:
+            # The CLI has no --lang; C is selected by `compile: lang: c` in a
+            # config the workflow writes or ships.
+            got = "c" if re.search(r"lang:\s*['\"]?c['\"]?\s*($|\\n|\n)", s.job.workflow.text + _repo_config(ctx)) else "c++"
+            if got != expect:
+                wrong.append(got)
+            continue
         for value in s.expand(s.inputs.get("lang", "c++")):
             got = value.strip() or "c++"
             if got != expect:
@@ -400,6 +519,10 @@ def _libs(ctx: Context) -> tuple[bool, str]:
         for key in LIBRARY_INPUTS:
             if key in s.inputs:
                 targets.extend(s.expand(s.inputs[key]))
+        if s.is_cli:
+            # A shell loop (`for lib in alpha beta`) names libraries outside
+            # the argv itself.
+            targets.append(str(s.raw.get("run", "")))
     blob = " ".join(targets)
     missing = [lib for lib in wanted if not re.search(rf"lib{re.escape(lib)}\b|\b{re.escape(lib)}\b", blob)]
     return (not missing, f"libraries not compared: {missing}" if missing else f"compares {wanted}")
@@ -444,11 +567,32 @@ def _toolchain(ctx: Context) -> tuple[bool, str]:
     text = "\n".join(w.text for w in ctx.workflows)
     if re.search(r"apt(-get)?\s+install[^\n]*\bcastxml\b", text):
         return False, "installs distribution castxml, commonly below abicheck's supported range"
-    return True, "dependencies provisioned by the Action"
+    cli_with_headers = [s for s in ctx.analysis_steps() if s.is_cli and any(k in s.inputs for k in HEADER_INPUTS)]
+    if cli_with_headers and not re.search(
+        r"(conda|mamba|micromamba|pixi)[^\n]*castxml|pip3?\s+install[^\n]*\bcastxml|install-castxml|ast-frontend[ =]clang|ABICHECK_AST_FRONTEND|ABICHECK_ALLOW_AST_FALLBACK",
+        text,
+    ):
+        return False, "CLI header analysis with no CastXML provisioned (the default frontend fails closed)"
+    return True, "header-AST toolchain provisioned"
+
+
+def _tag_rebuild(ctx: Context) -> bool:
+    """The PR compare job itself checks out a release tag (resolved from git)
+    and builds it as the old side: a valid release baseline with no
+    published snapshot, traded for a second build per run."""
+    for s in ctx.pr_compare_steps():
+        text = s.job.workflow.text
+        if re.search(r"git (tag --list|tag -l|describe --tags)|latest.*tag|--sort=-v:refname", text) and re.search(
+            r"git worktree add|git checkout|actions/checkout", text
+        ) and "old-library" in s.inputs and not str(s.inputs["old-library"]).endswith(".json"):
+            return True
+    return False
 
 
 @check("baseline_release")
 def _baseline_release(ctx: Context) -> tuple[bool, str]:
+    if _tag_rebuild(ctx):
+        return True, "PR job rebuilds the latest release tag and compares against it"
     jobs = [s.job for s in _dump_publishers(ctx)] + _run_dump_publishers(ctx)
     if not jobs:
         return False, "no release-triggered dump writing a *.abicheck.json asset"
@@ -471,6 +615,8 @@ def _baseline_release(ctx: Context) -> tuple[bool, str]:
 
 @check("release_bootstrap")
 def _bootstrap(ctx: Context) -> tuple[bool, str]:
+    if _tag_rebuild(ctx):
+        return True, "tag rebuild needs no published snapshot"
     jobs = [s.job for s in _dump_publishers(ctx)] + _run_dump_publishers(ctx)
     if any("workflow_dispatch" in j.workflow.triggers for j in jobs):
         return True, "workflow_dispatch backfill"
@@ -572,7 +718,8 @@ def load_scenarios(path: Path = SCENARIOS) -> dict[str, Any]:
 def grade(workspace: Path, scenario_id: str, final: str = "", corpus: dict[str, Any] | None = None) -> dict[str, Any]:
     corpus = corpus or load_scenarios()
     scenario = next(s for s in corpus["scenarios"] if s["id"] == scenario_id)
-    plan: list[tuple[str, dict[str, Any]]] = [(c, {}) for c in corpus["common_checks"]]
+    common_params = {"tag_object_shas": corpus.get("tag_object_shas") or {}}
+    plan: list[tuple[str, dict[str, Any]]] = [(c, common_params) for c in corpus["common_checks"]]
     plan += [(name, params or {}) for name, params in (scenario.get("checks") or {}).items()]
     workflows = load_workflows(workspace)
     results: list[Result] = []

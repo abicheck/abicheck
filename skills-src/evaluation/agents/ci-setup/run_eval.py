@@ -89,6 +89,28 @@ def child_environment() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in PARENT_SESSION_VARIABLES}
 
 
+#: Where the agent sees its repository inside the isolated mount namespace.
+ISOLATED_WORKSPACE = "/opt/ci-setup-eval-ws"
+
+#: Run as a mount-namespace-private shell script (root, `unshare --mount`).
+#: The agent must see only its own repository: an earlier run found this
+#: checkout via `find / -name action.yml` and read abicheck's sources, which
+#: no real user's agent can do. So the checkout, every other run's output,
+#: and the parent session's transcripts are covered with empty tmpfs mounts,
+#: and abicheck comes from a non-editable venv (`--abicheck-venv`) rather
+#: than the checkout's editable install.
+ISOLATE_SCRIPT = r"""
+set -e
+mkdir -p "$EVAL_TARGET"
+mount --bind "$EVAL_WORK" "$EVAL_TARGET"
+for hidden in $EVAL_HIDE; do
+  [ -d "$hidden" ] && mount -t tmpfs tmpfs "$hidden"
+done
+cd "$EVAL_TARGET"
+exec "$@"
+"""
+
+
 def _git(work: Path, *args: str) -> None:
     subprocess.run(
         ["git", *args], cwd=work, check=True, capture_output=True,
@@ -148,7 +170,7 @@ def _skill_activated(events: list[dict[str, Any]]) -> bool:
 
 
 def run_one(scenario: dict[str, Any], arm: str, rep: int, out: Path, model: str | None,
-            max_turns: int, timeout: int) -> dict[str, Any]:
+            max_turns: int, timeout: int, venv: Path | None = None) -> dict[str, Any]:
     run_dir = out / scenario["id"] / arm / f"rep{rep}"
     if run_dir.exists():
         shutil.rmtree(run_dir)
@@ -161,9 +183,20 @@ def run_one(scenario: dict[str, Any], arm: str, rep: int, out: Path, model: str 
            "--max-turns", str(max_turns), "--allowedTools", *ALLOWED_TOOLS]
     if model:
         cmd += ["--model", model]
+    env = child_environment()
+    cwd: Path = work
+    if venv is not None:
+        target = f"{ISOLATED_WORKSPACE}-{scenario['id']}-{arm}-{rep}"
+        hide = [str(ROOT), str(out), str(Path.home() / ".claude" / "projects"), "/tmp/claude-0"]
+        env.update(
+            EVAL_WORK=str(work), EVAL_TARGET=target, EVAL_HIDE=" ".join(hide),
+            PATH=f"{venv / 'bin'}{os.pathsep}{env['PATH']}",
+        )
+        cmd = ["unshare", "--mount", "--propagation", "private", "sh", "-c", ISOLATE_SCRIPT, "isolate", *cmd]
+        cwd = Path("/")
     started = time.monotonic()
     try:
-        proc = subprocess.run(cmd, cwd=work, env=child_environment(), capture_output=True,
+        proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True,
                               text=True, timeout=timeout)
         stdout, stderr = proc.stdout, proc.stderr
     except subprocess.TimeoutExpired as exc:
@@ -239,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=1500)
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--abicheck-venv", type=Path,
+                        help="non-editable abicheck venv; enables mount-namespace isolation (Linux, root)")
     parser.add_argument("--json", type=Path, help="write graded rows here")
     args = parser.parse_args(argv)
 
@@ -257,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
             for rep in range(args.repetitions)
         ]
         with cf.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futures = [pool.submit(run_one, s, arm, rep, out, args.model, args.max_turns, args.timeout)
+            futures = [pool.submit(run_one, s, arm, rep, out, args.model, args.max_turns, args.timeout, args.abicheck_venv)
                        for s, arm, rep in todo]
             for fut in cf.as_completed(futures):
                 m = fut.result()

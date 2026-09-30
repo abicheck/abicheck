@@ -203,3 +203,66 @@ def test_hand_rolled_release_dump_is_recognised_but_apt_castxml_is_not(tmp_path:
     assert "baseline_release" not in failed
     assert "release_bootstrap" not in failed
     assert "toolchain_via_action" in failed
+
+
+CLI_TAG_REBUILD = """name: abi
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  abi:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - run: pip install abicheck==0.6.0 castxml
+      - run: |
+          tag=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          git worktree add ../base "$tag"
+          cmake -S ../base -B ../base/build -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build ../base/build
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build
+      - run: |
+          printf 'compile:\\n  lang: c\\n' > cfg.yml
+          abicheck compare ../base/build/libgeom.so build/libgeom.so \\
+            --header old=../base/include --header new=include --config cfg.yml
+"""
+
+
+def _cli_workspace(tmp_path: Path, text: str) -> Path:
+    work = tmp_path / "ws"
+    shutil.copytree(EVAL / "fixtures" / "cmake-c-releases", work)
+    (work / ".github" / "workflows" / "abi.yml").write_text(text, encoding="utf-8")
+    return work
+
+
+def test_a_correct_cli_based_setup_passes_like_an_action_based_one(tmp_path: Path):
+    """The grader judges the integration, not which front end it uses: a
+    direct CLI call rebuilding the last release tag is a valid setup."""
+    result = grader.grade(_cli_workspace(tmp_path, CLI_TAG_REBUILD), "cmake-c-releases", "", CORPUS)
+    assert _failed(result) == set(), result["checks"]
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected"),
+    [
+        ("pip install abicheck==0.6.0 castxml", "pipx install abicheck", "pinned_abicheck"),
+        ("pip install abicheck==0.6.0 castxml", "pip install abicheck==0.6.0", "toolchain_via_action"),
+        ("lang: c", "std: c11", "lang"),
+        ("--header new=include", "--header new=src", "headers_public"),
+        ("../base/build/libgeom.so build/libgeom.so", "build/libgeom.so build/libgeom.so", "not_self_compare"),
+    ],
+)
+def test_cli_setup_failure_modes_are_caught(tmp_path: Path, old: str, new: str, expected: str):
+    assert old in CLI_TAG_REBUILD
+    result = grader.grade(_cli_workspace(tmp_path, CLI_TAG_REBUILD.replace(old, new)), "cmake-c-releases", "", CORPUS)
+    assert expected in _failed(result), result["checks"]
+
+
+def test_a_pin_to_an_annotated_tag_object_is_caught(tmp_path: Path):
+    work = _workspace(tmp_path, "cmake-c-releases")
+    _edit(work, "abi-baseline.yml", _sub("abicheck/abicheck@v0.6.0", "abicheck/abicheck@2ff668d3907e9368b51ea6240768c1bb3f36f8db"))
+    assert "pins_are_commits" in _failed(grader.grade(work, "cmake-c-releases", "", CORPUS))
+    _edit(work, "abi-baseline.yml", _sub("2ff668d3907e9368b51ea6240768c1bb3f36f8db", "a1f78b640ba29960251f7043c17ae98a647ee135"))
+    assert "pins_are_commits" not in _failed(grader.grade(work, "cmake-c-releases", "", CORPUS))

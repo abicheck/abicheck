@@ -28,6 +28,7 @@ common_checks:
   - not_self_compare
   - debug_info
   - toolchain_via_action
+  - pins_are_commits
 
 critical:
   - yaml_valid
@@ -47,6 +48,14 @@ critical:
   - baseline_meaningful
   - shared_build
   - toolchain_via_action
+  - pins_are_commits
+
+# Annotated-tag *object* SHAs (the `refs/tags/<tag>` line of `git ls-remote`
+# when a `^{}` line also exists). A `uses:` pinned to one does not resolve;
+# the commit is the `^{}` line. Recorded from `git ls-remote` on 2026-09-30.
+tag_object_shas:
+  2ff668d3907e9368b51ea6240768c1bb3f36f8db: abicheck/abicheck v0.6.0 (commit a1f78b640ba29960251f7043c17ae98a647ee135)
+  9f698171ed81b15d1823a05fc7211befd50c8ae0: actions/checkout v6.0.3 (commit df4cb1c069e1874edd31b4311f1884172cec0e10)
 
 scenarios:
   - id: cmake-c-releases
