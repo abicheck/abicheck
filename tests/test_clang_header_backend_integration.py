@@ -263,7 +263,7 @@ def test_clang_and_castxml_snapshots_agree_on_public_surface(
     def public_funcs(snap: object) -> set[str]:
         return {
             f.mangled
-            for f in snap.functions  # type: ignore[attr-defined]
+            for f in snap.declarations.functions  # type: ignore[attr-defined]
             if f.visibility == Visibility.PUBLIC
         }
 

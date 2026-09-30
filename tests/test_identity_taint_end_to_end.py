@@ -975,7 +975,7 @@ class TestFindingIdentityIsCheckoutPathInvariant:
 
         The direct-clang backend used elsewhere in this module doesn't
         emit a closure as its own standalone ``RecordType`` (confirmed
-        empirically -- ``snap.types`` carries no closure entry at all, only
+        empirically -- ``snap.declarations.types`` carries no closure entry at all, only
         ``Function.params[*].type`` embeds the ``(lambda:...)`` spelling),
         so a genuine end-to-end ``compare()`` can't be coerced into
         producing a real TYPE-bearing finding for a closure without

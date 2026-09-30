@@ -1821,7 +1821,7 @@ def pytestmark_e2e(func: object) -> object:
 
 
 def _widget_fields(snap: object) -> list[str]:
-    widget = next(t for t in snap.types if t.name == "Widget")  # type: ignore[attr-defined]
+    widget = next(t for t in snap.declarations.types if t.name == "Widget")  # type: ignore[attr-defined]
     return [f.name for f in widget.fields]
 
 

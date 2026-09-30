@@ -140,7 +140,7 @@ class TestMsvcPdbEndToEnd:
         snap = _snapshot(dll, pdb, "1.0")
         assert snap.platform == "pe"
         assert snap.pe is not None
-        exported = {f.name for f in snap.functions}
+        exported = {f.name for f in snap.declarations.functions}
         assert "widget_area" in exported, f"exports={sorted(exported)}"
 
     def test_pdb_snapshot_carries_layout(self, tmp_path: Path) -> None:
@@ -200,8 +200,8 @@ class TestMsvcPdbEndToEnd:
         dll2, pdb2 = _build_dll(tmp_path / "v2", "foo", v2=True)
         old = _snapshot(dll1, pdb1, "1.0")
         new = _snapshot(dll2, pdb2, "2.0")
-        old_exports = {f.name for f in old.functions}
-        new_exports = {f.name for f in new.functions}
+        old_exports = {f.name for f in old.declarations.functions}
+        new_exports = {f.name for f in new.declarations.functions}
         assert "legacy_fn" in old_exports, f"v1 exports={sorted(old_exports)}"
         assert "legacy_fn" not in new_exports, f"v2 exports={sorted(new_exports)}"
         result = compare(old, new)

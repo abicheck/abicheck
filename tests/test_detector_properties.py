@@ -285,7 +285,7 @@ def test_same_leaf_name_matching_is_order_independent(
     pair: tuple[AbiSnapshot, AbiSnapshot],
 ) -> None:
     """Two distinct namespace-qualified types sharing a bare leaf name must
-    diff identically no matter what order they appear in ``snap.types`` --
+    diff identically no matter what order they appear in ``snap.declarations.types`` --
     correct old/new matching is keyed by identity, never by list position.
     A detector keying its matching map by bare name alone (the PR #608 bug
     class) makes the result insertion-order-dependent, since a naive

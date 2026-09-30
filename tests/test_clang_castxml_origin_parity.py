@@ -103,7 +103,7 @@ def test_clang_and_castxml_agree_on_public_vs_private_header_origin(
     def origins(snap: object) -> dict[str, str]:
         return {
             f.name: f.origin.value  # type: ignore[attr-defined]
-            for f in snap.functions  # type: ignore[attr-defined]
+            for f in snap.declarations.functions  # type: ignore[attr-defined]
             if f.name in ("api_call", "detail_helper")
         }
 

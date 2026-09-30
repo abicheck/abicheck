@@ -465,7 +465,7 @@ class TestTypedApiParity:
 
     def test_a_typed_request_honours_its_defines(self, tmp_path: Path) -> None:
         snap = self._dump(tmp_path, defines=("FEATURE_API",))
-        names = {f.name for f in snap.functions}
+        names = {f.name for f in snap.declarations.functions}
         assert "guarded_expert" in names
         assert "-DFEATURE_API" in snap.ast_compile_args
 
@@ -475,7 +475,7 @@ class TestTypedApiParity:
         """The negative half: absence must still mean absence, so the test
         above cannot pass for an unrelated reason."""
         snap = self._dump(tmp_path)
-        assert "guarded_expert" not in {f.name for f in snap.functions}
+        assert "guarded_expert" not in {f.name for f in snap.declarations.functions}
 
     def test_a_value_carrying_define_selects_the_right_declaration(
         self, tmp_path: Path

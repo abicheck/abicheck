@@ -83,8 +83,8 @@ class TestHeaderOnlyDumpBasics:
         assert snap.pe is None
         assert snap.macho is None
         assert snap.from_headers is True
-        assert [f.name for f in snap.functions] == ["add"]
-        assert [t.name for t in snap.types] == ["Point"]
+        assert [f.name for f in snap.declarations.functions] == ["add"]
+        assert [t.name for t in snap.declarations.types] == ["Point"]
 
     def test_header_only_snapshot_has_real_declarations_on_clang_backend(
         self, tmp_path: Path
@@ -390,8 +390,8 @@ class TestHeaderOnlyDependencyScoping:
             "#include <vector>\nint add(int a, int b);\n", encoding="utf-8"
         )
         snap = _dump_header_only(header, "1.0")
-        assert snap.functions
-        assert all(f.source_header is not None for f in snap.functions)
+        assert snap.declarations.functions
+        assert all(f.source_header is not None for f in snap.declarations.functions)
 
 
 @pytest.fixture()
@@ -547,7 +547,7 @@ class TestHeaderOnlyReportContract:
         # in-surface finding. (Before header-only dumps ran
         # `apply_provenance` every origin was UNKNOWN and this addition was
         # pushed to the out-of-surface ledger instead.)
-        assert {e.origin.value for e in old.enums} == {"public_header"}
+        assert {e.origin.value for e in old.declarations.enums} == {"public_header"}
         assert "enum_member_added" in _kinds(result)
         assert result.out_of_surface_count == 0
 
