@@ -39,8 +39,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 from test_action_check_target import (
     _BASE_IDENTITY,
     ACTION_DIR,
@@ -174,14 +174,14 @@ class TestExplicitIdInputIsForwardedToFinalizeEnv:
 
     def test_action_yml_declares_the_input(self) -> None:
         action_yml = ACTION_DIR / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         assert "explicit-id" in data["inputs"]
         assert data["inputs"]["explicit-id"]["required"] is False
         assert data["inputs"]["explicit-id"]["default"] == ""
 
     def test_finalize_step_maps_it_to_input_explicit_id(self) -> None:
         action_yml = ACTION_DIR / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         steps = data["runs"]["steps"]
         finalize_step = next(
             s for s in steps if s.get("name") == "Write report envelope and finalize"

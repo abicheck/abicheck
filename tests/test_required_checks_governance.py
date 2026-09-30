@@ -28,15 +28,15 @@ import json
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 def _load_workflow(name: str) -> dict[str, Any]:
-    raw = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+    raw = _yaml_fast.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
     assert isinstance(raw, dict), f"{name}: expected a mapping at the top level"
     return raw
 

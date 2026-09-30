@@ -46,8 +46,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, require_bash
 
 from abicheck.model.analysis_context import (
@@ -433,7 +433,7 @@ def _run_record_context_step(tmp_path: Path, reports_dir: str) -> tuple[str, int
 
 @pytest.fixture(scope="module")
 def verify_action() -> dict[str, Any]:
-    return yaml.safe_load(
+    return _yaml_fast.safe_load(
         (REPO_ROOT / "actions" / "verify-source-run" / "action.yml").read_text(
             encoding="utf-8"
         )
@@ -550,7 +550,7 @@ class TestTheAggregateActionRecordsIt:
     @pytest.fixture(scope="class")
     @classmethod
     def aggregate_action(cls) -> dict[str, Any]:
-        return yaml.safe_load(
+        return _yaml_fast.safe_load(
             (REPO_ROOT / "actions" / "aggregate" / "action.yml").read_text(
                 encoding="utf-8"
             )

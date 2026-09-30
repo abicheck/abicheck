@@ -43,6 +43,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
 import yaml
 
@@ -65,10 +66,10 @@ def _action_documents() -> dict[str, dict[str, Any]]:
     documents: dict[str, dict[str, Any]] = {}
     root = REPO_ROOT / "action.yml"
     if root.is_file():
-        documents[""] = yaml.safe_load(root.read_text(encoding="utf-8"))
+        documents[""] = _yaml_fast.safe_load(root.read_text(encoding="utf-8"))
     for action_yml in sorted((REPO_ROOT / "actions").glob("*/action.yml")):
         key = f"actions/{action_yml.parent.name}"
-        documents[key] = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        documents[key] = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
     return documents
 
 
@@ -123,7 +124,7 @@ def _documented_steps() -> list[tuple[Path, dict[str, Any], dict[str, Any]]]:
         text = page.read_text(encoding="utf-8")
         for block in _FENCE.findall(text):
             try:
-                parsed = yaml.safe_load(block)
+                parsed = _yaml_fast.safe_load(block)
             except yaml.YAMLError:
                 # A deliberately partial snippet. Not this test's business:
                 # it checks the contract of steps that DO parse, and an
@@ -185,7 +186,7 @@ class TestEveryReferencedOutputExists:
         text = page.read_text(encoding="utf-8")
         for block in _FENCE.findall(text):
             try:
-                parsed = yaml.safe_load(block)
+                parsed = _yaml_fast.safe_load(block)
             except yaml.YAMLError:
                 continue
             # Only steps in THIS block can be referenced with confidence;
@@ -225,7 +226,7 @@ class TestTheScanCanActuallyFire:
 """
 
     def test_an_unknown_input_is_visible_to_the_step_walker(self) -> None:
-        parsed = yaml.safe_load(self.BLOCK)
+        parsed = _yaml_fast.safe_load(self.BLOCK)
         steps = _steps(parsed)
         assert len(steps) == 1
         declared = set(ACTIONS["actions/report"].get("inputs", {}))

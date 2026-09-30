@@ -31,7 +31,6 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-import yaml
 
 from tests.schema_validation import validate_instance
 
@@ -40,6 +39,7 @@ REPO = Path(__file__).resolve().parent.parent
 # Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
 if str(REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO / "scripts"))
+import _yaml_fast  # noqa: E402
 import example_catalog  # noqa: E402
 
 EVAL = REPO / "skills-src" / "evaluation" / "agents" / "skills"
@@ -53,7 +53,7 @@ PUBLISHED_SKILLS = REPO / ".agents" / "skills"
 def _load(path: Path) -> dict:
     if path.suffix == ".json":
         return json.loads(path.read_text(encoding="utf-8"))
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return _yaml_fast.safe_load(path.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")

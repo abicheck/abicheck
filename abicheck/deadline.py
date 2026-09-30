@@ -251,36 +251,33 @@ def run_bounded(
         # leaving the just-spawned group outside both this process's own
         # group and the cleanup set — permanently orphaned:
         #
-        # - pthread_sigmask blocks delivery on *this* thread, closing the
-        #   same-thread case: a signal landing while this very thread is
-        #   running Popen()/_register_pgroup() (e.g. the single-threaded CLI
-        #   path with no thread pool). This is necessary because
-        #   _active_pgroups_lock is an RLock — a same-thread signal handler
-        #   invocation would re-enter it instead of blocking, and see the
-        #   registry before _register_pgroup() ran.
+        # - A per-thread registration window, which _sigterm_cleanup_handler
+        #   honours by deferring itself, closes the same-thread case: a
+        #   signal landing while this very thread is running
+        #   Popen()/_register_pgroup() (e.g. the single-threaded CLI path
+        #   with no thread pool). Necessary because _active_pgroups_lock is
+        #   an RLock -- a same-thread handler invocation would re-enter it
+        #   instead of blocking, and see the registry before
+        #   _register_pgroup() ran. A deferred signal is replayed the moment
+        #   the window closes, when the new pgid is tracked.
+        #
+        #   This used to be pthread_sigmask(SIG_BLOCK, {SIGTERM}). A signal
+        #   mask is inherited across fork+exec, so every child started here
+        #   ran with SIGTERM *blocked*: _kill_process_tree's SIGTERM never
+        #   arrived, each timeout waited out the full grace period before
+        #   SIGKILL, and no compiler ever got a graceful shutdown. Python
+        #   only ever runs a signal handler on the main thread, between
+        #   bytecodes, so a window flag it reads is an exact, child-invisible
+        #   replacement.
         # - Holding _active_pgroups_lock across the same window closes the
         #   cross-thread case: run_bounded() is invoked from
         #   ThreadPoolExecutor workers on the default L4/L5 paths
         #   (source_replay, call_graph, type_graph), but CPython only ever
-        #   runs the installed SIGTERM handler on the *main* thread —
-        #   independent of which thread the signal was delivered to — so a
-        #   worker blocking SIGTERM on itself does not stop the (unblocked)
-        #   main thread from concurrently running the handler with a stale
-        #   registry. _sigterm_cleanup_handler already acquires this same
-        #   lock before reading the registry, so on the main thread it
-        #   genuinely blocks until the worker finishes registering.
-        #
-        # Deferred/blocked here, released the instant registration
-        # completes, by which point any handler invocation sees the tracked
-        # pgid. Restoring the exact previous mask (SIG_SETMASK) rather than
-        # unconditionally SIG_UNBLOCK-ing SIGTERM: pthread_sigmask(SIG_BLOCK,
-        # ...) returns the mask as it was *before* this change, so if the
-        # calling thread already had SIGTERM blocked for its own reasons
-        # (e.g. a nested run_bounded() call, or a caller with its own
-        # signal-deferral scope), SIG_UNBLOCK would incorrectly clear that
-        # pre-existing block instead of leaving it exactly as found
-        # (CodeRabbit review, PR #591, round 10).
-        prev_sigmask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+        #   runs the installed SIGTERM handler on the *main* thread, whose
+        #   own window is closed -- so the handler proceeds, acquires this
+        #   same lock before reading the registry, and genuinely blocks
+        #   until the worker finishes registering.
+        _enter_registration_window()
         _active_pgroups_lock.acquire()
     try:
         proc = subprocess.Popen(  # noqa: S603 — cmd is caller-built argv, never shell text
@@ -296,7 +293,7 @@ def run_bounded(
     finally:
         if use_pgroup:
             _active_pgroups_lock.release()
-            signal.pthread_sigmask(signal.SIG_SETMASK, prev_sigmask)
+            _exit_registration_window()
     try:
         try:
             out, err = proc.communicate(input=input, timeout=effective_timeout)
@@ -396,6 +393,39 @@ def _register_pgroup(proc: subprocess.Popen[Any]) -> int:
     return pgid
 
 
+# Per-thread depth of run_bounded()'s Popen()->_register_pgroup() window
+# (nested calls stack), and whether a SIGTERM arrived on the main thread while
+# its window was open. See run_bounded()'s comment for why this is not a
+# signal mask.
+_registration_window = threading.local()
+_deferred_sigterm = False
+
+
+def _registration_window_depth() -> int:
+    depth: int = getattr(_registration_window, "depth", 0)
+    return depth
+
+
+def _enter_registration_window() -> None:
+    _registration_window.depth = _registration_window_depth() + 1
+
+
+def _exit_registration_window() -> None:
+    global _deferred_sigterm
+    _registration_window.depth = _registration_window_depth() - 1
+    # Only the main thread can have deferred the handler (CPython runs it
+    # nowhere else), and only the main thread may replay it: the handler
+    # calls signal.signal(), which raises off the main thread. A worker
+    # closing its own window leaves the flag for the main thread.
+    if (
+        _registration_window.depth == 0
+        and _deferred_sigterm
+        and threading.current_thread() is threading.main_thread()
+    ):
+        _deferred_sigterm = False
+        _sigterm_cleanup_handler(signal.SIGTERM, None)
+
+
 def _unregister_pgroup(pgid: int) -> None:
     with _active_pgroups_lock:
         _active_pgroups.discard(pgid)
@@ -419,6 +449,12 @@ def _sigterm_cleanup_handler(signum: int, frame: Any) -> None:  # noqa: ARG001 -
     still exits with normal signal-termination semantics (exit status,
     shell ``$?``, etc.) rather than swallowing the signal.
     """
+    global _deferred_sigterm
+    if _registration_window_depth() > 0:
+        # This (main) thread is between Popen() and _register_pgroup():
+        # the newest group is not tracked yet. Replayed on window exit.
+        _deferred_sigterm = True
+        return
     with _active_pgroups_lock:
         pgids = list(_active_pgroups)
     for pgid in pgids:

@@ -33,6 +33,7 @@ import re
 import tomllib
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 
 yaml = pytest.importorskip("yaml")
@@ -55,7 +56,7 @@ def _pyproject_ruff_requirement() -> str:
 
 
 def _pre_commit_ruff_rev() -> str:
-    config = yaml.safe_load(PRE_COMMIT.read_text(encoding="utf-8"))
+    config = _yaml_fast.safe_load(PRE_COMMIT.read_text(encoding="utf-8"))
     repos = [r for r in config["repos"] if r["repo"] == _RUFF_REPO]
     assert len(repos) == 1, f"expected exactly one ruff-pre-commit repo, got {repos}"
     return repos[0]["rev"]

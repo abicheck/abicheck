@@ -415,6 +415,14 @@ also_copy = [
     "pixi.lock",
     "scripts",
     "skills-src",
+    # The committed, published skill tree (`npx skills add` installs from
+    # it). tests/test_gen_agent_skills_published.py's
+    # test_the_committed_tree_matches_a_fresh_render runs
+    # `gen_agent_skills.py --check` against it; without this entry the
+    # `mutants/` copy has no `skills/`, `--check` reports the whole tree as
+    # missing, and the `-x` lane aborts before measuring a mutant -- on
+    # every PR whose diff touches `tests/` (an unscoped run).
+    "skills",
     # contrib/ is also scanned by scripts/retired_surfaces.py's contrib/ sweep
     # (test_docs_contract_retired_surfaces.py::test_the_real_tools_readmes_
     # are_in_the_target_set reads the real repository tree directly) --

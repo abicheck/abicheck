@@ -45,8 +45,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, have_bash, require_bash
 from _workflow_files import WORKFLOW_DIR, read_repo_text, workflow_paths
 
@@ -89,7 +89,7 @@ def _steps() -> list[tuple[str, str, int, dict]]:
     """Every step of every workflow, tagged with where it came from."""
     found = []
     for path in workflow_paths():
-        doc = yaml.safe_load(read_repo_text(path))
+        doc = _yaml_fast.safe_load(read_repo_text(path))
         for job_name, job in ((doc or {}).get("jobs") or {}).items():
             if not isinstance(job, dict):
                 continue
@@ -194,7 +194,9 @@ def _real_pr_body_script() -> str:
     Read out of the workflow rather than retyped, so this module cannot go
     on testing a string the workflow itself stopped using.
     """
-    doc = yaml.safe_load(read_repo_text(WORKFLOW_DIR / "bugfix-test-contract.yml"))
+    doc = _yaml_fast.safe_load(
+        read_repo_text(WORKFLOW_DIR / "bugfix-test-contract.yml")
+    )
     for job in doc["jobs"].values():
         for step in job.get("steps") or []:
             if isinstance(step, dict) and "PR_BODY" in (step.get("env") or {}):

@@ -34,8 +34,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 ACTION_YML = Path(__file__).resolve().parents[1] / "action.yml"
@@ -204,7 +204,7 @@ _NON_RUN_SH_INPUTS = {
 
 def _action_yml_inputs() -> set[str]:
     with ACTION_YML.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        data = _yaml_fast.safe_load(f)
     return set(data["inputs"].keys())
 
 
@@ -263,7 +263,7 @@ def _step_env_mapping(step_name: str) -> dict[str, str]:
     to that step alone. A var wired into a *different* step's env block is
     invisible here, the same as it would be to the real runner."""
     with ACTION_YML.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        data = _yaml_fast.safe_load(f)
     for step in data["runs"]["steps"]:
         if step.get("name") == step_name:
             env = step.get("env") or {}

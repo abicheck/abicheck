@@ -47,7 +47,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import yaml
+import _yaml_fast
 from _workflow_exec import bash_executable, require_bash
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,7 +55,7 @@ CHECK_TARGET_ACTION = _REPO_ROOT / "actions" / "check-target" / "action.yml"
 
 
 def _overlay_step_run_source() -> str:
-    data = yaml.safe_load(CHECK_TARGET_ACTION.read_text(encoding="utf-8"))
+    data = _yaml_fast.safe_load(CHECK_TARGET_ACTION.read_text(encoding="utf-8"))
     step = next(s for s in data["runs"]["steps"] if s.get("id") == "assurance_overlay")
     run_body = step["run"]
     assert isinstance(run_body, str)

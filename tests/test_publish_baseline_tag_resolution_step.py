@@ -40,8 +40,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, require_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -66,7 +66,7 @@ _WINDOWS_PYTHON3_SKIP = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def workflow() -> dict[str, Any]:
-    return yaml.safe_load(PUBLISH_BASELINE.read_text(encoding="utf-8"))
+    return _yaml_fast.safe_load(PUBLISH_BASELINE.read_text(encoding="utf-8"))
 
 
 def _step(workflow: dict[str, Any], name: str) -> dict[str, Any]:

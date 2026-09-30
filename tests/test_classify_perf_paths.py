@@ -27,6 +27,7 @@ import re
 import sys
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 
 _PATH = Path(__file__).resolve().parent.parent / "scripts" / "classify_perf_paths.py"
@@ -485,9 +486,9 @@ class TestL2JobCheckoutHardening:
 
     @staticmethod
     def _jobs() -> dict:
-        yaml = pytest.importorskip("yaml")
+        pytest.importorskip("yaml")
         root = Path(__file__).resolve().parent.parent
-        doc = yaml.safe_load(
+        doc = _yaml_fast.safe_load(
             (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
         )
         return doc["jobs"]
@@ -666,9 +667,9 @@ class TestTheHeaderGraphGateRequiresAllMetrics:
 
     @staticmethod
     def _gating_job_steps() -> list[dict]:
-        yaml = pytest.importorskip("yaml")
+        pytest.importorskip("yaml")
         root = _PATH.resolve().parent.parent
-        doc = yaml.safe_load(
+        doc = _yaml_fast.safe_load(
             (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
         )
         return doc["jobs"]["header-graph-regression"]["steps"]

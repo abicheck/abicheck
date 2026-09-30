@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -453,8 +454,8 @@ def test_ci_shards_cover_the_whole_canonical_selection() -> None:
     """Every shard index 1..N is a matrix leg, each leg passes `--shard=K/N`
     with the same N, and the fan-in job checks it received N data files --
     a missing leg must not quietly shrink the measured selection."""
-    yaml = pytest.importorskip("yaml")
-    workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+    pytest.importorskip("yaml")
+    workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
     job = workflow["jobs"]["unit-tests"]
     shards = job["strategy"]["matrix"]["shard"]
     total = len(shards)
@@ -746,8 +747,8 @@ class TestUnitTestsPerPlatformTimeout:
 
     @staticmethod
     def _unit_tests_job() -> dict[str, Any]:
-        yaml = pytest.importorskip("yaml")
-        data = yaml.safe_load(
+        pytest.importorskip("yaml")
+        data = _yaml_fast.safe_load(
             (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         )
         return dict(data["jobs"]["unit-tests-other-os"])
@@ -876,8 +877,8 @@ class TestUnitTestJobLogVolume:
 
     @staticmethod
     def _invocations() -> list[str]:
-        yaml = pytest.importorskip("yaml")
-        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        pytest.importorskip("yaml")
+        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
         commands: list[str] = []
         for job in _PYTEST_JOBS:
             found = False
@@ -917,8 +918,8 @@ class TestUnitTestJobLogVolume:
         """Per *step*, not per job: the four platform legs are mutually
         exclusive `if:` conditions, so they may share a filename, but two
         invocations in one step would overwrite each other's results."""
-        yaml = pytest.importorskip("yaml")
-        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        pytest.importorskip("yaml")
+        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
         for step in workflow["jobs"]["unit-tests"]["steps"]:
             commands = [
                 line.strip()
@@ -936,8 +937,8 @@ class TestUnitTestJobLogVolume:
         # so it has no `matrix` context to interpolate and nothing to collide
         # with -- but it must still not reuse the matrix job's own artifact
         # name, which the sibling assertion below pins.
-        yaml = pytest.importorskip("yaml")
-        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        pytest.importorskip("yaml")
+        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
         for step in workflow["jobs"]["unit-tests"]["steps"]:
             for line in str(step.get("run", "")).splitlines():
                 if not line.strip().startswith("pytest "):
@@ -953,8 +954,8 @@ class TestUnitTestJobLogVolume:
                 )
 
     def test_the_slow_job_writes_its_own_distinct_result_files(self) -> None:
-        yaml = pytest.importorskip("yaml")
-        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        pytest.importorskip("yaml")
+        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
         paths = [
             self._junit_path(line.strip())
             for step in workflow["jobs"]["slow-tests"]["steps"]
@@ -992,8 +993,8 @@ class TestTheSlowLaneHasExactlyOneOwner:
 
     @staticmethod
     def _job_invocations(job: str) -> list[str]:
-        yaml = pytest.importorskip("yaml")
-        workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+        pytest.importorskip("yaml")
+        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
         return [
             line.strip()
             for step in workflow["jobs"][job]["steps"]
