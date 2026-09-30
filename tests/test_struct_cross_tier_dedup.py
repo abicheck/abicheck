@@ -394,7 +394,7 @@ class TestEndToEndOnlyOneFindingSurvivesForANamespacedStruct:
         ``Widget``) could never be bridged to the DWARF-tier
         ``STRUCT_SIZE_CHANGED`` for the same struct (qualified symbol
         ``a::Widget``), so both survived as two separate findings for one
-        real change. ``diff_types._append_type_size_and_alignment_changes``
+        real change. ``compare.record_layout.record_layout_changes``
         now stamps ``Change.qualified_name`` directly from the matched
         ``RecordType`` pair, which ``canonicalize_record_symbol`` prefers
         over the (necessarily ambiguous) table lookup."""
@@ -526,7 +526,7 @@ class TestEndToEndOnlyOneFindingSurvivesForANamespacedStruct:
 class TestTypeFieldEmittersStampStructuredIdentity:
     """Codex review on PR #873: TYPE_FIELD_REMOVED/_OFFSET_CHANGED/_TYPE_CHANGED
     must carry both ``qualified_name`` (mirroring
-    ``_append_type_size_and_alignment_changes``) and ``field_name`` (needed
+    ``compare.record_layout.record_layout_changes``) and ``field_name`` (needed
     by ``_dedup_cross_kind``'s field-identity check above)."""
 
     def _pair(self, old_fields: list[TypeField], new_fields: list[TypeField]) -> tuple:

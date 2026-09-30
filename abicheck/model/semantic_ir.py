@@ -131,6 +131,14 @@ class CanonicalEntity:
     cv_qualification: Fact[tuple[str, ...]] = field(
         default_factory=lambda: Fact.not_collected()
     )
+    #: A record's ``sizeof`` and alignment, in bits (ADR-063 6B, record-layout
+    #: cohort). ``NOT_COLLECTED`` for every non-record kind and for a record
+    #: whose producer established no layout (an opaque declaration, a clang
+    #: record DWARF could not fill); a present value is always an ``int``.
+    #: See ``model/semantic_ir_record_layout.py`` for how these are kept in
+    #: step with the ``RecordType`` they describe.
+    size_bits: Fact[int] = field(default_factory=lambda: Fact.not_collected())
+    alignment_bits: Fact[int] = field(default_factory=lambda: Fact.not_collected())
     producer: str = ""
 
     def __post_init__(self) -> None:
@@ -151,6 +159,13 @@ class CanonicalEntity:
                     "confirmed absence is spelled with this field's own "
                     'empty value ("" or ()), never None'
                 )
+        for name in ("size_bits", "alignment_bits"):
+            layout = getattr(self, name)
+            # `bool` is an `int` subclass; a JSON `true` must not pass as 1.
+            if layout.is_present and (
+                isinstance(layout.value, bool) or not isinstance(layout.value, int)
+            ):
+                raise ValueError(f"{name} must carry an int, got {layout.value!r}")
         cv = self.cv_qualification
         # `is_present`, not `status is PRESENT`: `PARTIAL` is usable evidence
         # everywhere else in this IR (`Fact.is_present`,

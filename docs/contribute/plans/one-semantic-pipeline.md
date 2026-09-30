@@ -11936,6 +11936,70 @@ check`/`ruff format --check`/`mypy abicheck/` clean;
 `check_architecture.py`/`check_ai_readiness.py`/`semantic_ir_cutover.py`/
 `check_fp_rate.py`/`check_tier_accuracy.py` all pass with zero regressions.
 
+**Landed (2026-09-30): Phase 6B's third checker cutover -- record layout
+(`TYPE_SIZE_CHANGED`/`TYPE_ALIGNMENT_CHANGED`), with the snapshot schema bump
+the IR needed to carry it (v53).** Approved as a public stored-format change
+before it landed.
+
+*What the IR gained.* `CanonicalEntity.size_bits`/`alignment_bits`
+(`Fact[int]`, `NOT_COLLECTED` for every non-record kind). The normalizer
+fills them for every record it sees. Every producer reaches the IR through
+`normalize_header_ast`, including the DWARF ELF fallback, PDB, BTF/CTF and
+the manifest path, so no producer was left out. On the wire, the layout pair
+is written only for a `TYPE` occurrence, inside a `semantic_ir` document now
+stamped `"version": 2`. The `ProjectSnapshot` `semantic_ir` section is also
+at v2, with a registered v1->v2 migration that refuses a v1 section claiming
+an IR version.
+
+*The correction to the "records: nothing to close" finding above.* That
+finding held that the IR and `RecordType` could never disagree on layout,
+because the normalizer reads the same field. Implementing the cohort showed
+otherwise. The direct-clang backend leaves `size_bits` unset, and
+`dumper_layout_backfill` fills it from DWARF *after* normalization
+(`dumper.py`). A cutover that trusted the IR as normalized would therefore
+have silently dropped every size change on a clang dump. The fill lives in
+`model/semantic_ir_record_layout.py` and runs at the two places a snapshot's
+IR and records meet: `AbiSnapshot.__post_init__`, and the storage decode,
+which assigns `semantic_ir` after construction. It fills only a
+`NOT_COLLECTED` fact, never overrides an established or `FAILED` one, and
+refuses when two records under one identity disagree. The same fill is the
+pre-v53 migration: a version-1 document decodes the layout pair as
+`NOT_COLLECTED` with `LEGACY_LAYOUT_DIAGNOSTIC`, and the load then fills it
+from the snapshot's own records.
+
+*Authority, not a fidelity gate.* `compare/record_layout.py` follows the T3
+rule. A side whose IR has record occurrences is read from that IR alone.
+Otherwise the side is read from the adapter's projection of its own records
+(`legacy_record_ir`). Nothing re-reads `RecordType` to check the IR. The one
+supplement is a record with no `entity_id`: no producer can give it an
+occurrence, so it is projected under a synthetic identity that cannot
+collide with a real one. When exactly one side establishes a layout value,
+the comparison is recorded as declined (T9 accounting) instead of passing
+silently.
+
+*The gate.* The `MIGRATED_COHORTS` entry `record_layout` forbids
+`types`/`size_bits`/`alignment_bits` reads in `compare/record_layout.py`.
+The entity-level read is `semantic_ir_record_layout.entity_layout`. Pairing
+stays with the caller's `TypeMap`.
+
+*Verification.* `tests/test_record_layout_cutover.py`:
+- A Hypothesis property over every mix of IR-backed/adapted side,
+  identified/unidentified record and present/absent layout, checked against
+  an oracle written from the documented legacy contract rather than by
+  calling the old helper.
+- An authority test: an IR that disagrees with its record is believed.
+- The DWARF-backfill fill, the no-override and conflict rules.
+- Codec round-trip, v1 load and fill, and refusal of non-integer values,
+  future versions and truncated v2 records.
+- The section migration, an end-to-end `compare()`, and the gate firing on
+  each forbidden read.
+
+Before the switch, the old and new paths ran side by side over the whole fast
+unit lane.
+
+*Still open.* Every other record fact (fields, bases, vtable, flags) and
+every other detector family still reads the legacy collections.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)

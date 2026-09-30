@@ -231,7 +231,9 @@ class TestExcludesDependencies:
             semantic_ir=semantic_ir,
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.semantic_ir is semantic_ir
+        # `snap.semantic_ir`, not the object passed in: construction fills
+        # the record's layout facts into a new IR (ADR-063 6B).
+        assert scoped.semantic_ir is snap.semantic_ir
 
     def test_semantic_ir_conflict_for_an_excluded_occurrence_is_dropped_too(self):
         """ADR-063 Phase 6 (second slice, Codex review, PR #1001, second

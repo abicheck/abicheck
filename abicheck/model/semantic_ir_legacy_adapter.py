@@ -99,6 +99,7 @@ Leaf module: depends only on other ``model`` modules, per ADR-061 D1's
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from ..errors import SemanticIrAuthorityError
@@ -113,16 +114,22 @@ from .identity import (
 )
 from .occurrence import OccurrenceId
 from .semantic_ir import CanonicalEntity, SemanticIR
+from .semantic_ir_record_layout import record_layout_facts, sync_snapshot_record_layout
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from .declarations import Function
+    from .entities import RecordType
     from .snapshot import AbiSnapshot
 
 __all__ = [
     "SYNTHETIC_IDENTITY_EXTRA",
+    "legacy_record_ir",
+    "legacy_record_occurrences",
+    "legacy_record_key",
     "assert_constant_ir_consistent",
+    "finalize_snapshot_semantic_ir",
     "assert_snapshot_semantic_ir_consistent",
     "assert_typedef_ir_consistent",
     "legacy_constant_ir",
@@ -327,6 +334,54 @@ def legacy_typedef_ir(snapshot: AbiSnapshot, typedefs: dict[str, str]) -> Semant
             canonical_spelling=Fact.present(underlying)
         )
     return SemanticIR(occurrences=occurrences)
+
+
+def legacy_record_key(record: RecordType) -> EntityId:
+    """The identity a record is looked up by in a record-layout index.
+
+    Its producer-resolved ``entity_id`` when it has one -- the same key a
+    real ``SemanticIR`` occurrence carries -- else a synthetic identity from
+    its qualified spelling, which only :func:`legacy_record_ir` produces.
+    """
+    if record.entity_id is not None:
+        return record.entity_id
+    return _synthetic_entity_id(EntityKind.TYPE, record.qualified_name or record.name)
+
+
+def legacy_record_occurrences(
+    records: Iterable[RecordType],
+) -> tuple[SemanticIR, tuple[OccurrenceId, ...]]:
+    """Project a side's records into a real ``SemanticIR`` carrying their
+    layout facts (ADR-063 6B, record-layout cohort), one occurrence per
+    record, plus each record's occurrence in input order.
+
+    Keyed by :func:`legacy_record_key`. Records sharing a key (an
+    ODR-duplicate pair, or two unidentified records with one spelling) are
+    kept apart by an ordinal disambiguator rather than collapsed: the caller
+    has already paired specific records, and collapsing would answer for
+    whichever record happened to come first.
+    """
+    occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+    seen: dict[EntityId, int] = {}
+    order: list[OccurrenceId] = []
+    for record in records:
+        key = legacy_record_key(record)
+        ordinal = seen.get(key, 0)
+        seen[key] = ordinal + 1
+        occ_id = OccurrenceId(key, str(ordinal) if ordinal else "")
+        size, align = record_layout_facts(record)
+        occurrences[occ_id] = CanonicalEntity(
+            canonical_spelling=Fact.present(record.qualified_name or record.name),
+            size_bits=size,
+            alignment_bits=align,
+        )
+        order.append(occ_id)
+    return SemanticIR(occurrences=occurrences), tuple(order)
+
+
+def legacy_record_ir(records: Iterable[RecordType]) -> SemanticIR:
+    """:func:`legacy_record_occurrences`' IR alone."""
+    return legacy_record_occurrences(records)[0]
 
 
 def legacy_constant_ir(snapshot: AbiSnapshot, constants: dict[str, str]) -> SemanticIR:
@@ -583,3 +638,13 @@ def assert_snapshot_semantic_ir_consistent(snapshot: AbiSnapshot) -> None:
     comment)."""
     assert_typedef_ir_consistent(snapshot)
     assert_constant_ir_consistent(snapshot)
+
+
+def finalize_snapshot_semantic_ir(snapshot: AbiSnapshot) -> None:
+    """Where a snapshot's ``SemanticIR`` meets its flat collections: the T3
+    identity check (:func:`assert_snapshot_semantic_ir_consistent`), then
+    the 6B record-layout fill (``semantic_ir_record_layout.
+    sync_snapshot_record_layout``). Run by ``AbiSnapshot.__post_init__`` and
+    again after a storage decode assigns ``semantic_ir``."""
+    assert_snapshot_semantic_ir_consistent(snapshot)
+    sync_snapshot_record_layout(snapshot)

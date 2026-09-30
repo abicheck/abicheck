@@ -73,6 +73,14 @@ _NAMED_CALL_ALLOWLIST: dict[tuple[str, str, str], str] = {
     ("abicheck/tu_merge.py", "_merge_types", "alignment_bits"): (
         "Receiver is a RecordType; only Variable.alignment_bits is bridged."
     ),
+    (
+        "abicheck/model/semantic_ir_record_layout.py",
+        "with_record_layout",
+        "alignment_bits",
+    ): (
+        "Receiver is a CanonicalEntity, whose alignment_bits is itself a "
+        "Fact[int] (ADR-063 6B), not a legacy field with a bridged sibling."
+    ),
     ("abicheck/tu_merge_provenance.py", "_blank_provenance", "deprecated"): (
         "Passes every blanked field's own `<field>_fact` through `**extra`, "
         "derived from the blanked-field list."

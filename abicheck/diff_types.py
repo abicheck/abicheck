@@ -23,6 +23,11 @@ from .checker_types import Change
 from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.enum_sentinel import is_sentinel_enum_member
 from .compare.fact_gate import both_facts_present
+from .compare.record_layout import (
+    RecordLayoutIndex,
+    record_layout_changes,
+    record_layout_index,
+)
 from .compare.typedefs import (
     diff_typedefs,
     is_version_stamped_typedef as is_version_stamped_typedef,
@@ -294,6 +299,11 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     vtable_facts_reliable = (
         old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
     )
+    # ADR-063 6B: record layout is read from each side's SemanticIR.
+    layout_indexes = (
+        record_layout_index(old.semantic_ir, old.types),
+        record_layout_index(new.semantic_ir, new.types),
+    )
 
     # Tracked by object identity, not key membership: a legacy-schema-vs-fresh
     # pair can match through diff_helpers.TypeMap's bare-name alias even though the two
@@ -351,6 +361,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ),
                 cv_facts_reliable=cv_facts_reliable,
                 vtable_facts_reliable=vtable_facts_reliable,
+                layout_indexes=layout_indexes,
             )
         )
 
@@ -458,6 +469,7 @@ def _diff_type_pair(
     castxml_backed: bool = False,
     cv_facts_reliable: bool = True,
     vtable_facts_reliable: bool = True,
+    layout_indexes: tuple[RecordLayoutIndex, RecordLayoutIndex],
 ) -> list[Change]:
     changes: list[Change] = []
 
@@ -475,7 +487,7 @@ def _diff_type_pair(
         )
         return changes  # no further checks meaningful for opaque type
 
-    _append_type_size_and_alignment_changes(changes, name, t_old, t_new)
+    record_layout_changes(changes, name, t_old, t_new, *layout_indexes)
     if not t_old.is_union:
         changes.extend(
             _diff_type_fields(name, t_old, t_new, cv_facts_reliable=cv_facts_reliable)
@@ -584,52 +596,6 @@ def _append_type_finality_changes(
                 name=name,
                 old_value="final",
                 new_value="non-final",
-                entity_id=t_old.entity_id or t_new.entity_id,
-            )
-        )
-
-
-def _append_type_size_and_alignment_changes(
-    changes: list[Change],
-    name: str,
-    t_old: RecordType,
-    t_new: RecordType,
-) -> None:
-    # This caller knows the matched RecordType pair directly, so it can
-    # stamp real identity even when record_canonical_names' bare-name
-    # bridge can't (an unrelated `a::Widget`/`b::Widget` collision
-    # elsewhere in the snapshot -- Codex review).
-    qualified = t_new.qualified_name or t_old.qualified_name
-    if (
-        t_old.size_bits is not None
-        and t_new.size_bits is not None
-        and t_old.size_bits != t_new.size_bits
-    ):
-        changes.append(
-            make_change(
-                ChangeKind.TYPE_SIZE_CHANGED,
-                symbol=name,
-                name=name,
-                old=str(t_old.size_bits),
-                new=str(t_new.size_bits),
-                qualified_name=qualified,
-                entity_id=t_old.entity_id or t_new.entity_id,
-            )
-        )
-
-    if (
-        t_old.alignment_bits is not None
-        and t_new.alignment_bits is not None
-        and t_old.alignment_bits != t_new.alignment_bits
-    ):
-        changes.append(
-            make_change(
-                ChangeKind.TYPE_ALIGNMENT_CHANGED,
-                symbol=name,
-                name=name,
-                old=str(t_old.alignment_bits),
-                qualified_name=qualified,
-                new=str(t_new.alignment_bits),
                 entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
@@ -879,7 +845,7 @@ def _diff_type_fields(
     changes: list[Change] = []
     old_fields = {f.name: f for f in t_old.fields}
     new_fields = {f.name: f for f in t_new.fields}
-    # Same qualified-identity stamp as _append_type_size_and_alignment_changes
+    # Same qualified-identity stamp as compare.record_layout.record_layout_changes
     # above, threaded down to the field-level emitters (Codex review).
     qualified = t_new.qualified_name or t_old.qualified_name
     # The containing record's own identity, not any one field's -- TypeField

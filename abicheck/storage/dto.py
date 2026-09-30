@@ -191,7 +191,9 @@ _SPECIALIZED_SECTION_KINDS = frozenset(
 #: package's manifest states which version *this* module wrote each section
 #: under, independent of every other axis.
 SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
-    SEMANTIC_IR_SECTION_KIND: 1,
+    # v2 (ADR-063 6B, snapshot schema v53): record occurrences carry
+    # size_bits/alignment_bits, and the IR document is stamped "version": 2.
+    SEMANTIC_IR_SECTION_KIND: 2,
     # ADR-063 Phase 8's full D8 split: every `LEGACY_SECTION_KINDS` entry is
     # its own independent axis from version 1 on, so a future `"binary"`
     # schema change never forces a bump on `"declarations"`.
@@ -203,6 +205,22 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     BUNDLE_COMPOSITION_SECTION_KIND: 2,
     BASELINE_SET_SECTION_KIND: 1,
 }
+
+
+def _semantic_ir_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Semantic IR v1 -> v2: the payload is unchanged. A v1 IR document has
+    no ``"version"`` key, and ``semantic_ir_codec`` reads that as "layout
+    never recorded" -- the honest reading, since v1 carried none; the
+    snapshot load fills it from the records (``semantic_ir_record_layout``).
+    A v1 section whose IR already claims a version was not written by a v1
+    writer, so it is refused rather than migrated."""
+    ir = payload.get("semantic_ir")
+    if isinstance(ir, Mapping) and "version" in ir:
+        raise ValueError(
+            f"{SEMANTIC_IR_SECTION_KIND!r} section v1 carries an IR document "
+            "version, which only a v2 writer emits"
+        )
+    return payload
 
 
 def _bundle_composition_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -233,6 +251,7 @@ _MIGRATIONS: Mapping[
 ] = {
     **{kind: {} for kind in SECTION_SCHEMA_VERSIONS},
     BUNDLE_COMPOSITION_SECTION_KIND: {1: _bundle_composition_v1_to_v2},
+    SEMANTIC_IR_SECTION_KIND: {1: _semantic_ir_v1_to_v2},
 }
 
 

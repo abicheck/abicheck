@@ -60,8 +60,9 @@ def _round_trip(snap: AbiSnapshot) -> AbiSnapshot:
     return snapshot_from_dict(json.loads(snapshot_to_json(snap)))
 
 
-def test_schema_version_is_52() -> None:
-    assert SCHEMA_VERSION == 52
+def test_schema_version_is_at_least_52() -> None:
+    # v52 introduced extraction_scope; later bumps must not reverse it.
+    assert SCHEMA_VERSION >= 52
 
 
 def test_scope_and_every_decision_round_trip() -> None:

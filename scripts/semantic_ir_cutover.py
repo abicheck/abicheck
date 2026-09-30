@@ -131,6 +131,17 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         forbidden_attributes=frozenset({"constants", "constant_entity_ids"}),
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
+    # ADR-063 6B cohort 3 (record layout): TYPE_SIZE_CHANGED/
+    # TYPE_ALIGNMENT_CHANGED read CanonicalEntity.size_bits/alignment_bits
+    # through each side's index; a RecordType's own layout attributes and a
+    # snapshot's `types` are off limits here. The index module owns the
+    # entity-level read (`semantic_ir_record_layout.entity_layout`).
+    MigratedCohort(
+        name="record_layout",
+        modules=("abicheck/compare/record_layout.py",),
+        forbidden_attributes=frozenset({"types", "size_bits", "alignment_bits"}),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
     # `functions` is deliberately NOT registered here yet. A first attempt
     # (abicheck/compare/functions.py's function_identity_index) built a
     # SemanticIRIndex per comparison but only ever looked up a function's

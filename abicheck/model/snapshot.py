@@ -731,7 +731,7 @@ class AbiSnapshot:
         )
         __import__("importlib").import_module(
             ".semantic_ir_legacy_adapter", __package__
-        ).assert_snapshot_semantic_ir_consistent(self)  # ADR-063 T3, avoids a cycle
+        ).finalize_snapshot_semantic_ir(self)  # ADR-063 T3 + 6B, avoids a cycle
 
     def index(self) -> None:
         """Build lookup indexes. Uses first-wins for duplicate mangled names.
