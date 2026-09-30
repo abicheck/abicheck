@@ -75,8 +75,9 @@ capability).
 
 from __future__ import annotations
 
+import copy
 import sys
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields as dataclass_fields, replace
 from enum import Enum
 from typing import Any, Generic, TypeVar
 
@@ -84,6 +85,10 @@ from .availability import FactStatus
 
 __all__ = [
     "Fact",
+    "RetiredBridgeField",
+    "legacy_view",
+    "retire_bridge_fields",
+    "set_legacy_field",
     "replace_with_fact_sync",
     "resolved_fact_value",
     "sync_present_facts",
@@ -197,8 +202,10 @@ def bridge_legacy_and_fact(
     the ``Fact[T]`` sibling over the legacy field on the next
     encode-then-decode round trip, silently reverting the mutation.
     ``replace_with_fact_sync`` does not help here — it only wraps
-    ``dataclasses.replace()`` calls, not attribute assignment. There is no
-    mechanical guard against this today; treat every bridged field
+    ``dataclasses.replace()`` calls, not attribute assignment. The five
+    Phase 0 fields are guarded mechanically since ADR-063 Phase 10
+    (:class:`RetiredBridgeField` raises on assignment); for every other
+    bridged field there is no such guard yet, so treat it
     (anything with a ``<field>_fact`` sibling) as effectively immutable
     after construction — build a fresh instance (or use
     ``replace_with_fact_sync``) instead of assigning to it directly.
@@ -213,6 +220,76 @@ def bridge_legacy_and_fact(
     if legacy is omitted:
         return normalized_default, Fact.not_collected()
     return legacy, Fact.present(legacy)
+
+
+def legacy_view(fact: Fact[T] | None, default: T) -> T:
+    """The value a retired legacy bridge field reads as: exactly what
+    :func:`bridge_legacy_and_fact` used to store in it (the fact's value when
+    it carries one, else *default*). One representation is stored -- the
+    ``Fact`` -- and this is only its derived projection."""
+    if fact is None or fact.value is None:
+        # A fresh copy: the default is shared by every instance's view, so
+        # handing it out directly would let one caller's mutation leak into
+        # every other record that omitted the field.
+        return copy.copy(default)
+    return fact.value
+
+
+class RetiredBridgeField:
+    """ADR-063 Phase 10: what a legacy bridge field becomes once its
+    ``<name>_fact`` sibling is the only stored representation.
+
+    The name stays a constructor argument (a dataclass ``InitVar``, so every
+    ``RecordType(bases=...)``/``dataclasses.replace`` call keeps working) and a
+    read-only view (:func:`legacy_view`) for serialization and ``replace``.
+    Assignment raises: a mutated legacy value next to a stale fact was the one
+    trap :func:`bridge_legacy_and_fact` could not guard. Detectors read the
+    fact (the ``fact-field-readers`` gate still enforces it).
+    """
+
+    __slots__ = ("_default", "_fact_attr", "_name")
+
+    def __init__(self, name: str, default: object) -> None:
+        self._name = name
+        self._fact_attr = f"{name}_fact"
+        self._default = default
+
+    def __get__(self, obj: object, objtype: type | None = None) -> Any:
+        if obj is None:
+            return self
+        return legacy_view(getattr(obj, self._fact_attr), self._default)
+
+    def __set__(self, obj: object, value: object) -> None:
+        raise AttributeError(
+            f"{type(obj).__name__}.{self._name} is a read-only view of "
+            f"{self._fact_attr}; build a new instance or use "
+            "replace_with_fact_sync()"
+        )
+
+
+def retire_bridge_fields(cls: type, defaults: dict[str, object]) -> None:
+    """Install :class:`RetiredBridgeField` views on *cls* for each name in
+    *defaults* (each an ``InitVar`` of the dataclass), and record the class's
+    persisted field order -- its real fields plus these views, in declaration
+    order -- as ``__wire_field_names__`` so the snapshot encoder writes the
+    identical document it wrote while they were stored fields."""
+    declared = cls.__dataclass_fields__  # type: ignore[attr-defined]
+    stored = {f.name for f in dataclass_fields(cls)}
+    for name, default in defaults.items():
+        if name not in declared or name in stored:
+            raise TypeError(f"{cls.__name__}.{name} must be an InitVar to retire")
+        setattr(cls, name, RetiredBridgeField(name, default))
+    cls.__retired_bridge_fields__ = frozenset(defaults)  # type: ignore[attr-defined]
+    cls.__wire_field_names__ = tuple(  # type: ignore[attr-defined]
+        name for name in declared if name in stored or name in defaults
+    )
+
+
+def set_legacy_field(obj: object, name: str, value: object) -> None:
+    """Assign a legacy bridge field -- a no-op for a retired one (ADR-063
+    Phase 10), whose read-only view already follows its fact."""
+    if name not in getattr(type(obj), "__retired_bridge_fields__", ()):
+        setattr(obj, name, value)
 
 
 def replace_with_fact_sync(obj: T, **updates: object) -> T:

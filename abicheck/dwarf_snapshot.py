@@ -1223,7 +1223,7 @@ class _DwarfSnapshotBuilder:
                 base_rec = by_name.get(base_name)
             return base_rec
 
-        unresolved = [t for t in self.types if t.vptr_offset_bits is None and t.bases]
+        unresolved = [t for t in self.types if t.vptr_pending(t.resolved_bases())]
         progressed = True
         while progressed and unresolved:
             progressed = False
@@ -1235,8 +1235,8 @@ class _DwarfSnapshotBuilder:
                     if offset_bits != 0:
                         continue
                     base_rec = _resolve_base_record(base_name, base_key)
-                    if base_rec is not None and base_rec.vptr_offset_bits is not None:
-                        resolved = base_rec.vptr_offset_bits
+                    if base_rec is not None and not base_rec.vptr_pending(True):
+                        resolved = base_rec.resolved_vptr_offset_bits()
                         break
                 if resolved is not None:
                     resolve_vptr_offset_bits(rec, resolved)
@@ -1270,7 +1270,7 @@ class _DwarfSnapshotBuilder:
         # already resolves more precisely (those are excluded here since
         # their `vptr_offset_bits` is already set).
         for rec in self.types:
-            if rec.vptr_offset_bits is None and rec.vtable:
+            if rec.vptr_pending(rec.resolved_vtable()):
                 resolve_vptr_offset_bits(rec, 0)
 
         # Second final-fallback tier: a class that is polymorphic ONLY
@@ -1317,7 +1317,7 @@ class _DwarfSnapshotBuilder:
         # `[F, A, E]` under GCC, so a single pass checked F while E was
         # still `None`, set E to 0, and left F unresolved).
         virtual_unresolved = [
-            t for t in self.types if t.vptr_offset_bits is None and t.virtual_bases
+            t for t in self.types if t.vptr_pending(t.resolved_virtual_bases())
         ]
         progressed = True
         while progressed and virtual_unresolved:
@@ -1327,7 +1327,7 @@ class _DwarfSnapshotBuilder:
                 virtual_edges = self._virtual_base_edges_by_record.get(id(rec), [])
                 if any(
                     (vbase := _resolve_base_record(vbase_name, vbase_key)) is not None
-                    and vbase.vptr_offset_bits is not None
+                    and not vbase.vptr_pending(True)
                     for vbase_name, vbase_key in virtual_edges
                 ):
                     resolve_vptr_offset_bits(rec, 0)

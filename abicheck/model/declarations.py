@@ -17,12 +17,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import cast
 
 from .elf_facts import SymbolBinding
 from .extraction_scope import EntityOwnership
-from .fact import Fact, _Omitted, bridge_legacy_and_fact
+from .fact import Fact, _Omitted, bridge_legacy_and_fact, retire_bridge_fields
 from .identity import EntityId
 from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visibility
 
@@ -76,9 +76,8 @@ class Param:
     is_restrict: bool = _OMITTED_IS_RESTRICT  # restrict-qualified pointer
     # ADR-063 Phase 0: defaults to a private omission sentinel, not False —
     # see is_va_list_fact below and __post_init__.
-    is_va_list: bool = (
-        _OMITTED_IS_VA_LIST  # parameter is va_list (variadic argument list)
-    )
+    # ADR-063 Phase 10: a constructor input only; is_va_list_fact is stored.
+    is_va_list: InitVar[bool] = _OMITTED_IS_VA_LIST  # parameter is va_list
     # Fact[bool] sibling — see RecordType's identical bases_fact/vtable_fact
     # comment in model/entities.py for the full rationale. A detector reads
     # this, never the plain is_va_list field above.
@@ -92,9 +91,9 @@ class Param:
     # indirection kind" (diff_symbols._params_differ).
     kind_fact: Fact[ParamKind] | None = field(default=None, kw_only=True)
 
-    def __post_init__(self) -> None:
-        self.is_va_list, self.is_va_list_fact = bridge_legacy_and_fact(
-            self.is_va_list, self.is_va_list_fact, _OMITTED_IS_VA_LIST, False
+    def __post_init__(self, is_va_list: bool) -> None:
+        _, self.is_va_list_fact = bridge_legacy_and_fact(
+            is_va_list, self.is_va_list_fact, _OMITTED_IS_VA_LIST, False
         )
         self.is_restrict, self.is_restrict_fact = bridge_legacy_and_fact(
             self.is_restrict, self.is_restrict_fact, _OMITTED_IS_RESTRICT, False
@@ -102,6 +101,9 @@ class Param:
         self.kind, self.kind_fact = bridge_legacy_and_fact(
             self.kind, self.kind_fact, _OMITTED_PARAM_KIND, ParamKind.VALUE
         )
+
+
+retire_bridge_fields(Param, {"is_va_list": False})
 
 
 @dataclass(slots=True)

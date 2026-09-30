@@ -17216,6 +17216,20 @@ not new design.
   declarations serialize under their historical keys, in their historical
   order.
 
+- **Phase 0 flags, audit (2026-09-30).** Nothing outside document decoding
+  ever sets a `*_facts_reliable` flag to `False`, and `storage/
+  fact_backfill.py` already downgrades the per-declaration facts each flag
+  guards. So the detector gates on `restrict`/`va_list`/`var_access`/`vtable`,
+  the `TypeField` CV gate and both `fact_provenance.py` branches can become
+  per-declaration `FactStatus` checks with no behavior change for decoded or
+  fresh snapshots. Two blockers stop the flags themselves from going:
+  `header_cv_facts_reliable` also guards cv spelling *inside*
+  `TypeField.type`/`Variable.type` strings, which no fact covers, and
+  `clang_field_initializer_facts_reliable`'s fingerprint heuristic reaches
+  `Param`/constant defaults, which have no fact either. The two
+  `policy/analysis_assurance_*` modules also need a load-time "degraded fact
+  families" record in place of eight model booleans. About 90 test sites set
+  a flag directly and would move to decoding a legacy document.
 - Phase 0: the *domain-side* `AbiSnapshot.clang_*_facts_reliable` boolean
   attributes are removed once every consumer reads the `Fact[...]` field
   instead. **Not removed, ever, per Phase 0's own corrected design**: the
@@ -17235,6 +17249,23 @@ not new design.
   first draft of this plan said this removal happened in Phase 5, which
   never touches these four fields at all (see Phase 0's own corrected
   text above).
+  **Closed (2026-09-30).** The five names are now dataclass `InitVar`s
+  (constructor-compatible, `dataclasses.replace` included) whose `*_fact`
+  sibling is the only stored representation; after construction each name
+  is a read-only view (`model/fact.py`'s `RetiredBridgeField`,
+  `legacy_view`), and assigning one raises -- which also closes the
+  mutation trap `bridge_legacy_and_fact`'s docstring documented. The DWARF
+  producer and the layout backfill read the facts, so `fact-field-readers`'
+  `EXEMPT_FUNCTIONS` is empty. The persisted document is unchanged: the
+  encoder writes the views in their historical position
+  (`__wire_field_names__`).
+- **Phase 1 legacy `-p` match, audit (2026-09-30).** It is not yet subsumed by
+  the P0.3 fold: `build_context_for_header` falls back to
+  `build_context_union_fallback` (the compile database's defines for a header
+  no compile unit includes), and `resolve_header_compile_context` has no such
+  fallback (`docs/contribute/known-gaps.md`, "ADR-063 Phase 1"). Retiring the
+  legacy path therefore means moving the union fallback into the fold for
+  *every* caller -- a typed-API behavior change, not a deletion.
 - Phase 1: `cli_dump_helpers.render_dump_dry_run()`'s independent
   resolution logic; the legacy `-p`/`--compile-db` auto-match's standalone
   code path once the fold fully subsumes it (already partly done per

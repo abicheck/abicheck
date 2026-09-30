@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from .model import RecordType, TypeField, replace_with_fact_sync
 from .model.debug_type_match import DebugRecordFacts, match_header_records
+from .model.fact import legacy_view
 from .model.graph_join import JoinState
 
 if TYPE_CHECKING:
@@ -215,7 +216,8 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
         size_bits=dwarf.size_bits,
         alignment_bits=dwarf.alignment_bits,
         fields=_merged_fields(header, dwarf),
-        vtable=header.vtable or dwarf.vtable,
+        vtable=legacy_view(header.vtable_fact, [])
+        or legacy_view(dwarf.vtable_fact, []),
         # Whichever side's *value* wins above must also supply its own Fact
         # status -- the same rule the vptr_offset_bits_fact/data_size_bits_
         # fact/is_standard_layout_fact/is_trivially_copyable_fact kwargs
@@ -229,11 +231,15 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
         # review, PR #1213, reproducing the exact fabrication that slice
         # exists to close, for any ELF dump combining the clang header
         # frontend with DWARF layout backfill.
-        vtable_fact=(header.vtable_fact if header.vtable else dwarf.vtable_fact),
+        vtable_fact=(
+            header.vtable_fact
+            if legacy_view(header.vtable_fact, [])
+            else dwarf.vtable_fact
+        ),
         vptr_offset_bits=(
-            header.vptr_offset_bits
-            if header.vptr_offset_bits is not None
-            else dwarf.vptr_offset_bits
+            legacy_view(header.vptr_offset_bits_fact, None)
+            if legacy_view(header.vptr_offset_bits_fact, None) is not None
+            else legacy_view(dwarf.vptr_offset_bits_fact, None)
         ),
         # Whichever side's *value* wins above must also supply its own Fact
         # status -- otherwise replace_with_fact_sync's default derivation
@@ -242,7 +248,7 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
         # confirmed determination it never became (Codex review, PR #909).
         vptr_offset_bits_fact=(
             header.vptr_offset_bits_fact
-            if header.vptr_offset_bits is not None
+            if legacy_view(header.vptr_offset_bits_fact, None) is not None
             else dwarf.vptr_offset_bits_fact
         ),
         base_offsets=header.base_offsets or dwarf.base_offsets,

@@ -87,7 +87,11 @@ def test_every_model_field_has_exactly_one_row(caps) -> None:
 
     for class_name in caps.COVERED_MODEL_CLASSES:
         cls = getattr(model, class_name)
-        real = {f.name for f in dataclasses.fields(cls)}
+        # A retired bridge field (ADR-063 Phase 10) is still a constructor
+        # input backends fill, so it keeps its row.
+        real = {f.name for f in dataclasses.fields(cls)} | set(
+            getattr(cls, "__retired_bridge_fields__", ())
+        )
         documented = {field for (owner, field) in rows if owner == class_name}
         assert real == documented, (
             f"{class_name}: matrix and model disagree. Missing rows: "

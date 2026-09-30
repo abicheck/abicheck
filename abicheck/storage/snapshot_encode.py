@@ -95,7 +95,12 @@ def _dataclass_field_names(cls: type) -> tuple[str, ...] | None:
         return _FIELD_NAMES[cls]
     except KeyError:
         names = (
-            tuple(f.name for f in dataclass_fields(cls)) if is_dataclass(cls) else None
+            # ADR-063 Phase 10: a class with retired bridge fields persists
+            # them from their read-only views, in their historical position.
+            getattr(cls, "__wire_field_names__", None)
+            or tuple(f.name for f in dataclass_fields(cls))
+            if is_dataclass(cls)
+            else None
         )
         _FIELD_NAMES[cls] = names
         return names

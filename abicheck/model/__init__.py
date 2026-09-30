@@ -76,6 +76,7 @@ from .fact import (
     fact_confirmed_true as fact_confirmed_true,
     replace_with_fact_sync as replace_with_fact_sync,
     resolved_fact_value as resolved_fact_value,
+    set_legacy_field as set_legacy_field,
 )
 from .fact_registry import (
     FACT_REGISTRY as FACT_REGISTRY,
@@ -166,6 +167,7 @@ __all__ = [
     "replace_with_fact_sync",
     "resolve_vptr_offset_bits",
     "resolved_fact_value",
+    "set_legacy_field",
     "stdlib_namespaces_excluded",
     "surface_fact_summary",
 ]

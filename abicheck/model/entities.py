@@ -17,11 +17,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import Any, cast
 
 from .extraction_scope import EntityOwnership
-from .fact import Fact, _Omitted, bridge_legacy_and_fact, resolved_fact_value
+from .fact import (
+    Fact,
+    _Omitted,
+    bridge_legacy_and_fact,
+    resolved_fact_value,
+    retire_bridge_fields,
+)
 from .identity import EntityId
 from .vocabulary import AccessLevel, ScopeOrigin
 
@@ -132,11 +138,12 @@ class RecordType:
     # empty list — an omitted field and an explicitly-confirmed-empty one
     # must backfill their *_fact sibling differently (not_collected() vs.
     # present([])). See bases_fact/virtual_bases_fact/vtable_fact below.
-    bases: list[str] = field(default_factory=lambda: _OMITTED_BASES)  # base class names
-    virtual_bases: list[str] = field(default_factory=lambda: _OMITTED_VIRTUAL_BASES)
-    vtable: list[str] = field(
-        default_factory=lambda: _OMITTED_VTABLE
-    )  # ordered vtable entries (mangled)
+    # ADR-063 Phase 10: constructor inputs only -- the *_fact siblings are the
+    # one stored representation; after construction these names are read-only
+    # views (model/fact.py's RetiredBridgeField).
+    bases: InitVar[list[str]] = _OMITTED_BASES  # base class names
+    virtual_bases: InitVar[list[str]] = _OMITTED_VIRTUAL_BASES
+    vtable: InitVar[list[str]] = _OMITTED_VTABLE  # ordered vtable entries (mangled)
     source_location: str | None = None
     is_union: bool = False
     is_opaque: bool = (
@@ -205,7 +212,7 @@ class RecordType:
     # ("no vptr observed"), so `RecordType()` (omitted) and
     # `RecordType(vptr_offset_bits=None)` (explicit: confirmed no vptr)
     # must backfill vptr_offset_bits_fact differently. See __post_init__.
-    vptr_offset_bits: int | None = _OMITTED_VPTR_OFFSET_BITS
+    vptr_offset_bits: InitVar[int | None] = _OMITTED_VPTR_OFFSET_BITS
     # Base-class subobject offsets: base name → bit offset within this object.
     # Distinct from ``bases`` (declaration order only): a base can *move* (e.g.
     # an empty-base-optimization is lost, or a member is inserted ahead of it)
@@ -333,18 +340,24 @@ class RecordType:
     # ADR-063 Phase 5 (ninth batch) -- case (a), see the field's own comment.
     deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
 
-    def __post_init__(self) -> None:
-        self.bases, self.bases_fact = bridge_legacy_and_fact(
-            self.bases, self.bases_fact, _OMITTED_BASES, []
+    def __post_init__(
+        self,
+        bases: list[str],
+        virtual_bases: list[str],
+        vtable: list[str],
+        vptr_offset_bits: int | None,
+    ) -> None:
+        _, self.bases_fact = bridge_legacy_and_fact(
+            bases, self.bases_fact, _OMITTED_BASES, []
         )
-        self.virtual_bases, self.virtual_bases_fact = bridge_legacy_and_fact(
-            self.virtual_bases, self.virtual_bases_fact, _OMITTED_VIRTUAL_BASES, []
+        _, self.virtual_bases_fact = bridge_legacy_and_fact(
+            virtual_bases, self.virtual_bases_fact, _OMITTED_VIRTUAL_BASES, []
         )
-        self.vtable, self.vtable_fact = bridge_legacy_and_fact(
-            self.vtable, self.vtable_fact, _OMITTED_VTABLE, []
+        _, self.vtable_fact = bridge_legacy_and_fact(
+            vtable, self.vtable_fact, _OMITTED_VTABLE, []
         )
-        self.vptr_offset_bits, self.vptr_offset_bits_fact = bridge_legacy_and_fact(
-            self.vptr_offset_bits,
+        _, self.vptr_offset_bits_fact = bridge_legacy_and_fact(
+            vptr_offset_bits,
             self.vptr_offset_bits_fact,
             _OMITTED_VPTR_OFFSET_BITS,
             None,
@@ -392,6 +405,26 @@ class RecordType:
         :meth:`resolved_bases`.
         """
         return resolved_fact_value(self.virtual_bases_fact, [])
+
+    def resolved_vtable(self) -> list[str]:
+        """``vtable_fact``, safely narrowed -- see :meth:`resolved_bases`."""
+        return resolved_fact_value(self.vtable_fact, [])
+
+    def resolved_vptr_offset_bits(self) -> int | None:
+        """``vptr_offset_bits_fact``, safely narrowed -- see
+        :meth:`resolved_bases`."""
+        return resolved_fact_value(self.vptr_offset_bits_fact, None)
+
+    def vptr_pending(self, evidence: object) -> bool:
+        """No vptr offset is resolved yet and *evidence* (a base list, the
+        vtable, or ``True``) says one may exist -- DWARF's vptr fixed point."""
+        return self.resolved_vptr_offset_bits() is None and bool(evidence)
+
+
+retire_bridge_fields(
+    RecordType,
+    {"bases": [], "virtual_bases": [], "vtable": [], "vptr_offset_bits": None},
+)
 
 
 @dataclass(slots=True)
@@ -509,5 +542,4 @@ def resolve_vptr_offset_bits(rec: RecordType, value: int) -> None:
     place), and leaving it stale while only the legacy scalar moves silently
     loses exactly the fact this bridge exists to make visible.
     """
-    rec.vptr_offset_bits = value
     rec.vptr_offset_bits_fact = Fact.present(value)

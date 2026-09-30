@@ -136,14 +136,10 @@ PKG = ROOT / "abicheck"
 #: only looks at reads on an existing instance, not constructor keywords).
 #: Unlike `KNOWN_UNMIGRATED_READERS` below, this set does not shrink --
 #: there is no "migrated" state for a bridge or a producer to reach.
-EXEMPT_FUNCTIONS: frozenset[str] = frozenset(
-    {
-        "abicheck/model/entities.py::RecordType.__post_init__",
-        "abicheck/model/declarations.py::Param.__post_init__",
-        "abicheck/dwarf_snapshot.py::_DwarfSnapshotBuilder._finalize_vptr_offsets",
-        "abicheck/dumper_layout_backfill.py::_backfilled_record",
-    }
-)
+#: Empty since ADR-063 Phase 10 retired the five legacy fields to read-only
+#: views (model/fact.py's RetiredBridgeField): the bridges read their InitVar
+#: parameters and the DWARF/backfill producers read the facts.
+EXEMPT_FUNCTIONS: frozenset[str] = frozenset()
 
 #: Every currently-known unmigrated semantic reader, keyed
 #: `"<rel>::<qualname>::<attr>::<outer-expr>::<expr-text>::<occurrence>"` --
