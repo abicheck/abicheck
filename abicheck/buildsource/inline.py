@@ -1090,6 +1090,9 @@ def _run_inline_source_abi(
             surface.coverage["cache_misses"] = cache.misses
     for diag in diagnostics:
         merged.diagnostics.append(f"source_abi: {diag}")
+    failed = failed_unit_names(selected_units, diagnostics)
+    if failed:
+        surface.coverage["failed_compile_units"] = failed
     parsed = int(surface.coverage.get("compile_units_parsed", 0) or 0)
     selected = int(surface.coverage.get("compile_units_selected", 0) or 0)
     extra = f", {elapsed:.2f}s"
@@ -1106,6 +1109,23 @@ def _run_inline_source_abi(
         )
     )
     return surface, selected_units
+
+
+#: How many failed TU names ride the coverage record; the exact count stays in
+#: ``extractor_failures``, so a pathological build cannot bloat the report.
+FAILED_TU_NAME_LIMIT = 20
+
+
+def failed_unit_names(units: list[Any], diagnostics: list[str]) -> list[str]:
+    """The selected units whose replay failed, named (at most the limit).
+
+    ``source_replay._extract_one`` records one ``"<source or id>: <error>"``
+    diagnostic per failed TU; naming them lets a fail-closed coverage consumer
+    ("only 17/19 selected TUs parsed") say *which* TUs, not only how many.
+    """
+    names = [u.source or u.id for u in units]
+    failed = [n for n in names if any(d.startswith(f"{n}: ") for d in diagnostics)]
+    return failed[:FAILED_TU_NAME_LIMIT]
 
 
 def _include_map_for_replay(
@@ -1288,7 +1308,14 @@ def _l4_coverage_detail(surface: SourceAbiSurface) -> str:
         parts.append(f"{float(elapsed):.2f}s")
     failures = int(cov.get("extractor_failures", 0) or 0)
     if failures:
-        parts.append(f"{failures} extractor failures")
+        names = [str(n) for n in cov.get("failed_compile_units") or ()]
+        more = failures - len(names)
+        named = (
+            f" ({', '.join(names)}{f', +{more} more' if more > 0 else ''})"
+            if names
+            else ""
+        )
+        parts.append(f"{failures} extractor failures{named}")
     return ", ".join(parts)
 
 
