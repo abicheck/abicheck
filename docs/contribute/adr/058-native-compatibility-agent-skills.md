@@ -58,7 +58,83 @@ Category A scenario's reference solution, but never run through an actual
 Harbor trial (no working container/sandbox runtime available in this
 environment); see the two amendments below and `skills-src/evaluation/agents/skills/harbor/
 CLAUDE.md` for the full account of what is and is not verified.
+A **second skill, `explain-abi-change`**, was admitted on 2026-09-30 (see
+that amendment below), with its own evaluation corpus and pilot.
 **Decision maker:** (pending — recorded per repository convention)
+
+> **Amendment (2026-09-30, later the same day — renamed to
+> `explain-abi-change` and widened — user-requested).**
+>
+> Before release the skill was renamed from `debug-abi-failure` and its
+> intent widened: not only "a program stopped working", but a developer
+> working out what changed between a program and the libraries it uses,
+> failing or not (Product positioning phrasing 10). The closed vocabulary
+> gains `library_older_than_build`, told apart from `symbol_removed` by
+> comparing in the reverse direction, and the corpus gains two scenarios
+> (a program built against a newer release than it runs on, and an
+> additions-only update where nothing fails). Re-run pilot, 10 scenarios,
+> 20 runs per arm: correct answer 19/20 with the skill vs 20/20 without;
+> ran a comparison 20/20 vs 14/20; zero-tolerance failures 1/20 vs 8/20.
+> The one skill-arm miss named the right mechanism but emitted two claim
+> blocks; the skill's wording was fixed and that scenario re-run 3/3. The
+> finding is unchanged: the skill adds evidence, not diagnostic accuracy.
+> Three further scenarios, built so that only the compiled layout shows the
+> change, did not separate the arms either (9/9 both; zero-tolerance 0/9 vs
+> 6/9); the baseline had abicheck on `PATH` and read DWARF itself. Runs now
+> also record time, tokens (including prompt-cache reads) and cost: the skill
+> arm costs roughly 27-37% more per run. A fourth round (both models, a
+> no-tool arm, a compact 750-word variant) found the skill's value is
+> model-dependent: Haiku 4.5 answered correctly 85-88% of the time with it,
+> 58% without it and 50% without the tool; Sonnet was correct even with no
+> tool. The compact variant matched the full skill's accuracy at lower cost
+> and is now the published version (one sentence added after measurement,
+> not re-run).
+> Everything below this amendment that says `debug-abi-failure`, "runtime
+> failure", six causes, or eight scenarios describes the skill before the
+> rename.
+
+> **Amendment (2026-09-30, second skill — `explain-abi-change` —
+> user-requested).**
+>
+> A second public skill is admitted. It covers a job the first cannot:
+> a program that **already failed** in a real environment
+> ("undefined symbol", "version ... not found", a crash or wrong results
+> after a library changed), worked back to its cause. The five admission
+> criteria:
+> 1. **Distinct user intent.** The request is a symptom, not a change under
+>    review; phrasings 8 and 9 in Product positioning.
+> 2. **Distinct decision tree.** The workflow starts from the loader:
+>    reproduce, find which library copy actually loads (`deps tree`), then
+>    compare it with the build-time library. `check-abi-compatibility`
+>    starts from two chosen versions and never asks which copy loads.
+> 3. **Distinct outcome.** One root cause from a closed set of six, and the
+>    fix that matches it. That includes "not an ABI problem" and "a stale
+>    copy wins the search", where rebuilding is the wrong advice.
+> 4. **Useful standalone.** Installable alone
+>    (`npx skills add abicheck/abicheck -s explain-abi-change`).
+> 5. **Specialized knowledge.** Loader search order and precedence
+>    (`DT_RPATH` over `LD_LIBRARY_PATH`), symbol versioning, and the
+>    libstdc++ dual ABI.
+>
+> **Evaluation**, the same A/B harness as the first skill:
+> - The corpus is eight `debug-*` scenarios in `scenarios.yaml`, two of them
+>   written after the skill as a check against tuning.
+> - The claim envelope gains `diagnosis.cause`, and a run is correct only
+>   when both the cause and the verdict are right.
+>
+> Pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md`,
+> `claude-sonnet-5-5`):
+>
+> | | skill | baseline |
+> |---|---|---|
+> | correct answer | 18/18 | 16/18 |
+> | ran a comparison | 18/18 | 9/18 |
+> | zero-tolerance failures | 1/18 | 11/18 |
+>
+> The report states plainly that the baseline also named the right *cause*
+> in all 18 runs. The skill's measured value is evidence and severity, not
+> diagnostic accuracy, on fixtures this small. Harder, held-out scenarios
+> are the recorded next step. Status: **preview**, like the first skill.
 
 > **Amendment (2026-09-29, PR 4 landed — `npx skills add`, second
 > pilot, harness leaks closed — user-requested).**
@@ -684,7 +760,7 @@ Three problems, not one, need solving together:
 
 ## Product positioning
 
-A good skill in this portfolio should answer requests such as these seven —
+A good skill in this portfolio should answer requests such as these ten —
 none of which name abicheck, and each of which a real user could type
 without knowing the tool exists:
 
@@ -695,6 +771,9 @@ without knowing the tool exists:
 5. "Why did this compatibility check suddenly report dozens of breaks?"
 6. "Will this binary still work after moving to a new OS/container?"
 7. "How do I keep ABI compatibility across compiler/client profiles?"
+8. "My program fails with 'undefined symbol' after we updated a library. Why?"
+9. "Our program crashes after a shared library was updated. What changed?"
+10. "A shared library we depend on was bumped and its symbols look different. What changed, and does our program care?"
 
 abicheck should appear inside the resulting workflow as a deterministic
 verification engine, not as the user-facing job. At the time these seven
@@ -708,7 +787,10 @@ the sole surviving skill, `check-abi-compatibility` (4's
 named-consumer scoping was absorbed via `--used-by`/`--required-symbol`,
 not dropped — see that amendment); 2 and 3 are currently unclaimed, tracked
 as future scope for that same skill and for a distinct future second skill
-respectively. This list is the source both `SKILL.md` `description` fields
+respectively. Phrasings 8-10 were added by the 2026-09-30 amendment (second skill,
+`explain-abi-change`), which claims all three: a developer working out what
+changed between a program and the libraries it uses in an existing
+environment, failing or not, rather than a change under review. This list is the source both `SKILL.md` `description` fields
 (Decision → Skill content model) and the trigger-test positive corpus
 (Testing and evaluation architecture, and G36's P0.8) are built from.
 

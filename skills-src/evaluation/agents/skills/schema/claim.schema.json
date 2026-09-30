@@ -25,6 +25,25 @@
       "description": "Set only when the run was scoped to a named consumer or plugin host (--used-by/--required-symbol(s)): that consumer's own scoped result, mirroring the report's informational `consumer_scope.verdict` block (workstream D-S1, shared/consumer-scoping.md). `verdict` above is always the library-wide answer -- exactly what an unscoped comparison of the same pair would report -- never swapped for the consumer's own result. Omitted entirely for an unscoped comparison, where there is no second, narrower answer to report.",
       "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
     },
+    "diagnosis": {
+      "type": "object",
+      "description": "ABI-change explanations only (the explain-abi-change skill's scenarios): the one mechanism the answer names, from that skill's closed vocabulary. SKILL.md's mechanism table and this enum are kept identical by tests/test_skill_eval_diagnosis.py. `verdict` alongside it compares the library the program was built against with the library the loader actually used.",
+      "required": ["cause"],
+      "additionalProperties": false,
+      "properties": {
+        "cause": {
+          "enum": [
+            "symbol_removed",
+            "library_older_than_build",
+            "symbol_version_missing",
+            "layout_changed",
+            "stale_library_loaded",
+            "cxx_abi_mismatch",
+            "not_an_abi_problem"
+          ]
+        }
+      }
+    },
     "evidence": {
       "type": "array",
       "items": {"type": "integer", "minimum": 0},
