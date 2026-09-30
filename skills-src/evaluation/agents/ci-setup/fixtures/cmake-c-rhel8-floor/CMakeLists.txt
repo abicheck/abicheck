@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(zpack VERSION 4.2.0 LANGUAGES C)
+add_library(zpack SHARED src/zpack.c)
+target_include_directories(zpack PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+set_target_properties(zpack PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 4)
+install(TARGETS zpack LIBRARY DESTINATION lib)
+install(DIRECTORY include/ DESTINATION include)

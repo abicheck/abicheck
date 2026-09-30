@@ -66,6 +66,9 @@ repository genuinely cannot tell you:
 | Versioning promise | `SOVERSION`/`VERSION`, `-Wl,-soname`, symbol-version scripts, a stated stability policy | A project that bumps SONAME on every release has a different gate from one promising stability |
 | Contributors from forks | `CONTRIBUTING.md`, public repo | Fork PRs cannot receive a PR comment from the check job |
 | Existing permissions / security posture | `permissions:` blocks, pinned-SHA usage, org rules | Match it |
+| Supported platforms / minimum glibc | README, docs, packaging (`manylinux`, "RHEL 8", "Ubuntu 20.04") | A stated floor must be declared, or floor regressions pass green |
+| Shape of the public API | inline functions, templates, macros, default arguments, `constexpr` in the public headers; "broke users without changing a symbol" | Decides `headers` vs `source` depth |
+| Toolchain constraints | cross-compilation toolchain files, clang-only or SYCL builds, several build profiles | Decides header frontend flags, runner arch, per-profile baselines |
 
 A library with **several** shared targets gets one check per library (a
 matrix), never one step pointed at the first `.so` found.
@@ -112,8 +115,14 @@ general shape of these choices.
    the gate for that one PR; it never skips the comparison. See template
    A's `fail-on-breaking` expression.
 5. **Evidence depth** (`headers`, the default). Headers plus the binary catch
-   signature, layout, and enum breaks. Build/source depth costs a build
-   system reachable in CI — see [evidence and depth](../shared/evidence-and-depth.md).
+   signature, layout, and enum breaks. `source` depth adds inline bodies,
+   templates, macros and default arguments, and costs clang, a compile
+   database, and source evidence on the **baseline** side as well — see
+   [depth, toolchain and floors](references/depth-toolchain-and-floors.md#2-evidence-depth-headers-l2-vs-buildsource-l3l5).
+7. **Runtime floors** — when the project states supported distributions,
+   declare them (`deployment.runtime_floors` in `.abicheck.yml`). Without
+   that, a raised glibc/libstdc++ requirement is only a warning and the gate
+   passes. See [runtime floors](references/depth-toolchain-and-floors.md#1-runtime-and-dependency-floors-glibc-libstdc).
 6. **Policy** (`strict_abi`) — `sdk_vendor`/`plugin_abi` only when the
    project's contract actually is one of those; see
    [policies and suppressions](../shared/policies-and-suppressions.md).
@@ -151,6 +160,10 @@ from step 1. Non-negotiable properties of the result (each is explained in
 - Build the candidate **exactly like a release** (same flags, same
   `BUILD_SHARED_LIBS`, `RelWithDebInfo`/`-g` so debug info is available), and
   build the baseline side the same way.
+- Match the build system and toolchain: library path, cross-compilation
+  (`gcc-prefix`/`sysroot`), header frontend, per-profile baselines — see
+  [build systems](references/depth-toolchain-and-floors.md#4-build-systems)
+  and [header backends](references/depth-toolchain-and-floors.md#3-header-ast-backends).
 - Point `header`/`new-header` at the **public** header directory, set `lang`
   correctly, and name the exact library path — no globs that might match
   zero or two files.
@@ -224,6 +237,8 @@ Files written:     .github/workflows/abi-check.yml, …
 Libraries checked: libfoo (build/libfoo.so, headers include/foo/, C)
 Baseline:          release snapshot (latest-release) | merge-base build | committed file
                    — why this one; how it refreshes; bootstrap step if any
+Depth / floors:    headers | source (clang, compile DB, baseline dumped with sources);
+                   runtime floors declared: GLIBC x.y … | none stated
 Gate:              blocks on binary break | advisory until <date/condition>;
                    API break: blocks | warns; intentional-break label: <name>
 Permissions:       per job, and why each is needed

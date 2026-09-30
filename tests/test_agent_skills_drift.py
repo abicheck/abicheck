@@ -411,6 +411,8 @@ NON_REPORT_IDENTIFIERS = frozenset(
         "sdk_vendor",
         "plugin_abi",
         "compile.lang",
+        "deployment.runtime_floors",
+        "build.targets",
     }
 )
 

@@ -451,8 +451,11 @@ def _self(ctx: Context) -> tuple[bool, str]:
 def _debug(ctx: Context) -> tuple[bool, str]:
     text = "\n".join({s.job.workflow.text for s in ctx.pr_compare_steps()})
     ok = bool(
-        re.search(r"RelWithDebInfo|debugoptimized|buildtype=debug|CMAKE_BUILD_TYPE=Debug|(?<![\w-])-g(?![\w-])|-ggdb", text)
+        re.search(r"RelWithDebInfo|debugoptimized|buildtype=debug|CMAKE_BUILD_TYPE=Debug|(?<![\w-])-g(?![\w-])|-ggdb|-c dbg|--compilation_mode[= ]dbg", text)
     )
+    if not ok and re.search(r"\./configure\b", text) and "CFLAGS=" not in text:
+        # autoconf's default CFLAGS are "-g -O2".
+        ok = True
     return ok, "debug info requested" if ok else "no debug-info build flags in the check build"
 
 
@@ -709,6 +712,146 @@ def _mentions(ctx: Context) -> tuple[bool, str]:
 # --------------------------------------------------------------------------
 # Scoring
 # --------------------------------------------------------------------------
+
+
+# --------------------------------------------------------------------------
+# Depth, toolchain, floors, build-system checks
+# --------------------------------------------------------------------------
+
+_CONFIG_DISCOVERY = (".abicheck.yml", ".github/.abicheck.yml", ".github/abicheck/.abicheck.yml")
+
+
+def _configs(ctx: Context) -> list[tuple[str, dict[str, Any]]]:
+    """Every `.abicheck.yml` the checks can actually reach: the discovery
+    locations plus any file a step names via `build-config` / `--config`."""
+    names = set(_CONFIG_DISCOVERY)
+    for s in ctx.analysis_steps():
+        if "build-config" in s.inputs:
+            names.update(s.expand(s.inputs["build-config"]))
+        if s.is_cli:
+            names.update(re.findall(r"--config[ =]\"?([^\s\"]+)", str(s.raw.get("run", ""))))
+    out = []
+    for name in sorted(n for n in names if n and "${{" not in n):
+        path = ctx.workspace / name.removeprefix("./")
+        if path.is_file():
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            except yaml.YAMLError:
+                continue
+            if isinstance(data, dict):
+                out.append((name, data))
+    return out
+
+
+def _version(text: object) -> tuple[int, ...] | None:
+    m = re.match(r"^\s*(\d+(?:\.\d+)*)\s*$", str(text))
+    return tuple(int(p) for p in m.group(1).split(".")) if m else None
+
+
+@check("runtime_floors_declared")
+def _floors(ctx: Context) -> tuple[bool, str]:
+    wanted: dict[str, str] = ctx.params.get("floors", {})
+    for name, data in _configs(ctx):
+        floors = ((data.get("deployment") or {}).get("runtime_floors") or {}) if isinstance(data.get("deployment"), dict) else {}
+        bad = []
+        for prefix, promise in wanted.items():
+            got = _version(floors.get(prefix))
+            # At or below the promise is safe; above it lets a real
+            # de-support through.
+            if got is None or got > _version(promise):  # type: ignore[operator]
+                bad.append(f"{prefix}={floors.get(prefix)!r}")
+        if not bad:
+            return True, f"{name} declares {floors}"
+    return False, f"no reachable .abicheck.yml declares deployment.runtime_floors {wanted}"
+
+
+@check("runner_pinned")
+def _runner_pinned(ctx: Context) -> tuple[bool, str]:
+    loose = sorted(
+        {
+            str(s.job.raw.get("runs-on"))
+            for s in ctx.analysis_steps()
+            if re.search(r"-latest\b", str(s.job.raw.get("runs-on", "")))
+        }
+    )
+    return (not loose, f"floating runner images {loose}: every image bump moves the runtime floor" if loose else "pinned")
+
+
+def _cli_flag(step: Step, flag: str) -> str | None:
+    m = re.search(rf"{flag}[ =]\"?([^\s\"]+)", str(step.raw.get("run", "")))
+    return m.group(1) if m else None
+
+
+def _depth(step: Step) -> str:
+    if step.is_cli:
+        return _cli_flag(step, "--depth") or "headers"
+    return str(step.inputs.get("depth", "headers")).strip()
+
+
+@check("source_depth_complete")
+def _source_depth(ctx: Context) -> tuple[bool, str]:
+    """L4 is asked for on the PR, with clang and a build-evidence input."""
+    steps = [s for s in ctx.pr_compare_steps() if _depth(s) == "source"]
+    if not steps:
+        return False, "no PR compare at depth: source (inline/template/macro changes stay invisible)"
+    problems = []
+    for s in steps:
+        text = s.job.workflow.text
+        if s.is_cli:
+            has_clang = bool(re.search(r"\bclang\b", text))
+            has_build = bool(_cli_flag(s, "--sources") or _cli_flag(s, "--build-info"))
+        else:
+            has_clang = str(s.inputs.get("dependency-source", "")).strip() in ("conda-forge-clang20", "system")
+            has_build = any(k in s.inputs for k in ("sources", "build-info", "compile-db"))
+        if not has_clang:
+            problems.append("no clang (default dependency-source has none)")
+        if not has_build:
+            problems.append("no sources/build-info/compile-db")
+    return (not problems, "; ".join(sorted(set(problems))) or "depth source with clang and build evidence")
+
+
+@check("baseline_has_source_evidence")
+def _baseline_source(ctx: Context) -> tuple[bool, str]:
+    """The old side of an L4 comparison must carry L4 evidence itself: the
+    new-side-only `sources` input cannot supply it."""
+    for s in ctx.steps():
+        if s.mode != "dump" or _depth(s) != "source":
+            continue
+        if s.is_cli:
+            if _cli_flag(s, "--sources") or _cli_flag(s, "--build-info"):
+                return True, "baseline dumped with source evidence (CLI)"
+        elif any(k in s.inputs for k in ("sources", "build-info", "compile-db")):
+            return True, "baseline dumped with source evidence"
+    if re.search(r"(old|baseline)[^.\n]{0,80}(no|without|lacks?|only the new)[^.\n]{0,40}(source|L4)", ctx.final, re.I):
+        return True, "one-sided L4 stated in the report"
+    return False, "old side has no L4 evidence and the report does not say so"
+
+
+@check("cross_toolchain")
+def _cross(ctx: Context) -> tuple[bool, str]:
+    bad = []
+    for s in ctx.analysis_steps():
+        if re.search(r"arm", str(s.job.raw.get("runs-on", ""))):
+            continue
+        if s.is_cli:
+            ok = bool(re.search(r"aarch64-linux-gnu", s.job.workflow.text + _repo_config(ctx)))
+        else:
+            ok = any(k in s.inputs for k in ("gcc-prefix", "gcc-path")) or "aarch64" in str(s.inputs.get("build-config", ""))
+            if not ok:
+                ok = any(re.search(r"aarch64-linux-gnu", str(d.get("compile") or "")) for _, d in _configs(ctx))
+        if not ok:
+            bad.append(f"{s.job.workflow.path.name}:{s.job.name}")
+    return (not bad, f"aarch64 headers parsed with the host compiler in {bad}" if bad else "target toolchain or arm runner")
+
+
+@check("library_path_plausible")
+def _lib_path(ctx: Context) -> tuple[bool, str]:
+    """The workflow references where this build system actually puts the
+    shared library (e.g. `.libs/` for libtool, `bazel-bin/` for Bazel)."""
+    hint = ctx.params.get("hint", "")
+    text = "\n".join({s.job.workflow.text for s in ctx.pr_compare_steps()})
+    ok = bool(re.search(hint, text))
+    return ok, f"references {hint!r}" if ok else f"never references where the build writes the library ({hint!r})"
 
 
 def load_scenarios(path: Path = SCENARIOS) -> dict[str, Any]:

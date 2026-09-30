@@ -1,0 +1,9 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build-aarch64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-linux-gnu.cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.16)
+project(sensor VERSION 3.3.0 LANGUAGES C)
+add_library(sensor SHARED src/sensor.c)
+target_include_directories(sensor PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+set_target_properties(sensor PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 3)

@@ -1,0 +1,34 @@
+name: ABI check
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  abi-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: new
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: old
+      - run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - run: |
+          for side in old new; do
+            cmake -S $side -B $side/build -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-linux-gnu.cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo
+            cmake --build $side/build
+          done
+      - uses: abicheck/abicheck@v0.6.0
+        with:
+          old-library: old/build/libsensor.so
+          new-library: new/build/libsensor.so
+          old-header: old/include
+          new-header: new/include
+          lang: c
+          gcc-prefix: aarch64-linux-gnu-
+          sysroot: /usr/aarch64-linux-gnu

@@ -49,6 +49,12 @@ critical:
   - shared_build
   - toolchain_via_action
   - pins_are_commits
+  - runtime_floors_declared
+  - runner_pinned
+  - source_depth_complete
+  - baseline_has_source_evidence
+  - cross_toolchain
+  - library_path_plausible
 
 # Annotated-tag *object* SHAs (the `refs/tags/<tag>` line of `git ls-remote`
 # when a `^{}` line also exists). A `uses:` pinned to one does not resolve;
@@ -124,3 +130,60 @@ scenarios:
       release_bootstrap: {}
       report_mentions:
         patterns: ["fork"]
+
+  # ------------------------------------------------ depth / toolchain / floors
+  - id: cmake-c-rhel8-floor
+    fixture: cmake-c-rhel8-floor
+    tags: [v4.1.0, v4.2.0]
+    prompt: Add abicheck ABI checks to our GitHub Actions.
+    checks:
+      lang: {expect: c}
+      headers_public: {}
+      covers_libs: {libs: [zpack]}
+      baseline_release: {}
+      release_bootstrap: {}
+      runtime_floors_declared: {floors: {GLIBC: "2.28"}}
+      runner_pinned: {}
+
+  - id: cmake-cpp-inline-heavy
+    fixture: cmake-cpp-inline-heavy
+    tags: [v1.7.0, v1.8.0]
+    prompt: >-
+      Set up abicheck in our CI so we stop shipping breaking changes to our
+      users.
+    checks:
+      lang: {expect: c++}
+      headers_public: {}
+      covers_libs: {libs: [vecmath]}
+      source_depth_complete: {}
+      baseline_has_source_evidence: {}
+
+  - id: autotools-c
+    fixture: autotools-c
+    tags: [v2.0.0, v2.1.0]
+    prompt: Please wire abicheck into GitHub Actions for this project.
+    checks:
+      lang: {expect: c}
+      headers_public: {}
+      covers_libs: {libs: [token]}
+      library_path_plausible: {hint: "\\.libs/|DESTDIR|make install|--prefix"}
+
+  - id: bazel-cpp
+    fixture: bazel-cpp
+    tags: [v0.8.0, v0.9.0]
+    prompt: Настрой проверку совместимости ABI с abicheck в GitHub Actions.
+    checks:
+      lang: {expect: c++}
+      headers_public: {}
+      covers_libs: {libs: [kv]}
+      library_path_plausible: {hint: "bazel-bin/"}
+
+  - id: cross-aarch64
+    fixture: cross-aarch64
+    tags: [v3.2.0, v3.3.0]
+    prompt: Add an ABI compatibility gate with abicheck to our CI.
+    checks:
+      lang: {expect: c}
+      headers_public: {}
+      covers_libs: {libs: [sensor]}
+      cross_toolchain: {}

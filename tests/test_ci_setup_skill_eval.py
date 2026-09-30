@@ -57,11 +57,8 @@ def _workspace(tmp_path: Path, scenario_id: str) -> Path:
     # workflow the fixture ships stays, as it would in a real repository.
     for path in wf.glob("abi*.yml"):
         path.unlink()
-    shutil.copytree(
-        EVAL / "reference" / scenario_id / ".github",
-        work / ".github",
-        dirs_exist_ok=True,
-    )
+    # The whole reference tree: a solution may include `.abicheck.yml`.
+    shutil.copytree(EVAL / "reference" / scenario_id, work, dirs_exist_ok=True)
     return work
 
 
@@ -461,4 +458,119 @@ def test_a_pin_to_an_annotated_tag_object_is_caught(tmp_path: Path):
     )
     assert "pins_are_commits" not in _failed(
         grader.grade(work, "cmake-c-releases", "", CORPUS)
+    )
+
+
+def _write(work: Path, rel: str, text: str) -> None:
+    (work / rel).write_text(text, encoding="utf-8")
+
+
+NEW_MUTATIONS = [
+    # runtime floors
+    (
+        "cmake-c-rhel8-floor",
+        ".abicheck.yml",
+        lambda t: t.replace('"2.28"', '"2.34"'),
+        "runtime_floors_declared",
+    ),
+    (
+        "cmake-c-rhel8-floor",
+        ".abicheck.yml",
+        lambda t: "policy: {}\n",
+        "runtime_floors_declared",
+    ),
+    (
+        "cmake-c-rhel8-floor",
+        ".github/workflows/abi-check.yml",
+        lambda t: t.replace("runs-on: ubuntu-24.04", "runs-on: ubuntu-latest"),
+        "runner_pinned",
+    ),
+    # source depth
+    (
+        "cmake-cpp-inline-heavy",
+        ".github/workflows/abi-check.yml",
+        lambda t: t.replace("          depth: source\n", ""),
+        "source_depth_complete",
+    ),
+    (
+        "cmake-cpp-inline-heavy",
+        ".github/workflows/abi-check.yml",
+        lambda t: t.replace("          dependency-source: conda-forge-clang20\n", ""),
+        "source_depth_complete",
+    ),
+    (
+        "cmake-cpp-inline-heavy",
+        ".github/workflows/abi-check.yml",
+        lambda t: t.replace(
+            "          sources: .\n          compile-db: build/compile_commands.json\n",
+            "",
+        ),
+        "source_depth_complete",
+    ),
+    (
+        "cmake-cpp-inline-heavy",
+        ".github/workflows/abi-baseline.yml",
+        lambda t: t.replace(
+            "          depth: source\n          sources: .\n          compile-db: build/compile_commands.json\n",
+            "",
+        ),
+        "baseline_has_source_evidence",
+    ),
+    # build systems
+    (
+        "autotools-c",
+        ".github/workflows/abi-check.yml",
+        lambda t: t.replace("/.libs/", "/"),
+        "library_path_plausible",
+    ),
+    (
+        "bazel-cpp",
+        ".github/workflows/abi-check.yml",
+        lambda t: t.replace("bazel-bin/libkv.so", "libkv.so"),
+        "library_path_plausible",
+    ),
+    (
+        "cross-aarch64",
+        ".github/workflows/abi-check.yml",
+        lambda t: t.replace("          gcc-prefix: aarch64-linux-gnu-\n", ""),
+        "cross_toolchain",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("scenario_id", "rel", "mutate", "expected"),
+    NEW_MUTATIONS,
+    ids=[f"{m[0]}:{m[3]}:{i}" for i, m in enumerate(NEW_MUTATIONS)],
+)
+def test_depth_toolchain_floor_failure_modes_are_caught(
+    tmp_path, scenario_id, rel, mutate, expected
+):
+    work = _workspace(tmp_path, scenario_id)
+    before = (work / rel).read_text(encoding="utf-8")
+    after = mutate(before)
+    assert after != before, "mutation did not apply"
+    _write(work, rel, after)
+    assert expected in _failed(grader.grade(work, scenario_id, "", CORPUS))
+
+
+def test_cross_toolchain_accepts_a_native_arm_runner(tmp_path: Path):
+    work = _workspace(tmp_path, "cross-aarch64")
+    rel = ".github/workflows/abi-check.yml"
+    text = (work / rel).read_text(encoding="utf-8")
+    text = text.replace("          gcc-prefix: aarch64-linux-gnu-\n", "").replace(
+        "runs-on: ubuntu-24.04", "runs-on: ubuntu-24.04-arm"
+    )
+    _write(work, rel, text)
+    assert "cross_toolchain" not in _failed(
+        grader.grade(work, "cross-aarch64", "", CORPUS)
+    )
+
+
+def test_a_floor_declared_below_the_promise_is_accepted(tmp_path: Path):
+    """Declaring glibc 2.17 when the promise is 2.28 is stricter, not weaker."""
+    work = _workspace(tmp_path, "cmake-c-rhel8-floor")
+    _write(work, ".abicheck.yml", 'deployment:\n  runtime_floors:\n    GLIBC: "2.17"\n')
+    assert "runtime_floors_declared" not in _failed(
+        grader.grade(work, "cmake-c-rhel8-floor", "", CORPUS)
     )
