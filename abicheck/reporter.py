@@ -952,14 +952,11 @@ def _add_detectors(d: dict[str, object], result: DiffResult) -> None:
             # ADR-063 T9 (schema 5.11): comparisons the detector ran but
             # declined to judge, each with its evidence reason.
             "declined": [
-                {"entity": entity, "reason": reason}
-                for entity, reason in det.declined
+                {"entity": entity, "reason": reason} for entity, reason in det.declined
             ],
         }
         for det in result.detector_results
-        if det.changes_count > 0
-        or det.coverage_gap is not None
-        or bool(det.declined)
+        if det.changes_count > 0 or det.coverage_gap is not None or bool(det.declined)
     ]
 
 

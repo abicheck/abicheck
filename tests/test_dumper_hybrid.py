@@ -1503,6 +1503,7 @@ class TestNamespaceQualifiedMerging:
         # single bare key below.
         assert type_fact_key("Foo", "deprecated") not in merged.fact_provenance
 
+
 class TestTypedefsQualifiedMerge:
     """Codex review, fresh evidence (schema v25 follow-up): unlike bare
     ``typedefs`` (deliberately left verbatim from castxml_snap, same as
