@@ -155,7 +155,11 @@ def _fmt(value: float | None, digits: int) -> str:
     return "—" if value is None else f"{value:,.{digits}f}"
 
 
-def _print_efficiency(skill: list[dict], base: list[dict]) -> None:
+#: Column order for the arms a batch may contain (runners/claude_code.py ARMS).
+ARM_ORDER = ("skill", "baseline", "no_tool")
+
+
+def _print_efficiency(by_arm: dict[str, list[dict]]) -> None:
     """What each arm spent, next to what it got right.
 
     Means per run, plus the cost of one *correct* answer: an arm that is
@@ -171,89 +175,72 @@ def _print_efficiency(skill: list[dict], base: list[dict]) -> None:
         ("mean cost, $", "cost_usd", 3),
     ]
     for label, field, digits in rows:
-        print(
-            f"{label:<26}{_fmt(_mean(skill, field), digits):>12}"
-            f"{_fmt(_mean(base, field), digits):>12}"
+        cells = "".join(
+            f"{_fmt(_mean(runs, field), digits):>12}" for runs in by_arm.values()
         )
-    per_correct = []
-    for runs in (skill, base):
+        print(f"{label:<26}{cells}")
+    cells = ""
+    for runs in by_arm.values():
         total = sum(
             v
             for r in runs
             if isinstance(v := (r.get("efficiency") or {}).get("cost_usd"), int | float)
         )
         correct = sum(1 for r in runs if r["correct"])
-        per_correct.append(total / correct if correct else None)
-    print(
-        f"{'cost per correct answer, $':<26}{_fmt(per_correct[0], 3):>12}"
-        f"{_fmt(per_correct[1], 3):>12}"
-    )
+        cells += f"{_fmt(total / correct if correct else None, 3):>12}"
+    print(f"{'cost per correct answer, $':<26}{cells}")
 
 
 def _print_table(graded: list[dict]) -> None:
-    """One skill's skill-vs-baseline table plus its per-scenario detail.
+    """One skill's arm-by-arm table plus its per-scenario detail.
 
     Printed per skill: the skills answer different questions, and one table
     pooling them would let a strong result on one hide a weak one on the
     other. "correct answer" is the verdict, plus the root cause for a
-    scenario that names one (see graders.dimensions.grade_run).
+    scenario that names one (see graders.dimensions.grade_run). One column
+    per arm present, in `ARM_ORDER`.
     """
-    skill = [g for g in graded if g["arm"] == "skill"]
-    base = [g for g in graded if g["arm"] == "baseline"]
-    print(f"{'':<26}{'skill':>12}{'baseline':>12}")
+    by_arm = {
+        arm: [g for g in graded if g["arm"] == arm]
+        for arm in ARM_ORDER
+        if any(g["arm"] == arm for g in graded)
+    }
+    print(f"{'':<26}" + "".join(f"{arm:>12}" for arm in by_arm))
     rows = [
-        ("runs graded", len(skill), len(base), None),
-        (
-            "correct answer",
-            sum(1 for r in skill if r["correct"]),
-            sum(1 for r in base if r["correct"]),
-            True,
-        ),
-        (
-            "ran a comparison",
-            sum(1 for r in skill if r["comparisons"] > 0),
-            sum(1 for r in base if r["comparisons"] > 0),
-            True,
-        ),
-        (
-            "claim well-formed",
-            sum(1 for r in skill if r["claim_status"] == "ok"),
-            sum(1 for r in base if r["claim_status"] == "ok"),
-            True,
-        ),
-        (
-            "zero-tolerance failures",
-            sum(1 for r in skill if r["zero_tolerance_failed"]),
-            sum(1 for r in base if r["zero_tolerance_failed"]),
-            True,
-        ),
+        ("correct answer", lambda r: r["correct"]),
+        ("ran a comparison", lambda r: r["comparisons"] > 0),
+        ("claim well-formed", lambda r: r["claim_status"] == "ok"),
+        ("zero-tolerance failures", lambda r: bool(r["zero_tolerance_failed"])),
     ]
-    for label, s_count, b_count, ratio in rows:
-        s_text = f"{s_count} ({_pct(s_count, len(skill))})" if ratio else str(s_count)
-        b_text = f"{b_count} ({_pct(b_count, len(base))})" if ratio else str(b_count)
-        print(f"{label:<26}{s_text:>12}{b_text:>12}")
-
-    _print_efficiency(skill, base)
-
     print(
-        "\nper scenario (correct answer | mean seconds | mean $, skill vs baseline):"
+        f"{'runs graded':<26}" + "".join(f"{len(runs):>12}" for runs in by_arm.values())
     )
+    for label, test in rows:
+        cells = ""
+        for runs in by_arm.values():
+            count = sum(1 for r in runs if test(r))
+            cells += f"{f'{count} ({_pct(count, len(runs))})':>12}"
+        print(f"{label:<26}{cells}")
+    _print_efficiency(by_arm)
+
+    arms = " vs ".join(by_arm)
+    print(f"\nper scenario (correct answer | mean seconds | mean $, {arms}):")
     for sid in sorted({g["scenario_id"] for g in graded}):
-        s_runs = [g for g in skill if g["scenario_id"] == sid]
-        b_runs = [g for g in base if g["scenario_id"] == sid]
-        first = next(iter(s_runs + b_runs))
+        per_arm = [
+            [g for g in runs if g["scenario_id"] == sid] for runs in by_arm.values()
+        ]
+        first = next(g for runs in per_arm for g in runs)
         expected = first["expected_verdict"]
         if first.get("expected_cause"):
             expected = f"{expected}, {first['expected_cause']}"
-        print(
-            f"  {sid:<34} {sum(1 for g in s_runs if g['correct'])}/{len(s_runs)}"
-            f" {sum(1 for g in b_runs if g['correct'])}/{len(b_runs)}"
-            f" | {_fmt(_mean(s_runs, 'wall_clock_seconds'), 0)}"
-            f" {_fmt(_mean(b_runs, 'wall_clock_seconds'), 0)}"
-            f" | {_fmt(_mean(s_runs, 'cost_usd'), 3)}"
-            f" {_fmt(_mean(b_runs, 'cost_usd'), 3)}"
-            f"   (expected {expected})"
+        correct = " ".join(
+            f"{sum(1 for g in runs if g['correct'])}/{len(runs)}" for runs in per_arm
         )
+        seconds = " ".join(
+            _fmt(_mean(runs, "wall_clock_seconds"), 0) for runs in per_arm
+        )
+        cost = " ".join(_fmt(_mean(runs, "cost_usd"), 3) for runs in per_arm)
+        print(f"  {sid:<34} {correct} | {seconds} | {cost}   (expected {expected})")
 
 
 def main(argv: list[str] | None = None) -> int:

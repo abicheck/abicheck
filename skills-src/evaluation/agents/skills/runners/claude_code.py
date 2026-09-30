@@ -99,7 +99,15 @@ PUBLISHED_SKILLS = ROOT / ".claude" / "skills"
 SKILLS_SRC = ROOT / "skills-src"
 PACK = EVAL_DIR / "skill-eval-pack.json"
 
-ARMS = ("skill", "baseline")
+#: `no_tool` is the third, opt-in arm: no skill *and* no abicheck. The
+#: baseline arm has abicheck on PATH, as a user who installed it would, so
+#: skill-vs-baseline measures the skill's instructions alone; `no_tool`
+#: measures what the agent does with only the system's own tools (`nm`,
+#: `readelf`, `ldd`, `gdb`), which is what the tool itself adds.
+ARMS = ("skill", "baseline", "no_tool")
+#: What `--arms` selects by default. `no_tool` costs a third more runs and
+#: answers a different question, so it is asked for explicitly.
+DEFAULT_ARMS = ("skill", "baseline")
 
 
 #: The skills this harness evaluates: exactly the published portfolio, read
@@ -823,8 +831,8 @@ def check_treatment(arm: str, scenario: dict, visible: list[str] | None) -> str 
     """The reason this run is not evidence about its arm, if it is not."""
     if visible is None:
         return "the CLI never reported which skills it could see"
-    if arm == "baseline" and visible:
-        return f"baseline arm could see published skill(s): {', '.join(visible)}"
+    if arm in ("baseline", "no_tool") and visible:
+        return f"{arm} arm could see published skill(s): {', '.join(visible)}"
     if arm == "skill" and visible != [scenario["skill"]]:
         return (
             f"skill arm should see exactly ['{scenario['skill']}'], saw: "
@@ -895,6 +903,90 @@ def _run_once(
             "so neither arm's result would be about the skill:\n  " + "\n  ".join(leaks)
         )
 
+    if arm == "no_tool":
+        env = no_tool_environment(os.environ)
+    else:
+        env = _recorded_environment(out_dir)
+
+    prompt = scenario["prompt"] + answer_contract(scenario)
+    (out_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
+    return _invoke(
+        out_dir, work, env, prompt, scenario, scenario_id, arm, rep, model, timeout
+    )
+
+
+def _tool_directories(path: str) -> set[str]:
+    """The `PATH` entries holding an executable named `abicheck`."""
+    return {
+        entry
+        for entry in path.split(os.pathsep)
+        if entry and os.access(os.path.join(entry, "abicheck"), os.X_OK)
+    }
+
+
+def no_tool_environment(parent: Mapping[str, str]) -> dict[str, str]:
+    """The `no_tool` arm's environment: the tool genuinely absent.
+
+    Not a stub that answers "command not found": `which abicheck` would still
+    find it, and an agent reading that is being told something false about
+    its machine. Every `PATH` entry that holds `abicheck` is dropped instead,
+    together with the virtual environment that put it there, so the Python
+    left on `PATH` is one without the package. Whatever the agent still
+    reaches is caught after the run by `reached_the_tool`.
+    """
+    env = child_environment(parent)
+    dropped = _tool_directories(env.get("PATH", ""))
+    env["PATH"] = os.pathsep.join(
+        entry for entry in env.get("PATH", "").split(os.pathsep) if entry not in dropped
+    )
+    for name in ("VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"):
+        env.pop(name, None)
+    return env
+
+
+#: Output that means an attempt to run the tool did *not* reach it.
+_TOOL_ABSENT = re.compile(
+    r"command not found|No module named|No such file or directory|not installed",
+    re.IGNORECASE,
+)
+#: A command that would run or install the tool, however it is spelled.
+_TOOL_ATTEMPT = re.compile(
+    r"(?:^|[\s;&|(`/])abicheck\b|-m\s+abicheck|install\b.*\babicheck"
+)
+
+
+def reached_the_tool(events: list[dict]) -> list[str]:
+    """Commands in a `no_tool` run that ran or installed abicheck anyway.
+
+    Each `Bash` call that names the tool is matched to its own result; one
+    whose output does not say the tool is missing is a leak. Conservative in
+    the direction that matters: a run that merely *looked* for the tool and
+    was told it is absent is kept, and anything else that names it is
+    reported, so a leak cannot be graded as the no-tool condition.
+    """
+    commands: dict[str, str] = {}
+    leaked: list[str] = []
+    for event in events:
+        for block in (event.get("message") or {}).get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                command = _bash_command(block)
+                if command is not None and _TOOL_ATTEMPT.search(command):
+                    commands[str(block.get("id"))] = command
+            elif block.get("type") == "tool_result":
+                command = commands.pop(str(block.get("tool_use_id")), None)
+                if command is None:
+                    continue
+                content = block.get("content")
+                text = content if isinstance(content, str) else json.dumps(content)
+                if not _TOOL_ABSENT.search(text):
+                    leaked.append(command)
+    return leaked + list(commands.values())
+
+
+def _recorded_environment(out_dir: Path) -> dict[str, str]:
+    """The skill and baseline arms' environment: the tool behind the recorder."""
     bin_dir = out_dir / "bin"
     bin_dir.mkdir()
     shim = bin_dir / "abicheck"
@@ -922,10 +1014,22 @@ def _run_once(
             interposer.write_text(_PYTHON_INTERPOSER, encoding="utf-8")
             interposer.chmod(0o755)
         env["SKILL_EVAL_REAL_PYTHON"] = real_python
+    return env
 
-    prompt = scenario["prompt"] + answer_contract(scenario)
-    (out_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
+def _invoke(
+    out_dir: Path,
+    work: Path,
+    env: dict[str, str],
+    prompt: str,
+    scenario: dict,
+    scenario_id: str,
+    arm: str,
+    rep: int,
+    model: str | None,
+    timeout: int,
+) -> dict:
+    """Run the agent once and validate that the run is evidence about `arm`."""
     started = time.monotonic()
     proc = subprocess.run(  # noqa: S603
         [
@@ -970,7 +1074,15 @@ def _run_once(
     usage = _usage(events, elapsed)
     (out_dir / "usage.json").write_text(json.dumps(usage, indent=2), encoding="utf-8")
 
-    if _bypassed_the_recorder(events, out_dir / "calls.jsonl"):
+    if arm == "no_tool":
+        leaked = reached_the_tool(events)
+        if leaked:
+            raise RuntimeError(
+                f"{scenario_id}/{arm}/{rep}: the no-tool arm reached abicheck "
+                f"anyway ({'; '.join(leaked)}), so this run is not the no-tool "
+                f"condition."
+            )
+    elif _bypassed_the_recorder(events, out_dir / "calls.jsonl"):
         raise RuntimeError(
             f"{scenario_id}/{arm}/{rep}: the run reached the tool through "
             f"`python -m abicheck`, which the recorder never saw, so its "
@@ -978,7 +1090,7 @@ def _run_once(
             f"the PATH interposer applies."
         )
 
-    if _shadowed_the_recorder(events, out_dir / "calls.jsonl"):
+    if arm != "no_tool" and _shadowed_the_recorder(events, out_dir / "calls.jsonl"):
         raise RuntimeError(
             f"{scenario_id}/{arm}/{rep}: the agent ran `abicheck` but the "
             f"recorder logged nothing, so something earlier on the agent's "
@@ -1296,7 +1408,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--arms",
-        default=",".join(ARMS),
+        default=",".join(DEFAULT_ARMS),
         help=f"Comma-separated subset of {','.join(ARMS)}",
     )
     parser.add_argument(
