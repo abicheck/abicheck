@@ -81,12 +81,13 @@ class FactLifecycle(Enum):
     A capability is documented or exposed as a CLI option only once it
     reaches ``PUBLIC`` — the stage that closes the repeated "shape shipped,
     wiring followed later" pattern AGENTS.md records for the L3->L2 fold.
-    Every fact this registry declares today sits no higher than
-    ``PERSISTED``: none has a detector reading its ``Fact[...]`` sibling
-    yet (Phase 0's own status note — "no detector has migrated ... this is
-    intentional"), so ``CONSUMED``/``REPORTED``/``PUBLIC`` have no real
-    member yet and are declared for the vocabulary's own completeness, not
-    because this registry already uses them.
+    ``CONSUMED`` means a detector branches on the fact's ``FactStatus``
+    (``compare_facts``/``both_facts_present``/a direct status check) rather
+    than the legacy present-or-default collapse; such an entry names those
+    detectors in :attr:`FactDefinition.consumed_by`, and
+    ``scripts/fact_registry_completeness.py`` checks each one resolves and
+    reads the fact (ADR-063 sub-phase 5B). ``REPORTED``/``PUBLIC`` have no
+    member yet.
     """
 
     MODELLED = "modelled"
@@ -161,6 +162,9 @@ class FactDefinition:
     reportable: bool
     lifecycle: FactLifecycle
     notes: str = ""
+    #: ``"module:function"`` detectors that branch on this fact's
+    #: ``FactStatus``. Required from ``CONSUMED`` upward, forbidden below it.
+    consumed_by: tuple[str, ...] = ()
 
     @property
     def id(self) -> str:
@@ -180,6 +184,15 @@ class FactDefinition:
                 f"{self.id}: producing_backends must name at least one real "
                 f"producer — a fact with no producer cannot ever reach "
                 f"FactStatus.PRESENT"
+            )
+        consumed = LIFECYCLE_ORDER.index(self.lifecycle) >= LIFECYCLE_ORDER.index(
+            FactLifecycle.CONSUMED
+        )
+        if consumed != bool(self.consumed_by):
+            raise ValueError(
+                f"{self.id}: consumed_by must name the consuming detector(s) "
+                f"exactly when lifecycle is CONSUMED or later "
+                f"(lifecycle={self.lifecycle.value}, consumed_by={self.consumed_by!r})"
             )
         unknown = set(self.producing_backends) - KNOWN_PRODUCING_BACKENDS
         if unknown:

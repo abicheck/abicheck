@@ -44,7 +44,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.compare.base_class_diff:diff_bases",),
         notes=(
             "Base class names, declaration order. No independent "
             "reliability flag ever guarded this field (unlike vtable/"
@@ -62,7 +63,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.compare.base_class_diff:diff_bases",),
     ),
     _E(
         owner="RecordType",
@@ -74,7 +76,11 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.compare.vtable_evidence:vtable_fact_declined",
+            "abicheck.diff_layout:_check_vptr_introduced",
+        ),
         notes="Guarded by AbiSnapshot.clang_vtable_facts_reliable for the clang producer.",
     ),
     _E(
@@ -87,7 +93,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.diff_layout:_check_vptr_introduced",),
         notes="Guarded by AbiSnapshot.clang_vtable_facts_reliable for the clang producer.",
     ),
     # ── Phase 5's first worked-example conversion ───────────────────
@@ -280,7 +287,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.diff_types_field_facts:_check_field_qualifier_pair",),
         notes=(
             "Whether the member is const-qualified. Case (a): guarded by "
             "AbiSnapshot.header_cv_facts_reliable, whose False marks a "
@@ -301,7 +309,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.diff_types_field_facts:_check_field_qualifier_pair",),
         notes=(
             "Whether the member is volatile-qualified. Case (a): guarded by "
             "AbiSnapshot.header_cv_facts_reliable, whose False marks a "
@@ -322,7 +331,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.diff_types_field_facts:_check_field_qualifier_pair",),
         notes=(
             "Whether the member is declared `mutable`. Case (a): guarded "
             "by AbiSnapshot.header_cv_facts_reliable, whose False "
@@ -342,7 +352,10 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.diff_types_field_facts:_diff_field_default_initializer",
+        ),
         notes=(
             "Default member initializer expression, verbatim. Case (a) "
             "even though the field is already `str | None`: None is a "
@@ -362,7 +375,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.diff_types_field_facts:_diff_field_deprecated",),
         notes=(
             "[[deprecated]] message string. Case (a) for the same "
             'reason as `default` above -- None means "not '
@@ -382,7 +396,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.diff_types_field_facts:_diff_type_deprecated",),
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
@@ -403,7 +418,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.diff_types_field_facts:_diff_enum_deprecated",),
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
@@ -424,7 +440,8 @@ TYPE_FACTS: list[FactDefinition] = [
         comparable=True,
         suppressible=False,
         reportable=True,
-        lifecycle=FactLifecycle.PERSISTED,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.diff_types:_diff_enums",),
         notes=(
             "`enum class`/`enum struct` versus a plain C enum. Case "
             "(a) even though the field is already tri-state: a pre-v19 "

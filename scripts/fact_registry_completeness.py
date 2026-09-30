@@ -136,9 +136,9 @@ claims in D7's own design, the same as ``persisted`` — but unlike
 ``persisted`` (direction 4 above, checked against real ``fact_codec.py``/
 ``serialization.py`` call sites), no consumer code reading a ``Fact[...]``
 sibling for suppression or reporting purposes exists anywhere in this
-codebase yet: ``fact_registry.py``'s own ``FactLifecycle`` docstring states
-plainly that every entry today sits no higher than ``PERSISTED`` and that
-"no detector has migrated ... this is intentional." A wiring check modeled
+codebase yet. (Detector consumption *is* wired and checked -- direction 9,
+``consumer_problems``, for every ``CONSUMED`` entry -- but no entry is
+``REPORTED``/``PUBLIC``.) A wiring check modeled
 on direction 4 has nothing real to check against — every current entry
 already declares ``reportable=True`` with zero report-schema wiring by
 design, so a check requiring real wiring would fail the entire committed
@@ -848,6 +848,57 @@ def _cross_check_against_backend_capabilities(
     return problems
 
 
+def consumer_problems(
+    field: str, consumed_by: tuple[str, ...], root: Path
+) -> list[str]:
+    """Why each ``"module:function"`` in *consumed_by* fails to consume *field*.
+
+    Direction 9 (ADR-063 5B): a ``CONSUMED`` registry entry is a claim that a
+    named detector branches on the fact's ``FactStatus``. Resolved by AST, not
+    import: the module must exist, define the function, and the function's
+    own body must read ``<field>_fact`` or pass ``"<field>"`` to
+    ``both_facts_present`` -- a renamed detector or one that moved back to the
+    legacy field stops satisfying the entry.
+    """
+    problems: list[str] = []
+    for target in consumed_by:
+        module, _, func = target.partition(":")
+        if not module or not func:
+            problems.append(f"{target!r} is not 'module:function'")
+            continue
+        path = root / (module.replace(".", "/") + ".py")
+        if not path.is_file():
+            problems.append(f"{target}: module file {_rel(path)} does not exist")
+            continue
+        source = _read(path)
+        defs = [
+            n
+            for n in ast.walk(ast.parse(source))
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == func
+        ]
+        if not defs:
+            problems.append(f"{target}: no function {func!r} in {_rel(path)}")
+            continue
+        reads = False
+        for node in defs:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Attribute) and sub.attr == f"{field}_fact":
+                    reads = True
+                elif (
+                    isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Name)
+                    and sub.func.id == "both_facts_present"
+                    and any(_string_constant(a) == field for a in sub.args)
+                ):
+                    reads = True
+        if not reads:
+            problems.append(
+                f"{target}: never reads {field}_fact nor gates on "
+                f"both_facts_present(..., {field!r})"
+            )
+    return problems
+
+
 def check_fact_registry_completeness(f: Findings) -> None:
     """ERROR on any of the eight directions this module's docstring states.
 
@@ -1014,6 +1065,14 @@ def check_fact_registry_completeness(f: Findings) -> None:
                 f"but its real {entry.fact_attr} annotation is "
                 f"Fact[{inner_type}] — the registry disagrees with the code "
                 f"it claims to describe",
+            )
+
+    # Direction 9: a CONSUMED entry's named detectors really read the fact.
+    for entry in FACT_REGISTRY.entries.values():
+        for problem in consumer_problems(entry.field, entry.consumed_by, ROOT):
+            f.err(
+                "fact-registry-completeness",
+                f"{entry.id} is lifecycle={entry.lifecycle.value}, but {problem}",
             )
 
     # Direction 7: every REFERENCE_FLAG_COVERAGE key must name a real field

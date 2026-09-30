@@ -137,7 +137,12 @@ concepts:
     producers: complete
     persistence: complete
     consumers: partial
-    authority: legacy
+    # 2026-09-30: raised from legacy to mixed -- 18 registry facts are now
+    # FactLifecycle.CONSUMED, each naming the detector(s) that branch on
+    # its FactStatus (FactDefinition.consumed_by, checked by
+    # fact-registry-completeness direction 9). Not `self`: the other
+    # registered facts are still read through the legacy fields.
+    authority: mixed
     lifecycle: wired
     removal_gate: >-
       Phase 5B (fact-semantic-consumption): every detector reading an
