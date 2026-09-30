@@ -40,7 +40,8 @@ from _mutmut_names import canonical_def_name, is_mutmut_artifact
         ("x__cached_bare_re__mutmut_orig", "_cached_bare_re"),
         ("x__cached_bare_re__mutmut_1", None),
         ("x__cached_bare_re__mutmut_42", None),
-        ("x__cached_bare_re__mutmut_mutants", None),
+        ("mutants_x__cached_bare_re__mutmut", None),
+        ("mutants_xǁCacheǁget__mutmut", None),
         ("xǁCacheǁget__mutmut_orig", "get"),
         ("xǁCacheǁget__mutmut_7", None),
         ("x_value", "x_value"),
@@ -52,39 +53,44 @@ def test_canonical_def_name(name: str, expected: str | None) -> None:
     assert is_mutmut_artifact(name) is (expected is None)
 
 
+_FIXTURE = Path(__file__).parent / "fixtures" / "mutmut_3_8_rewritten_module.txt"
+
+# The source mutmut 3.8.0 was run on to produce _FIXTURE (regenerate with
+# ``mutmut.mutation.file_mutation.mutate_file_contents`` if mutmut changes).
 _SOURCE = """
-    import functools, re
-    _cache = {}
+import re
+_pattern_cache = {}
 
-    @functools.lru_cache
-    def _cached_bare_re(name):
-        return re.compile(r"\\b" + re.escape(name) + r"\\b")
+
+def _cached_bare_re(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"\\b" + re.escape(name) + r"\\b")
+    return hit
+
+
+class Matcher:
+    def matches(self, text):
+        return re.search("_tag$", text) is not None
 """
+_MUTATED = _FIXTURE.read_text(encoding="utf-8")
 
-# What mutmut 3 writes for the same module (trampoline + orig + mutants).
-_MUTATED = """
-    import functools, re
-    _cache = {}
-    x__cached_bare_re__mutmut_mutants = {}
 
-    @functools.lru_cache
-    def _cached_bare_re(name):
-        return _mutmut_trampoline(x__cached_bare_re__mutmut_orig, x__cached_bare_re__mutmut_mutants, name)
-
-    def x__cached_bare_re__mutmut_orig(name):
-        return re.compile(r"\\b" + re.escape(name) + r"\\b")
-
-    def x__cached_bare_re__mutmut_1(name):
-        return re.compile(r"XX\\bXX" + re.escape(name) + r"\\b")
-
-    def x__cached_bare_re__mutmut_2(name):
-        return re.compile(None)
-"""
+def test_fixture_is_real_mutmut_output() -> None:
+    # Vacuity guard: the fixture carries every generated-name shape the
+    # helper must handle, as mutmut actually spells them.
+    for needle in (
+        "x__cached_bare_re__mutmut_orig",
+        "x__cached_bare_re__mutmut_1",
+        "mutants_x__cached_bare_re__mutmut",
+        "xǁMatcherǁmatches__mutmut_orig",
+    ):
+        assert needle in _MUTATED
 
 
 def _f4_sites(src: str) -> set[str]:
     v = _Visitor("m")
-    v.visit(ast.parse(textwrap.dedent(src)))
+    v.visit(ast.parse(textwrap.dedent(src).lstrip()))
     return v.sites
 
 
