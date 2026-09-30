@@ -33,16 +33,26 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _committed_yaml() -> list[Path]:
-    """Every committed ``*.yml``/``*.yaml`` (git's index, not a tree walk)."""
-    try:
-        listed = subprocess.run(
-            ["git", "ls-files", "-z", "*.yml", "*.yaml"],
-            cwd=ROOT,
-            capture_output=True,
-            check=True,
+    """Every committed ``*.yml``/``*.yaml`` (git's index, not a tree walk).
+
+    Skips unless this tree *is* the checkout's root: a copy nested inside
+    another repository (mutmut's ``mutants/`` workspace) is untracked there,
+    so ``git ls-files`` would honestly list nothing and the sweep would
+    prove nothing.
+    """
+
+    def _git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=ROOT, capture_output=True, check=True
         ).stdout.decode()
+
+    try:
+        toplevel = Path(_git("rev-parse", "--show-toplevel").strip())
+        listed = _git("ls-files", "-z", "*.yml", "*.yaml")
     except (OSError, subprocess.CalledProcessError):
         pytest.skip("not a git checkout")
+    if toplevel.resolve() != ROOT.resolve():
+        pytest.skip("tests are not at the root of their git checkout")
     return [ROOT / name for name in sorted(filter(None, listed.split("\0")))]
 
 
