@@ -16,6 +16,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -444,6 +445,9 @@ def test_large_graph_is_capped_with_a_disclosed_count() -> None:
 
 @pytest.mark.integration
 @pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
+@pytest.mark.skipif(
+    sys.platform != "linux", reason="builds ELF DT_NEEDED edges with GNU ld flags"
+)
 def test_real_shared_libraries_record_dt_needed_edges(tmp_path: Path) -> None:
     src = {
         "a1.c": "int a_base(int x){return x+1;}\nint a_gone(void){return 2;}\n",
