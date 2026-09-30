@@ -190,20 +190,20 @@ Windows — although its result depends only on the committed tree.
 
 | Change | Effect |
 |---|---|
-| `repo_scan` marker on the 21 whole-tree scan tests; excluded from every unit leg; run once, uninstrumented, by the new `repo-scan-tests` job (`verify.py --only repo-scan-tests`) | ~2 minutes once instead of ~15 CPU-minutes per leg ×3; same tests, same PR |
+| `repo_scan` marker on 31 whole-tree scan test functions (selected from measured durations, each confirmed to walk the committed tree); excluded from every unit leg; run once, uninstrumented, by the new `repo-scan-tests` job (`verify.py --only repo-scan-tests`) | ~2 minutes once instead of ~15 CPU-minutes per leg ×3; same tests, same PR |
 | Canonical lane split into three `pytest --shard=K/3` jobs (`tests/pytest_shards.py`: whole files, LPT by test count, order-independent — property-tested) plus a `unit-tests-coverage` fan-in that combines the data and enforces the 95% floor once | Same selection, same floor, critical path divided; a missing shard fails the fan-in's explicit count check |
 | Four scale tests (≥35s each on CI) moved to the `slow` lane, which runs on every PR | Off the critical path; still run per PR |
 | `packaging (ubuntu-latest)` removed | It ran `build` + `twine check`, which `fair-metadata`'s `distribution-build` step already runs on Linux in the same workflow; the Windows leg stays |
 | The two polling bridges deleted (Phase 1) | Two fewer runners held per PR, up to 60 runner-minutes |
+| macOS/Windows full unit legs, the 3.15 prerelease smoke leg and the 3.15t free-threading job run on `main` pushes, schedule/dispatch, and PRs labelled `ci:full` — not every PR push (maintainer decision, 2026-09-30) | The ~27-minute legs on the scarcest runner pools stop competing on every push. **Moved detection point, stated:** a macOS/Windows-only unit regression now surfaces on the first `main` run after merge unless the PR carries `ci:full`. The native PE/Mach-O compare jobs and the macOS/Windows integration legs still run on every PR |
 
 **Considered and not landed here**, each for a stated reason:
 
-- *Running the macOS/Windows unit legs, the 3.15 prerelease `python-compat`
-  leg, the `agentready` PR job, or examples-validation's clang half only on
-  `main`/nightly/label.* These are the largest remaining queue consumers per
-  PR, but each moves a detection point from the PR to after merge. Per this
-  document's own rule ("reducing assurance is not an optimization"), that is
-  a maintainer decision, not a CI-efficiency edit — left open for one.
+- *examples-validation's clang half on PRs.* Its merge and
+  `full-example-matrix` collectors require both toolchains' artifacts, so
+  gating one half cascades through three downstream jobs; needs its own
+  change to the collectors. The `agentready` PR diff also stays: it exists
+  only to comment on PRs.
 - *`needs: lint-and-types` in front of the heavy matrices.* It saves runners
   only on pushes that fail lint, and on a saturated pool it adds a second
   queue wait to every push that passes — the common case. Not landed.

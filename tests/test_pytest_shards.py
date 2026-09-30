@@ -30,7 +30,15 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings, strategies as st
 
-from tests.pytest_shards import assign_files, file_of, parse_shard, select
+from tests.pytest_shards import (
+    assign_files,
+    file_of,
+    file_weights,
+    load_weights,
+    parse_shard,
+    select,
+    weights_from_durations,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -96,6 +104,71 @@ def test_imbalance_is_bounded_by_the_heaviest_file(
         loads[shard - 1] += weights[path]
     if weights:
         assert max(loads) - min(loads) <= max(weights.values())
+
+
+_recorded = st.dictionaries(
+    st.from_regex(r"tests/test_[a-z]{1,6}\.py", fullmatch=True),
+    st.floats(min_value=0, max_value=500, allow_nan=False),
+    max_size=30,
+)
+
+
+@settings(deadline=None)
+@given(_nodeids(), st.integers(min_value=1, max_value=6), _recorded)
+def test_recorded_weights_never_change_what_runs(
+    ids: list[str], total: int, recorded: dict[str, float]
+) -> None:
+    """Weights steer balance only. Stale entries (files no longer collected),
+    missing entries (new files) and zero weights must still yield an exact
+    partition of the collected set."""
+    shards = [select(ids, k, total, recorded) for k in range(1, total + 1)]
+    assert set().union(*shards) == set(ids)
+    assert sum(len(x) for x in shards) == len(set(ids))
+
+
+@settings(deadline=None)
+@given(_nodeids(), _recorded)
+def test_unrecorded_files_fall_back_to_a_count_based_estimate(
+    ids: list[str], recorded: dict[str, float]
+) -> None:
+    weights = file_weights(ids, recorded)
+    assert set(weights) == {file_of(i) for i in ids}
+    for path, weight in weights.items():
+        if path in recorded:
+            assert weight == recorded[path]
+        else:
+            assert weight > 0
+
+
+def test_heavy_files_are_spread_rather_than_stacked() -> None:
+    """The reason weights exist: two slow files and many fast ones must not
+    land the two slow files on one shard just because they hold few tests."""
+    ids = [f"tests/test_slow{i}.py::t{j}" for i in range(2) for j in range(3)]
+    ids += [f"tests/test_fast{i}.py::t{j}" for i in range(20) for j in range(10)]
+    recorded = {"tests/test_slow0.py": 300.0, "tests/test_slow1.py": 300.0}
+    recorded |= {f"tests/test_fast{i}.py": 2.0 for i in range(20)}
+    owner = {k: select(ids, k, 2, recorded) for k in (1, 2)}
+    slow_shards = {k for k, sel in owner.items() for n in sel if "slow" in n}
+    assert slow_shards == {1, 2}
+
+
+def test_durations_fold_into_per_file_seconds() -> None:
+    records = [
+        {"nodeid": "tests/test_a.py::x", "when": "setup", "duration": 1.0},
+        {"nodeid": "tests/test_a.py::x", "when": "call", "duration": 2.5},
+        {"nodeid": "tests/test_b.py::C::y[1]", "when": "call", "duration": 0.25},
+    ]
+    assert weights_from_durations(records) == {
+        "tests/test_a.py": 3.5,
+        "tests/test_b.py": 0.25,
+    }
+
+
+def test_an_unreadable_weights_file_means_count_only_balancing(tmp_path: Path) -> None:
+    bad = tmp_path / "w.json"
+    bad.write_text("not json", encoding="utf-8")
+    assert load_weights(bad) == {}
+    assert load_weights(tmp_path / "missing.json") == {}
 
 
 @pytest.mark.parametrize("spec", ["", "1", "0/3", "4/3", "1/0", "a/b", "-1/2"])

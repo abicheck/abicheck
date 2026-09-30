@@ -397,11 +397,25 @@ jobs:
           fail_ci_if_error: false
 
   unit-tests-other-os:
-    # The full unit suite on macOS and Windows, every PR, no coverage (they
+    # The full unit suite on macOS and Windows, no coverage (they
     # skip the Linux-only ELF/DWARF tests, so their figure is structurally
     # below the floor and has no consumer). `repo_scan` tests are excluded
     # here too: they are OS-independent and `repo-scan-tests` owns them.
     name: unit-tests (${{ matrix.os }}, 3.13)
+    # Not on every PR push. These legs cost ~27 minutes each on the scarcest
+    # runner pools (macOS concurrency is a fraction of Linux's), and every PR
+    # push competing for them is where most of the 24-54 minutes of per-job
+    # queueing measured on 2026-09-29 came from. They run on every push to
+    # `main` (a platform regression surfaces on the first `main` run after
+    # merge), on `workflow_dispatch`, and on PRs labelled `ci:full` -- add it
+    # to a PR touching paths, encodings, subprocesses, temp files or anything
+    # else platform-sensitive. `Native PE/Mach-O compare workflows` and the
+    # macOS/Windows `integration-tests` legs still run on every PR. A moved
+    # detection point, stated: docs/contribute/plans/ci-cost-and-assurance.md,
+    # Phase 7.
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     runs-on: ${{ matrix.os }}
     # 15 was too tight for the canonical (ubuntu, 3.13) leg: its own
     # coverage-collecting main-suite step alone measured 803s (13m23s) on

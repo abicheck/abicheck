@@ -82,6 +82,7 @@ def _user_visible_adr_literals() -> list[str]:
     return hits
 
 
+@pytest.mark.repo_scan
 def test_no_adr_reference_in_user_visible_string_literals() -> None:
     hits = _user_visible_adr_literals()
     assert not hits, "ADR citation in user-visible text:\n" + "\n".join(hits)

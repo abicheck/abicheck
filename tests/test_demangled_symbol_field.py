@@ -33,6 +33,7 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Variable, Visibility
+from tests.schema_validation import validate_instance
 
 _MANGLED = "_ZN3Foo3barEv"
 _DEMANGLED = "Foo::bar()"
@@ -241,7 +242,6 @@ class TestSchema:
         # discover or type the field. Assert both the canonical schema and
         # a real report carrying demangled_symbol validate together.
         pytest.importorskip("jsonschema")
-        import jsonschema
 
         from abicheck.schemas import load_compare_report_schema
 
@@ -266,7 +266,7 @@ class TestSchema:
         from abicheck.reporter import to_json
 
         report = json.loads(to_json(result))
-        jsonschema.validate(instance=report, schema=schema)
+        validate_instance(report, schema)
 
 
 class TestDemanglePrewarmScoping:

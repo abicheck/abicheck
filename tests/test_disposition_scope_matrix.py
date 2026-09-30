@@ -806,6 +806,7 @@ def _record_call_sites():
                 yield path, node
 
 
+@pytest.mark.repo_scan
 def test_only_a_gate_resolved_call_may_declare_from_gate() -> None:
     """`from_gate=True` is the one way to opt a `non_gating` record out of
     the marker, so it may only be used where the disposition really did come
@@ -836,6 +837,7 @@ def test_only_a_gate_resolved_call_may_declare_from_gate() -> None:
     )
 
 
+@pytest.mark.repo_scan
 def test_no_call_site_passes_a_literal_false_gate_exclusion() -> None:
     """The other way to defeat the derivation: state the old default aloud.
 
