@@ -53,10 +53,19 @@ SRC = REPO / "skills-src"
 #: contributor contract, never published) is deliberately out of scope: it
 #: discusses repository internals like `latest_release` that are not report
 #: fields, and scanning it would generate false positives indefinitely.
+#: Published roots are exactly what `gen_agent_skills.py` reads: each
+#: `skills-src/<name>/` carrying a `SKILL.md`, plus `shared/`. Anything else
+#: under `skills-src/` (`evaluation/`'s corpora and reports) never ships.
+_PUBLISHED_ROOTS = {
+    child.name
+    for child in SRC.iterdir()
+    if child.is_dir() and (child / "SKILL.md").is_file()
+} | {"shared"}
 SKILL_FILES = sorted(
     path
     for path in SRC.rglob("*.md")
     if path.parent != SRC  # skills-src/CLAUDE.md and any future sibling doc
+    and path.relative_to(SRC).parts[0] in _PUBLISHED_ROOTS
 )
 
 _INLINE_RE = re.compile(r"`([^`\n]+)`")
