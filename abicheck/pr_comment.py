@@ -1444,8 +1444,8 @@ def build_model(
         raise UnsupportedReportShapeError(
             "This report was produced by the retired `scan` command "
             "(recognised by its 'scan_schema_version' key) and is no longer "
-            "a supported input -- `scan` was deleted outright (ADR-068 "
-            "Phase 6, no deprecation window). Re-run the comparison with "
+            "a supported input -- `scan` was deleted outright "
+            "(no deprecation window). Re-run the comparison with "
             "`compare` (with a stored baseline) or `compare --no-baseline` "
             "and feed this tool the resulting report instead."
         )

@@ -2693,9 +2693,9 @@ if [[ -n "${INPUT_AUDIT:-}" && "${INPUT_AUDIT}" != "false" ]]; then
 fi
 if [[ "$MODE" == "scan" ]]; then
   if [[ ( -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ) && "${INPUT_AUDIT:-false}" != "true" ]]; then
-    echo "::error::mode: scan is no longer supported (ADR-068). Replacement for a baseline scan: mode: compare with old-library set to the same baseline (against/abi-baseline both map onto old-library/abi-baseline unchanged), and new-library unchanged."
+    echo "::error::mode: scan is no longer supported. Replacement for a baseline scan: mode: compare with old-library set to the same baseline (against/abi-baseline both map onto old-library/abi-baseline unchanged), and new-library unchanged."
   else
-    echo "::error::mode: scan is no longer supported (ADR-068). Replacement for an audit-only scan (no baseline, or audit: true): mode: compare with old-library and abi-baseline both omitted -- new-library alone runs an audit-only compare --no-baseline. This candidate-side audit no longer gates a CI job on a BREAKING/API_BREAK-classified finding by default the way mode: scan did -- set severity-preset (e.g. 'default') to restore that gating; without it the step always exits 0/passes regardless of what the audit finds."
+    echo "::error::mode: scan is no longer supported. Replacement for an audit-only scan (no baseline, or audit: true): mode: compare with old-library and abi-baseline both omitted -- new-library alone runs an audit-only compare --no-baseline. This candidate-side audit no longer gates a CI job on a BREAKING/API_BREAK-classified finding by default the way mode: scan did -- set severity-preset (e.g. 'default') to restore that gating; without it the step always exits 0/passes regardless of what the audit finds."
   fi
   exit 1
 fi
@@ -2706,15 +2706,15 @@ fi
 # action/validate-inputs.sh already runs (this is the copy for anyone
 # invoking run.sh directly, e.g. tests).
 if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
-  echo "::error::new-library-set is no longer supported (ADR-068 (b): scan --artifact-set, and mode: scan itself, are both retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented. Remove new-library-set; compare each library individually, or wait for ADR-065 S3."
+  echo "::error::new-library-set is no longer supported (scan --artifact-set and mode: scan itself are both retired). Remove new-library-set and compare each library individually."
   exit 1
 fi
 if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
-  echo "::error::risk-rules is no longer supported (ADR-068 (b): scan --risk-rules, and mode: scan itself, are both retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level a risk profile used to escalate to. Remove risk-rules."
+  echo "::error::risk-rules is no longer supported (scan --risk-rules and mode: scan itself are both retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level a risk profile used to escalate to. Remove risk-rules."
   exit 1
 fi
 if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
-  echo "::error::crosscheck is no longer supported (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax, and mode: scan itself, are both retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity). Remove crosscheck and use policy.overrides instead."
+  echo "::error::crosscheck is no longer supported (scan --crosscheck's KEY=error promotion syntax and mode: scan itself are both retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity). Remove crosscheck and use policy.overrides instead."
   exit 1
 fi
 
@@ -2731,7 +2731,7 @@ fi
 # `mode: dump`'s own `config`/`sources` inputs reach it exactly as they did
 # before this input existed.
 if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
-  echo "::error::build-target is retired on every mode (ADR-068 (b) retired it for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's build-config: input (or let it auto-discover from sources:)."
+  echo "::error::build-target is retired on every mode (it was retired for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's build-config: input (or let it auto-discover from sources:)."
   exit 1
 fi
 
@@ -3294,15 +3294,15 @@ elif [[ "$MODE" == "compare" ]]; then
   fi
   if [[ "$_NO_BASELINE" == "true" ]]; then
     if [[ -n "${INPUT_SINCE:-}" ]]; then
-      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --since as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports since, or drop since for this audit-only run."
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (compare --no-baseline rejects --since as a usage error). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports since, or drop since for this audit-only run."
       exit 1
     fi
     if [[ -n "${INPUT_CHANGED_PATH:-}" ]]; then
-      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --changed-path as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports changed-path, or drop changed-path for this audit-only run."
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (compare --no-baseline rejects --changed-path as a usage error). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports changed-path, or drop changed-path for this audit-only run."
       exit 1
     fi
     if [[ -n "${INPUT_BUDGET:-}" ]]; then
-      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports budget, or drop budget for this audit-only run."
+      echo "::error::mode: compare without a baseline (old-library/abi-baseline both omitted) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (compare --no-baseline rejects --budget as a usage error). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports budget, or drop budget for this audit-only run."
       exit 1
     fi
     if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
@@ -4996,7 +4996,7 @@ _scope_accepted_note() {
   local _scope_accepted_where
   _scope_accepted_where=$(_report_query "$(_json_report_src)" scope_where 2>/dev/null || true)
   echo ">"
-  echo "> ℹ️ The comparison scope was **not fully checked** (ADR-065), accepted under \`scope.on_incomplete: warn\` (the default)${_scope_accepted_where:+: \`$_scope_accepted_where\`}. The compatibility verdict above covers the compared members only — see \`comparison_scope\` in the JSON report."
+  echo "> ℹ️ The comparison scope was **not fully checked**, accepted under \`scope.on_incomplete: warn\` (the default)${_scope_accepted_where:+: \`$_scope_accepted_where\`}. The compatibility verdict above covers the compared members only — see \`comparison_scope\` in the JSON report."
 }
 
 _blocking_gate_note() {
@@ -5036,7 +5036,7 @@ _blocking_gate_note() {
   # identical reason: orthogonal, so it is reported on its own terms.
   if _scope_gated && [[ "$GATE_TIER" != "SCOPE_INCOMPLETE" ]]; then
     echo ">"
-    echo "> ⚠️ The comparison scope also contributed to this run's exit (ADR-065: an unchecked selected member under scope.on_incomplete: block, or no comparison completed). Orthogonal to the compatibility verdict and to the severity policy — see \`comparison_scope\` in the JSON report."
+    echo "> ⚠️ The comparison scope also contributed to this run's exit (an unchecked selected member under scope.on_incomplete: block, or no comparison completed). Orthogonal to the compatibility verdict and to the severity policy — see \`comparison_scope\` in the JSON report."
   else
     _scope_accepted_note
   fi
@@ -5053,7 +5053,7 @@ _blocking_gate_note() {
   elif [[ "$GATE_TIER" == "SCOPE_INCOMPLETE" ]]; then
     # ADR-065's completeness axis, same orthogonal-axis shape as the two
     # branches around it.
-    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal completeness axis (ADR-065: an unchecked selected member under scope.on_incomplete: block, or no comparison completed). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal completeness axis (an unchecked selected member under scope.on_incomplete: block, or no comparison completed). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
   elif [[ "$GATE_TIER" == "ANALYSIS_INCOMPLETE" ]]; then
     # P0.4's assurance axis, mirroring the COVERAGE_INCOMPLETE branch
     # immediately above -- same orthogonal-axis shape, different evidence
@@ -5207,7 +5207,7 @@ else
               echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
             fi
             if _scope_gated; then
-              echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
+              echo "::warning::abicheck also reports an incompletely checked comparison scope; see comparison_scope in the JSON report."
             fi
           elif _scope_gated; then
             # ADR-065 S2's completeness axis alone: an unchecked selected
@@ -5239,7 +5239,7 @@ else
             echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
           fi
           if _scope_gated; then
-            echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
+            echo "::warning::abicheck also reports an incompletely checked comparison scope; see comparison_scope in the JSON report."
           fi
         fi
       elif [[ "${_NO_BASELINE:-false}" == "true" ]]; then
@@ -5316,7 +5316,7 @@ else
       # via the top-level `VERDICT == "ERROR"` branch further down, so
       # this arm changes the label, not whether the step fails.
       VERDICT="EVIDENCE_CONTRACT_ERROR"
-      echo "::error::abicheck aborted: this run's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected)."
+      echo "::error::abicheck aborted: this run's evidence contract could not be satisfied (exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected)."
       ;;
     5)
       # ADR-068 §3 #19's budget-overflow abort (`--budget`,
@@ -5505,10 +5505,10 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # Generic wording -- see the exit-1 dispatch's own comment on why
         # (two independent _EvidenceContractError raise sites, only one of
         # which is about a pinned depth/missing evidence).
-        echo "> **Verdict: EVIDENCE_CONTRACT_ERROR** 🛑 — This scan's evidence contract could not be satisfied (ADR-037 D5). This is not a CLI usage error and not an ABI/API break; see the command's own error message above for the exact cause and remedy (e.g. supplying \`--sources\`/\`--build-info\` or dropping a \`--depth\` pin, or reconsidering an \`--abi3\` target that isn't a recognisable CPython extension module)."
+        echo "> **Verdict: EVIDENCE_CONTRACT_ERROR** 🛑 — This scan's evidence contract could not be satisfied. This is not a CLI usage error and not an ABI/API break; see the command's own error message above for the exact cause and remedy (e.g. supplying \`--sources\`/\`--build-info\` or dropping a \`--depth\` pin, or reconsidering an \`--abi3\` target that isn't a recognisable CPython extension module)."
         ;;
       NOT_COMPARABLE)
-        echo "> **Verdict: NOT_COMPARABLE** 🛑 — The candidate and \`--against\` baseline were not extracted under a comparable profile/scope contract (ADR-050 D2), so no compatibility comparison ran. This is not an ABI/API break; see the JSON report's \`diff.reason\` for what mismatched."
+        echo "> **Verdict: NOT_COMPARABLE** 🛑 — The candidate and \`--against\` baseline were not extracted under a comparable profile/scope contract, so no compatibility comparison ran. This is not an ABI/API break; see the JSON report's \`diff.reason\` for what mismatched."
         ;;
       AUDIT_GATE)
         # ADR-068's 2026-09-10 amendment: `compare --no-baseline`'s own
@@ -5585,9 +5585,9 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         _json_src=$(_json_report_src)
         _scope_where=$(_report_query "$_json_src" scope_where)
         if [[ -n "$_scope_where" ]]; then
-          echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked: \`$_scope_where\` (ADR-065). This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. Supply the missing members, or accept an incompletely checked scope with \`scope.on_incomplete: warn\` (the default; a run that completed no comparison at all still fails)."
+          echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked: \`$_scope_where\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. Supply the missing members, or accept an incompletely checked scope with \`scope.on_incomplete: warn\` (the default; a run that completed no comparison at all still fails)."
         else
-          echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked (ADR-065). This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
+          echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
         fi
         ;;
       PASS)
@@ -6167,7 +6167,7 @@ else
   # step, exactly the class of gap the NOT_COMPARABLE comment above
   # describes for its own exit code.
   if [[ "$VERDICT" == "EVIDENCE_CONTRACT_ERROR" ]]; then
-    echo "::error::abicheck aborted: this run's evidence contract could not be satisfied (ADR-037 D5) — see the command's own error message above for the exact cause."
+    echo "::error::abicheck aborted: this run's evidence contract could not be satisfied — see the command's own error message above for the exact cause."
     FINAL_EXIT=1
   fi
 

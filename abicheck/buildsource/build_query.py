@@ -263,7 +263,7 @@ def drain_build_dir_cleanups(cleanups: Iterable[Callable[[], None]]) -> None:
     ``suppress`` — one failing thunk must not abort the remaining cleanups (which
     would leak the other dirs/locks) nor, when run from a caller's ``finally``,
     replace an in-flight exception with a stray ``OSError``. The single drain site
-    shared by ``inline.collect_inline_pack``, ``cli_scan`` and ``dry_run_estimate``.
+    shared by ``inline.collect_inline_pack`` and ``dry_run_estimate`` (and the retired ``cli_scan``).
     """
     for cleanup in cleanups:
         with contextlib.suppress(Exception):

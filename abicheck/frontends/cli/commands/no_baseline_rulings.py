@@ -241,7 +241,7 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
     ),
     "diagnostic_comparison": (
         "--diagnostic-comparison",
-        "ADR-050's escape hatch downgrades an incomparable-pair failure; with "
+        "this escape hatch downgrades an incomparable-pair failure; with "
         "the baseline declared absent there is no second contract to be "
         "incomparable with, so the check never runs",
     ),
@@ -370,8 +370,8 @@ def _reject_unsupported_options(kwargs: dict[str, Any]) -> None:
     for dest, (spelling, reason) in _UNSUPPORTED_OPTIONS.items():
         if _was_given(kwargs.get(dest)):
             raise click.UsageError(
-                f"{spelling} is not available with --no-baseline: {reason} "
-                "(ADR-068 D2). It is rejected rather than silently ignored so "
+                f"{spelling} is not available with --no-baseline: {reason}"
+                ". It is rejected rather than silently ignored so "
                 "a CI job never believes it took effect."
             )
 
@@ -409,7 +409,7 @@ def _reject_context_stashed_options(ctx: click.Context) -> None:
             "--variant is not available with --no-baseline: it selects among "
             "the variants a stored ProjectSnapshot package declares, and this "
             "path performs no variant selection -- a package operand is "
-            "audited through its single artifact (ADR-068 D2). It is rejected "
+            "audited through its single artifact. It is rejected "
             "rather than silently ignored so a CI job never believes it took "
             "effect."
         )

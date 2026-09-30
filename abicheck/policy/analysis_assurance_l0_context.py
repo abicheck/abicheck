@@ -40,8 +40,8 @@ def l0_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list[str
     helpers' presence-then-asymmetry shape.
 
     Self-audit finding (P0.4 review): an ``AbiSnapshot`` need not carry any
-    binary at all -- ``cli_scan_helpers._intrinsic_coverage`` already
-    documents and reports this exact state as ``"no binary export table
+    binary at all -- the retired ``cli_scan_helpers._intrinsic_coverage`` documented
+    and reported this exact state as ``"no binary export table
     (snapshot-only input)"`` (``has_binary = bool(snap.elf or snap.pe or
     snap.macho)``), the same predicate this helper uses. A comparison where
     only one side carries a real binary (the other a synthetic/

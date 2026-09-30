@@ -194,7 +194,7 @@ directory/package release comparison renders `json`/`markdown`/`junit`/
 | `--report-mode leaf\|impact` | `--view impact` / `--view root-cause`. **`leaf` was removed outright** — see [§E](#e-machine-output-report-and-snapshot-schemas). |
 | `--show-only <filter>` | `--view show=<tokens>` (severity / element / action tokens; AND across dimensions, OR within one) |
 | `--show-impact` | `--view impact` |
-| `--show-filtered` | **Removed — now automatic.** The scope/reconciliation ledger, the pattern-modulation ledger and the `--suppress` audit are always reported (ADR-067). There is nothing to switch on. |
+| `--show-filtered` | **Removed — now automatic.** The scope/reconciliation ledger, the pattern-modulation ledger and the `--suppress` audit are always reported. There is nothing to switch on. |
 | C++ demangling switches | **Removed — now automatic.** Human output always demangles and always keeps the exact mangled name beside it. |
 | `--exit-code-scheme` | **Removed.** The scheme is derived: severity-aware when a severity setting is in effect, legacy otherwise. See [CI Gating → the two exit-code schemes](../use/ci-gating.md#the-two-exit-code-schemes). |
 | `--profile {ci-gate,release-cut,quick}` | **Removed, no replacement token.** State `--depth`, `-o` and `--severity-preset` independently — a rendering choice may not carry a gate setting. `quick` is `-o oneline=-`. |
@@ -225,7 +225,7 @@ supported spelling of anything; it is two stray operands.
 | `--allow-ast-frontend-fallback` | `compile.ast_frontend_fallback: true` |
 | `--allow-unsupported-castxml` | `compile.allow_unsupported_castxml: true` |
 | `--gcc-path` / `--gcc-prefix` (`--compiler`/`--compiler-prefix`) | `compile.compiler:` — one merged key; a trailing `-` is a toolchain prefix, anything else a compiler path |
-| `--gcc-option` / `--compiler-option` (repeatable) | `compile.options:` (a YAML list). A `-D` among them has a better home: `compile.defines:`, or the per-invocation `-D/--define NAME[=VALUE]` that `dump`/`compare` regained in ADR-074 — the one member of this family with a CLI spelling again. |
+| `--gcc-option` / `--compiler-option` (repeatable) | `compile.options:` (a YAML list). A `-D` among them has a better home: `compile.defines:`, or the per-invocation `-D/--define NAME[=VALUE]` that `dump`/`compare` regained — the one member of this family with a CLI spelling again. |
 | `--sysroot` | `compile.sysroot:` |
 | `--nostdinc` | `compile.nostdinc: true` |
 | `--lang c` | `compile.lang: c` |

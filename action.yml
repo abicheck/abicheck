@@ -11,8 +11,8 @@ inputs:
     description: >
       Operation mode. The Action exposes four analysis modes, mirroring
       abicheck's core per-library CLI commands (compare/dump/deps tree/deps
-      compare — ADR-043; the CLI additionally has project-orchestration
-      commands like `aggregate` and `project plan` (ADR-054) that this
+      compare; the CLI additionally has project-orchestration
+      commands like `aggregate` and `project plan` that this
       Action does not expose as separate modes): "compare" (default)
       compares two ABI surfaces — old-library/new-library may be single
       binaries/snapshots OR directories/packages, in which case abicheck
@@ -20,15 +20,15 @@ inputs:
       mode); omitting old-library (and abi-baseline) runs an audit-only
       `compare --no-baseline` against new-library alone, reporting no
       old/new compatibility verdict — see the migration section of
-      docs/use/github-action.md for converting a `mode: scan` job (retired,
-      ADR-068) to this shape, including the severity-preset requirement to
+      docs/use/github-action.md for converting a `mode: scan` job (retired)
+      to this shape, including the severity-preset requirement to
       keep it gating a CI job the way `mode: scan`'s own audit mode did;
       "dump" generates a JSON baseline snapshot from a single library (now
       also embeds optional L3/L4/L5 build-source evidence via source/build
       inputs); "deps-tree" resolves transitive dependencies and symbol
       bindings for one binary (Linux ELF); "deps-compare" compares a
       binary's full dependency stack across two sysroots (Linux ELF).
-      `mode: scan` itself is retired outright (ADR-068 D8, hard removal,
+      `mode: scan` itself is retired outright (hard removal,
       no deprecation window) — setting it fails the step with an error
       naming the replacement for your shape.
     required: false
@@ -77,15 +77,11 @@ inputs:
     required: false
   new-library-set:
     description: >
-      RETIRED (ADR-068 D8, hard removal, no deprecation window). It mapped
-      to the now fully-removed `scan --artifact-set`/`mode: scan`:
-      preserving its per-member manifest/coverage accounting needs ADR-065
-      S3's package component inventories, and routing it onto `compare
-      --no-baseline DIR` before those land would silently narrow those
-      guarantees. Still declared so a
-      workflow that sets it gets an explicit `::error::` naming that
-      prerequisite instead of a silently-ignored input; run one audit-only
-      compare per library until ADR-065 S3 lands.
+      RETIRED (hard removal, no deprecation window). It mapped
+      to the now fully-removed `scan --artifact-set`/`mode: scan`. Still
+      declared so a workflow that sets it gets an explicit `::error::`
+      instead of a silently-ignored input; remove it and compare each
+      library individually.
       For a multi-library release comparison against an old side, use
       mode: compare with a directory/package operand instead.
     required: false
@@ -110,7 +106,7 @@ inputs:
     description: 'Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
   fail-on-removed-library:
-    description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full (ADR-065 D2/S3); a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
+    description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full; a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
 
   # ── Header inputs ───────────────────────────────────────────────────────────
@@ -145,7 +141,7 @@ inputs:
   build-target:
     description: >
       RETIRED (hard removal, no deprecation window). `scan --build-target`
-      was retired first (ADR-068's second 2026-09-09 amendment, ruling (b));
+      was retired first;
       `dump --build-target`, which this input mapped to, was retired next,
       once that removal resolved the routing hazard that had deferred it —
       neither command has this flag any more. Still declared so a workflow
@@ -388,7 +384,7 @@ inputs:
   # ── Source-scan & build-source evidence (dump / compare modes) ────────────────────────
   against:
     description: >
-      RETIRED (ADR-068's Action-input-lifecycle amendment, D8 hard
+      RETIRED (hard
       removal). This applied only to the now-removed mode: scan, as the
       baseline artifact to compare the scanned new-library against. Set
       old-library (or abi-baseline) to the same value under mode: compare
@@ -439,7 +435,7 @@ inputs:
     required: false
   jobs:
     description: >
-      Removed and ignored (ADR-068 D5). This input used to forward
+      Removed and ignored. This input used to forward
       `-j/--jobs` to `compare`, capping the directory/package release
       fan-out's worker count. Both the flag and the input are gone: the
       release engine auto-detects the CPU count and clamps it to available
@@ -494,7 +490,7 @@ inputs:
       the inline sources/build-info/compile-db inputs themselves, which are
       rejected with an error before the run since the per-library fan-out
       never collects them. Note what pinning a rung does and does not
-      guarantee: a shortfall is reported (ADR-064's exit-7 evidence-contract
+      guarantee: a shortfall is reported (the exit-7 evidence-contract
       axis) only for a pinned build/source rung on a side this run extracts
       live. A member that is already a serialized snapshot was never
       extracted by this run, so no shortfall is reported for it -- a
@@ -511,7 +507,7 @@ inputs:
       Rejected outright (step fails before any dependency install) for
       compare's audit-only shape (old-library and abi-baseline both
       omitted): compare --no-baseline does not implement revision-range
-      evidence scoping (ADR-068 D2) -- set old-library (or abi-baseline)
+      evidence scoping -- set old-library (or abi-baseline)
       to use since.
     required: false
   changed-path:
@@ -530,7 +526,7 @@ inputs:
       scope. Maps to compare --budget. Rejected outright (step fails before
       any dependency install) for compare's audit-only shape (old-library
       and abi-baseline both omitted): compare --no-baseline does not wire
-      the wall-clock guard to that path yet (ADR-068 D2) -- set old-library
+      the wall-clock guard to that path yet -- set old-library
       (or abi-baseline) to use budget.
     required: false
   dry-run:
@@ -554,7 +550,7 @@ inputs:
     default: 'false'
   estimate:
     description: >
-      RETIRED (ADR-068). This applied only to the now-removed mode: scan,
+      RETIRED. This applied only to the now-removed mode: scan,
       as a dry-run alias. Use dry-run: 'true' instead, which applies to
       every mode. Still declared so a workflow that sets it gets an
       explicit `::error::` naming that replacement instead of a
@@ -563,7 +559,7 @@ inputs:
     default: 'false'
   audit:
     description: >
-      RETIRED (ADR-068). This applied only to the now-removed mode: scan,
+      RETIRED. This applied only to the now-removed mode: scan,
       forcing a one-build audit-only run. Under mode: compare, simply omit
       old-library and abi-baseline to run an audit-only compare
       --no-baseline instead; set severity-preset (e.g. 'default') if this
@@ -575,7 +571,7 @@ inputs:
     default: 'false'
   crosscheck:
     description: >
-      RETIRED (ADR-068 D8, hard removal -- dropped, superseded, not a hard
+      RETIRED (superseded, not a hard
       removal with nothing to replace it). `scan --crosscheck`'s KEY=LEVEL
       promotion syntax, which this input mapped to, no longer exists (along
       with mode: scan itself): every cross-source check it used to gate
@@ -588,7 +584,7 @@ inputs:
     required: false
   risk-rules:
     description: >
-      RETIRED (ADR-068 D8, hard removal). `scan --risk-rules` is gone,
+      RETIRED (hard removal). `scan --risk-rules` is gone,
       together with mode: scan itself and the risk-driven `auto` depth
       escalation it fed: an omitted `depth` now resolves to the fixed
       `headers` rung — the same default `compare` has always used — instead
@@ -659,10 +655,10 @@ inputs:
       Output format: json, markdown, sarif, html, junit, review, or oneline
       (each mode's default when this input is left unset). compare, two-sided
       shape, single-pair (non-directory, non-package) operand: all seven.
-      compare, two-sided shape, directory/package operand: json, markdown, or
-      junit only — sarif/html/review/oneline are rejected with an error (the
-      per-library release fan-out has no single report those formats
-      describe). compare against a stored BundleFacts baseline (old-library
+      compare, two-sided shape, directory/package operand: json, markdown,
+      junit, oneline, or html (a release page rendered from the release JSON)
+      — sarif/review are rejected with an error (the per-library release
+      fan-out has no single report those formats describe). compare against a stored BundleFacts baseline (old-library
       naming such a document, new-library a directory/package): json or
       markdown only — that driver renders no junit either. This one narrowing
       is NOT pre-checked before the dependency install, unlike every other
@@ -690,7 +686,7 @@ inputs:
     required: false
   snapshot-compression:
     description: >
-      dump mode only (ADR-059). Storage envelope for the written snapshot:
+      dump mode only. Storage envelope for the written snapshot:
       'auto' (default) infers gzip/zstd/plain from output-file's canonical
       suffix (.abicheck.json.gz/.abicheck.json.zst/plain .abicheck.json);
       an explicit 'none', 'gzip', or 'zstd' is used as-is and is a hard
@@ -794,7 +790,7 @@ inputs:
       CLI override. Applied identically to single-pair compare's two-sided
       and audit-only (`--no-baseline`) shapes before its removal, and
       rejected outright for a directory/package compare's per-library
-      release fan-out until ADR-071, which gave that operand real semantics:
+      release fan-out until that operand was given real semantics:
       the fan-out folds every compared member's own `analysis_assurance` with
       `max` into the same exit axis, so `assurance.require_complete: true` is
       no longer single-pair-only. Still
@@ -918,9 +914,9 @@ outputs:
       detects new public API additions),
       COVERAGE_INCOMPLETE (with --contract via extra-args, when
       the selected contract domain cannot be closed on the available
-      evidence -- ADR-049's orthogonal coverage axis, which leaves the
+      evidence -- the orthogonal coverage axis, which leaves the
       compatibility verdict unchanged), SCOPE_INCOMPLETE (directory/package
-      operands only, ADR-065: a selected member went unchecked under
+      operands only: a selected member went unchecked under
       `.abicheck.yml`'s `scope.on_incomplete: block` key, or the run
       completed no comparison at all -- the completeness axis, orthogonal
       to the compatibility verdict, which then covers the compared members
@@ -929,7 +925,7 @@ outputs:
       `assurance.require_complete: true`, when
       analysis_assurance.status is not "complete" -- P0.4's orthogonal
       assurance axis, which likewise leaves the compatibility verdict
-      unchanged. Applies at any operand cardinality since ADR-071: for a
+      unchanged. Applies at any operand cardinality: for a
       directory/package operand it is `max` over every compared member's own
       contribution, so one member short of complete analysis publishes this
       verdict for the whole release, and the release JSON's
@@ -965,7 +961,7 @@ outputs:
       every one of these states published COMPATIBLE).
       For compare's audit-only shape (old-library and abi-baseline both
       omitted -- the replacement for a baseline-less mode: scan/audit: true
-      request, ADR-068): COVERAGE_INCOMPLETE (with --contract via
+      request): COVERAGE_INCOMPLETE (with --contract via
       extra-args, when the selected contract domain cannot be closed on the
       available evidence -- the same orthogonal coverage axis as the
       two-sided shape above; unlike the two-sided shape, there is no bare
@@ -1024,13 +1020,13 @@ outputs:
       above, leaving the audit-only contract incomplete),
       NOT_COMPARABLE (two-sided shape only, with the old-library or
       abi-baseline input: when the candidate and baseline were not
-      extracted under a comparable profile/scope contract -- ADR-050 D2 --
+      extracted under a comparable profile/scope contract,
       so no comparison could run at all; this verdict fails the step
       unconditionally, since no fail-on-* input governs a run in which no
       comparison happened. Never reachable on the audit-only shape, which
       has no baseline to mismatch against), BUDGET_OVERFLOW (two-sided
       shape only, with the budget input), EVIDENCE_CONTRACT_ERROR
-      (this run's evidence contract could not be satisfied -- ADR-037 D5
+      (this run's evidence contract could not be satisfied
       -- so no comparison could run at all: a pinned --depth/--source-method
       whose required source evidence was never collected. Two-sided shape
       only for the --abi3-targeting-an-unrecognisable-binary cause --
@@ -1048,8 +1044,7 @@ outputs:
       pr-comment setting, or extra-args, closing a gap four successive
       review rounds found in three earlier signaling designs (a stderr
       marker line, then a marker-file path, each shown forgeable by a
-      PR-controlled build script the run's own evidence collection spawns
-      -- see ADR-064 for the full account).
+      PR-controlled build script the run's own evidence collection spawns).
       Whether a JSON report also exists for this Action to read
       (auto-injected `-o json=...` sidecar, extra-args naming one, or
       `format: json`; an extra-args export set replaces this Action's own,
@@ -1087,7 +1082,7 @@ outputs:
       (severity error, incomplete contract coverage, incomplete analysis
       assurance with
       `.abicheck.yml`'s `assurance.require_complete: true`, or -- directory/package
-      operands, ADR-065 -- an incompletely checked comparison scope under
+      operands -- an incompletely checked comparison scope under
       `.abicheck.yml`'s scope.on_incomplete: block key, or no comparison completed at all under
       either setting; the four share the code and are told apart by the
       report's pre-fold severity.exit_code /
@@ -1116,7 +1111,7 @@ outputs:
       same way, one level down under diff),
       3 (AUDIT_GATE -- the audit-gate axis;
       see the verdict output's own description above),
-      7 (evidence-contract error, ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR
+      7 (evidence-contract error, VERDICT=EVIDENCE_CONTRACT_ERROR
       -- a pinned --depth/--source-method whose required source evidence
       was never collected; reachable on the audit-only shape too, since
       the underlying precondition checks run regardless of whether a

@@ -180,7 +180,7 @@ def explicit_source_extractor(
     still honor a *named* backend the same way every other resolver does.
     ``scan``'s candidate resolution is that caller: it has always let its L4
     replay take ``_make_source_extractor``'s own clang reading of ``"auto"``
-    (see ``scan_engine``'s call site), so adopting :func:`effective_frontend`
+    (see the retired ``scan_engine``'s call site), so adopting :func:`effective_frontend`
     wholesale would newly *require* castxml for a plain ``scan --depth
     source`` that works with clang today. Answering only the named case keeps
     that behaviour untouched while closing the real defect underneath it --

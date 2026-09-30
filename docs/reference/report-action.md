@@ -15,9 +15,7 @@ generated: false
 `actions/report` publishes an **already-produced** abicheck JSON report to a
 pull request, as a sticky comment and/or a job summary. It is the
 publication half of the two-workflow split described in
-[Reporting on fork pull requests](../use/fork-pr-reporting.md), and its
-design record is
-[ADR-073](../contribute/adr/073-report-only-publication-and-the-trusted-reporter-boundary.md).
+[Reporting on fork pull requests](../use/fork-pr-reporting.md).
 
 > **It analyses nothing.** No comparison, no dump, no build query, no
 > compiler, no project-dependency install. It installs abicheck and renders.
@@ -33,7 +31,7 @@ design record is
    report, a directory/package release report, a `compare --no-baseline`
    audit report, and an `aggregate` fan-in document.
 2. Renders the sticky comment body — the same projection the root Action
-   posts ([ADR-072](../contribute/adr/072-pr-comment-reporting-fidelity.md)),
+   posts,
    unchanged.
 3. Bounds the body and the job summary independently against GitHub's real
    limits, disclosing any truncation in the body itself.

@@ -85,8 +85,8 @@ def evidence_contract_notice(
     return (
         "Requested --depth evidence was not reached in: "
         + ", ".join(short)
-        + f". Contributes {contribution} to the release exit code (ADR-064 "
-        "evidence-contract axis). Inline --sources/--build-info are not "
+        + f". Contributes {contribution} to the release exit code "
+        "(evidence-contract axis). Inline --sources/--build-info are not "
         "accepted for a directory/package compare, so pre-dump each member "
         "with `dump --sources`/`--build-info` and compare the snapshot "
         "directories, or compare the library individually."
@@ -112,8 +112,8 @@ def evidence_contract_error_entries(
             "error": (
                 "Requested --depth evidence was not reached for this member; "
                 "its findings rest on shallower evidence than was asked for. "
-                "Contributes 7 to the release exit code (ADR-064 "
-                "evidence-contract axis)."
+                "Contributes 7 to the release exit code "
+                "(evidence-contract axis)."
             ),
         }
         for entry in library_results

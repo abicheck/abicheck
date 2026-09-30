@@ -17,9 +17,9 @@
 
 ## Verdict and consumer impact
 
-This is a **single-release audit** (ADR-035 "G20" corpus): there is no v1/v2
+This is a **single-release audit** (the "G20" corpus): there is no v1/v2
 pair to diff, just one build's evidence checked against itself. abicheck
-reports **no verdict at all** (`"verdict": null`): ADR-068 D2 — a single build
+reports **no verdict at all** (`"verdict": null`): a single build
 has nothing to be compatible *with*, so the audit answers what is *present*,
 not whether something broke. (The catalog's own 🟢 COMPATIBLE classification
 above is a statement about the case, not about the command's output: nothing
@@ -50,8 +50,7 @@ abicheck compare --no-baseline snapshot.abi.json
 ```
 
 !!! note "`compare --no-baseline`, not `scan`"
-    [ADR-068](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    D2 makes this the declared spelling for a single-build audit, and
+    0.6 makes this the declared spelling for a single-build audit, and
     retires `scan`. This case was blocked on that migration until
     2026-09-09; the audit now reports the finding below directly, and
     `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that it

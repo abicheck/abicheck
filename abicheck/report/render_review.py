@@ -15,6 +15,10 @@ from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
 class ImpactedSymbol:
     symbol: str
     kind: str
+    #: ``compare --use-cases``: the use cases whose entrypoints reach this
+    #: finding (the per-finding inverse of ``use_case_impact``); ``()`` when
+    #: none does or the attribution never ran.
+    use_cases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +58,12 @@ class ReviewDigest:
     result_counts: dict[str, int] = field(default_factory=dict)
     evidence_summary: str = ""
     show_release_recommendation: bool = False
+    #: The project's versioning-policy verdict (``PolicyAcceptance.to_dict()``),
+    #: ``None`` when no ``versioning:`` policy was stated.
+    policy_acceptance: dict[str, Any] | None = None
+    #: ``compare --use-cases``: ``group_id`` -> the use cases reaching any of
+    #: that review group's findings; empty when the attribution never ran.
+    review_group_use_cases: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 #: Per-list caps for the bounded review digest. Named rather than inline so
@@ -119,8 +129,10 @@ def render_review_digest(digest: ReviewDigest) -> str:
                 f"   {compact(group['consequence'], 240)}",
                 f"   Action: {compact(group['action'], 200)}",
                 f"   Findings: {', '.join(group['member_kinds'])}",
-                "",
             ]
+            if affects := digest.review_group_use_cases.get(str(group.get("group_id"))):
+                lines.append(f"   Affects use cases: {', '.join(affects)}")
+            lines.append("")
         if len(digest.review_groups) > len(shown):
             lines += [
                 f"… {len(digest.review_groups) - len(shown)} more group(s) omitted; export `markdown` or `json` for details.",
@@ -191,6 +203,15 @@ def render_review_digest(digest: ReviewDigest) -> str:
             f"SONAME `{digest.soname_value}`",
             "",
         ]
+    if digest.policy_acceptance is not None:
+        from .render_markdown import versioning_policy_label
+
+        lines += [
+            "**Versioning policy:** "
+            + versioning_policy_label(digest.policy_acceptance)
+            + f" — {digest.policy_acceptance.get('detail')}",
+            "",
+        ]
     if digest.env_matrix_source_sha256 is not None:
         lines += [
             f"**Deployment floor digest:** `{digest.env_matrix_source_sha256}`",
@@ -229,7 +250,8 @@ def render_review_digest(digest: ReviewDigest) -> str:
     if digest.impacted and not digest.review_groups:
         lines += ["**Top impacted symbols:**", ""]
         for sym in digest.impacted[:MAX_REVIEW_IMPACTED_SYMBOLS]:
-            lines.append(f"- `{sym.symbol}` — {sym.kind}")
+            note = f" (affects: {', '.join(sym.use_cases)})" if sym.use_cases else ""
+            lines.append(f"- `{sym.symbol}` — {sym.kind}{note}")
         if len(digest.impacted) > MAX_REVIEW_IMPACTED_SYMBOLS:
             lines.append(
                 f"- … and {len(digest.impacted) - MAX_REVIEW_IMPACTED_SYMBOLS} more"

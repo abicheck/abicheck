@@ -25,6 +25,8 @@ import logging
 import os
 from typing import Any
 
+from .extract.dwarf_subtree_index import drop_index
+
 log = logging.getLogger(__name__)
 
 
@@ -429,3 +431,6 @@ def free_cu_die_cache(CU: Any) -> None:
     diemap = getattr(CU, "_diemap", None)
     if diemap is not None:
         diemap.clear()
+    # The indexed child iterator's per-unit table holds the unit's raw
+    # bytes; it is rebuilt on next use, so dropping it keeps the bound.
+    drop_index(CU)

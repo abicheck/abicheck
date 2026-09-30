@@ -403,8 +403,8 @@ class ReportFindings:
 _RELEASE_FINDING_KEYS = ("bundle_findings", "matrix_findings")
 
 #: Where a ``scan --against`` report keeps its findings
-#: (``scan_engine.ScanOutcome.to_dict``'s ``diff`` block, filled by
-#: ``cli_scan_baseline``). A third report shape after ``compare`` and
+#: (the retired ``scan_engine.ScanOutcome.to_dict``'s ``diff`` block, filled by
+#: ``cli_scan_baseline``; both deleted by ADR-068 Phase 6). A third report shape after ``compare`` and
 #: ``compare-release``, and like the release shape it can never be
 #: *complete*: only the gating buckets are itemized (compatible findings are
 #: deliberately left out) and the list is capped at 20 with a

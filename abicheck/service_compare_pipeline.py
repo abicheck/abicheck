@@ -670,7 +670,7 @@ def classify_compare_pair(
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
     # its target DSO given as the other `CompareRequest` side still reads as
-    # byte-identical (mirrors the same fix on
+    # byte-identical (mirrors the same fix on the retired
     # `cli_scan_baseline._run_baseline_compare`).
     from .binary_utils import resolve_linker_script_chain
 

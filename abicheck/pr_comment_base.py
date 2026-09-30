@@ -232,7 +232,7 @@ class CommentModel:
     review_groups: list[dict[str, object]] = field(default_factory=list)
     result_counts: dict[str, int] | None = None
     # scan mode only (see `pr_comment_scan.from_scan`): the raw
-    # `scan_engine.ScanOutcome` verdict string
+    # (retired) `scan_engine.ScanOutcome` verdict string
     # ("COMPATIBLE"/"API_BREAK"/"BREAKING"/"NOT_COMPARABLE"/…), the
     # risk-score dict (`RiskScore.to_dict()`), and a short per-layer
     # coverage summary line list -- rendered in their own "🔎 Scan"/

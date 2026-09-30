@@ -276,7 +276,7 @@ class _AbicheckGroup(_RootGroupBase):
         """
         if args and args[0] == "scan":
             raise click.UsageError(
-                "No such command 'scan'. `scan` was removed (ADR-068) -- use "
+                "No such command 'scan'. `scan` was removed -- use "
                 "`compare` (with a stored baseline) or `compare --no-baseline` "
                 "(audit-only, no stored baseline) instead."
             )

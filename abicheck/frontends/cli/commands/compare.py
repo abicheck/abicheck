@@ -92,10 +92,10 @@ from ..runtime import (
 )
 from .dump import dump_cmd
 
-#: `oneline` joined the set once `report/release_oneline.py` gave it a real
-#: aggregate render (it needs no per-member `DiffResult`, unlike the three
-#: still missing -- see `docs/contribute/known-gaps.md`).
-_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline"})
+#: `oneline` and `html` render the aggregate release document alone
+#: (`report/release_oneline.py`, `report/render_release_html.py`); the two still
+#: missing need a per-member `DiffResult` -- see `docs/contribute/known-gaps.md`.
+_RELEASE_FORMATS = frozenset({"json", "markdown", "junit", "oneline", "html"})
 
 
 def reject_release_incompatible_view_mode(report_mode: str) -> None:
@@ -186,7 +186,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     if fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
             f"-o {fmt}=... is not available when comparing directories or "
-            "packages: sarif/html/review require a single-pair (non-directory, "
+            "packages: sarif/review require a single-pair (non-directory, "
             "non-package) comparison. Choose one of: "
             f"{', '.join(sorted(_RELEASE_FORMATS))}, or compare one library at "
             f"a time (a single old/new .so pair) to export {fmt}."
@@ -212,7 +212,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         if secondary_fmt not in _RELEASE_FORMATS:
             raise click.UsageError(
                 f"-o {secondary_fmt}=... is not available when comparing "
-                "directories or packages: sarif/html/review require a "
+                "directories or packages: sarif/review require a "
                 "single-pair (non-directory, non-package) comparison. Choose "
                 f"one of: {', '.join(sorted(_RELEASE_FORMATS))}, or compare one "
                 "library at a time (a single old/new .so pair) to export "
@@ -534,15 +534,15 @@ def _embed_inline_source_side(
     is_flag=True,
     default=False,
     help="Declare that no prior surface exists for this candidate -- an "
-    "audit, not a comparison (ADR-068 D2). Takes exactly one operand (the "
+    "audit, not a comparison. Takes exactly one operand (the "
     "candidate build) instead of OLD NEW; the OLD side is recorded with "
-    "ADR-065's 'declared_absent' acquisition state. Replaces `scan`'s "
+    "the 'declared_absent' acquisition state. Replaces `scan`'s "
     "audit-only mode (no --against): reports candidate-side facts only -- "
     "never an addition, a removal, or a compatibility verdict. "
     "--severity-preset is the sole switch that arms this audit's own gate: "
     "any preset other than 'info-only' contributes exit 3 the first time a "
-    "finding is BREAKING/API_BREAK-classified (ADR-068 2026-09-10 "
-    "amendment); omit it, or pass 'info-only', to opt out.",
+    "finding is BREAKING/API_BREAK-classified; "
+    "omit it, or pass 'info-only', to opt out.",
 )
 # Set-input fan-out (ADR-037 D7): --dso-only, --output-dir only bite
 # when the operands are directories/packages; a no-op-with-warning otherwise.
@@ -581,7 +581,7 @@ def _embed_inline_source_side(
     "suitable for a job summary or PR comment; 'oneline' emits a "
     "single human-readable summary line -- the 'just tell me' "
     "flow. A directory/package (release) comparison renders "
-    "json/markdown/junit/oneline only. Every export is rendered "
+    "json/markdown/junit/oneline/html only. Every export is rendered "
     "from the one completed comparison -- asking for more "
     "artifacts never re-runs the analysis and never changes the "
     "verdict or the exit code.",
@@ -593,7 +593,7 @@ def _embed_inline_source_side(
     callback=_validate_view,
     expose_value=True,
     metavar="TOKEN",
-    help="Repeatable rendering selector (ADR-068 D4): never changes the "
+    help="Repeatable rendering selector: never changes the "
     "verdict, findings, or exit code. TOKEN: "
     "'full' (default)/'impact'/'root-cause' (report mode); "
     "'show=<tokens>' (display filter over severity "
@@ -603,7 +603,7 @@ def _embed_inline_source_side(
     "one, repeatable to OR whole groups together). Example: --view root-cause "
     "--view show=breaking,functions. Disclosure is not a token: the "
     "pattern-modulation ledger, the scope/reconciliation ledger and the "
-    "--suppress audit are always reported (ADR-067), and C++ symbols are "
+    "--suppress audit are always reported, and C++ symbols are "
     "always demangled in human output with the exact mangled name kept "
     "beside them.",
 )
@@ -631,7 +631,7 @@ def _embed_inline_source_side(
     "config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Path to the project .abicheck.yml (ADR-037 D4). Default: the "
+    help="Path to the project .abicheck.yml. Default: the "
     "nearest .abicheck.yml found from the current directory upward. "
     "Supplies stable project settings (severity map, scope/FP "
     "tuning, suppression policy); CLI flags override it.",
@@ -700,7 +700,7 @@ def _embed_inline_source_side(
     "--budget",
     "budget",
     default=None,
-    help="ADR-068 §3 #19: a wall-clock guard on this run's deadline-aware "
+    help="A wall-clock guard on this run's deadline-aware "
     "stages, so a CI job fails clearly (exit 5) instead of running "
     "unbounded. A duration like 15m/900s/1h; unset means no budget.",
 )
@@ -719,7 +719,7 @@ def _embed_inline_source_side(
     "diagnostic_comparison",
     is_flag=True,
     default=False,
-    help="ADR-050 D2's sanctioned escape hatch: when OLD and NEW were "
+    help="A diagnostic escape hatch: when OLD and NEW were "
     "extracted under a genuinely incomparable profile/scope "
     "(ExtractionContract mismatch), downgrade the default hard "
     "failure (exit 16, no verdict) into a tentative diff instead, "
@@ -735,8 +735,8 @@ def _embed_inline_source_side(
     "use_cases_manifest",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="An impact-use-cases.yaml manifest (G29 Phase 4, ADR-057 "
-    "amendment) whose declared use cases this comparison's own "
+    help="An impact-use-cases.yaml manifest "
+    "whose declared use cases this comparison's own "
     "findings are attributed to: for each use case, which changes "
     "its resolved entrypoints can be shown to reach. Needs a "
     "source graph on at least one side (dump --sources/"
@@ -781,7 +781,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
       2  Error-level findings in potential_breaking (but not abi_breaking)
       4  Error-level findings in abi_breaking
     \b
-    Orthogonal to both tables (ADR-049 Phase 7): with --contract,
+    Orthogonal to both tables: with --contract,
     incomplete contract coverage of the selected --contract domain
     contributes exit 1. It is folded with max, so it raises a clean 0 to 1
     and never lowers a 2/4 — under the legacy scheme, 1 can only mean this.
@@ -802,7 +802,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     pair compares only, not the directory/package release fan-out (see
     docs/reference/config-file.md's `assurance:` section).
     \b
-    A third, independent orthogonal axis (ADR-068 2026-09-10 amendment):
+    A third, independent orthogonal axis:
     under --no-baseline, this becomes an audit rather than a comparison, and
     --severity-preset (any value other than 'info-only') opts that audit
     into gating on its own findings, contributing exit 3

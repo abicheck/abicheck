@@ -24,9 +24,9 @@ kept out of that module for two independent reasons:
   print the candidate twice under two labels, exactly the "a baseline was
   consulted" misreading ADR-068 D2 forbids.
 * **Imports.** ``compare_dry_run`` reaches ``workflows.compare_cost_preview``
-  and ``dry_run_estimate``, which close the ``cli_options -> dry_run_estimate ->
+  and ``dry_run_estimate``, which closed the ``cli_options -> dry_run_estimate ->
   scan_engine -> cli_scan_baseline -> cli_compare_helpers`` CLI-registration
-  SCC. A ``--no-baseline`` dispatch importing that module -- even
+  SCC (the ``scan_*`` members were retired by ADR-068 Phase 6). A ``--no-baseline`` dispatch importing that module -- even
   function-locally, which the AI-readiness scan counts too -- would join that
   cluster, which the ``import-cycle-growth`` gate rejects for a new member
   (``AGENTS.md`` "What NOT to do": move the shared logic to a leaf module,
@@ -139,7 +139,7 @@ def build_no_baseline_dry_run_result(
     result.add(
         "Output and exit-code behavior",
         f"format: {fmt}",
-        "no compatibility verdict is reported (ADR-068 D2); exit code folds the "
+        "no compatibility verdict is reported; exit code folds the "
         "coverage, analysis-assurance and evidence-contract axes only",
     )
     if collects_source and sources is None and build_info is None:

@@ -197,4 +197,12 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       already resolves several (``2.32``/``2.36``/``2.38``/``3.2``
 #:       in the per-comparison report's constant): renumber, don't
 #:       reuse, rather than discarding either side's change.
-RELEASE_SCHEMA_VERSION = "1.8"
+#: - ``1.9`` adds ``libraries[].dependencies``: per side (``old``/``new``),
+#:       the member's recorded ELF ``DT_SONAME`` (``soname``) and ``DT_NEEDED``
+#:       list (``needed``), copied from the member's snapshots
+#:       (``report.release_dependency_graph.member_dependencies``). A side
+#:       without ELF metadata is absent, and the whole block is absent when
+#:       neither side has any -- never an empty list standing in for "not
+#:       read". Additive; the HTML release report's dependency graph is drawn
+#:       from exactly these facts.
+RELEASE_SCHEMA_VERSION = "1.9"

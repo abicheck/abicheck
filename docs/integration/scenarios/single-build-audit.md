@@ -2,21 +2,15 @@
 
 You want abicheck to run — surfacing internal-noise checks, cross-source
 findings, a public-surface report — but there is nothing to compare against
-yet: no prior release, no `accepted-main` history, nothing. This is
-[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
-§8's S5, and it is a **real, distinct** check kind, not a degraded form of
+yet: no prior release, no `accepted-main` history, nothing. This is scenario S5, and it is a **real, distinct** check kind, not a degraded form of
 comparison — advisory by default, since there is no baseline-drift verdict
 to gate CI on in the first place.
 
-## The declared target: `compare --no-baseline` (ADR-068 D2)
+## The declared target: `compare --no-baseline`
 
-[ADR-068](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-D2 makes this scenario a *scope* of the one comparison product rather than a
-second command: `abicheck compare --no-baseline CANDIDATE`, with OLD
-recorded in
-[ADR-065](../../contribute/adr/065-comparison-scope-selection-and-completeness.md)'s
-`declared_absent` acquisition state. `scan` is retired with **no deprecation
-window** (ADR-068 D8) once that migration completes, so treat
+This scenario is a *scope* of the one comparison product rather than a
+second command: `abicheck compare --no-baseline CANDIDATE`, with OLD recorded in the `declared_absent` acquisition state. `scan` is retired with **no deprecation
+window** once that migration completes, so treat
 `compare --no-baseline` as where this scenario is going.
 
 **It gets you there now.** The two defects that made this section read
@@ -38,7 +32,7 @@ providers) have no audit-report equivalent yet, see
 abicheck compare --no-baseline build/libfoo.so -H include/
 ```
 
-This runs the same ADR-035 cross-source/single-release checks
+This runs the same cross-source/single-release checks
 (`CROSS_SOURCE_EVOLUTION_CHECKS`, e.g. `exported_not_public`,
 `private_header_leak`, `unversioned_exported_symbol`,
 `rtti_for_internal_type`, `public_not_exported`,
@@ -46,8 +40,7 @@ This runs the same ADR-035 cross-source/single-release checks
 `scan CANDIDATE` (no `--against`) runs, and reports whatever it finds under
 `findings[]`.
 
-Two things to know about the report shape, both direct consequences of
-ADR-068 D2:
+Two things to know about the report shape, both direct consequences of treating an audit as a comparison scope:
 
 - **`changes[]` is always empty, and `verdict` is always `null`.** An audit
   reports no addition, no removal, and no compatibility verdict — the
@@ -57,7 +50,7 @@ ADR-068 D2:
   `declared_absent` is always `persistent` (the check fired) or
   `not_evaluated` (the check's evidence gate closed). `introduced` and
   `resolved` are unreachable here by construction: both assert something
-  about a baseline this run was told does not exist (ADR-068 D3).
+  about a baseline this run was told does not exist.
 
 `--header`/`--include`, `--sources`/`--build-info`, `--depth`, `--contract`,
 `--policy`/`--suppress`, `--dry-run` and `-o/--output` all work. The export
@@ -71,19 +64,18 @@ error too: there is no OLD side for it to describe.
 Exit codes: hygiene findings are advisory and never gate on their own, so a
 clean run and a run reporting several findings both exit `0` **by default**.
 Gating on a hygiene finding is opt-in, via the audit-gate axis
-([ADR-068's 2026-09-10 amendment](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-10-the-audit-gate-exit-axis)):
+:
 a `scan`-based gating job migrating to `compare --no-baseline` needs exactly
 one addition to keep gating on a `BREAKING`/`API_BREAK`-classified finding —
 add `--severity-preset default` (or `strict`) — which then exits `3`, never
 `2`, so the hygiene gate can never be mistaken for a real compatibility
 break; a non-gating job needs no change. The four orthogonal axes still
 apply — see
-[exit codes](../../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact).
+[exit codes](../../reference/exit-codes.md#compare-no-baseline-single-artifact).
 
 ## The Action: `mode: compare`, no baseline
 
-[ADR-068's Action-input-lifecycle amendment](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-11-the-action-input-lifecycle-mode-scan-retired-outright)
-retired `mode: scan` outright — the root Action's `mode: compare` now
+0.6 retired `mode: scan` outright — the root Action's `mode: compare` now
 exposes `--no-baseline` directly: omit both `old-library` and `abi-baseline`
 and it runs the audit-only shape. So at the Action level, a no-baseline
 audit — including one that needs L3/L4 evidence — goes through

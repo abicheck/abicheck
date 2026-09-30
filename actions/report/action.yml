@@ -4,7 +4,7 @@ description: >-
   sticky comment and/or a job summary. Renders only -- it installs no
   project dependencies, invokes no compiler, runs no build query and
   performs no comparison, so it is safe to run in the trusted
-  `workflow_run` job that publishes a fork PR's results (ADR-073). A
+  `workflow_run` job that publishes a fork PR's results. A
   non-clean compatibility verdict never fails this Action; a failed
   publication always does.
 

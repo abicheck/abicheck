@@ -1,6 +1,6 @@
 # Case 118: Internal Struct Gains a Field (Non-Public, Scoped)
 
-**Category:** Public-Surface Scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE
+**Category:** Public-Surface Scoping | **Verdict:** ✅ NO_CHANGE
 
 ## Verdict and consumer impact
 
@@ -65,7 +65,7 @@ isn't installed here.
 With `-H`/`--header` the header AST parser records which declarations are
 public. abicheck then resolves the public surface — exported symbols plus
 their reachable type closure — and computes `InternalStats`'s layout change
-against that closure (ADR-024). Because `InternalStats` is never reached
+against that closure. Because `InternalStats` is never reached
 from `translate()` or any other exported declaration, the layout change is
 routed to the filtered/audit ledger instead of the reported findings, and
 the verdict stays `NO_CHANGE`. Internal-type *leaks* (a private type
@@ -99,7 +99,7 @@ reports.
 
 ## Cross-tool comparison
 
-`abidiff`/ABICC have no equivalent of ADR-024 public-surface scoping — both
+`abidiff`/ABICC have no equivalent of abicheck's public-surface scoping — both
 tools diff every type present in the debug info regardless of reachability
 from an exported declaration, so a plain `abidiff v1.xml v2.xml` on these
 two `.so` files would report the `InternalStats` field addition (as a

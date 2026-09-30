@@ -269,8 +269,7 @@ then guarantees the properties the old hand-written gate loop silently violated:
   `abi-report-windows-x86_64.json`, the gate reports Windows as unavailable and
   fails at exit `1` — it does **not** pass green as "all platforms compatible"
   when a required platform was never analyzed.
-* **Gate, coverage, compatibility, and contract coverage stay orthogonal
-  (ADR-042, extended by ADR-049 Phase 7).** Each report carries its own
+* **Gate, coverage, compatibility, and contract coverage stay orthogonal.** Each report carries its own
   severity gate decision; `aggregate` *combines* those (a policy-blocked
   `COMPATIBLE` still fails, a demoted `BREAKING` can pass) rather than
   recomputing a gate from the verdict. The exit code is `0` pass / `1`
@@ -543,7 +542,7 @@ Behavior knobs:
   all sections; `summary` reduces the comment to the verdict and counts.
 
 The same four inputs work for `mode: compare`'s audit-only shape
-(`old-library`/`abi-baseline` both omitted — ADR-068 D2, the replacement for
+(`old-library`/`abi-baseline` both omitted — the replacement for
 legacy `mode: scan` with no baseline): the comment renders the audit's own
 `AUDIT_GATE`/`AUDIT_CLEAN`/`AUDIT_RISK` verdict and candidate-side findings,
 with no second `compare` run and no OLD side to render at all:
@@ -683,10 +682,9 @@ build-id resolution:
 
 ## Application compatibility check
 
-There is no separate `appcompat` mode (ADR-043 folded it into `compare
---used-by`). Check whether your application binary is affected by a library
+There is no separate `appcompat` mode (it was folded into `compare --used-by`). Check whether your application binary is affected by a library
 update by scoping a normal `compare` to it via `extra-args` (see the note in
-[GitHub Action: Application-scoped comparison](github-action.md#application-scoped-comparison-adr-043-appcompat-folded-into-compare-used-by)
+[GitHub Action: Application-scoped comparison](github-action.md#application-scoped-comparison-appcompat-folded-into-compare-used-by)
 about the dedicated `used-by` input available in `v0.6.0`):
 
 ```yaml

@@ -98,6 +98,26 @@ def test_no_unapproved_import_cycle_growth(car):
     assert f.errors == [], f"Unapproved import-cycle growth detected: {f.errors}"
 
 
+def test_import_cycle_allowlist_names_only_existing_modules(car):
+    """Every allowlisted SCC member must still name a real ``abicheck`` module.
+
+    ``short <= allowed`` matching means a member naming a deleted module is
+    never noticed: it only widens the approved cluster. Ten such members
+    (``cli_doctor``, ``cli_probe``, ...) had built up in the CLI
+    registration cluster after their commands were removed. This test fails
+    on the next one, so a deletion PR has to shrink the allowlist too.
+    """
+    pkg = ROOT / "abicheck"
+    stale = sorted(
+        member
+        for scc in car.IMPORT_CYCLE_ALLOWLIST
+        for member in scc
+        if not (pkg / (member.replace(".", "/") + ".py")).is_file()
+        and not (pkg / member.replace(".", "/") / "__init__.py").is_file()
+    )
+    assert stale == [], f"IMPORT_CYCLE_ALLOWLIST names deleted modules: {stale}"
+
+
 def test_adr_index_and_nav_sync_holds(car):
     f = car.Findings()
     car.check_adr_index_and_nav_sync(f)

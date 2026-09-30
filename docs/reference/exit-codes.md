@@ -14,9 +14,9 @@ generated: false
 
 `abicheck` uses different exit codes for each command family.
 
-**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` had one too, but it was **retired outright** (ADR-068 D1/D8) — see [that section's warning](#abicheck-scan-retired) before depending on any of its historical codes.
+**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` had one too, but it was **retired outright** — see [that section's warning](#abicheck-scan-retired) before depending on any of its historical codes.
 
-## Contract relevance decides what the gate sees (ADR-049)
+## Contract relevance decides what the gate sees
 
 Under `--contract`, each finding's contract relevance is classified
 **before** compatibility policy runs, and policy then scores only the
@@ -42,7 +42,7 @@ from being the cheapest way to pass.
 **Without `--contract` no finding carries a relevance**, so every
 finding is scored exactly as before and every exit code below is unchanged.
 
-## Contract-coverage contribution (ADR-049)
+## Contract-coverage contribution
 
 `compare` carries an **orthogonal contract-coverage axis**
 under `--contract` (the retired `scan --against` carried the same one). Complete coverage of the mode-selected evidence
@@ -70,7 +70,7 @@ library`'s exit `8` is checked ahead of the coverage-only fallback, so a
 removed library's own signal is never masked by an unrelated coverage gap
 (and a real verdict-based `2`/`4` still wins outright over both, unchanged).
 
-## The completeness axis (ADR-065 D6/D7, directory/package `compare` only)
+## The completeness axis (directory/package `compare` only)
 
 Two more orthogonal `0`/`1` contributions, folded with `max` exactly like the
 contract-coverage axis above (a clean `0` becomes `1`; a `2`/`4` is never
@@ -95,14 +95,14 @@ Both appear in the report's `exit` block (`incomplete_scope_contribution`,
 `no_comparison_completed_contribution`) and, when they decide the code, in
 `exit.reasons`. A scalar `compare` never sets either.
 
-**Migration note (exit `8`).** Before ADR-065 S2, the (now-removed)
+**Migration note (exit `8`).** Before the completeness axis landed, the (now-removed)
 `--fail-on-removed-library` flag (today `.abicheck.yml`'s
 `gate.fail_on_removed_library: true`) exited `8` on the raw old-minus-new filename set difference, so a partial
 local build compared against a full baseline read as "N libraries removed".
 Exit `8` now requires the removal to be *proven*: the NEW side's inventory
 must be proven complete. Two things prove it, and nothing else does — a
 stored `ProjectSnapshot` package or bundle-facts document whose capture
-asserted `inventory_complete`, or (since ADR-065 S3) a **package archive**
+asserted `inventory_complete`, or a **package archive**
 operand, whose extractor unpacks the container in full or fails, so the
 components found in the extracted tree are the whole set the package ships.
 A stored package *without* the assertion and a live directory still cannot
@@ -117,7 +117,7 @@ complete. A one-member NEW directory is not narrowed: its unmatched OLD
 members stay unchecked, so `block` still gates — discovered cardinality is
 never read as intent.
 
-**Migration note (exit `8`, second step — ADR-065 S3).** S3 makes a package
+**Migration note (exit `8`, second step).** S3 makes a package
 *archive* pair a completeness proof, so `gate.fail_on_removed_library: true`
 reaches exit `8` again for `abicheck compare old.rpm new.rpm` (or `.deb`/`.tar.*`/
 `.whl`/`.conda`) where S2 had left it reachable only for a stored snapshot.
@@ -151,19 +151,18 @@ can be demoted. Only legacy output without a gate block falls back from
 compatibility verdict to `2`/`4`. Existing command-specific `5`, `8`, and `64`
 behavior is as documented below.
 
-## `compare --no-baseline` (ADR-068 D2, single artifact)
+## `compare --no-baseline` (single artifact)
 
 `abicheck compare --no-baseline NEW` declares that no prior surface exists
 for `NEW` and runs a candidate-side audit instead of a comparison — the
 first replacement for `scan`'s audit-only mode (no `--against`) and
-ADR-047 §8's S5. `--no-baseline` is an explicit declaration, never inferred
+integration scenario S5. `--no-baseline` is an explicit declaration, never inferred
 from argument count: `compare NEW` (one operand, no flag) and
 `compare --no-baseline OLD NEW` (the flag plus two operands) are both usage
 errors, exit `64`. Only a single artifact is supported today; a
-directory/package operand is also a usage error until ADR-065 S3's package
-component inventories land (plan §5 P5).
+directory/package operand is also a usage error until package component inventories land.
 
-The OLD side is recorded with ADR-065's `declared_absent`
+The OLD side is recorded with the `declared_absent`
 `MemberAcquisition` state — distinct from `not_supplied` (an *unproven*
 absence that can leave the scope reading incomplete): the user declared
 there is no prior surface, so `run_outcome.scope` reads `complete` and the
@@ -176,10 +175,10 @@ contributes `0` to the exit code.
 The audit's own content is the candidate-side finding set — the eleven
 cross-source hygiene checks and the pattern/preprocessor pre-scan, reported
 under `findings[]` (not `changes[]`, which stays empty by construction).
-These stay advisory (ADR-028 D3 / ADR-035 D1: `RISK`/`API_BREAK`, never
+These stay advisory (`RISK`/`API_BREAK`, never
 `BREAKING`), so **a hygiene finding never gates on its own** — an audit that
 reports several findings still exits `0` unless one of the orthogonal axes
-below fires. Every finding carries its ADR-068 D3 evolution state, which
+below fires. Every finding carries its evolution state, which
 with a `declared_absent` OLD is always `persistent` or `not_evaluated`,
 never `introduced`.
 
@@ -188,10 +187,10 @@ run, folded with the same `max` discipline:
 
 | Axis | Contributes | When |
 |---|---|---|
-| Audit gate (ADR-068 2026-09-10 amendment) | `3` | `--severity-preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
-| Analysis assurance (P0.4 / ADR-071) | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete`. On a directory/package (release) `compare`, `max` over every compared member's own contribution |
-| Contract coverage (ADR-049 Phase 7) | `1` | `--contract` and the selected domain's required evidence is incomplete |
-| Evidence contract (ADR-064) | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
+| Audit gate | `3` | `--severity-preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
+| Analysis assurance | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete`. On a directory/package (release) `compare`, `max` over every compared member's own contribution |
+| Contract coverage | `1` | `--contract` and the selected domain's required evidence is incomplete |
+| Evidence contract | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
 
 The contract-coverage row was inert until 2026-09-09 — `--contract` was
 parsed and documented on this path but never forwarded, so the ledger it
@@ -205,16 +204,15 @@ activate identically. Without `--contract` the contribution is still always
 
 The evidence-contract row was added in the same pass, for the same reason:
 `--depth build` with no `--sources`/`--build-info` silently degraded to
-symbols-only evidence and reported a clean audit. It now records ADR-064's
-exit-7 axis, matching the two-sided `compare` path exactly. A *stored*
+symbols-only evidence and reported a clean audit. It now records the exit-7 axis, matching the two-sided `compare` path exactly. A *stored*
 snapshot candidate (`.abi.json`) is exempt — this run never extracted it, so
 it cannot have fallen short of a pinned depth.
 
 `compare --no-baseline` never emits `2`/`4`: an audit reports no
-compatibility verdict (ADR-068 D2), so the compatibility family contributes
+compatibility verdict, so the compatibility family contributes
 nothing and only the orthogonal axes above can raise its exit code.
 
-**The audit-gate axis (ADR-068 2026-09-10 amendment).** Legacy `scan`'s
+**The audit-gate axis.** Legacy `scan`'s
 audit mode derived a *verdict* from its own findings and gated at `2` on a
 hygiene finding whose kind is `BREAKING`/`API_BREAK`-classified.
 `compare --no-baseline` cannot reproduce that at `2`/`4` (D2 forbids it),
@@ -232,9 +230,7 @@ per-category severity mapping — that mapping's `potential_breaking` bucket
 merges `API_BREAK_KINDS` with `RISK_KINDS`, which would gate an advisory-
 only `RISK` finding the same as an `API_BREAK` one; the preset only
 activates the axis, it does not decide which findings gate. See
-`policy/audit_gate_exit.py` and
-[ADR-068's amendment](../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-10-the-audit-gate-exit-axis)
-for the full account.
+`policy/audit_gate_exit.py` for the full account.
 
 **On `compare --no-baseline` only**, `--dry-run` reports the same condition
 ahead of any analysis: against a *live* candidate, a pinned `--depth build`/
@@ -267,7 +263,7 @@ to `1` and **never lowers** a `2`/`4`/`5`/`6` — incomplete assurance cannot
 demote a real ABI break to "warnings only", and it never rewrites the
 compatibility verdict, any finding, or the severity gate's own contribution.
 
-`assurance.require_complete: true` applies at any cardinality (ADR-071). A
+`assurance.require_complete: true` applies at any cardinality. A
 directory/package (release) `compare` folds **each member's own** `0`/`1`
 contribution with `max()` — the identical contribution a single-pair
 `compare` of that member computes — so a release of one library and that
@@ -290,7 +286,7 @@ that fell short and why, a top-level `analysis_assurance_exit_contribution`
 per-`libraries[]` `analysis_assurance_status`; a non-JSON format gets the
 same facts as a one-line stderr notice.
 
-This axis stays orthogonal to ADR-065's completeness axis, and both can apply
+This axis stays orthogonal to the completeness axis, and both can apply
 to the same run: that one asks whether every *selected member* was compared at
 all (an inventory question), this one asks whether the comparisons that *ran*
 had complete evidence. A release can be scope-`complete` with a `partial`
@@ -380,7 +376,7 @@ were and still reported). `budget_overflow_contribution` has no `compare`
 trigger yet — there is still no `--budget` flag — so it stays `0` on every
 `compare` report, prerequisite plumbing for the plan's Phase 7.
 
-## Commands removed in the ADR-043 CLI reset
+## Commands removed in the pre-1.0 CLI reset
 
 `appcompat` and `plugin-check` are gone as standalone commands; their scoping
 folded into `compare` itself — see
@@ -405,9 +401,9 @@ below.
 | `0` | `NO_CHANGE`, `COMPATIBLE`, or `COMPATIBLE_WITH_RISK` — no binary ABI break |
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
-| `5` | Budget overflow — the run's wall-clock `--budget` guard was exceeded. `compare` has its own `--budget` flag now (ADR-068 §3 #19, `frontends/cli/commands/compare.py`); exit `5` applies to both `compare` and `scan` on overflow. |
-| `7` | Evidence-contract error (ADR-037 D5) — the analysis a pinned input asked for could not be performed at all, so it was not silently downgraded. Reachable through **`--abi3 VERSION` against a candidate that is not a recognisable CPython extension module** (ADR-068 plan Phase 2d), and through **a pinned `--depth build`/`--depth source` whose evidence doesn't reach it** (ADR-068 plan §3 row 28, closed — `compare` shares this floor with `scan`/`dump` now, verified live). The depth trigger applies only when **at least one operand is a live extraction**; comparing two already-serialized snapshots is exempted from it even when neither embeds L3/L4 evidence (verified live — see [Evidence Depth](../use/evidence-depth.md)'s "pinned depth is a contract" warning), so a clean both-snapshot `compare` is not proof the pinned depth was reached. **On `compare`, the top-level `verdict` field is *not* `"EVIDENCE_CONTRACT_ERROR"`** for either trigger — verified live: it stays whatever the (otherwise-unaffected) compatibility comparison produced (e.g. `"NO_CHANGE"`). The error is carried in the `exit` block instead: `exit.code: 7` and `exit.reasons: ["evidence_contract_error"]`. A JSON consumer must check `exit`, not `verdict`, to detect this. (`scan`'s own dedicated exit path does set `verdict: "EVIDENCE_CONTRACT_ERROR"` — see its row below — so the two commands differ here despite sharing the same exit code.) `compare` folds this through the same `ExitDecision` precedence rule `scan` uses (`exit_decision_precedence.resolve_scan_exit_decision`), so the two commands can never disagree on which axis wins, only on how the JSON surfaces it. `dump`'s own, separately implemented floor for the depth trigger raises `DumpDepthNotSatisfiedError` and exits `1` instead — no snapshot is written — since `dump` has no verdict to fall back to. |
-| `16` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `-o json=-`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
+| `5` | Budget overflow — the run's wall-clock `--budget` guard was exceeded. `compare` has its own `--budget` flag now (`frontends/cli/commands/compare.py`); exit `5` applies to both `compare` and `scan` on overflow. |
+| `7` | Evidence-contract error — the analysis a pinned input asked for could not be performed at all, so it was not silently downgraded. Reachable through **`--abi3 VERSION` against a candidate that is not a recognisable CPython extension module**, and through **a pinned `--depth build`/`--depth source` whose evidence doesn't reach it** (`compare` shares this floor with `scan`/`dump` now, verified live). The depth trigger applies only when **at least one operand is a live extraction**; comparing two already-serialized snapshots is exempted from it even when neither embeds L3/L4 evidence (verified live — see [Evidence Depth](../use/evidence-depth.md)'s "pinned depth is a contract" warning), so a clean both-snapshot `compare` is not proof the pinned depth was reached. **On `compare`, the top-level `verdict` field is *not* `"EVIDENCE_CONTRACT_ERROR"`** for either trigger — verified live: it stays whatever the (otherwise-unaffected) compatibility comparison produced (e.g. `"NO_CHANGE"`). The error is carried in the `exit` block instead: `exit.code: 7` and `exit.reasons: ["evidence_contract_error"]`. A JSON consumer must check `exit`, not `verdict`, to detect this. (`scan`'s own dedicated exit path does set `verdict: "EVIDENCE_CONTRACT_ERROR"` — see its row below — so the two commands differ here despite sharing the same exit code.) `compare` folds this through the same `ExitDecision` precedence rule `scan` uses (`exit_decision_precedence.resolve_scan_exit_decision`), so the two commands can never disagree on which axis wins, only on how the JSON surfaces it. `dump`'s own, separately implemented floor for the depth trigger raises `DumpDepthNotSatisfiedError` and exits `1` instead — no snapshot is written — since `dump` has no verdict to fall back to. |
+| `16` | `not_comparable` — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `-o json=-`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
 | `64` | Invalid invocation — bad arguments/options or an unreadable/unrecognised input, deliberately outside the `0/2/4` verdict space |
 
 > **`compare --dry-run` does not preview the exit-`7` depth floor.** Pinning
@@ -433,7 +429,7 @@ is computed from the severity configuration rather than the verdict:
 | `4` | Error-level findings in `abi_breaking` |
 | `5` | Budget overflow — as in the legacy table above; the run's wall-clock `--budget` guard was exceeded before any severity classification could run, so it is scheme-independent. |
 | `7` | Evidence-contract error — as in the legacy table above; raised before severity classification runs, so it is scheme-independent. |
-| `16` | `not_comparable` (ADR-050 D2) — the comparability gate hard-fails before severity classification ever runs, identical to the legacy scheme's `16`. |
+| `16` | `not_comparable` — the comparability gate hard-fails before severity classification ever runs, identical to the legacy scheme's `16`. |
 
 The highest applicable code wins. For example, if both `abi_breaking=error` and
 `quality_issues=error` have findings, the exit code is `4`.
@@ -496,9 +492,8 @@ verdict=$(python3 -c "import json,sys; d=json.load(open('result.json')); print(d
 When `compare` is handed directory or package inputs (RPM/deb/tar/conda/wheel),
 it fans out to per-library pairs and aggregates the worst per-library verdict
 across the release — the behaviour formerly exposed as the standalone
-`compare-release` command (folded into `compare` per ADR-037 D7; the GitHub
-Action's own `compare-release`/`stack-check` mode aliases were removed the
-same way, per ADR-043 — `mode: compare` handles directory/package operands
+`compare-release` command (folded into `compare`; the GitHub
+Action's own `compare-release`/`stack-check` mode aliases were removed the same way — `mode: compare` handles directory/package operands
 directly). By default a set/release comparison uses the verdict-based scheme
 below, plus a dedicated code for removed libraries:
 
@@ -507,15 +502,15 @@ below, plus a dedicated code for removed libraries:
 | `0` | All libraries compatible (no API/ABI break) |
 | `2` | Worst verdict is `API_BREAK` |
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
-| `1` | No compatibility break, but the completeness axis contributed (ADR-065): `.abicheck.yml`'s `scope.on_incomplete: block` with an incompletely checked scope, or a run that completed no comparison at all (under either setting). Also the contract-coverage axis's own floor, as for single-pair `compare`. |
-| `8` | A library was **proven** removed between releases (NEW's inventory is proven complete — a stored `ProjectSnapshot` package or bundle-facts document whose capture asserted `inventory_complete`; ADR-065 D2) and `.abicheck.yml`'s `gate.fail_on_removed_library: true` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. An unmatched library under an unproven inventory never exits `8`; see the completeness axis above. |
-| `16` | `not_comparable` (ADR-050 D2) — at least one library's OLD/NEW DSOs were not extracted under a comparable profile/scope contract. Takes precedence over **every** other outcome in the release, including `8` (removed-library) and a genuine `ERROR`: a not_comparable result means the comparison couldn't establish what changed at all, so it dominates in both the legacy and severity-aware schemes. Identical code to native `compare`'s own `16`. |
+| `1` | No compatibility break, but the completeness axis contributed: `.abicheck.yml`'s `scope.on_incomplete: block` with an incompletely checked scope, or a run that completed no comparison at all (under either setting). Also the contract-coverage axis's own floor, as for single-pair `compare`. |
+| `8` | A library was **proven** removed between releases (NEW's inventory is proven complete — a stored `ProjectSnapshot` package or bundle-facts document whose capture asserted `inventory_complete`) and `.abicheck.yml`'s `gate.fail_on_removed_library: true` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. An unmatched library under an unproven inventory never exits `8`; see the completeness axis above. |
+| `16` | `not_comparable` — at least one library's OLD/NEW DSOs were not extracted under a comparable profile/scope contract. Takes precedence over **every** other outcome in the release, including `8` (removed-library) and a genuine `ERROR`: a not_comparable result means the comparison couldn't establish what changed at all, so it dominates in both the legacy and severity-aware schemes. Identical code to native `compare`'s own `16`. |
 
 On the release path the severity-aware code (`0/1/2/4`) replaces the
 verdict-based `2/4` mapping only when a severity *map* is actually in effect —
 that is, any `--severity-*` flag is passed **or** `.abicheck.yml` carries a
 `severity:` block (a preset or per-category levels). There is no manual
-override any more (ADR-064 / CLI cleanup phase two PR G2 removed
+override any more (CLI cleanup removed
 `--exit-code-scheme` and `.abicheck.yml`'s `exit_code_scheme:` key): the
 scheme is fully automatic, so with no severity values to apply, the fan-out
 has nothing to score against and falls back to the legacy verdict mapping —
@@ -534,9 +529,8 @@ scheme-independent CI behaviour.
 
 ## `abicheck scan` (retired)
 
-!!! danger "`scan` was retired by ADR-068 Phase 6 — hard removal, no deprecation window"
-    [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    D1 reduced the root surface to six verbs and retired `scan` as a second
+!!! danger "`scan` was retired in 0.6 — hard removal, no deprecation window"
+    0.6 reduced the root surface to six verbs and retired `scan` as a second
     analysis product. D8 is explicit that the removal is **hard**: no hidden
     alias, no shim, no silent ignoring. `abicheck scan` now exits `64` with
     `No such command`, and the error names `compare --no-baseline`. **The
@@ -551,9 +545,7 @@ scheme-independent CI behaviour.
     instead, and where none exists yet, see
     [known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
     for what is still open. The GitHub Action's own `mode: scan` input has
-    since been retired outright too — see
-    [ADR-068's Action-input-lifecycle amendment](../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-11-the-action-input-lifecycle-mode-scan-retired-outright)
-    and the [migration guide](../use/github-action.md#migrating-from-mode-scan).
+    since been retired outright too — see the [migration guide](../use/github-action.md#migrating-from-mode-scan).
 
 **Everything below this point, to the end of this section, is historical —
 `scan` no longer exists and none of it is a live invocation to copy.** While
@@ -567,11 +559,11 @@ ran a one-build audit/hygiene/source-consistency scan only; pass it and
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Compatible; or (audit-only, no `--against`) advisory-only crosscheck findings with no comparison verdict at all |
-| `2` | Source-level / API break (incl. `API_BREAK` cross-source findings). On a baseline (`--against`) scan, a cross-source finding (`exported_not_public`, `unversioned_exported_symbol`, ...) is scored exactly like any other `compare` finding as of 2026-09-09 (ADR-068 amendment) — it is **not** advisory-only just because it came from a cross-source check |
+| `2` | Source-level / API break (incl. `API_BREAK` cross-source findings). On a baseline (`--against`) scan, a cross-source finding (`exported_not_public`, `unversioned_exported_symbol`, ...) is scored exactly like any other `compare` finding as of 2026-09-09 — it is **not** advisory-only just because it came from a cross-source check |
 | `4` | ABI break (from the `--against` comparison) |
 | `5` | `--budget` overflow — the time guard tripped (scope is never silently shrunk) |
-| `6` | `NOT_COMPARABLE` (ADR-050 D2) — `ARTIFACT` and `--against` were not extracted under a comparable profile/scope contract, so the comparison never ran (`diff.reason` in `-o json=-`). Distinct from `compat check`'s `9` and native `compare`'s `16` — every command maintains an independent exit-code scheme. |
-| `7` | Evidence-contract error (ADR-037 D5) — a pinned `--depth`/`--source-method` whose required source evidence was never collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module. No comparison ever ran (`verdict: "EVIDENCE_CONTRACT_ERROR"` in `-o json=-`); this process's own dedicated exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of format or whether a JSON report was written. |
+| `6` | `NOT_COMPARABLE` — `ARTIFACT` and `--against` were not extracted under a comparable profile/scope contract, so the comparison never ran (`diff.reason` in `-o json=-`). Distinct from `compat check`'s `9` and native `compare`'s `16` — every command maintains an independent exit-code scheme. |
+| `7` | Evidence-contract error — a pinned `--depth`/`--source-method` whose required source evidence was never collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module. No comparison ever ran (`verdict: "EVIDENCE_CONTRACT_ERROR"` in `-o json=-`); this process's own dedicated exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of format or whether a JSON report was written. |
 | `64` | Invalid invocation (bad arguments/options) |
 
 > Exit `5` is `scan`-only in practice: `--budget 15m` **fails** the run
@@ -584,11 +576,11 @@ ran a one-build audit/hygiene/source-consistency scan only; pass it and
 > ever exits `0`/`1`/`64`, never a verdict code; see
 > [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
 
-> **`scan --artifact-set`** (auditing 2+ libraries together, ADR-056) is
-> **retired** — ADR-068's second 2026-09-09 amendment rules it (b), a
+> **`scan --artifact-set`** (auditing 2+ libraries together) is
+> **retired** in 0.6 — a
 > documented breaking change with no deprecation window. The capability is
-> not abandoned: plan §3 #16 retires the *mode*, and it returns as
-> `compare --no-baseline DIR` over ADR-065 S3's package component
+> not abandoned: 0.6 retires the *mode*, and it returns as
+> `compare --no-baseline DIR` over package component
 > inventories, which are the prerequisite for preserving its per-member
 > selection and coverage accounting. Until then, run `compare --no-baseline`
 > once per library. Exit `1` on a `scan` was unchanged there and meant a
@@ -664,8 +656,7 @@ therefore before any severity computation — ever runs.
 
 The multi-target fan-in gate folds the per-target `compare`/`scan` JSON reports
 a CI build matrix produces (one `abi-report-<target>.json` per leg) into one
-gate decision. Four axes stay **orthogonal** (ADR-042, extended by ADR-049
-Phase 7), and the exit code is the worst contribution across them:
+gate decision. Four axes stay **orthogonal**, and the exit code is the worst contribution across them:
 
 - **gate** — each report already carries its own severity gate decision
   (`severity.{exit_code,blocking,blocking_categories}`); `aggregate` *combines*
@@ -806,7 +797,7 @@ checked for. Neither block affects the exit code; the full field list is in
 
 ## Application- and plugin-scoped comparisons (`compare --used-by`/`--required-symbol`)
 
-The standalone `appcompat` and `plugin-check` commands are gone (ADR-043).
+The standalone `appcompat` and `plugin-check` commands are gone.
 Their scoping now folds into `compare` itself:
 
 - **`compare --used-by APP`** (repeatable) — folds `appcompat`. `APP` is a
@@ -861,7 +852,7 @@ renamed from the old `--baseline`/`--candidate`).
 | `0` | `PASS` | Binary loads and no harmful ABI changes |
 | `1` | `WARN` | Binary loads but ABI risk detected in dependencies |
 | `4` | `FAIL` | Load failure or binary ABI break in dependencies |
-| `5` | — | `not_comparable` (ADR-050 D2) — at least one dependency's before/after DSOs were not extracted under a comparable profile/scope contract, so its per-library ABI diff never ran. Dominates `0`/`1`/`4`, the same "couldn't establish what changed" precedence the gate uses elsewhere. |
+| `5` | — | `not_comparable` — at least one dependency's before/after DSOs were not extracted under a comparable profile/scope contract, so its per-library ABI diff never ran. Dominates `0`/`1`/`4`, the same "couldn't establish what changed" precedence the gate uses elsewhere. |
 | `64` | — | Invalid invocation (bad arguments/options) |
 
 `--dry-run` shows the old/new roots, resolved binary paths, and search order
@@ -916,7 +907,7 @@ In `abicheck compat`, non-verdict failures are further classified where possible
 | `6` | Invalid compat configuration/input (descriptor, suppression, regex flags) |
 | `7` | Failed to write report/output artifact |
 | `8` | Dump/analysis pipeline failure |
-| `9` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced. Distinct from native `compare`'s own `16` — the two commands maintain independent exit-code schemes. |
+| `9` | `not_comparable` — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced. Distinct from native `compare`'s own `16` — the two commands maintain independent exit-code schemes. |
 | `10` | Generic internal/tool failure fallback |
 | `11` | Interrupted run |
 

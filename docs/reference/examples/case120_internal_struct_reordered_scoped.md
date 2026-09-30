@@ -13,7 +13,7 @@
 | **Rule family** | [`internal-struct-reordered-scoped`](by-rule/internal-struct-reordered-scoped.md) |
 | **Subject** | [Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md) |
 
-**Category:** Public-Surface Scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE
+**Category:** Public-Surface Scoping | **Verdict:** ✅ NO_CHANGE
 
 ## Verdict and consumer impact
 
@@ -81,7 +81,7 @@ decision resolving to NO_CHANGE, not the underlying offset-diff mechanism.
 ## Why abicheck catches it (and doesn't report it)
 
 With `-H`/`--header`, abicheck resolves the public surface — exported
-symbols plus their reachable type closure (ADR-024) — and would evaluate any
+symbols plus their reachable type closure — and would evaluate any
 detected `InternalStats` layout difference against that closure. Because
 `InternalStats` is never reached from `translate()` or any other exported
 declaration, any such difference is routed to the filtered/audit ledger, not
@@ -114,7 +114,7 @@ as they truly stay unreachable from any exported declaration.
 
 ## Cross-tool comparison
 
-`abidiff`/ABICC have no equivalent of ADR-024 public-surface scoping — both
+`abidiff`/ABICC have no equivalent of abicheck's public-surface scoping — both
 diff every type present in their evidence regardless of reachability from an
 exported declaration. `abidw`/`abidiff` are not installed in this
 environment, so no cross-tool output is reproduced here.

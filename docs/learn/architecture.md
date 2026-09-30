@@ -82,8 +82,7 @@ additionally derives a sixth, the `L5` reachability graph), the more it can
 prove and the fewer false positives it raises. Artifact-backed `L0`/`L1`/`L2`
 evidence is authoritative for the shipped-ABI verdict; build/source
 `L3`/`L4`/`L5` evidence may explain, localize, or add confidence to a finding,
-but never silently deletes an artifact-proven break (the authority rule,
-ADR-028). See [Evidence & Detectability](evidence-and-detectability.md) for
+but never silently deletes an artifact-proven break (the authority rule). See [Evidence & Detectability](evidence-and-detectability.md) for
 the full model (all six layers, the `--depth` dial, and worked examples).
 
 ---

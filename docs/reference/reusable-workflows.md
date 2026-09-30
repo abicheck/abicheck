@@ -1,7 +1,6 @@
 # Reusable Workflows Reference: `check-single.yml` / `check-project.yml`
 
-Two `workflow_call` reusable workflows (G30 P1.4,
-[ADR-047](../contribute/adr/047-github-actions-integration-model.md) §4/§5)
+Two `workflow_call` reusable workflows (G30 P1.4)
 built on top of [`actions/check-target`](check-target.md):
 
 - **`check-single.yml`** — a thin wrapper around one `check-target`
@@ -102,12 +101,11 @@ Three jobs, always in this order:
    every report artifact and runs `abicheck aggregate reports --manifest
    run-plan.json ...`, which recognizes the run-plan by its own schema and
    projects it to the expected-target set internally (no separate projection
-   step or intermediate manifest file, ADR-054).
+   step or intermediate manifest file).
 
 ### The two required `if: always()` placements
 
-[ADR-047 §4](../contribute/adr/047-github-actions-integration-model.md)
-flags two specific places this workflow must use `always()` (or
+There are two specific places this workflow must use `always()` (or
 `!cancelled()`), not a bare `needs:`/no condition — both because plain
 GitHub Actions semantics **skip** a dependent job or step when an earlier
 one in its chain fails, and a **skipped** job/step reports `success`:
@@ -117,7 +115,7 @@ one in its chain fails, and a **skipped** job/step reports `success`:
   that leg is *expected* to fail its own job — that visibility is the
   point) would skip `aggregate` entirely, and a skipped job reporting
   success would silently green a branch-protection-required status past a
-  missing target — the exact failure mode ADR-047 exists to close.
+  missing target — the exact failure mode required-target coverage exists to close.
 - The matrix job's **`Upload report` step**. `check-target`'s own exit
   (after its finalize step already wrote the report) can still fail the
   *step* calling it, and a step in a job whose earlier step failed is
@@ -159,7 +157,7 @@ of the two report-producing steps actually ran.
 `check-project.yml` never builds anything and never fetches from a baseline
 channel's storage backend itself — the same "this Action never fetches"
 boundary [`actions/resolve-baseline`](resolve-baseline.md) and
-`actions/baseline` already draw (ADR-047 §10). The calling workflow's own
+`actions/baseline` already draw. The calling workflow's own
 job(s) must upload, before this reusable workflow's jobs need them:
 
 | Artifact name | One per | Contents |
@@ -206,7 +204,7 @@ jobs:
   fetch-accepted-main-baseline:
     runs-on: ubuntu-latest
     steps:
-      # ... restore from actions/cache, a release asset, or git, per ADR-047 §10 ...
+      # ... restore from actions/cache, a release asset, or git ...
       - uses: actions/upload-artifact@v7
         with:
           name: abicheck-baseline-linux-accepted-main

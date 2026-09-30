@@ -42,7 +42,7 @@ model for the mechanism).
 This matters most for an over-approximating walk: `VIRTUAL_CALL_MAY_DISPATCH_TO`
 (Phase 5 item 3) must stay `overapprox`/`RISK`, never `exact`/`BREAKING`,
 however confident the walk otherwise looks — see
-[Proof-path preference order](../reference/source-graph-schema.md#proof-path-preference-order-adr-046-d6)
+[Proof-path preference order](../reference/source-graph-schema.md#proof-path-preference-order)
 for the `effect_transitions` mechanism that marks a proof as
 over-approximated in the first place, and propagate that marking into your
 `ChangeKind`'s classification, not just the displayed path text.
@@ -96,7 +96,7 @@ A new detector should:
   hand-build the `impact_proof_path` node/edge-dict shape inline. If you
   have more than one candidate path, run them through
   `select_preferred_graph_path` (or extend it — see
-  [Proof-path preference order](../reference/source-graph-schema.md#proof-path-preference-order-adr-046-d6)
+  [Proof-path preference order](../reference/source-graph-schema.md#proof-path-preference-order)
   for which tiers it already covers) and pass the runner-ups as
   `alternative_paths` rather than silently dropping them.
 - Reuse `TraversalPolicy` for a new graph walk instead of re-deriving an

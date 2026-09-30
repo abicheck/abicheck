@@ -1728,8 +1728,8 @@ def _dump_macho(
     extra_includes = absolutize_include_roots(extra_includes)  # see its docstring
     if dump_manifest is not None:
         raise ValidationError(
-            "--dump-manifest is not yet supported for Mach-O binaries "
-            "(ADR-050 D3); use a single-header dump for this format."
+            "--dump-manifest is not yet supported for Mach-O binaries"
+            "; use a single-header dump for this format."
         )
     if dwarf_only:
         warnings.warn(
@@ -1902,8 +1902,8 @@ def _dump_pe(
     extra_includes = absolutize_include_roots(extra_includes)  # see its docstring
     if dump_manifest is not None:
         raise ValidationError(
-            "--dump-manifest is not yet supported for PE binaries "
-            "(ADR-050 D3); use a single-header dump for this format."
+            "--dump-manifest is not yet supported for PE binaries"
+            "; use a single-header dump for this format."
         )
     from .pe_metadata import parse_pe_metadata
 

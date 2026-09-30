@@ -26,7 +26,7 @@ breaking changes before they ship.
 > with policies, suppressions, and severity.
 
 > **See also.** For a project publishing baselines through
-> `.abicheck.yml`'s `baseline:` block and the G30/ADR-047 integration model
+> `.abicheck.yml`'s `baseline:` block and the G30 [project integration](../integration/index.md) model
 > (`release-contract`/`accepted-main` channels, `resolve-baseline`), see the
 > [`publish-baseline`/`update-main-baseline` reference](../reference/publish-baseline.md)
 > and [Which Scenario Am I?](../integration/index.md#baselines) — this
@@ -34,7 +34,7 @@ breaking changes before they ship.
 > both are built on.
 
 > **The built-in baseline registry command is gone.** The pre-1.0 CLI reset
-> (ADR-043) removed the whole `abicheck baseline` subcommand group
+> removed the whole `abicheck baseline` subcommand group
 > (`push`/`pull`/`list`/`delete`) with no replacement command — abicheck's
 > CLI has no opinion on *where* you store a snapshot. [Storing
 > Baselines](baseline-storage.md)'s recipes (GitHub Releases, git-committed
@@ -54,7 +54,7 @@ breaking changes before they ship.
 > `abicheck.product_baseline`: `pack_product_baseline`/
 > `unpack_product_baseline` archive/restore an entire product directory
 > as one deterministic `.tar.zst`, and `compare_product_directories`
-> runs the bundle-aware comparison (ADR-023) directly, in Python, with
+> runs the bundle-aware comparison directly, in Python, with
 > no CLI subprocess. `abicheck.bundle.build_bundle_snapshot_from_metadata`
 > is the underlying primitive that lets that cross-DSO analysis run from
 > already-parsed `ElfMetadata` (e.g. a stored `AbiSnapshot.elf`) instead

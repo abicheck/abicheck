@@ -55,14 +55,11 @@ Concretely, an acknowledgment record:
   vision's invariant warns against;
 - may be scoped to a **component** and a **release range** (`baseline`/
   `candidate` version labels, the same labels
-  [longitudinal history](../contribute/adr/066-longitudinal-history-and-versioning-policy.md)
-  tracks) — a record that names a component/candidate a run does not supply
+  longitudinal history (`abicheck project history`) tracks) — a record that names a component/candidate a run does not supply
   never matches; it is never resolved "to the nearest" acknowledgment.
 
 An **ambiguous match** — more than one loaded record matching the same
-change — is a hard error, not a silently-resolved pick: D5 of
-[ADR-067](../contribute/adr/067-change-intent-acknowledgment-and-disposition-audit.md)
-requires review in that case.
+change — is a hard error, not a silently-resolved pick: that case requires review.
 
 ## File format
 

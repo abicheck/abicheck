@@ -90,7 +90,7 @@ exercises against the committed fixtures. Because the platform default for
 plain-`char` signedness is target-dependent (signed on x86, unsigned on
 most ARM targets), abicheck requires **both** sides to state the flag
 explicitly before reporting a flip, avoiding a false finding on a project
-that merely records its platform default. Per ADR-028 D3 this build-evidence
+that merely records its platform default. By the authority rule, this build-evidence
 finding never decides a shipped-ABI break on its own — it flags the
 elevated risk and localizes the cause; an artifact diff of actual observed
 values is what would confirm a concrete break.

@@ -287,7 +287,7 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
                     "option layer rather than to the readers this class "
                     "covers."
                 ),
-                reference="docs/contribute/plans/one-comparison-product.md#phase-7l",
+                reference="docs/contribute/plans/one-comparison-product.md#phase-7l-external-cli-audit-2026-09-12-reconciled",
             ),
         ),
     ),
