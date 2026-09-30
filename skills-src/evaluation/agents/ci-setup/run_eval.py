@@ -111,9 +111,12 @@ exec "$@"
 """
 
 
+GIT = shutil.which("git") or "git"
+
+
 def _git(work: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", *args], cwd=work, check=True, capture_output=True,
+    subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [GIT, *args], cwd=work, check=True, capture_output=True,
         env={**os.environ, "GIT_AUTHOR_NAME": "Maintainer", "GIT_AUTHOR_EMAIL": "m@example.org",
              "GIT_COMMITTER_NAME": "Maintainer", "GIT_COMMITTER_EMAIL": "m@example.org"},
     )
@@ -170,7 +173,8 @@ def _skill_activated(events: list[dict[str, Any]]) -> bool:
 
 
 def run_one(scenario: dict[str, Any], arm: str, rep: int, out: Path, model: str | None,
-            max_turns: int, timeout: int, venv: Path | None = None) -> dict[str, Any]:
+            max_turns: int, timeout: int, venv: Path | None = None,
+            extra_hide: tuple[str, ...] = ()) -> dict[str, Any]:
     run_dir = out / scenario["id"] / arm / f"rep{rep}"
     if run_dir.exists():
         shutil.rmtree(run_dir)
@@ -187,7 +191,7 @@ def run_one(scenario: dict[str, Any], arm: str, rep: int, out: Path, model: str 
     cwd: Path = work
     if venv is not None:
         target = f"{ISOLATED_WORKSPACE}-{scenario['id']}-{arm}-{rep}"
-        hide = [str(ROOT), str(out), str(Path.home() / ".claude" / "projects"), "/tmp/claude-0"]
+        hide = [str(ROOT), str(out), str(Path.home() / ".claude" / "projects"), *extra_hide]
         env.update(
             EVAL_WORK=str(work), EVAL_TARGET=target, EVAL_HIDE=" ".join(hide),
             PATH=f"{venv / 'bin'}{os.pathsep}{env['PATH']}",
@@ -196,8 +200,9 @@ def run_one(scenario: dict[str, Any], arm: str, rep: int, out: Path, model: str 
         cwd = Path("/")
     started = time.monotonic()
     try:
-        proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True,
-                              text=True, timeout=timeout)
+        proc = subprocess.run(  # noqa: S603 - argv built above, no shell
+            cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False
+        )
         stdout, stderr = proc.stdout, proc.stderr
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
@@ -274,6 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report-only", action="store_true")
     parser.add_argument("--abicheck-venv", type=Path,
                         help="non-editable abicheck venv; enables mount-namespace isolation (Linux, root)")
+    parser.add_argument("--hide", action="append", default=[],
+                        help="extra directory to hide from the agent under isolation "
+                             "(e.g. the launching session's scratch directory); repeatable")
     parser.add_argument("--json", type=Path, help="write graded rows here")
     args = parser.parse_args(argv)
 
@@ -292,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             for rep in range(args.repetitions)
         ]
         with cf.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futures = [pool.submit(run_one, s, arm, rep, out, args.model, args.max_turns, args.timeout, args.abicheck_venv)
+            futures = [pool.submit(run_one, s, arm, rep, out, args.model, args.max_turns, args.timeout, args.abicheck_venv, tuple(args.hide))
                        for s, arm, rep in todo]
             for fut in cf.as_completed(futures):
                 m = fut.result()

@@ -51,7 +51,8 @@ workflow, is caught by the check named for it.
 python scripts/gen_agent_skills.py        # the runner installs skills/<name>
 python skills-src/evaluation/agents/ci-setup/run_eval.py \
     --out /tmp/ci-setup-eval --repetitions 3 --jobs 6 --model claude-sonnet-5-5 \
-    --abicheck-venv /opt/abicheck-eval-venv   # isolation: see below
+    --abicheck-venv /opt/abicheck-eval-venv \
+    --hide "$LAUNCHING_SESSION_SCRATCH_DIR"   # isolation: see below
 python skills-src/evaluation/agents/ci-setup/run_eval.py --out /tmp/ci-setup-eval --report-only
 ```
 
