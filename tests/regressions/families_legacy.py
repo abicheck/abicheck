@@ -62,6 +62,9 @@ LEGACY_UNATTACHED: frozenset[str] = frozenset(
         "config.textual_substitution_into_a_structured_document",
         "coverage.discovery_derived_completeness",
         "detector.diff_confirmation_precondition",
+        # Registered on main while defect families were in review.
+        "evidence.compare_dump_inline_routing_parity",
+        "evidence.linker_reserved_export_symbols",
         "evidence.backfill_bare_name_match",
         "evidence.container_presence_read_as_evidence_content",
         "evidence.entry_point_skips_extraction_record",

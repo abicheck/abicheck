@@ -183,6 +183,7 @@ _F2 = (
     "scoping.aggregate_view_starvation",
     "adapter.duck_typed_view_attribute_drift",
     "api.positional_slot_rebinding",
+    "evidence.compare_dump_inline_routing_parity",
 )
 _F3 = (
     "identity.environment_taint",
@@ -214,6 +215,7 @@ _F4 = (
     "extraction.ast_wrapper_chain_traversal",
     "guard.proxy_predicate_overshoots_justification",
     "config.rule_language_class_collapsed",
+    "evidence.linker_reserved_export_symbols",
 )
 _F5 = tuple(
     [
