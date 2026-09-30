@@ -119,7 +119,10 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "another computes. The same rule holds *between formats* of one "
             "report: a fact one projection publishes and its siblings drop "
             "leaves a consumer of the quiet format unable to act on the run "
-            "it was handed."
+            "it was handed. And *between routes* of one comparison: a report "
+            "field the native CLI computes must be computed by the shared "
+            "pipeline every route (typed API, release member) runs, never by "
+            "a front end alone."
         ),
         # #1185-era follow-up, two instances of the same shape. The audit's
         # suppressed rows read `Change.suppression_rule` -- the `label or
@@ -150,6 +153,13 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # (Codex review, P2).
             "tests/test_no_baseline_suppression_provenance.py",
             "tests/test_no_baseline_report_formats.py",
+            # F2 route parity (PR #TBD, fix/family-findings-b):
+            # `old_evidence_depth`/`new_evidence_depth` and `suppression_audit`
+            # were set only by the native CLI, and the typed API/release member
+            # reported a different `effective_config_digest` tier for the same
+            # configuration. The harness diffs whole reports across routes over
+            # an operand corpus x config axes, with an empty KNOWN_DIVERGENCES.
+            "tests/test_family_f2_route_parity.py",
         ),
         axes={
             # Only what a seed test really drives -- and *all* of it. This

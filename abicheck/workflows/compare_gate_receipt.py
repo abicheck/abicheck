@@ -144,14 +144,26 @@ def install_resolved_gate_receipt(
     digest a different file than the one that actually scored the findings
     if it changed between the two reads (Codex review, fresh evidence).
 
-    Always stamps ``result.evaluation_config`` (a request with no
-    ``--contract`` equivalent never builds a ``PersistedContractContext``,
-    so ``effective_config_digest``'s rich tier would otherwise be silently
-    unreachable for it even though *config* is a real, fully-resolved
-    ``CompatibilityEvaluationConfig`` -- same reasoning as
-    ``record_resolved_config``'s own leading comment); additionally merges
-    the gate into ``result.contract_context`` when one exists.
+    Resolves and stamps ``result.evaluation_config`` exactly when the
+    native CLI's ``resolve_and_apply`` resolves one: under contract
+    evaluation, or when a pack contributed (here: forwarded
+    ``pack_policy_overrides``/``pack_internal_namespaces`` -- a pack-only
+    run never builds a ``PersistedContractContext``, so without the stamp
+    ``effective_config_digest``'s rich tier would be unreachable for it).
+    A plain request resolves nothing and stays on the digest's documented
+    *baseline* tier (``effective_config_digest``'s module docstring: the
+    rich tier exists only when ``--contract``/``--pack`` resolved a
+    config). An earlier revision stamped unconditionally, so the typed API
+    and every release member reported the ``contract`` tier -- and a
+    different digest -- for a configuration the native CLI reported at the
+    ``baseline`` tier (F2 route-parity harness). Additionally merges the
+    gate into ``result.contract_context`` when one exists.
     """
+    packs_forwarded = bool(request.pack_policy_overrides) or (
+        request.pack_internal_namespaces is not None
+    )
+    if getattr(result, "contract_context", None) is None and not packs_forwarded:
+        return
     from ..compatibility_evaluation_frontend import (
         SEVERITY_CATEGORY_FIELDS,
         SuppressionSource,
@@ -164,7 +176,7 @@ def install_resolved_gate_receipt(
         suppression=SuppressionSource.from_loaded(suppression, path=request.suppress),
         project=_project_inputs_for_request(request),
     )
-    if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
+    if packs_forwarded:
         config = _with_pack_forwarded_provenance(config, request)
     result.evaluation_config = config
 

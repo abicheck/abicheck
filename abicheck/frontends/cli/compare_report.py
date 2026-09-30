@@ -193,44 +193,6 @@ def _render_compare_report(
     )
 
 
-def _attach_suppression_audit(result: Any, suppression: Any) -> None:
-    """Attach the ``--audit-suppressions`` audit trail to *result*.
-
-    Called whenever suppression is not None (plan slice 7o: the audit is
-    unconditional, so there is no separate request to guard on). Audited against the full pre-suppression change set (kept +
-    suppressed) plus any --used-by/--required-symbol scoped_only_changes
-    (Codex review, fresh evidence: run *after* scoping, not before, so a
-    rule matching only a scoping-synthesized finding like
-    CONSUMER_REQUIRED_SYMBOL_REMOVED isn't misreported as stale). Not a
-    complete fix: scope_diff_to_app/scope_diff_to_required_symbols apply
-    suppression internally to their own candidates before this ever
-    sees them, so a rule matching only a scoping candidate suppression
-    itself already dropped (never reaching scoped_only_changes at all)
-    is still invisible here -- closing that needs those functions to
-    expose their own pre-suppression candidate list, a separate,
-    larger change to appcompat.py this fix does not attempt.
-    """
-    assert suppression is not None
-    # Codex review, fresh evidence: pass the *effective*, policy-override-
-    # applied breaking set (not the static BREAKING_KINDS default) so a
-    # rule's "high risk" classification matches the verdict this run's
-    # own --policy-file would actually produce, e.g. a rule suppressing
-    # a kind the policy promoted to BREAKING is reported as high-risk
-    # even though it isn't in the built-in BREAKING_KINDS.
-    effective_breaking_kinds, _, _, _ = result._effective_kind_sets()
-    result.suppression_audit = suppression.audit(
-        list(result.changes)
-        + list(result.suppressed_changes)
-        + list(getattr(result, "scoped_only_changes", ()) or ()),
-        breaking_kinds=effective_breaking_kinds,
-        # Codex review: a selector-scoped `reclassify:` rule isn't
-        # expressible in effective_breaking_kinds at all (that's a
-        # kind-wide set); pass the policy file through so `audit()` can
-        # classify a reclassified finding by its own rule's resolution.
-        policy_file=getattr(result, "policy_file", None),
-    )
-
-
 def _reject_flags_unsupported_for_set_inputs(
     ctx: click.Context,
     *,
