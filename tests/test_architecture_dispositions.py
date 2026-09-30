@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.check_architecture import check_repository
 from tests.test_architecture_check import _add_package, _rules, _tree, _write
 
@@ -352,6 +354,7 @@ def test_classified_module_needs_no_disposition(tmp_path: Path) -> None:
     assert "unclassified-module-disposition" not in _rules(root)
 
 
+@pytest.mark.repo_scan
 def test_real_repository_dispositions_file_is_internally_consistent() -> None:
     """The real ``architecture/dispositions.yaml`` this PR ships must itself
     pass schema validation and cover every unclassified root module -- run

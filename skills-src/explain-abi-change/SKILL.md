@@ -1,0 +1,84 @@
+---
+name: explain-abi-change
+description: Explain an ABI-related observation in a C/C++ development environment and say what actually changed — a program or plugin that stopped loading ("undefined symbol", "symbol lookup error", "version `X' not found", "cannot open shared object file"), a crash or wrong results after a library was updated or rebuilt, a C++ symbol containing `__cxx11`/`B5cxx11` that cannot be found, or a shared-library update whose new or different symbols a developer wants to understand ("the library was bumped — what changed, and does our program care?"). Use when a developer is trying to understand what is going on between a program and the shared libraries it uses, on Linux ELF with GCC or Clang. Finds which library copy is actually used, compares it with the one the program was built against, names the mechanism behind the change, and says what (if anything) to do. Also says when the change is harmless or not ABI-related at all. Not for reviewing a proposed change before it ships — that is a compatibility review.
+license: Apache-2.0
+metadata:
+  abicheck-version-range: ">=0.6.0,<0.7.0"
+  layer: A
+  source: skills-src/explain-abi-change/SKILL.md
+---
+
+# Explaining an ABI change
+
+A developer noticed something between a program and the shared libraries it
+uses — a load error, a crash or wrong results after an update, or just a
+library whose symbols changed — and wants to know **what changed, why it
+behaves this way, and what (if anything) to do.**
+
+Two rules above all ([safety invariants](../shared/safety-invariants.md)):
+never state a compatibility verdict without a comparison you actually ran,
+and never change the environment (install, delete, relink, edit loader
+paths) unless asked. Designed for Linux ELF, GCC/Clang; elsewhere say the explanation is
+unverified. Check `abicheck --version` against this skill's version range
+(`metadata.abicheck-version-range`); outside it, stop and say so. If the tool
+is not installed, say so and how to install it, and do not install it.
+
+## Workflow
+
+1. **Reproduce.** Run the program the way the user does and keep the exact
+   output (symbol, version node, requiring object).
+2. **Find the copy actually used**, under the user's real environment:
+   `abicheck deps tree PROGRAM --ld-library-path "$LD_LIBRARY_PATH" -o json=tree.json`.
+   Note every copy on the search path and what the program was built
+   against. A stale copy winning the search is its own cause.
+3. **Compare built-against (old) with used (new)**, each with its own headers
+   when it has them:
+   `abicheck compare BUILT.so USED.so --header old=OLD.h --header new=NEW.h -o json=compare.json`.
+   Identical sources do not prove identical ABI: a compiler flag or a
+   configuration macro can change layout, and only the comparison sees it.
+   If the used copy only *lacks* symbols, also compare the other way round:
+   only additions there means the used library is an older release. That
+   reverse run is evidence only; the verdict you report is always
+   built-against to used.
+4. **Name one mechanism** the evidence supports:
+
+| Mechanism | Evidence |
+|---|---|
+| `symbol_removed` | the intended copy lacks a symbol the program needs, and is not older than the build's |
+| `library_older_than_build` | the used copy lacks needed symbols because it is an older release; the reverse comparison shows only additions |
+| `symbol_version_missing` | the symbol exists but the version node the program needs does not |
+| `layout_changed` | a type's size, field offsets or vtable, or a function's signature, differ |
+| `stale_library_loaded` | a correct copy exists but another copy wins the search order |
+| `cxx_abi_mismatch` | same source, different C++ ABI setting (`_GLIBCXX_USE_CXX11_ABI`) |
+| `not_an_abi_problem` | everything resolves and the libraries are identical or differ only by additions |
+
+   If none fits, say the mechanism is unverified and what evidence is
+   missing.
+
+   Report the severity the comparison gave. A missing export, a missing
+   version node or a changed layout breaks a program that is *already built*:
+   that is a binary break, not a source-level one, even when recompiling
+   would also fail.
+
+5. **Say what to do.** Stale copy: fix the path, rebuild nothing. Older
+   library: deploy the release the program was built against, or build
+   against the oldest you support. Layout or C++ ABI mismatch: rebuild
+   against the headers and flags of the library actually used, or get a
+   matching build. Removed symbol or version: restore it, or rebuild the
+   program. Not an ABI problem: change nothing in the libraries. More detail
+   in [the diagnostics reference](references/diagnostics.md) and the
+[remediation catalog](../shared/remediation-catalog.md).
+
+## Answer
+
+Keep it short: **what changed** (the mechanism, in plain words, with the
+comparison that shows it), **what to do**, and **how to verify** (the
+command to re-run and what it should print). Mention anything you could not
+check.
+
+## Termination criteria
+
+Done when the observation is reproduced, the copy actually used is
+identified, the two libraries are compared, and one mechanism is named with
+the comparison behind it, plus what to do. When any step could not be done,
+say which and why.

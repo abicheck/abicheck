@@ -924,4 +924,39 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=("tests/test_provided_by_member_platform.py",),
         axes={"member_platforms": ("elf", "pe", "macho", "mixed")},
     ),
+    BugClass(
+        id="evidence.linker_reserved_export_symbols",
+        invariant=(
+            "Adding any ELF linker-reserved symbol (_init/_fini/__bss_start/"
+            "_edata/_end) to an export table never changes any cross-source "
+            "check's findings: every export-table consumer reads the table "
+            "through the shared elf_symbol_filter.is_linker_reserved_symbol "
+            "predicate, whichever linker (gold/Bazel vs. bfd) produced it."
+        ),
+        fixed_by=(1422,),
+        seed_tests=("tests/test_cross_source_linker_reserved.py",),
+        public_surfaces=("cli",),
+        axes={
+            "reserved_name": ("_init", "_fini", "__bss_start", "_edata", "_end"),
+            "snapshot_shape": ("plain", "versioned", "private_rtti"),
+        },
+    ),
+    BugClass(
+        id="evidence.compare_dump_inline_routing_parity",
+        invariant=(
+            "For identical --sources/--build-info inputs, compare's inline "
+            "source-tree dump receives exactly the inputs a standalone dump "
+            "would (a pack-shaped --build-info beside a raw tree seeds L4 "
+            "replay in both), each input is consumed exactly once, and the "
+            "two commands select the same compile units."
+        ),
+        fixed_by=(1422,),
+        seed_tests=("tests/test_compare_dump_tu_selection_parity.py",),
+        public_surfaces=("cli",),
+        axes={
+            "sources": ("absent", "raw", "pack"),
+            "build_info": ("absent", "raw", "pack"),
+            "since": ("absent", "present"),
+        },
+    ),
 )

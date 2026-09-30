@@ -81,7 +81,7 @@ def test_excluded_header_constants_and_typedefs_are_scoped(tmp_path, frontend):
     # The used alias stays (the public signature names it); the unused one goes.
     assert (
         "dep_used_t" in snap.declarations.typedefs
-        and "dep_unused_t" not in snap.typedefs
+        and "dep_unused_t" not in snap.declarations.typedefs
     )
     assert "dep_unused_t" not in snap.declarations.typedefs_qualified
 

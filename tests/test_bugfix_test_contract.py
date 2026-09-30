@@ -462,7 +462,7 @@ class TestContentEvidence:
             "scripts/test_helper.py",
             # The one real file the fallback matched, and the clearest case:
             # an agent-eval fixture the suite deliberately does not execute.
-            "agent-evals/tasks/add-change-kind-small/hidden_tests/test_x.py",
+            "skills-src/evaluation/agents/tasks/add-change-kind-small/hidden_tests/test_x.py",
         ],
     )
     def test_a_test_basename_outside_a_test_tree_is_not_collected(

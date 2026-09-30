@@ -45,9 +45,14 @@ jobs:
       matrix:
         python-version: ['3.11', '3.12', '3.14']
         experimental: [false]
-        include:
-          - python-version: '3.15'
-            experimental: true
+        # The 3.15 prerelease leg is non-blocking (continue-on-error), so on a
+        # PR it only occupied a runner. It runs on `main` pushes, the weekly
+        # schedule, dispatch, and PRs labelled `ci:full`.
+        include: >-
+          ${{ (github.event_name != 'pull_request'
+               || contains(github.event.pull_request.labels.*.name, 'ci:full'))
+              && fromJSON('[{"python-version": "3.15", "experimental": true}]')
+              || fromJSON('[]') }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
@@ -133,6 +138,11 @@ jobs:
     # micromamba `scripts/setup_dev_env.sh` uses. Non-blocking until 3.15 is
     # final, like the 3.15 smoke leg above.
     name: free-threading (py3.15t)
+    # Non-blocking like the 3.15 smoke leg, so off plain PR pushes for the
+    # same reason; `ci:full` opts a PR in (e.g. one touching concurrency).
+    if: >-
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'ci:full')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     continue-on-error: true

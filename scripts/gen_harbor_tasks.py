@@ -30,7 +30,7 @@ started, entirely outside the Docker build, so an unrequested arm's image
 never carries the skill's content at all — the generated task never bakes a
 skill in. A baseline trial is `harbor run -a claude-code ...`; a skill
 trial is the same command with `--skill abicheck/abicheck:.claude/skills/
-check-abi-compatibility`. See `agent-evals/skills/harbor/CLAUDE.md`.
+check-abi-compatibility`. See `skills-src/evaluation/agents/skills/harbor/CLAUDE.md`.
 
 **Reuses, never re-derives, three things this repo already has right:**
 
@@ -68,14 +68,14 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL_DIR = ROOT / "agent-evals" / "skills"
+EVAL_DIR = ROOT / "skills-src" / "evaluation" / "agents" / "skills"
 sys.path.insert(0, str(EVAL_DIR))
 
 from runners.claude_code import (  # noqa: E402
     _PYTHON_INTERPOSER,
-    ANSWER_CONTRACT,
     EXPLANATORY_FILES,
     SOURCE_SUFFIXES,
+    answer_contract,
     demo_app_sources,
     strip_comments,
 )
@@ -114,7 +114,7 @@ def _write_lf(path: Path, content: str) -> None:
 #: owns. `.toml`/`.sh`/`.md` all accept a `#`-comment first line.
 _MARKER = (
     "# GENERATED FILE -- do not hand-edit. Source: scripts/gen_harbor_tasks.py "
-    "+ agent-evals/skills/skill-eval-pack.json. Regenerate with "
+    "+ skills-src/evaluation/agents/skills/skill-eval-pack.json. Regenerate with "
     "`python scripts/gen_harbor_tasks.py`.\n"
 )
 
@@ -219,7 +219,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
 # happens -- strictly better than a permanently broken image, though a
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
-# own scope; see agent-evals/skills/harbor/CLAUDE.md.
+# own scope; see skills-src/evaluation/agents/skills/harbor/CLAUDE.md.
 ARG ABICHECK_REF={ref}
 # ABICHECK_RUNTIME_DIGEST={runtime_digest}
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
@@ -234,7 +234,7 @@ RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \\
     && pip install --no-cache-dir -e ".[dev]"
 
 # Evaluation-only version-metadata patch (mirrors
-# agent-evals/skills/CLAUDE.md's "Environment prerequisites for a real run"
+# skills-src/evaluation/agents/skills/CLAUDE.md's "Environment prerequisites for a real run"
 # section, never a real release decision): `pyproject.toml`'s own `version`
 # field lags the working tree's actual CLI surface between releases
 # (skills-src/CLAUDE.md rule 7), and the published skill's own preflight
@@ -251,7 +251,7 @@ RUN set -eux; \\
     DIST=$(python3 -c "import importlib.metadata as m; print(next(str(d._path) for d in m.distributions() if d.metadata['Name']=='abicheck'))")/METADATA; \\
     sed -i "s/^Version: .*/Version: {version_floor}/" "$EGG" "$DIST"
 
-# Recording shim (agent-evals/skills/shim/abicheck): every `abicheck ...`
+# Recording shim (skills-src/evaluation/agents/skills/shim/abicheck): every `abicheck ...`
 # call an agent makes is transparently recorded to $SKILL_EVAL_CALLS, then
 # forwarded to the real binary. Present in every trial, skill-arm or not --
 # both arms of the existing harness always have abicheck on PATH; only
@@ -268,7 +268,7 @@ RUN set -eux; \\
 RUN real="$(command -v abicheck)" \\
     && [ "$real" = /usr/local/bin/abicheck ] \\
     && mv "$real" "$real-real" \\
-    && cp /opt/abicheck-src/agent-evals/skills/shim/abicheck "$real" \\
+    && cp /opt/abicheck-src/skills-src/evaluation/agents/skills/shim/abicheck "$real" \\
     && chmod +x "$real" "$real-real"
 ENV SKILL_EVAL_REAL_ABICHECK=/usr/local/bin/abicheck-real
 ENV SKILL_EVAL_CALLS=/workspace/calls.jsonl
@@ -313,7 +313,7 @@ RUN resolved="$(readlink -f "$(command -v python3)")" \\
 ENV SKILL_EVAL_REAL_PYTHON=/usr/local/bin/python3.13-real
 
 # This sandbox's own castxml is routinely below abicheck's policy floor
-# (agent-evals/skills/CLAUDE.md's "Environment prerequisites" section);
+# (skills-src/evaluation/agents/skills/CLAUDE.md's "Environment prerequisites" section);
 # degrade to direct-clang rather than hard-erroring, matching the existing
 # harness's own documented workaround.
 ENV ABICHECK_ALLOW_AST_FALLBACK=1
@@ -332,7 +332,7 @@ ENV ABICHECK_ALLOW_AST_FALLBACK=1
 # started, entirely outside the Docker build -- a complete no-op when
 # `--skill` isn't passed. A skill-arm trial therefore requests it via
 # `harbor run ... --skill abicheck/abicheck:.claude/skills/check-abi-
-# compatibility` (see `agent-evals/skills/harbor/CLAUDE.md`), which the
+# compatibility` (see `skills-src/evaluation/agents/skills/harbor/CLAUDE.md`), which the
 # real `harbor` package's own `--ak skills_dir=...`-driven `claude_code`
 # adapter (`_build_register_skills_command`) then copies from
 # Harbor's own resolved skills directory into Claude's config at trial
@@ -345,12 +345,12 @@ ENV ABICHECK_ALLOW_AST_FALLBACK=1
 # is readable by the very agent being evaluated on it (Codex review, fresh
 # evidence). `git clone` above pulls the *whole* repository -- source,
 # history, and every test file -- and this repo's ground truth for these
-# 12 scenarios turns out not to live in one place: `agent-evals/skills/
+# 12 scenarios turns out not to live in one place: `skills-src/evaluation/agents/skills/
 # scenarios.yaml`/`skill-eval-pack.json` and every sibling task's own
 # generated `harbor/tasks/<id>/tests/scenario.json` carry it directly,
 # `catalog/ground_truth.json` derives a Category A scenario's outcome,
 # the raw `fixtures/` sources are sometimes comment-annotated with the
-# answer, `agent-evals/skills/graders/` (`dimensions.py`/`evidence.py`)
+# answer, `skills-src/evaluation/agents/skills/graders/` (`dimensions.py`/`evidence.py`)
 # itself contains scenario-identifying comments naming specific
 # fixtures/consumers, and `tests/test_skill_eval_graders_consumer_
 # scoping.py`'s own hand-written unit-test fixtures independently restate
@@ -387,7 +387,7 @@ ENV ABICHECK_ALLOW_AST_FALLBACK=1
 # tracked file's working-tree copy does not remove it from history, and
 # `/opt/abicheck-src/.git` stayed present and agent-visible for the whole
 # trial in an earlier version of this same fix -- `git -C /opt/abicheck-
-# src show HEAD:agent-evals/skills/scenarios.yaml` (or `git log`/`git
+# src show HEAD:skills-src/evaluation/agents/skills/scenarios.yaml` (or `git log`/`git
 # cat-file` against the same blob) recovered the exact answer straight
 # out of history even after the working-tree file was gone (Codex review,
 # fresh evidence). The allowlist above already excludes `.git` by
@@ -420,7 +420,7 @@ def _verifier_dockerfile(ref: str, runtime_digest: str) -> str:
     no filesystem with it. That separation is the actual fix for the
     ground-truth leak `_dockerfile()`'s own comment above describes: the
     agent process never has shell access to this container at all, so the
-    answer-bearing `agent-evals/skills/graders/` and `verify_run.py` no
+    answer-bearing `skills-src/evaluation/agents/skills/graders/` and `verify_run.py` no
     longer need to be hidden from it by naming, obfuscation, or omission --
     they simply aren't reachable.
     `verify_run.py` itself imports only the standard library plus `graders/`
@@ -477,10 +477,10 @@ RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \\
 # attack surface are not substitutes for each other.
 RUN set -eux; \\
     cd /opt/abicheck-src; \\
-    mkdir -p /tmp/rt-keep/agent-evals/skills/harbor; \\
+    mkdir -p /tmp/rt-keep/skills-src/evaluation/agents/skills/harbor; \\
     mv abicheck /tmp/rt-keep/abicheck; \\
-    mv agent-evals/skills/graders /tmp/rt-keep/agent-evals/skills/graders; \\
-    mv agent-evals/skills/harbor/verify_run.py /tmp/rt-keep/agent-evals/skills/harbor/verify_run.py; \\
+    mv skills-src/evaluation/agents/skills/graders /tmp/rt-keep/skills-src/evaluation/agents/skills/graders; \\
+    mv skills-src/evaluation/agents/skills/harbor/verify_run.py /tmp/rt-keep/skills-src/evaluation/agents/skills/harbor/verify_run.py; \\
     cd /; \\
     rm -rf /opt/abicheck-src; \\
     mv /tmp/rt-keep /opt/abicheck-src
@@ -509,7 +509,7 @@ name = "abicheck"
 [metadata]
 category = {json.dumps(category)}
 coverage_note = {json.dumps(note)}
-generated_from = "agent-evals/skills/scenarios.yaml"
+generated_from = "skills-src/evaluation/agents/skills/scenarios.yaml"
 
 [verifier]
 timeout_sec = 180.0
@@ -544,14 +544,16 @@ mcp_servers = []
 
 
 def _instruction_md(scenario: dict) -> str:
-    return scenario["prompt"].strip() + "\n" + ANSWER_CONTRACT + _FILE_ADDENDUM
+    return (
+        scenario["prompt"].strip() + "\n" + answer_contract(scenario) + _FILE_ADDENDUM
+    )
 
 
 def _readme(scenario_id: str, scenario: dict) -> str:
     return (
         f"{_MARKER}\n# abicheck/{scenario_id}\n\n"
         f"Category {scenario.get('category', '?')} scenario from the G37 evaluation "
-        f"corpus (`agent-evals/skills/scenarios.yaml`). Generated, not hand-authored "
+        f"corpus (`skills-src/evaluation/agents/skills/scenarios.yaml`). Generated, not hand-authored "
         "-- see `scripts/gen_harbor_tasks.py`.\n"
     )
 
@@ -614,7 +616,7 @@ esac
 set -euo pipefail
 {arch_guard}
 mkdir -p /logs/verifier
-python3 /opt/abicheck-src/agent-evals/skills/harbor/verify_run.py \\
+python3 /opt/abicheck-src/skills-src/evaluation/agents/skills/harbor/verify_run.py \\
     --workspace /workspace \\
     --scenario /tests/scenario.json \\
     --reward-txt /logs/verifier/reward.txt \\
@@ -685,7 +687,7 @@ def _solve_sh(scenario_id: str, scenario: dict) -> str:
 
     Not attempted for Category B: each fixture's correct invocation was
     verified by hand when its scenario was promoted to `ready` (see the
-    PR history for `agent-evals/skills/fixtures/`), but that command isn't
+    PR history for `skills-src/evaluation/agents/skills/fixtures/`), but that command isn't
     recorded anywhere this generator can read it back from -- a stub
     explaining why beats silently guessing one for a corpus dominated by
     scoped/uncertain-outcome scenarios, where a wrong guess reads as a
@@ -854,14 +856,16 @@ def generate(check: bool = False) -> bool:
                 return False
             changed = _diff_trees(TASKS_DIR, staging)
             if changed:
-                print("ERROR: agent-evals/skills/harbor/tasks/ is out of date.")
+                print(
+                    "ERROR: skills-src/evaluation/agents/skills/harbor/tasks/ is out of date."
+                )
                 print(
                     "       Run `python scripts/gen_harbor_tasks.py` and commit the result."
                 )
                 for line in changed:
                     print(f"       {line}")
                 return False
-            print("agent-evals/skills/harbor/tasks/ is up to date")
+            print("skills-src/evaluation/agents/skills/harbor/tasks/ is up to date")
             return True
 
         if TASKS_DIR.exists():
@@ -901,9 +905,9 @@ _DIGEST_LINE = re.compile(rb"^# ABICHECK_RUNTIME_DIGEST=([0-9a-f]{64})$", re.MUL
 #: `.claude/skills/check-abi-compatibility` is correctly absent from this
 #: list, not by oversight.
 _RUNTIME_RELEVANT_PATHS = (
-    "agent-evals/skills/graders",
-    "agent-evals/skills/shim",
-    "agent-evals/skills/harbor/verify_run.py",
+    "skills-src/evaluation/agents/skills/graders",
+    "skills-src/evaluation/agents/skills/shim",
+    "skills-src/evaluation/agents/skills/harbor/verify_run.py",
 )
 
 

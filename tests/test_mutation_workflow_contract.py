@@ -335,7 +335,7 @@ def test_the_repository_files_tests_read_are_copied_into_mutants() -> None:
     also_copy = set(_mutmut_config().get("also_copy", []))
     required = {
         ".github",
-        "agent-evals",
+        "skills-src",
         "docs",
         "examples",
         # Not a directory: `test_ai_readiness.py` and `test_docs_hooks.py`
@@ -667,6 +667,7 @@ _ACCEPTED_KILL_LOSS = {
 }
 
 
+@pytest.mark.repo_scan
 def test_no_ignored_test_file_can_kill_a_detector_mutant() -> None:
     """An exclusion is free only if the file reaches no mutated module.
 

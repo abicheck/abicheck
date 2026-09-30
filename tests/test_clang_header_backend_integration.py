@@ -275,7 +275,7 @@ def test_clang_and_castxml_snapshots_agree_on_public_surface(
     castxml_types = {t.name for t in castxml_snap.declarations.types}
     assert castxml_types & clang_types >= {"Point", "Widget"}
     assert {e.name for e in clang_snap.declarations.enums} == {
-        e.name for e in castxml_snap.enums
+        e.name for e in castxml_snap.declarations.enums
     }
 
 

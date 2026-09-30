@@ -17029,7 +17029,7 @@ earlier phases already establish as the pattern.
 
 **Landed (complete).** `abicheck/policy/selectors.py`'s `SelectorSet` is the
 one selector grammar `Suppression.__post_init__`/`ReclassifyRule.
-__post_init__` each construct internally and delegate all validation/
+__post_init__` each construct internally and delegate all skills-src/evaluation/validation/
 matching to, exactly as designed below — including both selectors this
 section's own history flags as easy to omit (`binding`, `finding_id`) and
 the `finding_id`-matcher upward-dependency fix this section's own Design

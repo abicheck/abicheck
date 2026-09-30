@@ -33,6 +33,8 @@ import jsonschema
 import pytest
 import yaml
 
+from tests.schema_validation import validate_instance
+
 REPO = Path(__file__).resolve().parent.parent
 
 # Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
@@ -40,7 +42,7 @@ if str(REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO / "scripts"))
 import example_catalog  # noqa: E402
 
-EVAL = REPO / "agent-evals" / "skills"
+EVAL = REPO / "skills-src" / "evaluation" / "agents" / "skills"
 SCHEMA_DIR = EVAL / "schema"
 SCENARIOS = EVAL / "scenarios.yaml"
 RUBRIC = EVAL / "rubric.yaml"
@@ -97,7 +99,7 @@ def test_every_schema_the_plan_names_exists() -> None:
 
 
 def test_manifest_validates(manifest: dict) -> None:
-    jsonschema.validate(manifest, _load(SCHEMA_DIR / "scenario.schema.json"))
+    validate_instance(manifest, _load(SCHEMA_DIR / "scenario.schema.json"))
 
 
 def test_scenario_ids_are_unique(scenarios: list[dict]) -> None:
@@ -232,7 +234,7 @@ def test_at_least_one_scoped_scenario_diverges(scenarios: list[dict]) -> None:
 
 
 def test_rubric_validates() -> None:
-    jsonschema.validate(_load(RUBRIC), _load(SCHEMA_DIR / "rubric.schema.json"))
+    validate_instance(_load(RUBRIC), _load(SCHEMA_DIR / "rubric.schema.json"))
 
 
 def test_zero_tolerance_dimensions_are_exactly_two_and_six() -> None:

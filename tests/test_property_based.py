@@ -219,18 +219,18 @@ def test_serialization_roundtrip(snap: AbiSnapshot):
 
     assert restored.library == snap.library
     assert restored.version == snap.version
-    assert len(restored.declarations.functions) == len(snap.functions)
-    assert len(restored.declarations.variables) == len(snap.variables)
-    assert len(restored.declarations.types) == len(snap.types)
-    assert len(restored.declarations.enums) == len(snap.enums)
-    assert restored.declarations.typedefs == snap.typedefs
-    assert restored.declarations.constants == snap.constants
+    assert len(restored.declarations.functions) == len(snap.declarations.functions)
+    assert len(restored.declarations.variables) == len(snap.declarations.variables)
+    assert len(restored.declarations.types) == len(snap.declarations.types)
+    assert len(restored.declarations.enums) == len(snap.declarations.enums)
+    assert restored.declarations.typedefs == snap.declarations.typedefs
+    assert restored.declarations.constants == snap.declarations.constants
     assert restored.elf_only_mode == snap.elf_only_mode
     assert restored.platform == snap.platform
     assert restored.language_profile == snap.language_profile
 
     # Verify function fields roundtrip
-    for orig, rest in zip(snap.declarations.functions, restored.functions):
+    for orig, rest in zip(snap.declarations.functions, restored.declarations.functions):
         assert orig.name == rest.name
         assert orig.mangled == rest.mangled
         assert orig.return_type == rest.return_type
@@ -256,7 +256,7 @@ def test_serialization_roundtrip(snap: AbiSnapshot):
             assert op.is_va_list == rp.is_va_list
 
     # Verify variable fields roundtrip
-    for orig, rest in zip(snap.declarations.variables, restored.variables):
+    for orig, rest in zip(snap.declarations.variables, restored.declarations.variables):
         assert orig.name == rest.name
         assert orig.mangled == rest.mangled
         assert orig.type == rest.type
@@ -265,7 +265,7 @@ def test_serialization_roundtrip(snap: AbiSnapshot):
         assert orig.access == rest.access
 
     # Verify type fields roundtrip
-    for orig, rest in zip(snap.declarations.types, restored.types):
+    for orig, rest in zip(snap.declarations.types, restored.declarations.types):
         assert orig.name == rest.name
         assert orig.kind == rest.kind
         assert orig.size_bits == rest.size_bits
@@ -277,7 +277,7 @@ def test_serialization_roundtrip(snap: AbiSnapshot):
         # assert orig.is_opaque == rest.is_opaque
 
     # Verify enum fields roundtrip
-    for orig, rest in zip(snap.declarations.enums, restored.enums):
+    for orig, rest in zip(snap.declarations.enums, restored.declarations.enums):
         assert orig.name == rest.name
         assert orig.underlying_type == rest.underlying_type
         assert len(orig.members) == len(rest.members)
@@ -299,10 +299,10 @@ def test_serialization_roundtrip_via_file(snap: AbiSnapshot):
 
     assert restored.library == snap.library
     assert restored.version == snap.version
-    assert len(restored.declarations.functions) == len(snap.functions)
-    assert len(restored.declarations.variables) == len(snap.variables)
-    assert len(restored.declarations.types) == len(snap.types)
-    assert len(restored.declarations.enums) == len(snap.enums)
+    assert len(restored.declarations.functions) == len(snap.declarations.functions)
+    assert len(restored.declarations.variables) == len(snap.declarations.variables)
+    assert len(restored.declarations.types) == len(snap.declarations.types)
+    assert len(restored.declarations.enums) == len(snap.declarations.enums)
 
 
 # ---------------------------------------------------------------------------

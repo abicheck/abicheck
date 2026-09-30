@@ -1,0 +1,5 @@
+### Changed
+
+- **Repository layout** — the opt-in LibTooling companion moved from `tools/clang-layout-tool/` to `contrib/clang-layout-tool/`, next to the other Clang companion (`contrib/abicheck-clang-plugin/`); the one-off PVXS `HANDOFF.md` moved from the repository root to `docs/contribute/archive/pvxs-integration-handoff.md`. No runtime behavior changes.
+- **Evaluation trees moved under the skill source** — the three top-level evaluation directories now live in `skills-src/evaluation/`: `eval/` → `skills-src/evaluation/field/`, `validation/` → `skills-src/evaluation/validation/`, `agent-evals/` (including the Agent Skill evals) → `skills-src/evaluation/agents/`. Nothing there is published as a skill. Generated Harbor tasks and the skill-eval pack were regenerated for the new paths.
+- **`check_architecture.py` rejects stale legacy-inventory entries** — a `legacy_root_modules` or layer `legacy_paths` entry whose file no longer exists is now a `stale-root-inventory` error, so the flat-root inventory can only shrink (ADR-061 amendment, 2026-09-30). Five stale entries were removed.

@@ -17,14 +17,14 @@ bucket it's in:
 
 | Workflow | Required on every PR? | Notes |
 |----------|------------------------|-------|
-| `ci.yml` | **Yes** — `ai-readiness`, `fair-metadata`, `lint-and-types`, `unit-tests` (canonical Linux/3.13 lane), `slow-tests`, `packaging` jobs | The core gate. `unit-tests`' `integration-tests`/`windows-msvc` sibling jobs in the same workflow have their own rules below. `ai-readiness` also runs the ADR-061 bounded-module architecture gate as its own step (`scripts/verify.py --profile pr --only architecture`, i.e. `scripts/check_architecture.py`) — there is no separate `module-architecture.yml` workflow or check. `slow-tests` is the `slow` marker lane, split out of `unit-tests`' canonical leg (where it ran as a step behind the ~23-minute main suite) so it runs concurrently instead — still required on every PR, still every `slow`-marked test, reproducible locally as `python scripts/verify.py --profile full --only slow,slow-perf`. |
+| `ci.yml` | **Yes** — `ai-readiness`, `fair-metadata`, `lint-and-types`, `unit-tests` (canonical Linux/3.13 lane, three `--shard=K/3` jobs) + `unit-tests-coverage` (combines their coverage data and enforces the 95% floor once), `unit-tests-other-os` (macOS/Windows, no coverage; runs on `main` pushes, dispatch, and PRs labelled `ci:full` — add the label to a platform-sensitive PR), `repo-scan-tests`, `slow-tests`, `packaging` (Windows; the Linux build is `fair-metadata`'s `distribution-build`) jobs | The core gate. Tests marked `repo_scan` (whole-tree structural scans, OS- and coverage-independent) are excluded from every unit leg and run once in `repo-scan-tests` (`python scripts/verify.py --profile pr --only repo-scan-tests`). `unit-tests`' `integration-tests`/`windows-msvc` sibling jobs in the same workflow have their own rules below. `ai-readiness` also runs the ADR-061 bounded-module architecture gate as its own step (`scripts/verify.py --profile pr --only architecture`, i.e. `scripts/check_architecture.py`) — there is no separate `module-architecture.yml` workflow or check. `slow-tests` is the `slow` marker lane, split out of `unit-tests`' canonical leg (where it ran as a step behind the ~23-minute main suite) so it runs concurrently instead — still required on every PR, still every `slow`-marked test, reproducible locally as `python scripts/verify.py --profile full --only slow,slow-perf`. |
 | `changelog-check.yml` | Yes, only when the diff touches `abicheck/**/*.py` | Bypass with the `skip-changelog` label |
 | `cli-interface-check.yml` | Yes, when the CLI surface changes | Diffs `dump_cli_surface.py` output old vs. new |
 | `dependency-review.yml` | Yes | GitHub's built-in dependency-review action |
 | `docs-pr.yml` | Yes, when `docs/**`/`mkdocs.yml` changes | |
 | `docs-review-triggers.yml` | No (informational) | Diffs the PR's changed files against every docs page's front-matter `depends_on` list (`scripts/check_docs_review_triggers.py`) and posts an `::notice::`/step-summary when they overlap — a nudge to re-check that page, never a merge blocker. |
 | `security.yml` | Yes | CodeQL + related static checks |
-| `python-compat.yml` | **Yes** for 3.11/3.12/3.14; 3.15 (prerelease) and `free-threading` (3.15t) are `continue-on-error` | Tiered Python coverage: every non-canonical interpreter builds the sdist+wheel, installs the wheel into a clean venv, imports every module, smokes the CLI, and runs a small unit-test subset. The `free-threading` job runs the free-threaded 3.15t interpreter (conda-forge, the base no-GIL version this project tests; 3.14t is deliberately skipped), fails if any import re-enables the GIL, and runs the concurrency test subset with `PYTHON_GIL=0`. The full suite runs only on `ci.yml`'s canonical 3.13 `unit-tests`. |
+| `python-compat.yml` | **Yes** for 3.11/3.12/3.14; 3.15 (prerelease) and `free-threading` (3.15t) are `continue-on-error` and run on `main`/schedule/dispatch and `ci:full`-labelled PRs only | Tiered Python coverage: every non-canonical interpreter builds the sdist+wheel, installs the wheel into a clean venv, imports every module, smokes the CLI, and runs a small unit-test subset. The `free-threading` job runs the free-threaded 3.15t interpreter (conda-forge, the base no-GIL version this project tests; 3.14t is deliberately skipped), fails if any import re-enables the GIL, and runs the concurrency test subset with `PYTHON_GIL=0`. The full suite runs only on `ci.yml`'s canonical 3.13 `unit-tests`. |
 | `ci.yml`'s `windows-msvc` job | No — `continue-on-error: true` | MSVC+PDB lane is still maturing; informational only |
 | `ci.yml`'s `heavy-parity-gate` → `libabigail-parity`/`abicc-parity`/`integration-tests` | Conditional | Only runs when one of `abicheck/**`, `tests/**`, `examples/**`, `.github/workflows/**`, `pyproject.toml`, `action/**`, `.github/actions/**`, or `scripts/verify.py` changed (path-filtered via `dorny/paths-filter`). `integration-tests` joined this gate rather than staying always-on because it is the most expensive job in the repo (three OS legs, macOS billed 10x) and was running in full on docs-only PRs. The last four paths are the gated jobs' own *infrastructure* — they all `pip install -e ".[dev]"` and set CastXML up via the composite action, and the parity lanes are driven by `scripts/verify.py`'s step catalog — so omitting them let a re-pin of CastXML merge without a single CastXML-using job running. |
 | `clang-plugin.yml` | **No** | Standalone, path-filtered to `contrib/abicheck-clang-plugin/**`; never a required abicheck-CI gate (see `contrib/abicheck-clang-plugin/AGENTS.md`) |
@@ -81,10 +81,15 @@ red or incomplete merge over paying it on every merge. Concretely:
 for it are still intact and don't need to be reinvented — see the
 now-historical "PR 0 — restore a green CI baseline first" section of
 `docs/contribute/plans/cli-cleanup-phase-two.md` for the full original
-design (the required-check derivation rule, the `docs-pr (required)`/
-`test-action (required)` neutral-aggregate gate jobs in `ci.yml` that make a
-path-filtered workflow requirable without stranding unrelated PRs, and the
-one-stable-aggregate-check-per-workflow principle). Re-deriving the
+design (the required-check derivation rule and the
+one-stable-aggregate-check-per-workflow principle). The `docs-pr (required)`/
+`test-action (required)` bridge jobs that design put in `ci.yml` were
+**deleted** (2026-09-30): with nothing required they only polled another
+workflow's check for up to 25/35 minutes each, holding a runner on every PR.
+Re-enabling merge-blocking must bridge a path-filtered workflow with a
+reusable-workflow call and ordinary `needs:` instead (plan
+`docs/contribute/plans/ci-cost-and-assurance.md`, Phase 1) —
+`tests/test_required_checks_governance.py` rejects a sleep-loop poller. Re-deriving the
 required-check list from this file's "Required vs. informational workflows"
 table, adding a `required_status_checks` rule with that list to
 `branch-protection-ruleset.json`, and applying it is enough on its own —

@@ -74,10 +74,16 @@ def test_snapshot_json_roundtrip(name: str, version: str) -> None:
 
     assert roundtripped.library == snap.library
     assert roundtripped.version == snap.version
-    assert len(roundtripped.declarations.functions) == len(snap.functions)
-    assert len(roundtripped.declarations.variables) == len(snap.variables)
-    assert roundtripped.declarations.functions[0].name == snap.functions[0].name
-    assert roundtripped.declarations.variables[0].name == snap.variables[0].name
+    assert len(roundtripped.declarations.functions) == len(snap.declarations.functions)
+    assert len(roundtripped.declarations.variables) == len(snap.declarations.variables)
+    assert (
+        roundtripped.declarations.functions[0].name
+        == snap.declarations.functions[0].name
+    )
+    assert (
+        roundtripped.declarations.variables[0].name
+        == snap.declarations.variables[0].name
+    )
 
 
 # ---------------------------------------------------------------------------

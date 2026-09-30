@@ -113,6 +113,7 @@ def _raw_selector_calls(node: ast.FunctionDef) -> set[str]:
     }
 
 
+@pytest.mark.repo_scan
 def test_no_pairwise_detector_selects_on_unreconciled_evidence() -> None:
     offenders: list[str] = []
     for path, node in _pairwise_functions():

@@ -328,13 +328,32 @@ STEPS: tuple[Step, ...] = (
         description="ADR-061 responsibility packages, dependency direction, and debt no-growth gate",
     ),
     Step(
+        "repo-scan-tests",
+        _py(
+            "pytest",
+            "tests/",
+            "--tb=short",
+            "-m",
+            "repo_scan and not integration and not libabigail and not abicc and not slow",
+            "-n",
+            "auto",
+            "--dist",
+            "worksteal",
+            "-q",
+            "-r",
+            "fE",
+        ),
+        frozenset({PR, FULL}),
+        description="Whole-tree structural scan tests (`repo_scan` marker) — run once, uninstrumented; unit-pr excludes them",
+    ),
+    Step(
         "unit-pr",
         _py(
             "pytest",
             "tests/",
             "--tb=short",
             "-m",
-            "not integration and not libabigail and not abicc and not slow",
+            "not integration and not libabigail and not abicc and not slow and not repo_scan",
             "-n",
             "auto",
             "--dist",
@@ -458,12 +477,12 @@ STEPS: tuple[Step, ...] = (
     Step(
         # Same generated-artifact contract as skill-eval-pack above, for the
         # Harbor task battery it derives from: a scenario/fixture change that
-        # doesn't also regenerate agent-evals/skills/harbor/tasks/ leaves the
+        # doesn't also regenerate skills-src/evaluation/agents/skills/harbor/tasks/ leaves the
         # committed tasks describing a stale corpus.
         "harbor-tasks",
         _pyscript("scripts/gen_harbor_tasks.py", "--check"),
         frozenset({PR, FULL}),
-        description="agent-evals/skills/harbor/tasks/ matches its generator",
+        description="skills-src/evaluation/agents/skills/harbor/tasks/ matches its generator",
     ),
     Step(
         # harbor-tasks above only re-derives the tree structurally -- it

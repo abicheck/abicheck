@@ -34,7 +34,9 @@ cadence is the only mitigation today.
 
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
 from pathlib import Path
 
 import click
@@ -47,17 +49,21 @@ from abicheck.cli import main as cli_main
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "skills-src"
 
+_spec = importlib.util.spec_from_file_location(
+    "gen_agent_skills_drift", REPO / "scripts" / "gen_agent_skills.py"
+)
+assert _spec is not None and _spec.loader is not None
+_gen = importlib.util.module_from_spec(_spec)
+sys.modules.setdefault("gen_agent_skills_drift", _gen)
+_spec.loader.exec_module(_gen)
+
 #: The files the generator actually publishes into an installed skill — each
 #: skill's `SKILL.md`, its own `references/`, and the shared fragments. This
 #: gate protects what ships to an agent, so `skills-src/CLAUDE.md` (the
 #: contributor contract, never published) is deliberately out of scope: it
 #: discusses repository internals like `latest_release` that are not report
 #: fields, and scanning it would generate false positives indefinitely.
-SKILL_FILES = sorted(
-    path
-    for path in SRC.rglob("*.md")
-    if path.parent != SRC  # skills-src/CLAUDE.md and any future sibling doc
-)
+SKILL_FILES = _gen.published_source_files(SRC)
 
 _INLINE_RE = re.compile(r"`([^`\n]+)`")
 _LONG_OPT_RE = re.compile(r"^--[a-z][a-z0-9-]*$")
@@ -391,6 +397,67 @@ NON_REPORT_IDENTIFIERS = frozenset(
     }
 )
 
+
+def _deps_report_keys() -> frozenset[str]:
+    """Every key `deps tree`/`deps compare` JSON can carry, read from the
+    code that builds it.
+
+    `deps` reports have no JSON Schema of their own; their one owner is
+    `abicheck/report/stack.py`. Every string literal used there as a dict key
+    (in a `{...}` literal or a `d["key"] = ...` assignment) is a key the
+    report can emit, so reading them from that module's AST keeps this
+    vocabulary exactly as live as the compare-report schema above: rename a
+    key there and a skill still citing the old name fails here.
+    """
+    import ast
+
+    tree = ast.parse(
+        (REPO / "abicheck" / "report" / "stack.py").read_text(encoding="utf-8")
+    )
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            keys.update(
+                k.value
+                for k in node.keys
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)
+            )
+        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
+            if isinstance(node.slice, ast.Constant) and isinstance(
+                node.slice.value, str
+            ):
+                keys.add(node.slice.value)
+    return frozenset(keys)
+
+
+DEPS_REPORT_KEYS = _deps_report_keys()
+
+
+def _diagnosis_causes() -> frozenset[str]:
+    """The runtime-failure cause vocabulary `explain-abi-change` reports.
+
+    A skill-defined outcome vocabulary, not a report field: its one source is
+    the evaluation claim schema that grades it (`diagnosis.cause`), so the
+    skill and its grader cannot name different causes.
+    """
+    import json
+
+    schema = json.loads(
+        (
+            REPO
+            / "skills-src"
+            / "evaluation"
+            / "agents"
+            / "skills"
+            / "schema"
+            / "claim.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    return frozenset(schema["properties"]["diagnosis"]["properties"]["cause"]["enum"])
+
+
+DIAGNOSIS_CAUSES = _diagnosis_causes()
+
 #: A candidate field-reference token: snake_case, optionally dotted, with an
 #: optional `[]` marking an array hop (`changes[].kind`). Only tokens carrying
 #: a `_`, a `.`, or `[]` are considered — a bare English word in inline code
@@ -452,6 +519,8 @@ def test_every_cited_report_field_still_exists(path: Path):
                 token in SCHEMA_PROPERTY_NAMES
                 or token in SCHEMA_ENUM_VALUES
                 or token in CHANGE_KIND_VALUES
+                or token in DEPS_REPORT_KEYS
+                or token in DIAGNOSIS_CAUSES
             )
         if not ok:
             line = text.count("\n", 0, match.start()) + 1
@@ -476,6 +545,16 @@ def test_the_drift_check_actually_has_teeth():
     assert NON_REPORT_IDENTIFIERS.isdisjoint(SCHEMA_PROPERTY_NAMES)
     assert "profile_mismatch" in SCHEMA_ENUM_VALUES
     assert "runtime_floor_raised" in CHANGE_KIND_VALUES
+    # The deps-report vocabulary is read from real code, so it must be
+    # non-empty and must contain the keys the debugging skill leans on.
+    assert {
+        "missing_symbols",
+        "bindings_summary",
+        "unresolved_libraries",
+    } <= DEPS_REPORT_KEYS
+    assert "resolution_reason" in DEPS_REPORT_KEYS
+    assert "no_such_deps_key" not in DEPS_REPORT_KEYS
+    assert "not_an_abi_problem" in DIAGNOSIS_CAUSES
     # The three vocabularies must stay distinct sources, not one merged blob:
     # a token accepted only because some *other* registry happens to contain
     # it would defeat the point.

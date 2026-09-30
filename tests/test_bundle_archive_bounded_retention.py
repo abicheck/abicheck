@@ -192,6 +192,8 @@ def test_writer_retains_blob_metadata_not_blob_bytes(tmp_path) -> None:
         )
 
 
+# Scale/memory measurement (~77s on CI); the `slow` lane runs it on every PR.
+@pytest.mark.slow
 def test_write_peak_does_not_grow_with_member_count(tmp_path) -> None:
     """The behavioural claim behind the spooling change.
 

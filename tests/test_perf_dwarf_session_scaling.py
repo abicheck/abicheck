@@ -159,7 +159,7 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
 
     # Sanity: both paths actually extracted the same real work, not near-empty
     # snapshots that would make the timing comparison meaningless.
-    assert len(legacy_snap.declarations.types) == len(session_snap.types)
+    assert len(legacy_snap.declarations.types) == len(session_snap.declarations.types)
     assert legacy_snap.declarations.types
 
     # Validation measured ~8x on a comparable fixture; require only a modest,

@@ -1,0 +1,27 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [
+    "x86_64"
+  ],
+  "category": "B",
+  "digest": "sha256:78d57448a05339962c46dc659cae35f45ec54c259046fc824f4ad5744afe8fbf",
+  "expected": {
+    "cause": "layout_changed",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-layout-binary-only",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We dropped a vendor build of libwidget into our dev environment and now our app prints the wrong area for a 3x4 widget; it should print 12. We only have their binary. Run ./setup.sh once, then ./env/run.sh. What is going on?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-layout-binary-only",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}

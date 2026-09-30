@@ -38,6 +38,7 @@ from abicheck.report.change_operation import (
 from abicheck.reporter import to_json
 from abicheck.reporter_markdown import ShowOnlyFilter
 from abicheck.schemas import load_compare_report_schema
+from tests.schema_validation import validate_instance
 
 jsonschema = pytest.importorskip("jsonschema")
 
@@ -125,7 +126,7 @@ class TestFindingEvolutionSchema:
         previous = None if prev is None else _real(prev, old)
         apply_finding_evolution(result, previous)
         doc = json.loads(to_json(result))
-        jsonschema.Draft202012Validator(load_compare_report_schema()).validate(doc)
+        validate_instance(doc, load_compare_report_schema())
         assert doc["finding_evolution"]["chain_evaluated"] is (prev is not None)
 
     @pytest.mark.parametrize(
@@ -140,7 +141,7 @@ class TestFindingEvolutionSchema:
     )
     def test_malformed_block_is_rejected(self, field: str, bad: object) -> None:
         doc = json.loads(to_json(_real({"a"}, set())))
-        jsonschema.Draft202012Validator(load_compare_report_schema()).validate(doc)
+        validate_instance(doc, load_compare_report_schema())
         doc["finding_evolution"][field] = bad
         validator = jsonschema.Draft202012Validator(load_compare_report_schema())
         assert list(validator.iter_errors(doc))

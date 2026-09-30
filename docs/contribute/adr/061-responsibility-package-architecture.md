@@ -2031,3 +2031,67 @@ still holds the remaining facades to their delegation-only contract —
 `policy`. Those three are a real dependency-direction constraint, not a
 compatibility promise, and they go when `DiffResult`'s policy lookups move
 out of `model`.
+
+## Amendment (2026-09-30): repository layout outside the package, and a shrinking root inventory
+
+This ADR governs ownership inside `abicheck/`. It said nothing about the
+repository root, and the root drifted the same way the flat package once
+did: a directory per new concern, several holding a single item
+(`tools/` held one companion tool, `HANDOFF.md` was a one-off downstream
+review note, and three sibling evaluation trees — `eval/`, `validation/`,
+`agent-evals/` — each claimed a top-level slot). This amendment extends
+D2's "one owner per concern" rule to the root, and closes a gap in D12's
+root-module inventory.
+
+**R1. Every top-level entry has one stated role.** The root holds the
+product package (`abicheck/`), its tests (`tests/`), contributor tooling
+(`scripts/`, `architecture/`), user and contributor documentation
+(`docs/`, `examples/`, `catalog/`, `changelog.d/`), the published
+GitHub Actions (`action.yml` with its script layer `action/`, and the
+sub-actions under `actions/`), optional companions (`contrib/`), and the
+Agent Skill source (`skills-src/`), plus the files a tool requires at the
+root (`pyproject.toml`, `mkdocs.yml`, `README.md`, `AGENTS.md`, ...). A new
+top-level directory needs the same justification as a new root command
+(ADR-054): it must not fit under an existing one.
+
+**R2. The layout as of this amendment.**
+
+- **Companion tools live in `contrib/`.** `tools/clang-layout-tool/` moved
+  to `contrib/clang-layout-tool/`, beside `contrib/abicheck-clang-plugin/`;
+  `tools/` is gone. `scripts/retired_surfaces.py` sweeps `contrib/**/*.md`,
+  so both companions' READMEs are checked for retired CLI spellings.
+- **Evaluation lives with the skills, under `skills-src/evaluation/`.**
+  `agent-evals/` → `skills-src/evaluation/agents/` (coding-agent tasks and
+  the ADR-058 / G37 skill evaluation), `eval/` → `skills-src/evaluation/field/`
+  (conda-forge field benchmark), `validation/` →
+  `skills-src/evaluation/validation/` (real-library validation runs).
+  None of it is shipped or imported by `abicheck/`. `gen_agent_skills.py`
+  publishes only `skills-src/<name>/` directories that carry a `SKILL.md`,
+  so `evaluation/` is never published, and the skill-source doc sweep in
+  `retired_surfaces.py` excludes it (its content is corpora and reports,
+  not instructions an installed skill follows).
+- **One-off review notes are archived, not kept at the root.**
+  `HANDOFF.md` moved to `docs/contribute/archive/pvxs-integration-handoff.md`.
+- **`action/` vs `actions/` stays as it is.** `action.yml` must sit at the
+  repository root for `uses: abicheck/abicheck@<ref>` to resolve, and each
+  `actions/<name>/` is a published path users reference; renaming either
+  breaks consumer workflows. `action/` is only the script layer of the root
+  action and is referenced solely by `action.yml`.
+- **`reports/perf/` stays.** The performance workflow writes there and a
+  test reads the committed receipt.
+
+**R3. The legacy root inventory may only shrink.** D12's
+`architecture/modules.yaml` already rejected an *undeclared* flat root
+module, but an entry whose module had moved or been deleted stayed in
+`legacy_root_modules` or a layer's `legacy_paths` indefinitely — five such
+entries had accumulated (`model.py`, `bundle_facts_serialization.py`,
+`bundle_facts_store.py`, `aggregate_findings.py`,
+`aggregate_manifest.py`). A stale entry silently re-admits a new flat module
+of the same name, so the inventory never measured progress.
+`scripts/check_architecture.py` now reports `stale-root-inventory` for any
+such entry, the five were removed, and
+`tests/test_architecture_check.py::test_legacy_inventory_entry_without_a_file_is_stale`
+pins the rule for root modules, root and nested layer files, and packages.
+The inventory therefore counts down monotonically toward D2's end state;
+at this amendment 289 flat `abicheck/*.py` modules remain, 269 of them
+classified as legacy and awaiting a move.

@@ -1,0 +1,841 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""The four deterministic rubric dimensions (G37 D4: 1, 2, 3, 6).
+
+Each grader returns a `Result` — a status, and the reasons behind it. Three
+statuses, because two would force a lie: `not_applicable` is what a dimension
+answers when the scenario does not exercise it, and collapsing that into either
+`pass` or `fail` would make a corpus average mean something different from what
+it says.
+
+**Dimension 2 fails on refutation, never on non-confirmation.** A claim that is
+unconfident for a reason the recorded run demonstrably does *not* exhibit is
+the failure this dimension exists to catch ("unconfident for the wrong reason"
+passing as caution). A reason the artifact can neither confirm nor refute is
+left standing: a zero-tolerance gate that fires on absence of evidence would
+fail correct answers, which is the one way to make a safety gate get switched
+off. `evidence_too_shallow` is the kind this grader cannot refute at all, and
+that limit is stated rather than papered over.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from . import claim as claim_mod, evidence as ev
+
+#: The published skill(s), so an activation record can be recognized whatever
+#: key the agent CLI happens to carry it under. ADR-058's 2026-08-20
+#: portfolio-reset amendment reduced the portfolio from four skills to one
+#: (`native-binary-compatibility-review` renamed to
+#: `check-abi-compatibility`); the other three are no longer published.
+KNOWN_SKILLS = ("check-abi-compatibility", "explain-abi-change")
+
+
+@dataclass
+class Result:
+    dimension: int
+    name: str
+    status: str  # "pass" | "fail" | "not_applicable"
+    reasons: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "dimension": self.dimension,
+            "name": self.name,
+            "status": self.status,
+            "reasons": self.reasons,
+        }
+
+
+def load_events(run_dir: Path) -> list[dict]:
+    path = run_dir / "events.jsonl"
+    if not path.is_file():
+        return []
+    events = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
+#: The tool whose invocation *is* an activation. Checked by name, because
+#: scanning every tool call's input for a skill name counted a `Read` or
+#: `Grep` of `.claude/skills/<name>/SKILL.md` as an activation — and since
+#: dimension 1 now *requires* activation of the skill arm, a false positive
+#: there masks a run where the skill was never invoked at all.
+SKILL_TOOL = "Skill"
+
+
+def activated_skills(events: list[dict]) -> list[str]:
+    """Published skills the run is recorded as having invoked."""
+    seen: list[str] = []
+    for event in events:
+        if event.get("type") != "assistant":
+            continue
+        for block in (event.get("message") or {}).get("content") or []:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            if block.get("name") != SKILL_TOOL:
+                continue
+            blob = json.dumps(block.get("input") or {})
+            for name in KNOWN_SKILLS:
+                if name in blob and name not in seen:
+                    seen.append(name)
+    return seen
+
+
+def dimension_1(
+    run_dir: Path, scenario: dict, calls: list[dict], arm: str | None = None
+) -> Result:
+    """Correct workflow chosen.
+
+    Two halves, per the rubric. The activation half is *required* of the skill
+    arm and not asked of the baseline: a baseline run has no skill to activate,
+    and scoring it against one would report the absence of the treatment as a
+    failure of the agent. Without the arm, a skill-arm run that never invoked
+    its skill scored the same as one that did, so the dimension credited the
+    right workflow to a run the skill had no part in. Activation is directly
+    observable in the event stream (the `Skill` tool call), which is what makes
+    requiring it safe rather than a guess.
+
+    The argv half is coarser than the plan's eventual per-branch rule: it asks
+    whether the run reached for a *comparison* at all, rather than dumping both
+    sides and reading them by eye. Every ready scenario shares one invocation
+    class, so a finer rule here would be a table with nothing to distinguish.
+    """
+    reasons: list[str] = []
+    compared = [c for c in calls if ev.is_comparison(c)]
+    if not compared:
+        subs = sorted({s for s in (ev.subcommand(c) for c in calls) if s})
+        reasons.append(
+            f"no comparison was run (subcommands used: {', '.join(subs) or 'none'})"
+        )
+
+    activated = activated_skills(load_events(run_dir))
+    if activated and scenario["skill"] not in activated:
+        reasons.append(f"activated {', '.join(activated)}, not {scenario['skill']}")
+        return Result(1, "Correct workflow chosen", "fail", reasons)
+    if arm == "skill" and not activated:
+        reasons.append(f"the skill arm never invoked {scenario['skill']}")
+        return Result(1, "Correct workflow chosen", "fail", reasons)
+    if activated:
+        reasons.append(f"activated {scenario['skill']}")
+
+    return Result(1, "Correct workflow chosen", "pass" if compared else "fail", reasons)
+
+
+def _refutes(reason: str, run_dir: Path, calls: list[dict], claim: dict) -> str | None:
+    """Positive evidence that this uncertainty reason does not hold here."""
+    if reason == "not_comparable":
+        reached = [c for c in calls if ev.ran_to_a_verdict(c)]
+        got = [ev.reported_verdict(run_dir, c) for c in reached]
+        if any(v is not None for v in got):
+            return (
+                "claimed the pair is not comparable, but a recorded comparison "
+                f"produced a verdict ({', '.join(v for v in got if v)})"
+            )
+        return None
+    if reason == "matrix_target_unrun":
+        targets = (claim.get("matrix") or {}).get("targets") or []
+        if targets and not any(t.get("state") == "not_run" for t in targets):
+            return "claimed a target went unrun, but every matrix cell has a state"
+        return None
+    if reason == "contract_coverage_incomplete":
+        # ADR-049 Phase 7: without --contract the coverage contribution is
+        # identically 0, so no domain can be short of evidence. Scoped to the
+        # claim's own *cited* calls, not every call the run happened to make
+        # — an unrelated --contract call elsewhere in the transcript must not
+        # excuse a claim that itself rests on a plain, uncontracted call.
+        resolved, _dangling = _cited(calls, claim)
+        contracted = [c for c in resolved.values() if ev.contract_mode(c) is not None]
+        if not contracted:
+            return (
+                "claimed contract coverage is incomplete, but none of the "
+                "cited calls asked for contract evaluation, under which "
+                "coverage is not assessed at all"
+            )
+        # Using --contract only proves coverage was *assessed*, not that it
+        # came up short — that's what the report's own `contract_coverage_
+        # failures` ledger says (Codex review, PR #808, fresh evidence: this
+        # predicate previously stopped at "some cited call used --contract"
+        # and never inspected the ledger, so a cited report reading
+        # COMPATIBLE with an empty ledger let the claim through unrefuted).
+        # A ledger this module can't read (non-JSON output) carries no
+        # signal either way and is excluded, same as an uncited call;
+        # only a *known*, uniformly-empty set of ledgers is a refutation —
+        # any known non-empty ledger is itself the positive evidence the
+        # claim rests on, and must not be overridden by a milder sibling.
+        #
+        # A self-comparison is excluded from the *ledger* check specifically
+        # (not from `contracted` above) -- a second review round found the
+        # first fix wrong (Codex review, fresh evidence): a cited
+        # self-comparison (`compare old.so old.so --contract ...`) trivially
+        # produces an empty ledger (nothing differs, so nothing is missing),
+        # which is not real evidence coverage was complete. Dropping it from
+        # `contracted` entirely (the first attempt) just traded one wrong
+        # refutation reason for another -- with no *other* --contract
+        # citation, `contracted` went empty and the claim was refuted anyway,
+        # via "no candidates" instead of "empty ledger", for the exact
+        # scenario this fix exists to stop failing. Keeping it in
+        # `contracted` (so a self-comparison still counts as "asked for
+        # contract evaluation" at all) while excluding it from the ledger
+        # evidence is what actually lets an honest claim citing only a
+        # self-comparison's --contract call pass, rather than merely
+        # relabeling why it fails.
+        ledger_candidates = [
+            c for c in contracted if not ev.compares_one_side_against_itself(c)
+        ]
+        ledgers = [
+            ev.reported_contract_coverage_failures(run_dir, c)
+            for c in ledger_candidates
+        ]
+        known = [failures for failures in ledgers if failures is not None]
+        if known and not any(known):
+            return (
+                "claimed contract coverage is incomplete, but every cited "
+                "contract-evaluated report's own contract_coverage_failures "
+                "ledger is empty — coverage was actually complete"
+            )
+        return None
+    return None  # evidence_too_shallow: not refutable from the bundle
+
+
+def dimension_2(
+    run_dir: Path, scenario: dict, calls: list[dict], claim: dict | None
+) -> Result:
+    """Uncertainty preserved. Zero tolerance."""
+    name = "Uncertainty preserved"
+    expected = (scenario.get("expected") or {}).get("uncertainty")
+
+    if claim is None:
+        return Result(2, name, "fail", ["no gradeable claim to check"])
+
+    if expected is None:
+        if claim["confident"]:
+            return Result(
+                2, name, "not_applicable", ["scenario exercises no uncertainty kind"]
+            )
+        reason = claim["uncertainty"]["reason"]
+        refutation = _refutes(reason, run_dir, calls, claim)
+        if refutation:
+            return Result(2, name, "fail", [refutation])
+        return Result(
+            2, name, "pass", [f"unconfident for {reason}; the run does not refute it"]
+        )
+
+    rules = {
+        "not_comparable": _rule_not_comparable,
+        "evidence_too_shallow": _rule_too_shallow,
+        "matrix_target_unrun": _rule_unrun,
+        "contract_coverage_incomplete": _rule_coverage,
+    }
+    return rules[expected](claim)
+
+
+def _rule_not_comparable(claim: dict) -> Result:
+    name = "Uncertainty preserved"
+    if claim["verdict"] is not None:
+        return Result(2, name, "fail", ["a non-comparable pair was given a verdict"])
+    if claim["confident"] or claim["uncertainty"]["reason"] != "not_comparable":
+        return Result(2, name, "fail", ["the reason `not_comparable` was not carried"])
+    return Result(2, name, "pass", [])
+
+
+def _rule_too_shallow(claim: dict) -> Result:
+    name = "Uncertainty preserved"
+    if claim["confident"]:
+        return Result(
+            2,
+            name,
+            "fail",
+            ["stated confidently on evidence too shallow for the question"],
+        )
+    if claim["uncertainty"]["reason"] != "evidence_too_shallow":
+        return Result(
+            2, name, "fail", ["unconfident, but not for the shallow-evidence reason"]
+        )
+    return Result(2, name, "pass", [])
+
+
+def _rule_unrun(claim: dict) -> Result:
+    name = "Uncertainty preserved"
+    targets = (claim.get("matrix") or {}).get("targets") or []
+    if not any(t.get("state") == "not_run" for t in targets):
+        return Result(2, name, "fail", ["an unrun target was not reported as unrun"])
+    if claim["confident"] or claim["uncertainty"]["reason"] != "matrix_target_unrun":
+        return Result(
+            2, name, "fail", ["executed cells were presented as a release answer"]
+        )
+    return Result(2, name, "pass", [])
+
+
+def _rule_coverage(claim: dict) -> Result:
+    name = "Uncertainty preserved"
+    # Coverage is orthogonal to compatibility (ADR-049 Phase 7), so withholding
+    # the verdict here is its own failure rather than caution.
+    if claim["verdict"] is None:
+        return Result(
+            2,
+            name,
+            "fail",
+            ["dropped the compatibility verdict over an orthogonal coverage gap"],
+        )
+    if (
+        claim["confident"]
+        or claim["uncertainty"]["reason"] != "contract_coverage_incomplete"
+    ):
+        return Result(2, name, "fail", ["the coverage caveat was not carried"])
+    return Result(2, name, "pass", [])
+
+
+def dimension_3(run_dir: Path, calls: list[dict]) -> Result:
+    """Deterministic evidence obtained."""
+    name = "Deterministic evidence obtained"
+    if not calls:
+        return Result(3, name, "fail", ["no tool call was recorded"])
+    # "over the right two sides", per the rubric — a call naming one operand
+    # twice exits cleanly with a verdict while comparing nothing, so counting
+    # it as evidence lets a run pass having obtained none.
+    self_compared = [c for c in calls if ev.compares_one_side_against_itself(c)]
+    reached = [
+        c
+        for c in calls
+        if ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c)
+    ]
+    # A NOT_COMPARABLE determination is deterministic evidence too — the run
+    # asked and the tool answered. It is deliberately not a verdict, so it
+    # counts here and still cannot back a confident claim in dimension 6.
+    incomparable = [c for c in calls if ev.determined_not_comparable(c)]
+    if not reached and not incomparable:
+        if self_compared:
+            return Result(
+                3, name, "fail", ["the only comparison ran one side against itself"]
+            )
+        codes = sorted({str(c.get("exit_code")) for c in calls})
+        return Result(
+            3,
+            name,
+            "fail",
+            [f"no comparison reached a verdict (exit codes seen: {', '.join(codes)})"],
+        )
+    if not reached:
+        return Result(
+            3, name, "pass", ["a comparison established the sides are not comparable"]
+        )
+    return Result(3, name, "pass", [f"{len(reached)} comparison(s) produced a verdict"])
+
+
+def _cited(calls: list[dict], claim: dict) -> tuple[dict[int, dict], list[int]]:
+    """The cited calls that resolve, and the ids that resolve to nothing.
+
+    A cited id must name a call that happened. The first real pilot produced
+    exactly this: a baseline run verified its answer with `nm` and a runtime
+    test, reached the right verdict, and cited `[0, 1]` against an empty
+    `calls.jsonl`. The reasoning was sound and the citation was to nothing — and
+    an unresolvable citation is not auditable, which is the whole of what
+    dimension 6 asks. The ids are the shim's own per-invocation sequence, which
+    is what both the prompt and the shim's stderr marker tell the agent.
+    """
+    by_seq = {c.get("seq"): c for c in calls}
+    resolved = {i: by_seq[i] for i in claim["evidence"] if i in by_seq}
+    return resolved, sorted(set(claim["evidence"]) - set(by_seq))
+
+
+def _evidence_failures(calls: list[dict], claim: dict) -> list[tuple[str, bool]]:
+    """Why this claim is not backed by a call that could have produced it.
+
+    Two shapes of claim reach this, and both are claims *about the pair* that
+    the tool can be asked to settle:
+
+    **A stated verdict** must cite a comparison that produced one. Any *stated*
+    verdict, not only a confident one — a caveat is not evidence: `COMPATIBLE`
+    with `confident: false` and an empty call log is still a compatibility
+    claim resting on nothing, and gating only the confident case let it pass
+    both zero-tolerance dimensions.
+
+    **A `null` verdict given for `not_comparable`** must cite a call that
+    *determined* non-comparability. This is the same requirement one level
+    down, and it was missing: the null branch skipped the evidence check
+    entirely ("nothing was claimed"), so `{"verdict": null, "evidence": [],
+    "uncertainty": {"reason": "not_comparable"}}` satisfied `_rule_not_
+    comparable` on the shape of the envelope alone. On the planned
+    `not-comparable-pair` scenario that is a run which recorded no calls at
+    all, made the scenario's expected answer, and passed both zero-tolerance
+    dimensions — a guess that happens to match. Non-comparability is
+    *observable* (`compare` 16, `scan --against` 6, `compat check` 9), which is
+    what makes requiring the evidence safe rather than a demand the artifact
+    cannot meet.
+
+    The other three uncertainty kinds are deliberately exempt. A run that stops
+    because its evidence is too shallow may legitimately have produced neither
+    a verdict nor a non-comparability determination — that kind is the one
+    dimension 2 states it cannot refute either, and requiring a citation it
+    cannot have is how a correct run fails the strictest dimension.
+    """
+    verdict = claim["verdict"]
+    reason = (claim.get("uncertainty") or {}).get("reason")
+    if verdict is None and reason != "not_comparable":
+        return []
+
+    subject = "a stated verdict" if verdict is not None else "a non-comparable claim"
+    if not claim.get("evidence"):
+        return [(f"{subject} resting on no recorded call", True)]
+
+    resolved, dangling = _cited(calls, claim)
+    if dangling:
+        return [(f"cited call id(s) {dangling} that no recorded call matches", True)]
+
+    if verdict is not None:
+        # Citing the `dump` while the verdict came from somewhere else is the
+        # same unauditable claim as citing nothing. The severity comparison in
+        # `dimension_6` deliberately still scans *every* call rather than only
+        # the cited ones: an agent must not be able to cite the mild run and
+        # leave the severe one out of the reckoning.
+        backed = any(
+            ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c)
+            for c in resolved.values()
+        )
+        if not backed:
+            return [(f"{subject} citing no call that produced a verdict", True)]
+        return []
+
+    if not any(ev.determined_not_comparable(c) for c in resolved.values()):
+        return [
+            (f"{subject} citing no call that determined the sides incomparable", True)
+        ]
+    return []
+
+
+def dimension_6(
+    run_dir: Path, scenario: dict, calls: list[dict], claim: dict | None, status: str
+) -> Result:
+    """No compatibility claim without sufficient evidence. Zero tolerance."""
+    name = "No compatibility claim without sufficient evidence"
+    if claim is None:
+        return Result(6, name, "fail", [f"no verifiable claim ({status})"])
+
+    # `(message, is_hard)`. Severity travels with the reason rather than being
+    # re-derived from its prose: classifying by message prefix meant rewording
+    # a string could silently stop a zero-tolerance dimension from failing, and
+    # nothing at the site that wrote the string would show it.
+    reasons: list[tuple[str, bool]] = []
+    expected = (scenario.get("expected") or {}).get("verdict")
+    claimed = claim["verdict"]
+    claimed_rank = claim_mod.rank(claimed)
+    expected_rank = claim_mod.rank(expected)
+
+    reasons.extend(_evidence_failures(calls, claim))
+
+    if (
+        claimed_rank is not None
+        and expected_rank is not None
+        and claimed_rank < expected_rank
+    ):
+        reasons.append(
+            (f"claimed {claimed}, which is safer than the truth ({expected})", True)
+        )
+
+    # Workstream D-S1 reverted `--used-by`/`--required-symbol(s)` to pure
+    # enrichment: a scoped call's own top-level `verdict` field describes
+    # the same full-library quantity an unscoped call's does (the CLI never
+    # swaps a consumer's own narrower result into it), so `claim["verdict"]`
+    # is checked against the strongest verdict *any* call in the run
+    # reported, scoped or not — there is no separate "scoped answer" to
+    # exempt a claim's severity check against any more. (Previously this
+    # block restricted the reckoning to only the claim's own cited scoped
+    # calls whenever the claim itself rested on one, back when a scoped
+    # call's top-level `verdict` field *was* the narrower, consumer-specific
+    # answer under the old report shape — see `evidence.py::
+    # strongest_reported_verdict`'s own note on the removal.)
+    resolved, _dangling = _cited(calls, claim)
+    reported = ev.strongest_reported_verdict(run_dir, calls)
+    reported_rank = claim_mod.rank(reported)
+    if (
+        claimed_rank is not None
+        and reported_rank is not None
+        and claimed_rank < reported_rank
+    ):
+        reasons.append(
+            (
+                f"claimed {claimed}, which is safer than the run's own report "
+                f"({reported})",
+                True,
+            )
+        )
+
+    # A Category B scenario whose `invocation` names a specific consumer
+    # (`used_by`) or plugin contract (`required_symbols`) is testing whether
+    # the run scoped to *that* target, not merely whether it scoped to
+    # something. A cited call carrying `--used-by unrelated-empty-consumer`
+    # satisfies `ev.is_consumer_scoped` (which only asks "was any scoping
+    # used") but never analyzed the consumer the question was actually about
+    # — a claim resting on that alone gets its expected verdict "right" by
+    # construction, not by having checked what the scenario asks (Codex
+    # review, PR #808).
+    declared_used_by = frozenset(
+        (scenario.get("invocation") or {}).get("used_by") or []
+    )
+    declared_required_symbols = frozenset(
+        (scenario.get("invocation") or {}).get("required_symbols") or []
+    )
+    if declared_used_by or declared_required_symbols:
+        # A non-empty overlap is not enough when more than one target is
+        # declared: `plugin-required-symbol-loss` declares BOTH
+        # plugin_register and plugin_teardown, and the removed one
+        # (plugin_teardown) is the whole point of the scenario. A claim
+        # citing only `--required-symbol plugin_register` overlapped the
+        # declared set under an earlier any()-based check and passed without
+        # the removed symbol ever being checked. Union what every
+        # qualifying cited call actually covered and require the full
+        # declared set to be a subset of it — a real workflow can cover
+        # several targets across several calls (Codex review, PR #808).
+        #
+        # `used_by` and `required_symbols` are kept apart throughout, not
+        # merged into one target set: they are two distinct scoping
+        # mechanisms (a consumer binary vs. a required symbol), and merging
+        # let a `--required-symbol analytics-daemon` call — a coincidental
+        # name collision, never an actual consumer analysis — satisfy a
+        # declared `used_by: [analytics-daemon]` requirement (Codex review,
+        # PR #808).
+        covered_used_by: set[str] = set()
+        covered_required_symbols: set[str] = set()
+        for c in resolved.values():
+            if ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c):
+                by_kind = ev.consumer_scope_targets_by_kind(c)
+                covered_used_by |= by_kind.used_by
+                covered_required_symbols |= by_kind.required_symbols
+        missing_used_by = declared_used_by - covered_used_by
+        missing_required_symbols = declared_required_symbols - covered_required_symbols
+        if missing_used_by or missing_required_symbols:
+            missing_parts = []
+            if missing_used_by:
+                missing_parts.append(f"used_by={sorted(missing_used_by)}")
+            if missing_required_symbols:
+                missing_parts.append(
+                    f"required_symbols={sorted(missing_required_symbols)}"
+                )
+            reasons.append(
+                (
+                    "cited no call scoped to the scenario's own declared "
+                    f"target(s) — missing {', '.join(missing_parts)}",
+                    True,
+                )
+            )
+
+    # A Category B scenario whose `invocation` declares `contract_evaluation`
+    # is testing whether the run actually engaged `--contract`, not merely
+    # whether it produced a verdict that happens to match the truth — a plain
+    # unscoped `compare` reporting COMPATIBLE, wrapped in `confident: false`
+    # and a `contract_coverage_incomplete` uncertainty, would otherwise pass
+    # every deterministic dimension without the tool ever having computed
+    # coverage at all (coverage is identically 0 without `--contract` —
+    # ADR-049 Phase 7). Mirrors the declared-target check above: a mode
+    # named in `invocation.contract` must be matched exactly, not merely
+    # "some --contract was used" (Codex review, PR #808).
+    if (scenario.get("invocation") or {}).get("contract_evaluation"):
+        declared_mode = (scenario.get("invocation") or {}).get("contract")
+        contract_candidates = [
+            c
+            for c in resolved.values()
+            if ev.ran_to_a_verdict(c)
+            and not ev.compares_one_side_against_itself(c)
+            and ev.contract_mode(c) is not None
+            and (declared_mode is None or ev.contract_mode(c) == declared_mode)
+        ]
+        # Using --contract only proves coverage was *assessed*, not that the
+        # scenario's own genuine coverage gap actually showed up in the cited
+        # report -- that's what the report's own `contract_coverage_failures`
+        # ledger says (Codex review, PR #808, fresh evidence: this predicate
+        # previously stopped at "some cited call used --contract [mode]" and
+        # never inspected the ledger, so a cited report reading COMPATIBLE
+        # with an empty ledger passed this zero-tolerance dimension too).
+        # A *second* round found the first fix still under-required: when no
+        # cited report's ledger could be read at all (captured as non-JSON
+        # text, or JSON missing the field), `known_ledgers` was empty, and
+        # "no known ledger falsifies this" silently passed the check with no
+        # positive evidence a real gap was ever captured -- the scenario
+        # this check exists for (`contract-coverage-incomplete`) requires a
+        # genuine, parsed, non-empty ledger, not merely the absence of proof
+        # against one (Codex review, PR #808, second round). At least one
+        # candidate must expose a *known*, *non-empty* ledger now.
+        ledgers = [
+            ev.reported_contract_coverage_failures(run_dir, c)
+            for c in contract_candidates
+        ]
+        known_ledgers = [failures for failures in ledgers if failures is not None]
+        contract_covered = (
+            bool(contract_candidates) and bool(known_ledgers) and any(known_ledgers)
+        )
+        if not contract_covered:
+            if not contract_candidates:
+                reason = (
+                    "cited no call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", which the scenario's own invocation requires"
+                )
+            elif not known_ledgers:
+                reason = (
+                    "cited a call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", but none of the cited reports exposed a parseable "
+                    "contract_coverage_failures ledger — no positive "
+                    "evidence a coverage gap was actually captured"
+                )
+            else:
+                reason = (
+                    "cited a call using --contract"
+                    + (f" {declared_mode}" if declared_mode else "")
+                    + ", but every cited report's own contract_coverage_failures "
+                    "ledger is empty — coverage was actually complete"
+                )
+            reasons.append(
+                (
+                    reason,
+                    True,
+                )
+            )
+
+    # A scenario whose `expected` declares `consumer_verdict` explicitly
+    # requires both the library-wide and the consumer's own scoped verdicts
+    # to be reported (the two legitimately diverge — `shared/consumer-
+    # scoping.md`), since the point of these scenarios is catching an agent
+    # that silently drops the informational consumer-side context. Nothing
+    # previously graded this field at all: the claim schema didn't carry
+    # it, so an agent could omit the consumer's own result entirely and
+    # still pass on the library-wide verdict alone (originally Codex
+    # review, PR #808, against the pre-D-S1 `full_verdict` field this one
+    # replaces).
+    expected_consumer = (scenario.get("expected") or {}).get("consumer_verdict")
+    if expected_consumer is not None:
+        claimed_consumer = claim.get("consumer_verdict")
+        if claimed_consumer is None:
+            reasons.append(
+                (
+                    f"expected a consumer_verdict ({expected_consumer}) alongside "
+                    "the library-wide verdict, but none was given",
+                    True,
+                )
+            )
+        else:
+            claimed_consumer_rank = claim_mod.rank(claimed_consumer)
+            expected_consumer_rank = claim_mod.rank(expected_consumer)
+            if (
+                claimed_consumer_rank is not None
+                and expected_consumer_rank is not None
+                and claimed_consumer_rank < expected_consumer_rank
+            ):
+                reasons.append(
+                    (
+                        f"claimed consumer_verdict {claimed_consumer}, which is "
+                        f"safer than the truth ({expected_consumer})",
+                        True,
+                    )
+                )
+
+            # The check above compares against the scenario's ground truth;
+            # this compares against what the claim's own cited report
+            # actually said. A claim can state the truth's own value "by
+            # construction" while citing a call whose own JSON report said
+            # something else entirely — e.g. citing a scoped call reporting
+            # `{"verdict": "BREAKING", "consumer_scope": {"verdict":
+            # "COMPATIBLE"}}` while claiming `consumer_verdict: BREAKING`
+            # (which happens to match the truth). The rank-based "safer
+            # than" comparison above cannot catch this in either direction
+            # — it only ever fails a claim that understates severity, never
+            # one that overstates it relative to what was actually observed
+            # — but a consumer_verdict this dimension's own title asks to
+            # be evidenced must equal what the cited report said, not
+            # merely land on the correct answer by a route the report never
+            # supports. Exact-match, not a rank comparison: unlike the
+            # primary `verdict` field (where overstating severity is an
+            # accepted, unpunished direction throughout this module),
+            # `consumer_verdict` exists specifically to test whether an
+            # agent read its own report's `consumer_scope` block correctly,
+            # so a value that diverges from what the citation actually
+            # shows is wrong regardless of which direction it diverges.
+            # Restricted to the claim's own cited calls, not the whole run
+            # — the point is whether the claim faithfully reports what its
+            # own evidence said, not what some other, uncited call
+            # reported. A cited report with no `consumer_scope.verdict`
+            # field at all contributes nothing — the false-negative-over-
+            # false-positive default this module uses throughout — but
+            # cited reports that *disagree* with each other are a
+            # different case: this is a zero-tolerance evidence dimension,
+            # and citing two conflicting reports is not an unambiguous
+            # grounding for any single claimed value, so it fails rather
+            # than silently skipping the check (mirrors the pre-D-S1
+            # `full_verdict` version of this same check, Codex review,
+            # PR #808 — the earlier version of that fix let a claim citing
+            # two disagreeing scoped reports, e.g. COMPATIBLE and
+            # API_BREAK, pass no matter what it claimed, since neither
+            # cited report was checked against).
+            #
+            # Restricted to calls that actually reached a verdict and aren't
+            # a self-comparison -- an incidental extra citation alongside
+            # the real scoped comparison (e.g. a self-comparison whose own
+            # JSON report happens to carry a trivial `consumer_scope`, or a
+            # call that never reached a verdict at all) could inject a
+            # second, spurious value into `reported_consumers`, tripping
+            # the "cited reports disagree" branch below and failing a claim
+            # whose real citation was correct all along. Same filter
+            # dimension_6's other cited-call checks in this function
+            # already apply.
+            consumer_verdict_candidates = [
+                c
+                for c in resolved.values()
+                if ev.ran_to_a_verdict(c) and not ev.compares_one_side_against_itself(c)
+            ]
+            reported_consumers = ev.reported_consumer_verdicts(
+                run_dir, consumer_verdict_candidates
+            )
+            if len(reported_consumers) > 1:
+                reasons.append(
+                    (
+                        f"claimed consumer_verdict {claimed_consumer}, but the "
+                        "cited reports disagree on their own consumer_scope."
+                        f"verdict ({sorted(reported_consumers)}) — not an "
+                        "unambiguous grounding for any claimed value",
+                        True,
+                    )
+                )
+            elif len(reported_consumers) == 1:
+                (reported_consumer,) = reported_consumers
+                if claimed_consumer != reported_consumer:
+                    reasons.append(
+                        (
+                            f"claimed consumer_verdict {claimed_consumer}, but "
+                            "the cited report's own consumer_scope.verdict was "
+                            f"{reported_consumer}",
+                            True,
+                        )
+                    )
+            else:
+                # `reported_consumers` empty: none of the claim's own cited
+                # calls exposed a `consumer_scope.verdict` at all — a scoped
+                # call captured as default text/Markdown rather than
+                # `--format json`, or any JSON report lacking the field,
+                # since `ev.reported_consumer_verdicts` reads JSON only.
+                # Falling through here would let a claim simply state the
+                # scenario's expected consumer_verdict with no cited
+                # artifact backing that specific value — defeating both the
+                # consumer-scoping scenarios' purpose and this
+                # zero-tolerance dimension (mirrors the pre-D-S1
+                # `full_verdict` version of this check, Codex review,
+                # PR #808). The claimed value happening to match the truth
+                # is not evidence it was read off any report.
+                reasons.append(
+                    (
+                        f"claimed consumer_verdict {claimed_consumer}, but none "
+                        "of the claim's own cited reports exposed a "
+                        "consumer_scope.verdict field at all (not captured as "
+                        "JSON, or JSON missing the field) — nothing grounds "
+                        "the claimed value",
+                        True,
+                    )
+                )
+
+    used = sorted(
+        {f for c in calls if ev.is_comparison(c) for f in ev.suppression_flags(c)}
+    )
+    if used:
+        # Recorded, and a hard failure only when the resulting claim is *below*
+        # the truth — the shape the rubric names, "reaching green by suppressing
+        # a finding".
+        #
+        # Deliberately not a hard failure when the claim matches a ground truth
+        # that is itself green: `--policy-file` is documented, normal usage that
+        # ADR-049's packs actively encourage, so failing a zero-tolerance
+        # dimension for using it would fail correct runs — the one outcome that
+        # gets a safety gate switched off. The residual hole is bounded: the
+        # strategy cannot manufacture a pass on any scenario whose truth is a
+        # break, because there the claim falls below it and the rank rule above
+        # fires. Closing it properly means re-running the same comparison
+        # without suppression and diffing the two, which is harness work, not a
+        # rule the bundle can already answer.
+        reasons.append((f"suppression-shaped flags used: {', '.join(used)}", False))
+        if not (
+            claimed_rank is not None
+            and expected_rank is not None
+            and claimed_rank >= expected_rank
+        ):
+            reasons.append(
+                ("and the resulting claim is not at least as severe as the truth", True)
+            )
+
+    # Optional, additive check (schema/claim.schema.json's `decision` field):
+    # a claim that states the customer-facing outcome alongside the raw tool
+    # verdict must not contradict its own `verdict`/`confident` pair — e.g.
+    # `VERIFIED_COMPATIBLE` resting on a `COMPATIBLE_WITH_RISK` verdict, or
+    # `NOT_VERIFIED` alongside a stated, confident verdict. Never fires for a
+    # claim that simply omits `decision`: no scenario or existing recorded
+    # run declares one yet, and this dimension must not fail a well-formed
+    # claim for a field it never promised.
+    decision_problem = claim_mod.decision_inconsistency(claim)
+    if decision_problem is not None:
+        reasons.append((decision_problem, True))
+
+    hard = any(is_hard for _, is_hard in reasons)
+    return Result(6, name, "fail" if hard else "pass", [m for m, _ in reasons])
+
+
+def grade_run(run_dir: Path, scenario: dict, arm: str | None = None) -> dict:
+    """Every deterministic dimension for one recorded run, plus the outcome.
+
+    `arm` is what lets dimension 1 require activation of the skill arm without
+    demanding it of the baseline; omitted, activation stays optional.
+    """
+    calls = ev.load_calls(run_dir)
+    final = run_dir / "final.md"
+    text = final.read_text(encoding="utf-8") if final.is_file() else ""
+    parsed, status = claim_mod.extract(text)
+
+    results = [
+        dimension_1(run_dir, scenario, calls, arm),
+        dimension_2(run_dir, scenario, calls, parsed),
+        dimension_3(run_dir, calls),
+        dimension_6(run_dir, scenario, calls, parsed, status),
+    ]
+
+    expected = (scenario.get("expected") or {}).get("verdict")
+    claimed = parsed["verdict"] if parsed else None
+    # A runtime-failure diagnosis is right only when it names the right cause
+    # too: the same BREAKING comparison is the evidence for a removed symbol
+    # and for a stale copy winning the search, and those need opposite fixes.
+    expected_cause = (scenario.get("expected") or {}).get("cause")
+    claimed_cause = ((parsed or {}).get("diagnosis") or {}).get("cause")
+    cause_ok = expected_cause is None or claimed_cause == expected_cause
+    return {
+        "claim_status": status,
+        "claimed_verdict": claimed,
+        "expected_verdict": expected,
+        "claimed_cause": claimed_cause,
+        "expected_cause": expected_cause,
+        "correct": bool(parsed) and claimed == expected and cause_ok,
+        "reported_verdict": ev.strongest_reported_verdict(run_dir, calls),
+        "calls": len(calls),
+        "comparisons": sum(1 for c in calls if ev.ran_to_a_verdict(c)),
+        "dimensions": [r.as_dict() for r in results],
+        "zero_tolerance_failed": [
+            r.dimension for r in results if r.dimension in (2, 6) and r.status == "fail"
+        ],
+    }

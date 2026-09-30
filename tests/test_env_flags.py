@@ -242,6 +242,7 @@ class TestNoHandRolledParserSurvives:
                     bound[target.id] = value.value
         return bound
 
+    @pytest.mark.repo_scan
     def test_no_module_compares_an_abicheck_env_value_by_hand(self) -> None:
         root = Path(__file__).resolve().parent.parent / "abicheck"
         offenders: list[str] = []

@@ -87,6 +87,8 @@ def _libs(hidden: Path | None) -> list[Path]:
     return libs
 
 
+# Walks every host ELF library (~61s on CI).
+@pytest.mark.slow
 def test_decode_versym_equals_the_per_entry_read(
     hidden_version_lib: Path | None,
 ) -> None:

@@ -666,7 +666,9 @@ def test_both_sides_captured_still_diffs_normally(
     kinds = {c.kind for c in result.changes}
     if ChangeKind.TYPE_VTABLE_CHANGED not in kinds:
         # The only sanctioned reason to stay silent here.
-        assert len(old.declarations.types[0].vtable) == len(new.types[0].vtable)
+        assert len(old.declarations.types[0].vtable) == len(
+            new.declarations.types[0].vtable
+        )
 
 
 # --- Cross-detector evidence-gap consistency (generalized, not example-shaped)

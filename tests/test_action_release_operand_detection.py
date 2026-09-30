@@ -91,6 +91,7 @@ def _function_source() -> str:
             "fi",
             _named_function_source("_is_path_already_qualified"),
             _named_function_source("_is_release_style_operand"),
+            _named_function_source("_is_release_style_operand_uncached"),
         )
     )
 

@@ -133,6 +133,7 @@ def _producer_calls() -> set[tuple[str, str, str]]:
     return found
 
 
+@pytest.mark.repo_scan
 def test_every_snapshot_producer_call_is_classified() -> None:
     calls = _producer_calls()
     assert calls, "vacuity guard: the scan found no producer call at all"
@@ -144,6 +145,7 @@ def test_every_snapshot_producer_call_is_classified() -> None:
     assert not stale, f"inventory names calls that no longer exist: {sorted(stale)}"
 
 
+@pytest.mark.repo_scan
 def test_stamped_sites_really_call_the_stamp() -> None:
     """A site listed as stamped names the function that stamps it, and that
     function really calls ``classify_extracted``."""

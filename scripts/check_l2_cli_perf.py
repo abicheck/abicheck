@@ -818,9 +818,38 @@ _SEQUENCE_CACHE_MODES = frozenset(
 )
 
 
+#: Written into every cache root this harness creates. `_reset_cache` clears
+#: only a directory carrying it: it used to `rmtree` whatever path it was
+#: handed, and one unit test handed it `/tmp` -- deleting every file the test
+#: process could reach there, mid-run, under every other job on the machine
+#: (the "something prunes /tmp on these runners" that ci.yml's
+#: `TMPDIR=$RUNNER_TEMP` step works around).
+CACHE_ROOT_MARKER = ".abicheck-l2-perf-cache-root"
+
+
+def prepare_cache_root(path: Path) -> Path:
+    """Create *path* as a harness-owned cache root that `_reset_cache` may clear."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / CACHE_ROOT_MARKER).touch()
+    return path
+
+
 def _reset_cache(cache_root: Path) -> None:
-    shutil.rmtree(cache_root, ignore_errors=True)
-    cache_root.mkdir(parents=True, exist_ok=True)
+    """Empty a cache root `prepare_cache_root` made; refuse any other path."""
+    if not (cache_root / CACHE_ROOT_MARKER).is_file():
+        raise ValueError(
+            f"refusing to clear {cache_root}: not a cache root this harness "
+            f"prepared (no {CACHE_ROOT_MARKER} marker)"
+        )
+    for child in cache_root.iterdir():
+        if child.name == CACHE_ROOT_MARKER:
+            continue
+        if child.is_dir() and not child.is_symlink():
+            # Fail loudly: a partially cleared cache would silently turn a
+            # "cold" measurement warm.
+            shutil.rmtree(child)
+        else:
+            child.unlink(missing_ok=True)
 
 
 def _resolved_dependency_roots(fixture: fixtures.BuiltFixture) -> set[str]:
@@ -1208,9 +1237,8 @@ class _ScenarioArea:
     def __post_init__(self) -> None:
         self.build_root = self.root / "fixture"
         self.work = self.root / "work"
-        self.cache_root = self.root / "cache"
         self.work.mkdir(parents=True, exist_ok=True)
-        self.cache_root.mkdir(parents=True, exist_ok=True)
+        self.cache_root = prepare_cache_root(self.root / "cache")
         self.spy = NativeInvocationSpy(self.root / "spy")
         if self.install_spy:
             self.spy.install()

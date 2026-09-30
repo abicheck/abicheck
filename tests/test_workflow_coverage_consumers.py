@@ -49,6 +49,17 @@ from _workflow_files import WORKFLOW_DIR, read_repo_text, workflow_paths
 
 #: `--cov-report=xml` writes `coverage.xml`; `--cov-report=xml:NAME` writes NAME.
 _COV_REPORT = re.compile(r"--cov-report=xml(?::([\w.\-]+))?")
+#: `--cov-report=` with an empty value: no report at all, only the raw
+#: `.coverage` data file (the sharded canonical lane, combined elsewhere).
+#: Its consumer must name that data file.
+_COV_DATA_ONLY = re.compile(r"--cov-report=(?=\s|$)")
+
+
+def _reports_written(run: str) -> list[str]:
+    """Every coverage artifact one `run:` body writes."""
+    reports = [match or "coverage.xml" for match in _COV_REPORT.findall(run)]
+    reports.extend(".coverage" for _ in _COV_DATA_ONLY.finditer(run))
+    return reports
 
 
 def _matrix_combinations(job: dict[str, Any]) -> list[dict[str, Any]]:
@@ -142,8 +153,7 @@ def _orphaned_reports() -> list[str]:
                         continue
                     if not condition_holds(step.get("if"), ctx):
                         continue
-                    for match in _COV_REPORT.findall(run):
-                        report = match or "coverage.xml"
+                    for report in _reports_written(run):
                         if not _has_consumer(steps, step, report, ctx):
                             findings.append(
                                 f"{path.name}::{job_name} {combo or '(no matrix)'} "
@@ -188,7 +198,7 @@ def test_the_survey_actually_finds_coverage_producers() -> None:
     the assertion above vacuously true."""
     producers = 0
     for path in workflow_paths():
-        producers += len(_COV_REPORT.findall(read_repo_text(path)))
+        producers += len(_reports_written(read_repo_text(path)))
     assert producers >= 2, (
         f"found {producers} coverage producers; expected the known lanes"
     )
@@ -299,13 +309,37 @@ class TestMatrixExpansionFollowsGitHub:
         )
         assert combos == [{"os": "b", "cov": True}]
 
-    def test_the_real_unit_tests_matrix_still_expands_to_its_three_legs(self) -> None:
-        """The regression this must not cause: the live matrix is exactly the
-        shape the old append-everything code got right by luck."""
+    def test_the_real_unit_tests_matrices_expand_to_their_legs(self) -> None:
+        """The live matrices: three canonical coverage shards, and the two
+        other-OS legs -- each leg is where a producer/consumer pair is
+        checked, so a mis-expansion would silently skip one."""
         doc = yaml.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
-        combos = _matrix_combinations(doc["jobs"]["unit-tests"])
-        assert [(c["os"], c["python-version"]) for c in combos] == [
-            ("ubuntu-latest", "3.13"),
+        shards = _matrix_combinations(doc["jobs"]["unit-tests"])
+        assert [(c["python-version"], c["shard"]) for c in shards] == [
+            ("3.13", 1),
+            ("3.13", 2),
+            ("3.13", 3),
+        ]
+        other = _matrix_combinations(doc["jobs"]["unit-tests-other-os"])
+        assert [(c["os"], c["python-version"]) for c in other] == [
             ("windows-latest", "3.13"),
             ("macos-latest", "3.13"),
         ]
+
+
+def test_a_data_only_coverage_run_is_a_producer_too() -> None:
+    """`--cov-report=` (empty) writes only the `.coverage` data file; the
+    sharded canonical lane relies on it, so the survey must see it -- else a
+    shard whose data nobody uploads would pass the consumer check unseen."""
+    assert _reports_written("pytest tests/ --cov=abicheck --cov-report=") == [
+        ".coverage"
+    ]
+    assert _reports_written("pytest --cov-report= -q") == [".coverage"]
+    assert _reports_written("pytest --cov-report=xml") == ["coverage.xml"]
+    assert _reports_written("pytest --cov-report=term:skip-covered") == []
+
+
+def test_the_live_shards_are_surveyed_as_data_producers() -> None:
+    doc = yaml.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
+    runs = " ".join(str(s.get("run", "")) for s in _steps(doc["jobs"]["unit-tests"]))
+    assert ".coverage" in _reports_written(runs)

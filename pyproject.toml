@@ -278,6 +278,7 @@ markers = [
     "msvc: requires MSVC cl.exe (Windows) — MSVC+PDB end-to-end lane",
     "slow: marks tests as slow (hypothesis / performance benchmarks)",
     "golden: golden-output snapshot tests",
+    "repo_scan: statically scans the whole repository tree; OS- and coverage-independent, run once by the repo-scan-tests CI job",
 ]
 # Global per-test hang safety valve (pytest-timeout), not a perf regression
 # gate -- CI's own "Test-time report" step already says a *hard* wall-time
@@ -405,24 +406,21 @@ also_copy = [
     "action",
     "action.yml",
     "actions",
-    "agent-evals",
     "changelog.d",
     "contrib",
     "docs",
-    "eval",
     "examples",
     "catalog",
     "mkdocs.yml",
     "pixi.lock",
     "scripts",
     "skills-src",
-    # Scanned by scripts/retired_surfaces.py's tools/ sweep
+    # contrib/ is also scanned by scripts/retired_surfaces.py's contrib/ sweep
     # (test_docs_contract_retired_surfaces.py::test_the_real_tools_readmes_
     # are_in_the_target_set reads the real repository tree directly) --
-    # without this, the mutants/ sandbox copy has no tools/ directory at
+    # without the copy, the mutants/ sandbox has no contrib/ directory at
     # all, so the test's real-vs-expected comparison sees an empty set
     # (Codex review, fresh evidence: mutmut PR lane failure).
-    "tools",
     # Committed perf receipts. `test_perf_receipt.py::TestCommittedReceiptsAre
     # Honest` globs `reports/perf/*.json` and asserts at least one exists, so
     # without the copy the stats run aborts on its vacuity guard.
@@ -434,7 +432,6 @@ also_copy = [
     ".agents",
     ".claude",
     ".gemini",
-    "validation",
     # Root ruff configuration. `test_changekind_stub.py::test_the_formatter_
     # leaves_the_generated_stub_alone_on_an_explicit_path` runs the real
     # `ruff format --check abicheck/` in this tree, and its whole claim is
@@ -746,7 +743,7 @@ pytest_add_cli_args = [
     # never engages and the hard `assert proc.returncode == 0` fires for a
     # commit this context simply can't see. No mutation-kill cost: this
     # file imports no `only_mutate` module (confirmed by grep) -- only
-    # stdlib, `jsonschema`, `pytest`, and `agent-evals/run_task.py` loaded
+    # stdlib, `jsonschema`, `pytest`, and `skills-src/evaluation/agents/run_task.py` loaded
     # by path, none of which is mutated.
     "--ignore=tests/test_agent_evals.py",
     # Same "reads the real repository" class as `test_fact_field_readers.py`/

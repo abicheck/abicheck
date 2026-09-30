@@ -193,6 +193,7 @@ def test_unrelated_callables_and_parameters_are_left_alone() -> None:
         assert not GATE.change_symbol_none_sites(ast.parse(source)), source
 
 
+@pytest.mark.repo_scan
 def test_the_live_tree_carries_no_fabricated_none() -> None:
     """A contributor learns locally, not from CI, that they added one."""
     offenders = [

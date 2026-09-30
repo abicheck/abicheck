@@ -1218,7 +1218,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         )
 
         # At least one of our typedefs should be present
-        assert "my_int" in snap.declarations.typedefs or "my_int2" in snap.typedefs
+        assert (
+            "my_int" in snap.declarations.typedefs
+            or "my_int2" in snap.declarations.typedefs
+        )
 
     def test_cpp_const_variable(self, cpp_lib: Path) -> None:
         """Const global variable should be extracted."""
@@ -1494,7 +1497,10 @@ my_int2_t add_typed(my_int2_t a, my_int2_t b) { return a + b; }
         dwarf_meta, dwarf_adv = parse_dwarf(c_lib)
         snap = build_snapshot_from_dwarf(c_lib, elf_meta, dwarf_meta, dwarf_adv)
 
-        assert "my_int_t" in snap.declarations.typedefs or "my_int2_t" in snap.typedefs
+        assert (
+            "my_int_t" in snap.declarations.typedefs
+            or "my_int2_t" in snap.declarations.typedefs
+        )
 
     def test_c_exported_variable(self, c_lib: Path) -> None:
         """Exported C variables should appear in snapshot."""

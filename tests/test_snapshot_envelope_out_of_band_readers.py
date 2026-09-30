@@ -239,7 +239,7 @@ _MOVED_KEYS = frozenset(
 )
 
 #: Trees whose files read snapshot documents from outside `abicheck/`.
-_SCANNED_ROOTS = ("actions", "contrib", "scripts", "validation", "tests")
+_SCANNED_ROOTS = ("actions", "contrib", "scripts", "skills-src/evaluation", "tests")
 
 #: Sites that read one of `_MOVED_KEYS` off a dict that is NOT a snapshot
 #: document some `abicheck dump` wrote (a hand-built fixture, a pack dict, a
@@ -368,6 +368,7 @@ def _reads_a_file(node: ast.AST) -> bool:
 class TestNoUnguardedOutOfBandReader:
     """What keeps the class closed against a *new* reader."""
 
+    @pytest.mark.repo_scan
     def test_every_file_reading_a_snapshot_document_unwraps_the_envelope(self) -> None:
         offenders: list[str] = []
         for root in _SCANNED_ROOTS:

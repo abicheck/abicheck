@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:6ba8b7da015daf3f95c017ef050b1673d3128e65e87ce7d2f8168dbbaf65983f",
+  "expected": {
+    "cause": "layout_changed",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-layout-mismatch",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Since libwidget was updated, our app starts fine but prints the wrong area for a 3x4 widget; it should print 12. Run ./setup.sh once, then ./env/run.sh. Nothing in our code changed. What happened?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-layout-mismatch",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}
