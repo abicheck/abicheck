@@ -23,10 +23,10 @@ from abicheck.diff_helpers import (
     build_type_map,
     depth_aware_bare_name,
     diff_by_key,
-    fact_known_qualified,
     lookup_matched_type,
     type_map_key,
 )
+from abicheck.fact_provenance import resolved_fact_producer
 from abicheck.model import AbiSnapshot, RecordType
 
 ADDED = (ChangeKind.FUNC_VIRTUAL_ADDED, "added")
@@ -311,108 +311,104 @@ def _hybrid_snap(fact_provenance: dict[str, str]) -> AbiSnapshot:
     )
 
 
-class TestFactKnownQualified:
+class TestResolvedFactProducerFallback:
     """G31 Phase C, third review round: dumper_hybrid.py qualifies
     deprecated/is_scoped provenance keys by namespace, but a hybrid baseline
     persisted before that fix still has real provenance recorded under the
-    former bare key. fact_known_qualified must accept that legacy data
-    (Codex review, fresh evidence) without reopening the bare-name collision
-    the qualification itself was introduced to close."""
+    former bare key. The qualified-then-bare probe must accept that legacy
+    data (Codex review, fresh evidence) without reopening the bare-name
+    collision the qualification itself was introduced to close.
+
+    ADR-063 5B moved the detectors off this lookup onto ``FactStatus``; the
+    probe itself survives as ``fact_provenance.resolved_fact_producer``,
+    which ``storage/fact_backfill`` uses on load to decide whether a legacy
+    hybrid declaration's fact was ever confirmed. These tests state its
+    contract directly, per side, with the bare-name ambiguity flag coming
+    from ``TypeMap`` as the load path's does."""
+
+    @staticmethod
+    def _probe(snap, qualified, bare, records, name):
+        return resolved_fact_producer(
+            snap,
+            qualified,
+            bare,
+            bare_unambiguous=build_type_map(records).bare_name_is_unambiguous(name),
+        )
 
     def test_qualified_key_present_needs_no_fallback(self) -> None:
-        old = _hybrid_snap({"type:ns::Foo:deprecated": "castxml"})
-        new = _hybrid_snap({"type:ns::Foo:deprecated": "clang"})
         t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
-        old_map = build_type_map([t])
-        new_map = build_type_map([t])
-        assert fact_known_qualified(
-            old,
-            new,
-            old_map,
-            new_map,
-            "Foo",
-            "type:ns::Foo:deprecated",
-            "type:ns::Foo:deprecated",
-            "type:Foo:deprecated",
+        snap = _hybrid_snap({"type:ns::Foo:deprecated": "clang"})
+        assert (
+            self._probe(
+                snap, "type:ns::Foo:deprecated", "type:Foo:deprecated", [t], "Foo"
+            )
+            == "clang"
         )
 
     def test_legacy_bare_key_falls_back_when_unambiguous(self) -> None:
-        # Both sides only ever recorded the pre-qualification bare key.
-        old = _hybrid_snap({"type:Foo:deprecated": "castxml"})
-        new = _hybrid_snap({"type:Foo:deprecated": "castxml"})
         t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
-        old_map = build_type_map([t])
-        new_map = build_type_map([t])
-        assert fact_known_qualified(
-            old,
-            new,
-            old_map,
-            new_map,
-            "Foo",
-            "type:ns::Foo:deprecated",
-            "type:ns::Foo:deprecated",
-            "type:Foo:deprecated",
+        snap = _hybrid_snap({"type:Foo:deprecated": "castxml"})
+        assert (
+            self._probe(
+                snap, "type:ns::Foo:deprecated", "type:Foo:deprecated", [t], "Foo"
+            )
+            == "castxml"
         )
 
     def test_ambiguous_bare_name_does_not_fall_back(self) -> None:
-        # Two distinct namespaced types share the bare name "Foo" on the old
-        # side -- the bare-key provenance entry (if any) cannot be safely
-        # attributed to either one, so no fallback is allowed there.
-        old = _hybrid_snap({"type:Foo:deprecated": "castxml"})
-        new = _hybrid_snap({})
+        # Two distinct namespaced types share the bare name "Foo": the
+        # bare-key entry cannot be safely attributed to either one.
         a_foo = RecordType(name="Foo", qualified_name="a::Foo", kind="class")
         b_foo = RecordType(name="Foo", qualified_name="b::Foo", kind="class")
-        old_map = build_type_map([a_foo, b_foo])
-        new_map = build_type_map([a_foo])
-        assert not fact_known_qualified(
-            old,
-            new,
-            old_map,
-            new_map,
-            "Foo",
-            "type:a::Foo:deprecated",
-            "type:a::Foo:deprecated",
-            "type:Foo:deprecated",
+        snap = _hybrid_snap({"type:Foo:deprecated": "castxml"})
+        assert (
+            self._probe(
+                snap,
+                "type:a::Foo:deprecated",
+                "type:Foo:deprecated",
+                [a_foo, b_foo],
+                "Foo",
+            )
+            is None
         )
 
     def test_genuinely_unknown_stays_unknown(self) -> None:
-        old = _hybrid_snap({})
-        new = _hybrid_snap({})
         t = RecordType(name="Foo", qualified_name="ns::Foo", kind="class")
-        old_map = build_type_map([t])
-        new_map = build_type_map([t])
-        assert not fact_known_qualified(
-            old,
-            new,
-            old_map,
-            new_map,
-            "Foo",
-            "type:ns::Foo:deprecated",
-            "type:ns::Foo:deprecated",
-            "type:Foo:deprecated",
+        snap = _hybrid_snap({})
+        assert (
+            self._probe(
+                snap, "type:ns::Foo:deprecated", "type:Foo:deprecated", [t], "Foo"
+            )
+            is None
         )
 
-    def test_asymmetric_qualified_identity_probes_each_side_independently(self) -> None:
-        """Codex review, second round: old predates ``qualified_name``
-        entirely (its own ``type_map_key()`` is bare), while new carries the
-        real namespaced spelling -- probing new's side with OLD's
-        (bare-shaped) qualified key must not be what makes this fail; each
-        side's OWN qualified key must be tried."""
-        old = _hybrid_snap({"type:Color:deprecated": "castxml"})
-        new = _hybrid_snap({"type:ns::Color:deprecated": "clang"})
+    def test_each_side_probes_its_own_qualified_key(self) -> None:
+        """Codex review, second round: old predates ``qualified_name`` (its
+        own key is bare) while new carries the namespaced spelling -- each
+        side must be probed with its OWN key."""
         old_color = RecordType(name="Color", qualified_name=None, kind="class")
         new_color = RecordType(name="Color", qualified_name="ns::Color", kind="class")
-        old_map = build_type_map([old_color])
-        new_map = build_type_map([new_color])
-        assert fact_known_qualified(
-            old,
-            new,
-            old_map,
-            new_map,
-            "Color",
-            "type:Color:deprecated",  # old's own type_map_key() -- bare
-            "type:ns::Color:deprecated",  # new's own type_map_key() -- qualified
-            "type:Color:deprecated",
+        old = _hybrid_snap({"type:Color:deprecated": "castxml"})
+        new = _hybrid_snap({"type:ns::Color:deprecated": "clang"})
+        assert (
+            self._probe(
+                old,
+                "type:Color:deprecated",
+                "type:Color:deprecated",
+                [old_color],
+                "Color",
+            )
+            == "castxml"
+        )
+        assert (
+            self._probe(
+                new,
+                "type:ns::Color:deprecated",
+                "type:Color:deprecated",
+                [new_color],
+                "Color",
+            )
+            == "clang"
         )
 
 
