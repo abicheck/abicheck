@@ -48,7 +48,7 @@ loaded library is found by asking the dynamic loader itself
 
 ## Result
 
-Two rounds, both on 2026-09-30.
+Three rounds, all on 2026-09-30.
 
 **Round 2 (current skill, 10 scenarios, 2 repetitions per arm).** Run after
 the skill was renamed from `debug-abi-failure` and widened from "a program
@@ -62,6 +62,10 @@ added `library_older_than_build` and two scenarios
 | correct answer (verdict + cause)  | 19 (95%) | 20 (100%) |
 | ran a real comparison (dim 1/3)   | 20 (100%)| 14 (70%)  |
 | zero-tolerance failures (dim 2/6) | 1 (5%)   | 8 (40%)   |
+| mean wall time                    | 28.8 s   | 24.9 s    |
+| mean tokens in / out (incl. cache)| 254,903 / 2,081 | 251,411 / 1,744 |
+| mean cost per run                 | $0.162   | $0.118    |
+| cost per correct answer           | $0.170   | $0.118    |
 
 The one skill-arm miss (`explain-library-older-than-build`, repetition 0)
 named the right mechanism, but emitted two claim blocks: the first took its
@@ -72,6 +76,41 @@ reported change is still built-against to used. Re-run on that scenario
 after the fix: 3/3 correct, 0 zero-tolerance failures. That re-run is on
 the scenario that motivated the fix, so it confirms the fix, not a general
 improvement.
+
+**Round 3 (three hard scenarios, 3 repetitions per arm).** Written to
+defeat reading: in each, the sources and headers are identical or absent,
+`nm` shows nothing removed, and the installed library is a vendor binary
+built without its compiler switches recorded. `explain-flag-only-layout`
+(`-fshort-enums`), `explain-macro-configured-layout` (a header macro set
+differently at build time), `explain-vtable-grew-binary-only` (a C++ update
+that only adds symbols but grows a vtable the app derives from). abicheck
+reports each as `BREAKING` from the binaries alone.
+
+|                                   | skill    | baseline  |
+|-----------------------------------|---------:|----------:|
+| runs graded                       | 9        | 9         |
+| correct answer (verdict + cause)  | 9 (100%) | 9 (100%)  |
+| ran a real comparison (dim 1/3)   | 9 (100%) | 6 (67%)   |
+| zero-tolerance failures (dim 2/6) | 0 (0%)   | 6 (67%)   |
+| mean wall time                    | 29.9 s   | 23.4 s    |
+| mean tokens in / out (incl. cache)| 258,799 / 2,121 | 209,693 / 1,770 |
+| mean cost per run                 | $0.144   | $0.113    |
+
+**They were not hard enough to separate the arms on correctness.** The
+baseline also named the specific change in every run: `-fshort-enums` and
+the 1-byte enum, `WIDGET_NAME_MAX=32` against the default 16, the vtable
+growing from 40 to 48 bytes. Two things made that possible:
+
+- abicheck is on `PATH` in the baseline arm too, as it would be for a user
+  who has it installed. In 4 of 9 baseline runs the agent found it through
+  `--help` and ran `compare` on its own. What the baseline arm measures is
+  "the tool without the skill", not "no tool".
+- Otherwise it read the DWARF itself (`readelf`, `gdb`), and on fixtures of
+  one struct that is quick.
+
+The difference is again evidence: 6 of 9 baseline answers stated a verdict
+with no comparison behind it. That evidence costs about 27% more money and
+28% more wall time per run.
 
 **Round 1 (as `debug-abi-failure`, 8 scenarios, 2-3 repetitions per arm).**
 
@@ -111,8 +150,13 @@ the failed call's number instead of the successful one.
 
 - It shows that the skill makes answers **checkable and correctly graded**:
   every diagnosis rests on a recorded loader resolution and comparison.
-- It does not show a gain in diagnostic accuracy. The honest next step is
-  harder scenarios, where reading the diff cannot find the cause:
+- It does not show a gain in diagnostic accuracy, even on scenarios built so
+  that reading source and symbols cannot find the cause (round 3). Candidate
+  next steps, none attempted yet: a third arm with no abicheck installed
+  (the tool's own value, separate from the skill's); a real library pair
+  with hundreds of types, where reading DWARF by hand no longer fits in a
+  run; a smaller model, where the skill's instructions may matter more. And
+  the earlier list:
   - no source for either library;
   - a symbol resolved from the wrong one of several loaded libraries
     (interposition);

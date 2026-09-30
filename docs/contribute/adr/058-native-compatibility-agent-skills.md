@@ -78,6 +78,11 @@ that amendment below), with its own evaluation corpus and pilot.
 > The one skill-arm miss named the right mechanism but emitted two claim
 > blocks; the skill's wording was fixed and that scenario re-run 3/3. The
 > finding is unchanged: the skill adds evidence, not diagnostic accuracy.
+> Three further scenarios, built so that only the compiled layout shows the
+> change, did not separate the arms either (9/9 both; zero-tolerance 0/9 vs
+> 6/9); the baseline had abicheck on `PATH` and read DWARF itself. Runs now
+> also record time, tokens (including prompt-cache reads) and cost: the skill
+> arm costs roughly 27-37% more per run.
 > Everything below this amendment that says `debug-abi-failure`, "runtime
 > failure", six causes, or eight scenarios describes the skill before the
 > rename.
