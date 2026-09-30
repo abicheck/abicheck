@@ -974,8 +974,7 @@ class TestDeletedFromDwarfRoundTrip:
             functions=[{"name": "f", "mangled": "f", "return_type": "void"}]
         )
         assert "deleted_from_dwarf" not in d["functions"][0]
-        reloaded_fn = snapshot_from_dict(d).declarations.functions[0]
-        assert reloaded_fn.deleted_from_dwarf is False
+        assert snapshot_from_dict(d).declarations.functions[0].deleted_from_dwarf is False  # fmt: skip
 
 
 # ── inferred from_headers provenance ──────────────────────────────────────

@@ -335,9 +335,8 @@ class TestSidecarIsPersisted:
         reloaded = snapshot_from_dict(
             json.loads(json.dumps(snapshot_to_dict(original)))
         )
-        new, old = reloaded.declarations, original.declarations
-        assert new.typedef_entity_ids == old.typedef_entity_ids
-        assert new.constant_entity_ids == old.constant_entity_ids
+        for name in ("typedef_entity_ids", "constant_entity_ids"):
+            assert field_of(reloaded, name) == field_of(original, name)
 
     def test_scope_kind_survives_rather_than_a_rendered_string(self) -> None:
         # The same counterexample the declaration carrier's own round-trip
