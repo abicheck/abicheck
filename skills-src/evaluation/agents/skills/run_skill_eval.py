@@ -39,6 +39,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from graders.dimensions import grade_run  # noqa: E402
+from graders.efficiency import run_efficiency  # noqa: E402
 
 PACK = Path(__file__).resolve().parent / "skill-eval-pack.json"
 
@@ -140,6 +141,55 @@ def summarize(runs: list[dict]) -> dict:
     }
 
 
+def _mean(runs: list[dict], field: str) -> float | None:
+    """Mean of one efficiency field over the runs that recorded it."""
+    values = [
+        v
+        for r in runs
+        if isinstance(v := (r.get("efficiency") or {}).get(field), int | float)
+    ]
+    return sum(values) / len(values) if values else None
+
+
+def _fmt(value: float | None, digits: int) -> str:
+    return "—" if value is None else f"{value:,.{digits}f}"
+
+
+def _print_efficiency(skill: list[dict], base: list[dict]) -> None:
+    """What each arm spent, next to what it got right.
+
+    Means per run, plus the cost of one *correct* answer: an arm that is
+    cheaper per run but wrong more often can still cost more per answer
+    worth having. Tokens in include prompt-cache reads and writes.
+    """
+    rows = [
+        ("mean wall time, s", "wall_clock_seconds", 1),
+        ("mean turns", "turns", 1),
+        ("mean tool calls", "tool_calls", 1),
+        ("mean tokens in", "tokens_in_total", 0),
+        ("mean tokens out", "tokens_out", 0),
+        ("mean cost, $", "cost_usd", 3),
+    ]
+    for label, field, digits in rows:
+        print(
+            f"{label:<26}{_fmt(_mean(skill, field), digits):>12}"
+            f"{_fmt(_mean(base, field), digits):>12}"
+        )
+    per_correct = []
+    for runs in (skill, base):
+        total = sum(
+            v
+            for r in runs
+            if isinstance(v := (r.get("efficiency") or {}).get("cost_usd"), int | float)
+        )
+        correct = sum(1 for r in runs if r["correct"])
+        per_correct.append(total / correct if correct else None)
+    print(
+        f"{'cost per correct answer, $':<26}{_fmt(per_correct[0], 3):>12}"
+        f"{_fmt(per_correct[1], 3):>12}"
+    )
+
+
 def _print_table(graded: list[dict]) -> None:
     """One skill's skill-vs-baseline table plus its per-scenario detail.
 
@@ -183,7 +233,11 @@ def _print_table(graded: list[dict]) -> None:
         b_text = f"{b_count} ({_pct(b_count, len(base))})" if ratio else str(b_count)
         print(f"{label:<26}{s_text:>12}{b_text:>12}")
 
-    print("\nper scenario (correct answer, skill vs baseline):")
+    _print_efficiency(skill, base)
+
+    print(
+        "\nper scenario (correct answer | mean seconds | mean $, skill vs baseline):"
+    )
     for sid in sorted({g["scenario_id"] for g in graded}):
         s_runs = [g for g in skill if g["scenario_id"] == sid]
         b_runs = [g for g in base if g["scenario_id"] == sid]
@@ -192,8 +246,13 @@ def _print_table(graded: list[dict]) -> None:
         if first.get("expected_cause"):
             expected = f"{expected}, {first['expected_cause']}"
         print(
-            f"  {sid:<24} {sum(1 for g in s_runs if g['correct'])}/{len(s_runs)}"
-            f"   {sum(1 for g in b_runs if g['correct'])}/{len(b_runs)}   (expected {expected})"
+            f"  {sid:<34} {sum(1 for g in s_runs if g['correct'])}/{len(s_runs)}"
+            f" {sum(1 for g in b_runs if g['correct'])}/{len(b_runs)}"
+            f" | {_fmt(_mean(s_runs, 'wall_clock_seconds'), 0)}"
+            f" {_fmt(_mean(b_runs, 'wall_clock_seconds'), 0)}"
+            f" | {_fmt(_mean(s_runs, 'cost_usd'), 3)}"
+            f" {_fmt(_mean(b_runs, 'cost_usd'), 3)}"
+            f"   (expected {expected})"
         )
 
 
@@ -268,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
             repetition=rep,
             runs_root=str(root),
             skill=pack["scenarios"][sid].get("skill"),
+            efficiency=run_efficiency(run_dir),
         )
         graded.append(grade)
         if isinstance(row.get("model"), str) or isinstance(

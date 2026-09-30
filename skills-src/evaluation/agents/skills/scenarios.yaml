@@ -469,3 +469,64 @@ scenarios:
     expected:
       verdict: COMPATIBLE
       cause: not_an_abi_problem
+
+  # Hard scenarios: the difference is not in any source or header the
+  # developer can read, and `nm` shows nothing removed. Each installed
+  # library is a vendor binary built without its compiler switches recorded,
+  # so only the compiled layout (debug info) tells the two builds apart.
+
+  - id: explain-flag-only-layout
+    category: B
+    skill: explain-abi-change
+    status: ready
+    coverage_note: "vendor build of byte-identical sources and headers; a compiler flag changed the enum size and every later field offset"
+    prompt: >-
+      We switched to the vendor's build of libwidget. They ship its sources
+      and headers too, and those are byte-for-byte identical to our SDK's;
+      the exported symbols match as well. Yet our app now prints the wrong
+      area for a 3x4 widget; it should print 12. Run ./setup.sh once, then
+      ./env/run.sh. What is actually different?
+    fixture: skills-src/evaluation/agents/skills/fixtures/explain-flag-only-layout
+    platforms: [linux]
+    architectures: [x86_64]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: layout_changed
+
+  - id: explain-macro-configured-layout
+    category: B
+    skill: explain-abi-change
+    status: ready
+    coverage_note: "same sources and headers; the vendor configured a header macro differently, changing a struct's size"
+    prompt: >-
+      The vendor's libwidget is built from the same release as our SDK and
+      the headers they ship are identical to ours, but our app prints the
+      wrong area for a 3x4 widget; it should print 12. Run ./setup.sh once,
+      then ./env/run.sh. What changed between the two builds?
+    fixture: skills-src/evaluation/agents/skills/fixtures/explain-macro-configured-layout
+    platforms: [linux]
+    architectures: [x86_64]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: layout_changed
+
+  - id: explain-vtable-grew-binary-only
+    category: B
+    skill: explain-abi-change
+    status: ready
+    coverage_note: "a binary-only C++ update that only adds symbols, but adds a virtual method to a class the app derives from"
+    prompt: >-
+      The vendor shipped a new libwidget (binary only, no headers). Their
+      release note says the update only adds functions, and comparing the
+      exported symbols confirms nothing was removed. Since we installed it,
+      our app crashes. Run ./setup.sh once, then ./env/run.sh. What changed,
+      and what do we need to do?
+    fixture: skills-src/evaluation/agents/skills/fixtures/explain-vtable-grew-binary-only
+    platforms: [linux]
+    architectures: [x86_64]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: layout_changed

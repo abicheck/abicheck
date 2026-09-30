@@ -72,6 +72,9 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from graders.efficiency import token_usage  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[5]
 EVAL_DIR = ROOT / "skills-src" / "evaluation" / "agents" / "skills"
 
@@ -844,8 +847,7 @@ def _usage(events: list[dict], elapsed: float) -> dict[str, Any]:
             continue
         counts = event.get("usage") or {}
         usage["turns"] = event.get("num_turns")
-        usage["tokens_in"] = counts.get("input_tokens")
-        usage["tokens_out"] = counts.get("output_tokens")
+        usage.update(token_usage(counts))
         usage["cost_usd"] = event.get("total_cost_usd")
         break
     usage["tool_calls"] = sum(

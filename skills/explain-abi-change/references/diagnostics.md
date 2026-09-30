@@ -82,7 +82,7 @@ Findings to look for:
 | `func_removed`, `var_removed` | `symbol_removed`; `stale_library_loaded` when a correct copy also exists; `library_older_than_build` when the reverse comparison shows only additions |
 | only `func_added`, `var_added` (`COMPATIBLE`) | `not_an_abi_problem`: the program keeps working, and it can use the new symbols once rebuilt |
 | `symbol_version_node_removed`, `symbol_moved_version_node` | `symbol_version_missing` |
-| `type_size_changed`, `type_field_offset_changed`, `func_params_changed` | `layout_changed` |
+| `type_size_changed`, `type_field_offset_changed`, `type_vtable_changed`, `enum_underlying_size_changed`, `func_params_changed` | `layout_changed`, even when the two sides' sources and headers are identical: a compiler flag or a configuration macro can change the compiled layout on its own |
 | mangled names that differ only by `B5cxx11`, alongside `func_added_elf_only` | `cxx_abi_mismatch` |
 | `NO_CHANGE`, and the loader resolved everything | `not_an_abi_problem` |
 

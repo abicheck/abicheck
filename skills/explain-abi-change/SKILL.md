@@ -120,7 +120,7 @@ Pick the one mechanism the evidence supports, from this closed set:
 | `symbol_removed` | the used library does not export a symbol the program needs, it is the copy the program is meant to use, and it is not older than the build's |
 | `library_older_than_build` | the used library lacks symbols the program needs because it is an older release than the one the program was built against; compared the other way round, the build's library only adds to it |
 | `symbol_version_missing` | the symbol exists, but the used library lacks the version node the program requires (a library, or a system runtime such as libstdc++, older than the one the program was built against) |
-| `layout_changed` | a type's size or field offsets, or a function's signature, differ between the build-time headers and the used library |
+| `layout_changed` | a type's size, field offsets or virtual table, or a function's signature, differ between the build-time headers and the used library |
 | `stale_library_loaded` | a correct copy exists, but an older or different copy wins the search order |
 | `cxx_abi_mismatch` | same source, but the program and library disagree on a C++ ABI build setting, most often `_GLIBCXX_USE_CXX11_ABI` |
 | `not_an_abi_problem` | every symbol resolves and the built-against and used libraries are ABI-identical or differ only by additions; nothing about the libraries breaks the program |

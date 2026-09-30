@@ -298,7 +298,8 @@ def test_fixture_reproduces_its_symptom_and_ground_truth(tmp_path, scenario):
     cause = scenario["expected"]["cause"]
     output = ran.stdout + ran.stderr
     if cause == "layout_changed":
-        assert ran.returncode == 0 and "area=12" not in output
+        # Wrong results, or a crash when a vtable grew under a derived class.
+        assert "area=12" not in output
     elif cause == "symbol_version_missing":
         assert ran.returncode != 0 and "version `WIDGET_2.0' not found" in output
     elif (

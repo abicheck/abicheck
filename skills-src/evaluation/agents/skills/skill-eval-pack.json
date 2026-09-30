@@ -350,6 +350,33 @@
       "skill": "explain-abi-change",
       "status": "ready"
     },
+    "explain-flag-only-layout": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [
+        "x86_64"
+      ],
+      "category": "B",
+      "digest": "sha256:8ba0b436f4cc080476ea08e2ce53291e498f4bb20e05211462d54415a83326b1",
+      "expected": {
+        "cause": "layout_changed",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-flag-only-layout",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "We switched to the vendor's build of libwidget. They ship its sources and headers too, and those are byte-for-byte identical to our SDK's; the exported symbols match as well. Yet our app now prints the wrong area for a 3x4 widget; it should print 12. Run ./setup.sh once, then ./env/run.sh. What is actually different?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-flag-only-layout",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
     "explain-layout-binary-only": {
       "affects": [
         "explain-abi-change"
@@ -422,6 +449,33 @@
       "roots": [
         "catalog/ground_truth.json",
         "skills-src/evaluation/agents/skills/fixtures/explain-library-older-than-build",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-macro-configured-layout": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [
+        "x86_64"
+      ],
+      "category": "B",
+      "digest": "sha256:7e8cd4c9595b77c0e36d7cb1c6b8210ee65e655c3a94415293cfd3447c653307",
+      "expected": {
+        "cause": "layout_changed",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-macro-configured-layout",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "The vendor's libwidget is built from the same release as our SDK and the headers they ship are identical to ours, but our app prints the wrong area for a 3x4 widget; it should print 12. Run ./setup.sh once, then ./env/run.sh. What changed between the two builds?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-macro-configured-layout",
         "skills-src/evaluation/agents/skills/scenarios.yaml"
       ],
       "skill": "explain-abi-change",
@@ -547,6 +601,33 @@
       "roots": [
         "catalog/ground_truth.json",
         "skills-src/evaluation/agents/skills/fixtures/explain-stale-copy-loaded",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-vtable-grew-binary-only": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [
+        "x86_64"
+      ],
+      "category": "B",
+      "digest": "sha256:4b69afbdf233bb80c73cc0a7e2f1af9d09a4b76d7cc1ff594f5bc6544f128db9",
+      "expected": {
+        "cause": "layout_changed",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-vtable-grew-binary-only",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "The vendor shipped a new libwidget (binary only, no headers). Their release note says the update only adds functions, and comparing the exported symbols confirms nothing was removed. Since we installed it, our app crashes. Run ./setup.sh once, then ./env/run.sh. What changed, and what do we need to do?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-vtable-grew-binary-only",
         "skills-src/evaluation/agents/skills/scenarios.yaml"
       ],
       "skill": "explain-abi-change",
@@ -734,7 +815,7 @@
         "check-abi-compatibility",
         "explain-abi-change"
       ],
-      "digest": "sha256:2b832f0f5c313aa167def171ed57925c0bc32d0c1403a401985b900e2078eae2",
+      "digest": "sha256:f15e4c7e38bd8a105a814ff50f0e3a7555749f4de6b057ffc4a6dd3980935703",
       "roots": [
         "skills-src/evaluation/agents/skills/grade_bundle.py",
         "skills-src/evaluation/agents/skills/graders",
@@ -788,7 +869,7 @@
       "roots": [
         ".agents/skills/explain-abi-change"
       ],
-      "tree": "sha256:1e9063fb77a77cb778f467eff92d5ab2ecfb2098307cec93c82d90288d202be4"
+      "tree": "sha256:3816c5039e4fd6c8aa8b99b6d905d4dab808ab246030be932a0acc9c8754660c"
     }
   }
 }
