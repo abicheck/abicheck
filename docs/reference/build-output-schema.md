@@ -121,9 +121,9 @@ generator-less evidence file never conflicts). When both the declaration and the
 
 The same identity is what the comparability gate reads off a snapshot's
 embedded L3 build evidence: two snapshots built by different build systems,
-or scoped to different root targets, are refused as not comparable
-([ADR-050](../contribute/adr/050-comparability-contract-and-multi-tu-manifest.md)'s
-build-identity amendment).
+or scoped to different root targets, are refused as not comparable; when
+only one side records its build system the comparison runs but is reported
+with reduced assurance.
 
 ### `targets[]` fields
 
