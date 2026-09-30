@@ -35,7 +35,9 @@ def _snapshot(library: str, sources: list[str]) -> AbiSnapshot:
         version="1",
         functions=[
             Function(
-                name=library, mangled=library, return_type="int",
+                name=library,
+                mangled=library,
+                return_type="int",
                 visibility=Visibility.PUBLIC,
             )
         ],
@@ -43,7 +45,9 @@ def _snapshot(library: str, sources: list[str]) -> AbiSnapshot:
     snap.build_source = BuildSourcePack(
         root=Path(""),
         build_evidence=BuildEvidence(
-            compile_units=[CompileUnit(id=f"cu{i}", source=s) for i, s in enumerate(sources)]
+            compile_units=[
+                CompileUnit(id=f"cu{i}", source=s) for i, s in enumerate(sources)
+            ]
         ),
     )
     return snap
@@ -53,7 +57,9 @@ def _import(tmp: Path, snaps: list[AbiSnapshot]):
     store = DirectoryObjectStore(tmp)
     manifests = [
         import_legacy_snapshot(
-            snapshot_to_dict(s), store=store, artifact_id=s.library,
+            snapshot_to_dict(s),
+            store=store,
+            artifact_id=s.library,
             max_known_schema_version=SCHEMA_VERSION,
         )
         for s in snaps
@@ -63,7 +69,9 @@ def _import(tmp: Path, snaps: list[AbiSnapshot]):
 
 @settings(max_examples=25, deadline=None)
 @given(count=st.integers(2, 5), shared=_SOURCES)
-def test_identical_build_evidence_is_one_object(tmp_path_factory, count, shared) -> None:
+def test_identical_build_evidence_is_one_object(
+    tmp_path_factory, count, shared
+) -> None:
     tmp = tmp_path_factory.mktemp("pkg")
     snaps = [_snapshot(f"lib{i}.so", shared) for i in range(count)]
     store, artifacts = _import(tmp, snaps)
@@ -76,7 +84,9 @@ def test_identical_build_evidence_is_one_object(tmp_path_factory, count, shared)
         doc = export_legacy_snapshot(
             artifact, store=store, source_schema_version=SCHEMA_VERSION
         )
-        assert len(doc["build_source"]["build_evidence"]["compile_units"]) == len(shared)
+        assert len(doc["build_source"]["build_evidence"]["compile_units"]) == len(
+            shared
+        )
 
 
 @settings(max_examples=25, deadline=None)
@@ -84,5 +94,7 @@ def test_identical_build_evidence_is_one_object(tmp_path_factory, count, shared)
 def test_different_build_evidence_is_never_merged(tmp_path_factory, a, b) -> None:
     tmp = tmp_path_factory.mktemp("pkg")
     _, artifacts = _import(tmp, [_snapshot("liba.so", a), _snapshot("libb.so", b)])
-    same = artifacts[0].sections["build"].digest == artifacts[1].sections["build"].digest
+    same = (
+        artifacts[0].sections["build"].digest == artifacts[1].sections["build"].digest
+    )
     assert same == (a == b)

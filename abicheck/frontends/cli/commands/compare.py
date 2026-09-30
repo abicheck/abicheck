@@ -78,6 +78,7 @@ from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-export
 from ....report.report_modes import normalize_report_mode
 from ..dump_debug_config import DumpDebugConfig, resolve_stored_bundle_lang
 from ..options.evidence_roles import reject_unsupported_detached_debug
+from ..options.operand_path import CompareOperandPath
 from ..options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
@@ -524,10 +525,8 @@ def _embed_inline_source_side(
 
 @main.command("compare")
 @cli_help.compare_help_options  # curated --help + full --help-all (G21.8 collapse M2)
-@click.argument("old_input", type=click.Path(exists=True, path_type=Path))
-@click.argument(
-    "new_input", type=click.Path(exists=True, path_type=Path), required=False
-)
+@click.argument("old_input", type=CompareOperandPath())
+@click.argument("new_input", type=CompareOperandPath(), required=False)
 @click.option(
     "--no-baseline",
     "no_baseline",

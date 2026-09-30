@@ -1629,8 +1629,11 @@ concepts:
       doesn't explicitly build or pass a package still gets the
       pre-existing single-artifact representation. Per
       docs/contribute/plans/storage-format-v2.md's own Phase 1 status,
-      closing that gap needs: the `.tar.zst` single-file transport form
-      (A1.1's own remainder), digest-deduplicated shared
+      closing that gap needs: (the single-file transport, A1.1's own
+      remainder, landed 2026-09-30 as a zip archive --
+      storage/project_package_archive.py, accepted by compare -- and the
+      storage half of digest-deduplicated shared evidence is tested,
+      tests/test_shared_build_evidence_dedup.py) digest-deduplicated shared
       BuildSourcePack/toolchain evidence (A1.5), `bundle_variants:`
       config/CLI wiring (A1.6), stored/live and stored/stored
       release-comparison reachability from the standard CLI (A1.7), and

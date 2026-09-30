@@ -108,7 +108,7 @@ and `BundleFacts` document is bit-for-bit unchanged.
 
 ### Phase 1 — unified project and multibuild storage
 
-**Status: A1.1/A1.2/A1.3/A1.4 implemented** — the object model
+**Status: A1.1 (as a zip transport, 2026-09-30)/A1.2/A1.3/A1.4 implemented** — the object model
 (`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`,
 `PackageManifest.project_sections`), a real directory-backed store
 (`abicheck/project_snapshot_store.py`'s `DirectoryObjectStore` plus its
@@ -258,7 +258,35 @@ insertion.
 
 #### A1.1 remainder — the `.tar.zst` transport form
 
-**Status: not implemented.** Everything else D6 specifies for the directory
+**Status (2026-09-30): implemented as a zip, not a `.tar.zst`.** The
+container was changed by a maintainer decision, for the reason G40's plan
+records ("Zip, not tar"): random access to one member through the central
+directory. This keeps the repository at one single-file zip family instead
+of adding a tar container beside G40's zip, which this plan's own "no third
+persisted bundle shape" rule argues against.
+
+- `abicheck/storage/project_package_archive.py` implements
+  `pack_project_package`/`unpack_project_package`/
+  `is_project_package_archive`. Members are stored uncompressed, the file
+  identifies itself by a leading `mimetype` member, and the pinned `ZipInfo`
+  is shared with G40 in `storage/zip_member.py`.
+- `compare` accepts an archive anywhere it accepts a package directory. The
+  CLI unpacks at the operand boundary (`frontends/cli/options/operand_path.
+  py`); the typed API reads a single-artifact archive via
+  `workflows.project_package_input`.
+- `tests/test_project_package_archive.py` covers:
+  - byte-identical round trip and determinism;
+  - every hostile member shape refused before any write, including
+    traversal, absolute, backslash, symlink, compressed, duplicate, stray and
+    wrong-mimetype members;
+  - `compare` on two archives equal to `compare` on their directories;
+  - a corrupt operand exiting 64;
+  - the typed API leaving no unpacked copy behind.
+
+The design text below is kept as the record of the original `.tar.zst`
+proposal.
+
+**Earlier status: not implemented.** Everything else D6 specifies for the directory
 layout is real (`project_snapshot_store.DirectoryObjectStore` plus its
 manifest/ref writer and reader over ADR-059's physical envelope); only the
 single-file transport wrapper is missing, which is why a package today is
@@ -862,6 +890,8 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/ast_cache_budget.py` | `DEFAULT_MAX_BYTES`, `MIN_AGE_SECONDS`, `RECHECK_INTERVAL_SECONDS`, `configured_max_bytes`, `enforce_ast_cache_budget`, `note_use` — a least-recently-used byte budget (env ABICHECK_AST_CACHE_MAX_BYTES, default 16 GiB, 0 disables) for each L2 header-AST cache backend directory, re-checked at most every five minutes; each use stamps the entry mtime, and entries used in the last hour are never evicted. Internal, not re-exported by the package |
 | `abicheck/storage/castxml_xml.py` | `parse_castxml_xml` — parses a castxml XML document (a cached L2 header-AST entry or fresh castxml output) through defusedxml's parser with a tree builder that stores one object per distinct attribute value, cutting the parsed tree by about a third, and that keeps only `ARGUMENT_ATTRIBUTES_READ` on each Argument element and shares one element per distinct parameter spelling (116 → 26 MiB live on a 26 MB MKL header dump). Internal, not re-exported by the package |
 | `abicheck/storage/atomic_file.py` | `atomic_write`, `atomic_copy` — write or stream-copy a cache file through a same-directory temp file and `os.replace`, so a concurrent reader sees either no file or a complete one, never a torn one. Moved unchanged from `dumper_cache.py`. Internal, not re-exported by the package |
+| `abicheck/storage/project_package_archive.py` | `pack_project_package`, `unpack_project_package`, `is_project_package_archive`, `MIMETYPE` — A1.1's one-file zip transport of a package directory; unpacking refuses any non-layout, symlinked, compressed, duplicate or over-budget member before writing. Internal, reached through `workflows.storage` |
+| `abicheck/storage/zip_member.py` | `deterministic_zipinfo` — the pinned zip member header shared by G40's bundle archive and the package transport. Internal, not re-exported by the package |
 | `abicheck/storage/json_compact.py` | `compact_json_stream`, `compacted_ast`, `CompactedAst`, `migrate_legacy_entry`, `open_cached_entry` — streams a JSON document (clang's `-ast-dump=json`) into a compact, ASCII-only copy that is parsed and then renamed into the L2 AST cache; value-preserving by construction (a line never starts or ends inside a JSON string). `migrate_legacy_entry` rewrites a pretty-printed entry stored before compaction-at-store in place, on first read. Internal, not re-exported by the package |
 | `abicheck/storage/ref_ids.py` | `REF_SUFFIX`, `safe_ref_id`, `reject_filesystem_collisions` — cross-platform ref-id path safety, split out of `package.py`'s own 800-line production cap (ADR-063 Track C 8B); `resolve_ref_ids` — name-to-safe-artifact-id resolver the two bundle/baseline-set import adapters use for a library name they don't control -- internal, not re-exported by the package |
 | `abicheck/storage/dto.py` | `BASELINE_SET_SECTION_KIND`, `BINARY_SECTION_KIND`, `BUILD_SECTION_KIND`, `BUNDLE_COMPOSITION_SECTION_KIND`, `DEBUG_SECTION_KIND`, `DECLARATIONS_SECTION_KIND`, `GRAPH_SECTION_KIND`, `LAYOUT_SECTION_KIND`, `PROVENANCE_SECTION_KIND`, `SECTION_SCHEMA_VERSIONS`, `SEMANTIC_IR_SECTION_KIND`, `TYPES_SECTION_KIND`, `SectionDTO`, `baseline_set_metadata_from_dto`, `baseline_set_metadata_to_dto`, `binary_from_dto`, `binary_to_dto`, `build_from_dto`, `build_to_dto`, `bundle_composition_from_dto`, `bundle_composition_to_dto`, `debug_from_dto`, `debug_to_dto`, `declarations_from_dto`, `declarations_to_dto`, `graph_from_dto`, `graph_to_dto`, `layout_from_dto`, `layout_to_dto`, `legacy_section_from_dto`, `legacy_section_to_dto`, `migrate_section_dto`, `provenance_from_dto`, `provenance_to_dto`, `semantic_ir_from_dto`, `semantic_ir_to_dto`, `types_from_dto`, `types_to_dto` (A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint; `TYPES_SECTION_KIND`/`types_from_dto`/`types_to_dto` are ADR-063 Track 4 (8B)'s first typed-DTO promotion beyond semantic_ir, see types_section_codec.py; `GRAPH_SECTION_KIND`/`graph_from_dto`/`graph_to_dto` are its second, see graph_section_codec.py; the remaining six `*_SECTION_KIND`/`*_from_dto`/`*_to_dto` triples are its third slice, see sparse_section_codec.py -- every D8 legacy section kind now has a dedicated DTO; `BUNDLE_COMPOSITION_SECTION_KIND`/`BASELINE_SET_SECTION_KIND` and their `*_from_dto`/`*_to_dto` pairs are A1.4's own two variant-level section kinds, ADR-063 Track C 8B, see `import_bundle_facts.py`/`import_baseline_set.py` below) |

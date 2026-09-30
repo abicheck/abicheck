@@ -378,7 +378,7 @@ def materialize_release_variant_artifacts(
     `write_project_manifest`, the identical writer/validator
     `write_legacy_snapshot_package` uses -- so every existing consumer of a
     package-shaped `compare`/`compare-release` operand
-    (`workflows.input_resolution._resolve_project_snapshot_directory` via
+    (`workflows.project_package_input._resolve_project_snapshot_directory` via
     `read_legacy_snapshot_document`) reads it completely unchanged; this
     function is purely a *source* for the map, not a new code path through
     comparison.

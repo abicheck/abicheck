@@ -53,6 +53,7 @@ from .json_budget import (
     JsonNestingTooDeepError,
     check_json_container_budget,
 )
+from .zip_member import deterministic_zipinfo as _deterministic_zipinfo
 from .zstd_frame_guard import (
     read_past_leading_skippable_frames,
     skip_leading_skippable_frames,
@@ -116,24 +117,8 @@ def _blob_member_name(content_hash: str) -> str:
 
 #: A fixed zip timestamp (the format's epoch floor) for every member this
 #: module writes -- else `ZipFile.writestr` stamps `time.localtime()`.
-_ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
-
-
-def _deterministic_zipinfo(name: str) -> zipfile.ZipInfo:
-    """A ``ZipInfo`` for member *name* with every reproducibility-affecting
-    field pinned, so the bytes this module writes depend only on the
-    member's own name and content -- never on when or by whom it was
-    written."""
-    info = zipfile.ZipInfo(name, date_time=_ZIP_EPOCH)
-    info.compress_type = zipfile.ZIP_STORED
-    # A fixed, portable permission bit (rw-r--r--) rather than whatever
-    # `ZipInfo`'s own platform-dependent default would otherwise stamp.
-    info.external_attr = 0o644 << 16
-    # `ZipInfo.__init__` defaults `create_system` to the host platform (0
-    # Windows, 3 Unix); pinned to 3 unconditionally so identical facts on
-    # Windows vs. Linux/macOS CI don't differ in bytes/`stored_sha256`.
-    info.create_system = 3
-    return info
+# The pinned member header lives in `zip_member.py`, shared with the
+# project-package archive.
 
 
 _ZIP_MAGIC_PREFIXES = (b"PK\x03\x04", b"PK\x05\x06")

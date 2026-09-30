@@ -1248,10 +1248,10 @@ coordination this section asked for:
   reconciled to one physical layout by Track 1.
 - Multi-artifact packages reachable from the standard `compare` CLI: A1.7.
 
-What remains of 8B is that plan's own open list:
-- the `.tar.zst` transport (A1.1);
+The one-file transport (A1.1) landed on the same day as a zip archive (`storage/project_package_archive.py`). What remains of 8B is that plan's own open list:
 - digest-deduplicated shared `BuildSourcePack`/source-graph evidence
-  (A1.5);
+  (A1.5), whose storage half holds and is tested, leaving decoded size
+  (A2.x);
 - `bundle_variants:` wiring (A1.6);
 - non-ELF artifact membership (A1.8).
 
