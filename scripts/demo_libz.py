@@ -48,9 +48,15 @@ def main() -> None:
             headers=[ZLIB_H],
             version="1.3.0",
         )
-        pub = [f for f in snap_v1.declarations.functions if f.visibility == Visibility.PUBLIC]
+        pub = [
+            f
+            for f in snap_v1.declarations.functions
+            if f.visibility == Visibility.PUBLIC
+        ]
         print(f"  Library : {snap_v1.library}")
-        print(f"  Functions total / public : {len(snap_v1.declarations.functions)} / {len(pub)}")
+        print(
+            f"  Functions total / public : {len(snap_v1.declarations.functions)} / {len(pub)}"
+        )
         print(f"  Types   : {len(snap_v1.declarations.types)}")
         print(f"  Variables: {len(snap_v1.declarations.variables)}")
         print(f"  Sample public funcs: {', '.join(f.name for f in pub[:5])}")
@@ -66,8 +72,12 @@ def main() -> None:
         snap_v2.library = "libz.so.1.4"
 
         # Breaking: remove gzgetc_
-        removed = [f.name for f in snap_v2.declarations.functions if f.name == "gzgetc_"]
-        snap_v2.functions = [f for f in snap_v2.declarations.functions if f.name != "gzgetc_"]
+        removed = [
+            f.name for f in snap_v2.declarations.functions if f.name == "gzgetc_"
+        ]
+        snap_v2.functions = [
+            f for f in snap_v2.declarations.functions if f.name != "gzgetc_"
+        ]
 
         # Breaking: change return type of zlibCompileFlags
         for f in snap_v2.declarations.functions:

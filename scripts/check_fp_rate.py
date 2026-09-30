@@ -136,7 +136,7 @@ def _snap(
         build_mode=build_mode,
     )
     if typedefs:
-        snap.typedefs = dict(typedefs)
+        snap.declarations.typedefs = dict(typedefs)
     return snap
 
 
@@ -1229,7 +1229,7 @@ def _abi_pack(*flags: str) -> BuildSourcePack:
 
 def _cc_exported_not_public_fire() -> AbiSnapshot:
     snap = _hsnap(elf=_elf("_Z3apiv", "_Z6secretv"))
-    snap.functions = [
+    snap.declarations.functions = [
         _pub_fn("api", "_Z3apiv"),
         _pub_fn("secret", "_Z6secretv", origin=ScopeOrigin.EXPORT_ONLY),
     ]
@@ -1238,7 +1238,7 @@ def _cc_exported_not_public_fire() -> AbiSnapshot:
 
 def _cc_exported_not_public_clean() -> AbiSnapshot:
     snap = _hsnap(elf=_elf("_Z3apiv"))
-    snap.functions = [_pub_fn("api", "_Z3apiv")]
+    snap.declarations.functions = [_pub_fn("api", "_Z3apiv")]
     return snap
 
 
@@ -1248,13 +1248,16 @@ def _cc_exported_not_public_clean() -> AbiSnapshot:
 def _cc_public_not_exported_fire() -> AbiSnapshot:
     # A public decl promising _Z7missingv that the binary does not export.
     snap = _hsnap(elf=_elf("_Z3apiv"))
-    snap.functions = [_pub_fn("api", "_Z3apiv"), _pub_fn("missing", "_Z7missingv")]
+    snap.declarations.functions = [
+        _pub_fn("api", "_Z3apiv"),
+        _pub_fn("missing", "_Z7missingv"),
+    ]
     return snap
 
 
 def _cc_public_not_exported_clean() -> AbiSnapshot:
     snap = _hsnap(elf=_elf("_Z3apiv"))
-    snap.functions = [_pub_fn("api", "_Z3apiv")]
+    snap.declarations.functions = [_pub_fn("api", "_Z3apiv")]
     return snap
 
 
@@ -1278,8 +1281,8 @@ def _cc_header_build_context_mismatch_clean() -> AbiSnapshot:
 
 def _cc_private_header_leak_fire() -> AbiSnapshot:
     snap = _hsnap(elf=_elf("_Z3usev"))
-    snap.functions = [_pub_fn("use", "_Z3usev", ret="Impl *")]
-    snap.types = [
+    snap.declarations.functions = [_pub_fn("use", "_Z3usev", ret="Impl *")]
+    snap.declarations.types = [
         RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER)
     ]
     return snap
@@ -1287,8 +1290,8 @@ def _cc_private_header_leak_fire() -> AbiSnapshot:
 
 def _cc_private_header_leak_clean() -> AbiSnapshot:
     snap = _hsnap(elf=_elf("_Z3usev"))
-    snap.functions = [_pub_fn("use", "_Z3usev", ret="Widget *")]
-    snap.types = [
+    snap.declarations.functions = [_pub_fn("use", "_Z3usev", ret="Widget *")]
+    snap.declarations.types = [
         RecordType(name="Widget", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER)
     ]
     return snap
@@ -1387,8 +1390,8 @@ def _cc_unversioned_exported_symbol_clean() -> AbiSnapshot:
 
 def _cc_rtti_for_internal_type_fire() -> AbiSnapshot:
     snap = _hsnap(elf=_elf("_ZTI8Internal", "_Z3apiv"))
-    snap.functions = [_pub_fn("api", "_Z3apiv")]
-    snap.types = [
+    snap.declarations.functions = [_pub_fn("api", "_Z3apiv")]
+    snap.declarations.types = [
         RecordType(name="Internal", kind="class", origin=ScopeOrigin.PRIVATE_HEADER)
     ]
     return snap
@@ -1396,8 +1399,8 @@ def _cc_rtti_for_internal_type_fire() -> AbiSnapshot:
 
 def _cc_rtti_for_internal_type_clean() -> AbiSnapshot:
     snap = _hsnap(elf=_elf("_ZTI6Widget", "_Z3apiv"))
-    snap.functions = [_pub_fn("api", "_Z3apiv")]
-    snap.types = [
+    snap.declarations.functions = [_pub_fn("api", "_Z3apiv")]
+    snap.declarations.types = [
         RecordType(name="Widget", kind="class", origin=ScopeOrigin.PUBLIC_HEADER)
     ]
     return snap

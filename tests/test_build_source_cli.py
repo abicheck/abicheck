@@ -3576,11 +3576,11 @@ def test_exported_symbols_from_snapshot_extracts_mangled_names():
     from abicheck.model import Function, Variable
 
     snap = AbiSnapshot(library="libfoo.so", version="1")
-    snap.functions = [
+    snap.declarations.functions = [
         Function(name="foo", mangled="_Z3foov", return_type="void", params=[]),
         Function(name="bar", mangled="", return_type="void", params=[]),  # no symbol
     ]
-    snap.variables = [Variable(name="g", mangled="_Z1g", type="int")]
+    snap.declarations.variables = [Variable(name="g", mangled="_Z1g", type="int")]
     assert _exported_symbols_from_snapshot(snap) == ("_Z1g", "_Z3foov")
 
     assert _exported_symbols_from_snapshot(AbiSnapshot(library="l", version="1")) == ()
@@ -3598,7 +3598,7 @@ def test_exported_symbols_from_snapshot_uses_elf_dynamic_table():
     snap = AbiSnapshot(library="libfoo.so", version="1")
     # A DWARF-modeled function whose linkage name is the non-ABI unified C4 tag —
     # never present in the real export table.
-    snap.functions = [
+    snap.declarations.functions = [
         Function(name="Foo::Foo", mangled="_ZN3FooC4Ev", return_type="void", params=[])
     ]
     snap.elf = ElfMetadata()
@@ -3670,10 +3670,10 @@ def test_exported_symbols_falls_back_to_modeled_names_without_raw_table():
     from abicheck.model import Function, Variable
 
     snap = AbiSnapshot(library="libfoo.so", version="1")
-    snap.functions = [
+    snap.declarations.functions = [
         Function(name="foo", mangled="_Z3foov", return_type="void", params=[])
     ]
-    snap.variables = [Variable(name="g", mangled="_Z1g", type="int")]
+    snap.declarations.variables = [Variable(name="g", mangled="_Z1g", type="int")]
     # No .elf/.pe/.macho set → fall back to the modeled names.
     assert _exported_symbols_from_snapshot(snap) == ("_Z1g", "_Z3foov")
 
@@ -3978,7 +3978,7 @@ def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
     # A realistic binary exports _Z3foov via its dynamic symbol table (the
     # authoritative export set), not merely via the DWARF-modeled functions list.
     bin_snap.elf.symbols = [ElfSymbol(name="_Z3foov")]
-    bin_snap.functions = [
+    bin_snap.declarations.functions = [
         Function(name="foo", mangled="_Z3foov", return_type="void", params=[])
     ]
     bin_path = tmp_path / "bin.json"
@@ -4036,7 +4036,7 @@ def test_merge_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
     # A realistic binary exports _Z3foov via its dynamic symbol table (the
     # authoritative export set), not merely via the DWARF-modeled functions list.
     bin_snap.elf.symbols = [ElfSymbol(name="_Z3foov")]
-    bin_snap.functions = [
+    bin_snap.declarations.functions = [
         Function(name="foo", mangled="_Z3foov", return_type="void", params=[])
     ]
     bin_path = tmp_path / "bin.json"

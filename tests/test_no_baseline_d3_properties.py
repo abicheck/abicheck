@@ -161,15 +161,15 @@ def _candidate_snapshots(draw):
             ],
             versions_defined=["LIB_1.0"] if versioned else [],
         )
-    snap.functions = draw(_functions(names))
+    snap.declarations.functions = draw(_functions(names))
     if has_private_type:
-        snap.types = [
+        snap.declarations.types = [
             RecordType(
                 name="detail::Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
             )
         ]
     if draw(st.booleans()):
-        snap.variables = [
+        snap.declarations.variables = [
             Variable(
                 name="g_state",
                 mangled="_Z7g_state",

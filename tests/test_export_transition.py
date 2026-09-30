@@ -210,9 +210,9 @@ class TestExportLossIsDetectedForEveryDeclarationKind:
         old_snap, new_snap = _snap("1.0"), _snap("2.0")
         for snap, decl in ((old_snap, old_decl), (new_snap, new_decl)):
             if owner == "variable":
-                snap.variables = [decl]  # type: ignore[list-item]
+                snap.declarations.variables = [decl]  # type: ignore[list-item]
             else:
-                snap.functions = [decl]  # type: ignore[list-item]
+                snap.declarations.functions = [decl]  # type: ignore[list-item]
         return old_snap, new_snap
 
     @pytest.mark.parametrize(
@@ -396,9 +396,9 @@ class TestExportGainedIsRecordedNotDropped:
         old_snap, new_snap = _snap("1.0"), _snap("2.0")
         for snap, decl in ((old_snap, old_decl), (new_snap, new_decl)):
             if owner == "variable":
-                snap.variables = [decl]  # type: ignore[list-item]
+                snap.declarations.variables = [decl]  # type: ignore[list-item]
             else:
-                snap.functions = [decl]  # type: ignore[list-item]
+                snap.declarations.functions = [decl]  # type: ignore[list-item]
         return old_snap, new_snap
 
     @pytest.mark.parametrize(

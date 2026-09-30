@@ -170,9 +170,9 @@ class TestChangeEntityIdCarrier:
             entity_id=eid,
         )
         old_snap = _snap([])
-        old_snap.types = [old_owner]
+        old_snap.declarations.types = [old_owner]
         new_snap = _snap([new_method])
-        new_snap.types = [owner]
+        new_snap.declarations.types = [owner]
         r = compare(old_snap, new_snap)
         assert _change(r, ChangeKind.VIRTUAL_METHOD_ADDED).entity_id == eid  # type: ignore[attr-defined]
 
@@ -380,9 +380,9 @@ class TestChangeEntityIdCarrier:
             entity_id=eid,
         )
         old_snap = _snap([old_ctor])
-        old_snap.types = [owner]
+        old_snap.declarations.types = [owner]
         new_snap = _snap([new_ctor1, new_ctor2])
-        new_snap.types = [owner]
+        new_snap.declarations.types = [owner]
         r = compare(old_snap, new_snap, scope_to_public_surface=False)
         assert _change(r, ChangeKind.CTOR_OVERLOAD_AMBIGUITY_RISK).entity_id == eid  # type: ignore[attr-defined]
 

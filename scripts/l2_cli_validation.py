@@ -207,7 +207,9 @@ def _validate_snapshot(path: Path) -> list[str]:
     if size > MAX_OUTPUT_BYTES:
         problems.append(f"snapshot is {size} bytes, over the {MAX_OUTPUT_BYTES} cap")
     snapshot = load_snapshot(str(path))
-    names = {f.name for f in snapshot.declarations.functions} | {t.name for t in snapshot.declarations.types}
+    names = {f.name for f in snapshot.declarations.functions} | {
+        t.name for t in snapshot.declarations.types
+    }
     for declaration in fixtures.EXPECTED_DECLARATIONS:
         if not any(declaration in name for name in names):
             problems.append(

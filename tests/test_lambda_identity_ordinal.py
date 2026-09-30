@@ -188,9 +188,18 @@ class TestSnapshotRenumbering:
         renumber_anonymous_closure_identities(old)
         renumber_anonymous_closure_identities(new)
 
-        assert old.declarations.types[0].qualified_name == new.declarations.types[0].qualified_name
-        assert old.declarations.types[1].qualified_name == new.declarations.types[1].qualified_name
-        assert old.declarations.functions[0].mangled == new.declarations.functions[0].mangled
+        assert (
+            old.declarations.types[0].qualified_name
+            == new.declarations.types[0].qualified_name
+        )
+        assert (
+            old.declarations.types[1].qualified_name
+            == new.declarations.types[1].qualified_name
+        )
+        assert (
+            old.declarations.functions[0].mangled
+            == new.declarations.functions[0].mangled
+        )
         assert (
             old.declarations.functions[0].params[0].type
             == new.declarations.functions[0].params[0].type
@@ -201,8 +210,14 @@ class TestSnapshotRenumbering:
         # the fix, so the assertions above are testing something real.
         old = self._snapshot("2021.13.0", 522, 520)
         new = self._snapshot("2022.3.0", 539, 528)
-        assert old.declarations.types[0].qualified_name != new.declarations.types[0].qualified_name
-        assert old.declarations.functions[0].mangled != new.declarations.functions[0].mangled
+        assert (
+            old.declarations.types[0].qualified_name
+            != new.declarations.types[0].qualified_name
+        )
+        assert (
+            old.declarations.functions[0].mangled
+            != new.declarations.functions[0].mangled
+        )
 
     def test_compare_reports_no_findings_for_pure_line_drift(self) -> None:
         """End-to-end: renumbering both sides before compare() eliminates the

@@ -1401,14 +1401,14 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.types = [
+            snap.declarations.types = [
                 RecordType(
                     name="event",
                     kind="struct",
                     fields=[TypeField(name="stamp", type="time_t")],
                 )
             ]
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="get_event",
                     mangled="get_event",
@@ -1428,14 +1428,14 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.types = [
+            snap.declarations.types = [
                 RecordType(
                     name="_private_event",
                     kind="struct",
                     fields=[TypeField(name="stamp", type="time_t")],
                 )
             ]
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="api",
                     mangled="api",
@@ -1454,7 +1454,7 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="get_stamp",
                     mangled="get_stamp",
@@ -1475,14 +1475,14 @@ class TestTime64AbiFlip:
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
             snap.declarations.typedefs["Stat"] = "stat_rec"
-            snap.types = [
+            snap.declarations.types = [
                 RecordType(
                     name="stat_rec",
                     kind="struct",
                     fields=[TypeField(name="mtime", type="time_t")],
                 )
             ]
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="get_stat",
                     mangled="get_stat",
@@ -1502,14 +1502,14 @@ class TestTime64AbiFlip:
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
             snap.declarations.typedefs["Stat"] = "stat_rec"
-            snap.types = [
+            snap.declarations.types = [
                 RecordType(
                     name="stat_rec",
                     kind="struct",
                     fields=[TypeField(name="mtime", type="time_t")],
                 )
             ]
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="api",
                     mangled="api",
@@ -1528,14 +1528,14 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.types = [
+            snap.declarations.types = [
                 RecordType(
                     name="ns::Event",
                     kind="struct",
                     fields=[TypeField(name="stamp", type="time_t")],
                 )
             ]
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="get_event",
                     mangled="get_event",
@@ -1555,7 +1555,7 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.types = [
+            snap.declarations.types = [
                 RecordType(
                     name="Event",
                     kind="struct",
@@ -1567,7 +1567,7 @@ class TestTime64AbiFlip:
                     fields=[TypeField(name="stamp", type="time_t")],
                 ),
             ]
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="get_event",
                     mangled="get_event",
@@ -1586,7 +1586,7 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.types = [
+            snap.declarations.types = [
                 RecordType(
                     name="Base",
                     kind="struct",
@@ -1594,7 +1594,7 @@ class TestTime64AbiFlip:
                 ),
                 RecordType(name="Derived", kind="struct", fields=[], bases=["Base"]),
             ]
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="get_derived",
                     mangled="get_derived",
@@ -1612,7 +1612,7 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.types = [
+            snap.declarations.types = [
                 RecordType(
                     name="inner",
                     kind="struct",
@@ -1624,7 +1624,7 @@ class TestTime64AbiFlip:
                     fields=[TypeField(name="detail", type="inner")],
                 ),
             ]
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="get_outer",
                     mangled="get_outer",
@@ -1654,7 +1654,7 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.variables = [
+            snap.declarations.variables = [
                 Variable(
                     name="epoch",
                     mangled="epoch",
@@ -1671,7 +1671,7 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.functions = [
+            snap.declarations.functions = [
                 Function(
                     name="internal",
                     mangled="internal",

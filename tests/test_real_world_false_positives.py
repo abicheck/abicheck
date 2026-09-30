@@ -232,7 +232,7 @@ def test_stripped_new_side_does_not_fabricate_type_removals():
             RecordType(name="_xmlDoc", kind="struct", size_bits=512),
         ],
     )
-    old.typedefs = {"xmlNodePtr": "_xmlNode *", "xmlDocPtr": "_xmlDoc *"}
+    old.declarations.typedefs = {"xmlNodePtr": "_xmlNode *", "xmlDocPtr": "_xmlDoc *"}
     # new: same library, but the binary is stripped -> exports the same symbols,
     # zero type DWARF (a real stripped .so still has a dynamic symbol table).
     new = _elf_snapshot(
@@ -273,7 +273,7 @@ def test_semantic_ir_only_typedef_evidence_still_confirms_a_real_removal():
     from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 
     old = _elf_snapshot(functions=[_exported_func("use_alias")])
-    old.typedefs = {"A": "int", "B": "long"}
+    old.declarations.typedefs = {"A": "int", "B": "long"}
 
     # new: same exported function, flat `typedefs` map empty, but a real
     # SemanticIR resolves `A` (only) -- `B` was genuinely removed.
@@ -1112,7 +1112,7 @@ def test_stdlib_enum_member_churn_is_filtered_for_a_normal_library():
     apply the same surface filter (Codex review on PR #273)."""
     std_enum = "std::__detail::_S_state"  # a std:: enum
     old = _elf_snapshot(name="libtbb.so.12")
-    old.enums = [
+    old.declarations.enums = [
         EnumType(
             name=std_enum,
             members=[
@@ -1122,9 +1122,8 @@ def test_stdlib_enum_member_churn_is_filtered_for_a_normal_library():
         )
     ]
     new = _elf_snapshot(name="libtbb.so.12")
-    new.enums = [
-        EnumType(name=std_enum, members=[EnumMember(name="_S_a", value=0)])
-    ]  # member removed
+    # member removed
+    new.declarations.enums = [EnumType(std_enum, [EnumMember("_S_a", 0)])]
     result = compare(old, new)
     assert result.verdict not in (Verdict.BREAKING,), (
         f"std:: enum member churn in a non-runtime library must stay filtered; "
@@ -1136,7 +1135,7 @@ def test_stdlib_enum_member_change_is_breaking_when_target_is_the_runtime():
     """The same std:: enum churn IS a break when the target is libstdc++ itself."""
     std_enum = "std::__detail::_S_state"
     old = _elf_snapshot(name="libstdc++.so.6")
-    old.enums = [
+    old.declarations.enums = [
         EnumType(
             name=std_enum,
             members=[
@@ -1146,7 +1145,7 @@ def test_stdlib_enum_member_change_is_breaking_when_target_is_the_runtime():
         )
     ]
     new = _elf_snapshot(name="libstdc++.so.6")
-    new.enums = [EnumType(name=std_enum, members=[EnumMember(name="_S_a", value=0)])]
+    new.declarations.enums = [EnumType(std_enum, [EnumMember("_S_a", 0)])]
     result = compare(old, new)
     assert result.verdict == Verdict.BREAKING
 
@@ -1157,9 +1156,9 @@ def test_stdlib_qualified_typedef_churn_is_filtered_for_a_normal_library():
     extractor qualifies typedefs with their scope so the FP-1 filter sees the
     ``std::`` prefix (Codex review on PR #273)."""
     old = _elf_snapshot(name="libtbb.so.12")
-    old.typedefs = {"std::vector<int>::size_type": "unsigned long"}
+    old.declarations.typedefs = {"std::vector<int>::size_type": "unsigned long"}
     new = _elf_snapshot(name="libtbb.so.12")
-    new.typedefs = {}  # std:: typedef "removed" by toolchain churn
+    new.declarations.typedefs = {}  # std:: typedef "removed" by toolchain churn
     result = compare(old, new)
     assert result.verdict not in (Verdict.BREAKING,), (
         f"qualified std:: typedef churn must stay filtered for a non-runtime "
@@ -1170,9 +1169,9 @@ def test_stdlib_qualified_typedef_churn_is_filtered_for_a_normal_library():
 def test_qualified_public_typedef_removal_still_breaking():
     """A genuine, non-std public typedef removal must still be reported."""
     old = _elf_snapshot(name="libtbb.so.12")
-    old.typedefs = {"tbb::concurrent_vector<int>::handle": "void *"}
+    old.declarations.typedefs = {"tbb::concurrent_vector<int>::handle": "void *"}
     new = _elf_snapshot(name="libtbb.so.12")
-    new.typedefs = {}
+    new.declarations.typedefs = {}
     result = compare(old, new)
     assert _breaking_symbols(result) or result.verdict in (
         Verdict.BREAKING,
@@ -1246,14 +1245,14 @@ def test_dwarf_qualified_flat_typedefs_keep_their_key_space():
     from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 
     old = _elf_snapshot(functions=[_exported_func("use_alias")])
-    old.typedefs = {"Alias": "int", "ns::Alias": "int"}
+    old.declarations.typedefs = {"Alias": "int", "ns::Alias": "int"}
     old.dwarf = DwarfMetadata(has_dwarf=True)  # the content flag, not the object
 
     eid_global = entity_id_for_typedef((), "Alias")
     eid_ns = entity_id_for_typedef((Namespace("ns"),), "Alias")
     new = _elf_snapshot(functions=[_exported_func("use_alias")])
-    new.typedefs_qualified = {"Alias": "long", "ns::Alias": "int"}
-    new.typedef_entity_ids = {"Alias": eid_global, "ns::Alias": eid_ns}
+    new.declarations.typedefs_qualified = {"Alias": "long", "ns::Alias": "int"}
+    new.declarations.typedef_entity_ids = {"Alias": eid_global, "ns::Alias": eid_ns}
     new.semantic_ir = SemanticIR(
         occurrences={
             OccurrenceId(eid_global): CanonicalEntity(
@@ -1296,14 +1295,14 @@ def test_header_backed_snapshot_with_incidental_dwarf_stays_bare_keyed():
     from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
 
     old = _elf_snapshot(functions=[_exported_func("use_alias")])
-    old.typedefs = {"Alias": "int"}
+    old.declarations.typedefs = {"Alias": "int"}
     old.dwarf = DwarfMetadata()
     old.from_headers = True
 
     eid_ns = entity_id_for_typedef((Namespace("ns"),), "Alias")
     new = _elf_snapshot(functions=[_exported_func("use_alias")])
-    new.typedefs_qualified = {"ns::Alias": "int"}
-    new.typedef_entity_ids = {"ns::Alias": eid_ns}
+    new.declarations.typedefs_qualified = {"ns::Alias": "int"}
+    new.declarations.typedef_entity_ids = {"ns::Alias": eid_ns}
     new.semantic_ir = SemanticIR(
         occurrences={
             OccurrenceId(eid_ns): CanonicalEntity(
@@ -1345,14 +1344,14 @@ def test_btf_ctf_typedef_removal_still_reported_via_leftover_fallback():
 
     dwarf_meta = DwarfMetadata()
     old = _elf_snapshot(functions=[_exported_func("use_alias")])
-    old.typedefs = {"kept_typedef": "int", "removed_typedef": "long"}
+    old.declarations.typedefs = {"kept_typedef": "int", "removed_typedef": "long"}
     old.dwarf = dwarf_meta
     old.semantic_ir = semantic_ir_from_debug_metadata(dwarf_meta, "btf")
 
     eid = entity_id_for_typedef((), "kept_typedef")
     new = _elf_snapshot(functions=[_exported_func("use_alias")])
-    new.typedefs_qualified = {"kept_typedef": "int"}
-    new.typedef_entity_ids = {"kept_typedef": eid}
+    new.declarations.typedefs_qualified = {"kept_typedef": "int"}
+    new.declarations.typedef_entity_ids = {"kept_typedef": eid}
     new.semantic_ir = SemanticIR(
         occurrences={
             OccurrenceId(eid): CanonicalEntity(canonical_spelling=Fact.present("int"))

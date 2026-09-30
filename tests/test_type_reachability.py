@@ -1006,7 +1006,7 @@ class TestPublicVariablesAndTypedefResolution:
                 RecordType(name="std::string", kind="class"),
             ],
         )
-        snap.typedefs = {"Alias": "Foo"}
+        snap.declarations.typedefs = {"Alias": "Foo"}
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
 
     def test_no_typedefs_means_no_typedef_pattern_compiled(self) -> None:
@@ -1039,7 +1039,7 @@ class TestPublicVariablesAndTypedefResolution:
                 RecordType(name="std::string", kind="class"),
             ],
         )
-        snap.typedefs = {"Alias": "Foo"}
+        snap.declarations.typedefs = {"Alias": "Foo"}
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
 
     def test_variable_scan_breaks_once_everything_already_found(self) -> None:
@@ -1151,7 +1151,7 @@ class TestStdlibTypedefAliasResolution:
                 )
             ],
         )
-        snap.typedefs = {
+        snap.declarations.typedefs = {
             "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
         }
         assert directly_referenced_stdlib_types(snap) == frozenset(
@@ -1175,7 +1175,7 @@ class TestStdlibTypedefAliasResolution:
                 )
             ],
         )
-        snap.typedefs = {
+        snap.declarations.typedefs = {
             "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
         }
         assert directly_referenced_stdlib_types(snap) == frozenset(
@@ -1210,7 +1210,7 @@ class TestStdlibTypedefAliasResolution:
                 ),
             ],
         )
-        snap.typedefs = {
+        snap.declarations.typedefs = {
             "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
         }
         assert directly_referenced_stdlib_types(snap) == frozenset()
@@ -1497,7 +1497,7 @@ class TestNestedMatchesWithinTheSameSpellingIndex:
                 RecordType(name="std::string", kind="class"),
             ],
         )
-        snap.typedefs = {"Wrapper<Bar>": "irrelevant_target", "Bar": "Foo"}
+        snap.declarations.typedefs = {"Wrapper<Bar>": "irrelevant_target", "Bar": "Foo"}
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
 
     def test_single_character_match_does_not_attempt_further_recursion(self) -> None:
@@ -1640,7 +1640,7 @@ class TestNonStdlibBareAliasCollisionWithStdlibStrippedSpelling:
                 ),
             ],
         )
-        snap.typedefs = {
+        snap.declarations.typedefs = {
             "std::string": "basic_string<char, std::char_traits<char>, std::allocator<char> >"
         }
         assert directly_referenced_stdlib_types(snap) == frozenset()
@@ -1668,7 +1668,7 @@ class TestNonStdlibTypedefBareAlias:
                 RecordType(name="std::string", kind="class"),
             ],
         )
-        snap.typedefs = {"api::Alias": "Foo"}
+        snap.declarations.typedefs = {"api::Alias": "Foo"}
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
 
     def test_non_stdlib_typedef_bare_alias_colliding_with_real_record_is_dropped(

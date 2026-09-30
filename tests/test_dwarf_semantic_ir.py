@@ -170,8 +170,12 @@ class TestDwarfSemanticIrCvQualification:
         so the structural ``is_const``/``cv_qualification`` fields and the
         spelling itself agree, rather than only the structural fields
         carrying the distinction a shared spelling used to hide."""
-        const_ptr = next(v for v in snapshot.declarations.variables if v.name == "g_const_ptr")
-        ptr_to_const = next(v for v in snapshot.declarations.variables if v.name == "g_ptr_to_const")
+        const_ptr = next(
+            v for v in snapshot.declarations.variables if v.name == "g_const_ptr"
+        )
+        ptr_to_const = next(
+            v for v in snapshot.declarations.variables if v.name == "g_ptr_to_const"
+        )
         assert const_ptr.type != ptr_to_const.type
         assert self._cv_qualification_for(snapshot, "g_ptr_to_const") == ()
 
@@ -227,7 +231,9 @@ class TestDwarfSemanticIrFunctionsAndTypes:
         return _build_snapshot(fn_lib)
 
     def test_function_occurrences_populated(self, snapshot) -> None:
-        assert snapshot.declarations.functions, "fixture should export at least one function"
+        assert snapshot.declarations.functions, (
+            "fixture should export at least one function"
+        )
         assert snapshot.canonical_ir is not None
         for fn in snapshot.declarations.functions:
             assert fn.entity_id is not None
@@ -236,12 +242,16 @@ class TestDwarfSemanticIrFunctionsAndTypes:
             assert entity.canonical_spelling.status is FactStatus.PRESENT
 
     def test_function_cv_qualification_not_collected(self, snapshot) -> None:
-        compute = next(f for f in snapshot.declarations.functions if f.name == "compute")
+        compute = next(
+            f for f in snapshot.declarations.functions if f.name == "compute"
+        )
         entity = _one_entity(snapshot, compute.entity_id)
         assert entity.cv_qualification.status is FactStatus.NOT_COLLECTED
 
     def test_record_type_occurrence_populated(self, snapshot) -> None:
-        widget = next((t for t in snapshot.declarations.types if t.name == "Widget"), None)
+        widget = next(
+            (t for t in snapshot.declarations.types if t.name == "Widget"), None
+        )
         assert widget is not None
         assert widget.entity_id is not None
         entity = _one_entity(snapshot, widget.entity_id)

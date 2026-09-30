@@ -929,7 +929,7 @@ class TestHeaderConstants:
 
 def _snap_with_constants(constants, from_headers=True):
     s = _snap(from_headers=from_headers)
-    s.constants = dict(constants)
+    s.declarations.constants = dict(constants)
     return s
 
 

@@ -410,8 +410,8 @@ class TestResolvePublicSurfaceIsNotIdentityCached:
         first = resolve_public_surface(snap)
         assert "Bystander" not in first.public_types
 
-        snap.typedefs = {"A": "Here"}
-        snap.types = [RecordType(name="Here", kind="struct")]
+        snap.declarations.typedefs = {"A": "Here"}
+        snap.declarations.types = [RecordType(name="Here", kind="struct")]
         second = resolve_public_surface(snap)
 
         assert "Here" in second.public_types

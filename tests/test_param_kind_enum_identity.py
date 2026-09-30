@@ -173,7 +173,9 @@ class TestEndToEndMarkerBearingSnapshotLoadPreservesParamKind:
         # A real const-overload removal too (const dropped, non-const
         # kept), so the detector's own finding is exercised, not just its
         # grouping key.
-        new.functions = [f for f in new.declarations.functions if not f.is_const]
+        new.declarations.functions = [
+            f for f in new.declarations.functions if not f.is_const
+        ]
 
         result = compare(old, new)
 

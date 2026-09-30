@@ -39,9 +39,9 @@ from abicheck.serialization import snapshot_to_json
 
 def _snap(ver: str, funcs=None, types=None, enums=None) -> AbiSnapshot:
     s = AbiSnapshot(library="libtest.so", version=ver)
-    s.functions = funcs or []
-    s.types = types or []
-    s.enums = enums or []
+    s.declarations.functions = funcs or []
+    s.declarations.types = types or []
+    s.declarations.enums = enums or []
     return s
 
 

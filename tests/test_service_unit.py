@@ -3837,11 +3837,11 @@ def _scoped_snapshot(platform: str, *funcs: tuple[str, Visibility]) -> AbiSnapsh
     from abicheck.model import RecordType
 
     snap = AbiSnapshot(library="lib", version="1.0", platform=platform)
-    snap.functions = [
+    snap.declarations.functions = [
         Function(name=n, mangled=n, return_type="int", visibility=v) for n, v in funcs
     ]
     # A header-scoped dump carries real type info (so layout diffs still fire).
-    snap.types = [RecordType(name="PublicStruct", kind="struct")]
+    snap.declarations.types = [RecordType(name="PublicStruct", kind="struct")]
     return snap
 
 

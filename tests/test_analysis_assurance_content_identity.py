@@ -248,7 +248,9 @@ def test_any_persisted_difference_defeats_content_identity(mutate: str) -> None:
         b.library = f"{b.library}-other"
     else:
         assert b.declarations.functions, "fixture must carry a function to perturb"
-        b.declarations.functions[0].return_type = f"{b.declarations.functions[0].return_type} const"
+        b.declarations.functions[
+            0
+        ].return_type = f"{b.declarations.functions[0].return_type} const"
 
     assert not same_persisted_content(a, b)
     assert _status(a, b)[0] == "degraded"

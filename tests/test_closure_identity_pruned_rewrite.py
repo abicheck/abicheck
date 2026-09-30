@@ -137,9 +137,9 @@ def test_pruned_rewrite_matches_full_walk(snap: AbiSnapshot) -> None:
         closure_identity._rewrite_marked_subtrees = original  # type: ignore[assignment]
     renumber_anonymous_closure_identities(snap)
     for field in closure_identity._LAMBDA_IDENTITY_FIELDS:
-        assert repr(field_of(snap, field, None)) == repr(field_of(oracle, field, None)), (
-            field
-        )
+        assert repr(field_of(snap, field, None)) == repr(
+            field_of(oracle, field, None)
+        ), field
 
 
 @given(

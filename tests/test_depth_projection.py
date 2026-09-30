@@ -570,8 +570,9 @@ class TestHiddenVisibilityDropped:
     def test_no_false_removal_finding_from_a_hidden_declaration(self) -> None:
         old = self._snap()
         new = self._snap()
-        new.functions = [f for f in new.declarations.functions if f.name != "hid"]
-        new.variables = [v for v in new.declarations.variables if v.name != "hid_v"]
+        nd = new.declarations
+        nd.functions = [f for f in nd.functions if f.name != "hid"]
+        nd.variables = [v for v in nd.variables if v.name != "hid_v"]
         old_b = project_snapshot_to_depth(old, "binary")
         new_b = project_snapshot_to_depth(new, "binary")
         result = checker.compare(old_b, new_b)

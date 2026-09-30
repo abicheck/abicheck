@@ -350,7 +350,9 @@ class TestUndeclaredDataExportsAreAdditionsToo:
 
         old = _snap([], data_exports=[])
         new = _snap([], data_exports=["g_declared"])
-        new.variables = [Variable(name="g_declared", mangled="g_declared", type="int")]
+        new.declarations.variables = [
+            Variable(name="g_declared", mangled="g_declared", type="int")
+        ]
         new.__dict__.pop("variable_map", None)
         assert _diff_undeclared_exports(old, new) == []
 
@@ -394,7 +396,7 @@ class TestANameThatAlreadyExistedIsNeverAnAddition:
             ],
         )
         snap = AbiSnapshot(library="libfoo.so", version="1", elf=elf)
-        snap.functions = list(declared)
+        snap.declarations.functions = list(declared)
         return snap
 
     def _kinds(self, old, new):

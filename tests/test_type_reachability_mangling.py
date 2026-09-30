@@ -359,7 +359,7 @@ class TestBareIdentityCollisionWithDerivedSuffix:
                 RecordType(name="std::string", kind="class"),
             ],
         )
-        snap.typedefs = {"Alias": "std::string", "api::Alias": "api::Foo"}
+        snap.declarations.typedefs = {"Alias": "std::string", "api::Alias": "api::Foo"}
         assert directly_referenced_stdlib_types(snap) == frozenset()
 
     def test_typedef_exact_key_agreeing_with_derived_suffix_is_kept(self) -> None:
@@ -393,7 +393,7 @@ class TestBareIdentityCollisionWithDerivedSuffix:
                 RecordType(name="std::string", kind="class"),
             ],
         )
-        snap.typedefs = {"Alias": "std::string"}
+        snap.declarations.typedefs = {"Alias": "std::string"}
         assert directly_referenced_stdlib_types(snap) == frozenset()
 
     def test_typedef_exact_key_without_record_collision_still_resolves(
@@ -408,7 +408,7 @@ class TestBareIdentityCollisionWithDerivedSuffix:
             functions=[_fn("use_alias", return_type="NoCollision")],
             types=[RecordType(name="std::string", kind="class")],
         )
-        snap.typedefs = {"NoCollision": "std::string"}
+        snap.declarations.typedefs = {"NoCollision": "std::string"}
         assert directly_referenced_stdlib_types(snap) == frozenset({"std::string"})
 
     def test_within_namespace_bare_signature_does_not_misattribute_to_global_record(

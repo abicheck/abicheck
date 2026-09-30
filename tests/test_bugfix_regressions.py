@@ -35,13 +35,13 @@ def _snap(
 ) -> AbiSnapshot:
     s = AbiSnapshot(library="libtest.so", version=ver)
     if funcs is not None:
-        s.functions = funcs
+        s.declarations.functions = funcs
     if variables is not None:
-        s.variables = variables
+        s.declarations.variables = variables
     if types is not None:
         s.types = types
     if enums is not None:
-        s.enums = enums
+        s.declarations.enums = enums
     return s
 
 

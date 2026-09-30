@@ -196,7 +196,7 @@ def project(snap: AbiSnapshot, tier: Tier) -> AbiSnapshot:
         # DetectCppPatterns.detect_serialization_tag_changes (which reads
         # `constants` directly, not via from_headers) would report a constant
         # change at L0/L1 and overstate a constant-axis case (Codex review #487).
-        s.constants = {}
+        s.declarations.constants = {}
         s.from_headers = False
         # A CPython extension's Python-visible API is recovered from a `.pyi`
         # type stub — a header-equivalent (L2) fact. A stripped binary and its
@@ -211,9 +211,9 @@ def project(snap: AbiSnapshot, tier: Tier) -> AbiSnapshot:
         # symbol (no type/const/value evidence). Anything richer would let
         # compare() overstate what a stripped binary can see for a type-, enum-,
         # typedef- or variable-axis case (Codex review #487).
-        s.types = []
-        s.enums = []
-        s.typedefs = {}
+        s.declarations.types = []
+        s.declarations.enums = []
+        s.declarations.typedefs = {}
         for f in s.declarations.functions:
             f.return_type = "?"
             f.params = []

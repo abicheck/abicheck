@@ -272,7 +272,9 @@ class TestSurfaceEvidenceAsymmetry:
         """
         old = _snapshot(["c_func"], evidence=evidence_on_old)
         new = _snapshot(["_Z6c_funcv"], evidence=not evidence_on_old)
-        old.declarations.functions[0].name = new.declarations.functions[0].name = "c_func"
+        old.declarations.functions[0].name = new.declarations.functions[0].name = (
+            "c_func"
+        )
         old.declarations.functions[0].is_extern_c = True
         new.declarations.functions[0].is_extern_c = False
         kinds = {c.kind for c in compare(old, new).changes}

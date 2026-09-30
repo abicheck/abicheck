@@ -111,9 +111,9 @@ def attach_declarations(
 
     A builder input left ``None`` keeps whatever the given IR's store already
     holds for that kind (``dataclasses.replace`` of a snapshot, or a decoded
-    document), and a new container is made either way, so two snapshots
-    never share one store -- the same "new containers, same declaration
-    objects" semantics ``replace`` had when these were plain fields.
+    document). Each snapshot gets its own store, so re-binding a kind on one
+    never reaches the other; the containers themselves are shared -- the
+    same semantics ``replace`` had when these were plain fields.
     """
     given = dict(zip(_BUILDER_INPUT_ORDER, builder_inputs, strict=True))
     ir = snapshot.__dict__.get("semantic_ir")
@@ -154,7 +154,7 @@ def guard_assignment(snapshot: Any, name: str, value: Any) -> Any:
     Assigning ``semantic_ir`` keeps the snapshot's store attached."""
     if name in DECLARATION_KINDS:
         raise AttributeError(
-            f"AbiSnapshot.{name} was removed (ADR-063 Phase 10); "
+            f"AbiSnapshot.{name} was removed; "
             f"assign snapshot.declarations.{name} instead"
         )
     current = snapshot.__dict__.get("semantic_ir")
@@ -163,24 +163,31 @@ def guard_assignment(snapshot: Any, name: str, value: Any) -> Any:
     return value
 
 
-_REPLACE_CODE = dataclasses._replace.__code__  # type: ignore[attr-defined]
+# The frame that reads InitVars off the instance: ``_replace`` on 3.13+,
+# ``replace`` itself before that.
+_REPLACE_CODE = getattr(dataclasses, "_replace", dataclasses.replace).__code__
 
 
 class _RemovedDeclarationField:
     """What ``AbiSnapshot.<kind>`` is after ADR-063 Phase 10: the builder
-    InitVar's class-level default, which ``dataclasses.replace`` reads off
-    the instance (and gets ``None``, so the replaced snapshot keeps its
-    store). Every other read raises, rather than answering ``None`` for a
+    InitVar's class-level default. ``dataclasses.replace`` reads it off the
+    instance and gets the current value, passed on as a builder input.
+    Every other read raises, rather than answering ``None`` for a
     field that no longer exists."""
 
     def __init__(self, kind: str) -> None:
         self._kind = kind
 
     def __get__(self, obj: Any, objtype: type | None = None) -> Any:
-        if obj is None or sys._getframe(1).f_code is _REPLACE_CODE:
+        if obj is None:
             return None
+        if sys._getframe(1).f_code is _REPLACE_CODE:
+            # ``replace`` forwards the current value as a builder input --
+            # exactly what it did for the plain field, including when the
+            # call also swaps in a fresh, store-less ``semantic_ir``.
+            return getattr(obj.declarations, self._kind)
         raise AttributeError(
-            f"AbiSnapshot.{self._kind} was removed (ADR-063 Phase 10); "
+            f"AbiSnapshot.{self._kind} was removed; "
             f"read snapshot.declarations.{self._kind} instead"
         )
 

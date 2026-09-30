@@ -50,7 +50,7 @@ def _rich_snap() -> AbiSnapshot:
     snap = AbiSnapshot(library="librich.so", version="2.5.0")
 
     # Functions
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="compute",
             mangled="_Z7computei",
@@ -77,7 +77,7 @@ def _rich_snap() -> AbiSnapshot:
     ]
 
     # Variables
-    snap.variables = [
+    snap.declarations.variables = [
         Variable(
             name="g_count",
             mangled="_Z7g_count",
@@ -88,7 +88,7 @@ def _rich_snap() -> AbiSnapshot:
     ]
 
     # Types
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="Point",
             kind="struct",
@@ -110,7 +110,7 @@ def _rich_snap() -> AbiSnapshot:
     ]
 
     # Enums
-    snap.enums = [
+    snap.declarations.enums = [
         EnumType(
             name="Status",
             members=[
@@ -123,10 +123,10 @@ def _rich_snap() -> AbiSnapshot:
     ]
 
     # Typedefs
-    snap.typedefs = {"size_t": "unsigned long", "handle_t": "void *"}
+    snap.declarations.typedefs = {"size_t": "unsigned long", "handle_t": "void *"}
 
     # Constants
-    snap.constants = {"MAX_SIZE": "1024", "VERSION_MAJOR": "2"}
+    snap.declarations.constants = {"MAX_SIZE": "1024", "VERSION_MAJOR": "2"}
 
     # elf_only_mode
     snap.elf_only_mode = False
@@ -161,7 +161,9 @@ class TestSnapshotRoundtrip:
         orig = _rich_snap()
         restored = _roundtrip(orig)
         assert len(restored.declarations.functions) == len(orig.declarations.functions)
-        for f_orig, f_rest in zip(orig.declarations.functions, restored.declarations.functions):
+        for f_orig, f_rest in zip(
+            orig.declarations.functions, restored.declarations.functions
+        ):
             assert f_rest.name == f_orig.name
             assert f_rest.mangled == f_orig.mangled
             assert f_rest.return_type == f_orig.return_type
@@ -406,7 +408,7 @@ class TestEdgeCases:
     def test_snapshot_with_only_enums(self) -> None:
         """Snapshot with only enum types roundtrips correctly."""
         orig = AbiSnapshot(library="libenum.so", version="1.0")
-        orig.enums = [
+        orig.declarations.enums = [
             EnumType("A", [EnumMember("X", 0), EnumMember("Y", 1)]),
             EnumType("B", [EnumMember("P", 100)], underlying_type="unsigned int"),
         ]
@@ -417,14 +419,14 @@ class TestEdgeCases:
     def test_unicode_names_preserved(self) -> None:
         """Unicode characters in names survive roundtrip."""
         orig = AbiSnapshot(library="libunicode.so", version="1.0")
-        orig.typedefs = {"café_type": "unsigned char", "naïve_t": "int"}
+        orig.declarations.typedefs = {"café_type": "unsigned char", "naïve_t": "int"}
         restored = _roundtrip(orig)
         assert restored.declarations.typedefs == orig.declarations.typedefs
 
     def test_large_constant_values(self) -> None:
         """Large integer constants survive roundtrip as strings."""
         orig = _minimal_snap()
-        orig.constants = {
+        orig.declarations.constants = {
             "ULLONG_MAX": "18446744073709551615",
             "NEG": "-9223372036854775808",
         }
@@ -437,7 +439,7 @@ class TestEdgeCases:
             Param(name=f"p{i}", type="int", kind=ParamKind.VALUE) for i in range(20)
         ]
         orig = AbiSnapshot(library="libmany.so", version="1.0")
-        orig.functions = [
+        orig.declarations.functions = [
             Function(
                 name="multi_param",
                 mangled="_Z11multi_param" + "i" * 20,

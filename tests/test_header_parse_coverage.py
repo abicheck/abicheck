@@ -244,7 +244,7 @@ def test_dependency_scope_never_drops_an_unnamed_dwarf_type_under_partial_parse(
     from abicheck.dumper_scoping import scope_snapshot_excluding_dependencies
 
     snap = _snap("1", excluded=excluded, dependency_scope=None)
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Pub", kind="struct", size_bits=32, source_header="/inc/pub.h"),
         RecordType(
             name="DepT", kind="struct", size_bits=8,

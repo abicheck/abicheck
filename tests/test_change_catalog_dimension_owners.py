@@ -456,11 +456,11 @@ class TestSerializationTagFindingsKeepTheirContributingSource:
         from abicheck.model import AbiSnapshot, EnumMember, EnumType, Variable
 
         snap = AbiSnapshot(library="libtag.so", version="1")
-        snap.constants = {"Foo_tag_id": const_value}
-        snap.variables = [
+        snap.declarations.constants = {"Foo_tag_id": const_value}
+        snap.declarations.variables = [
             Variable(name="Bar_tagid", mangled="Bar_tagid", type="int", value=var_value)
         ]
-        snap.enums = [
+        snap.declarations.enums = [
             EnumType(
                 name="Msg_tag_id",
                 members=[EnumMember(name="kAlpha", value=enum_value)],

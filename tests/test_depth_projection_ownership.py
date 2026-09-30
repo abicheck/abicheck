@@ -305,11 +305,17 @@ class TestSharingIsSafeForTheWaysCallersActuallyUse_A_Projection:
             depth = next(
                 d
                 for d in ALL_DEPTHS
-                if len(alone[d].declarations.functions) == len(projected.declarations.functions)
-                and len(alone[d].declarations.types) == len(projected.declarations.types)
+                if len(alone[d].declarations.functions)
+                == len(projected.declarations.functions)
+                and len(alone[d].declarations.types)
+                == len(projected.declarations.types)
             )
-            assert len(projected.declarations.functions) == len(alone[depth].declarations.functions)
-            assert len(projected.declarations.types) == len(alone[depth].declarations.types)
+            assert len(projected.declarations.functions) == len(
+                alone[depth].declarations.functions
+            )
+            assert len(projected.declarations.types) == len(
+                alone[depth].declarations.types
+            )
 
     @pytest.mark.parametrize("depth", ALL_DEPTHS)
     def test_serializing_a_projection_does_not_disturb_the_input(

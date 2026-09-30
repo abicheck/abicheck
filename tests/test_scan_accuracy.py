@@ -136,7 +136,9 @@ class TestSingleMutationDetection:
     def test_func_removed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.functions = [f for f in new.declarations.functions if f.name != "process"]
+        new.declarations.functions = [
+            f for f in new.declarations.functions if f.name != "process"
+        ]
         result = compare(old, new)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.FUNC_REMOVED for c in result.changes)
@@ -176,7 +178,7 @@ class TestSingleMutationDetection:
     def test_var_removed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.variables = []
+        new.declarations.variables = []
         result = compare(old, new)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.VAR_REMOVED for c in result.changes)
@@ -202,7 +204,9 @@ class TestSingleMutationDetection:
     def test_type_field_removed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.declarations.types[0].fields = [new.declarations.types[0].fields[0]]  # keep only 'width'
+        new.declarations.types[0].fields = [
+            new.declarations.types[0].fields[0]
+        ]  # keep only 'width'
         result = compare(old, new, scope_to_public_surface=False)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPE_FIELD_REMOVED for c in result.changes)
@@ -244,7 +248,7 @@ class TestSingleMutationDetection:
     def test_typedef_removed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.typedefs = {}
+        new.declarations.typedefs = {}
         result = compare(old, new, scope_to_public_surface=False)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes)

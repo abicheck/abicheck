@@ -326,7 +326,9 @@ class TestSymlinkedCheckoutRootIsANoOp:
         # Prove the canonicalization claim above rather than merely assert
         # it: both sides record the REAL (non-symlinked) path, confirming
         # clang resolved the symlink before abicheck's model ever saw it.
-        add_direct = next(f for f in snap_direct.declarations.functions if f.name.endswith("add"))
+        add_direct = next(
+            f for f in snap_direct.declarations.functions if f.name.endswith("add")
+        )
         add_via_symlink = next(
             f for f in snap_via_symlink.declarations.functions if f.name.endswith("add")
         )
@@ -527,7 +529,9 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         so2, header2 = _build(relocated_root, header_text, source_text)
         snap2 = _dump(so2, header2)
 
-        relocated_lambda_spellings = _lambda_param_spellings(snap2.declarations.functions)
+        relocated_lambda_spellings = _lambda_param_spellings(
+            snap2.declarations.functions
+        )
         assert len(relocated_lambda_spellings) >= 2
 
         result = compare(snap, snap2, cross_source_checks=False)

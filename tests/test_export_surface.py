@@ -1128,8 +1128,8 @@ class TestUnresolvedTypeEdges:
 
         # Same shape with the target present: the alias is followed, nothing
         # is reported, and the target really does enter the closure.
-        snap.typedefs = {"Alias": "Here"}
-        snap.types = [_rec("Here")]
+        snap.declarations.typedefs = {"Alias": "Here"}
+        snap.declarations.types = [_rec("Here")]
         intact = compute_export_surface(snap)
         assert not intact.unresolved_type_edges
         assert intact.exclusion_is_provable

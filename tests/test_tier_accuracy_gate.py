@@ -146,11 +146,13 @@ def test_projection_clears_header_constants_below_l2():
     from abicheck.model import AbiSnapshot
 
     snap = AbiSnapshot(library="lib", version="1", from_headers=True)
-    snap.constants = {"SCHEMA_TAG": "7"}
+    snap.declarations.constants = {"SCHEMA_TAG": "7"}
     assert tier_gate.project(snap, Tier.L0).declarations.constants == {}
     assert tier_gate.project(snap, Tier.L1).declarations.constants == {}
     # L2+ retains header constants.
-    assert tier_gate.project(snap, Tier.L2).declarations.constants == {"SCHEMA_TAG": "7"}
+    assert tier_gate.project(snap, Tier.L2).declarations.constants == {
+        "SCHEMA_TAG": "7"
+    }
 
 
 def test_l0_projection_clears_typedefs():
@@ -160,7 +162,7 @@ def test_l0_projection_clears_typedefs():
     from abicheck.model import AbiSnapshot
 
     snap = AbiSnapshot(library="lib", version="1", from_headers=True)
-    snap.typedefs = {"Handle": "int"}
+    snap.declarations.typedefs = {"Handle": "int"}
     assert tier_gate.project(snap, Tier.L0).declarations.typedefs == {}
     # L1+ (debug/headers) may legitimately retain typedef evidence.
     assert tier_gate.project(snap, Tier.L1).declarations.typedefs == {"Handle": "int"}

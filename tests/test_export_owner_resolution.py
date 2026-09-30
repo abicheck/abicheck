@@ -69,8 +69,8 @@ def _snapshot(
         from_headers=True,
         elf=ElfMetadata(machine="x86-64", symbols=[ElfSymbol(name=n) for n in exports]),
     )
-    snap.functions = list(declarations)
-    snap.types = list(types or [])
+    snap.declarations.functions = list(declarations)
+    snap.declarations.types = list(types or [])
     return snap
 
 
