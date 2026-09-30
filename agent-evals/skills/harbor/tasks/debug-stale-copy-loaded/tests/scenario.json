@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "debug-abi-failure"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:63621a2e48264c87e48c65f5ff612f8a72df9727fcf96cf59f2ed054e3b55c00",
+  "expected": {
+    "cause": "stale_library_loaded",
+    "verdict": "BREAKING"
+  },
+  "inputs": "agent-evals/skills/fixtures/debug-stale-copy-loaded",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We installed the latest libwidget into env/opt/widget, but our app still fails to start. Run ./setup.sh once, then ./env/run.sh shows the error. Why is this happening and what should we change?",
+  "roots": [
+    "agent-evals/skills/fixtures/debug-stale-copy-loaded",
+    "agent-evals/skills/scenarios.yaml",
+    "catalog/ground_truth.json"
+  ],
+  "skill": "debug-abi-failure",
+  "status": "ready"
+}

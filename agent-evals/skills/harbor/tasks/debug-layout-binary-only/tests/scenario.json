@@ -1,0 +1,27 @@
+{
+  "affects": [
+    "debug-abi-failure"
+  ],
+  "architectures": [
+    "x86_64"
+  ],
+  "category": "B",
+  "digest": "sha256:ebe1fe151a76495a9ba72602b21cbefcc1ba8cc8a59f9fa6fb03947fb303fd09",
+  "expected": {
+    "cause": "layout_changed",
+    "verdict": "BREAKING"
+  },
+  "inputs": "agent-evals/skills/fixtures/debug-layout-binary-only",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We dropped a vendor build of libwidget into our dev environment and now our app prints the wrong area for a 3x4 widget; it should print 12. We only have their binary. Run ./setup.sh once, then ./env/run.sh. What is going on?",
+  "roots": [
+    "agent-evals/skills/fixtures/debug-layout-binary-only",
+    "agent-evals/skills/scenarios.yaml",
+    "catalog/ground_truth.json"
+  ],
+  "skill": "debug-abi-failure",
+  "status": "ready"
+}

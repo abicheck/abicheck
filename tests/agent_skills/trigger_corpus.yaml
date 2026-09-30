@@ -81,6 +81,20 @@ positive:
 # Adjacent-but-out-of-scope requests. No `native-*` skill may claim these:
 # each is a compatibility question about a domain this portfolio deliberately
 # does not cover, and a false trigger there is worse than no trigger.
+  - prompt: "My program fails with 'undefined symbol' after we updated a library. Why?"
+    # Added with the second skill (ADR-058 2026-09-30 amendment): a runtime
+    # failure in an existing environment, not a change under review.
+    expected_skill: debug-abi-failure
+    description_keywords:
+      - undefined symbol
+      - updated
+
+  - prompt: "Our program crashes after a shared library was updated. What changed?"
+    expected_skill: debug-abi-failure
+    description_keywords:
+      - crash
+      - shared-library
+
 negative:
   - prompt: "Is this a breaking change to our REST API?"
     forbidden_terms: [rest, http, endpoint]

@@ -99,7 +99,8 @@ implied is reset → rewrite → evaluate → publish, and this is step two.
 
 | Skill | Status | Meaning |
 |---|---|---|
-| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The sole published skill. The 2026-09-29 pilot (`agent-evals/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
+| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The first published skill. The 2026-09-29 pilot (`agent-evals/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
+| `debug-abi-failure` | **Preview — same install; single-agent pilot evidence only.** | Admitted by ADR-058's 2026-09-30 amendment (all five admission criteria, stated there). Starts from a runtime symptom in an existing environment and works back to one of six named causes. Evaluated on 8 scenarios (`agent-evals/skills/scenarios.yaml`, `debug-*`); results in `agent-evals/skills/pilot-results/2026-09-30-debug-abi-failure.md`. |
 
 **What "PR 2" integrated, over the bare rename the reset amendment left in
 place:**
@@ -164,13 +165,12 @@ scope. See the ADR amendment for the full accounting of what was deferred.
 
 **What this means in practice:**
 
-- Don't add a second published skill. Rebuilding
-  `native-release-compatibility` (or anything else) as a public skill needs
-  its own pass through ADR-058's five-criteria admission bar, informed by
-  whatever this one candidate's evaluation actually finds — not a
-  restoration from git history.
-- Don't cite `check-abi-compatibility` as validated in any user-facing
-  claim; no behavioral evidence exists yet.
+- Don't add another published skill without its own ADR-058 amendment
+  stating the five admission criteria and an evaluation corpus of its own,
+  the way `debug-abi-failure` was added (2026-09-30). Rebuilding
+  `native-release-compatibility` from git history is not a shortcut.
+- Don't cite either skill as validated in any user-facing claim; each has
+  single-agent pilot evidence only, with the caveats its pilot report states.
 - This reset does not reopen ADR-058's five-criteria admission bar for a
   *new* skill on its own — see "Adding a public skill" below, unchanged.
 
@@ -184,8 +184,8 @@ domain knowledge to justify a skill. A candidate failing any one becomes a
 P2 candidates and the evidence each needs are recorded in
 `docs/contribute/plans/g36-native-compatibility-agent-skills.md`. The
 portfolio status above is a stronger, additional bar on top of this one:
-even a candidate that clears all five criteria should not be pursued while
-the sole candidate skill's own evaluation is still open.
+a new skill ships with scenarios in `agent-evals/skills/scenarios.yaml` and a
+pilot run against the no-skill baseline, like both published skills did.
 
 ## Workflow
 
@@ -211,6 +211,7 @@ here as they are run.
 
 | Target | Skills validated | Date | Notes |
 |---|---|---|---|
+| Claude Code | `debug-abi-failure` | 2026-09-30 | Headless `claude -p`, `claude-sonnet-5-5`, 8-scenario A/B corpus; see `agent-evals/skills/pilot-results/2026-09-30-debug-abi-failure.md`. |
 | Claude Code | `check-abi-compatibility` | 2026-09-29 | Headless `claude -p`, `claude-sonnet-5-5`, 14-scenario A/B corpus; see `agent-evals/skills/pilot-results/2026-09-29.md`. Not yet exercised interactively or through a `npx`-installed copy by a person. |
 | Codex | — | — | not yet run |
 | GitHub Copilot | — | — | not yet run |

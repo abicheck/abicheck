@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "debug-abi-failure"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:1030d14363c0e837502f0ce177ada82db8e4d1d20a9902c2783a490fcfaac9a4",
+  "expected": {
+    "cause": "not_an_abi_problem",
+    "verdict": "NO_CHANGE"
+  },
+  "inputs": "agent-evals/skills/fixtures/debug-not-an-abi-problem",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Our app started failing after we reinstalled libwidget; it now exits with an error. Run ./setup.sh once, then ./env/run.sh. Is the library the problem, and what should we do?",
+  "roots": [
+    "agent-evals/skills/fixtures/debug-not-an-abi-problem",
+    "agent-evals/skills/scenarios.yaml",
+    "catalog/ground_truth.json"
+  ],
+  "skill": "debug-abi-failure",
+  "status": "ready"
+}

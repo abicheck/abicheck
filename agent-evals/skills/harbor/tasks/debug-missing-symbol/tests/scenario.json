@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "debug-abi-failure"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:4341fc3a1bb1b3ca21ce23f00d6ae3be49a14d93af46ab0038a89f442b9acb47",
+  "expected": {
+    "cause": "symbol_removed",
+    "verdict": "BREAKING"
+  },
+  "inputs": "agent-evals/skills/fixtures/debug-missing-symbol",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "After we updated libwidget on our dev box, our app won't start any more. Run ./setup.sh once to build the environment, then ./env/run.sh shows the error. What is wrong, and how do we fix it?",
+  "roots": [
+    "agent-evals/skills/fixtures/debug-missing-symbol",
+    "agent-evals/skills/scenarios.yaml",
+    "catalog/ground_truth.json"
+  ],
+  "skill": "debug-abi-failure",
+  "status": "ready"
+}

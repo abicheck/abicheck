@@ -98,18 +98,17 @@ PACK = EVAL_DIR / "skill-eval-pack.json"
 
 ARMS = ("skill", "baseline")
 
-#: G37's 2026-08-11 scope note (docs/contribute/plans/
-#: g37-agent-skill-quality-evaluation.md) named
-#: `native-binary-compatibility-review` (renamed `review-native-library-
-#: change`) as the sole flagship subject for every phase. ADR-058's
-#: 2026-08-20 portfolio-reset amendment went further and removed the other
-#: three shipped skills from the published portfolio entirely, so this
-#: filter is now a no-op in practice — every scenario in `scenarios.yaml`
-#: already names this one skill — but is kept rather than removed: it is
-#: what re-scopes a future second skill's scenarios out of a
-#: still-flagship-only run the moment one is added, without needing this
-#: filter re-introduced from scratch.
-FLAGSHIP_SKILL = "check-abi-compatibility"
+
+#: The skills this harness evaluates: exactly the published portfolio, read
+#: from `skills-src/` (see `_published_skill_names`). A scenario naming any
+#: other skill (a retired prototype from before ADR-058's 2026-08-20 reset)
+#: is excluded unless `--include-prototype-skills` is passed. This used to be
+#: one hard-coded flagship name; with a second published skill
+#: (`debug-abi-failure`, ADR-058's 2026-09-30 amendment) that would have
+#: silently dropped every one of its scenarios from a default run.
+def evaluated_skills() -> frozenset[str]:
+    return frozenset(p.name for p in SKILLS_SRC.iterdir() if (p / "SKILL.md").is_file())
+
 
 #: Identical for both arms — the treatment must be the skill, nothing else.
 #: `Skill` is included so the skill arm can actually invoke what it finds;
@@ -175,6 +174,28 @@ Optionally, also add `"decision"` — one of `VERIFIED_COMPATIBLE`,
 is the vocabulary a compatibility-review skill's own final decision uses; it
 must agree with `verdict`/`confident`, not merely restate the raw verdict).
 """
+
+#: Appended after `ANSWER_CONTRACT` for runtime-failure scenarios (those whose
+#: `expected` names a `cause`). Identical for both arms, like the contract
+#: itself: it states the answer format, and the cause list is the grading
+#: vocabulary, so the baseline arm is told the same candidate causes the
+#: skill arm is.
+DIAGNOSIS_CONTRACT = """
+This is a runtime failure, so also add a `"diagnosis"` object naming its
+root cause: `{"cause": "<one of symbol_removed, symbol_version_missing,
+layout_changed, stale_library_loaded, cxx_abi_mismatch, not_an_abi_problem>"}`.
+Here `"verdict"` compares the library the program was built against with the
+library that actually gets loaded when it runs (`NO_CHANGE` when they are
+ABI-identical).
+"""
+
+
+def answer_contract(scenario: dict) -> str:
+    """The answer-format instructions appended to this scenario's prompt."""
+    if (scenario.get("expected") or {}).get("cause") is not None:
+        return ANSWER_CONTRACT + DIAGNOSIS_CONTRACT
+    return ANSWER_CONTRACT
+
 
 #: `python -m abicheck ...` is a documented, supported entry point
 #: (`abicheck/__main__.py`), and it does not go through a `PATH` shim named
@@ -899,7 +920,7 @@ def _run_once(
             interposer.chmod(0o755)
         env["SKILL_EVAL_REAL_PYTHON"] = real_python
 
-    prompt = scenario["prompt"] + ANSWER_CONTRACT
+    prompt = scenario["prompt"] + answer_contract(scenario)
     (out_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
     started = time.monotonic()
@@ -1279,18 +1300,17 @@ def main(argv: list[str] | None = None) -> int:
         "--scenarios",
         default="",
         help=(
-            "Comma-separated ids; default: every ready scenario for the "
-            f"flagship skill ({FLAGSHIP_SKILL})"
+            "Comma-separated ids; default: every ready scenario for a "
+            "published skill (one with a skills-src/ directory)"
         ),
     )
     parser.add_argument(
         "--include-prototype-skills",
         action="store_true",
         help=(
-            "Also select ready scenarios for prototype-status skills (all "
-            f"skills other than {FLAGSHIP_SKILL}). Off by default per G37's "
-            "2026-08-11 scope note — the portfolio is frozen and only the "
-            "flagship skill is a live evaluation target."
+            "Also select ready scenarios for skills that are no longer "
+            "published (retired prototypes). Off by default: only the "
+            "published portfolio is a live evaluation target."
         ),
     )
     parser.add_argument("--timeout", type=int, default=900)
@@ -1370,12 +1390,12 @@ def main(argv: list[str] | None = None) -> int:
         prototype_wanted = sorted(
             sid
             for sid in wanted
-            if pack["scenarios"].get(sid, {}).get("skill") != FLAGSHIP_SKILL
+            if pack["scenarios"].get(sid, {}).get("skill") not in evaluated_skills()
         )
         if prototype_wanted:
             print(
-                f"{', '.join(prototype_wanted)}: not the flagship skill "
-                f"({FLAGSHIP_SKILL}) — G37's 2026-08-11 scope note excludes "
+                f"{', '.join(prototype_wanted)}: not a published skill "
+                f"({', '.join(sorted(evaluated_skills()))}) — G37's scope note excludes "
                 f"prototype-status skills from evaluation by default. Pass "
                 f"--include-prototype-skills to run them anyway.",
                 file=sys.stderr,
@@ -1386,7 +1406,7 @@ def main(argv: list[str] | None = None) -> int:
         for sid, entry in sorted(pack["scenarios"].items())
         if entry["status"] == "ready"
         and (not wanted or sid in wanted)
-        and (args.include_prototype_skills or entry.get("skill") == FLAGSHIP_SKILL)
+        and (args.include_prototype_skills or entry.get("skill") in evaluated_skills())
     }
     if not scenarios:
         print("no ready scenarios selected", file=sys.stderr)
@@ -1473,7 +1493,7 @@ def main(argv: list[str] | None = None) -> int:
         return [
             row
             for row in in_pack
-            if pack["scenarios"][row["scenario_id"]].get("skill") == FLAGSHIP_SKILL
+            if pack["scenarios"][row["scenario_id"]].get("skill") in evaluated_skills()
         ]
 
     for sid, scenario in scenarios.items():

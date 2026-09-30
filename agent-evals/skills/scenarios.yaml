@@ -285,3 +285,148 @@ scenarios:
       We removed the noexcept guarantee from a function that now throws
       internally. The symbol itself didn't change. Is this release still
       safe to deploy for people already running the old library?
+
+  # ------------------------------------------------ debug-abi-failure (B)
+  # A runtime failure in an existing environment, worked backwards to its
+  # cause. Each fixture's `setup.sh` builds a small environment: the program
+  # is linked against `sdk/`, and `env/run.sh` runs it the way its users do.
+  # `expected.verdict` compares the library the program was built against
+  # with the one the loader actually uses; `expected.cause` is the root cause
+  # the answer must name (claim `diagnosis.cause`). The last scenario is the
+  # control: the libraries are identical and the failure is the program's
+  # own, so the right answer is that there is no ABI problem.
+
+  - id: debug-missing-symbol
+    category: B
+    skill: debug-abi-failure
+    status: ready
+    coverage_note: "undefined symbol at startup; the installed library dropped an export"
+    prompt: >-
+      After we updated libwidget on our dev box, our app won't start any
+      more. Run ./setup.sh once to build the environment, then
+      ./env/run.sh shows the error. What is wrong, and how do we fix it?
+    fixture: agent-evals/skills/fixtures/debug-missing-symbol
+    platforms: [linux]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: symbol_removed
+
+  - id: debug-stale-copy-loaded
+    category: B
+    skill: debug-abi-failure
+    status: ready
+    coverage_note: "undefined symbol, but the right library is installed; a stale copy wins the search"
+    prompt: >-
+      We installed the latest libwidget into env/opt/widget, but our app
+      still fails to start. Run ./setup.sh once, then ./env/run.sh shows the
+      error. Why is this happening and what should we change?
+    fixture: agent-evals/skills/fixtures/debug-stale-copy-loaded
+    platforms: [linux]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: stale_library_loaded
+
+  - id: debug-missing-version-node
+    category: B
+    skill: debug-abi-failure
+    status: ready
+    coverage_note: "version node not found at load time"
+    prompt: >-
+      Our app fails at startup on the test machine with a message about a
+      version not being found. Run ./setup.sh once, then ./env/run.sh to
+      see it. What is going on and what do we do about it?
+    fixture: agent-evals/skills/fixtures/debug-missing-version-node
+    platforms: [linux]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: symbol_version_missing
+
+  - id: debug-layout-mismatch
+    category: B
+    skill: debug-abi-failure
+    status: ready
+    coverage_note: "no loader error; wrong results from a changed struct layout"
+    prompt: >-
+      Since libwidget was updated, our app starts fine but prints the wrong
+      area for a 3x4 widget; it should print 12. Run ./setup.sh once, then
+      ./env/run.sh. Nothing in our code changed. What happened?
+    fixture: agent-evals/skills/fixtures/debug-layout-mismatch
+    platforms: [linux]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: layout_changed
+
+  - id: debug-dual-cxx-abi
+    category: B
+    skill: debug-abi-failure
+    status: ready
+    coverage_note: "same source, different _GLIBCXX_USE_CXX11_ABI build setting"
+    prompt: >-
+      We rebuilt libwidget from exactly the same source and now our C++ app
+      fails to start with a symbol error. Run ./setup.sh once, then
+      ./env/run.sh. The code is identical, so what broke?
+    fixture: agent-evals/skills/fixtures/debug-dual-cxx-abi
+    platforms: [linux]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: cxx_abi_mismatch
+
+  - id: debug-not-an-abi-problem
+    category: B
+    skill: debug-abi-failure
+    status: ready
+    coverage_note: "control: identical libraries; the failure is the program's own"
+    prompt: >-
+      Our app started failing after we reinstalled libwidget; it now exits
+      with an error. Run ./setup.sh once, then ./env/run.sh. Is the library
+      the problem, and what should we do?
+    fixture: agent-evals/skills/fixtures/debug-not-an-abi-problem
+    platforms: [linux]
+    invocation: {}
+    expected:
+      verdict: NO_CHANGE
+      cause: not_an_abi_problem
+
+  # The two below were written after the skill itself, as a check it was not
+  # tuned to the first six. Both remove the easy path: no side-by-side source
+  # for the library that is actually loaded, or a launcher whose library path
+  # looks right while the binary's own RPATH wins the search.
+
+  - id: debug-rpath-overrides-path
+    category: B
+    skill: debug-abi-failure
+    status: ready
+    coverage_note: "undefined symbol although LD_LIBRARY_PATH names the right copy; a DT_RPATH in the program wins"
+    prompt: >-
+      Our launcher points LD_LIBRARY_PATH at env/lib, where the current
+      libwidget is installed, yet the app still fails to start. Run
+      ./setup.sh once, then ./env/run.sh. Why, and what should we change?
+    fixture: agent-evals/skills/fixtures/debug-rpath-overrides-path
+    platforms: [linux]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: stale_library_loaded
+
+  - id: debug-layout-binary-only
+    category: B
+    skill: debug-abi-failure
+    status: ready
+    coverage_note: "wrong results; the installed library ships as a binary only, so the layout change is visible only in the binary"
+    prompt: >-
+      We dropped a vendor build of libwidget into our dev environment and now
+      our app prints the wrong area for a 3x4 widget; it should print 12. We
+      only have their binary. Run ./setup.sh once, then ./env/run.sh. What
+      is going on?
+    fixture: agent-evals/skills/fixtures/debug-layout-binary-only
+    platforms: [linux]
+    architectures: [x86_64]
+    invocation: {}
+    expected:
+      verdict: BREAKING
+      cause: layout_changed

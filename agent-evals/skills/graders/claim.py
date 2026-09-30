@@ -222,6 +222,21 @@ def _validate_matrix(matrix: object) -> str | None:
     return None
 
 
+#: debug-abi-failure's closed root-cause vocabulary (claim `diagnosis.cause`).
+#: tests/test_skill_eval_diagnosis.py keeps this, the claim and scenario
+#: schemas, and the skill's own SKILL.md cause table identical.
+DIAGNOSIS_CAUSES = frozenset(
+    {
+        "symbol_removed",
+        "symbol_version_missing",
+        "layout_changed",
+        "stale_library_loaded",
+        "cxx_abi_mismatch",
+        "not_an_abi_problem",
+    }
+)
+
+
 def validate(claim: dict) -> str | None:
     """Why this envelope is not a gradeable claim, or None if it is."""
     verdict = claim.get("verdict")
@@ -233,6 +248,12 @@ def validate(claim: dict) -> str | None:
             return f"consumer_verdict {consumer_verdict!r} is outside the vocabulary"
     if "decision" in claim and _outside(claim["decision"], DECISION_STATES):
         return f"decision {claim['decision']!r} is outside the vocabulary"
+    if "diagnosis" in claim:
+        diagnosis = claim["diagnosis"]
+        if not isinstance(diagnosis, dict) or _outside(
+            diagnosis.get("cause"), DIAGNOSIS_CAUSES
+        ):
+            return f"diagnosis {diagnosis!r} does not name a cause from the vocabulary"
     if "confident" not in claim or not isinstance(claim["confident"], bool):
         return "confident is missing or not a boolean"
     if "evidence" not in claim:
