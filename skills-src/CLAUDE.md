@@ -14,6 +14,10 @@ skills-src/
   <skill-name>/
     SKILL.md              Layer A — the skill itself (frontmatter + workflow)
     references/           material specific to this one skill only
+  evaluation/             not a skill (no SKILL.md, never published) — see its README
+    agents/               coding-agent tasks + the G37 skill evaluation harness
+    field/                conda-forge field benchmark of abicheck
+    validation/           real-library validation runs
 ```
 
 Generated output, per skill, per target tree:
@@ -99,7 +103,7 @@ implied is reset → rewrite → evaluate → publish, and this is step two.
 
 | Skill | Status | Meaning |
 |---|---|---|
-| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The sole published skill. The 2026-09-29 pilot (`agent-evals/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
+| `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The sole published skill. The 2026-09-29 pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
 
 **What "PR 2" integrated, over the bare rename the reset amendment left in
 place:**
@@ -141,7 +145,7 @@ intent only, that PR 4's deliverable should be an npm/npx-installable
 package published from this repository rather than a separate distribution
 repo. **PR 3 landed** under that new name (a complete G37 evaluation
 corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's "PR 3"
-amendment and `agent-evals/skills/pilot-results/README.md`; its dominant
+amendment and `skills-src/evaluation/agents/skills/pilot-results/README.md`; its dominant
 finding is a harness turn-budget confound, not a skill-quality result, so
 the skill is still not behaviorally validated. PR 4 has since landed (2026-09-29):
 `npx skills add abicheck/abicheck` installs the skill from the committed
@@ -211,7 +215,7 @@ here as they are run.
 
 | Target | Skills validated | Date | Notes |
 |---|---|---|---|
-| Claude Code | `check-abi-compatibility` | 2026-09-29 | Headless `claude -p`, `claude-sonnet-5-5`, 14-scenario A/B corpus; see `agent-evals/skills/pilot-results/2026-09-29.md`. Not yet exercised interactively or through a `npx`-installed copy by a person. |
+| Claude Code | `check-abi-compatibility` | 2026-09-29 | Headless `claude -p`, `claude-sonnet-5-5`, 14-scenario A/B corpus; see `skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`. Not yet exercised interactively or through a `npx`-installed copy by a person. |
 | Codex | — | — | not yet run |
 | GitHub Copilot | — | — | not yet run |
 | Gemini CLI | — | — | not yet run |

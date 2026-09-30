@@ -1,0 +1,287 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# G37 D5 — behavioral (L2) scenario corpus. Validated against
+# schema/scenario.schema.json by tests/test_skill_eval_scenarios.py.
+#
+# Category A derives its expected outcome from examples/ground_truth.json and
+# never restates it here. Category B carries invocation parameters that
+# catalog structurally cannot express, so it states its own outcome.
+#
+# L1l (live trigger) does NOT appear here: it replays
+# tests/agent_skills/trigger_corpus.yaml, the one labelled set L1s already
+# grades statically, because activation precision is not computable without
+# that file's negatives.
+#
+# `status: planned` means declared but not yet runnable — excluded from the
+# expected-evidence set, and may not claim a fixture that already resolves.
+# Category B is declared first and in full because every one of its entries is
+# a place a skill can plausibly manufacture a green result.
+#
+# ADR-058's 2026-08-20 portfolio-reset amendment removed three of the four
+# scenario-owning skills (`native-api-evolution`, `native-consumer-
+# compatibility`, `native-release-compatibility`) from the published
+# portfolio. Most of their scenarios were removed from this corpus in the
+# same change rather than reassigned to the surviving `review-native-library-
+# change` skill (renamed from `native-binary-compatibility-review`): that
+# skill's workflow does not (yet) claim the API-evolution or whole-release-
+# matrix capabilities those scenarios exercised, and reassigning a scenario
+# to a skill that does not claim its scope would grade against capability the
+# skill does not have. This is why dimension 2's `matrix_target_unrun`
+# uncertainty kind (owned by the removed whole-release-matrix scenario) is
+# narrowed correspondingly in `rubric.yaml`/`schema/`/
+# `tests/test_skill_eval_scenarios.py` — see that amendment for the full
+# accounting, including what remains deferred.
+#
+# The three named-consumer scenarios are the one exception: the flagship's
+# own workflow explicitly directs `--used-by`/`--required-symbol` for a
+# named application, plugin, or host (Step 3 of `SKILL.md`, citing
+# `shared/consumer-scoping.md`) — that capability was *absorbed*, not
+# dropped, by the reset. Reassigned to `check-abi-compatibility` rather
+# than removed, so the inversion this corpus exists to catch (an agent that
+# silently drops the informational `consumer_verdict` context instead of
+# reporting it alongside the library-wide `verdict`) still has coverage.
+#
+# Workstream D-S1 (vision-api-abi-evolution.md "D. Optional prebuilt-consumer
+# lifecycle") reverted `--used-by`/`--required-symbol(s)` from *replacing*
+# the compatibility gate to merely *enriching* it: `verdict` is now always
+# the library-wide result (never swapped for a supplied consumer's own
+# scoped result), and a supplied consumer's own result is reported under the
+# separate, purely informational `consumer_verdict` (report JSON:
+# `consumer_scope.verdict`). The three scenarios below were updated in place
+# for this — `verdict` restated as the full-library truth and the old
+# `full_verdict` field renamed `consumer_verdict` — rather than reassigned,
+# since the underlying inversion they guard against is unchanged.
+
+schema_version: 1
+
+scenarios:
+  # ---------------------------------------------------------------- Category B
+  # Of dimension 2's original four uncertainty kinds, three remain claimable
+  # by the surviving skill; `matrix_target_unrun` has no scenario left since
+  # its owning skill (`native-release-compatibility`) is no longer published
+  # — see the file-level note above.
+
+  - id: not-comparable-pair
+    category: B
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "D4 uncertainty kind 1 — not comparable"
+    prompt: >-
+      Here are the previous and current builds of our shared library. Did this
+      change break anything for programs already linked against it?
+    fixture: skills-src/evaluation/agents/skills/fixtures/not-comparable-pair
+    platforms: [linux]
+    invocation:
+      break_comparability: true
+    expected:
+      verdict: null
+      uncertainty: not_comparable
+
+  - id: evidence-too-shallow
+    category: B
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "D4 uncertainty kind 2 — evidence too shallow for the question"
+    prompt: >-
+      Only the stripped release binaries survived for the old version. Can you
+      still tell me whether the struct layouts our plugins depend on changed?
+    fixture: skills-src/evaluation/agents/skills/fixtures/evidence-too-shallow
+    platforms: [linux]
+    # old/liblib.so is a committed, prebuilt x86_64 binary (the whole point
+    # of this fixture -- only the stripped binary survived, so there is
+    # nothing to rebuild from). The new side is built from source at run
+    # time on whichever host runs the harness, so an aarch64 Linux runner
+    # (this repository's CI has one) would build new/ for arm64 against an
+    # x86_64 old/, producing a real elf_machine_changed cross-architecture
+    # break instead of the intended shallow-evidence result.
+    architectures: [x86_64]
+    invocation:
+      depth: symbols
+    expected:
+      verdict: COMPATIBLE
+      uncertainty: evidence_too_shallow
+
+  - id: contract-coverage-incomplete
+    category: B
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "D4 uncertainty kind 4 — contract coverage incomplete (not the matrix case)"
+    prompt: >-
+      Check this release against the last one and tell me whether anything we
+      actually export to customers changed.
+    fixture: skills-src/evaluation/agents/skills/fixtures/contract-coverage-incomplete
+    platforms: [linux]
+    invocation:
+      contract: exports
+      contract_evaluation: true
+    expected:
+      verdict: COMPATIBLE
+      uncertainty: contract_coverage_incomplete
+
+  # The three consumer scenarios state both verdicts on purpose. `verdict` is
+  # always the library-wide answer, and `consumer_verdict` is the informational
+  # consumer-scoped one (report JSON: `consumer_scope.verdict`) — the skill's
+  # own worked example is this exact pair (`verdict: BREAKING` with
+  # `consumer_verdict: COMPATIBLE`). Stating only the library-wide value here
+  # would reward silently dropping the consumer-side context — the inversion
+  # the skill explicitly warns against.
+
+  - id: consumer-unaffected-despite-break
+    category: B
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "consumer answer diverging below the library's global verdict"
+    prompt: >-
+      The library team says this release has a breaking change. Does our
+      renderer actually need rebuilding, or can we ship it as-is?
+    fixture: skills-src/evaluation/agents/skills/fixtures/consumer-unaffected-despite-break
+    platforms: [linux]
+    invocation:
+      used_by: ["renderer"]
+    expected:
+      verdict: BREAKING
+      consumer_verdict: COMPATIBLE
+
+  - id: consumer-actually-affected
+    category: B
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "consumer answer confirming impact"
+    prompt: >-
+      We upgraded the shared library under our analytics daemon without
+      rebuilding it. Is that safe?
+    fixture: skills-src/evaluation/agents/skills/fixtures/consumer-actually-affected
+    platforms: [linux]
+    invocation:
+      used_by: ["analytics-daemon"]
+    expected:
+      # The non-diverging half of the pair: scoped and global agree, so an
+      # agent cannot pass both consumer scenarios by always reporting one field.
+      verdict: BREAKING
+      consumer_verdict: BREAKING
+
+  - id: plugin-required-symbol-loss
+    category: B
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "plugin loses a symbol its host requires"
+    prompt: >-
+      We're about to ship a new build of our plugin. Our host requires
+      plugin_register and plugin_teardown to load a plugin at all — does the
+      new build still satisfy that, or will it break existing installs of
+      our host?
+    fixture: skills-src/evaluation/agents/skills/fixtures/plugin-required-symbol-loss
+    platforms: [linux]
+    invocation:
+      required_symbols: ["plugin_register", "plugin_teardown"]
+    expected:
+      # `--required-symbol` scopes the same way `--used-by` does, so this one
+      # states both verdicts too.
+      verdict: BREAKING
+      consumer_verdict: BREAKING
+
+  # ---------------------------------------------------------------- Category A
+  # Expected outcome comes from examples/ground_truth.json — never restated.
+
+  - id: removed-export
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "removed export"
+    case: case01_symbol_removal
+    prompt: >-
+      Review this change to our shared library for binary compatibility with
+      applications already built against it.
+
+  - id: changed-signature
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "changed function signature"
+    case: case02_param_type_change
+    prompt: >-
+      Does this change break existing consumers of the library, or only
+      require a recompile?
+
+  - id: struct-layout-drift
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "struct layout drift"
+    case: case07_struct_layout
+    prompt: >-
+      We changed a struct that appears in our public headers. Is that safe for
+      already-compiled callers?
+
+  - id: enum-value-change
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "enum value change"
+    case: case08_enum_value_change
+    prompt: >-
+      Someone reordered an enum in a public header. What does that do to
+      programs already linked against this library?
+
+  - id: vtable-change
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "vtable change"
+    case: case09_cpp_vtable
+    prompt: >-
+      A virtual function was added to a class our users derive from. Review
+      this for compatibility.
+
+  - id: compatible-addition
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: "compatible addition — false-green-without-evidence floor"
+    case: case03_compat_addition
+    prompt: >-
+      We only added a new function this release. Confirm nothing else changed
+      for existing consumers.
+
+  - id: constant-value-changed
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: >-
+      source-only API break — a changed public constant's value has no
+      exported symbol to break, so a binary-only view sees nothing; only
+      header-depth evidence catches it, and the right answer is "recompile
+      required," not "binary break"
+    case: case124_header_constant_value_changed
+    prompt: >-
+      We changed the value of a public constant in our headers — no function
+      signatures moved. Can existing binaries keep running against the new
+      library as-is, or do they need to be rebuilt?
+
+  - id: runtime-floor-raised
+    category: A
+    skill: check-abi-compatibility
+    status: ready
+    coverage_note: >-
+      COMPATIBLE_WITH_RISK — a function keeps its mangled symbol (not a
+      linkage break) but dropping its noexcept guarantee raises the
+      library's minimum required libstdc++ version, a deployment risk
+      distinct from either a clean pass or an outright break
+    case: case15_noexcept_change
+    prompt: >-
+      We removed the noexcept guarantee from a function that now throws
+      internally. The symbol itself didn't change. Is this release still
+      safe to deploy for people already running the old library?

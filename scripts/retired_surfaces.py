@@ -1096,9 +1096,9 @@ def retired_surface_scan_targets(
     `docs/`, each kept advertising a retired flag after removal, invisible
     above (Codex review, fresh evidence -- twice, one file each).
 
-    `tools/**/*.md` is here for the identical reason one step further out
+    `contrib/**/*.md` is here for the identical reason one step further out
     still: a first-party companion tool's own README documents real
-    invocations of the main CLI too (e.g. `tools/clang-layout-tool/
+    invocations of the main CLI too (e.g. `contrib/clang-layout-tool/
     README.md`'s "Using it with abicheck" section), and this sweep
     previously stopped at the repository root -- `--ast-frontend`'s
     removal from `compare` left that page advertising it, invisible here
@@ -1144,7 +1144,7 @@ def retired_surface_scan_targets(
     Keyed repo-relative (`catalog/cases/caseNN.../README.md`,
     `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
     `catalog/ground_truth.json`, `README.md`, `AGENTS.md`,
-    `tools/<tool>/README.md`, `examples/workflows/<name>/README.md`,
+    `contrib/<tool>/README.md`, `examples/workflows/<name>/README.md`,
     `examples/workflows/<name>/workflow.yaml`,
     `skills-src/<path>.md`, `.github/workflows/<name>.yml`), which cannot
     collide with a
@@ -1167,11 +1167,11 @@ def retired_surface_scan_targets(
     for name in ("README.md", "AGENTS.md"):
         if (root / name).is_file():
             targets.append((root / name, name))
-    tools_dir = root / "tools"
-    if tools_dir.is_dir():
+    contrib_dir = root / "contrib"
+    if contrib_dir.is_dir():
         targets += [
-            (p, f"tools/{p.relative_to(tools_dir).as_posix()}")
-            for p in sorted(tools_dir.rglob("*.md"))
+            (p, f"contrib/{p.relative_to(contrib_dir).as_posix()}")
+            for p in sorted(contrib_dir.rglob("*.md"))
         ]
     workflows_dir = root / "examples" / "workflows"
     if workflows_dir.is_dir():
@@ -1188,6 +1188,9 @@ def retired_surface_scan_targets(
         targets += [
             (p, f"skills-src/{p.relative_to(skills_src_dir).as_posix()}")
             for p in sorted(skills_src_dir.rglob("*.md"))
+            # `skills-src/evaluation/` holds eval corpora and reports, not
+            # instructions an installed skill follows.
+            if p.relative_to(skills_src_dir).parts[0] != "evaluation"
         ]
     gha_workflows_dir = root / ".github" / "workflows"
     if gha_workflows_dir.is_dir():

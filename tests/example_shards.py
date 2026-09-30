@@ -34,7 +34,7 @@ the two pieces CI additionally needs:
 ``merge``
     Recombine the shards' JSON artifacts into the single whole-catalog
     artifact the downstream collector requires.
-    ``validation/scripts/collect_full_example_matrix.py`` enforces that the
+    ``skills-src/evaluation/validation/scripts/collect_full_example_matrix.py`` enforces that the
     gcc/clang artifacts cover the catalog exactly -- no missing ids, no
     duplicates, and ``selected_cases`` equal to the full catalog size -- so
     a bare shard artifact is rejected by design, and something has to put

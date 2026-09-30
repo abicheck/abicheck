@@ -283,7 +283,7 @@ Build/source capability coverage to add after the current `build-source` smoke:
 Gate:
 
 - Remeasurement report is generated from checked-in validation metadata.
-  - `validation/scripts/summarize_remeasurement.py` consumes
+  - `skills-src/evaluation/validation/scripts/summarize_remeasurement.py` consumes
     `validate_examples.v2`, `component_suites.v1`, and `run_matrix.v2`
     artifacts and writes schema `remeasurement_summary.v1`.
   - The summary records section counts, total records, blocking failures,
@@ -291,15 +291,15 @@ Gate:
 - Each measured case records expected verdict, actual verdict, evidence coverage, and whether manual review is acceptable.
 - `python tests/validate_examples.py --json` runs all non-skipped example cases from `examples/ground_truth.json`.
 - `pytest` component suites for every source family above are run or explicitly marked blocked with missing platform/tooling reason.
-  - `validation/scripts/run_component_suites.py` writes schema
+  - `skills-src/evaluation/validation/scripts/run_component_suites.py` writes schema
     `component_suites.v1` records for each source-family suite.
   - Each component-suite record includes component, suite/case id, platform,
     supported platforms, source layers, pytest command, runtime, status,
     pass/fail/error/skip/warning counts, and blocked reasons.
-- `validation/scripts/run_matrix.py` remeasures all package pairs in `validation/data/manifest.json` once binaries are available through `ABICHECK_VALIDATION_LIBS`.
-  - `validation/data/results.json` keeps the per-comparison records and now uses
+- `skills-src/evaluation/validation/scripts/run_matrix.py` remeasures all package pairs in `skills-src/evaluation/validation/data/manifest.json` once binaries are available through `ABICHECK_VALIDATION_LIBS`.
+  - `skills-src/evaluation/validation/data/results.json` keeps the per-comparison records and now uses
     schema `run_matrix.v2`.
-  - `validation/data/results.meta.json` records run-level metadata: runner,
+  - `skills-src/evaluation/validation/data/results.meta.json` records run-level metadata: runner,
     command, platform, manifest pair count, comparison count, and observed
     evidence modes and comparison-status counts.
   - Each real-world record includes component, case id, platform, mode,
@@ -311,8 +311,8 @@ Gate:
     verdicts legitimately return non-zero from `abicheck compare`.
 - Current validation inventory is treated as the starting corpus, not the final corpus:
   - 129 synthetic cases in `examples/ground_truth.json`
-  - 11 curated real-world package pairs in `validation/data/manifest.json`
-  - 33 current real-world shared-library comparisons in `validation/data/results.json`
+  - 11 curated real-world package pairs in `skills-src/evaluation/validation/data/manifest.json`
+  - 33 current real-world shared-library comparisons in `skills-src/evaluation/validation/data/results.json`
   - current observed real-world evidence modes: `sym->sym`, `dwarf->sym`, `dwarf->dwarf`
 - Remeasurement must fail the release gate if any previously passing example, component suite, or real-world known-FP regression changes verdict without an accepted explanation.
 
@@ -378,7 +378,7 @@ pytest -q tests/test_example_autodiscovery.py tests/test_validate_examples_unit.
 Source-family component suites:
 
 ```bash
-python validation/scripts/run_component_suites.py --all --output validation/data/component_suites.json
+python skills-src/evaluation/validation/scripts/run_component_suites.py --all --output skills-src/evaluation/validation/data/component_suites.json
 pytest -q \
   tests/test_elf_metadata_unit.py \
   tests/test_elf_parse_integration.py \
@@ -420,13 +420,13 @@ Known false-positive and real-world gates:
 
 ```bash
 pytest -q tests/test_real_world_false_positives.py tests/test_realworld_scan.py tests/test_fp_rate_gate.py
-ABICHECK_VALIDATION_LIBS=validation/libs/ex python validation/scripts/run_matrix.py
-python validation/scripts/summarize_remeasurement.py \
+ABICHECK_VALIDATION_LIBS=skills-src/evaluation/validation/libs/ex python skills-src/evaluation/validation/scripts/run_matrix.py
+python skills-src/evaluation/validation/scripts/summarize_remeasurement.py \
   --examples results/validate_examples.json \
-  --components validation/data/component_suites.json \
-  --real-world validation/data/results.json \
-  --real-world-meta validation/data/results.meta.json \
-  --output validation/data/remeasurement_summary.json \
+  --components skills-src/evaluation/validation/data/component_suites.json \
+  --real-world skills-src/evaluation/validation/data/results.json \
+  --real-world-meta skills-src/evaluation/validation/data/results.meta.json \
+  --output skills-src/evaluation/validation/data/remeasurement_summary.json \
   --fail-on-blocking
 python tests/check_validate_results.py
 python tests/summarize_validate_results.py
@@ -443,10 +443,10 @@ pytest -q tests/test_workflow_kernel_accel.py
 
 Expected artifacts:
 
-- `validation/data/results.json` regenerated from the current manifest.
-- `validation/data/runs/*.json` regenerated for each measured shared-library comparison.
-- `validation/data/component_suites.json` generated from component-suite runs.
-- `validation/data/remeasurement_summary.json` generated from examples,
+- `skills-src/evaluation/validation/data/results.json` regenerated from the current manifest.
+- `skills-src/evaluation/validation/data/runs/*.json` regenerated for each measured shared-library comparison.
+- `skills-src/evaluation/validation/data/component_suites.json` generated from component-suite runs.
+- `skills-src/evaluation/validation/data/remeasurement_summary.json` generated from examples,
   component suites, and real-world matrix artifacts.
 
 ## Definition Of Done

@@ -49,7 +49,7 @@ the skill:
 The skill was revised against that same scenario set, so this is not yet a
 held-out result, and it has not been validated on other agents. The
 methodology and caveats are in
-[the pilot report](https://github.com/abicheck/abicheck/blob/main/agent-evals/skills/pilot-results/2026-09-29.md).
+[the pilot report](https://github.com/abicheck/abicheck/blob/main/skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md).
 
 **Portfolio status (2026-08-20):** the portfolio was reset from four
 published skills down to **one internal candidate**. No skill has measured

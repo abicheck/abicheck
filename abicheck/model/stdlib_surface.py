@@ -37,7 +37,7 @@ def stdlib_namespaces_excluded(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     False only when *either* side IS the C++ runtime (libstdc++ / libc++), where
     those types are the surface under test.  Single source of truth so every
     registered detector that consumes ``snapshot.types`` agrees on whether to
-    keep std:: records (validation/REPORT.md FP-1; Codex reviews on PR #273).
+    keep std:: records (skills-src/evaluation/validation/REPORT.md FP-1; Codex reviews on PR #273).
 
     Note (cross-implementation comparisons): when two snapshots are built
     against *different* stdlib implementations (libstdc++ ↔ libc++), standalone

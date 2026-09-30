@@ -1,0 +1,29 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [
+    "x86_64"
+  ],
+  "category": "B",
+  "digest": "sha256:770c733538151339da4ed92a1f0a07bbedf391531422b03fc2d158b043004b50",
+  "expected": {
+    "uncertainty": "evidence_too_shallow",
+    "verdict": "COMPATIBLE"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/evidence-too-shallow",
+  "invocation": {
+    "depth": "symbols"
+  },
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Only the stripped release binaries survived for the old version. Can you still tell me whether the struct layouts our plugins depend on changed?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/evidence-too-shallow",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

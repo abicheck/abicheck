@@ -41,8 +41,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-_CONDA = Path("validation/scripts/conda_harness.py")
-_VALIDATE = Path("validation/scripts/validate.py")
+_CONDA = Path("skills-src/evaluation/validation/scripts/conda_harness.py")
+_VALIDATE = Path("skills-src/evaluation/validation/scripts/validate.py")
 
 
 def _load(name: str, path: Path):

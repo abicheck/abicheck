@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""`agent-evals/skills/run_skill_eval.py` — grading a batch across run roots.
+"""`skills-src/evaluation/agents/skills/run_skill_eval.py` — grading a batch across run roots.
 
 Parallel scenario subsets are the practical way to run the A/B (each run is
 minutes long), so one batch is routinely several `--out` roots. Grading them
@@ -32,7 +32,8 @@ from _skill_eval_graders_fixtures import a_breaking_call, envelope
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location(
-    "run_skill_eval", ROOT / "agent-evals" / "skills" / "run_skill_eval.py"
+    "run_skill_eval",
+    ROOT / "skills-src" / "evaluation" / "agents" / "skills" / "run_skill_eval.py",
 )
 run_skill_eval = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(run_skill_eval)

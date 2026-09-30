@@ -49,7 +49,7 @@ Stale facts corrected while compacting, each verified against the tree:
   (`reporter.py`/`report/build.py` → `report/finding_evolution.py`'s
   `finding_evolution` block). The earlier "not yet wired into any CLI
   command" claim was stale.
-- **`validation/scripts/run_oneapi_scan.py` and `eval/scan_level_scaling.py`
+- **`skills-src/evaluation/validation/scripts/run_oneapi_scan.py` and `skills-src/evaluation/field/scan_level_scaling.py`
   no longer exist** — both were deleted in Phase 6 (list A). The earlier
   "stays on `scan`" note is void.
 - **`tests/parity/gaps.py` and `tests/parity/test_gap_registry_contract.py`
@@ -600,9 +600,9 @@ condensed version in [known gaps](../known-gaps.md).
 - **Docs, examples, eval.** `docs/use/scan-levels.md` became
   `docs/use/evidence-depth.md`; the user docs, the nine G20 catalog case
   READMEs, `examples/workflows/audit-release` and `skills-src/` moved to
-  `compare`/`compare --no-baseline`. `eval/scan_level_scaling.py` was
+  `compare`/`compare --no-baseline`. `skills-src/evaluation/field/scan_level_scaling.py` was
   re-driven onto `compare` and later deleted in Phase 6 together with
-  `validation/scripts/run_oneapi_scan.py`.
+  `skills-src/evaluation/validation/scripts/run_oneapi_scan.py`.
 
 ### Phase 5 — Presentation/analysis separation — **done**
 
@@ -642,7 +642,7 @@ condensed version in [known gaps](../known-gaps.md).
   `workflows/scan_config.py` (`workflows/scan_gate_options.py` and
   `workflows/scan_subprocess.py` had already gone in Phase 4);
   `service_scan.py`'s surviving cost model became `dry_run_estimate.py`;
-  `eval/scan_level_scaling.py` and `validation/scripts/run_oneapi_scan.py`.
+  `skills-src/evaluation/field/scan_level_scaling.py` and `skills-src/evaluation/validation/scripts/run_oneapi_scan.py`.
   `SCAN_SCHEMA_VERSION` and its call sites are gone.
 - **Deleted (lists B and D):** the 33 scan-only test modules, and
   `buildsource/poi.py`/`risk.py` with `tests/test_poi.py`,

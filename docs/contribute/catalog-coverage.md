@@ -83,4 +83,4 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 | `python-api` | I want to run this check from my own build script or test suite, not by shelling out to the CLI -- how do I call abicheck from Python? | linux, macos | 3 |
 | `suppressions` | I renamed a function on purpose -- how do I stop CI from failing on it, without turning off detection for everything else? | linux, macos | 4 |
 
-Each row is a `workflow.yaml` that `validation/scripts/run_workflow_examples.py` runs end to end -- the documented commands themselves, in a scratch copy, checked against the exit code and the verdict/change kinds the walkthrough claims. A directory without that contract is a hard error rather than a free point of coverage.
+Each row is a `workflow.yaml` that `skills-src/evaluation/validation/scripts/run_workflow_examples.py` runs end to end -- the documented commands themselves, in a scratch copy, checked against the exit code and the verdict/change kinds the walkthrough claims. A directory without that contract is a hard error rather than a free point of coverage.
