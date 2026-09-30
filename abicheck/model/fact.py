@@ -269,10 +269,10 @@ class RetiredBridgeField:
 
 def retire_bridge_fields(cls: type, defaults: dict[str, object]) -> None:
     """Install :class:`RetiredBridgeField` views on *cls* for each name in
-    *defaults* (each an ``InitVar`` of the dataclass), and record the class's
-    persisted field order -- its real fields plus these views, in declaration
-    order -- as ``__wire_field_names__`` so the snapshot encoder writes the
-    identical document it wrote while they were stored fields."""
+    *defaults* (each an ``InitVar`` of the dataclass), and record their names
+    as ``__retired_bridge_fields__``: the snapshot encoder writes each view in
+    its historical position, per concrete class, so the document is identical
+    to the one written while they were stored fields."""
     declared = cls.__dataclass_fields__  # type: ignore[attr-defined]
     stored = {f.name for f in dataclass_fields(cls)}
     for name, default in defaults.items():
@@ -280,9 +280,6 @@ def retire_bridge_fields(cls: type, defaults: dict[str, object]) -> None:
             raise TypeError(f"{cls.__name__}.{name} must be an InitVar to retire")
         setattr(cls, name, RetiredBridgeField(name, default))
     cls.__retired_bridge_fields__ = frozenset(defaults)  # type: ignore[attr-defined]
-    cls.__wire_field_names__ = tuple(  # type: ignore[attr-defined]
-        name for name in declared if name in stored or name in defaults
-    )
 
 
 def set_legacy_field(obj: object, name: str, value: object) -> None:

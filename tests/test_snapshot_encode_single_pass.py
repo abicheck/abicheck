@@ -447,3 +447,18 @@ def test_nested_containers_are_all_fresh_objects() -> None:
     encoded = _encode_value(source)
     encoded["outer"][0]["inner"].append(2)  # type: ignore[index,union-attr]
     assert source == {"outer": [{"inner": [1]}]}
+
+
+def test_a_subclass_keeps_its_own_fields_and_the_retired_views() -> None:
+    from dataclasses import dataclass
+
+    from abicheck.model import Param
+
+    @dataclass(slots=True)
+    class TaggedParam(Param):
+        tag: str = "x"
+
+    encoded = _encode_value(TaggedParam(name="p", type="int", is_va_list=True, tag="t"))
+    assert encoded["tag"] == "t"
+    assert encoded["is_va_list"] is True
+    assert list(encoded)[-1] == "tag"
