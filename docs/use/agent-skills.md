@@ -95,7 +95,7 @@ still-unrun behavioral evaluation. The same status is also kept in `skills-src/C
 ## Installing it
 
 ```bash
-npx skills add abicheck/abicheck                     # both skills, into the current project
+npx skills add abicheck/abicheck                     # all three skills, into the current project
 npx skills add abicheck/abicheck -s explain-abi-change  # just one of them
 npx skills add abicheck/abicheck -g -a claude-code   # for every project, one agent
 npx skills add abicheck/abicheck -l                  # list what the repository offers
@@ -104,10 +104,10 @@ npx skills add abicheck/abicheck -l                  # list what the repository 
 This uses the [`skills` CLI](https://www.npmjs.com/package/skills), which
 installs skills straight from a GitHub repository into the directory each
 agent reads (Claude Code, Codex, Copilot, Cursor, Gemini CLI and others) and
-handles `list`, `update` and `remove` itself. abicheck publishes the skill
-for it as the committed, self-contained `skills/check-abi-compatibility/`
-tree: generated from `skills-src/`, with every reference it cites copied in,
-and checked against a fresh render in CI so it cannot drift.
+handles `list`, `update` and `remove` itself. abicheck publishes the skills
+for it as the committed, self-contained `skills/<skill-name>/`
+trees: generated from `skills-src/`, with every reference each one cites copied in,
+and checked against a fresh render in CI so they cannot drift.
 
 The skill drives the abicheck CLI, so install that too:
 `pipx install abicheck` (or `pip install abicheck`).
@@ -124,6 +124,14 @@ Skills are executable content. Anthropic's own guidance applies to these as
 to any others: install only from sources you trust, and read what you install.
 The rules these skills hold *themselves* to — never manufacture a green
 result, never widen a suppression, never mutate a project silently — ship inside every skill as `references/shared/safety-invariants.md`.
+
+## Enabling them for a whole repository
+
+To make the skills available to *every* contributor's agent in your own
+library's repository — install them into the project and commit them, make
+the `abicheck` CLI available to local and cloud agents, and describe your
+public headers, build, and baseline in `AGENTS.md` — see
+[Enabling abicheck skills in your repository](agent-skills-in-your-repo.md).
 
 ## Prerequisites
 

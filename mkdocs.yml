@@ -104,6 +104,7 @@ nav:
       - Tool Modes: use/tool-modes.md
       - Python API: use/python-api.md
       - Agent Skills: use/agent-skills.md
+      - Skills in Your Repository: use/agent-skills-in-your-repo.md
       - Migrating to the Current CLI: use/companion-commands.md
       - Migrating from ABICC: use/from-abicc.md
       - Migrating from libabigail: use/from-libabigail.md
