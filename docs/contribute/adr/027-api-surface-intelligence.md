@@ -180,18 +180,12 @@ classification is auditable and the diff stage stays source-agnostic.
 
 ```python
 class Idiom(str, Enum):
-    OPAQUE_POINTER = (
-        "opaque_pointer"  # type only ever crossed by pointer; never by value
-    )
-    PIMPL = "pimpl"  # public type whose only data member is a pointer to a private/incomplete type
-    HANDLE = "handle"  # typedef of void* / forward-declared struct ptr used as a token
-    FACTORY = "factory"  # exported fn returning a pointer to an abstract/base type
-    CREATE_DESTROY = (
-        "create_destroy"  # paired create_X / destroy_X (or _new/_free) lifecycle fns
-    )
-    CALLBACK_ABI = (
-        "callback_abi"  # function-pointer-typed parameter/field (ABI-sensitive)
-    )
+    OPAQUE_POINTER   = "opaque_pointer"    # type only ever crossed by pointer; never by value
+    PIMPL            = "pimpl"             # public type whose only data member is a pointer to a private/incomplete type
+    HANDLE           = "handle"            # typedef of void* / forward-declared struct ptr used as a token
+    FACTORY          = "factory"           # exported fn returning a pointer to an abstract/base type
+    CREATE_DESTROY   = "create_destroy"    # paired create_X / destroy_X (or _new/_free) lifecycle fns
+    CALLBACK_ABI     = "callback_abi"      # function-pointer-typed parameter/field (ABI-sensitive)
 ```
 
 > **OUT_PARAM is deliberately *not* a recognised idiom.** Detecting that a
@@ -305,17 +299,12 @@ prove the both-snapshots anti-hiding guards (D4.1), and populate the ledger's
 @dataclass
 class IdiomTag:
     idiom: Idiom
-    confidence: Confidence  # so D4.1 thresholds survive serialization
-    evidence: list[str]  # the matched edges/reasons → ledger edges_matched
+    confidence: Confidence            # so D4.1 thresholds survive serialization
+    evidence: list[str]               # the matched edges/reasons → ledger edges_matched
     # idiom-specific proof needed by the both-snapshots guards:
-    layout_signature: str | None = (
-        None  # OPAQUE/PIMPL wrapper's own layout (D4.1 PIMPL guard)
-    )
-    hidden_pointee: str | None = None  # PIMPL impl pointee identity
-    definition_hidden: bool = (
-        False  # T incomplete in the public include closure (D2.1 cond.1)
-    )
-
+    layout_signature: str | None = None   # OPAQUE/PIMPL wrapper's own layout (D4.1 PIMPL guard)
+    hidden_pointee: str | None = None      # PIMPL impl pointee identity
+    definition_hidden: bool = False        # T incomplete in the public include closure (D2.1 cond.1)
 
 # AbiSnapshot.idioms: dict[str, list[IdiomTag]]   # declaration name → tags
 # AbiSnapshot.conventions: ...

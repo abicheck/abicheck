@@ -144,10 +144,10 @@ All platform-specific metadata is optional in `AbiSnapshot`:
 ```python
 @dataclass
 class AbiSnapshot:
-    elf: ElfMetadata | None  # ELF-specific
-    pe: PeMetadata | None  # PE-specific
-    macho: MachoMetadata | None  # Mach-O-specific
-    platform: str | None  # "elf" | "pe" | "macho"
+    elf: ElfMetadata | None     # ELF-specific
+    pe: PeMetadata | None       # PE-specific
+    macho: MachoMetadata | None # Mach-O-specific
+    platform: str | None        # "elf" | "pe" | "macho"
 ```
 
 The checker detects which platform metadata is present and runs the

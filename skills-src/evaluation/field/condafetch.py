@@ -4,7 +4,6 @@
 No conda needed. Uses anaconda.org API + direct CDN download. Handles .conda
 (zip of zstd tarballs; requires external zstd for GNU tar) and legacy .tar.bz2.
 """
-
 from __future__ import annotations
 
 import json
@@ -37,13 +36,11 @@ def _retrieve(url, dest):
         raise ValueError(f"refusing non-HTTPS download: {url}")
     urllib.request.urlretrieve(url, dest)  # noqa: S310  # nosec B310 - scheme pinned above
 
-
 def _ensure_within(root, path):
     root = os.path.realpath(root)
     path = os.path.realpath(path)
     if os.path.commonpath([root, path]) != root:
         raise RuntimeError(f"unsafe archive member path: {path}")
-
 
 def _validate_tar_member(member, outdir):
     _ensure_within(outdir, os.path.join(outdir, member.name))
@@ -54,7 +51,6 @@ def _validate_tar_member(member, outdir):
             raise RuntimeError(f"unsafe absolute archive link: {member.name}")
         link_base = os.path.dirname(os.path.join(outdir, member.name))
         _ensure_within(outdir, os.path.join(link_base, member.linkname))
-
 
 def _safe_extract_tar(tf, outdir):
     for member in tf.getmembers():
@@ -67,7 +63,6 @@ def _safe_extract_tar(tf, outdir):
     except TypeError:
         tf.extractall(outdir)  # noqa: S202  # nosec B202 - members validated above
 
-
 def _require_zstd():
     if shutil.which("zstd") is None:
         raise RuntimeError(
@@ -75,12 +70,10 @@ def _require_zstd():
             "install zstd or provide a legacy .tar.bz2 package"
         )
 
-
 def _get(url, dest):
     t0 = time.time()
     _retrieve(url, dest)
     return time.time() - t0, os.path.getsize(dest)
-
 
 def list_files(pkg, subdir="linux-64"):
     p = f"{CACHE}/{pkg}.api.json"
@@ -92,7 +85,6 @@ def list_files(pkg, subdir="linux-64"):
     # newest build per (version): sort by version then build_number
     return fs
 
-
 def pick(pkg, version, subdir="linux-64"):
     """Pick the highest build_number .conda (fallback .tar.bz2) for a version."""
     fs = [f for f in list_files(pkg, subdir) if f["version"] == version]
@@ -102,7 +94,6 @@ def pick(pkg, version, subdir="linux-64"):
     pool = conda or fs
     pool.sort(key=lambda f: (f["attrs"].get("build_number", 0), f["basename"]))
     return pool[-1]
-
 
 def download(pkg, version, subdir="linux-64"):
     f = pick(pkg, version, subdir)
@@ -114,22 +105,15 @@ def download(pkg, version, subdir="linux-64"):
         dl_t, size = _get(CDN.format(base), dest)
     return dest, dl_t, size
 
-
 def extract(archive, outdir):
     """Extract a .conda or .tar.bz2 into outdir. Returns extract seconds."""
     t0 = time.time()
-    shutil.rmtree(
-        outdir, ignore_errors=True
-    )  # no stale files from a prior build/extract
+    shutil.rmtree(outdir, ignore_errors=True)  # no stale files from a prior build/extract
     os.makedirs(outdir, exist_ok=True)
     if archive.endswith(".conda"):
         _require_zstd()
         with zipfile.ZipFile(archive) as z:
-            inner = [
-                n
-                for n in z.namelist()
-                if n.startswith("pkg-") and n.endswith(".tar.zst")
-            ]
+            inner = [n for n in z.namelist() if n.startswith("pkg-") and n.endswith(".tar.zst")]
             if not inner:
                 raise RuntimeError(f"no pkg-*.tar.zst payload in {archive}")
             tmp = outdir + "/_inner.tar.zst"
@@ -141,7 +125,6 @@ def extract(archive, outdir):
         with tarfile.open(archive, "r:bz2") as t:
             _safe_extract_tar(t, outdir)
     return time.time() - t0
-
 
 def find_sos(root):
     """Real (non-symlink) shared objects: *.so, *.so.N.M, *.dylib."""
@@ -158,25 +141,18 @@ def find_sos(root):
                 out.append(p)
     return out
 
-
 if __name__ == "__main__":
     cmd = sys.argv[1]
     if cmd == "versions":
         fs = list_files(sys.argv[2])
         import collections
-
         c = collections.Counter(f["version"] for f in fs)
         import re
-
         def _vkey(s):
             # homogeneous (int, str) tuples per component so mixed numeric/suffix
             # versions (1.0.2 vs 1.1.1w) stay comparable under sorted()
-            return [
-                (int(p), "") if p.isdigit() else (0, p)
-                for p in re.split(r"(\d+)", s)
-                if p
-            ]
-
+            return [(int(p), "") if p.isdigit() else (0, p)
+                    for p in re.split(r"(\d+)", s) if p]
         for v in sorted(c, key=_vkey):
             print(v, c[v])
     elif cmd == "fetch":
@@ -185,15 +161,6 @@ if __name__ == "__main__":
         out = os.path.join(CACHE, f"ex_{pkg}_{ver}")
         ex_t = extract(arch, out)
         sos = find_sos(out)
-        print(
-            json.dumps(
-                {
-                    "archive": os.path.basename(arch),
-                    "dl_s": round(dl_t, 2),
-                    "size_kb": size // 1024,
-                    "extract_s": round(ex_t, 2),
-                    "sos": [os.path.relpath(s, out) for s in sos],
-                },
-                indent=2,
-            )
-        )
+        print(json.dumps({"archive": os.path.basename(arch), "dl_s": round(dl_t,2),
+                          "size_kb": size//1024, "extract_s": round(ex_t,2),
+                          "sos": [os.path.relpath(s, out) for s in sos]}, indent=2))

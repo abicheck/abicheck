@@ -56,9 +56,7 @@ def _run_owner(owner: str, proof: str) -> dict[str, object]:
             check=False,
         )
         output = "\n".join(
-            part.strip()
-            for part in (completed.stdout, completed.stderr)
-            if part.strip()
+            part.strip() for part in (completed.stdout, completed.stderr) if part.strip()
         )
         passed = sum(int(n) for n in _PASSED_RE.findall(completed.stdout))
         skipped = sum(int(n) for n in _SKIPPED_RE.findall(completed.stdout))

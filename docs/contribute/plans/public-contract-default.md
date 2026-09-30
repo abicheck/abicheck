@@ -155,13 +155,13 @@ Add a leaf-layer immutable object (exact module name may vary):
 ```python
 @dataclass(frozen=True)
 class CompatibilityEvaluationConfig:
-    contract: ContractConfig  # mode, unresolved behavior, overlays
-    evidence: EvidenceConfig  # providers, requirements, variants
-    surface: SurfaceConfig  # explicit scope and surface hints
-    assurance: AssuranceConfig  # evidence/coverage requirements
-    policy: CompatibilityPolicyConfig  # immutable base/packs/overrides
-    gate: GateConfig  # exit scheme, preset/packs/severity overrides
-    suppressions: SuppressionConfig  # immutable rules and digest
+    contract: ContractConfig          # mode, unresolved behavior, overlays
+    evidence: EvidenceConfig          # providers, requirements, variants
+    surface: SurfaceConfig            # explicit scope and surface hints
+    assurance: AssuranceConfig        # evidence/coverage requirements
+    policy: CompatibilityPolicyConfig # immutable base/packs/overrides
+    gate: GateConfig                  # exit scheme, preset/packs/severity overrides
+    suppressions: SuppressionConfig   # immutable rules and digest
     provenance: Mapping[str, ValueProvenance]
 ```
 

@@ -71,7 +71,6 @@ to know which format the data came from.
 ```python
 class TypeMetadataSource(Protocol):
     """Common interface for all debug format readers."""
-
     def get_struct_layout(self, name: str) -> StructLayout | None: ...
     def get_enum_info(self, name: str) -> EnumInfo | None: ...
     def get_function_proto(self, name: str) -> FuncProto | None: ...
@@ -156,15 +155,13 @@ section via pyelftools' section API.
 def _btf_struct_to_layout(btf_type, members, strings) -> StructLayout:
     fields = []
     for m in members:
-        fields.append(
-            FieldInfo(
-                name=strings[m.name_off],
-                type_name=resolve_type_name(m.type_id),
-                byte_offset=m.offset // 8,
-                bit_offset=m.offset % 8 if is_bitfield else 0,
-                bit_size=m.bit_size if is_bitfield else 0,
-            )
-        )
+        fields.append(FieldInfo(
+            name=strings[m.name_off],
+            type_name=resolve_type_name(m.type_id),
+            byte_offset=m.offset // 8,
+            bit_offset=m.offset % 8 if is_bitfield else 0,
+            bit_size=m.bit_size if is_bitfield else 0,
+        ))
     return StructLayout(
         name=strings[btf_type.name_off],
         byte_size=btf_type.size,

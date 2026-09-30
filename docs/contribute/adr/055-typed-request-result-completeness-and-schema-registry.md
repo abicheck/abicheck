@@ -287,17 +287,16 @@ class InputSpec:
     sources: Path | None = None
     build_info: Path | None = None
     dump_manifest: Path | None = None
-    compile: CompileContext | None = None  # per-side override
+    compile: CompileContext | None = None          # per-side override
     public_header_dirs: tuple[Path, ...] = ()
-
 
 @dataclass(frozen=True)
 class CompareRequest:
     old: InputSpec
     new: InputSpec
     # ... existing fields unchanged ...
-    depth: str | None = None  # AnalysisDepth spelling
-    frontend_context: str = "host"  # ADR-050 host|device
+    depth: str | None = None                        # AnalysisDepth spelling
+    frontend_context: str = "host"                  # ADR-050 host|device
 ```
 
 `run_compare_request` already resolves every one of these concepts
@@ -508,10 +507,9 @@ Add a small `abicheck.schemas` (or extend the existing one, if `compare`/
 
 ```python
 from abicheck import schemas
-
-schemas.current("snapshot")  # -> current SCHEMA_VERSION (int)
-schemas.current("compare")  # -> current REPORT_SCHEMA_VERSION (str)
-schemas.current("scan")  # -> current SCAN_SCHEMA_VERSION (str)
+schemas.current("snapshot")   # -> current SCHEMA_VERSION (int)
+schemas.current("compare")    # -> current REPORT_SCHEMA_VERSION (str)
+schemas.current("scan")       # -> current SCAN_SCHEMA_VERSION (str)
 ```
 
 (the exact values drift as each artifact's own constant bumps — deliberately

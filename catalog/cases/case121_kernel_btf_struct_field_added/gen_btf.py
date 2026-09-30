@@ -31,7 +31,6 @@ A real kernel workflow would instead run::
     pahole -J vmlinux        # embeds .BTF into vmlinux
     bpftool btf dump file vmlinux format raw
 """
-
 from __future__ import annotations
 
 import struct
@@ -73,15 +72,8 @@ def build_struct_btf(struct_name: str, n_fields: int) -> bytes:
     type_data = b"".join(types)
     str_data = bytes(strings)
     header = struct.pack(
-        "<HBBIIIII",
-        BTF_MAGIC,
-        BTF_VERSION,
-        0,
-        24,
-        0,
-        len(type_data),
-        len(type_data),
-        len(str_data),
+        "<HBBIIIII", BTF_MAGIC, BTF_VERSION, 0, 24,
+        0, len(type_data), len(type_data), len(str_data),
     )
     return header + type_data + str_data
 

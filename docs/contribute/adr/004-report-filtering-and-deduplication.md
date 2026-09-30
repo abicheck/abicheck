@@ -294,8 +294,8 @@ class Change:
     source_location: str | None = None
     affected_symbols: list[str] | None = None
     # NEW
-    caused_by_type: str | None = None  # root type that makes this change redundant
-    caused_count: int = 0  # number of derived changes collapsed into this root
+    caused_by_type: str | None = None    # root type that makes this change redundant
+    caused_count: int = 0                # number of derived changes collapsed into this root
 
 
 @dataclass

@@ -948,20 +948,18 @@ tooling:
 
 ```python
 from abicheck.bundle import (
-    build_bundle_snapshot,
-    compare_bundle,
-    load_manifest,
+    build_bundle_snapshot, compare_bundle, load_manifest,
 )
 from pathlib import Path
 
 old = build_bundle_snapshot({p.name: p for p in Path("old/").glob("*.so")})
 new = build_bundle_snapshot({p.name: p for p in Path("new/").glob("*.so")})
-manifest = load_manifest(Path("manifest.yaml"))  # optional
+manifest = load_manifest(Path("manifest.yaml"))   # optional
 
 # per_library_results is the list of DiffResult returned by
 # abicheck.checker.compare() for each library pair.
 result = compare_bundle(old, new, per_library_results, manifest=manifest)
-print(result.bundle_verdict)  # Verdict.BREAKING / COMPATIBLE / ...
+print(result.bundle_verdict)        # Verdict.BREAKING / COMPATIBLE / ...
 for f in result.bundle_findings:
     print(f.kind, f.symbol, f.consumer_library)
 ```

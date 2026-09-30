@@ -110,9 +110,7 @@ retention policy, no way to list available baselines, no cleanup mechanism.
 class BaselineRegistry(Protocol):
     """Store and retrieve ABI baseline snapshots."""
 
-    def push(
-        self, key: BaselineKey, snapshot: AbiSnapshot, metadata: BaselineMetadata
-    ) -> str:
+    def push(self, key: BaselineKey, snapshot: AbiSnapshot, metadata: BaselineMetadata) -> str:
         """Store a snapshot. Returns a reference ID."""
         ...
 
@@ -128,15 +126,13 @@ class BaselineRegistry(Protocol):
         """Delete a baseline. Returns True if deleted, False if not found."""
         ...
 
-
 @dataclass
 class BaselineKey:
     """Unique identifier for a baseline snapshot."""
-
-    library: str  # Library name (e.g., "libfoo")
-    version: str  # Version or branch (e.g., "1.0.0", "main")
-    platform: str  # Target platform (e.g., "linux-x86_64")
-    variant: str = ""  # Build variant (e.g., "debug", "ssl-enabled")
+    library: str           # Library name (e.g., "libfoo")
+    version: str           # Version or branch (e.g., "1.0.0", "main")
+    platform: str          # Target platform (e.g., "linux-x86_64")
+    variant: str = ""      # Build variant (e.g., "debug", "ssl-enabled")
 
     @property
     def path(self) -> str:
@@ -146,20 +142,16 @@ class BaselineKey:
             parts.append(self.variant)
         return "/".join(parts)
 
-
 @dataclass
 class BaselineMetadata:
     """Provenance and integrity metadata for a baseline."""
-
-    abicheck_version: str  # Version of abicheck that produced the snapshot
-    schema_version: int  # Snapshot schema version (ADR-015)
-    created_at: datetime  # ISO 8601 timestamp
-    build_context_hash: (
-        str | None
-    )  # Hash of compile_commands.json / flags used (ADR-020a)
-    git_commit: str | None  # Source commit that produced the library
-    checksum: str  # SHA-256 of the serialized snapshot JSON
-    signature: str | None  # Optional detached signature (GPG/sigstore)
+    abicheck_version: str           # Version of abicheck that produced the snapshot
+    schema_version: int             # Snapshot schema version (ADR-015)
+    created_at: datetime            # ISO 8601 timestamp
+    build_context_hash: str | None  # Hash of compile_commands.json / flags used (ADR-020a)
+    git_commit: str | None          # Source commit that produced the library
+    checksum: str                   # SHA-256 of the serialized snapshot JSON
+    signature: str | None           # Optional detached signature (GPG/sigstore)
 ```
 
 ### 2. Git-native backend (default)

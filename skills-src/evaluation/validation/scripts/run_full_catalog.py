@@ -449,29 +449,17 @@ def run_full_catalog(toolchain: str, results_dir: Path) -> dict[str, Any]:
     build_source_by_case = {r["name"]: r for r in build_source["results"]}
 
     bundle = _run_json(
-        [
-            sys.executable,
-            "skills-src/evaluation/validation/scripts/run_bundle_examples.py",
-            "--json",
-        ]
+        [sys.executable, "skills-src/evaluation/validation/scripts/run_bundle_examples.py", "--json"]
     )
     bundle_by_case = {r["case_id"]: r for r in bundle["results"]}
 
     special_cli = _run_json(
-        [
-            sys.executable,
-            "skills-src/evaluation/validation/scripts/run_special_cli_examples.py",
-            "--json",
-        ]
+        [sys.executable, "skills-src/evaluation/validation/scripts/run_special_cli_examples.py", "--json"]
     )
     special_by_case = {r["case_id"]: r for r in special_cli["results"]}
 
     runtime = _run_json(
-        [
-            sys.executable,
-            "skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py",
-            "--json",
-        ]
+        [sys.executable, "skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py", "--json"]
     )
     runtime_by_case = {r["case_id"]: r for r in runtime["results"]}
 

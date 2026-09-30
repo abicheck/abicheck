@@ -158,18 +158,9 @@ def _compile_shared_lib_with_plugin(work: Path, plugin: Path, clangxx: str) -> P
             "-shared",
             "-Iinclude",
             f"-fplugin={plugin}",
-            "-Xclang",
-            "-plugin-arg-abicheck-facts",
-            "-Xclang",
-            "out=abicheck_inputs",
-            "-Xclang",
-            "-plugin-arg-abicheck-facts",
-            "-Xclang",
-            "public-roots=include",
-            "-Xclang",
-            "-plugin-arg-abicheck-facts",
-            "-Xclang",
-            "library=widget",
+            "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "out=abicheck_inputs",
+            "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "public-roots=include",
+            "-Xclang", "-plugin-arg-abicheck-facts", "-Xclang", "library=widget",
             "widget.cpp",
             "-o",
             str(so),
@@ -197,10 +188,8 @@ def main(argv: list[str] | None = None) -> int:
     # Only auto-created temp dirs are ours to delete; a caller-supplied --work
     # is owned by the caller and must never be rmtree'd (Codex review).
     created_tmp = args.work is None
-    work = (
-        Path(args.work).resolve()
-        if args.work
-        else Path(tempfile.mkdtemp(prefix="abicheck-scan-"))
+    work = Path(args.work).resolve() if args.work else Path(
+        tempfile.mkdtemp(prefix="abicheck-scan-")
     )
     work.mkdir(parents=True, exist_ok=True)
     src = work / "fx"
@@ -212,13 +201,8 @@ def main(argv: list[str] | None = None) -> int:
         # plugin-emitted pack folded in inline (real ingest, no re-parse).
         dump_out = _run(
             [
-                "abicheck",
-                "dump",
-                str(so),
-                "--build-info",
-                "./abicheck_inputs/",
-                "-o",
-                "widget.baseline.json",
+                "abicheck", "dump", str(so), "--build-info", "./abicheck_inputs/",
+                "-o", "widget.baseline.json",
             ],
             cwd=src,
         )
@@ -231,9 +215,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("merged baseline has no embedded build_source payload")
         folded = _count_entities(build_source)
         if folded <= 0:
-            raise SystemExit(
-                "merged baseline folded zero source entities from the pack"
-            )
+            raise SystemExit("merged baseline folded zero source entities from the pack")
 
         # PR1: a non-empty L4 entity count alone does not prove source_edges
         # ever reached the L5 graph -- assert the specific edges the

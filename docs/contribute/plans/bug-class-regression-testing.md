@@ -150,11 +150,11 @@ BugClass(
         "does not depend on checkout root, absolute path spelling, "
         "temp-directory location, or unrelated line-number drift."
     ),
-    fixed_by=(837, 843, 846, 868),  # issue/PR numbers, for traceability
+    fixed_by=(837, 843, 846, 868),           # issue/PR numbers, for traceability
     seed_tests=("tests/test_castxml_anonymous_type_location.py",),
-    public_surfaces=(),  # () until a seed genuinely invokes one
-    axes={},  # {} until a seed genuinely covers an axis
-    known_gaps=(),  # each entry names a reference + optional canary
+    public_surfaces=(),                       # () until a seed genuinely invokes one
+    axes={},                                  # {} until a seed genuinely covers an axis
+    known_gaps=(),                            # each entry names a reference + optional canary
 )
 ```
 

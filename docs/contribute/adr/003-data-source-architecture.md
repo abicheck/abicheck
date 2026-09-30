@@ -152,9 +152,7 @@ filter to only ABI-relevant items:
 
 ```python
 # Intersection: DWARF functions × ELF exported symbols
-exported = {
-    s.name for s in elf_meta.symbols if s.binding in ("GLOBAL", "WEAK") and s.defined
-}
+exported = {s.name for s in elf_meta.symbols if s.binding in ('GLOBAL', 'WEAK') and s.defined}
 for func in dwarf_functions:
     if func.linkage_name in exported or func.name in exported:
         func.visibility = Visibility.PUBLIC

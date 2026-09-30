@@ -82,9 +82,7 @@ _LATEST_PUBLISHED_VERSION = "unknown"
 def on_config(config: Any, **kwargs: Any) -> Any:
     global _LATEST_PUBLISHED_VERSION
     config_file_path = config.get("config_file_path")
-    repo_root = (
-        Path(config_file_path).resolve().parent if config_file_path else Path(".")
-    )
+    repo_root = Path(config_file_path).resolve().parent if config_file_path else Path(".")
     _LATEST_PUBLISHED_VERSION = _latest_published_version(repo_root)
     config["extra"]["latest_published_version"] = _LATEST_PUBLISHED_VERSION
     return config

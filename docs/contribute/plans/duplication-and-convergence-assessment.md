@@ -424,7 +424,7 @@ execution (or through dry-run's own inspection), not begin partway through:
 with resolve_artifact_request(request) as plan:
     # plan.session owns the inferred-build directory (if any) from here
     if dry_run:
-        return render_plan(plan)  # closes on context-manager exit
+        return render_plan(plan)          # closes on context-manager exit
     with execute_artifact_plan(plan) as result:
         run_header_graph(result)
         attach_build_context(result)
@@ -499,11 +499,10 @@ rule. That remains this section's target.
 ```python
 @dataclass(frozen=True)
 class EffectiveGate:
-    exit_code_scheme: str  # e.g. "legacy" or "severity"
+    exit_code_scheme: str      # e.g. "legacy" or "severity"
     severity: EffectiveSeverity
     require_complete_analysis: bool
     scope: ScopedGateSelection | None  # ADR-043 --used-by/--required-symbol
-
 
 @dataclass(frozen=True)
 class EffectiveEvaluationConfig:
@@ -617,7 +616,6 @@ class ExitContribution:
     priority: int
     details: Mapping[str, object]
 
-
 @dataclass(frozen=True)
 class ExitDecision:
     code: int
@@ -680,9 +678,7 @@ any serialization:
 class ReportEnvelope:
     operation: OperationKind
     schema_version: str
-    operational_state: (
-        OperationalState  # SUCCESS / NOT_COMPARABLE / ERROR / UNAVAILABLE
-    )
+    operational_state: OperationalState  # SUCCESS / NOT_COMPARABLE / ERROR / UNAVAILABLE
     inputs: InputReport
     resolution: ResolutionReport
     effective_config: EffectiveConfigReport
@@ -769,10 +765,10 @@ from shared *helper functions* to a shared *parsed object*:
 
 ```python
 class CompileAction(Enum):
-    OBJECT = "object"  # -c: source -> object file, compile stops here
-    ASSEMBLE = "assemble"  # -S: source -> assembly text file
+    OBJECT = "object"        # -c: source -> object file, compile stops here
+    ASSEMBLE = "assemble"    # -S: source -> assembly text file
     PREPROCESS = "preprocess"  # -E: source -> preprocessed text (file or stdout)
-    LINK = "link"  # no stop flag: compile straight through and
+    LINK = "link"             # no stop flag: compile straight through and
     # link -- the source's own intermediate object is an internal,
     # unnamed temporary the compiler manages itself, never a file this
     # model names; the invocation's own `output` field is the real result
@@ -953,11 +949,9 @@ assignments alongside it):
 ```python
 @dataclass(frozen=True)
 class EnvironmentOverlay:
-    clear_inherited: bool  # a clear occurred somewhere in the prefix chain
-    unset: frozenset[str]  # names removed AND NOT later reset — final state
-    assignments: tuple[
-        tuple[str, str], ...
-    ]  # NAME=VALUE surviving to the driver, in argv order
+    clear_inherited: bool                    # a clear occurred somewhere in the prefix chain
+    unset: frozenset[str]                    # names removed AND NOT later reset — final state
+    assignments: tuple[tuple[str, str], ...] # NAME=VALUE surviving to the driver, in argv order
 ```
 
 A plain `{}` (or a single cleared-vs-not sentinel) can't carry this: it

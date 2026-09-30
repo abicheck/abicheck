@@ -41,8 +41,8 @@ up their symbol tables.
 
 ```python
 class Visibility(str, Enum):
-    PUBLIC = "public"  # Default visibility, exported, declared in headers
-    HIDDEN = "hidden"  # __attribute__((visibility("hidden")))
+    PUBLIC   = "public"    # Default visibility, exported, declared in headers
+    HIDDEN   = "hidden"    # __attribute__((visibility("hidden")))
     ELF_ONLY = "elf_only"  # Present in ELF symbol table, NOT in headers
 ```
 
@@ -89,9 +89,8 @@ In DWARF-only mode (no headers available), visibility is determined by
 intersecting DWARF functions with ELF exported symbols:
 
 ```python
-exported = {
-    s.name for s in elf_meta.symbols if s.binding in ("GLOBAL", "WEAK") and s.defined
-}
+exported = {s.name for s in elf_meta.symbols
+            if s.binding in ('GLOBAL', 'WEAK') and s.defined}
 for func in dwarf_functions:
     if func.linkage_name in exported or func.name in exported:
         func.visibility = Visibility.PUBLIC

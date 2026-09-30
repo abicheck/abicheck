@@ -264,8 +264,8 @@ current engine records the **provider list** per check
 **Example test assertion (case148, synthetic, fast lane):**
 
 ```python
-snap = _snap(...)  # header type w/ macro-conditional layout
-snap.build_source = _build(macros={"BIG_BUFFERS": "1"})  # L3 says built WITH it
+snap = _snap(...)                      # header type w/ macro-conditional layout
+snap.build_source = _build(macros={"BIG_BUFFERS": "1"})   # L3 says built WITH it
 res = run_crosschecks(snap)
 hits = _findings_of(res, ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH)
 assert hits and hits[0].confidence == Confidence.HIGH
@@ -306,12 +306,10 @@ ADR-035 calls out explicitly (D7 floor; the oneDAL field-failure shape in D4).
 ```python
 poi = build_points_of_interest(
     changed_paths={"src/widget.cpp"},
-    risk=RiskRules.from_dict({"src/**": 0}),  # mis-weighted: zero weight
-    pattern_triggers=[],
-    baseline=None,
-    candidate=snap,
+    risk=RiskRules.from_dict({"src/**": 0}),   # mis-weighted: zero weight
+    pattern_triggers=[], baseline=None, candidate=snap,
 )
-assert any(p.path.endswith("widget.cpp") for p in poi.items)  # floor holds
+assert any(p.path.endswith("widget.cpp") for p in poi.items)   # floor holds
 ```
 
 **Acceptance:** both suites green in the fast lane (Python only, synthetic

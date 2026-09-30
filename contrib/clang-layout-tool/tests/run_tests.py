@@ -93,17 +93,10 @@ def main() -> int:
     # Struct align = max(4,8,1) = 8B -> size rounds 17 -> 24B = 192 bits.
     records = run_tool(binary, "simple.cpp")
     check(
-        "simple.cpp",
-        "ns::Foo",
-        records,
-        {
-            "size_bits": 192,
-            "alignment_bits": 64,
-            "data_size_bits": 192,
-            "is_standard_layout": True,
-            "is_trivially_copyable": True,
-            "vptr_offset_bits": None,
-        },
+        "simple.cpp", "ns::Foo", records,
+        {"size_bits": 192, "alignment_bits": 64, "data_size_bits": 192,
+         "is_standard_layout": True, "is_trivially_copyable": True,
+         "vptr_offset_bits": None},
     )
     rec = records["ns::Foo"]
     assert field_offset(rec, "a") == 0
@@ -126,9 +119,7 @@ def main() -> int:
     # space at byte 17 (136 bits), keeping Derived's total size equal to
     # Base's (192 bits), not growing to a new 256-bit total.
     records = run_tool(binary, "nonpod_tailpad.cpp")
-    check(
-        "nonpod_tailpad.cpp", "Base", records, {"size_bits": 192, "data_size_bits": 136}
-    )
+    check("nonpod_tailpad.cpp", "Base", records, {"size_bits": 192, "data_size_bits": 136})
     check("nonpod_tailpad.cpp", "Derived", records, {"size_bits": 192})
     assert field_offset(records["Derived"], "d") == 136
 
@@ -140,9 +131,7 @@ def main() -> int:
     assert field_offset(records["Base"], "a") == 64
     check("polymorphic.cpp", "Derived", records, {"vptr_offset_bits": 0})
     assert field_offset(records["Derived"], "b") == 96
-    check(
-        "polymorphic.cpp", "Diamond", records, {"vptr_offset_bits": 0, "size_bits": 256}
-    )
+    check("polymorphic.cpp", "Diamond", records, {"vptr_offset_bits": 0, "size_bits": 256})
     assert base_offset(records["Diamond"], "Left") == 0
     assert base_offset(records["Diamond"], "Right") == 128
     assert field_offset(records["Diamond"], "d") == 224
@@ -151,9 +140,7 @@ def main() -> int:
     # exactly once in C's base list (deduplicated across A's and B's virtual
     # paths), placed after A and B's own non-virtual portions.
     records = run_tool(binary, "virtual_inherit.cpp")
-    check(
-        "virtual_inherit.cpp", "C", records, {"vptr_offset_bits": 0, "size_bits": 384}
-    )
+    check("virtual_inherit.cpp", "C", records, {"vptr_offset_bits": 0, "size_bits": 384})
     c_bases = {b["name"]: b for b in records["C"]["bases"]}
     assert c_bases["A"]["is_virtual"] is False
     assert c_bases["A"]["offset_bits"] == 0
@@ -185,9 +172,7 @@ def main() -> int:
     # match it by name.
     records = run_tool(binary, "c_anon_typedef.c", "-x", "c", "-std=gnu11")
     check(
-        "c_anon_typedef.c",
-        "Foo",
-        records,
+        "c_anon_typedef.c", "Foo", records,
         {"size_bits": 192, "data_size_bits": 192},
     )
     rec = records["Foo"]

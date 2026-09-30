@@ -350,11 +350,7 @@ are defined in `abicheck.workflows.contracts` and
 
 ```python
 from abicheck.service import (
-    CompareRequest,
-    CompareResult,
-    DumpRequest,
-    InputSpec,
-    run_compare_request,
+    CompareRequest, CompareResult, DumpRequest, InputSpec, run_compare_request,
 )
 ```
 
@@ -512,7 +508,6 @@ Two consequences, and they are not the same consequence:
 
   ```python
   from abicheck.serialization import load_snapshot
-
   snap = load_snapshot("baseline.abi.json")
   snap.library, snap.functions, snap.types
   ```

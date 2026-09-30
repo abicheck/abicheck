@@ -368,14 +368,12 @@ class CompareRequest:
     scope: ComparisonScopeSelection
     configuration: EvaluationConfiguration
 
-
 @dataclass(frozen=True)
 class ResolvedComparePlan:
     old_plan: ResolvedArtifactPlan
     new_plan: ResolvedArtifactPlan
     acquisition: ScopeAcquisitionRecord
     effective_configuration: EffectiveEvaluationConfig
-
 
 @dataclass(frozen=True)
 class CompareResult:
@@ -467,7 +465,8 @@ configuration, or create policy findings.
 **Renderers.** Every renderer is a pure projection:
 
 ```python
-def render_markdown(document: ReportDocument) -> str: ...
+def render_markdown(document: ReportDocument) -> str:
+    ...
 ```
 
 A renderer cannot remove findings, change severity, reconstruct a verdict,

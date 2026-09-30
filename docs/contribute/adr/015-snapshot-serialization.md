@@ -39,15 +39,15 @@ class AbiSnapshot:
     variables: list[Variable]
     types: list[RecordType]
     enums: list[EnumType]
-    typedefs: dict[str, str]  # default: {}
-    constants: dict[str, str]  # default: {} (populated from header #defines)
+    typedefs: dict[str, str]        # default: {}
+    constants: dict[str, str]       # default: {} (populated from header #defines)
     elf: ElfMetadata | None
     pe: PeMetadata | None
     macho: MachoMetadata | None
     dwarf: DwarfMetadata | None
     dwarf_advanced: AdvancedDwarfMetadata | None
-    platform: str | None  # "elf" | "pe" | "macho"
-    language_profile: str | None  # "c" | "cpp" | "sycl"
+    platform: str | None         # "elf" | "pe" | "macho"
+    language_profile: str | None # "c" | "cpp" | "sycl"
     elf_only_mode: bool
     dependency_info: DependencyInfo | None
 ```

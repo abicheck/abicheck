@@ -401,9 +401,7 @@ from abicheck.appcompat import check_appcompat, check_against, parse_app_require
 
 # Full mode (old + new library) — app_path, old_lib_path, new_lib_path
 result = check_appcompat(
-    Path("./myapp"),
-    Path("libfoo.so.1"),
-    Path("libfoo.so.2"),
+    Path("./myapp"), Path("libfoo.so.1"), Path("libfoo.so.2"),
 )
 print(result.verdict, result.symbol_coverage)
 

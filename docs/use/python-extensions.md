@@ -221,7 +221,7 @@ every caller:
 # v1
 def transform(data, *, encoding="utf-8"): ...
 # v2 — same PyInit_, same imported Py* surface, same abi3 tag…
-def transform(data, codec): ...  # renamed kwarg, dropped default
+def transform(data, codec): ...   # renamed kwarg, dropped default
 ```
 
 The export table is still one `PyInit_` symbol and the imported C-API is

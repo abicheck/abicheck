@@ -133,9 +133,7 @@ def _check_allowed_paths(
     changed: list[str], allowed_paths: list[str], task_name: str
 ) -> tuple[bool, list[str]]:
     violations = []
-    hidden_tests_prefix = (
-        f"skills-src/evaluation/agents/tasks/{task_name}/hidden_tests/"
-    )
+    hidden_tests_prefix = f"skills-src/evaluation/agents/tasks/{task_name}/hidden_tests/"
     for path in changed:
         if path.startswith(hidden_tests_prefix):
             violations.append(
@@ -262,9 +260,7 @@ def score_task(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--task",
-        required=True,
-        help="Task directory name under skills-src/evaluation/agents/tasks/",
+        "--task", required=True, help="Task directory name under skills-src/evaluation/agents/tasks/"
     )
     parser.add_argument(
         "--base-commit",

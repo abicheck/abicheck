@@ -84,31 +84,21 @@ command — it's the same `compare-release` with broader input support.
 ```python
 class PackageExtractor(Protocol):
     """Extract package contents to a temporary directory."""
-
     def extract(self, pkg_path: str, target_dir: str) -> ExtractResult: ...
     def detect(self, pkg_path: str) -> bool: ...
 
-
 @dataclass
 class ExtractResult:
-    lib_dir: str  # path to extracted shared libraries
-    debug_dir: str | None  # path to extracted debug info (if debug pkg provided)
-    header_dir: str | None  # path to extracted headers (if devel pkg provided)
-    metadata: dict  # package-specific metadata (name, version, arch, etc.)
-
+    lib_dir: str          # path to extracted shared libraries
+    debug_dir: str | None # path to extracted debug info (if debug pkg provided)
+    header_dir: str | None # path to extracted headers (if devel pkg provided)
+    metadata: dict        # package-specific metadata (name, version, arch, etc.)
 
 # Concrete extractors
 class RpmExtractor(PackageExtractor): ...
-
-
 class DebExtractor(PackageExtractor): ...
-
-
 class TarExtractor(PackageExtractor): ...
-
-
 class DirExtractor(PackageExtractor): ...  # passthrough, no extraction
-
 
 def detect_extractor(path: str) -> PackageExtractor:
     """Auto-detect package format and return appropriate extractor."""

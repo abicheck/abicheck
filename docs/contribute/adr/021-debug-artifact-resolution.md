@@ -104,24 +104,19 @@ New module: `abicheck/debug_resolver.py`
 ```python
 class DebugResolver(Protocol):
     """Locate debug artifacts for a given binary."""
-
     def resolve(self, binary_path: Path, build_id: str | None) -> DebugArtifact | None:
         """Find debug info for the given binary. Returns None if not found."""
         ...
 
-
 @dataclass
 class DebugArtifact:
     """Resolved debug artifact location."""
-
-    dwarf_path: Path | None  # Path to file containing DWARF sections
-    dwp_path: Path | None  # Path to .dwp (DWARF package) file
-    dwo_dir: Path | None  # Directory containing .dwo files
-    pdb_path: Path | None  # Path to .pdb file (Windows)
-    dsym_path: Path | None  # Path to .dSYM bundle (macOS)
-    source: (
-        str  # Human-readable provenance ("build-id tree", "debuginfod", "dSYM bundle")
-    )
+    dwarf_path: Path | None        # Path to file containing DWARF sections
+    dwp_path: Path | None          # Path to .dwp (DWARF package) file
+    dwo_dir: Path | None           # Directory containing .dwo files
+    pdb_path: Path | None          # Path to .pdb file (Windows)
+    dsym_path: Path | None         # Path to .dSYM bundle (macOS)
+    source: str                    # Human-readable provenance ("build-id tree", "debuginfod", "dSYM bundle")
 ```
 
 ### 2. Resolver chain (ordered, first-match wins)
@@ -266,7 +261,6 @@ def _find_dsym(binary_path: Path) -> Path | None:
 
     return None
 
-
 def _dsym_dwarf_path(dsym_bundle: Path, binary_name: str) -> Path:
     """Get the DWARF file path within a dSYM bundle."""
     return dsym_bundle / "Contents" / "Resources" / "DWARF" / binary_name
@@ -305,11 +299,10 @@ Implementation approach:
 @dataclass
 class PackageSet:
     """A set of packages that together form one side of a comparison."""
-
-    runtime_packages: list[Path]  # Contains shared libraries
-    debug_packages: list[Path]  # Contains debug info (.debug files)
-    devel_packages: list[Path]  # Contains headers
-    extra_packages: list[Path]  # Additional content (configs, data)
+    runtime_packages: list[Path]     # Contains shared libraries
+    debug_packages: list[Path]       # Contains debug info (.debug files)
+    devel_packages: list[Path]       # Contains headers
+    extra_packages: list[Path]       # Additional content (configs, data)
 
     def extract_all(self, target_dir: Path) -> ExtractResult:
         """Extract all packages in the set into a unified directory tree."""

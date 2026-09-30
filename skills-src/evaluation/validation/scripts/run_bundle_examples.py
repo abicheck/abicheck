@@ -11,7 +11,6 @@ This runner builds those examples through the normal examples CMake project,
 runs ``abicheck compare-release`` on each old/new directory, and checks the
 bundle verdict/kinds declared in ``catalog/ground_truth.json``.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -114,7 +113,11 @@ def _build_case(build_dir: Path, case_name: str, entry: dict) -> str | None:
     if not libs:
         return "no bundle libraries declared or discovered"
 
-    targets = [f"{case_name}_{side}_{lib}" for side in ("old", "new") for lib in libs]
+    targets = [
+        f"{case_name}_{side}_{lib}"
+        for side in ("old", "new")
+        for lib in libs
+    ]
     result = _run([cmake, "--build", str(build_dir), "--target", *targets], timeout=240)
     if result.returncode != 0:
         return (result.stderr or result.stdout)[:1000]
@@ -156,9 +159,7 @@ def _build_case84(build_dir: Path) -> str | None:
     return None
 
 
-def _compare_release(
-    build_dir: Path, case_name: str, entry: dict
-) -> tuple[dict | None, str | None]:
+def _compare_release(build_dir: Path, case_name: str, entry: dict) -> tuple[dict | None, str | None]:
     old_dir = build_dir / case_name / "old"
     new_dir = build_dir / case_name / "new"
     report_dir = build_dir / case_name / "reports"
@@ -186,9 +187,7 @@ def _compare_release(
             ]
         )
     bundle_cohort = entry.get("bundle_cohort")
-    if not bundle_cohort and "bundle_soname_skew" in (
-        entry.get("expected_kinds") or []
-    ):
+    if not bundle_cohort and "bundle_soname_skew" in (entry.get("expected_kinds") or []):
         bundle_cohort = "libonedal_"
     if bundle_cohort:
         # PR J: cohorts are .abicheck.yml's `bundle.cohorts:` now, not
@@ -220,7 +219,6 @@ def _compare_release(
                 item[key] = data[key]
 
     return payload, None
-
 
 def _change_kinds(entry: dict) -> set[str]:
     kinds: set[str] = set()
@@ -254,10 +252,8 @@ def _validate_library_assertions(payload: dict, library_assertions: dict) -> lis
             errors.append(f"{expected_name}: malformed library_assertions entry")
             continue
         matches = [
-            item
-            for item in actual
-            if isinstance(item, dict)
-            and (
+            item for item in actual
+            if isinstance(item, dict) and (
                 _library_name(item) == expected_name
                 or str(expected_name) in str(item.get("library", ""))
                 or str(expected_name) in str(item.get("name", ""))
@@ -275,9 +271,7 @@ def _validate_library_assertions(payload: dict, library_assertions: dict) -> lis
                 f"{expected_name}: expected verdict {expected_verdict!r}, "
                 f"got {got_verdict!r}"
             )
-        expected_kinds = set(
-            expected.get("kinds") or expected.get("expected_kinds") or []
-        )
+        expected_kinds = set(expected.get("kinds") or expected.get("expected_kinds") or [])
         if expected_kinds:
             got = _change_kinds(item)
             missing = expected_kinds - got
@@ -287,7 +281,6 @@ def _validate_library_assertions(payload: dict, library_assertions: dict) -> lis
                     f"got {sorted(got)!r}, missing={sorted(missing)!r}"
                 )
     return errors
-
 
 def _validate_case(case_name: str, entry: dict, build_dir: Path) -> dict:
     started = time.perf_counter()
@@ -323,15 +316,8 @@ def _validate_case(case_name: str, entry: dict, build_dir: Path) -> dict:
     unexpected = got_kinds - expected_kinds
     if entry.get("allow_extra_bundle_kinds", True):
         unexpected = set()
-    library_errors = _validate_library_assertions(
-        payload, entry.get("library_assertions") or {}
-    )
-    if (
-        got_verdict == expected_verdict
-        and not missing
-        and not unexpected
-        and not library_errors
-    ):
+    library_errors = _validate_library_assertions(payload, entry.get("library_assertions") or {})
+    if got_verdict == expected_verdict and not missing and not unexpected and not library_errors:
         status = "PASS"
         message = ""
     else:
@@ -373,9 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = {
             "schema_version": SCHEMA_VERSION,
             "runner": "skills-src/evaluation/validation/scripts/run_bundle_examples.py",
-            "ground_truth_sha256": hashlib.sha256(
-                GROUND_TRUTH.read_bytes()
-            ).hexdigest(),
+            "ground_truth_sha256": hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest(),
             "summary": {"SKIP": 1},
             "results": [
                 {
@@ -385,11 +369,7 @@ def main(argv: list[str] | None = None) -> int:
                 }
             ],
         }
-        print(
-            json.dumps(payload, indent=2)
-            if args.json_out
-            else payload["results"][0]["message"]
-        )
+        print(json.dumps(payload, indent=2) if args.json_out else payload["results"][0]["message"])
         return 0
 
     cases = _load_bundle_cases()
@@ -407,9 +387,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: cmake configure failed: {configure_err}", file=sys.stderr)
             return 2
 
-        results = [
-            _validate_case(name, entry, build_dir) for name, entry in cases.items()
-        ]
+        results = [_validate_case(name, entry, build_dir) for name, entry in cases.items()]
 
     payload = {
         "schema_version": SCHEMA_VERSION,

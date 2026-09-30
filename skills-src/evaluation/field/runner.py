@@ -26,7 +26,6 @@ Usage:
     python skills-src/evaluation/field/runner.py --only zlib,icu # subset
     python skills-src/evaluation/field/runner.py --report-only   # regenerate REPORT.md from the latest results file
 """
-
 from __future__ import annotations
 
 import argparse
@@ -53,12 +52,10 @@ except ImportError:  # pragma: no cover
 EVAL_DIR = Path(__file__).resolve().parent
 RESULTS_DIR = EVAL_DIR / "results"
 _DEFAULT_CACHE = str(Path(tempfile.gettempdir()) / "abicheck-eval")
-WORK = (
-    Path(os.environ.get("ABICHECK_EVAL_CACHE", _DEFAULT_CACHE)).parent / "abicheck-eval"
-)
+WORK = Path(os.environ.get("ABICHECK_EVAL_CACHE", _DEFAULT_CACHE)).parent / "abicheck-eval"
 SNAP_DIR = WORK / "snap"
-SRC_DIR = WORK / "src"  # source-tier git checkouts
-BUILD_DIR = WORK / "build"  # source-tier configure output (compile DB)
+SRC_DIR = WORK / "src"        # source-tier git checkouts
+BUILD_DIR = WORK / "build"    # source-tier configure output (compile DB)
 RESULT_SCHEMA = 1
 
 
@@ -70,15 +67,10 @@ def _abicheck_version() -> str:
 def _defined_export_funcs(so: str) -> int:
     """Count defined (non-UND) GLOBAL/WEAK FUNC dynamic symbols."""
     p = subprocess.run(
-        [
-            "bash",
-            "-c",
-            f"readelf -W --dyn-syms '{so}' 2>/dev/null | "
-            f'awk \'$4=="FUNC" && $7!="UND" && ($5=="GLOBAL"||$5=="WEAK")\' | wc -l',
-        ],
-        capture_output=True,
-        text=True,
-    )
+        ["bash", "-c",
+         f"readelf -W --dyn-syms '{so}' 2>/dev/null | "
+         f"awk '$4==\"FUNC\" && $7!=\"UND\" && ($5==\"GLOBAL\"||$5==\"WEAK\")' | wc -l"],
+        capture_output=True, text=True)
     try:
         return int(p.stdout.strip() or 0)
     except ValueError:
@@ -108,13 +100,9 @@ def _run(cmd: list[str]) -> tuple[float, subprocess.CompletedProcess]:
 
 def scan_one(entry: dict) -> dict:
     lib = entry["lib"]
-    rec: dict = {
-        "lib": lib,
-        "conda_pkg": entry["conda_pkg"],
-        "old": str(entry["old"]),
-        "new": str(entry["new"]),
-        "expect": entry.get("expect"),
-    }
+    rec: dict = {"lib": lib, "conda_pkg": entry["conda_pkg"],
+                 "old": str(entry["old"]), "new": str(entry["new"]),
+                 "expect": entry.get("expect")}
     try:
         t0 = time.time()
         oso = _pick_so(entry["conda_pkg"], rec["old"], entry.get("so_stem"))
@@ -123,13 +111,8 @@ def scan_one(entry: dict) -> dict:
         rec["old_so"] = os.path.basename(oso)
         rec["new_so"] = os.path.basename(nso)
         # P20 guard: never compare two different libraries from a multi-.so package
-        if (
-            entry.get("so_stem") is None
-            and rec["old_so"].split(".so")[0] != rec["new_so"].split(".so")[0]
-        ):
-            rec["error"] = (
-                f"different libs picked: {rec['old_so']} vs {rec['new_so']} (set so_stem)"
-            )
+        if entry.get("so_stem") is None and rec["old_so"].split(".so")[0] != rec["new_so"].split(".so")[0]:
+            rec["error"] = f"different libs picked: {rec['old_so']} vs {rec['new_so']} (set so_stem)"
             return rec
         SNAP_DIR.mkdir(parents=True, exist_ok=True)
         osnap = SNAP_DIR / f"{lib}_old.json"
@@ -150,21 +133,12 @@ def scan_one(entry: dict) -> dict:
         rec["verdict"] = d.get("verdict")
         rec["evidence_tier"] = d.get("evidence_tier")
         s = d.get("summary", {})
-        for k in (
-            "breaking",
-            "source_breaks",
-            "risk_changes",
-            "compatible_additions",
-            "total_changes",
-        ):
+        for k in ("breaking", "source_breaks", "risk_changes", "compatible_additions", "total_changes"):
             rec[k] = s.get(k)
         rec["top_kinds"] = dict(
-            collections.Counter(
-                c.get("kind") for c in d.get("changes", [])
-            ).most_common(6)
-        )
+            collections.Counter(c.get("kind") for c in d.get("changes", [])).most_common(6))
         if rec["expect"] is not None:
-            rec["verdict_matches_expected"] = rec["verdict"] == rec["expect"]
+            rec["verdict_matches_expected"] = (rec["verdict"] == rec["expect"])
     except Exception as e:  # noqa: BLE001 - record any failure as a row
         rec["error"] = f"{type(e).__name__}: {e}"
     return rec
@@ -227,9 +201,7 @@ def _checkout_key(repo: str, tag: str) -> str:
     is never silently reused for a different revision (Codex review) — the dir
     name no longer omits the tag.
     """
-    return hashlib.sha1(f"{repo}@{tag}".encode(), usedforsecurity=False).hexdigest()[
-        :10
-    ]
+    return hashlib.sha1(f"{repo}@{tag}".encode(), usedforsecurity=False).hexdigest()[:10]
 
 
 def _git_clone_tag(repo: str, tag: str, dest: Path) -> None:
@@ -246,10 +218,7 @@ def _git_clone_tag(repo: str, tag: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "clone", "--depth", "1", "--branch", tag, repo, str(dest)],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=600,
+        check=True, capture_output=True, text=True, timeout=600,
     )
 
 
@@ -257,25 +226,13 @@ def _cmake_configure(src_dir: Path, build_dir: Path, extra_args: list[str]) -> N
     """Configure *src_dir* into *build_dir*, emitting compile_commands.json."""
     build_dir.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        [
-            "cmake",
-            "-S",
-            str(src_dir),
-            "-B",
-            str(build_dir),
-            "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-            *extra_args,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=600,
+        ["cmake", "-S", str(src_dir), "-B", str(build_dir),
+         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", *extra_args],
+        check=True, capture_output=True, text=True, timeout=600,
     )
 
 
-def _dump_sources(
-    tree: Path, build_dir: Path, out: Path
-) -> tuple[float, subprocess.CompletedProcess]:
+def _dump_sources(tree: Path, build_dir: Path, out: Path) -> tuple[float, subprocess.CompletedProcess]:
     # "full" was retired from the public --depth ladder (ADR-043 D2): it
     # collapsed into "source" — replay *scope*, not a deeper depth, used to
     # distinguish them (abicheck/model/evidence_depth_levels.py's own
@@ -285,20 +242,12 @@ def _dump_sources(
     # source-tier job tolerates per-library failures, so a 0/N scanned run
     # still "succeeded") -- see main()'s --fail-on-empty-source gate below,
     # which is the guard against that specific failure mode recurring.
-    return _run(
-        [
-            "abicheck",
-            "dump",
-            "--sources",
-            str(tree),
-            "--build-info",
-            str(build_dir),
-            "--depth",
-            "source",
-            "-o",
-            str(out),
-        ]
-    )
+    return _run([
+        "abicheck", "dump", "--sources", str(tree),
+        "--build-info", str(build_dir),
+        "--depth", "source",
+        "-o", str(out),
+    ])
 
 
 def _scan_source_side(entry: dict, which: str, tag: str) -> tuple[Path, dict, float]:
@@ -318,9 +267,7 @@ def _scan_source_side(entry: dict, which: str, tag: str) -> tuple[Path, dict, fl
     snap = SNAP_DIR / f"{lib}_src_{which}.json"
     secs, p = _dump_sources(tree, build, snap)
     if p.returncode or not snap.exists():
-        raise RuntimeError(
-            f"dump --sources failed ({which}): {(p.stderr or '')[-200:]}"
-        )
+        raise RuntimeError(f"dump --sources failed ({which}): {(p.stderr or '')[-200:]}")
     cov = _source_coverage(json.loads(snap.read_text(encoding="utf-8")))
     return snap, cov, round(time.time() - t0 + secs, 2)
 
@@ -329,8 +276,7 @@ def scan_source_one(entry: dict) -> dict:
     """Source-tier (L3/L4/L5) scan for one manifest entry with a ``source:`` block."""
     src = entry["source"]
     rec: dict = {
-        "lib": entry["lib"],
-        "tier": "source",
+        "lib": entry["lib"], "tier": "source",
         "old": str(src.get("tag_old", entry.get("old"))),
         "new": str(src.get("tag_new", entry.get("new"))),
         "repo": src.get("repo"),
@@ -353,9 +299,7 @@ def scan_source_one(entry: dict) -> dict:
         else:
             rec["error"] = "compare produced no output: " + (pc.stderr or "")[-160:]
     except subprocess.CalledProcessError as e:
-        rec["error"] = (
-            f"{e.cmd[0] if e.cmd else 'cmd'} failed: {(e.stderr or str(e))[-200:]}"
-        )
+        rec["error"] = f"{e.cmd[0] if e.cmd else 'cmd'} failed: {(e.stderr or str(e))[-200:]}"
     except Exception as e:  # noqa: BLE001 - record any failure as a row
         rec["error"] = f"{type(e).__name__}: {e}"
     return rec
@@ -363,8 +307,7 @@ def scan_source_one(entry: dict) -> dict:
 
 def _source_entries(manifest: dict, only: set[str] | None) -> list[dict]:
     return [
-        e
-        for e in manifest["libraries"]
+        e for e in manifest["libraries"]
         if e.get("source") and not (only and e["lib"] not in only)
     ]
 
@@ -377,11 +320,7 @@ def run(manifest: dict, only: set[str] | None, tiers: set[str]) -> dict:
                 continue
             rec = scan_one(entry)
             status = rec.get("verdict") or rec.get("error", "?")
-            flag = (
-                ""
-                if rec.get("verdict_matches_expected", True)
-                else "  !! EXPECTED " + str(rec.get("expect"))
-            )
+            flag = "" if rec.get("verdict_matches_expected", True) else "  !! EXPECTED " + str(rec.get("expect"))
             print(f"  {rec['lib']:14} {status}{flag}", file=sys.stderr)
             rows.append(rec)
 
@@ -390,33 +329,21 @@ def run(manifest: dict, only: set[str] | None, tiers: set[str]) -> dict:
         missing = [t for t in _SOURCE_REQUIRED if not _have(t)]
         entries = _source_entries(manifest, only)
         if missing:
-            print(
-                f"  source tier skipped: missing {', '.join(missing)}", file=sys.stderr
-            )
+            print(f"  source tier skipped: missing {', '.join(missing)}", file=sys.stderr)
             source_rows = [
-                {
-                    "lib": e["lib"],
-                    "tier": "source",
-                    "error": f"skipped: missing {', '.join(missing)}",
-                }
+                {"lib": e["lib"], "tier": "source", "error": f"skipped: missing {', '.join(missing)}"}
                 for e in entries
             ]
         else:
             if not _have("clang"):
-                print(
-                    "  note: clang absent — L4 (decls/types) will be partial",
-                    file=sys.stderr,
-                )
+                print("  note: clang absent — L4 (decls/types) will be partial", file=sys.stderr)
             for entry in entries:
                 rec = scan_source_one(entry)
                 status = rec.get("verdict") or rec.get("error", "?")
                 cov = rec.get("new_coverage") or {}
                 cu = cov.get("l3_compile_units", "?")
                 decls = cov.get("l4_declarations", "?")
-                print(
-                    f"  {rec['lib']:14} src {status}  (L3 cu={cu}, L4 decls={decls})",
-                    file=sys.stderr,
-                )
+                print(f"  {rec['lib']:14} src {status}  (L3 cu={cu}, L4 decls={decls})", file=sys.stderr)
                 source_rows.append(rec)
 
     payload = {
@@ -439,8 +366,7 @@ def drift_rows(payload: dict) -> list[dict]:
     "what counts as a failure" lives in one place.
     """
     return [
-        r
-        for r in payload.get("results", [])
+        r for r in payload.get("results", [])
         if "error" in r or not r.get("verdict_matches_expected", True)
     ]
 
@@ -516,11 +442,7 @@ def source_scan_summary(payload: dict) -> dict:
     rows = payload.get("source_results", [])
     scanned = [r for r in rows if "error" not in r]
     with_evidence = [r for r in scanned if _row_has_full_evidence(r)]
-    return {
-        "total": len(rows),
-        "scanned": len(scanned),
-        "with_evidence": len(with_evidence),
-    }
+    return {"total": len(rows), "scanned": len(scanned), "with_evidence": len(with_evidence)}
 
 
 def source_tier_broken(payload: dict) -> str | None:
@@ -589,50 +511,32 @@ def write_results(payload: dict) -> Path:
     stamp = payload["generated_utc"].replace(":", "").replace("-", "")
     out = RESULTS_DIR / f"{stamp}.json"
     out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    (RESULTS_DIR / "latest.json").write_text(
-        json.dumps(payload, indent=2) + "\n", encoding="utf-8"
-    )
+    (RESULTS_DIR / "latest.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return out
 
 
 def _render_binary_section(rows: list[dict]) -> list[str]:
-    ok = sum(
-        1 for r in rows if r.get("verdict_matches_expected", True) and "error" not in r
-    )
+    ok = sum(1 for r in rows if r.get("verdict_matches_expected", True) and "error" not in r)
     verdicts = collections.Counter(r.get("verdict", "ERROR") for r in rows)
     L = ["## Binary tier (L0/L1)\n"]
-    L.append(
-        f"- libraries: **{len(rows)}** | verdict matches expected: **{ok}/{len(rows)}**"
-    )
-    L.append(
-        "- verdict distribution: "
-        + ", ".join(f"{v}×{n}" for v, n in sorted(verdicts.items()))
-    )
+    L.append(f"- libraries: **{len(rows)}** | verdict matches expected: **{ok}/{len(rows)}**")
+    L.append("- verdict distribution: " + ", ".join(f"{v}×{n}" for v, n in sorted(verdicts.items())))
     L.append("")
-    L.append(
-        "| lib | old→new | so | verdict | exp? | break/risk/add | total | funcs | dump s | cmp s | tier |"
-    )
+    L.append("| lib | old→new | so | verdict | exp? | break/risk/add | total | funcs | dump s | cmp s | tier |")
     L.append("|---|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         if "error" in r:
-            L.append(
-                f"| {r['lib']} | {r['old']}→{r['new']} | — | ERROR | | | | | | | {r['error'][:40]} |"
-            )
+            L.append(f"| {r['lib']} | {r['old']}→{r['new']} | — | ERROR | | | | | | | {r['error'][:40]} |")
             continue
-        exp = (
-            "✓" if r.get("verdict_matches_expected", True) else f"✗({r.get('expect')})"
-        )
+        exp = "✓" if r.get("verdict_matches_expected", True) else f"✗({r.get('expect')})"
         bra = f"{r.get('breaking')}/{r.get('risk_changes')}/{r.get('compatible_additions')}"
         L.append(
-            f"| {r['lib']} | {r['old']}→{r['new']} | `{r.get('old_so', '')}` | {r.get('verdict')} | {exp} "
+            f"| {r['lib']} | {r['old']}→{r['new']} | `{r.get('old_so','')}` | {r.get('verdict')} | {exp} "
             f"| {bra} | {r.get('total_changes')} | {r.get('old_funcs')}→{r.get('new_funcs')} "
-            f"| {r.get('dump_s')} | {r.get('compare_s')} | {r.get('evidence_tier')} |"
-        )
+            f"| {r.get('dump_s')} | {r.get('compare_s')} | {r.get('evidence_tier')} |")
     L.append("")
-    L.append(
-        "> `funcs` = defined exported FUNC dynamic symbols (not raw readelf). "
-        "Verdicts/counts are abicheck output. Reproduce: `python skills-src/evaluation/field/runner.py`."
-    )
+    L.append("> `funcs` = defined exported FUNC dynamic symbols (not raw readelf). "
+             "Verdicts/counts are abicheck output. Reproduce: `python skills-src/evaluation/field/runner.py`.")
     L.append("")
     return L
 
@@ -641,36 +545,27 @@ def _render_source_section(rows: list[dict]) -> list[str]:
     """Render the L3/L4/L5 source-tier table (coverage on the *new* side)."""
     scanned = [r for r in rows if "error" not in r]
     L = ["## Source tier (L3 build / L4 source-ABI / L5 graph)\n"]
-    L.append(
-        f"- entries: **{len(rows)}** | scanned: **{len(scanned)}** "
-        f"(rest skipped/errored — needs git+cmake, clang for full L4)"
-    )
+    L.append(f"- entries: **{len(rows)}** | scanned: **{len(scanned)}** "
+             f"(rest skipped/errored — needs git+cmake, clang for full L4)")
     L.append("")
-    L.append(
-        "| lib | old→new | verdict | L3 units | L4 decls | L4 types | L4 macros | L5 n/e | build s | cmp s |"
-    )
+    L.append("| lib | old→new | verdict | L3 units | L4 decls | L4 types | L4 macros | L5 n/e | build s | cmp s |")
     L.append("|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         if "error" in r:
-            L.append(
-                f"| {r['lib']} | {r.get('old', '')}→{r.get('new', '')} | SKIP/ERR "
-                f"| | | | | | | {r['error'][:40]} |"
-            )
+            L.append(f"| {r['lib']} | {r.get('old','')}→{r.get('new','')} | SKIP/ERR "
+                     f"| | | | | | | {r['error'][:40]} |")
             continue
         c = r.get("new_coverage", {})
-        ne = f"{c.get('l5_nodes', '?')}/{c.get('l5_edges', '?')}"
+        ne = f"{c.get('l5_nodes','?')}/{c.get('l5_edges','?')}"
         L.append(
-            f"| {r['lib']} | {r['old']}→{r['new']} | {r.get('verdict', '-')} "
-            f"| {c.get('l3_compile_units', '?')} | {c.get('l4_declarations', '?')} "
-            f"| {c.get('l4_types', '?')} | {c.get('l4_macros', '?')} | {ne} "
-            f"| {r.get('build_s', '?')} | {r.get('compare_s', '?')} |"
-        )
+            f"| {r['lib']} | {r['old']}→{r['new']} | {r.get('verdict','-')} "
+            f"| {c.get('l3_compile_units','?')} | {c.get('l4_declarations','?')} "
+            f"| {c.get('l4_types','?')} | {c.get('l4_macros','?')} | {ne} "
+            f"| {r.get('build_s','?')} | {r.get('compare_s','?')} |")
     L.append("")
-    L.append(
-        "> Coverage = embedded `build_source` fact counts on the new side. "
-        "L4 needs clang (decls/types); a configure-only tree may show partial "
-        "L4 if generated headers are absent. Reproduce: `python skills-src/evaluation/field/runner.py --tier source`."
-    )
+    L.append("> Coverage = embedded `build_source` fact counts on the new side. "
+             "L4 needs clang (decls/types); a configure-only tree may show partial "
+             "L4 if generated headers are absent. Reproduce: `python skills-src/evaluation/field/runner.py --tier source`.")
     L.append("")
     return L
 
@@ -679,15 +574,11 @@ def render_report(payload: dict) -> str:
     rows = payload.get("results", [])
     source_rows = payload.get("source_results", [])
     L = []
-    L.append(
-        "<!-- GENERATED by skills-src/evaluation/field/runner.py — do not edit by hand. Edit manifest.yaml and re-run. -->"
-    )
+    L.append("<!-- GENERATED by skills-src/evaluation/field/runner.py — do not edit by hand. Edit manifest.yaml and re-run. -->")
     L.append("# abicheck field-evaluation report\n")
     L.append(f"- generated: `{payload['generated_utc']}`")
     L.append(f"- abicheck: `{payload['abicheck_version']}`")
-    L.append(
-        f"- host: `{payload['host']['platform']}`, Python {payload['host']['python']}"
-    )
+    L.append(f"- host: `{payload['host']['platform']}`, Python {payload['host']['python']}")
     L.append(f"- tiers: `{payload.get('tier', 'binary')}`")
     L.append("")
     if rows:
@@ -700,41 +591,25 @@ def render_report(payload: dict) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", help="comma-separated lib names")
-    ap.add_argument(
-        "--tier",
-        choices=["binary", "source", "both"],
-        default="binary",
-        help="which tier(s) to scan: binary L0/L1 (default), source L3/L4/L5, or both",
-    )
-    ap.add_argument(
-        "--report-only",
-        action="store_true",
-        help="regenerate REPORT.md from latest results",
-    )
-    ap.add_argument(
-        "--fail-on-drift",
-        action="store_true",
-        help="exit non-zero if any binary-tier verdict drifts from its "
-        "manifest `expect` (or a scan errored) — the CI regression gate",
-    )
-    ap.add_argument(
-        "--fail-on-empty-source",
-        action="store_true",
-        help="exit non-zero if the source tier (L3/L4/L5) is systemically "
-        "broken — zero of its entries scanned successfully, or every "
-        "successful scan captured zero L3 build evidence. Does NOT "
-        "fail on one library's own build/network failure (tolerated, "
-        "same as --fail-on-drift's binary-tier counterpart isn't this "
-        "flag's job) — see source_tier_broken()'s own docstring.",
-    )
+    ap.add_argument("--tier", choices=["binary", "source", "both"], default="binary",
+                    help="which tier(s) to scan: binary L0/L1 (default), source L3/L4/L5, or both")
+    ap.add_argument("--report-only", action="store_true", help="regenerate REPORT.md from latest results")
+    ap.add_argument("--fail-on-drift", action="store_true",
+                    help="exit non-zero if any binary-tier verdict drifts from its "
+                         "manifest `expect` (or a scan errored) — the CI regression gate")
+    ap.add_argument("--fail-on-empty-source", action="store_true",
+                    help="exit non-zero if the source tier (L3/L4/L5) is systemically "
+                         "broken — zero of its entries scanned successfully, or every "
+                         "successful scan captured zero L3 build evidence. Does NOT "
+                         "fail on one library's own build/network failure (tolerated, "
+                         "same as --fail-on-drift's binary-tier counterpart isn't this "
+                         "flag's job) — see source_tier_broken()'s own docstring.")
     args = ap.parse_args()
 
     if args.report_only:
         payload = json.loads((RESULTS_DIR / "latest.json").read_text(encoding="utf-8"))
     else:
-        manifest = yaml.safe_load(
-            (EVAL_DIR / "manifest.yaml").read_text(encoding="utf-8")
-        )
+        manifest = yaml.safe_load((EVAL_DIR / "manifest.yaml").read_text(encoding="utf-8"))
         only = set(args.only.split(",")) if args.only else None
         tiers = {"binary", "source"} if args.tier == "both" else {args.tier}
         payload = run(manifest, only, tiers)
@@ -748,13 +623,9 @@ def main() -> None:
         drift = drift_rows(payload)
         if drift:
             libs = ", ".join(
-                f"{r['lib']}({r.get('verdict') or r.get('error', '?')[:30]})"
-                for r in drift
+                f"{r['lib']}({r.get('verdict') or r.get('error', '?')[:30]})" for r in drift
             )
-            print(
-                f"FAIL: binary-tier drift/errors on {len(drift)} lib(s): {libs}",
-                file=sys.stderr,
-            )
+            print(f"FAIL: binary-tier drift/errors on {len(drift)} lib(s): {libs}", file=sys.stderr)
             failed = True
         else:
             print("OK: all binary-tier verdicts match expected", file=sys.stderr)

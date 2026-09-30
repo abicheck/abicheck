@@ -9045,8 +9045,8 @@ the load-bearing part; what changed is the last section.
 showed the conflation:
 
 ```python
-PUBLIC = "public"  # default visibility / exported
-HIDDEN = "hidden"  # __attribute__((visibility("hidden")))
+PUBLIC = "public"      # default visibility / exported
+HIDDEN = "hidden"      # __attribute__((visibility("hidden")))
 ELF_ONLY = "elf_only"  # present in ELF symbol table, not in headers
 ```
 

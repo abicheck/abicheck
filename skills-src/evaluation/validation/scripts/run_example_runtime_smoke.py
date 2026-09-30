@@ -8,7 +8,6 @@ abicheck produce for built artifacts?".  This script answers the simpler runtime
 question: "does the old consumer app still run when libv2 is substituted for
 libv1?".
 """
-
 from __future__ import annotations
 
 import argparse
@@ -170,7 +169,7 @@ def _soname(lib: Path) -> str | None:
         start = line.find("[")
         end = line.find("]", start + 1)
         if start != -1 and end != -1:
-            return line[start + 1 : end]
+            return line[start + 1:end]
     return None
 
 
@@ -236,9 +235,7 @@ def _copy_runtime_tree(src_dir: Path, dst_dir: Path) -> None:
             shutil.copy2(item, dst_dir / item.name)
 
 
-def _classify_runtime_signal(
-    baseline: dict[str, object], swapped: dict[str, object]
-) -> str:
+def _classify_runtime_signal(baseline: dict[str, object], swapped: dict[str, object]) -> str:
     if swapped.get("timeout"):
         return "timeout"
     # Compare against the *baseline's* returncode, not a hardcoded 0: some
@@ -431,11 +428,7 @@ def main(argv: list[str] | None = None) -> int:
         "runner": "skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py",
         "ground_truth_sha256": hashlib.sha256(GROUND_TRUTH.read_bytes()).hexdigest(),
         "platform": _platform(),
-        "command": [
-            sys.executable,
-            "skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py",
-            *(argv or sys.argv[1:]),
-        ],
+        "command": [sys.executable, "skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py", *(argv or sys.argv[1:])],
         "build_type": args.build_type,
         "selected_cases": len(names),
         "ground_truth_cases": len(truth),
@@ -448,10 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload["summary"], indent=2))
         for result in results:
             if result["status"] not in {"DEMONSTRATED", "NO_RUNTIME_SIGNAL", "SKIP"}:
-                print(
-                    f"{result['status']}: {result['case_id']} {result.get('message', '')}",
-                    file=sys.stderr,
-                )
+                print(f"{result['status']}: {result['case_id']} {result.get('message', '')}", file=sys.stderr)
 
     return 1 if any(r["status"] == "BUILD_ERROR" for r in results) else 0
 

@@ -718,9 +718,9 @@ It is described by a versioned [JSON Schema](https://json-schema.org/) (draft
 
 ```python
 from abicheck.schemas import (
-    REPORT_SCHEMA_VERSION,  # the MAJOR.MINOR this build emits
-    COMPARE_REPORT_SCHEMA_PATH,  # pathlib.Path to the .schema.json
-    load_compare_report_schema,  # -> dict
+    REPORT_SCHEMA_VERSION,        # the MAJOR.MINOR this build emits
+    COMPARE_REPORT_SCHEMA_PATH,   # pathlib.Path to the .schema.json
+    load_compare_report_schema,   # -> dict
 )
 ```
 

@@ -93,11 +93,7 @@ def _print_outputs(
         # every branch, so a caller's expression never reads a key that some
         # paths simply never define.
         "snapshot-paths": json.dumps(
-            {
-                row["target"]: row["snapshot"]
-                for row in (members or [])
-                if row["snapshot"]
-            }
+            {row["target"]: row["snapshot"] for row in (members or []) if row["snapshot"]}
         ),
         "members": json.dumps(members or []),
         "message": result.message,
@@ -119,9 +115,7 @@ def _print_outputs(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-dir", required=True, type=Path)
-    parser.add_argument(
-        "--kind", required=True, choices=["target", "bundle", "members"]
-    )
+    parser.add_argument("--kind", required=True, choices=["target", "bundle", "members"])
     parser.add_argument("--name", required=True, help="target id or bundle id")
     parser.add_argument(
         "--members",
