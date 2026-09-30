@@ -272,6 +272,7 @@ _FENCE_DELIMITER_RE = re.compile(r"`{3,}|~{3,}")
 #: Placeholder body — `\x00` cannot occur in a Markdown source, so a masked
 #: region is invisible to every link pattern and cannot be produced by one.
 _MASK = "\x00m{index}\x00"
+_MASK_TOKEN_RE = re.compile("\x00m[0-9]+\x00")
 
 #: A list marker at *any* indentation. The bound that decides whether a given
 #: line is a marker or code is the enclosing container's own floor, computed
@@ -477,8 +478,25 @@ def mask_code_regions(text: str) -> tuple[str, dict[str, str]]:
 
 
 def unmask_code_regions(text: str, replacements: dict[str, str]) -> str:
-    for placeholder, original in replacements.items():
+    """Restore every masked region, innermost last.
+
+    Masks nest: the indented-block pass runs before the fenced pass, so an
+    indented-looking run of lines *inside* a fence (any YAML/JSON example
+    after a blank line) is masked first and its placeholder is then swallowed
+    by the fence's own mask. Restoring in creation order would try the inner
+    placeholder while it is still hidden inside the outer one, and it would
+    survive into the published file — which is how whole workflow steps of a
+    template were once shipped as a bare ``\\x00m2\\x00`` marker. Restoring in
+    reverse creation order unwraps each outer region before the regions it
+    contains, so nesting depth does not matter.
+    """
+    for placeholder, original in reversed(list(replacements.items())):
         text = text.replace(placeholder, original)
+    if _MASK_TOKEN_RE.search(text):
+        raise SkillGenerationError(
+            "a masked code region was not restored; the generated file would "
+            "contain a placeholder instead of the original code"
+        )
     return text
 
 

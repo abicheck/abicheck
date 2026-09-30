@@ -122,7 +122,7 @@ def _git(work: Path, *args: str) -> None:
     )
 
 
-def materialize(scenario: dict[str, Any], work: Path, arm: str) -> None:
+def materialize(scenario: dict[str, Any], work: Path, arm: str, skill_dir: Path = PUBLISHED_SKILL) -> None:
     shutil.copytree(FIXTURES / scenario["fixture"], work)
     _git(work, "init", "-q", "-b", "main")
     _git(work, "remote", "add", "origin", f"https://github.com/example-org/{scenario['fixture']}.git")
@@ -133,7 +133,7 @@ def materialize(scenario: dict[str, Any], work: Path, arm: str) -> None:
         _git(work, "tag", tag)
     if arm == "skill":
         dest = work / ".claude" / "skills" / SKILL
-        shutil.copytree(PUBLISHED_SKILL, dest)
+        shutil.copytree(skill_dir, dest)
         # Keep the installed skill out of the agent's diff of "the project".
         (work / ".git" / "info" / "exclude").write_text(".claude/\n", encoding="utf-8")
 
@@ -174,13 +174,13 @@ def _skill_activated(events: list[dict[str, Any]]) -> bool:
 
 def run_one(scenario: dict[str, Any], arm: str, rep: int, out: Path, model: str | None,
             max_turns: int, timeout: int, venv: Path | None = None,
-            extra_hide: tuple[str, ...] = ()) -> dict[str, Any]:
+            extra_hide: tuple[str, ...] = (), skill_dir: Path = PUBLISHED_SKILL) -> dict[str, Any]:
     run_dir = out / scenario["id"] / arm / f"rep{rep}"
     if run_dir.exists():
         shutil.rmtree(run_dir)
     run_dir.mkdir(parents=True)
     work = run_dir / "workspace"
-    materialize(scenario, work, arm)
+    materialize(scenario, work, arm, skill_dir)
     prompt = scenario["prompt"].strip() + RUN_CONTRACT
     (run_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
     cmd = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
@@ -279,6 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report-only", action="store_true")
     parser.add_argument("--abicheck-venv", type=Path,
                         help="non-editable abicheck venv; enables mount-namespace isolation (Linux, root)")
+    parser.add_argument("--skill-dir", type=Path, default=PUBLISHED_SKILL,
+                        help="skill tree to install in the skill arm (default: the published skills/ copy); "
+                             "use it to A/B two versions of the skill")
     parser.add_argument("--hide", action="append", default=[],
                         help="extra directory to hide from the agent under isolation "
                              "(e.g. the launching session's scratch directory); repeatable")
@@ -289,8 +292,8 @@ def main(argv: list[str] | None = None) -> int:
     if out.is_relative_to(ROOT):
         parser.error("--out must be outside this checkout (the skill arm would leak into the baseline)")
     if not args.report_only:
-        if not PUBLISHED_SKILL.is_dir():
-            parser.error(f"{PUBLISHED_SKILL} missing: run scripts/gen_agent_skills.py")
+        if not (args.skill_dir / "SKILL.md").is_file():
+            parser.error(f"{args.skill_dir} has no SKILL.md: run scripts/gen_agent_skills.py")
         corpus = grader.load_scenarios()
         todo = [
             (s, arm, rep)
@@ -300,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
             for rep in range(args.repetitions)
         ]
         with cf.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futures = [pool.submit(run_one, s, arm, rep, out, args.model, args.max_turns, args.timeout, args.abicheck_venv, tuple(args.hide))
+            futures = [pool.submit(run_one, s, arm, rep, out, args.model, args.max_turns, args.timeout, args.abicheck_venv, tuple(args.hide), args.skill_dir.resolve())
                        for s, arm, rep in todo]
             for fut in cf.as_completed(futures):
                 m = fut.result()
