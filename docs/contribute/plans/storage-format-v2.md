@@ -130,7 +130,7 @@ live-object and document entry points; see A1.4's own entry below.
 **A1.7 is now also implemented** (directory packages only, matching A1.1's
 own "everything but `.tar.zst`" scope). A1.5's storage criterion holds
 and is tested; its decoded-size criterion is deferred to A2.1/A2.5. A1.6
-remains open; A1.8 is implemented (see its own entry).
+is implemented (see its own entry); A1.8 is implemented (see its own entry).
 See "Landed in Phase 1" below.
 
 - **A1.1** `ProjectSnapshotStore` reads and writes the D6 layout over a
@@ -173,7 +173,8 @@ See "Landed in Phase 1" below.
   are stored once per project/variant and referenced by digest.
 - **A1.6** `bundle_variants:` is wired into `.abicheck.yml` discovery, the
   capture pipeline is told which variant it is producing, and both declared
-  and captured coordinates are stored and verified.
+  and captured coordinates are stored and verified. **Implemented** — see
+  A1.6's own entry below.
 - **A1.7** Stored/live and stored/stored release comparison is reachable
   from the standard CLI. **Implemented** for directory packages (the
   `.tar.zst` transport form remains A1.1's own open item) — see "Landed in
@@ -239,8 +240,8 @@ nothing in the existing pipeline changes behavior.
    A1.7's own entry below.
 6. **Open, designed below**: the `.tar.zst` transport form (the remainder of
    A1.1), `BuildSourcePack`/source-graph digest-deduplicated shared evidence
-   (the remainder of A1.4/A1.5), and `bundle_variants:` CLI wiring (A1.6).
-   Non-ELF artifact membership (A1.8) has landed.
+   (the remainder of A1.4/A1.5). `bundle_variants:` CLI wiring (A1.6) and
+   non-ELF artifact membership (A1.8) have landed.
 
 `AvailabilityLedger.declare` and `.override` rebuild, revalidate, and
 re-sort the whole mapping per call, so building a ledger of *n* overrides
@@ -529,71 +530,90 @@ shared-evidence size); it scales with (sum of per-library sizes) +
 
 #### A1.6 — `bundle_variants:` CLI wiring
 
-**Status: not implemented, and the module this item originally named as
-"exists, just needs a consumer" is gone.** `abicheck/bundle_variants_config.py`
-(`parse_bundle_variants_config`/`pair_variants`) was deleted outright in
-ADR-065 S1 (2026-09-06, [`model/release_selection.py`]'s `ReleaseSelection`
-landed instead) rather than given a consumer — its `required:` field
-addressed a different axis (multibuild *variant* identity) from what S1
-needed (release *member* selection), and no capture pipeline tags a variant
-name to feed it, so wiring the old module would have been a parser-only
-slice with nothing downstream to drive. This item therefore needs a
-**deliberately new, specified** config-schema-and-pairing design — not
-"wire the existing module" — before any of the "Design" paragraph below can
-be implemented; the design below still describes the target shape
-(`VariantRef.declared`/`.captured`) correctly, but its own reference to a
-`BundleVariantSpec` producer no longer has a starting implementation to
-build from.
+**Status: implemented** (directory packages; the one-file transport form is
+A1.1's own concern). A deliberately new design — the deleted
+`bundle_variants_config.py` (ADR-065 S1) was not restored.
 
-**Goal.** A project's `bundle_variants:` block (variant name →
-`target_triple`/`compiler_family`/`feature_toggles`/`required`) drives a
-real multi-variant capture, and both what was *declared* in config and what
-was *actually captured* end up on the package's own `VariantRef.declared`/
-`.captured` maps (already exactly this two-map shape, per that class's own
-docstring) — so a later comparison can tell a genuine variant-boundary
-change from an ordinary version bump.
+**What landed.**
 
-**Design.** `BundleVariantSpec`'s four fields map onto `VariantRef.declared`
-verbatim (`{"target_triple": ..., "compiler_family": ..., **feature_toggles}`)
-at config-parse time, before any capture runs — this is the `declared` half,
-knowable from `.abicheck.yml` alone. `.captured` is filled in per real
-capture run from whatever the toolchain/build actually reports (compiler
-version, resolved standard, resolved feature-toggle values where a build
-system can confirm them) — the same "two independent coordinate maps"
-split `VariantRef`'s own docstring already specifies, so this item is
-wiring a real producer for the `VariantRef` schema that already exists —
-the config-parsing/pairing half (formerly `bundle_variants_config.py`,
-deleted per the note above) needs to be designed and written fresh,
-not restored. A `required: true` variant that fails to capture is a hard error
-for the release-capture command (mirrors `AnalysisPlanner`'s "reject before
-extraction" discipline: knowing a required variant is unreachable belongs
-at plan time, not discovered as a silently-incomplete package after a long
-capture run); `required: false` degrades to a package missing that
-`VariantRef` entirely, not a placeholder with empty `captured`.
+- **Config** — `model/bundle_variants.py`: the `.abicheck.yml`
+  `bundle_variants:` block (variant name → `target_triple`,
+  `compiler_family`, `feature_toggles` mapping, `required` bool, default
+  `true`) parsed into `BundleVariantsConfig`/`BundleVariantSpec`, with
+  total, eager validation (unknown keys, wrong types, missing coordinates, a
+  toggle shadowing a fixed coordinate, an unsafe or case-colliding variant
+  name — every finding at once). `bundle_variants` is a recognized
+  `BuildConfig` top-level key, and the same validator runs on **every**
+  `.abicheck.yml` ingestion (`build_config_schema.WHOLE_BLOCK_VALIDATORS`,
+  shared with `deployment:`), not only in the capture command.
+  `BundleVariantSpec.declared()` is the `VariantRef.declared` map
+  (`{"target_triple", "compiler_family", **feature_toggles}`).
+- **Capture** — `workflows/bundle_variants_capture.py`, driven by
+  `abicheck project capture-variants --variant NAME=PATH ... --package DIR
+  [--config FILE] [--variant-header NAME=PATH] [--variant-include NAME=DIR]
+  [--dry-run] [-o FORMAT=DEST]` (`frontends/cli/project_capture_variants.py`,
+  attached to the existing `project` group — no new root command). Three
+  ordered phases: `plan_variant_capture` (before any extraction: an
+  undeclared/duplicate input, or a required variant with no input, a
+  missing path, or nothing capturable, is a `VariantCaptureError` → exit
+  64; an optional one becomes a reported skip); `capture_variants` (every
+  variant dumped in memory through the shared `run_dump_request`; a required
+  variant's extractor failure raises with nothing written, an optional one
+  is skipped and reported); then one write into a staging directory renamed
+  into place last, so a failure never leaves a partial package. Each
+  captured variant is one `VariantRef` with `declared` from config and
+  `captured` from `captured_coordinates()` — only what the snapshots
+  recorded (`dwarf_advanced.toolchain` compiler family/version/producer,
+  DWARF target arch, container format, ELF machine/class, header-parse
+  standard/frontend; a mixed variant records the sorted distinct values).
+  The two maps are never merged. A variant-level `bundle_variant_spec`
+  section records `required` and the toggle keys. A skipped optional
+  variant has no `VariantRef` at all.
+- **Artifact ids are namespaced by variant** (`<variant>.<library-id>`,
+  opaque via `resolve_ref_ids` when that is not ref-id safe), closing A1.7's
+  carried-forward limitation that two variants of one package could not
+  share a library name; every reader already recovers the library name from
+  `ArtifactRef.native_identity`.
+- **Pairing** — `compare/variant_pairing.pair_variant_views` (the
+  replacement for the deleted `pair_variants()`): by `variant_id` only,
+  never by coordinates. `workflows/variant_pairing.release_variant_pairing`
+  reads both packages' views when *both* release operands are stored
+  packages; the result rides `ReleaseScopePlan.variant_pairing` onto the
+  ADR-065 acquisition record and out as the release JSON's
+  `comparison_scope.variant_pairing` (release schema 1.10;
+  `$defs/comparison_scope` in `compare_report.schema.json`). A
+  declared-coordinate difference is `variant_boundary_changed` with
+  `declared_changes`, distinct from `captured_changes` (a version bump). A
+  variant only one side carries is `unmatched_old`/`unmatched_new` with a
+  "absence is not removal" reason and its recorded `required` flag;
+  `unmatched_required` lists the required ones. Report-only: which variant's
+  libraries are compared is still `--variant old=/new=`, and no verdict or
+  exit code changes.
 
-**Files.** `abicheck/cli_project.py` (a new subcommand, per this
-repository's root-command admission bar in `AGENTS.md` — this is advanced,
-multi-target CI-integration surface that fits the existing `project` group,
-not a new root command) or an extension of whatever multi-library capture
-entry point A1.7 below settles on, since the two are naturally one CLI
-surface (capture N variants of M libraries into one package) rather than
-two independent flags. `abicheck/bundle_variants_capture.py` (new) —
-resolves a `.abicheck.yml` `bundle_variants:` block plus a real build
-description into one capture run per variant, writing each into the shared
-`bundle_facts_store.py` writer from A1.4/A1.5 above with the right
-`VariantRef`.
+**Tests.** `tests/test_bundle_variants_config.py` (every wrong type for
+every key from an independent table, unsafe names, compositional finding
+collection over every subset of breakages, strict `.abicheck.yml`
+ingestion); `tests/test_bundle_variants_capture.py` (an exhaustive 64-case
+matrix — two variants × required/optional × {captured, no input, missing
+path, extractor failure} — against an independently written oracle,
+including "no file and no staging directory is left behind"; declared vs.
+captured disagreeing and both kept; pairing properties over every pair of
+subsets of four ids in both orders; pairing over packages written by real
+`capture-variants` runs, through the real `compare` CLI, schema-validated;
+an unmatched required variant; an unrelated extra baseline variant not
+changing the selected comparison; and an `integration`-marked capture of a
+real gcc-built `-g` shared object whose `captured.compiler_family` comes
+from `DW_AT_producer`).
 
-**Tests.** A `bundle_variants:` block with two variants (one `required`,
-one not) against a fixture build; the `required` variant's simulated
-capture failure raises before any file is written (no partial package);
-`declared` vs. `captured` disagree on at least one field in the fixture
-(e.g. `.abicheck.yml` under-specifies a compiler version the real build
-reports), asserting both maps are kept, not merged/overwritten.
-
-**Acceptance criteria.** The new pairing algorithm (replacing the deleted
-`pair_variants()`) operates correctly over `VariantRef`s produced by a real
-capture run, not only over hand-constructed fixtures — closing the
-"modelled but not captured" half of finding #7.
+**Open, deliberately not in this slice.** An unmatched *required* variant is
+reported, not gated — whether it should contribute to the ADR-065
+`--on-incomplete-scope` axis is a policy decision for that ADR. Pairing is
+reported, but the per-library fan-out still compares exactly one selected
+variant per side (a multi-variant package with no `--variant` selection is
+still A1.7's usage error), so "compare every paired variant in one run" is a
+future fan-out extension. `captured` records toolchain facts DWARF carries;
+a build-system-confirmed feature-toggle value is not captured (no producer
+records one today).
 
 ---
 
@@ -693,17 +713,17 @@ requirement. Also covers the ambiguous-variant usage error and
 `--old-variant` disambiguation.
 
 **Acceptance criteria.** Closes finding #7's "no coherent multi-variant
-baseline from a normal workflow" for the comparison half (A1.6 above still
-owns the capture half — `bundle_variants:` CLI wiring remains open); no new
+baseline from a normal workflow" for the comparison half (A1.6 above owns
+the capture half, now landed too); no new
 root CLI command (`AGENTS.md`'s admission bar) — this is `compare`'s
 existing release fan-out gaining a new operand shape, not a new verb.
-**Known limitation carried forward, not closed by this item**: two variants
-of one package cannot share a library name today, since
+**Known limitation carried forward, closed by A1.6**: two variants
+of one package could not share a library name, since
 `bundle_facts_store._artifact_id_for_library` derives `ArtifactRef.artifact_id`
-from the library name alone, not `(variant, name)` — a real multi-variant
-capture (A1.6) will need that reconciled before this item's variant
-selection is exercised against a real multi-variant capture rather than a
-hand-assembled fixture.
+from the library name alone, not `(variant, name)`. A1.6's capture now
+namespaces every artifact id by its variant, and its tests exercise this
+item's variant selection against packages a real multi-variant capture
+wrote.
 
 ---
 
@@ -982,8 +1002,9 @@ each to its section kind's current version, and reassembles the original
 **Not yet implemented, and still open**: storing `BuildSourcePack`/project
 source graphs/toolchain profiles once per project and referencing them by
 digest (A1.5 — folding baseline sets/`BundleFacts` into sections, A1.4, is
-done), `bundle_variants:` CLI/config wiring (A1.6/A1.7), and the `.tar.zst`
-transport form. Decoding a legacy section's *internal* shape into a typed
+done) and the `.tar.zst` transport form. (`bundle_variants:` CLI/config
+wiring, A1.6, and stored release comparison, A1.7, have landed.)
+Decoding a legacy section's *internal* shape into a typed
 domain object (rather than carrying the existing JSON as-is), and giving
 `ArtifactRef.sections` a per-section `FactAvailability` (the "known,
 deliberately deferred gap" below), are both real future work this landing

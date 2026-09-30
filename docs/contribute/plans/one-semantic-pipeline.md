@@ -1252,7 +1252,7 @@ The one-file transport (A1.1) landed on the same day as a zip archive (`storage/
 - digest-deduplicated shared `BuildSourcePack`/source-graph evidence
   (A1.5), whose storage half holds and is tested, leaving decoded size
   (A2.x);
-- `bundle_variants:` wiring (A1.6);
+- ~~`bundle_variants:` wiring (A1.6)~~ -- landed (see the storage-format-v2 plan's A1.6 entry);
 - ~~non-ELF artifact membership (A1.8)~~ -- landed (see the storage-format-v2 plan's A1.8 entry).
 
 It is tracked there, not restated here.
@@ -16978,7 +16978,8 @@ decoding a section's own *internal* shape into a typed domain object beyond
 `semantic_ir` (each section still carries the pre-existing JSON encoding
 for its fields); multi-artifact packages (a real multi-library
 `ProjectSnapshot`); folding baseline sets/`BundleFacts` into sections, the
-`.tar.zst` transport form, `bundle_variants:` config wiring (A1.4-A1.7),
+`.tar.zst` transport form, `bundle_variants:` config wiring (A1.4-A1.7 --
+A1.4, A1.6 and A1.7 have since landed),
 and non-ELF membership specifics beyond `ArtifactRef.kind` (A1.8) remain
 open. See `docs/contribute/plans/
 storage-format-v2.md`'s "Landed in Phase 1" section and

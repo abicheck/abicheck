@@ -126,7 +126,7 @@ def build_comparison_scope_section(decision: ScopeDecision) -> dict[str, Any]:
         raise ValueError(
             "build_comparison_scope_section needs a decision with a record"
         )
-    return {
+    section = {
         "schema_version": SCOPE_ACQUISITION_SCHEMA_VERSION,
         "completeness": decision.completeness.value,
         "policy": decision.policy,
@@ -146,6 +146,9 @@ def build_comparison_scope_section(decision: ScopeDecision) -> dict[str, Any]:
         "proven_removed": [m.name for m in record.proven_removed_members],
         "proven_added": [m.name for m in record.proven_added_members],
     }
+    if record.variant_pairing is not None:  # ADR-062 A1.6: stored/stored only
+        section["variant_pairing"] = record.variant_pairing.to_dict()
+    return section
 
 
 #: This module's long-standing spelling of the shared escaping rule, kept as

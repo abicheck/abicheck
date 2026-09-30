@@ -161,6 +161,7 @@ Recognized (so they don't trigger the unknown-key warning) but parsed by a sibli
 
 - `aggregate`
 - `baseline`
+- `bundle_variants`
 - `bundles`
 - `crosschecks`
 - `profiles`

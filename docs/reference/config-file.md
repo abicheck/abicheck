@@ -135,8 +135,8 @@ an unknown-key error.
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
 `compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
 `assurance:`, `deployment:`, `resource_limits:`, `performance:`, `policy:`, `version:`,
-`risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`, and
-`baseline:` are the recognized top-level keys.
+`risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`,
+`baseline:`, and `bundle_variants:` are the recognized top-level keys.
 See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
 generated key/type list (`BuildConfig`'s own schema); the sections below
@@ -532,6 +532,67 @@ deployment:
 
 See [Environment & Toolchain Drift](../learn/environment-drift.md) for the
 full worked example, including CI/GitHub Action usage.
+
+---
+
+### `bundle_variants:`
+
+Declares the build **variants** of one project — each a target
+triple, a compiler family, and a set of feature toggles — for
+[`abicheck project capture-variants`](cli-reference.md), which captures
+every declared variant into **one** `ProjectSnapshot` package, one
+`VariantRef` per variant.
+
+```yaml
+bundle_variants:
+  linux-x86_64-gcc:              # variant name: [A-Za-z0-9._-], 1-100 chars
+    target_triple: x86_64-linux-gnu   # required, non-empty string
+    compiler_family: gcc              # required, non-empty string
+    feature_toggles:                  # optional mapping
+      simd: avx2                      #   value: string, boolean or integer
+      threads: true                   #   (stored as "true"/"false"/"2")
+    required: true                    # optional boolean, default true
+  linux-aarch64-clang:
+    target_triple: aarch64-linux-gnu
+    compiler_family: clang
+    required: false
+```
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `target_triple` | string | — (required) | the variant's target |
+| `compiler_family` | string | — (required) | the variant's compiler family |
+| `feature_toggles` | mapping of string → string/bool/int | `{}` | build toggles that define the variant; may not reuse `target_triple`/`compiler_family` as a key |
+| `required` | boolean | `true` | whether the capture must produce this variant |
+
+Validation is strict on **every** `.abicheck.yml` load, not only in
+`capture-variants`: an unknown key, a wrong type, a missing coordinate, an
+unsafe or case-colliding variant name is a usage error (exit 64) naming
+every finding at once.
+
+What the block drives:
+
+- **`declared`** — each variant's `VariantRef.declared` map is
+  `{target_triple, compiler_family, **feature_toggles}`, known from this
+  block alone.
+- **`captured`** — filled from what the capture actually observed (the
+  DWARF `DW_AT_producer` compiler family/version/producer string, target
+  architecture, binary format, ELF machine/class, header-parse standard and
+  frontend). The two maps are stored side by side and never merged: if the
+  config says `clang` and the binary says `GCC 13.2.0`, the package records
+  both.
+- **`required`** — a required variant with no `--variant` input, a missing
+  path, nothing capturable, or a failed capture is an error *before anything
+  is written* (no partial package). An optional variant in any of those
+  states is skipped and reported; the package carries no `VariantRef` for
+  it (never an empty placeholder).
+
+Comparing two such packages (`abicheck compare OLD NEW --variant old=ID`)
+adds `comparison_scope.variant_pairing` to the JSON report: both packages'
+variants paired by id, a change to a variant's declared coordinates reported
+as a **variant-boundary change** (distinct from `captured` drift such as a
+compiler-version bump), and a variant present on only one side reported as
+unmatched — never as a removal — with its recorded `required` flag.
 
 ---
 

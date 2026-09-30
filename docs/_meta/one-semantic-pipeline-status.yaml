@@ -1634,10 +1634,10 @@ concepts:
       storage/project_package_archive.py, accepted by compare -- and the
       storage half of digest-deduplicated shared evidence is tested,
       tests/test_shared_build_evidence_dedup.py) digest-deduplicated shared
-      BuildSourcePack/toolchain evidence (A1.5), `bundle_variants:`
-      config/CLI wiring (A1.6), stored/live and stored/stored
-      release-comparison reachability from the standard CLI (A1.7); non-ELF
-      artifact membership (A1.8) has landed.
+      BuildSourcePack/toolchain evidence (A1.5); `bundle_variants:`
+      config/CLI wiring (A1.6, `project capture-variants`), stored/live and
+      stored/stored release-comparison reachability from the standard CLI
+      (A1.7) and non-ELF artifact membership (A1.8) have landed.
 
   report_document:
     primitive: complete

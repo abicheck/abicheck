@@ -270,6 +270,22 @@ Dump ABI snapshot of a shared library to JSON.
 
 Advanced multi-target project integration.
 
+### `project capture-variants`
+
+Capture every declared bundle variant into one ProjectSnapshot package.
+
+**Options**
+
+| Option | Required | Default | Description |
+|---|:--:|---|---|
+| `--variant` | yes | — | Capture declared bundle variant NAME from PATH: a binary, a directory of binaries/snapshots, or a single snapshot (the same operand shape compare's release fan-out takes). Repeatable, one per variant. NAME must be declared under .abicheck.yml bundle\_variants:. |
+| `--package` | yes | — | Directory to write the one multi-variant ProjectSnapshot package to. Must not exist or be empty; written atomically, so a failed capture leaves nothing behind. |
+| `--config` | no | — | The .abicheck.yml whose bundle\_variants: block declares the variants. Default: the nearest project config at or above the current directory. |
+| `--variant-header` | no | — | A public header (or header directory) for variant NAME's dumps. Repeatable. |
+| `--variant-include` | no | — | An include directory for variant NAME's header parse. Repeatable. |
+| `--dry-run` | no | `False` | Resolve and check the plan (every required variant reachable, every input discoverable) and report it, without capturing or writing. |
+| `--output`, `-o` | no | — | Export this run's report as FORMAT to DESTINATION. FORMAT is one of text/json; DESTINATION is a file path, or '-' for stdout. Repeatable: every export renders the same completed analysis, so the result never depends on which (or how many) you ask for. Default: text=-. |
+
 ### `project history`
 
 Derive per-API lifecycle events from an ordered chain of SNAPSHOTS (offline longitudinal compatibility history).

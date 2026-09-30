@@ -44,7 +44,10 @@ the concrete accounting.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from ..environment_matrix import EnvironmentMatrix
+from ..model.bundle_variants import BUNDLE_VARIANTS_KEY, bundle_variants_findings
 from .build_config_scope import (
     OWNERSHIP_LIST_KEYS,
     dependencies_findings,
@@ -256,6 +259,21 @@ def deployment_findings(value: object) -> list[str]:
     except (TypeError, ValueError) as exc:
         return [f"deployment: {exc}"]
     return []
+
+
+#: Top-level keys whose value is validated by a dedicated, whole-block
+#: validator rather than a flat subkey table: ``deployment:`` embeds
+#: ``EnvironmentMatrix``'s nested shape, ``bundle_variants:`` (ADR-062 A1.6)
+#: is a name -> spec mapping (``model.bundle_variants``). Parsed by their own
+#: consumers; validated here so every ``.abicheck.yml`` ingestion is strict.
+def _bundle_variants_block_findings(value: object) -> list[str]:
+    return [] if value is None else bundle_variants_findings(value)
+
+
+WHOLE_BLOCK_VALIDATORS: dict[str, Callable[[object], list[str]]] = {
+    "deployment": deployment_findings,
+    BUNDLE_VARIANTS_KEY: _bundle_variants_block_findings,
+}
 
 
 def parse_policy_overrides(policy_block: dict[str, object]) -> dict[str, str]:
