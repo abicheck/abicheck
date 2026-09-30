@@ -249,6 +249,7 @@ MANIFEST_ARGS=(
   --generator-action-ref "$GENERATOR_ACTION_REF"
 )
 [[ -n "$PREVIOUS_MANIFEST" ]] && MANIFEST_ARGS+=(--previous-manifest "$PREVIOUS_MANIFEST")
+[[ -n "${INPUT_EXTRACTION_CONTEXT:-}" ]] && MANIFEST_ARGS+=(--extraction-context "$INPUT_EXTRACTION_CONTEXT")
 
 MANIFEST_STDOUT=$(python3 "$ACTION_PATH/build_manifest.py" "${MANIFEST_ARGS[@]}") \
   || _fail "manifest generation failed -- see output above."

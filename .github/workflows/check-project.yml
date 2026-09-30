@@ -991,6 +991,8 @@ jobs:
           allow-new-target: ${{ matrix.allow_new_target || 'false' }}
           requested-depth: ${{ matrix.requested_depth }}
           explicit-id: ${{ matrix.explicit_id || '' }}
+          build-system: ${{ matrix.build_system || '' }}
+          build-generator: ${{ matrix.build_generator || '' }}
           gate-mode: ${{ matrix.gate_mode }}
           # require-complete-analysis is RETIRED (rulings.py deferred-option
           # followup, mirroring the root Action's own retirement) -- no
