@@ -490,6 +490,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Re-generate golden output files in tests/golden/ instead of comparing.",
     )
+    parser.addoption(
+        "--shard",
+        default=None,
+        metavar="K/N",
+        help="Run only shard K of N (whole test files, balanced by recorded duration; see tests/pytest_shards.py).",
+    )
 
 
 def _materialize_generated_skill_trees() -> None:
@@ -603,8 +609,48 @@ def _keep_mutmut_stats_out_of_child_processes() -> None:
     os.environ.pop("MUTANT_UNDER_TEST", None)
 
 
+#: Git settings forced on every git process a test starts. A test that
+#: makes real commits otherwise inherits the developer's global config, and
+#: commit signing there (an SSH/GPG signer, a pinentry prompt, a hardware
+#: key) makes those tests fail -- or hang -- on that machine only: 22 tests
+#: failed at once when a signing helper went missing. `GIT_CONFIG_COUNT`
+#: overrides every config file without replacing the rest of the user's
+#: config (identity, `safe.directory`), so nothing else changes.
+_HERMETIC_GIT_CONFIG = (("commit.gpgsign", "false"), ("tag.gpgsign", "false"))
+
+
+def _effective_git_env_config() -> dict[str, str]:
+    """What the `GIT_CONFIG_*` environment currently forces, key -> value.
+
+    A later index wins, matching git's own precedence among those entries.
+    """
+    effective: dict[str, str] = {}
+    for i in range(int(os.environ.get("GIT_CONFIG_COUNT", "0") or 0)):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{i}")
+        if key is not None:
+            effective[key.lower()] = os.environ.get(f"GIT_CONFIG_VALUE_{i}", "")
+    return effective
+
+
+def _make_git_hermetic() -> None:
+    """Force `_HERMETIC_GIT_CONFIG` via `GIT_CONFIG_*`, appended last so it
+    wins over any existing entry. Idempotent: a process that already forces
+    every pair (an xdist worker inheriting the controller's environment) is
+    left alone rather than growing the list again. An existing entry forcing a
+    *different* value (e.g. `commit.gpgsign=true`) does not count."""
+    effective = _effective_git_env_config()
+    if all(effective.get(key) == value for key, value in _HERMETIC_GIT_CONFIG):
+        return
+    start = int(os.environ.get("GIT_CONFIG_COUNT", "0") or 0)
+    for offset, (key, value) in enumerate(_HERMETIC_GIT_CONFIG):
+        os.environ[f"GIT_CONFIG_KEY_{start + offset}"] = key
+        os.environ[f"GIT_CONFIG_VALUE_{start + offset}"] = value
+    os.environ["GIT_CONFIG_COUNT"] = str(start + len(_HERMETIC_GIT_CONFIG))
+
+
 def pytest_configure(config: pytest.Config) -> None:
     _keep_mutmut_stats_out_of_child_processes()
+    _make_git_hermetic()
     _materialize_generated_skill_trees()
     config.addinivalue_line(
         "markers",
@@ -663,8 +709,12 @@ _MARKER_REQUIRED_TOOL: dict[str, str] = {
 }
 
 
+@pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
     _apply_mutmut_hypothesis_settings(items)
+    # trylast: shard what survives `-m`/`-k` deselection, so each shard's
+    # share is balanced over the tests that will actually run.
+    _apply_shard(config, items)
 
     reason = _integration_skip_reason()
     if reason:
@@ -680,6 +730,23 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
         for item in items:
             if marker in item.keywords:
                 item.add_marker(skip)
+
+
+def _apply_shard(config: pytest.Config, items: list) -> None:
+    spec = config.getoption("--shard")
+    if not spec:
+        return
+    from tests.pytest_shards import load_weights, parse_shard, select
+
+    try:
+        index, total = parse_shard(spec)
+    except ValueError as exc:
+        raise pytest.UsageError(str(exc)) from exc
+    keep = select((item.nodeid for item in items), index, total, load_weights())
+    deselected = [item for item in items if item.nodeid not in keep]
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = [item for item in items if item.nodeid in keep]
 
 
 @pytest.fixture

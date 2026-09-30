@@ -195,6 +195,7 @@ def _call_sites(function_name: str, defining_module: str) -> dict[Path, int]:
     return dict(_CALL_SITE_CACHE[function_name])
 
 
+@pytest.mark.repo_scan
 @pytest.mark.parametrize("function_name", sorted(_ENGINE_PRIMITIVES))
 def test_primitive_has_exactly_the_expected_callers(function_name: str) -> None:
     """Phase 2b (plan §3 #6/#8): `compare()` reaches both primitives via

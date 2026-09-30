@@ -10771,3 +10771,19 @@ comparison against a baseline dumped *before* it lists them as
 `typedef_removed`; under the default public-header scoping they are
 filtered as non-public, stay visible in the disposition list, and do not
 move the gate. Regenerate a stored baseline to remove the noise.
+
+## Destructive test-helper resets are guarded one helper at a time (2026-09-30)
+
+The "something prunes `/tmp` on these runners mid-job" behind `ci.yml`'s
+`TMPDIR=$RUNNER_TEMP` step was a unit test: it handed
+`scripts/check_l2_cli_perf.py`'s `_reset_cache` the path `/tmp`, and that
+helper was a bare `rmtree`. It now empties only a cache root the harness
+created and marked (`prepare_cache_root`), refusing anything else
+(`tests/test_l2_cli_perf_cache_reset.py`; bug class
+`test_harness.destructive_reset_of_a_caller_supplied_path`). What remains
+open: no gate stops another helper under `tests/` or `scripts/` from
+`rmtree`-ing a caller-supplied path, and the detector that found this one
+(a canary file under `/tmp`, checked before and after every test by a
+`pytest_runtest_protocol` hookwrapper, per-worker timestamps to name the
+overlapping test) is not wired into CI. The `TMPDIR=$RUNNER_TEMP` step stays:
+it is cheap isolation and would contain the next such helper.

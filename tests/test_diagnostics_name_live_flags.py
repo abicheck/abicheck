@@ -197,6 +197,7 @@ def mentions() -> list[tuple[str, int, str, str]]:
     return _diagnostic_flag_mentions()
 
 
+@pytest.mark.repo_scan
 def test_every_diagnostic_flag_is_registered(
     registered: set[str], mentions: list[tuple[str, int, str, str]]
 ) -> None:
@@ -212,6 +213,7 @@ def test_every_diagnostic_flag_is_registered(
     )
 
 
+@pytest.mark.repo_scan
 def test_allowlisted_functions_have_no_production_caller() -> None:
     """An allowlist entry is only valid while its function is unreachable
     from the product; a production call site turns its stale flags into live
@@ -235,6 +237,7 @@ def test_allowlisted_functions_have_no_production_caller() -> None:
     )
 
 
+@pytest.mark.repo_scan
 def test_allowlist_entries_still_carry_a_stale_mention(
     mentions: list[tuple[str, int, str, str]], registered: set[str]
 ) -> None:

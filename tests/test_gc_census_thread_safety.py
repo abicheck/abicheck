@@ -197,6 +197,7 @@ class TestNoUnguardedCensus:
         f.write_text("import gc\nlen(gc.get_objects())\nfrom gc import get_referrers\n")
         assert _census_sites(f) == [2, 3]
 
+    @pytest.mark.repo_scan
     def test_no_first_party_file_enumerates_the_heap_unguarded(self) -> None:
         offenders = {}
         for path in _first_party_files():

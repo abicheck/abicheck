@@ -146,6 +146,7 @@ def _subscript_string_keys(tree: ast.Module) -> set[str]:
 class TestConsumerInventory:
     """Re-derive the inventory from the source, so it cannot go stale."""
 
+    @pytest.mark.repo_scan
     def test_no_module_reads_a_new_side_snapshot_it_would_not_find(self) -> None:
         """``_new_snapshot`` is never *read* outside the tolerant fold.
 

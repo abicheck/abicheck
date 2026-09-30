@@ -243,6 +243,7 @@ isn't available in your environment (add `,docs,dist` for full parity).
 | `msvc` | MSVC `cl.exe` (Windows) | Only for the MSVC+PDB end-to-end lane |
 | `slow` | varies | Hypothesis/perf benchmarks, skip in normal dev |
 | `golden` | golden files | Snapshot tests, skip unless changing output format |
+| `repo_scan` | Python only | Whole-tree structural scans (AST/text gates over the committed repo). OS- and coverage-independent, so CI runs them once in `repo-scan-tests` (`verify.py --only repo-scan-tests`) and every unit leg excludes them. Mark a new test this way only if it reads the whole tree and its result cannot depend on the platform |
 
 **Default fast command excludes all external-tool markers.** Use it.
 
@@ -1434,7 +1435,11 @@ line+branch coverage floor (`--cov-fail-under=95`) — the `fast` profile does
 not, since it's the everyday inner loop and deliberately skips coverage
 instrumentation. This floor applies **only on the canonical Linux/Python-3.13
 unit-test lane** in `.github/workflows/ci.yml` — that's where the full unit
-suite runs under coverage.
+suite runs under coverage. In CI that lane runs as three concurrent
+`pytest --shard=K/3` jobs (`tests/pytest_shards.py`: whole files, balanced by
+test count) that only collect coverage data; `unit-tests-coverage` combines
+them and enforces the floor once. Locally, `verify.py`'s `unit-pr` step runs
+the same selection unsharded, in one process.
 Other Python versions do not run the full suite at all; `python-compat.yml`'s
 smoke lane covers them (a second full-suite leg would only re-check the same tests).
 macOS/Windows skip the Linux-only ELF/DWARF parsing tests, which structurally lowers

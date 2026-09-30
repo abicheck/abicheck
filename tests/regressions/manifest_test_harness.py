@@ -298,4 +298,61 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="test_harness.destructive_reset_of_a_caller_supplied_path",
+        invariant=(
+            "A harness helper that empties a directory empties only one it "
+            "created and marked; handed any other path it refuses and "
+            "leaves it byte-for-byte intact, and it never follows a link out "
+            "of the directory it clears. `check_l2_cli_perf._reset_cache` "
+            "was a bare `rmtree(path, ignore_errors=True)`, and a unit test "
+            "passed it `/tmp`: every run deleted whatever the test process "
+            "could reach there while other jobs used it -- the unattributed "
+            "`/tmp` pruning that ci.yml's `TMPDIR=$RUNNER_TEMP` step was "
+            "added to survive (a gcc object mid-link, `run.sh` scratch dirs, "
+            "xdist basetemps), and in one session the commit-signing helper. "
+            "Found by a canary file in `/tmp` checked around every test."
+        ),
+        fixed_by=(1421,),
+        seed_tests=("tests/test_l2_cli_perf_cache_reset.py",),
+        public_surfaces=(),
+        axes={
+            "target": (
+                "unmarked_dir",
+                "marker_in_child_only",
+                "marker_is_dir",
+                "empty_dir",
+                "missing",
+                "marked_root",
+            ),
+            "contents": ("files", "subdirs", "symlink_out"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only this harness's reset is guarded; no gate stops "
+                    "another test helper from `rmtree`-ing a caller-supplied "
+                    "path. The canary-around-every-test detector used to find "
+                    "it is not wired into CI."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="test_harness.git_inherits_developer_signing_config",
+        invariant=(
+            "A git commit a test makes succeeds whatever the developer's "
+            "global git config says about signing. `GIT_CONFIG_COUNT` "
+            "overrides force `commit.gpgsign`/`tag.gpgsign` off for every "
+            "git process the suite starts, without replacing the rest of "
+            "the user's config; a control shows the same commit fails "
+            "without them. 22 tests failed at once when a signing helper "
+            "went missing."
+        ),
+        fixed_by=(1421,),
+        seed_tests=("tests/test_hermetic_git.py",),
+        public_surfaces=(),
+        axes={"scope": ("commit", "tag")},
+    ),
 )

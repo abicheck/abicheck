@@ -195,6 +195,7 @@ def _unencoded_repo_reads(path: Path) -> list[str]:
     return _reads_in_scope(tree, _repo_rooted_aliases(tree, frozenset()), path.name)
 
 
+@pytest.mark.repo_scan
 def test_no_test_reads_checked_in_text_with_a_platform_dependent_encoding() -> None:
     """The structural half of the invariant, over the whole suite."""
     findings: list[str] = []

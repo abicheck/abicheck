@@ -278,6 +278,7 @@ markers = [
     "msvc: requires MSVC cl.exe (Windows) — MSVC+PDB end-to-end lane",
     "slow: marks tests as slow (hypothesis / performance benchmarks)",
     "golden: golden-output snapshot tests",
+    "repo_scan: statically scans the whole repository tree; OS- and coverage-independent, run once by the repo-scan-tests CI job",
 ]
 # Global per-test hang safety valve (pytest-timeout), not a perf regression
 # gate -- CI's own "Test-time report" step already says a *hard* wall-time

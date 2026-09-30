@@ -804,7 +804,7 @@ class TestEveryRepetitionIsValidated:
             runs={},
             scenario=self._scenario(),
             fixture=None,
-            cache_root=tmp_path,
+            cache_root=harness.prepare_cache_root(tmp_path / "cache"),
             timeout=10,
             one_side=None,
             check_extraction=False,
@@ -831,7 +831,7 @@ class TestEveryRepetitionIsValidated:
             runs={},
             scenario=self._scenario(),
             fixture=None,
-            cache_root=tmp_path,
+            cache_root=harness.prepare_cache_root(tmp_path / "cache"),
             timeout=10,
             one_side=None,
             check_extraction=False,
@@ -848,7 +848,7 @@ class TestEveryRepetitionIsValidated:
             runs={},
             scenario=self._scenario(),
             fixture=None,
-            cache_root=tmp_path,
+            cache_root=harness.prepare_cache_root(tmp_path / "cache"),
             timeout=10,
             one_side=None,
             check_extraction=False,
@@ -867,7 +867,7 @@ class TestEveryRepetitionIsValidated:
                 runs={},
                 scenario=self._scenario(),
                 fixture=None,
-                cache_root=tmp_path,
+                cache_root=harness.prepare_cache_root(tmp_path / "cache"),
                 timeout=10,
                 one_side=None,
                 check_extraction=False,
@@ -940,7 +940,7 @@ class TestAbsentCountersAreNotZero:
         )
         assert not [p for p in problems if "stale" in p], problems
 
-    def test_a_repetition_message_is_not_prefixed_twice(self):
+    def test_a_repetition_message_is_not_prefixed_twice(self, tmp_path):
         # The cache validators number their own pairs, so the per-repetition
         # wrapper must not prefix them again; the first version printed
         # "repetition 0: repetition 0: ...".
@@ -972,7 +972,7 @@ class TestAbsentCountersAreNotZero:
             runs={},
             scenario=scenario,
             fixture=None,
-            cache_root=Path("/tmp"),
+            cache_root=harness.prepare_cache_root(tmp_path / "cache"),
             timeout=10,
             one_side=None,
             check_extraction=False,

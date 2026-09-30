@@ -135,6 +135,7 @@ def _installed_doubles() -> list[tuple[Path, str, ast.FunctionDef, bool]]:
 class TestDoublesMatchTheRealSignature:
     """The invariant, over whatever doubles the suite currently installs."""
 
+    @pytest.mark.repo_scan
     def test_at_least_one_double_is_inspected(self) -> None:
         """Vacuity guard: an empty scan would satisfy the check below.
 
@@ -144,6 +145,7 @@ class TestDoublesMatchTheRealSignature:
         """
         assert len(_installed_doubles()) >= 3
 
+    @pytest.mark.repo_scan
     def test_no_double_is_narrower_than_what_it_replaces(self) -> None:
         narrower: list[str] = []
         for path, target, fn, is_method in _installed_doubles():

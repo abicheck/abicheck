@@ -276,6 +276,7 @@ def test_content_identity_fails_closed_on_an_unencodable_snapshot() -> None:
     assert _status(a, b)[0] == "degraded"
 
 
+@pytest.mark.repo_scan
 def test_every_compute_call_site_passes_the_storage_projection() -> None:
     """The exhaustiveness half, and the reason this question is answered in
     `storage` at all (Codex review, PR #1229 -- the P1, plus the four P2s
@@ -323,6 +324,7 @@ def test_every_compute_call_site_passes_the_storage_projection() -> None:
     )
 
 
+@pytest.mark.repo_scan
 def test_the_persisted_projection_is_not_reimplemented_outside_storage() -> None:
     """The companion to the call-site guard: the reason the class closed is
     that nothing outside `storage` describes what the codec persists any
