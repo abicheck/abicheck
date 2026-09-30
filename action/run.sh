@@ -1884,9 +1884,23 @@ _is_compare_release_operand() {
 import sys
 from pathlib import Path
 
-from abicheck.cli_resolve import classify_compare_operand
 
-raise SystemExit(0 if classify_compare_operand(Path(sys.argv[1])) in {"directory", "package"} else 3)
+def is_release(path):
+    # For a non-directory, "directory or package" is exactly
+    # `is_package` -- the same function classify_compare_operand
+    # consults -- and `abicheck.package` imports in a fraction of the
+    # time `abicheck.cli_resolve` does. Only a directory needs the full
+    # classifier (single- vs multi-artifact ProjectSnapshot package).
+    if path.is_dir():
+        from abicheck.cli_resolve import classify_compare_operand
+
+        return classify_compare_operand(path) in {"directory", "package"}
+    from abicheck.package import is_package
+
+    return is_package(path)
+
+
+raise SystemExit(0 if any(is_release(Path(p)) for p in sys.argv[1:]) else 3)
 ' "$_probe_path") || _probe_rc=$?
     [[ "$_probe_rc" -eq 0 ]] && return 0
     [[ "$_probe_rc" -eq 3 ]] && return 1
@@ -1920,10 +1934,23 @@ _any_compare_release_operand() {
 import sys
 from pathlib import Path
 
-from abicheck.cli_resolve import classify_compare_operand
 
-release = any(classify_compare_operand(Path(p)) in {"directory", "package"} for p in sys.argv[1:])
-raise SystemExit(0 if release else 3)
+def is_release(path):
+    # For a non-directory, "directory or package" is exactly
+    # `is_package` -- the same function classify_compare_operand
+    # consults -- and `abicheck.package` imports in a fraction of the
+    # time `abicheck.cli_resolve` does. Only a directory needs the full
+    # classifier (single- vs multi-artifact ProjectSnapshot package).
+    if path.is_dir():
+        from abicheck.cli_resolve import classify_compare_operand
+
+        return classify_compare_operand(path) in {"directory", "package"}
+    from abicheck.package import is_package
+
+    return is_package(path)
+
+
+raise SystemExit(0 if any(is_release(Path(p)) for p in sys.argv[1:]) else 3)
 ' "${_probes[@]}") || _probe_rc=$?
     [[ "$_probe_rc" -eq 0 ]] && return 0
     [[ "$_probe_rc" -eq 3 ]] && return 1

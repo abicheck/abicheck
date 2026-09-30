@@ -959,6 +959,11 @@ class TestMeasureSizeErrorHandling:
             return {"baseline_ms": 1.0, "attach_ms": 1.0}
 
         monkeypatch.setattr(hg_gate, "_measure_one", _fake_measure_one)
+        # The surviving clang point would otherwise spawn a real subprocess
+        # memory probe (a full clang parse, ~13s) -- irrelevant to the skip
+        # decision this test pins, and already covered for real by
+        # TestLiveMeasurement below (integration lane).
+        monkeypatch.setattr(hg_gate, "_measure_memory", lambda n, backend: {})
         points = hg_gate._measure_size(10, repeat=1, backends=("clang", "castxml"))
         assert [p["backend"] for p in points] == ["clang"]
 
