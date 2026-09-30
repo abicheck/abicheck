@@ -128,7 +128,9 @@ reconciled (Track 1): `bundle_facts_store.py` is now a thin wrapper over
 plus `storage.import_bundle_facts`, so one physical layout serves both the
 live-object and document entry points; see A1.4's own entry below.
 **A1.7 is now also implemented** (directory packages only, matching A1.1's
-own "everything but `.tar.zst`" scope); A1.5, A1.6, and A1.8 remain open.
+own "everything but `.tar.zst`" scope). A1.5's storage criterion holds
+and is tested; its decoded-size criterion is deferred to A2.1/A2.5. A1.6
+and A1.8 remain open.
 See "Landed in Phase 1" below.
 
 - **A1.1** `ProjectSnapshotStore` reads and writes the D6 layout over a
@@ -447,7 +449,31 @@ and cross-schema-version-mismatch behavior; `test_dto.py`/
 
 #### A1.5 — digest-deduplicated shared evidence (`BuildSourcePack`/source graph)
 
-**Status: not implemented.** Distinct from A1.4 above: this item is about a
+**Status (2026-09-30): the storage criterion holds and is now tested; the
+decoded-size criterion is not met and belongs with A2.1/A2.5.** Checked
+rather than assumed. The `build` section is `{build_source_pack,
+build_source}` and nothing per-library. The graph is its own `graph` section,
+and every package writer, including `import_bundle_facts`, goes through
+`import_legacy_snapshot`. So N libraries embedding one capture write N
+byte-identical `build` sections, and `ObjectStore.put` stores them once
+under one digest.
+
+`tests/test_shared_build_evidence_dedup.py` states this as a property over
+2-5 libraries and generated evidence:
+- identical evidence is exactly one `build` object;
+- each library keeps its own `declarations` object;
+- every library reads its own pack back;
+- two different packs are never merged.
+
+No new writer or section shape was needed. What remains is the second
+criterion. Loading still decodes each artifact's `build` section into its
+own `BuildSourcePack`, so decoded size scales with N even though stored size
+does not. Sharing one decoded object across snapshots is unsafe while
+`BuildSourcePack` is mutable, and this is A2.1's lazy-loading and A2.5's
+measurement territory, not a storage-layout change. The earlier text is kept
+below for the design record.
+
+**Earlier status: not implemented.** Distinct from A1.4 above: this item is about a
 shared `BuildSourcePack`/project source graph/toolchain profile — evidence
 several libraries in one bundle can genuinely share byte-for-byte — being
 stored **once** and referenced by digest from every artifact that needs it,

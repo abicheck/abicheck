@@ -1239,6 +1239,24 @@ repo's own "say so explicitly and record the gap" convention, rather than
 attempted against the plan's own stated blocker or left silently
 unaddressed.
 
+**Status correction (2026-09-30): the two items above are no longer
+blocked, and one of them has landed.** Both landed through the
+storage-format-v2 plan rather than here, which is why this note did not see
+them. That plan owns the shared container, so going through it was the G38
+coordination this section asked for:
+- `BundleFacts`/baseline sets folded into `VariantRef.sections`: A1.4,
+  reconciled to one physical layout by Track 1.
+- Multi-artifact packages reachable from the standard `compare` CLI: A1.7.
+
+What remains of 8B is that plan's own open list:
+- the `.tar.zst` transport (A1.1);
+- digest-deduplicated shared `BuildSourcePack`/source-graph evidence
+  (A1.5);
+- `bundle_variants:` wiring (A1.6);
+- non-ELF artifact membership (A1.8).
+
+It is tracked there, not restated here.
+
 **Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider
 gap 6B's own migration would otherwise trip on, and 6B is what actually
