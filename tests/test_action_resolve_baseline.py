@@ -33,6 +33,7 @@ import sys
 import tarfile
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 from _workflow_exec import bash_executable, require_bash
 
@@ -135,14 +136,15 @@ def test_every_declared_input_is_forwarded_to_run_sh_as_an_env_var() -> None:
     directly (setting the env var by hand, bypassing action.yml entirely)
     still passes (Codex review: exactly this gap on `expected-project-ref`).
     """
-    import yaml
 
     # python-version is consumed by the earlier "Set up Python" step
     # (actions/setup-python's own `python-version` input), never by run.sh
     # -- it has no INPUT_PYTHON_VERSION to forward.
     _NOT_FORWARDED_TO_RUN_SH = {"python-version"}
 
-    action = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
+    action = _yaml_fast.safe_load(
+        (ACTION_DIR / "action.yml").read_text(encoding="utf-8")
+    )
     declared_inputs = set(action.get("inputs", {}) or {}) - _NOT_FORWARDED_TO_RUN_SH
     resolve_step = next(
         step

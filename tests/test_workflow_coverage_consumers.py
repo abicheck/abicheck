@@ -43,6 +43,7 @@ import itertools
 import re
 from typing import Any
 
+import _yaml_fast
 import yaml
 from _gha_expressions import condition_holds, runner_os_for
 from _workflow_files import WORKFLOW_DIR, read_repo_text, workflow_paths
@@ -140,7 +141,7 @@ def _orphaned_reports() -> list[str]:
     report no step in the same combination reads."""
     findings = []
     for path in workflow_paths():
-        doc = yaml.safe_load(read_repo_text(path))
+        doc = _yaml_fast.safe_load(read_repo_text(path))
         for job_name, job in ((doc or {}).get("jobs") or {}).items():
             if not isinstance(job, dict):
                 continue
@@ -313,7 +314,7 @@ class TestMatrixExpansionFollowsGitHub:
         """The live matrices: three canonical coverage shards, and the two
         other-OS legs -- each leg is where a producer/consumer pair is
         checked, so a mis-expansion would silently skip one."""
-        doc = yaml.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
+        doc = _yaml_fast.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
         shards = _matrix_combinations(doc["jobs"]["unit-tests"])
         assert [(c["python-version"], c["shard"]) for c in shards] == [
             ("3.13", 1),
@@ -340,6 +341,6 @@ def test_a_data_only_coverage_run_is_a_producer_too() -> None:
 
 
 def test_the_live_shards_are_surveyed_as_data_producers() -> None:
-    doc = yaml.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
+    doc = _yaml_fast.safe_load(read_repo_text(WORKFLOW_DIR / "ci.yml"))
     runs = " ".join(str(s.get("run", "")) for s in _steps(doc["jobs"]["unit-tests"]))
     assert ".coverage" in _reports_written(runs)

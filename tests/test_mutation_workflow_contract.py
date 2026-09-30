@@ -33,6 +33,7 @@ import importlib.util
 import tomllib
 from pathlib import Path, PurePosixPath
 
+import _yaml_fast
 import pytest
 
 yaml = pytest.importorskip("yaml")
@@ -42,7 +43,7 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "mutation.yml"
 
 
 def _workflow() -> dict:
-    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    return _yaml_fast.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
 
 def _on_block(wf: dict) -> dict:
@@ -76,7 +77,7 @@ def _filters() -> dict[str, list[str]]:
     """Every dorny/paths-filter list in the `resolve` job."""
     steps = _workflow()["jobs"]["resolve"]["steps"]
     step = next(s for s in steps if "paths-filter" in str(s.get("uses", "")))
-    return yaml.safe_load(step["with"]["filters"])
+    return _yaml_fast.safe_load(step["with"]["filters"])
 
 
 def _paths_filter() -> list[str]:

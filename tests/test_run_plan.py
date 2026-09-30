@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 from click.testing import CliRunner
 
@@ -1193,12 +1194,13 @@ class TestToolchainMatrixFixtureExample:
         assert (self._DIR / "README.md").is_file()
 
     def test_two_profiles_resolve_to_documented_compile_context(self) -> None:
-        import yaml
 
         from abicheck.buildsource.toolchain_bindings import load_bindings_file
 
         config = ProjectTargetsConfig.from_dict(
-            yaml.safe_load((self._DIR / ".abicheck.yml").read_text(encoding="utf-8"))
+            _yaml_fast.safe_load(
+                (self._DIR / ".abicheck.yml").read_text(encoding="utf-8")
+            )
         )
         bindings_file = load_bindings_file(self._DIR / "toolchain-bindings.yml")
         plan, report = generate_run_plan(

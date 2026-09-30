@@ -30,6 +30,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 
 _GATE_PATH = (
@@ -1738,10 +1739,9 @@ def test_every_shared_skill_fragment_is_registered_in_topics_yaml() -> None:
     """The real tree: every `skills-src/shared/*.md` fragment that claims a
     `summarizes` topic must be registered against it, and the whole gate must
     stay error-free with those entries present."""
-    import yaml
 
     root = Path(__file__).resolve().parent.parent
-    topics = yaml.safe_load(
+    topics = _yaml_fast.safe_load(
         (root / "docs" / "_meta" / "topics.yaml").read_text(encoding="utf-8")
     )["topics"]
     registered = {

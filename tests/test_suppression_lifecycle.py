@@ -13,6 +13,7 @@ import textwrap
 from datetime import date, timedelta
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 
 from abicheck.suppression import SuppressionList, suggest_suppressions
@@ -218,9 +219,8 @@ class TestSuggestSuppressions:
         ]
         yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
         # Should be parseable as YAML without error
-        import yaml
 
-        data = yaml.safe_load(yaml_text)
+        data = _yaml_fast.safe_load(yaml_text)
         assert len(data["suppressions"]) == 1
 
     def test_custom_expiry_days(self) -> None:
@@ -263,14 +263,13 @@ class TestSuggestSuppressions:
         assert 'type_pattern: "' not in yaml_text
 
     def test_output_is_valid_yaml(self) -> None:
-        import yaml
 
         changes = [
             {"kind": "func_removed", "symbol": "_ZN3foo6legacyEv"},
             {"kind": "type_size_changed", "symbol": "MyStruct"},
         ]
         yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
-        data = yaml.safe_load(yaml_text)
+        data = _yaml_fast.safe_load(yaml_text)
         assert data["version"] == 1
         assert len(data["suppressions"]) == 2
 

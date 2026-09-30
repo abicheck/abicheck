@@ -37,6 +37,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 from _workflow_exec import bash_executable, require_bash
 
@@ -444,10 +445,9 @@ class TestRemovedInputTombstones:
         all. Pin that, so a later "tidy up dead inputs" pass cannot silently
         restore the drop-on-the-floor behavior this whole block exists to
         prevent."""
-        import yaml
 
         action_yml = VALIDATE_SH.parent.parent / "action.yml"
-        inputs = yaml.safe_load(action_yml.read_text())["inputs"]
+        inputs = _yaml_fast.safe_load(action_yml.read_text())["inputs"]
         assert name in inputs
         description = inputs[name]["description"].lower()
         # Either tombstone wording counts: the hard-error tombstones are
@@ -857,10 +857,9 @@ class TestUnsetFormatUsesEachModesOwnDefault:
         `format` would silently populate INPUT_FORMAT for every mode that
         never sets it, defeating the empty-string sentinel every mode
         branch's `${INPUT_FORMAT:-...}` relies on."""
-        import yaml
 
         action_yml = ACTION_DIR.parent / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         assert "default" not in data["inputs"]["format"], (
             "action.yml's `format` input must not declare a default — see "
             "this class's docstring."

@@ -39,6 +39,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import _yaml_fast
 import click
 import pytest
 from click.testing import CliRunner
@@ -242,9 +243,8 @@ def test_compile_options_rejects_plugin_loading_sequences(
 
 
 def _yaml_compile_block(options_yaml: str) -> dict:
-    import yaml
 
-    return yaml.safe_load(options_yaml)["compile"]
+    return _yaml_fast.safe_load(options_yaml)["compile"]
 
 
 def test_compile_options_rejects_plugin_loading_even_from_explicit_config(

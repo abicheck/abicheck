@@ -34,8 +34,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 CORPUS_PATH = REPO / "tests" / "agent_skills" / "trigger_corpus.yaml"
@@ -44,7 +44,7 @@ ADR_PATH = (
     REPO / "docs" / "contribute" / "adr" / "058-native-compatibility-agent-skills.md"
 )
 
-CORPUS = yaml.safe_load(CORPUS_PATH.read_text(encoding="utf-8"))
+CORPUS = _yaml_fast.safe_load(CORPUS_PATH.read_text(encoding="utf-8"))
 POSITIVE = CORPUS["positive"]
 NEGATIVE = CORPUS["negative"]
 
@@ -76,7 +76,7 @@ def _description(skill: str) -> str:
     text = (SRC / skill / "SKILL.md").read_text(encoding="utf-8")
     match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.DOTALL)
     assert match is not None
-    return str(yaml.safe_load(match.group(1))["description"])
+    return str(_yaml_fast.safe_load(match.group(1))["description"])
 
 
 SKILL_NAMES = sorted(p.name for p in SRC.iterdir() if (p / "SKILL.md").is_file())

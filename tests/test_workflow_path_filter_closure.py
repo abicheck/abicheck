@@ -43,8 +43,8 @@ from __future__ import annotations
 
 import re
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_files import REPO_ROOT, read_repo_text, workflow_paths
 
 # A repo-relative script handed to an interpreter, or executed directly.
@@ -147,7 +147,7 @@ def _filtered_workflows() -> list[tuple[str, str, list[str], set[str]]]:
     cases = []
     for path in workflow_paths():
         text = read_repo_text(path)
-        doc = yaml.safe_load(text)
+        doc = _yaml_fast.safe_load(text)
         # PyYAML parses the bare `on:` key as the boolean True.
         triggers = (doc or {}).get("on", (doc or {}).get(True)) or {}
         if not isinstance(triggers, dict):

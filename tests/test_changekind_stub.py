@@ -42,6 +42,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import _yaml_fast
+
 REPO_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -124,7 +126,7 @@ def test_every_member_value_round_trips_through_yaml_and_json():
 
     for member in ChangeKind:
         dumped = yaml.safe_dump(member.value)
-        assert yaml.safe_load(dumped) == member.value
+        assert _yaml_fast.safe_load(dumped) == member.value
         assert json.loads(json.dumps(member.value)) == member.value
 
 

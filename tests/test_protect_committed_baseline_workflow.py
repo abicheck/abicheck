@@ -37,8 +37,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, require_bash
 
 WORKFLOW_PATH = (
@@ -51,7 +51,7 @@ WORKFLOW_PATH = (
 
 def _load() -> dict[str, Any]:
     with WORKFLOW_PATH.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return _yaml_fast.safe_load(fh)
 
 
 def _check_job(data: dict[str, Any]) -> dict[str, Any]:

@@ -1021,7 +1021,10 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
         Random rather than hand-picked so the cases are chosen without the
         author's own idea of which combinations matter; seeded so a failure
         is reproducible. ``ABICHECK_F19_SEED`` re-seeds it for a soak run
-        without editing the test.
+        without editing the test. Fifty points, not the whole space: the
+        exhaustive sibling below is ``slow``, which ci.yml's slow-tests job
+        runs on every PR, so this sample only has to catch a regression
+        locally, not to carry the claim.
         """
         old_p, new_p = _write_pair(tmp_path)
         suppress = _write_suppression(tmp_path)
@@ -1030,7 +1033,7 @@ class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
         rng = random.Random(int(os.environ.get("ABICHECK_F19_SEED", "0xF19"), 0))
         out_dir = tmp_path / "out"
         out_dir.mkdir(exist_ok=True)
-        for case in rng.sample(_permutations(), 150):
+        for case in rng.sample(_permutations(), 50):
             exit_code, facts = _run_permutation(case, old_p, new_p, suppress, out_dir)
             _assert_agrees_with_oracle(case, facts, oracle, out_dir / "canonical.json")
             assert exit_code == 4, case

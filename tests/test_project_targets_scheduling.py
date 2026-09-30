@@ -34,6 +34,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 import yaml
 from _workflow_exec import bash_executable, require_bash
@@ -165,7 +166,9 @@ def _resolve_dependency_source(
     changes the branching still fails here.
     """
     require_bash()
-    action = yaml.safe_load((REPO_ROOT / "action.yml").read_text(encoding="utf-8"))
+    action = _yaml_fast.safe_load(
+        (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
+    )
     step = next(
         s
         for s in action["runs"]["steps"]

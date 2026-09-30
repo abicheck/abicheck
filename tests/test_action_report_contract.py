@@ -43,8 +43,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 
 from tests._workflow_exec import bash_executable, require_bash
 
@@ -113,7 +113,9 @@ def _executable_surface(action_dir: Path) -> str:
     bitten once by a text assertion that matched a comment describing the
     thing it was checking for the absence of.
     """
-    action = yaml.safe_load((action_dir / "action.yml").read_text(encoding="utf-8"))
+    action = _yaml_fast.safe_load(
+        (action_dir / "action.yml").read_text(encoding="utf-8")
+    )
     parts: list[str] = []
     for step in action["runs"]["steps"]:
         if "uses" in step:
@@ -149,7 +151,9 @@ class TestNeitherActionAnalysesAnything:
         assert found == [], f"{action_dir.name} invokes build tool(s) {found}"
 
     def test_the_only_third_party_step_is_setup_python(self, action_dir: Path) -> None:
-        action = yaml.safe_load((action_dir / "action.yml").read_text(encoding="utf-8"))
+        action = _yaml_fast.safe_load(
+            (action_dir / "action.yml").read_text(encoding="utf-8")
+        )
         uses = [s["uses"] for s in action["runs"]["steps"] if "uses" in s]
         assert all(u.startswith("actions/setup-python@") for u in uses), uses
 
@@ -177,7 +181,9 @@ class TestNeitherActionAnalysesAnything:
     def test_it_is_a_composite_action_with_no_docker_step(
         self, action_dir: Path
     ) -> None:
-        action = yaml.safe_load((action_dir / "action.yml").read_text(encoding="utf-8"))
+        action = _yaml_fast.safe_load(
+            (action_dir / "action.yml").read_text(encoding="utf-8")
+        )
         assert action["runs"]["using"] == "composite"
         assert all(
             "docker" not in str(s.get("uses", "")) for s in action["runs"]["steps"]
@@ -231,7 +237,7 @@ class TestDeclaredSurface:
     """
 
     def test_report_action_outputs(self) -> None:
-        action = yaml.safe_load(
+        action = _yaml_fast.safe_load(
             (REPORT_ACTION / "action.yml").read_text(encoding="utf-8")
         )
         assert set(action["outputs"]) == {
@@ -243,7 +249,7 @@ class TestDeclaredSurface:
         }
 
     def test_report_action_inputs_cover_the_documented_contract(self) -> None:
-        action = yaml.safe_load(
+        action = _yaml_fast.safe_load(
             (REPORT_ACTION / "action.yml").read_text(encoding="utf-8")
         )
         names = {str(k) for k in action["inputs"]}
@@ -294,7 +300,7 @@ class TestDeclaredSurface:
         the step id is silently empty for every consumer, which is the
         failure that actually reaches people.
         """
-        action = yaml.safe_load(
+        action = _yaml_fast.safe_load(
             (VERIFY_ACTION / "action.yml").read_text(encoding="utf-8")
         )
         declared = set(action["outputs"])
@@ -315,7 +321,7 @@ class TestDeclaredSurface:
 
     def test_every_input_carries_help_text(self) -> None:
         for action_dir in (REPORT_ACTION, VERIFY_ACTION):
-            action = yaml.safe_load(
+            action = _yaml_fast.safe_load(
                 (action_dir / "action.yml").read_text(encoding="utf-8")
             )
             for name, spec in action["inputs"].items():

@@ -23,7 +23,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-import yaml
+import _yaml_fast
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 
@@ -39,7 +39,7 @@ def _load_gen():
 
 def test_generated_reference_is_in_sync_with_action_yml():
     gen = _load_gen()
-    action = yaml.safe_load(gen.ACTION_YML.read_text(encoding="utf-8"))
+    action = _yaml_fast.safe_load(gen.ACTION_YML.read_text(encoding="utf-8"))
     expected = gen.render(action)
     actual = gen.OUT_PATH.read_text(encoding="utf-8")
     assert actual == expected, (
@@ -50,7 +50,7 @@ def test_generated_reference_is_in_sync_with_action_yml():
 
 def test_every_action_input_and_output_appears_in_generated_reference():
     gen = _load_gen()
-    action = yaml.safe_load(gen.ACTION_YML.read_text(encoding="utf-8"))
+    action = _yaml_fast.safe_load(gen.ACTION_YML.read_text(encoding="utf-8"))
     input_rows, output_rows = gen.build_rows(action)
     assert {r["name"] for r in input_rows} == set(action["inputs"])
     assert {r["name"] for r in output_rows} == set(action["outputs"])

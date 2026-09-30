@@ -35,8 +35,8 @@ import re
 import sys
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "skills-src"
@@ -68,7 +68,7 @@ def _front_matter(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
     match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.DOTALL)
     assert match is not None, f"{path}: missing YAML frontmatter"
-    data = yaml.safe_load(match.group(1))
+    data = _yaml_fast.safe_load(match.group(1))
     assert isinstance(data, dict), f"{path}: frontmatter is not a mapping"
     return data
 

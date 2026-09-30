@@ -43,8 +43,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 from _tmp_tree_resilience import require_workspace, run_writing_env_file
 
 #: Distinguishes the per-invocation step-body script files `run_step` writes,
@@ -121,7 +121,7 @@ requires_newline_in_filenames = pytest.mark.skipif(
 
 def load_workflow(name: str) -> dict[str, Any]:
     with open(WORKFLOWS / name, encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return _yaml_fast.safe_load(fh)
 
 
 def find_run_step(workflow: str, job: str, step_name: str) -> dict[str, Any]:

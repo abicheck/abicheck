@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, require_bash
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +19,7 @@ CHECK_TARGET = ROOT / "actions" / "check-target" / "action.yml"
 
 
 def _load(path: Path) -> dict[str, Any]:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return _yaml_fast.safe_load(path.read_text(encoding="utf-8"))
 
 
 def _steps(container: dict[str, Any]) -> list[dict[str, Any]]:
