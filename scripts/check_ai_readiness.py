@@ -22,6 +22,7 @@ import argparse
 import ast
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -3630,6 +3631,13 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
 }
 
 
+def _run_one_check(name: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Run one check in a worker process; return its findings for the parent."""
+    findings = Findings()
+    CHECKS[name](findings)
+    return findings.errors, findings.warnings
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -3651,14 +3659,29 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Emit a machine-readable summary on stdout (in addition to the report).",
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="Run checks in N worker processes (0 = one per CPU). The checks "
+        "are independent whole-tree scans, so the wall time drops to roughly "
+        "the slowest one; findings are merged in registry order either way.",
+    )
     args = parser.parse_args(argv)
 
     findings = Findings()
-    selected = args.only or list(CHECKS)
-    for name in selected:
-        if name in args.skip:
-            continue
-        CHECKS[name](findings)
+    selected = [n for n in (args.only or list(CHECKS)) if n not in args.skip]
+    jobs = args.jobs if args.jobs > 0 else (os.cpu_count() or 1)
+    if jobs > 1 and len(selected) > 1:
+        from concurrent.futures import ProcessPoolExecutor
+
+        with ProcessPoolExecutor(max_workers=min(jobs, len(selected))) as pool:
+            for errors, warnings in pool.map(_run_one_check, selected):
+                findings.errors.extend(errors)
+                findings.warnings.extend(warnings)
+    else:
+        for name in selected:
+            CHECKS[name](findings)
 
     rc = findings.report()
 
