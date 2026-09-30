@@ -88,3 +88,17 @@ fix it in place rather than adding a parallel workflow. Common findings:
   migrating is a separate decision — see
   [migrating from ABICC](../../../docs/use/from-abicc.md) and
   [from libabigail](../../../docs/use/from-libabigail.md).
+
+## Optional add-ons (offer when relevant)
+
+- **SARIF / Code Scanning:** `format: sarif` + `upload-sarif: 'true'`, which
+  requires `security-events: write` — so pin every action in that job by SHA.
+  Single-pair compare only.
+- **Full report as an artifact:** `extra-args: -o json=abicheck-report.json`,
+  then `actions/upload-artifact`, and pass its `artifact-url` output to
+  `pr-comment-report-artifact-url`.
+- **Fork PR comments:** the trusted `workflow_run` split —
+  [fork-PR reporting](../../../docs/use/fork-pr-reporting.md).
+- **Many targets/profiles/baseline channels:** the reusable
+  `check-project.yml` workflow —
+  [which scenario am I](../../../docs/integration/index.md).

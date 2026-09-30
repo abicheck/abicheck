@@ -10,244 +10,139 @@ metadata:
 
 # Setting up compatibility checking in GitHub Actions
 
-Someone wants their repository to **stop merging changes that break the
-library's existing users, from now on, without anyone having to remember to
-check**. The job is a working CI integration that answers that question on
-every pull request — not a pasted snippet from a README. A workflow that is
-syntactically valid but compares against nothing meaningful, parses the wrong
-headers, or can never fail is worse than no workflow: it manufactures
-confidence.
+Goal: every pull request is checked against what the library's users already
+have, with no one remembering to run anything. A workflow that parses the
+wrong headers, compares against nothing real, or can never fail is worse than
+none. The deliverable is working workflow files plus
+[the setup report](#what-you-hand-back).
 
-The deliverable, every time, is [the setup report below](#what-you-hand-back):
-the files you wrote, the decisions they encode, and what the check still
-cannot see.
+Three [safety invariants](../shared/safety-invariants.md) govern this job
+(the rest concern reviews, not setup): never re-point a baseline to make a
+check green (7); never add or widen a suppression to quiet the first run (6);
+the request authorizes workflow files, not edits to the build — ask before
+touching `CMakeLists.txt` and the like (8).
 
-Read [safety invariants](../shared/safety-invariants.md) first. Two of them
-govern this whole workflow: a baseline is never re-pointed to make a check
-green (item 7), and you change the user's *build* only with their explicit
-confirmation (item 8) — being asked to add a CI check authorizes the workflow
-files, not edits to `CMakeLists.txt`.
-
-## Evaluated scope
-
-Designed for: a GitHub repository building one or more **C or C++ shared
-libraries for Linux (ELF)** with GCC or Clang, on GitHub-hosted
-`ubuntu-*` runners, using the `abicheck/abicheck` composite Action. macOS/
-Windows libraries, static-only libraries, header-only libraries, and
-self-hosted/air-gapped runners are possible but outside this workflow's
-evaluated scope — say so in the report rather than presenting the result with
-the same confidence.
+Scope: C/C++ **shared** libraries, Linux ELF, GCC/Clang, GitHub-hosted
+`ubuntu-*` runners, the `abicheck/abicheck` Action. Anything else (macOS/
+Windows, static- or header-only, self-hosted) may work — say it is outside
+the evaluated scope.
 
 ## Step 0 — Preflight
 
-1. Confirm this is a GitHub repository (`.git/` plus a `github.com` remote,
-   or an existing `.github/`). Another CI system is out of scope: say so.
-2. If `abicheck` is installed locally, run `abicheck --version` and compare it
-   to this skill's declared version range (`metadata.abicheck-version-range`); you will use it to
-   validate the setup in step 6. It is not required — the Action installs its
-   own copy — so a missing local install is a note, not a stop. Do not install
-   it yourself.
-3. Look for an existing ABI check (`grep -ril 'abicheck\|abi-compliance\|abidiff'
-   .github/`). If one exists, the task is *repair or migrate*, not *add a
-   second one* — see [pitfalls](references/pitfalls.md#repairing-an-existing-check).
+1. It is a GitHub repository (`github.com` remote or `.github/`); other CI
+   systems are out of scope.
+2. If `abicheck` is installed, check `abicheck --version` against this
+   skill's declared version range (`metadata.abicheck-version-range`). A
+   missing local install is fine — the Action installs its own; don't
+   install it yourself.
+3. `grep -ril 'abicheck\|abi-compliance\|abidiff' .github/` — an existing
+   check means **repair it in place**, not add a second one; read
+   [repairing an existing check](references/pitfalls.md#repairing-an-existing-check).
 
-## Step 1 — Inventory the repository (read, don't ask)
+## Step 1 — Inventory (read the repo; ask only what it cannot tell you)
 
-Establish each of these from the files, and ask the user only for what the
-repository genuinely cannot tell you:
+- **Build commands** — reuse the existing CI workflow's steps verbatim.
+- **Shared targets and their output paths** — one check per shipped library
+  (matrix); a static-by-default CMake project needs `-DBUILD_SHARED_LIBS=ON`
+  in the check build.
+- **Public headers** — the installed directory (`install(DIRECTORY include/`,
+  `PUBLIC_HEADER`, `include_HEADERS`), never `src/` or the repo root.
+- **C or C++** — the Action defaults to `lang: c++`; C needs `lang: c`.
+- **Releases** (tags, GitHub Releases) — decides the baseline (step 2).
+- **Supported platforms / minimum glibc** ("RHEL 8", "Ubuntu 20.04",
+  manylinux) — must be declared (step 3), or floor raises pass green.
+- **API shape** — inline functions, templates, macros, default arguments in
+  public headers, or "broke users without changing a symbol" → `source` depth.
+- **Toolchain** — cross-compilation, Bazel/Autotools, clang-only, several
+  profiles → [depth, toolchain, floors](references/depth-toolchain-and-floors.md).
+- **Fork contributors** — their PRs get no comment from this job.
 
-| Fact | Where it comes from | Why it matters |
+## Step 2 — Baseline
+
+| Situation | Strategy | Read |
 |---|---|---|
-| Build system and the exact build commands | `CMakeLists.txt`, `meson.build`, `configure.ac`, `Makefile`, `BUILD`/`MODULE.bazel`, and **the existing CI workflows** (reuse their build steps verbatim) | The check needs the real candidate binary |
-| Which targets are **shared** libraries and where they land | `add_library(... SHARED)`, `BUILD_SHARED_LIBS`, `shared_library()`, `-shared`/`libtool` | Only a shared library has a binary ABI to gate; a static-only project needs `BUILD_SHARED_LIBS=ON` for the check build |
-| The **public** header directory | `install(DIRECTORY include/ ...)`, `install(FILES ...)`, `PUBLIC_HEADER`, `include_HEADERS` | The public contract. Never point the check at `src/` or private headers — that turns internal refactors into "breaks" |
-| C or C++ | public headers' language, `project(... LANGUAGES C)` | The Action defaults to `lang: c++`; a C library needs `lang: c` |
-| Release process | tags (`git tag`), GitHub Releases, `on: release`/`on: push: tags` workflows, a `CHANGELOG` | Decides the baseline strategy (step 2) |
-| Versioning promise | `SOVERSION`/`VERSION`, `-Wl,-soname`, symbol-version scripts, a stated stability policy | A project that bumps SONAME on every release has a different gate from one promising stability |
-| Contributors from forks | `CONTRIBUTING.md`, public repo | Fork PRs cannot receive a PR comment from the check job |
-| Existing permissions / security posture | `permissions:` blocks, pinned-SHA usage, org rules | Match it |
-| Supported platforms / minimum glibc | README, docs, packaging (`manylinux`, "RHEL 8", "Ubuntu 20.04") | A stated floor must be declared, or floor regressions pass green |
-| Shape of the public API | inline functions, templates, macros, default arguments, `constexpr` in the public headers; "broke users without changing a symbol" | Decides `headers` vs `source` depth |
-| Toolchain constraints | cross-compilation toolchain files, clang-only or SYCL builds, several build profiles | Decides header frontend flags, runner arch, per-profile baselines |
+| Tagged/GitHub Releases, compatibility promised with what shipped | **Release snapshot**: release workflow dumps `<lib>.abicheck.json`, attaches it; PRs use `abi-baseline: latest-release` | [template A](references/template-release-baseline.md) |
+| No releases, or a zero-infrastructure start | **Merge-base build**: PR job also builds the base commit; each side with its own headers | [template B](references/template-merge-base.md) |
+| Snapshot already committed / wanted | **Committed snapshot** + refresh rule | [template C](references/template-committed-snapshot.md) |
 
-A library with **several** shared targets gets one check per library (a
-matrix), never one step pointed at the first `.so` found.
+Read only the template you chose. Recommend a strategy and say why; the user
+decides. Both sides must be built identically
+([comparability](../shared/baseline-and-comparability.md)).
 
-## Step 2 — Choose the baseline strategy
+## Step 3 — Gate decisions (defaults in parentheses)
 
-The baseline is what "breaking" is measured against. It is the decision that
-most often makes a gate useless. See
-[baseline and comparability](../shared/baseline-and-comparability.md) for why
-both sides must be built the same way.
+1. **Rollout** (advisory first: `fail-on-breaking: 'false'`, PR comment on;
+   state when it flips to blocking).
+2. **Binary break** blocks; **API-only break** (`fail-on-api-break`) blocks
+   for SDKs whose users recompile, else warns.
+3. **Intentional breaks** — a label relaxes `fail-on-breaking` for that PR;
+   the comparison still runs.
+4. **Depth** (`headers`). `source` needs clang, a compile DB and source
+   evidence on the baseline side too — see
+   [depth](references/depth-toolchain-and-floors.md#2-evidence-depth-headers-l2-vs-buildsource-l3l5).
+5. **Runtime floors** — declare stated floors in `.abicheck.yml`
+   (`deployment.runtime_floors`); undeclared, a glibc raise is only a
+   warning. See [floors](references/depth-toolchain-and-floors.md#1-runtime-and-dependency-floors-glibc-libstdc).
+6. **Policy** (`strict_abi`); see
+   [policies](../shared/policies-and-suppressions.md) only if the contract is
+   an SDK or plugin ABI.
 
-| Situation | Strategy | Template |
-|---|---|---|
-| The project publishes GitHub Releases/tags and promises compatibility with what shipped | **Release baseline**: a release workflow dumps a snapshot (`<lib>.abicheck.json`) and attaches it to the release; PRs compare against it with `abi-baseline: latest-release` | [A](references/workflow-templates.md#a-release-baseline) |
-| No releases yet, releases are irregular, or the user wants a zero-infrastructure start | **Merge-base build**: the PR job also builds the PR's base commit and compares the two native libraries, each with its own headers | [B](references/workflow-templates.md#b-merge-base-build) |
-| A snapshot is already committed, or the user explicitly wants a reviewed, hand-refreshed file | **Committed snapshot** (`old-library: abi/<lib>.abicheck.json`) plus a documented refresh procedure | [C](references/workflow-templates.md#c-committed-snapshot) |
+## Step 4 — Write the workflow (every rule below is required)
 
-Recommend one and say why; the choice belongs to the user
-([safety invariants](../shared/safety-invariants.md) item 7). The common good
-answer for a project with releases is **A** — it gates on the actual promise
-("compatible with what we shipped"). Strategy A has a bootstrap problem: the
-latest existing release has no snapshot asset yet, so the first PR run would
-fail. Handle it (template A's `workflow_dispatch` backfill) rather than
-leaving the user to discover it.
-
-If they need both "compatible with the last release" and "did *this* PR
-introduce the break", that is two checks against two baselines — see
-[baseline management](../../docs/use/baseline-management.md).
-
-## Step 3 — Decide what blocks and what warns
-
-Bring these decisions to the user; the defaults in parentheses are the
-recommended starting point. See [CI wiring](../shared/ci-wiring.md) for the
-general shape of these choices.
-
-1. **Rollout** (advisory first on a repository that has never had the check:
-   `fail-on-breaking: 'false'` with the PR comment on, flipped to blocking
-   after the first clean runs). A brand-new gate that fails its first PR for a
-   pre-existing reason gets disabled, not fixed.
-2. **Binary break** blocks (`fail-on-breaking: 'true'`, the Action default).
-3. **Source-only (API) break** (`fail-on-api-break`) — blocks for an SDK whose
-   users recompile against the headers; warns otherwise.
-4. **Intentional breaks** — a PR label (e.g. `abi-break-approved`) relaxes
-   the gate for that one PR; it never skips the comparison. See template
-   A's `fail-on-breaking` expression.
-5. **Evidence depth** (`headers`, the default). Headers plus the binary catch
-   signature, layout, and enum breaks. `source` depth adds inline bodies,
-   templates, macros and default arguments, and costs clang, a compile
-   database, and source evidence on the **baseline** side as well — see
-   [depth, toolchain and floors](references/depth-toolchain-and-floors.md#2-evidence-depth-headers-l2-vs-buildsource-l3l5).
-7. **Runtime floors** — when the project states supported distributions,
-   declare them (`deployment.runtime_floors` in `.abicheck.yml`). Without
-   that, a raised glibc/libstdc++ requirement is only a warning and the gate
-   passes. See [runtime floors](references/depth-toolchain-and-floors.md#1-runtime-and-dependency-floors-glibc-libstdc).
-6. **Policy** (`strict_abi`) — `sdk_vendor`/`plugin_abi` only when the
-   project's contract actually is one of those; see
-   [policies and suppressions](../shared/policies-and-suppressions.md).
-
-Never add a suppression file to make the first run quiet
-([safety invariants](../shared/safety-invariants.md) item 6).
-
-## Step 4 — Write the workflow
-
-Start from the template the strategy selected, then adapt it to the facts
-from step 1. Non-negotiable properties of the result (each is explained in
-[pitfalls](references/pitfalls.md)):
-
-- **Pin** `abicheck/abicheck@v0.6.0` (an exact tag, never `@main`); pin every
-  action by commit SHA with the tag in a comment when the job holds an
-  elevated permission such as `security-events: write` or `contents: write`.
-  A pin must be a **commit** SHA, and an annotated tag's plain
-  `refs/tags/<tag>` line is the tag *object*, which `uses:` cannot run.
-  Resolve every pin with exactly this command, which prints the commit
-  whether the tag is annotated or lightweight, and copy its output:
+- `abicheck/abicheck@v0.6.0` — exact tag. In a job holding `contents: write`
+  or `security-events: write`, pin **every** action to a commit SHA with the
+  tag in a comment, resolved only with:
   `git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>' 'refs/tags/<tag>^{}' | sort -k2 | tail -1 | cut -f1`
-  Never type a SHA from memory or pick a line by eye.
-- **Least privilege**, declared per job: `contents: read` always;
-  `pull-requests: write` only for the PR comment; `contents: write` only in
-  the release job that uploads the snapshot.
-- **Never `pull_request_target`** with a checkout of PR code. Fork PRs run
-  under `pull_request`; their comment needs the separate trusted
-  [fork-PR reporting](../../docs/use/fork-pr-reporting.md) workflow — offer
-  it, don't silently omit the case.
-- **Run abicheck through the Action on both sides** — `mode: dump` for the
-  release snapshot, the default `compare` for the PR. The Action provisions a
-  supported CastXML (conda-forge) and abicheck itself. Do not hand-roll
-  `pip install abicheck` plus `apt-get install castxml` in a `run:` step:
-  distribution CastXML packages are commonly older than abicheck's supported
-  range and are refused, so the job fails on its first run.
-- Build the candidate **exactly like a release** (same flags, same
-  `BUILD_SHARED_LIBS`, `RelWithDebInfo`/`-g` so debug info is available), and
-  build the baseline side the same way.
-- Match the build system and toolchain: library path, cross-compilation
-  (`gcc-prefix`/`sysroot`), header frontend, per-profile baselines — see
-  [build systems](references/depth-toolchain-and-floors.md#4-build-systems)
-  and [header backends](references/depth-toolchain-and-floors.md#3-header-ast-backends).
-- Point `header`/`new-header` at the **public** header directory, set `lang`
-  correctly, and name the exact library path — no globs that might match
-  zero or two files.
-- A `concurrency:` group that cancels superseded runs on the same PR.
-- No top-level `paths:` filter if the check will become a **required** status
-  check (a filtered-out required check stays pending forever); use
-  `paths-ignore` for docs only, or a job-level condition.
-- A snapshot name ending in `.abicheck.json` (what `abi-baseline:
-  latest-release` searches for), one per library, with the library name in it.
+  (an annotated tag's plain line is the tag object, which `uses:` cannot run;
+  never type a SHA from memory).
+- `permissions:` per job: `contents: read`; `pull-requests: write` for the
+  comment; `contents: write` only in the release-upload job.
+- `pull_request`, never `pull_request_target`; offer
+  [fork-PR reporting](../../docs/use/fork-pr-reporting.md) if forks
+  contribute.
+- abicheck runs **through the Action** on both sides (`mode: dump` for
+  snapshots). No `pip install abicheck` + `apt-get install castxml`: distro
+  CastXML is below the supported range and is refused.
+- Both sides built the same way, with debug info (`RelWithDebInfo`/`-g`),
+  pinned runner image (`ubuntu-24.04`).
+- Exact library path (no globs), public header directory, correct `lang`.
+- Snapshot names end in `.abicheck.json`, one per library.
+- `concurrency:` cancelling superseded runs; no top-level `paths:` filter on
+  a check that will become required.
+- Its own file (`abi-check.yml`, plus `abi-baseline.yml` for strategy A).
 
-Keep the new workflow in its own file (`.github/workflows/abi-check.yml`,
-plus `abi-baseline.yml` for strategy A) unless the user asks to extend an
-existing one — a separate file is easier to make required and to roll back.
-Reuse the repository's existing build steps (dependency installation, CMake
-options) rather than inventing a different build.
+Add an `.abicheck.yml` (via `build-config`) only for a real decision
+(floors, severity), never to restate defaults.
 
-## Step 5 — Optional configuration
+## Step 5 — Validate
 
-Only when a decision from step 3 needs it: an `.abicheck.yml` (e.g.
-`severity:` block, or per-kind policy overrides) passed via `build-config`, or a
-`CONTRIBUTING.md` paragraph telling contributors what the check means and how
-to request the intentional-break label. Do not create configuration that
-merely restates defaults.
-
-## Step 6 — Validate before handing back
-
-Prove what you can locally; say exactly what you could not:
-
-1. YAML parses; if `actionlint` is available, it passes.
-2. Every `uses:` reference is pinned; every Action input you used exists.
-   Check each one against the
-   [inputs reference](../../docs/reference/github-action-inputs.md) rather
-   than from memory — the commonly needed ones are `mode`, `old-library`,
-   `new-library`, `abi-baseline`, `header`/`old-header`/`new-header`,
-   `lang`, `output-file`, `fail-on-breaking`, `fail-on-api-break`, `policy`,
-   `pr-comment`, `dry-run`.
-3. The library path and header directory you named actually exist after the
-   build commands you wrote — run the build locally if it is cheap, otherwise
-   trace the build files to the output path.
-4. If `abicheck` is installed locally, run the equivalent comparison once
-   (e.g. `abicheck compare old/libfoo.so new/libfoo.so --header old=old/include
-   --header new=new/include`, or
-   `abicheck dump` for the release side; a C library's language is set via
-   `.abicheck.yml`'s `compile.lang`, which the Action's `lang` input
-   synthesizes for you) to prove the inputs resolve.
-   `dry-run: 'true'` on the Action does the same in CI without analysis.
-5. State that the workflow has **not** run on GitHub yet unless it has, and
-   what the first run should show.
+1. YAML parses (`actionlint` if present); every Action input exists in the
+   [inputs reference](../../docs/reference/github-action-inputs.md).
+2. The library and header paths exist after your build commands (build
+   locally if cheap, else trace the build files).
+3. If abicheck is installed, run the equivalent `abicheck compare old.so
+   new.so --header old=old/include --header new=new/include` once.
+4. Say the workflow has not run on GitHub yet, and what its first run shows.
 
 ## Termination criteria
 
-Done when all of these hold — not when a YAML file exists:
-
-- every shared library the project ships has a check, or the report says
-  which ones do not and why;
-- the baseline strategy is chosen, and its refresh and bootstrap steps are
-  either automated or written down as required actions;
-- the gate's blocking/advisory state is explicit, with the condition for
-  moving from advisory to blocking;
-- step 6's validation ran, and anything it could not prove is listed;
-- the setup report below has been given.
-
-Stop and ask instead of guessing when the repository cannot tell you which
-library is the public one, where its public headers are, or how it is built.
+Done when every shipped shared library is checked (or the gap is stated),
+the baseline and its bootstrap/refresh are automated or written as required
+actions, the gate state and its flip condition are explicit, step 5 ran, and
+the report is given. Ask instead of guessing when the repository cannot tell
+you which library is public, where its headers are, or how it is built.
 
 ## What you hand back
 
-```
-## ABI compatibility check — setup report
-Files written:     .github/workflows/abi-check.yml, …
-Libraries checked: libfoo (build/libfoo.so, headers include/foo/, C)
-Baseline:          release snapshot (latest-release) | merge-base build | committed file
-                   — why this one; how it refreshes; bootstrap step if any
-Depth / floors:    headers | source (clang, compile DB, baseline dumped with sources);
-                   runtime floors declared: GLIBC x.y … | none stated
-Gate:              blocks on binary break | advisory until <date/condition>;
-                   API break: blocks | warns; intentional-break label: <name>
-Permissions:       per job, and why each is needed
-Validated:         what you actually ran; what you could not
-Not covered:       fork-PR comments, other platforms/libraries, depth limits
-Next steps:        e.g. make "ABI check" a required status check after N clean runs
-```
+Short; the files are the product:
 
-Keep the prose short; the files are the product. Never claim the check will
-catch everything — say which evidence depth it runs at and what that depth
-cannot see.
+```
+Files:        …
+Libraries:    libfoo (build/libfoo.so, include/foo/, C)
+Baseline:     release snapshot | merge-base | committed — why; bootstrap/refresh
+Depth/floors: headers|source; floors declared: GLIBC x.y | none stated
+Gate:         advisory until … | blocking; API break: blocks|warns; label: …
+Validated:    what ran; what could not
+Not covered:  fork comments, platforms, depth limits
+Next:         e.g. make it a required check after N clean runs
+```
