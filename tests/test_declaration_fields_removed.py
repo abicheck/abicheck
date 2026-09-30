@@ -73,3 +73,32 @@ def test_replace_gives_the_copy_its_own_store() -> None:
     assert other.declarations is not snap.declarations
     other.declarations.functions = []
     assert [f.name for f in snap.declarations.functions] == ["f"]
+
+
+def _fn(name: str) -> Function:
+    return Function(name=name, mangled=name, return_type="int")
+
+
+def test_replace_with_an_ir_that_brings_its_own_store_uses_that_store() -> None:
+    snap = _snap()
+    donor = AbiSnapshot(library="libx.so", version="1", functions=[_fn("g")])
+    other = dataclasses.replace(snap, semantic_ir=donor.semantic_ir)
+    assert [f.name for f in other.declarations.functions] == ["g"]
+    # Kinds the donor store holds (empty here) replace the source's too.
+    assert other.declarations.constants == {}
+
+
+def test_replace_with_a_storeless_ir_keeps_the_source_declarations() -> None:
+    snap = _snap()
+    other = dataclasses.replace(snap, semantic_ir=None)
+    assert [f.name for f in other.declarations.functions] == ["f"]
+    assert other.declarations.constants == {"K": "1"}
+
+
+def test_an_explicit_kind_beats_both_the_source_and_a_given_store() -> None:
+    snap = _snap()
+    donor = AbiSnapshot(library="libx.so", version="1", functions=[_fn("g")])
+    other = dataclasses.replace(
+        snap, semantic_ir=donor.semantic_ir, functions=[_fn("h")]
+    )
+    assert [f.name for f in other.declarations.functions] == ["h"]

@@ -110,8 +110,9 @@ def attach_declarations(
     that owns a declaration store built from its builder inputs.
 
     A builder input left ``None`` keeps whatever the given IR's store already
-    holds for that kind (``dataclasses.replace`` of a snapshot, or a decoded
-    document). Each snapshot gets its own store, so re-binding a kind on one
+    holds for that kind (a decoded document, or ``replace`` given an attached
+    IR); a value ``replace`` only forwarded yields to such a store (see
+    ``_resolve``). Each snapshot gets its own store, so re-binding a kind on one
     never reaches the other; the containers themselves are shared -- the
     same semantics ``replace`` had when these were plain fields.
     """
@@ -120,16 +121,30 @@ def attach_declarations(
     if ir is None:
         ir = empty_ir()
     base = ir.declarations
-    values: dict[str, Any] = {
-        kind: (
-            value
-            if (value := given[kind]) is not None
-            else (getattr(base, kind) if base is not None else _empty(kind))
-        )
-        for kind in DECLARATION_KINDS
-    }
+    values = {kind: _resolve(given[kind], base, kind) for kind in DECLARATION_KINDS}
     store = Declarations(**values)
     object.__setattr__(snapshot, "semantic_ir", ir.attached(store))
+
+
+def _resolve(value: object, base: Any, kind: str) -> Any:
+    """One kind's value: an explicit builder input wins; a value
+    ``dataclasses.replace`` merely forwarded from the source snapshot yields
+    to a store the given IR brings (``replace(snap, semantic_ir=ir)`` with
+    an attached ``ir`` means "use these declarations"); otherwise the given
+    IR's store, else empty."""
+    if isinstance(value, _Forwarded):
+        return getattr(base, kind) if base is not None else value.value
+    if value is not None:
+        return value
+    return getattr(base, kind) if base is not None else _empty(kind)
+
+
+@dataclass(frozen=True)
+class _Forwarded:
+    """A declaration kind ``dataclasses.replace`` read off the source
+    snapshot, as opposed to one the caller passed explicitly."""
+
+    value: Any
 
 
 def _empty(kind: str) -> Any:
@@ -184,10 +199,10 @@ class _RemovedDeclarationField:
         caller = inspect.currentframe()
         caller = caller.f_back if caller is not None else None
         if caller is not None and caller.f_code is _REPLACE_CODE:
-            # ``replace`` forwards the current value as a builder input --
-            # exactly what it did for the plain field, including when the
-            # call also swaps in a fresh, store-less ``semantic_ir``.
-            return getattr(obj.declarations, self._kind)
+            # ``replace`` forwards the current value as a builder input,
+            # tagged so a replacement IR that brings its own store wins
+            # over it (and a store-less one still keeps it).
+            return _Forwarded(getattr(obj.declarations, self._kind))
         raise AttributeError(
             f"AbiSnapshot.{self._kind} was removed; "
             f"read snapshot.declarations.{self._kind} instead"
