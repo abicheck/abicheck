@@ -13,12 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Structural tests for evaluation/agents/ (CLAUDE.md "M1-5").
+"""Structural tests for skills-src/evaluation/agents/ (CLAUDE.md "M1-5").
 
 Guards the manifest schema/shape and run_task.py's own plumbing (path
 matching, manifest loading) — NOT whether any particular task's hidden test
 is currently red, since a task's underlying gap may legitimately get closed
-by unrelated work later (see evaluation/agents/README.md).
+by unrelated work later (see skills-src/evaluation/agents/README.md).
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ import jsonschema
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-EVALS_DIR = ROOT / "evaluation" / "agents"
+EVALS_DIR = ROOT / "skills-src" / "evaluation" / "agents"
 SCHEMA_PATH = EVALS_DIR / "schema" / "task-manifest.schema.json"
 TASKS_DIR = EVALS_DIR / "tasks"
 
@@ -148,8 +148,10 @@ class TestCheckAllowedPaths:
 
     def test_editing_own_hidden_tests_is_flagged_even_if_path_allowed(self) -> None:
         ok, violations = run_task._check_allowed_paths(
-            changed=["evaluation/agents/tasks/some-task/hidden_tests/test_x.py"],
-            allowed_paths=["evaluation/agents/**"],
+            changed=[
+                "skills-src/evaluation/agents/tasks/some-task/hidden_tests/test_x.py"
+            ],
+            allowed_paths=["skills-src/evaluation/agents/**"],
             task_name="some-task",
         )
         assert not ok

@@ -56,7 +56,7 @@ Four public skills ship today (`native-binary-compatibility-review`,
 | `tests/test_agent_skills_structural.py` | frontmatter, layering, version range, self-containment | nothing about whether the workflow works |
 | `tests/test_agent_skills_drift.py` | every CLI flag and report-JSON path a skill names still exists | that naming a real flag means using it correctly |
 | `tests/test_agent_skills_triggers.py` | the descriptions lexically cover and discriminate ADR-058's seven intents | that a real agent activates the right skill |
-| `evaluation/agents/` (M1-5) | an agent can make a small abicheck code change | nothing — different axis entirely (agent *as contributor to* abicheck, not agent *equipped with* these skills) |
+| `skills-src/evaluation/agents/` (M1-5) | an agent can make a small abicheck code change | nothing — different axis entirely (agent *as contributor to* abicheck, not agent *equipped with* these skills) |
 
 So the repository can currently ship a skill that is perfectly well-formed,
 references only live CLI surface, and gives systematically wrong compatibility
@@ -229,7 +229,7 @@ abicheck                                          agent-benchmark
 ────────                                          ───────────────
 skills-src/ ──gen──► .agents/skills/  ┐
 catalog/ground_truth.json            ├─► skill-eval-pack.json ──► subjects/ (kind: skill)
-evaluation/agents/skills/scenarios.yaml     │   + fixtures manifest      arms run: baseline | docs | skill | skill-agent
+skills-src/evaluation/agents/skills/scenarios.yaml     │   + fixtures manifest      arms run: baseline | docs | skill | skill-agent
 transcript bundles + rubric schema    ┘   + content hash           tasks run: harness × model matrix
         │                                                                   │
         │  off-CI: run_skill_eval.py ──► committed evidence bundles         │
@@ -383,7 +383,7 @@ cannot be graded by the wrong rule set. The layout below is the `behavioral`
 shape:
 
 ```text
-evaluation/agents/skills/runs/<run-id>/<scenario>/<k>/
+skills-src/evaluation/agents/skills/runs/<run-id>/<scenario>/<k>/
   meta.json          agent, model, seed/temperature; **every** hash D6's freshness
                      check reads — this skill's tree hash, one entry per scenario
                      exercised (scenario record + fixture closure), the live-trigger
@@ -674,7 +674,7 @@ These need `--used-by`, `--required-symbol`, a multi-target matrix, a
 deliberately broken comparability contract, an L0-only pair whose question
 requires L2 evidence, or a `--contract-evaluation` run whose selected
 `--contract` domain cannot be closed. They get explicit records in
-`evaluation/agents/skills/scenarios.yaml` with their own fixtures.
+`skills-src/evaluation/agents/skills/scenarios.yaml` with their own fixtures.
 
 **Each of dimension 2's four uncertainty kinds (D4) needs its own scenario,
 or a zero-tolerance rule gates on nothing.** The first three entries above and
@@ -831,27 +831,27 @@ round-trip check confirms the arm receives the whole skill and its references.
 
 ### D8 — Where the harness lives in this repo
 
-`evaluation/agents/`, extended with a second task kind — not a new tree, and not
-`evaluation/validation/`.
+`skills-src/evaluation/agents/`, extended with a second task kind — not a new tree, and not
+`skills-src/evaluation/validation/`.
 
-`evaluation/agents/` is already "score an agent's behavior against hidden expectations
+`skills-src/evaluation/agents/` is already "score an agent's behavior against hidden expectations
 with a manifest, a scope contract, a gate contract, and a JSON result," and is
 already a `FIRST_PARTY_PY_ROOTS` member with its own `CLAUDE.md`. Skill
 evaluation is the same mechanism pointed at a different subject (an agent
 *equipped with* a skill, rather than an agent *modifying* abicheck).
-`evaluation/validation/` is a different thing entirely — running abicheck against
+`skills-src/evaluation/validation/` is a different thing entirely — running abicheck against
 real-world package corpora — and putting an agent-behavioral harness there
 would create a third overlapping home for "evaluation."
 
-**This deviates from G36 P1.1's stated file paths** (`evaluation/validation/scripts/
-run_skill_evals.py`, `evaluation/validation/data/skill_eval_scenarios.yaml`). The
+**This deviates from G36 P1.1's stated file paths** (`skills-src/evaluation/validation/scripts/
+run_skill_evals.py`, `skills-src/evaluation/validation/data/skill_eval_scenarios.yaml`). The
 deviation is deliberate and is recorded in [Relationship to G36's own
 items](#relationship-to-g36s-own-items) below.
 
 ## Files & surfaces
 
 ```text
-evaluation/agents/
+skills-src/evaluation/agents/
   skills/
     CLAUDE.md                        scoped agent context for this sub-tree
     scenarios.yaml                   Category A refs + Category B explicit records
@@ -977,7 +977,7 @@ writing the checks made the gap visible:
   unchanged in spirit — a scenario still states both the global and the
   consumer's own expected answer, and the grader still rejects a claim that
   drops or inverts either — only the field names moved; see
-  `evaluation/agents/skills/graders/dimensions.py` and
+  `skills-src/evaluation/agents/skills/graders/dimensions.py` and
   `tests/test_skill_eval_graders_consumer_scoping.py` for the current shape.
 
 **Done when:** `pr` fails on a hand-edited pack, an unresolvable fixture
@@ -1066,10 +1066,10 @@ Category A + 6 Category B), and a real 48-run A/B pilot has completed
 against it.** Two real environment prerequisites the harness had never had
 to satisfy (an `abicheck --version` inside the flagship's declared floor; a
 CastXML build inside abicheck's own supported policy range) were found and
-documented in the same pass — see `evaluation/agents/skills/CLAUDE.md`'s
+documented in the same pass — see `skills-src/evaluation/agents/skills/CLAUDE.md`'s
 "Environment prerequisites for a real run". Full results, per-dimension and
 per-scenario tables, and next steps are in
-`evaluation/agents/skills/pilot-results/README.md`; the matching ADR-058 "PR 3"
+`skills-src/evaluation/agents/skills/pilot-results/README.md`; the matching ADR-058 "PR 3"
 amendment records the same. **Read the pilot honestly, not as a validation
 result**: its own dominant finding is a harness confound — a 12-turn
 runner ceiling (`--max-turns 12`) cut off 31% of all 48 runs before they
@@ -1083,13 +1083,13 @@ pilot's own "Recommended next steps" (raise `--max-turns` and re-run, first)
 is the actual next action here, not a fresh Phase-3 pass.
 
 **2026-08-21, additive Harbor task battery (user-requested, not a phase
-advance).** `evaluation/agents/skills/harbor/tasks/` now carries a generated,
+advance).** `skills-src/evaluation/agents/skills/harbor/tasks/` now carries a generated,
 schema-validated [Harbor](https://www.harborframework.com) task per
 scenario, alongside the unchanged existing harness — real (validated
 against the actual `harbor` package's schema; every Category A reference
 solution runs end to end through the real graders), but never run through
 an actual Harbor trial (no Docker in this environment). See
-`evaluation/agents/skills/harbor/CLAUDE.md` and ADR-058's matching amendment for
+`skills-src/evaluation/agents/skills/harbor/CLAUDE.md` and ADR-058's matching amendment for
 the full account. Does not advance Phase 3's own done-ness or any later
 phase — it is a second surface over the same corpus, not new corpus or a
 new result.
@@ -1109,10 +1109,10 @@ phase's own "Codex and Gemini CLI runners" line above is superseded by
 that decision, not a parallel option. Harbor's own agent registry already
 includes Codex CLI and Gemini CLI adapters (confirmed by reading its
 source, not assumed), so this phase's real content shrinks to running the
-existing `evaluation/agents/skills/harbor/tasks/` battery with `--agent codex`/
+existing `skills-src/evaluation/agents/skills/harbor/tasks/` battery with `--agent codex`/
 `--agent gemini-cli` instead of building a second/third hand-written
 runner — once a real Harbor trial has been run at all (still zero; see
-`evaluation/agents/skills/harbor/CLAUDE.md`'s own "What executing this decision
+`skills-src/evaluation/agents/skills/harbor/CLAUDE.md`'s own "What executing this decision
 still needs"). Building a bespoke Codex/Gemini runner from here is now
 out of scope; extending the Harbor generator to a still-open corpus gap
 is in scope.
@@ -1322,7 +1322,7 @@ required job.
 | G36 item | Status under G37 |
 |---|---|
 | **P0.8** (trigger tests) | static half stands as-is; its deferred live half becomes G37 Phase 2's L1l |
-| **P1.1** (behavioral eval) | **superseded in implementation detail.** G37 keeps its substance — the two scenario categories, the six-dimension rubric, and the split gating model, all of which P1.1 got right — and changes: file locations (`evaluation/agents/skills/`, not `evaluation/validation/`, per D8), the addition of the recording shim and replay grading (D3), pass^k rather than per-run grading for the safety dimensions, and live evaluation running off-CI with CI checking its evidence (D2) |
+| **P1.1** (behavioral eval) | **superseded in implementation detail.** G37 keeps its substance — the two scenario categories, the six-dimension rubric, and the split gating model, all of which P1.1 got right — and changes: file locations (`skills-src/evaluation/agents/skills/`, not `skills-src/evaluation/validation/`, per D8), the addition of the recording shim and replay grading (D3), pass^k rather than per-run grading for the safety dimensions, and live evaluation running off-CI with CI checking its evidence (D2) |
 | **P1.4** (publication) | its freshness precondition becomes mechanical (D6) and its "acceptable baseline rate" becomes G37 Phase 6's explicit four-part gate |
 | **P1.5** (cross-agent log) | generated from real results for scriptable targets (Phase 4); manual only for Copilot/Cursor |
 | **P1.2/P1.3** (contingent) | unchanged — still gated on findings, which G37 Phase 3 is what actually produces |
@@ -1338,7 +1338,7 @@ here so the reasoning is not re-litigated:
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Harness location | `evaluation/agents/skills/` (D8), accepting the deviation from G36 P1.1's `evaluation/validation/` paths. `evaluation/validation/` runs abicheck against real-world package corpora and has no agent, model, or transcript in it; a third "evaluation" tree was rejected as surface sprawl. If holding two task kinds under `evaluation/agents/` becomes confusing, splitting it into explicit `code-tasks/` and `skill-scenarios/` sub-trees is a later rename, not a re-architecture |
+| 1 | Harness location | `skills-src/evaluation/agents/skills/` (D8), accepting the deviation from G36 P1.1's `skills-src/evaluation/validation/` paths. `skills-src/evaluation/validation/` runs abicheck against real-world package corpora and has no agent, model, or transcript in it; a third "evaluation" tree was rejected as surface sprawl. If holding two task kinds under `skills-src/evaluation/agents/` becomes confusing, splitting it into explicit `code-tasks/` and `skill-scenarios/` sub-trees is a later rename, not a re-architecture |
 | 2 | What the `docs` arm gates | Nothing — split the question (D7). `skill:` vs `docs` is reported as a content diagnostic; `skill-agent:` vs `baseline` is what gates publication, because progressive disclosure is how these skills actually deploy and the `docs` arm presupposes the retrieval decision the skill exists to make |
 | 3 | When G36 is amended | Immediately, in this plan's own PR, rather than deferred to Phase 0 — the divergence window costs more than the edit |
 | 4 | Live evaluation in CI | No. CI runs deterministic checks only; the live runner is an off-CI maintainer operation whose committed evidence CI re-grades (D2). This also resolves two structural problems the alternative has: a label-gated job does not block merge when skipped, and a fork PR cannot hold credentials without exposing them to PR-controlled content |

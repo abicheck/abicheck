@@ -936,7 +936,7 @@ def test_first_party_roots_agree_with_the_readiness_script(car, ass):
     """adr_status_sync keeps a local copy of the first-party root names to
     stay a leaf module; this is the check that keeps the copy honest, so a
     root added to FIRST_PARTY_PY_ROOTS can't silently go untracked here."""
-    # Nested roots (contrib/abicheck-clang-plugin, evaluation/*) are keyed on
+    # Nested roots (contrib/abicheck-clang-plugin, skills-src/evaluation/*) are keyed on
     # their *top* path segment by the status-sync side.
     from_script = {p.relative_to(car.ROOT).parts[0] for p in car.FIRST_PARTY_PY_ROOTS}
     assert from_script <= set(ass.FIRST_PARTY_ROOT_NAMES), (
@@ -1555,7 +1555,7 @@ def test_file_sizes_covers_first_party_roots_beyond_abicheck(
     """An oversized script outside abicheck/ must fail the gate.
 
     Regression guard for the exact gap M1-2 describes: before first-party
-    scanning covered `scripts/`/`evaluation/field/`/`evaluation/validation/`/`action/`/the clang
+    scanning covered `scripts/`/`skills-src/evaluation/field/`/`skills-src/evaluation/validation/`/`action/`/the clang
     plugin's `tests/`, an oversized file there was invisible to this check.
     """
     fake_root = tmp_path / "scripts"

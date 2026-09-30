@@ -134,7 +134,7 @@ inheritance for internal implementation details.
 
 ## Ground-truth provenance
 
-**Known kind gap:** public_api_internal_dependency_added needs a public-header set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not declare one in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via type_base_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in evaluation/validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
+**Known kind gap:** public_api_internal_dependency_added needs a public-header set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not declare one in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via type_base_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in skills-src/evaluation/validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).
 
 ## Source files
 

@@ -1557,7 +1557,7 @@ def evaluate(corpus: list[Case] | None = None) -> Outcome:
 #
 # The single 0/0 headline proves "no regression" but hides *which* accuracy axis
 # a higher evidence layer bought. Tagging each case with the scoping axis it
-# exercises lets CI archive the per-axis case counts (like ``evaluation/field/`` archives its
+# exercises lets CI archive the per-axis case counts (like ``skills-src/evaluation/field/`` archives its
 # results) and read the trend over releases: when a new layer/detector removes a
 # class of false positive, the matching axis grows a covered case here.
 # --------------------------------------------------------------------------- #

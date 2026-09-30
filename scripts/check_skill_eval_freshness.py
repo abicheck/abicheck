@@ -77,8 +77,8 @@ from skill_eval_surface import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-PACK = ROOT / "evaluation" / "agents" / "skills" / "skill-eval-pack.json"
-EVIDENCE = ROOT / "evaluation" / "agents" / "skills" / "evidence"
+PACK = ROOT / "skills-src" / "evaluation" / "agents" / "skills" / "skill-eval-pack.json"
+EVIDENCE = ROOT / "skills-src" / "evaluation" / "agents" / "skills" / "evidence"
 
 #: The pack shape this checker understands. A pack written by a newer
 #: generator fails loudly rather than being read field-by-field against

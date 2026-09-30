@@ -201,8 +201,8 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # The eval-suite scan-level scalability harness, and the shared
     # measurement/threshold/classification modules the perf-gate scripts (and
     # this workflow's own classify job) import.
-    "evaluation/field/scan_level_scaling.py",
-    "evaluation/field/scaling.py",
+    "skills-src/evaluation/field/scan_level_scaling.py",
+    "skills-src/evaluation/field/scaling.py",
     "scripts/perf_measurement.py",
     "scripts/perf_baseline.py",
     "scripts/classify_perf_paths.py",

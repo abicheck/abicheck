@@ -408,7 +408,6 @@ also_copy = [
     "changelog.d",
     "contrib",
     "docs",
-    "evaluation",
     "examples",
     "catalog",
     "mkdocs.yml",
@@ -743,7 +742,7 @@ pytest_add_cli_args = [
     # never engages and the hard `assert proc.returncode == 0` fires for a
     # commit this context simply can't see. No mutation-kill cost: this
     # file imports no `only_mutate` module (confirmed by grep) -- only
-    # stdlib, `jsonschema`, `pytest`, and `evaluation/agents/run_task.py` loaded
+    # stdlib, `jsonschema`, `pytest`, and `skills-src/evaluation/agents/run_task.py` loaded
     # by path, none of which is mutated.
     "--ignore=tests/test_agent_evals.py",
     # Same "reads the real repository" class as `test_fact_field_readers.py`/

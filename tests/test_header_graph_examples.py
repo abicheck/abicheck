@@ -31,7 +31,7 @@ proves BREAKING via a structural ``ChangeKind`` — see
 are named after needs its own dedicated live check that actually reproduces
 it — the exact reproduction commands documented in each README's "How to
 reproduce" section, executed for real rather than only described. See
-``evaluation/validation/scripts/collect_full_example_matrix.py``'s
+``skills-src/evaluation/validation/scripts/collect_full_example_matrix.py``'s
 ``HEADER_GRAPH_PROOF_CASES`` for how these are excluded from the
 build-integrated (``--sources``/``--build-info``) proof lane, which this
 family deliberately does not use.

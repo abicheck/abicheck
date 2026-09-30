@@ -10,8 +10,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-_SCRIPT = Path("evaluation/validation/scripts/conda_harness.py")
-_RUN_MATRIX_SCRIPT = Path("evaluation/validation/scripts/run_matrix.py")
+_SCRIPT = Path("skills-src/evaluation/validation/scripts/conda_harness.py")
+_RUN_MATRIX_SCRIPT = Path("skills-src/evaluation/validation/scripts/run_matrix.py")
 
 
 def _load_logical_name():
@@ -122,10 +122,10 @@ def test_run_matrix_run_metadata_summarizes_modes() -> None:
     )
 
     assert meta["schema_version"] == "run_matrix.v2"
-    assert meta["runner"] == "evaluation/validation/scripts/run_matrix.py"
+    assert meta["runner"] == "skills-src/evaluation/validation/scripts/run_matrix.py"
     assert meta["platform"]
     assert meta["manifest_pairs"] == 2
     assert meta["comparisons"] == 2
     assert meta["modes"] == ["dwarf->sym", "sym->sym"]
     assert meta["comparison_status_counts"] == {"ABICHECK_WEAKER": 1, "MATCH": 1}
-    assert meta["results_file"] == "evaluation/validation/data/results.json"
+    assert meta["results_file"] == "skills-src/evaluation/validation/data/results.json"

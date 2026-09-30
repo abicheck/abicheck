@@ -40,7 +40,7 @@ if str(REPO / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO / "scripts"))
 import example_catalog  # noqa: E402
 
-EVAL = REPO / "evaluation" / "agents" / "skills"
+EVAL = REPO / "skills-src" / "evaluation" / "agents" / "skills"
 SCHEMA_DIR = EVAL / "schema"
 SCENARIOS = EVAL / "scenarios.yaml"
 RUBRIC = EVAL / "rubric.yaml"

@@ -458,12 +458,12 @@ STEPS: tuple[Step, ...] = (
     Step(
         # Same generated-artifact contract as skill-eval-pack above, for the
         # Harbor task battery it derives from: a scenario/fixture change that
-        # doesn't also regenerate evaluation/agents/skills/harbor/tasks/ leaves the
+        # doesn't also regenerate skills-src/evaluation/agents/skills/harbor/tasks/ leaves the
         # committed tasks describing a stale corpus.
         "harbor-tasks",
         _pyscript("scripts/gen_harbor_tasks.py", "--check"),
         frozenset({PR, FULL}),
-        description="evaluation/agents/skills/harbor/tasks/ matches its generator",
+        description="skills-src/evaluation/agents/skills/harbor/tasks/ matches its generator",
     ),
     Step(
         # harbor-tasks above only re-derives the tree structurally -- it

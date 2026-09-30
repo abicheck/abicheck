@@ -860,10 +860,10 @@ use_cases:
     gap: G17
     plan: docs/contribute/plans/g17-real-world-corpus.md
     evidence:
-      modules: [evaluation/field/runner.py, evaluation/field/condafetch.py]
-      tests: [evaluation/field/manifest.yaml, evaluation/field/results/latest.json]
+      modules: [skills-src/evaluation/field/runner.py, skills-src/evaluation/field/condafetch.py]
+      tests: [skills-src/evaluation/field/manifest.yaml, skills-src/evaluation/field/results/latest.json]
     next_steps: >
-      Reproducible benchmark (evaluation/field/) of abicheck against real conda-forge
+      Reproducible benchmark (skills-src/evaluation/field/) of abicheck against real conda-forge
       libraries: a curated manifest with expected verdicts, a runner that fetches
       + scans, and a generated report. DONE: binary (L0/L1) tier — verdicts match
       the manifest 'expect'. PLANNED: (1) a source (L3/L4/L5) tier in the runner

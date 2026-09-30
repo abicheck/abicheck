@@ -15,7 +15,7 @@ release builds, and scale (LLVM ~150 MB / ~31k exported funcs). Nothing in-repo
 continuously validates abicheck against that real surface, so a regression in a
 real-world verdict would not be caught.
 
-The evaluation produced a **reproducible corpus** under `evaluation/field/`: a curated
+The evaluation produced a **reproducible corpus** under `skills-src/evaluation/field/`: a curated
 `manifest.yaml` (library, version pair, **expected verdict**, `.so` stem, optional
 source repo/tags), a `runner.py` that fetches from conda-forge and runs
 `abicheck dump`/`compare`, and a generated `REPORT.md` + schema'd
@@ -24,13 +24,13 @@ verdicts match the manifest's `expect`. Two pieces remain.
 
 ## Pointers
 
-- `evaluation/field/manifest.yaml` — curated corpus (source of truth; `source:` repo/tags
+- `skills-src/evaluation/field/manifest.yaml` — curated corpus (source of truth; `source:` repo/tags
   already present for zlib/zstd/snappy).
-- `evaluation/field/runner.py` — `run()`/`scan_one()` (binary tier); `--report-only`.
-- `evaluation/field/condafetch.py` — conda-forge fetch/extract (handles split packages, `.conda`).
-- `evaluation/field/results/latest.json` — schema'd results (`result_schema` 1).
+- `skills-src/evaluation/field/runner.py` — `run()`/`scan_one()` (binary tier); `--report-only`.
+- `skills-src/evaluation/field/condafetch.py` — conda-forge fetch/extract (handles split packages, `.conda`).
+- `skills-src/evaluation/field/results/latest.json` — schema'd results (`result_schema` 1).
 - Retired source-tier prototype lives in git history at
-  `evaluation/field/field-eval/scripts/bsdrive.py` (clone → configure → `dump --sources`).
+  `skills-src/evaluation/field/field-eval/scripts/bsdrive.py` (clone → configure → `dump --sources`).
 - CI lane pattern to mirror: `.github/workflows/mutation.yml` /
   `performance.yml` (scheduled / label-triggered).
 

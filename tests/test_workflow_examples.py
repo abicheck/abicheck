@@ -17,7 +17,7 @@
 valid, non-drifting executable contract.
 
 The fast-lane half of Phase 5's workflow gate: no compiler, no `abicheck`
-run -- `evaluation/validation/scripts/run_workflow_examples.py` does that. What is
+run -- `skills-src/evaluation/validation/scripts/run_workflow_examples.py` does that. What is
 checked here is that a workflow directory cannot exist without a manifest,
 that the manifest parses against the schema, and above all that every
 command it runs is a command the README actually shows.
@@ -216,7 +216,7 @@ def test_every_step_parses_to_a_real_argv(directory: Path):
 
 
 # --------------------------------------------------------------------------
-# `--require` bookkeeping in evaluation/validation/scripts/run_workflow_examples.py.
+# `--require` bookkeeping in skills-src/evaluation/validation/scripts/run_workflow_examples.py.
 #
 # Bug class: a derived summary that double-counts because a status change was
 # recorded beside the record instead of on it. The original cut appended a
@@ -244,7 +244,12 @@ def _load_runner():
     if name in sys.modules:
         return sys.modules[name]
     path = (
-        REPO_DIR / "evaluation" / "validation" / "scripts" / "run_workflow_examples.py"
+        REPO_DIR
+        / "skills-src"
+        / "evaluation"
+        / "validation"
+        / "scripts"
+        / "run_workflow_examples.py"
     )
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader

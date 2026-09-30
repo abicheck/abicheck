@@ -202,7 +202,7 @@ def jobs_ceiling(*, floor: int = 8, cpu_multiplier: int = 2) -> int:
 
     Each worker drives a heavyweight clang/castxml process (one TU,
     single-threaded); past ~2x the CPU count the processes only contend for
-    cores (``evaluation/field/SCALING.md`` saw L4 ``jobs=8`` on 4 CPUs *regress*). An
+    cores (``skills-src/evaluation/field/SCALING.md`` saw L4 ``jobs=8`` on 4 CPUs *regress*). An
     explicit env-var override is still clamped to this so a stray large
     value can't thrash the host.
     """

@@ -1,7 +1,7 @@
 name: Eval suite (real-world regression guard)
 
-# Runs the field-evaluation suite (evaluation/field/runner.py) against the curated
-# conda-forge corpus in evaluation/field/manifest.yaml. The binary tier (L0/L1) is the
+# Runs the field-evaluation suite (skills-src/evaluation/field/runner.py) against the curated
+# conda-forge corpus in skills-src/evaluation/field/manifest.yaml. The binary tier (L0/L1) is the
 # regression guard: it fails the lane if any library's verdict drifts from its
 # manifest `expect`. The source tier (L3/L4/L5) is exploratory and non-gating —
 # it clones+configures the libraries that carry a `source:` block and records
@@ -29,7 +29,7 @@ on:
     - cron: "31 5 * * 1"
   # No `paths` filter: a paths filter gates the whole pull_request trigger
   # (including `labeled`), which would stop the `eval` label from opting in a PR
-  # that changes checker code under abicheck/** but not evaluation/field/**. Instead, every
+  # that changes checker code under abicheck/** but not skills-src/evaluation/field/**. Instead, every
   # PR event reaches the workflow and the per-job `if` below runs the suite only
   # when the PR carries the `eval` label (jobs skip cheaply otherwise).
   pull_request:
@@ -86,7 +86,7 @@ jobs:
           if [ -n "${ONLY_INPUT:-}" ]; then
             ONLY=(--only "$ONLY_INPUT")
           fi
-          python evaluation/field/runner.py --tier binary --fail-on-drift ${ONLY[@]+"${ONLY[@]}"}
+          python skills-src/evaluation/field/runner.py --tier binary --fail-on-drift ${ONLY[@]+"${ONLY[@]}"}
 
       - name: Upload eval results
         if: always()
@@ -94,13 +94,13 @@ jobs:
         with:
           name: eval-binary-tier
           path: |
-            evaluation/field/results
-            evaluation/field/REPORT.md
+            skills-src/evaluation/field/results
+            skills-src/evaluation/field/REPORT.md
 
   source-tier:
     name: Source tier (L3/L4/L5) coverage
     # Exploratory *per library*: one library's own build/network hiccup is
-    # tolerated and never blocks a merge (evaluation/field/runner.py's source_tier_broken()
+    # tolerated and never blocks a merge (skills-src/evaluation/field/runner.py's source_tier_broken()
     # only trips on a *systemic* failure — see --fail-on-empty-source below).
     # continue-on-error is deliberately NOT set at the job level anymore: it
     # previously masked exactly the failure mode this gate now exists to
@@ -155,8 +155,8 @@ jobs:
           # real L3 evidence) — an individual library's own build/network
           # failure is still recorded as a per-row error and does not fail
           # this step, matching this job's own "exploratory per library"
-          # design (see evaluation/field/runner.py's source_tier_broken() docstring).
-          python evaluation/field/runner.py --tier source --fail-on-empty-source ${ONLY[@]+"${ONLY[@]}"}
+          # design (see skills-src/evaluation/field/runner.py's source_tier_broken() docstring).
+          python skills-src/evaluation/field/runner.py --tier source --fail-on-empty-source ${ONLY[@]+"${ONLY[@]}"}
 
       - name: Write coverage to job summary
         if: always()
@@ -164,7 +164,7 @@ jobs:
           {
             echo "## Eval source-tier coverage"
             echo ""
-            sed -n '/## Source tier/,$p' evaluation/field/REPORT.md 2>/dev/null || echo "(no source-tier report)"
+            sed -n '/## Source tier/,$p' skills-src/evaluation/field/REPORT.md 2>/dev/null || echo "(no source-tier report)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload source-tier results
@@ -173,5 +173,5 @@ jobs:
         with:
           name: eval-source-tier
           path: |
-            evaluation/field/results
-            evaluation/field/REPORT.md
+            skills-src/evaluation/field/results
+            skills-src/evaluation/field/REPORT.md

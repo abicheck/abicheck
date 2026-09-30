@@ -26,7 +26,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
-_SCRIPT = Path("evaluation/validation/scripts/fetch_tracker_oracle.py")
+_SCRIPT = Path("skills-src/evaluation/validation/scripts/fetch_tracker_oracle.py")
 
 
 def _load_module():

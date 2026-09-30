@@ -14,7 +14,7 @@ rot with the calibration catalog's own gates all still green.
 A `workflow.yaml` states what the walkthrough claims: the commands, the exit
 code, and the verdict/change kinds. Two consumers share this module so they
 cannot drift from each other -- `tests/test_workflow_examples.py` (fast lane,
-structural, no compiler) and `evaluation/validation/scripts/run_workflow_examples.py`
+structural, no compiler) and `skills-src/evaluation/validation/scripts/run_workflow_examples.py`
 (really runs them).
 
 The load-bearing rule is `readme_drift()`: every `run:` line must appear

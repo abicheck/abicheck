@@ -2145,6 +2145,6 @@ Deferred by the original review, not attempted here either:
 - A trend-reporting database persisting `check_tier_accuracy.py`/`check_fp_rate.py`/
   mutation-score history across runs (needs a storage/retention decision
   first).
-- A full behavioral baseline / task-suite leaderboard beyond `evaluation/agents/`'s
+- A full behavioral baseline / task-suite leaderboard beyond `skills-src/evaluation/agents/`'s
   current one-task harness (should grow from real usage, not be
   speculatively built).

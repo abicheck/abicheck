@@ -7,7 +7,7 @@ import json
 import subprocess
 from pathlib import Path
 
-_SCRIPT = Path("evaluation/validation/scripts/run_component_suites.py")
+_SCRIPT = Path("skills-src/evaluation/validation/scripts/run_component_suites.py")
 
 
 def _load_runner():
@@ -91,7 +91,10 @@ def test_report_summarizes_suite_statuses() -> None:
     report = runner.make_report(records)
 
     assert report["schema_version"] == "component_suites.v1"
-    assert report["runner"] == "evaluation/validation/scripts/run_component_suites.py"
+    assert (
+        report["runner"]
+        == "skills-src/evaluation/validation/scripts/run_component_suites.py"
+    )
     assert report["suite_count"] == 3
     assert report["status_counts"] == {"blocked": 1, "planned": 2}
     assert report["records"] == records

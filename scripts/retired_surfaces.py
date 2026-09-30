@@ -1188,6 +1188,9 @@ def retired_surface_scan_targets(
         targets += [
             (p, f"skills-src/{p.relative_to(skills_src_dir).as_posix()}")
             for p in sorted(skills_src_dir.rglob("*.md"))
+            # `skills-src/evaluation/` holds eval corpora and reports, not
+            # instructions an installed skill follows.
+            if p.relative_to(skills_src_dir).parts[0] != "evaluation"
         ]
     gha_workflows_dir = root / ".github" / "workflows"
     if gha_workflows_dir.is_dir():

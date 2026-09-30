@@ -34,7 +34,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-EVAL_DIR = ROOT / "evaluation" / "agents" / "skills"
+EVAL_DIR = ROOT / "skills-src" / "evaluation" / "agents" / "skills"
 sys.path.insert(0, str(EVAL_DIR))
 
 

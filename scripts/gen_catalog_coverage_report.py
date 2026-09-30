@@ -252,7 +252,7 @@ def _workflow_coverage() -> str:
     this section used to be: an empty or half-finished directory raised the
     number while proving nothing. A workflow counts only once it carries a
     `workflow.yaml` -- the executable contract
-    `evaluation/validation/scripts/run_workflow_examples.py` runs -- so this figure and
+    `skills-src/evaluation/validation/scripts/run_workflow_examples.py` runs -- so this figure and
     "is it actually exercised in CI" cannot diverge.
     """
     workflows = workflow_examples.load_all()
@@ -278,7 +278,7 @@ def _workflow_coverage() -> str:
             *rows,
             "",
             "Each row is a `workflow.yaml` that "
-            "`evaluation/validation/scripts/run_workflow_examples.py` runs end to end "
+            "`skills-src/evaluation/validation/scripts/run_workflow_examples.py` runs end to end "
             "-- the documented commands themselves, in a scratch copy, "
             "checked against the exit code and the verdict/change kinds the "
             "walkthrough claims. A directory without that contract is a hard "

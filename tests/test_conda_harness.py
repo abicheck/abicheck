@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-_SCRIPT = Path("evaluation/validation/scripts/conda_harness.py")
+_SCRIPT = Path("skills-src/evaluation/validation/scripts/conda_harness.py")
 
 
 def _load_module():

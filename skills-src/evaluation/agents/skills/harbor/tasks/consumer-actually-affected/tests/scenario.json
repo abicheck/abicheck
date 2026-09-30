@@ -1,0 +1,29 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:2a5f4902c821ed54905b81ca0aadb46b416138959b18e3997cf2e7f7e6cd8c81",
+  "expected": {
+    "consumer_verdict": "BREAKING",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/consumer-actually-affected",
+  "invocation": {
+    "used_by": [
+      "analytics-daemon"
+    ]
+  },
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We upgraded the shared library under our analytics daemon without rebuilding it. Is that safe?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/consumer-actually-affected",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

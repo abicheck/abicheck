@@ -1241,6 +1241,26 @@ def _check_root_modules(
         | public_root_files
         | facade_root_files
     )
+    # The legacy inventory may only shrink toward ADR-061's end state: an
+    # entry whose module has moved or been deleted must leave the list, or it
+    # silently re-admits a new flat module of the same name later.
+    for name in sorted(legacy_root_modules):
+        if not (root / "abicheck" / name).exists():
+            findings.append(
+                Finding(
+                    "stale-root-inventory",
+                    f"legacy_root_modules: abicheck/{name} no longer exists; remove the entry",
+                )
+            )
+    for layer_name, layer in sorted(layers.items()):
+        for path in layer.get("legacy_paths", []):
+            if not (root / path).exists():
+                findings.append(
+                    Finding(
+                        "stale-root-inventory",
+                        f"layers.{layer_name}.legacy_paths: {path} no longer exists; remove the entry",
+                    )
+                )
     for path in sorted((root / "abicheck").glob("*.py")):
         if path.name not in allowed_root_modules:
             findings.append(

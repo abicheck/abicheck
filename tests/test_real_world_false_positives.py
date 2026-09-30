@@ -1,4 +1,4 @@
-"""Regression scenarios distilled from real-world validation (evaluation/validation/REPORT.md).
+"""Regression scenarios distilled from real-world validation (skills-src/evaluation/validation/REPORT.md).
 
 Each test reproduces — at the snapshot/diff level — a false-positive pattern
 observed when running ``abicheck compare`` against real upstream release
@@ -6,7 +6,7 @@ binaries (oneTBB, Protobuf, libxml2, …). They drive the public
 :func:`abicheck.checker.compare` pipeline with minimal synthetic snapshots that
 isolate the responsible mechanism.
 
-These cover the FP-1…FP-4 families from ``evaluation/validation/DESIGN_ANALYSIS.md`` plus
+These cover the FP-1…FP-4 families from ``skills-src/evaluation/validation/DESIGN_ANALYSIS.md`` plus
 the RD2-* refinements (std:: leaks via the DWARF struct/enum detector, lambda
 RTTI churn, mixed DWARF→stripped phantom removals, and unknown-``"?"`` signature
 handling). Each now asserts the implemented behaviour directly — the scenarios
@@ -37,7 +37,7 @@ from abicheck.model import (
     is_non_abi_surface_type,
 )
 
-REPORT = "evaluation/validation/REPORT.md / evaluation/validation/DESIGN_ANALYSIS.md"
+REPORT = "skills-src/evaluation/validation/REPORT.md / skills-src/evaluation/validation/DESIGN_ANALYSIS.md"
 
 
 def _elf_snapshot(

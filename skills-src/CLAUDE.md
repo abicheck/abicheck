@@ -14,6 +14,10 @@ skills-src/
   <skill-name>/
     SKILL.md              Layer A — the skill itself (frontmatter + workflow)
     references/           material specific to this one skill only
+  evaluation/             not a skill (no SKILL.md, never published) — see its README
+    agents/               coding-agent tasks + the G37 skill evaluation harness
+    field/                conda-forge field benchmark of abicheck
+    validation/           real-library validation runs
 ```
 
 Generated output, per skill, per target tree:
@@ -141,7 +145,7 @@ intent only, that PR 4's deliverable should be an npm/npx-installable
 package published from this repository rather than a separate distribution
 repo. **PR 3 landed** under that new name (a complete G37 evaluation
 corpus, 12 scenarios, plus a real 48-run pilot) — see the ADR's "PR 3"
-amendment and `evaluation/agents/skills/pilot-results/README.md`; its dominant
+amendment and `skills-src/evaluation/agents/skills/pilot-results/README.md`; its dominant
 finding is a harness turn-budget confound, not a skill-quality result, so
 the skill is still not behaviorally validated. PR 4 (an npm/npx-installable
 package published from this repository, removing the internal-candidate
