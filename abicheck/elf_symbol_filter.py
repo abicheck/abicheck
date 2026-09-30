@@ -109,6 +109,25 @@ _TRANSITIVE_RUNTIME_PREFIXES: tuple[str, ...] = tuple(_STDLIB_PREFIXES) + tuple(
 )
 
 
+#: Public read-only view of the linker-reserved names, for tests and callers
+#: that enumerate the class rather than probe one name.
+ELF_LINKER_RESERVED_SYMBOLS: frozenset[str] = _ELF_LINKER_ARTIFACTS
+
+
+def is_linker_reserved_symbol(name: str) -> bool:
+    """Whether *name* is an ELF symbol the linker/toolchain defines itself.
+
+    ``_init``/``_fini`` and the section-boundary markers
+    ``__bss_start``/``_edata``/``_end`` land in ``.dynsym`` depending on the
+    linker (gold and Bazel's default link export them, bfd ``ld`` 2.42 does
+    not), never because the library's author declared them. The single
+    predicate every export-table consumer uses to drop them -- including the
+    ones that must *not* apply the wider :func:`is_abi_relevant_elf_symbol`
+    filter because they deliberately report leaked runtime symbols.
+    """
+    return name in _ELF_LINKER_ARTIFACTS
+
+
 @lru_cache(maxsize=1 << 18)
 def is_abi_relevant_elf_symbol(
     name: str,
@@ -129,7 +148,7 @@ def is_abi_relevant_elf_symbol(
     if not name:
         return False
 
-    if name in _ELF_LINKER_ARTIFACTS:
+    if is_linker_reserved_symbol(name):
         return False
 
     # Virtual-override thunks (_ZTh / _ZTv / _ZTc) are compiler-generated vtable
