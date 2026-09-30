@@ -62,7 +62,7 @@ carry elsewhere in this same package apply to a given fact.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 __all__ = [
@@ -164,7 +164,7 @@ class FactDefinition:
     notes: str = ""
     #: ``"module:function"`` detectors that branch on this fact's
     #: ``FactStatus``. Required from ``CONSUMED`` upward, forbidden below it.
-    consumed_by: tuple[str, ...] = ()
+    consumed_by: tuple[str, ...] = field(default=(), kw_only=True)
 
     @property
     def id(self) -> str:

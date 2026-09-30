@@ -122,3 +122,42 @@ def test_broken_targets_are_rejected(target: str, needle: str) -> None:
     problems = consumer_problems("bases", (target,), _REPO_ROOT)
     assert len(problems) == 1
     assert needle in problems[0]
+
+
+@pytest.mark.parametrize(
+    ("source", "needle"),
+    [
+        # Only a same-named method remains: not the module-level function.
+        (
+            "class C:\n    def diff_x(self, a, b):\n"
+            "        return compare_facts(a.bases_fact, b.bases_fact, [])\n",
+            "no function",
+        ),
+        # Only a nested function remains.
+        (
+            "def outer():\n    def diff_x(a, b):\n"
+            "        return compare_facts(a.bases_fact, b.bases_fact, [])\n",
+            "no function",
+        ),
+        # A value-only read never branches on availability.
+        (
+            "def diff_x(a, b):\n    return a.bases_fact.value != b.bases_fact.value\n",
+            "never branches on its availability",
+        ),
+        # Status-aware readers are accepted.
+        (
+            "def diff_x(a, b):\n    return compare_facts(a.bases_fact, b.bases_fact, [])\n",
+            None,
+        ),
+        ("def diff_x(a):\n    return a.bases_fact.status\n", None),
+    ],
+)
+def test_consumer_shape_rules(tmp_path: Path, source: str, needle: str | None) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "mod.py").write_text(source)
+    problems = consumer_problems("bases", ("pkg.mod:diff_x",), tmp_path)
+    if needle is None:
+        assert problems == []
+    else:
+        assert len(problems) == 1 and needle in problems[0]

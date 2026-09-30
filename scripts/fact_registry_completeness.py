@@ -848,6 +848,19 @@ def _cross_check_against_backend_capabilities(
     return problems
 
 
+#: What makes a consumer status-aware (direction 9): a shared gate call, or a
+#: direct read of a fact's availability.
+_STATUS_GATES = frozenset(
+    {
+        "compare_facts",
+        "both_facts_present",
+        "vtable_fact_declined",
+        "fact_confirmed_true",
+    }
+)
+_STATUS_ATTRS = frozenset({"status", "is_present"})
+
+
 def consumer_problems(
     field: str, consumed_by: tuple[str, ...], root: Path
 ) -> list[str]:
@@ -871,30 +884,39 @@ def consumer_problems(
             problems.append(f"{target}: module file {_rel(path)} does not exist")
             continue
         source = _read(path)
+        # Module-level definitions only: a same-named method or nested
+        # function is not the `module:function` the entry names.
         defs = [
             n
-            for n in ast.walk(ast.parse(source))
+            for n in ast.parse(source).body
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == func
         ]
         if not defs:
             problems.append(f"{target}: no function {func!r} in {_rel(path)}")
             continue
-        reads = False
+        reads = status_aware = False
         for node in defs:
             for sub in ast.walk(node):
                 if isinstance(sub, ast.Attribute) and sub.attr == f"{field}_fact":
                     reads = True
-                elif (
-                    isinstance(sub, ast.Call)
-                    and isinstance(sub.func, ast.Name)
-                    and sub.func.id == "both_facts_present"
-                    and any(_string_constant(a) == field for a in sub.args)
-                ):
-                    reads = True
+                if isinstance(sub, ast.Attribute) and sub.attr in _STATUS_ATTRS:
+                    status_aware = True
+                if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
+                    if sub.func.id in _STATUS_GATES:
+                        status_aware = True
+                    if sub.func.id == "both_facts_present" and any(
+                        _string_constant(a) == field for a in sub.args
+                    ):
+                        reads = True
         if not reads:
             problems.append(
                 f"{target}: never reads {field}_fact nor gates on "
                 f"both_facts_present(..., {field!r})"
+            )
+        elif not status_aware:
+            problems.append(
+                f"{target}: reads {field}_fact but never branches on its "
+                "availability (FactStatus, compare_facts, both_facts_present)"
             )
     return problems
 

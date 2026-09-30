@@ -386,6 +386,10 @@ def backend_declaration_reads(tree: ast.AST) -> dict[tuple[str, str], int]:
             if (
                 isinstance(child, ast.Attribute)
                 and child.attr in BACKEND_DECLARATION_FIELDS
+                and (
+                    isinstance(child.ctx, ast.Load)
+                    or (isinstance(node, ast.AugAssign) and child is node.target)
+                )
             ):
                 field_name = child.attr
             elif (
