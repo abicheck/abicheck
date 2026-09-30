@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:777ae873be87d0115899bbd2379834978dd73c80bfc47be192792905e72ea43e",
+  "expected": {
+    "cause": "cxx_abi_mismatch",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-dual-cxx-abi",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "We rebuilt libwidget from exactly the same source and now our C++ app fails to start with a symbol error. Run ./setup.sh once, then ./env/run.sh. The code is identical, so what broke?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-dual-cxx-abi",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}

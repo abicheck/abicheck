@@ -28,7 +28,7 @@ site/
 .agents/
 .gemini/
 .claude/skills/check-abi-compatibility/
-.claude/skills/debug-abi-failure/
+.claude/skills/explain-abi-change/
 /results/
 .pixi/
 
@@ -37,5 +37,5 @@ site/
 mutants/
 mutation-receipt.json
 mutmut-results.txt
-# debug-abi-failure eval fixtures build their environment in place (setup.sh)
+# explain-abi-change eval fixtures build their environment in place (setup.sh)
 skills-src/evaluation/agents/skills/fixtures/*/env/

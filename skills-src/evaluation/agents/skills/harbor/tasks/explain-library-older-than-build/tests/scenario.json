@@ -1,0 +1,25 @@
+{
+  "affects": [
+    "explain-abi-change"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:b80f140a575ef9352ea885c18db50095ea426891e399b4714c45a25cb152ae85",
+  "expected": {
+    "cause": "library_older_than_build",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-library-older-than-build",
+  "invocation": {},
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "Our app builds fine against the libwidget SDK we ship with, but in our test environment it fails at startup. Did libwidget drop something? Run ./setup.sh once, then ./env/run.sh. What changed, and what should we do?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/explain-library-older-than-build",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "explain-abi-change",
+  "status": "ready"
+}

@@ -19,9 +19,9 @@ pilot against it — see `pilot-results/README.md` for the numbers and, just as
 important, the harness confound (`--max-turns`) that limits how much weight
 they can bear today. A second pilot (2026-09-29, `pilot-results/2026-09-29.md`)
 fixed three harness leaks that invalidated earlier numbers — see that file —
-and is the current evidence. The second skill, `debug-abi-failure`, has its own
-eight `debug-*` scenarios, graded on the root cause as well as the verdict
-(`diagnosis.cause`; see `pilot-results/2026-09-30-debug-abi-failure.md`).
+and is the current evidence. The second skill, `explain-abi-change`, has its own
+ten `explain-*` scenarios, graded on the named mechanism as well as the verdict
+(`diagnosis.cause`; see `pilot-results/2026-09-30-explain-abi-change.md`).
 `run_skill_eval.py` reports each skill in its own table. **Still missing: the judged dimensions (4 and 5), the
 trigger corpus runner, and any committed evidence.**
 

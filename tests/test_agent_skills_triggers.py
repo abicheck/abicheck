@@ -101,7 +101,7 @@ def test_corpus_prompts_match_adr_058_verbatim():
     these strings. An ADR wording change that is not mirrored into the corpus
     must fail here rather than leave the corpus quietly stale."""
     adr = _adr_prompts()
-    assert len(adr) == 9, f"expected nine canonical prompts, parsed {len(adr)}"
+    assert len(adr) == 10, f"expected ten canonical prompts, parsed {len(adr)}"
     corpus = [entry["prompt"] for entry in POSITIVE]
     assert corpus == adr
 

@@ -242,208 +242,6 @@
       "skill": "check-abi-compatibility",
       "status": "ready"
     },
-    "debug-dual-cxx-abi": {
-      "affects": [
-        "debug-abi-failure"
-      ],
-      "architectures": [],
-      "category": "B",
-      "digest": "sha256:395b3f72e42364df178223ea345e6ef4a6abd9a47f49e50587a09a0624b0bec1",
-      "expected": {
-        "cause": "cxx_abi_mismatch",
-        "verdict": "BREAKING"
-      },
-      "inputs": "skills-src/evaluation/agents/skills/fixtures/debug-dual-cxx-abi",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "We rebuilt libwidget from exactly the same source and now our C++ app fails to start with a symbol error. Run ./setup.sh once, then ./env/run.sh. The code is identical, so what broke?",
-      "roots": [
-        "catalog/ground_truth.json",
-        "skills-src/evaluation/agents/skills/fixtures/debug-dual-cxx-abi",
-        "skills-src/evaluation/agents/skills/scenarios.yaml"
-      ],
-      "skill": "debug-abi-failure",
-      "status": "ready"
-    },
-    "debug-layout-binary-only": {
-      "affects": [
-        "debug-abi-failure"
-      ],
-      "architectures": [
-        "x86_64"
-      ],
-      "category": "B",
-      "digest": "sha256:58fb80789233a93cd22c070bc9a3f287d58fe65e9232422e6776b75753bf1557",
-      "expected": {
-        "cause": "layout_changed",
-        "verdict": "BREAKING"
-      },
-      "inputs": "skills-src/evaluation/agents/skills/fixtures/debug-layout-binary-only",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "We dropped a vendor build of libwidget into our dev environment and now our app prints the wrong area for a 3x4 widget; it should print 12. We only have their binary. Run ./setup.sh once, then ./env/run.sh. What is going on?",
-      "roots": [
-        "catalog/ground_truth.json",
-        "skills-src/evaluation/agents/skills/fixtures/debug-layout-binary-only",
-        "skills-src/evaluation/agents/skills/scenarios.yaml"
-      ],
-      "skill": "debug-abi-failure",
-      "status": "ready"
-    },
-    "debug-layout-mismatch": {
-      "affects": [
-        "debug-abi-failure"
-      ],
-      "architectures": [],
-      "category": "B",
-      "digest": "sha256:264869848d61fff8a610b175ed3774bd9fc56fd838f097766819a61719a0ca5b",
-      "expected": {
-        "cause": "layout_changed",
-        "verdict": "BREAKING"
-      },
-      "inputs": "skills-src/evaluation/agents/skills/fixtures/debug-layout-mismatch",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "Since libwidget was updated, our app starts fine but prints the wrong area for a 3x4 widget; it should print 12. Run ./setup.sh once, then ./env/run.sh. Nothing in our code changed. What happened?",
-      "roots": [
-        "catalog/ground_truth.json",
-        "skills-src/evaluation/agents/skills/fixtures/debug-layout-mismatch",
-        "skills-src/evaluation/agents/skills/scenarios.yaml"
-      ],
-      "skill": "debug-abi-failure",
-      "status": "ready"
-    },
-    "debug-missing-symbol": {
-      "affects": [
-        "debug-abi-failure"
-      ],
-      "architectures": [],
-      "category": "B",
-      "digest": "sha256:65cef0f783dd40385a0e40224335ab385fe156c97a8a1f7cd45cca7afd0b20f0",
-      "expected": {
-        "cause": "symbol_removed",
-        "verdict": "BREAKING"
-      },
-      "inputs": "skills-src/evaluation/agents/skills/fixtures/debug-missing-symbol",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "After we updated libwidget on our dev box, our app won't start any more. Run ./setup.sh once to build the environment, then ./env/run.sh shows the error. What is wrong, and how do we fix it?",
-      "roots": [
-        "catalog/ground_truth.json",
-        "skills-src/evaluation/agents/skills/fixtures/debug-missing-symbol",
-        "skills-src/evaluation/agents/skills/scenarios.yaml"
-      ],
-      "skill": "debug-abi-failure",
-      "status": "ready"
-    },
-    "debug-missing-version-node": {
-      "affects": [
-        "debug-abi-failure"
-      ],
-      "architectures": [],
-      "category": "B",
-      "digest": "sha256:279f24ffc3434cfa7e5a02099228e41e035514dc11dbc49bd97be99094bcd3f2",
-      "expected": {
-        "cause": "symbol_version_missing",
-        "verdict": "BREAKING"
-      },
-      "inputs": "skills-src/evaluation/agents/skills/fixtures/debug-missing-version-node",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "Our app fails at startup on the test machine with a message about a version not being found. Run ./setup.sh once, then ./env/run.sh to see it. What is going on and what do we do about it?",
-      "roots": [
-        "catalog/ground_truth.json",
-        "skills-src/evaluation/agents/skills/fixtures/debug-missing-version-node",
-        "skills-src/evaluation/agents/skills/scenarios.yaml"
-      ],
-      "skill": "debug-abi-failure",
-      "status": "ready"
-    },
-    "debug-not-an-abi-problem": {
-      "affects": [
-        "debug-abi-failure"
-      ],
-      "architectures": [],
-      "category": "B",
-      "digest": "sha256:dcf082b405d699678ba709d4c017c4f816fd7a115f52992fc2dd75e7663926f4",
-      "expected": {
-        "cause": "not_an_abi_problem",
-        "verdict": "NO_CHANGE"
-      },
-      "inputs": "skills-src/evaluation/agents/skills/fixtures/debug-not-an-abi-problem",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "Our app started failing after we reinstalled libwidget; it now exits with an error. Run ./setup.sh once, then ./env/run.sh. Is the library the problem, and what should we do?",
-      "roots": [
-        "catalog/ground_truth.json",
-        "skills-src/evaluation/agents/skills/fixtures/debug-not-an-abi-problem",
-        "skills-src/evaluation/agents/skills/scenarios.yaml"
-      ],
-      "skill": "debug-abi-failure",
-      "status": "ready"
-    },
-    "debug-rpath-overrides-path": {
-      "affects": [
-        "debug-abi-failure"
-      ],
-      "architectures": [],
-      "category": "B",
-      "digest": "sha256:fe5209620fad0c95e9ede7f0243987c62eca9380571dfa2bcee6f5d50cccb79b",
-      "expected": {
-        "cause": "stale_library_loaded",
-        "verdict": "BREAKING"
-      },
-      "inputs": "skills-src/evaluation/agents/skills/fixtures/debug-rpath-overrides-path",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "Our launcher points LD_LIBRARY_PATH at env/lib, where the current libwidget is installed, yet the app still fails to start. Run ./setup.sh once, then ./env/run.sh. Why, and what should we change?",
-      "roots": [
-        "catalog/ground_truth.json",
-        "skills-src/evaluation/agents/skills/fixtures/debug-rpath-overrides-path",
-        "skills-src/evaluation/agents/skills/scenarios.yaml"
-      ],
-      "skill": "debug-abi-failure",
-      "status": "ready"
-    },
-    "debug-stale-copy-loaded": {
-      "affects": [
-        "debug-abi-failure"
-      ],
-      "architectures": [],
-      "category": "B",
-      "digest": "sha256:bbdbc70c36812cc03c07dc8c5c6474a41f5ad72457efc6db55a507b0ef96b2fb",
-      "expected": {
-        "cause": "stale_library_loaded",
-        "verdict": "BREAKING"
-      },
-      "inputs": "skills-src/evaluation/agents/skills/fixtures/debug-stale-copy-loaded",
-      "invocation": {},
-      "platforms": [
-        "linux"
-      ],
-      "prompt": "We installed the latest libwidget into env/opt/widget, but our app still fails to start. Run ./setup.sh once, then ./env/run.sh shows the error. Why is this happening and what should we change?",
-      "roots": [
-        "catalog/ground_truth.json",
-        "skills-src/evaluation/agents/skills/fixtures/debug-stale-copy-loaded",
-        "skills-src/evaluation/agents/skills/scenarios.yaml"
-      ],
-      "skill": "debug-abi-failure",
-      "status": "ready"
-    },
     "enum-value-change": {
       "affects": [
         "check-abi-compatibility"
@@ -500,6 +298,258 @@
         "skills-src/evaluation/agents/skills/scenarios.yaml"
       ],
       "skill": "check-abi-compatibility",
+      "status": "ready"
+    },
+    "explain-additions-only": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [],
+      "category": "B",
+      "digest": "sha256:34b075046aea153131b6632f9be8af888d71f1010fdd4d5631866e5fe7b198e8",
+      "expected": {
+        "cause": "not_an_abi_problem",
+        "verdict": "COMPATIBLE"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-additions-only",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "Our dev environment picked up a newer libwidget than the one our app was built against, and its exported symbols look different. The app still seems to run. Run ./setup.sh once, then ./env/run.sh. What actually changed, and do we need to rebuild or change anything?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-additions-only",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-dual-cxx-abi": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [],
+      "category": "B",
+      "digest": "sha256:777ae873be87d0115899bbd2379834978dd73c80bfc47be192792905e72ea43e",
+      "expected": {
+        "cause": "cxx_abi_mismatch",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-dual-cxx-abi",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "We rebuilt libwidget from exactly the same source and now our C++ app fails to start with a symbol error. Run ./setup.sh once, then ./env/run.sh. The code is identical, so what broke?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-dual-cxx-abi",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-layout-binary-only": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [
+        "x86_64"
+      ],
+      "category": "B",
+      "digest": "sha256:78d57448a05339962c46dc659cae35f45ec54c259046fc824f4ad5744afe8fbf",
+      "expected": {
+        "cause": "layout_changed",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-layout-binary-only",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "We dropped a vendor build of libwidget into our dev environment and now our app prints the wrong area for a 3x4 widget; it should print 12. We only have their binary. Run ./setup.sh once, then ./env/run.sh. What is going on?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-layout-binary-only",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-layout-mismatch": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [],
+      "category": "B",
+      "digest": "sha256:6ba8b7da015daf3f95c017ef050b1673d3128e65e87ce7d2f8168dbbaf65983f",
+      "expected": {
+        "cause": "layout_changed",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-layout-mismatch",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "Since libwidget was updated, our app starts fine but prints the wrong area for a 3x4 widget; it should print 12. Run ./setup.sh once, then ./env/run.sh. Nothing in our code changed. What happened?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-layout-mismatch",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-library-older-than-build": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [],
+      "category": "B",
+      "digest": "sha256:b80f140a575ef9352ea885c18db50095ea426891e399b4714c45a25cb152ae85",
+      "expected": {
+        "cause": "library_older_than_build",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-library-older-than-build",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "Our app builds fine against the libwidget SDK we ship with, but in our test environment it fails at startup. Did libwidget drop something? Run ./setup.sh once, then ./env/run.sh. What changed, and what should we do?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-library-older-than-build",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-missing-symbol": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [],
+      "category": "B",
+      "digest": "sha256:ab54df20bb66eab966c52d06f449794c47c93cd046d567956b15f175e3aad9cf",
+      "expected": {
+        "cause": "symbol_removed",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-missing-symbol",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "After we updated libwidget on our dev box, our app won't start any more. Run ./setup.sh once to build the environment, then ./env/run.sh shows the error. What is wrong, and how do we fix it?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-missing-symbol",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-missing-version-node": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [],
+      "category": "B",
+      "digest": "sha256:e5009fb7478875999e14e93cb9d75feeeb5b07dbbf02881a4db1e0da2d5ad983",
+      "expected": {
+        "cause": "symbol_version_missing",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-missing-version-node",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "Our app fails at startup on the test machine with a message about a version not being found. Run ./setup.sh once, then ./env/run.sh to see it. What is going on and what do we do about it?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-missing-version-node",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-not-an-abi-problem": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [],
+      "category": "B",
+      "digest": "sha256:aff2cd5630592838cc370631856be22e1b1baf6b3ec7cc48ecff2017c073d997",
+      "expected": {
+        "cause": "not_an_abi_problem",
+        "verdict": "NO_CHANGE"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-not-an-abi-problem",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "Our app started failing after we reinstalled libwidget; it now exits with an error. Run ./setup.sh once, then ./env/run.sh. Is the library the problem, and what should we do?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-not-an-abi-problem",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-rpath-overrides-path": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [],
+      "category": "B",
+      "digest": "sha256:9cb7d653d13241b4bb542bd79c3b271985147f209e094d6e75d594894e41c1d5",
+      "expected": {
+        "cause": "stale_library_loaded",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-rpath-overrides-path",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "Our launcher points LD_LIBRARY_PATH at env/lib, where the current libwidget is installed, yet the app still fails to start. Run ./setup.sh once, then ./env/run.sh. Why, and what should we change?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-rpath-overrides-path",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
+      "status": "ready"
+    },
+    "explain-stale-copy-loaded": {
+      "affects": [
+        "explain-abi-change"
+      ],
+      "architectures": [],
+      "category": "B",
+      "digest": "sha256:751802c394f8579afe96cdb4dd82926403556480085c2335840d37784c9946dc",
+      "expected": {
+        "cause": "stale_library_loaded",
+        "verdict": "BREAKING"
+      },
+      "inputs": "skills-src/evaluation/agents/skills/fixtures/explain-stale-copy-loaded",
+      "invocation": {},
+      "platforms": [
+        "linux"
+      ],
+      "prompt": "We installed the latest libwidget into env/opt/widget, but our app still fails to start. Run ./setup.sh once, then ./env/run.sh shows the error. Why is this happening and what should we change?",
+      "roots": [
+        "catalog/ground_truth.json",
+        "skills-src/evaluation/agents/skills/fixtures/explain-stale-copy-loaded",
+        "skills-src/evaluation/agents/skills/scenarios.yaml"
+      ],
+      "skill": "explain-abi-change",
       "status": "ready"
     },
     "not-comparable-pair": {
@@ -682,9 +732,9 @@
     "harness": {
       "affects": [
         "check-abi-compatibility",
-        "debug-abi-failure"
+        "explain-abi-change"
       ],
-      "digest": "sha256:ba49cf5ec292d8804f53b7b48d352bcbfce982912cad0dff8954cd8c9fb990cf",
+      "digest": "sha256:2b832f0f5c313aa167def171ed57925c0bc32d0c1403a401985b900e2078eae2",
       "roots": [
         "skills-src/evaluation/agents/skills/grade_bundle.py",
         "skills-src/evaluation/agents/skills/graders",
@@ -696,9 +746,9 @@
     "trigger_corpus": {
       "affects": [
         "check-abi-compatibility",
-        "debug-abi-failure"
+        "explain-abi-change"
       ],
-      "digest": "sha256:9f955629f4d350a01001d4fbf1f606670b572e34283a97c5d34bc205d631933c",
+      "digest": "sha256:a686e6e7fb8a54fc851a28517df90ceadd4653cf9031ced0325c5d7eafc3316e",
       "prompt_ids": [
         "positive-0",
         "positive-1",
@@ -709,6 +759,7 @@
         "positive-6",
         "positive-7",
         "positive-8",
+        "positive-9",
         "negative-0",
         "negative-1",
         "negative-2",
@@ -730,14 +781,14 @@
       ],
       "tree": "sha256:8866a669966f31f1fe57ae4066699184f942738d253e92e5c42b56e924f8b2a3"
     },
-    "debug-abi-failure": {
+    "explain-abi-change": {
       "affects": [
-        "debug-abi-failure"
+        "explain-abi-change"
       ],
       "roots": [
-        ".agents/skills/debug-abi-failure"
+        ".agents/skills/explain-abi-change"
       ],
-      "tree": "sha256:6088c25cde122cef6ea68926422f85247c51ebc949c22547f940ad47f66b551a"
+      "tree": "sha256:d467c5eb8bbacdfb4f696fda464f3b69191f673102ddfeb469c79be8f857363d"
     }
   }
 }

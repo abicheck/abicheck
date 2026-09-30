@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # each exists. `_normalize_pinned_ref`/`_DIGEST_LINE` in this generator are
 # file-path-agnostic, so the identical two-line convention here is picked up
 # by `--check` without any further changes to that comparison machinery.
-ARG ABICHECK_REF=8880e840bb56d8271f387b07041d20154cf93fca
-# ABICHECK_RUNTIME_DIGEST=51cde7071632acd46b40b819474bd2cdded66fca8aa99b2e77deb27b66b8c613
+ARG ABICHECK_REF=032d8b11febbb28855af56a126cf69090a87512e
+# ABICHECK_RUNTIME_DIGEST=885a9e392bb0ed9af9a72a3aa42de960fd4edf82454217f2107106f415fc8615
 RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \
     && cd /opt/abicheck-src \
     && (git checkout "$ABICHECK_REF" 2>/dev/null \

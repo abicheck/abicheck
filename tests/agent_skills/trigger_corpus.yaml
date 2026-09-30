@@ -84,16 +84,22 @@ positive:
   - prompt: "My program fails with 'undefined symbol' after we updated a library. Why?"
     # Added with the second skill (ADR-058 2026-09-30 amendment): a runtime
     # failure in an existing environment, not a change under review.
-    expected_skill: debug-abi-failure
+    expected_skill: explain-abi-change
     description_keywords:
       - undefined symbol
       - updated
 
   - prompt: "Our program crashes after a shared library was updated. What changed?"
-    expected_skill: debug-abi-failure
+    expected_skill: explain-abi-change
     description_keywords:
       - crash
       - shared-library
+
+  - prompt: "A shared library we depend on was bumped and its symbols look different. What changed, and does our program care?"
+    expected_skill: explain-abi-change
+    description_keywords:
+      - shared-library update
+      - does our program care
 
 negative:
   - prompt: "Is this a breaking change to our REST API?"

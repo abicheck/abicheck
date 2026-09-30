@@ -32,7 +32,7 @@
         "skill": {
           "enum": [
             "check-abi-compatibility",
-            "debug-abi-failure"
+            "explain-abi-change"
           ]
         },
         "status": {
@@ -100,13 +100,14 @@
             "cause": {
               "enum": [
                 "symbol_removed",
+                "library_older_than_build",
                 "symbol_version_missing",
                 "layout_changed",
                 "stale_library_loaded",
                 "cxx_abi_mismatch",
                 "not_an_abi_problem"
               ],
-              "description": "debug-abi-failure scenarios only: the root cause the answer must name (claim `diagnosis.cause`). Identical to the claim schema's cause vocabulary; tests/test_skill_eval_diagnosis.py keeps the two, and the skill's own cause table, in step. `verdict` alongside it compares the library the program was built against with the library the loader actually used."
+              "description": "explain-abi-change scenarios only: the root cause the answer must name (claim `diagnosis.cause`). Identical to the claim schema's cause vocabulary; tests/test_skill_eval_diagnosis.py keeps the two, and the skill's own cause table, in step. `verdict` alongside it compares the library the program was built against with the library the loader actually used."
             },
             "uncertainty": {
               "enum": [

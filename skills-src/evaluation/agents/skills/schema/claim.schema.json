@@ -27,13 +27,14 @@
     },
     "diagnosis": {
       "type": "object",
-      "description": "Runtime-failure diagnoses only (the debug-abi-failure skill's scenarios): the one root cause the answer names, from that skill's closed cause vocabulary. SKILL.md's cause table and this enum are kept identical by tests/test_skill_eval_diagnosis.py. `verdict` alongside it compares the library the program was built against with the library the loader actually used.",
+      "description": "ABI-change explanations only (the explain-abi-change skill's scenarios): the one mechanism the answer names, from that skill's closed vocabulary. SKILL.md's mechanism table and this enum are kept identical by tests/test_skill_eval_diagnosis.py. `verdict` alongside it compares the library the program was built against with the library the loader actually used.",
       "required": ["cause"],
       "additionalProperties": false,
       "properties": {
         "cause": {
           "enum": [
             "symbol_removed",
+            "library_older_than_build",
             "symbol_version_missing",
             "layout_changed",
             "stale_library_loaded",

@@ -58,11 +58,11 @@ Category A scenario's reference solution, but never run through an actual
 Harbor trial (no working container/sandbox runtime available in this
 environment); see the two amendments below and `skills-src/evaluation/agents/skills/harbor/
 CLAUDE.md` for the full account of what is and is not verified.
-A **second skill, `debug-abi-failure`**, was admitted on 2026-09-30 (see
+A **second skill, `explain-abi-change`**, was admitted on 2026-09-30 (see
 that amendment below), with its own evaluation corpus and pilot.
 **Decision maker:** (pending — recorded per repository convention)
 
-> **Amendment (2026-09-30, second skill — `debug-abi-failure` —
+> **Amendment (2026-09-30, second skill — `explain-abi-change` —
 > user-requested).**
 >
 > A second public skill is admitted. It covers a job the first cannot:
@@ -80,7 +80,7 @@ that amendment below), with its own evaluation corpus and pilot.
 >    fix that matches it. That includes "not an ABI problem" and "a stale
 >    copy wins the search", where rebuilding is the wrong advice.
 > 4. **Useful standalone.** Installable alone
->    (`npx skills add abicheck/abicheck -s debug-abi-failure`).
+>    (`npx skills add abicheck/abicheck -s explain-abi-change`).
 > 5. **Specialized knowledge.** Loader search order and precedence
 >    (`DT_RPATH` over `LD_LIBRARY_PATH`), symbol versioning, and the
 >    libstdc++ dual ABI.
@@ -91,7 +91,7 @@ that amendment below), with its own evaluation corpus and pilot.
 > - The claim envelope gains `diagnosis.cause`, and a run is correct only
 >   when both the cause and the verdict are right.
 >
-> Pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-30-debug-abi-failure.md`,
+> Pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md`,
 > `claude-sonnet-5-5`):
 >
 > | | skill | baseline |
@@ -729,7 +729,7 @@ Three problems, not one, need solving together:
 
 ## Product positioning
 
-A good skill in this portfolio should answer requests such as these nine —
+A good skill in this portfolio should answer requests such as these ten —
 none of which name abicheck, and each of which a real user could type
 without knowing the tool exists:
 
@@ -742,6 +742,7 @@ without knowing the tool exists:
 7. "How do I keep ABI compatibility across compiler/client profiles?"
 8. "My program fails with 'undefined symbol' after we updated a library. Why?"
 9. "Our program crashes after a shared library was updated. What changed?"
+10. "A shared library we depend on was bumped and its symbols look different. What changed, and does our program care?"
 
 abicheck should appear inside the resulting workflow as a deterministic
 verification engine, not as the user-facing job. At the time these seven
@@ -755,9 +756,10 @@ the sole surviving skill, `check-abi-compatibility` (4's
 named-consumer scoping was absorbed via `--used-by`/`--required-symbol`,
 not dropped — see that amendment); 2 and 3 are currently unclaimed, tracked
 as future scope for that same skill and for a distinct future second skill
-respectively. Phrasings 8 and 9 were added by the 2026-09-30 amendment (second skill,
-`debug-abi-failure`), which claims both: a program that already failed in a
-real environment, rather than a change under review. This list is the source both `SKILL.md` `description` fields
+respectively. Phrasings 8-10 were added by the 2026-09-30 amendment (second skill,
+`explain-abi-change`), which claims all three: a developer working out what
+changed between a program and the libraries it uses in an existing
+environment, failing or not, rather than a change under review. This list is the source both `SKILL.md` `description` fields
 (Decision → Skill content model) and the trigger-test positive corpus
 (Testing and evaluation architecture, and G36's P0.8) are built from.
 

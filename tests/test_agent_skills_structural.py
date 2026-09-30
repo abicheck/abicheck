@@ -88,11 +88,11 @@ def _version_tuple(text: str) -> tuple[int, ...]:
 def test_the_published_portfolio_is_exactly_the_admitted_skills():
     """ADR-058: every public skill passes the five-criteria admission bar in
     an ADR amendment of its own. `check-abi-compatibility` survived the
-    2026-08-20 portfolio reset; `debug-abi-failure` was admitted by the
+    2026-08-20 portfolio reset; `explain-abi-change` was admitted by the
     2026-09-30 amendment. A new directory here without that record fails."""
     assert [d.name for d in SKILL_DIRS] == [
         "check-abi-compatibility",
-        "debug-abi-failure",
+        "explain-abi-change",
     ]
 
 

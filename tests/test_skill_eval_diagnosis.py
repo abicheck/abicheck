@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The runtime-failure diagnosis contract (`debug-abi-failure`, ADR-058).
+"""The ABI-change explanation contract (`explain-abi-change`, ADR-058).
 
-The skill names one root cause from a closed vocabulary; the evaluation
+The skill names one mechanism from a closed vocabulary; the evaluation
 grades it. Five places spell that vocabulary — the grader, the claim schema,
 the scenario schema, and the skill's own two cause tables — and they must
 agree, or the skill is graded against causes it was never told about.
@@ -42,7 +42,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 EVAL_DIR = ROOT / "skills-src" / "evaluation" / "agents" / "skills"
-SKILL_DIR = ROOT / "skills-src" / "debug-abi-failure"
+SKILL_DIR = ROOT / "skills-src" / "explain-abi-change"
 sys.path.insert(0, str(EVAL_DIR))
 
 from graders import claim as claim_mod  # noqa: E402
@@ -59,7 +59,7 @@ SCENARIOS = [
     for s in yaml.safe_load((EVAL_DIR / "scenarios.yaml").read_text(encoding="utf-8"))[
         "scenarios"
     ]
-    if s["skill"] == "debug-abi-failure"
+    if s["skill"] == "explain-abi-change"
 ]
 PACK = json.loads((EVAL_DIR / "skill-eval-pack.json").read_text(encoding="utf-8"))
 
@@ -132,7 +132,7 @@ def _run(tmp_path: Path, envelope: dict | None, *, calls: int = 1) -> Path:
 
 
 DEBUG = {
-    "skill": "debug-abi-failure",
+    "skill": "explain-abi-change",
     "expected": {"verdict": "BREAKING", "cause": "stale_library_loaded"},
 }
 REVIEW = {"skill": "check-abi-compatibility", "expected": {"verdict": "BREAKING"}}
@@ -301,6 +301,11 @@ def test_fixture_reproduces_its_symptom_and_ground_truth(tmp_path, scenario):
         assert ran.returncode == 0 and "area=12" not in output
     elif cause == "symbol_version_missing":
         assert ran.returncode != 0 and "version `WIDGET_2.0' not found" in output
+    elif (
+        cause == "not_an_abi_problem" and scenario["expected"]["verdict"] != "NO_CHANGE"
+    ):
+        # A library update the program does not notice: it runs normally.
+        assert ran.returncode == 0 and "size=" in output
     elif cause == "not_an_abi_problem":
         assert ran.returncode != 0 and "resize failed" in output
     else:
@@ -326,3 +331,25 @@ def test_fixture_reproduces_its_symptom_and_ground_truth(tmp_path, scenario):
         json.loads(report.read_text(encoding="utf-8"))["verdict"]
         == scenario["expected"]["verdict"]
     )
+    if scenario["expected"]["cause"] == "library_older_than_build":
+        # What separates it from `symbol_removed`: the used copy is an older
+        # release, so compared the other way round the build's library only
+        # adds to it.
+        reverse = tmp_path / "reverse.json"
+        subprocess.run(
+            [
+                "abicheck",
+                "compare",
+                str(loaded),
+                str(fixture / "env" / "sdk" / "libwidget.so.1"),
+                *(["--header", f"old={loaded_header}"] if loaded_header else []),
+                "--header",
+                f"new={fixture / 'sdk' / 'widget.h'}",
+                "-o",
+                f"json={reverse}",
+            ],
+            capture_output=True,
+        )
+        assert (
+            json.loads(reverse.read_text(encoding="utf-8"))["verdict"] == "COMPATIBLE"
+        )

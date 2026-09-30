@@ -104,7 +104,7 @@ ARMS = ("skill", "baseline")
 #: other skill (a retired prototype from before ADR-058's 2026-08-20 reset)
 #: is excluded unless `--include-prototype-skills` is passed. This used to be
 #: one hard-coded flagship name; with a second published skill
-#: (`debug-abi-failure`, ADR-058's 2026-09-30 amendment) that would have
+#: (`explain-abi-change`, ADR-058's 2026-09-30 amendment) that would have
 #: silently dropped every one of its scenarios from a default run.
 def evaluated_skills() -> frozenset[str]:
     return frozenset(p.name for p in SKILLS_SRC.iterdir() if (p / "SKILL.md").is_file())
@@ -175,14 +175,15 @@ is the vocabulary a compatibility-review skill's own final decision uses; it
 must agree with `verdict`/`confident`, not merely restate the raw verdict).
 """
 
-#: Appended after `ANSWER_CONTRACT` for runtime-failure scenarios (those whose
+#: Appended after `ANSWER_CONTRACT` for explain-abi-change scenarios (those whose
 #: `expected` names a `cause`). Identical for both arms, like the contract
 #: itself: it states the answer format, and the cause list is the grading
 #: vocabulary, so the baseline arm is told the same candidate causes the
 #: skill arm is.
 DIAGNOSIS_CONTRACT = """
-This is a runtime failure, so also add a `"diagnosis"` object naming its
-root cause: `{"cause": "<one of symbol_removed, symbol_version_missing,
+This asks what changed between a program and its libraries, so also add a
+`"diagnosis"` object naming the mechanism: `{"cause": "<one of
+symbol_removed, library_older_than_build, symbol_version_missing,
 layout_changed, stale_library_loaded, cxx_abi_mismatch, not_an_abi_problem>"}`.
 Here `"verdict"` compares the library the program was built against with the
 library that actually gets loaded when it runs (`NO_CHANGE` when they are

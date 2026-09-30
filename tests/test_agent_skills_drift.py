@@ -434,7 +434,7 @@ DEPS_REPORT_KEYS = _deps_report_keys()
 
 
 def _diagnosis_causes() -> frozenset[str]:
-    """The runtime-failure cause vocabulary `debug-abi-failure` reports.
+    """The runtime-failure cause vocabulary `explain-abi-change` reports.
 
     A skill-defined outcome vocabulary, not a report field: its one source is
     the evaluation claim schema that grades it (`diagnosis.cause`), so the

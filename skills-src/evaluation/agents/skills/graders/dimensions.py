@@ -44,7 +44,7 @@ from . import claim as claim_mod, evidence as ev
 #: portfolio-reset amendment reduced the portfolio from four skills to one
 #: (`native-binary-compatibility-review` renamed to
 #: `check-abi-compatibility`); the other three are no longer published.
-KNOWN_SKILLS = ("check-abi-compatibility", "debug-abi-failure")
+KNOWN_SKILLS = ("check-abi-compatibility", "explain-abi-change")
 
 
 @dataclass

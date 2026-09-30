@@ -51,13 +51,15 @@ held-out result, and it has not been validated on other agents. The
 methodology and caveats are in
 [the pilot report](https://github.com/abicheck/abicheck/blob/main/skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md).
 
-**Second skill (2026-09-30): `debug-abi-failure`**, for a program that
-already fails at runtime. It was evaluated on 8 scenarios in the same way.
+**Second skill (2026-09-30): `explain-abi-change`**, for a developer who
+wants to understand what changed between a program and the shared libraries
+it uses, whether something fails or not. It was evaluated on 10 scenarios in
+the same way.
 With the skill, the agent always backed its diagnosis with a real comparison
 and graded severity correctly (18 of 18 runs, against 16 of 18). Without it,
 the agent named the right cause just as often, so the skill's measured value
 so far is evidence and correct severity, not a better guess at the cause.
-See [its pilot report](https://github.com/abicheck/abicheck/blob/main/skills-src/evaluation/agents/skills/pilot-results/2026-09-30-debug-abi-failure.md).
+See [its pilot report](https://github.com/abicheck/abicheck/blob/main/skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md).
 
 **Portfolio status (2026-08-20):** the portfolio was reset from four
 published skills down to **one internal candidate**. No skill has measured
@@ -81,13 +83,13 @@ still-unrun behavioral evaluation. The same status is also kept in `skills-src/C
 | Skill | Status | The question it answers |
 |---|---|---|
 | [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/skills-src/check-abi-compatibility/SKILL.md) | **Preview** (`npx skills add abicheck/abicheck`) | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
-| [`debug-abi-failure`](https://github.com/abicheck/abicheck/blob/main/skills-src/debug-abi-failure/SKILL.md) | **Preview** (same install) | "Why does my program fail now that a library changed?" — starts from a runtime symptom (`undefined symbol`, `version ... not found`, a crash or wrong results after an update, a plugin that stops loading), finds which library copy the loader really used, compares it with the one the program was built against, and names the cause and the fix. Also says when it is not an ABI problem. |
+| [`explain-abi-change`](https://github.com/abicheck/abicheck/blob/main/skills-src/explain-abi-change/SKILL.md) | **Preview** (same install) | "What changed in this library, and why does my program behave like this?" — starts from what the developer observed (`undefined symbol`, `version ... not found`, a crash or wrong results after an update, a plugin that stops loading, or just a library bump with different symbols), finds which library copy is really used, compares it with the one the program was built against, and names the mechanism and what to do. Also says when the change is harmless or not ABI-related. |
 
 ## Installing it
 
 ```bash
 npx skills add abicheck/abicheck                     # both skills, into the current project
-npx skills add abicheck/abicheck -s debug-abi-failure  # just one of them
+npx skills add abicheck/abicheck -s explain-abi-change  # just one of them
 npx skills add abicheck/abicheck -g -a claude-code   # for every project, one agent
 npx skills add abicheck/abicheck -l                  # list what the repository offers
 ```

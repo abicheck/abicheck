@@ -104,7 +104,7 @@ implied is reset → rewrite → evaluate → publish, and this is step two.
 | Skill | Status | Meaning |
 |---|---|---|
 | `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The first published skill. The 2026-09-29 pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
-| `debug-abi-failure` | **Preview — same install; single-agent pilot evidence only.** | Admitted by ADR-058's 2026-09-30 amendment (all five admission criteria, stated there). Starts from a runtime symptom in an existing environment and works back to one of six named causes. Evaluated on 8 scenarios (`skills-src/evaluation/agents/skills/scenarios.yaml`, `debug-*`); results in `skills-src/evaluation/agents/skills/pilot-results/2026-09-30-debug-abi-failure.md`. |
+| `explain-abi-change` | **Preview — same install; single-agent pilot evidence only.** | Admitted by ADR-058's 2026-09-30 amendment (all five admission criteria, stated there). For a developer working out what changed between a program and the shared libraries it uses — a failure or just a library update — worked back to one of seven named mechanisms. Renamed from `debug-abi-failure` before release, when the framing widened from "a program stopped working" to "a developer wants to understand an ABI change". Evaluated on 10 scenarios (`skills-src/evaluation/agents/skills/scenarios.yaml`, `explain-*`); results in `skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md`. |
 
 **What "PR 2" integrated, over the bare rename the reset amendment left in
 place:**
@@ -171,7 +171,7 @@ scope. See the ADR amendment for the full accounting of what was deferred.
 
 - Don't add another published skill without its own ADR-058 amendment
   stating the five admission criteria and an evaluation corpus of its own,
-  the way `debug-abi-failure` was added (2026-09-30). Rebuilding
+  the way `explain-abi-change` was added (2026-09-30). Rebuilding
   `native-release-compatibility` from git history is not a shortcut.
 - Don't cite either skill as validated in any user-facing claim; each has
   single-agent pilot evidence only, with the caveats its pilot report states.
@@ -215,7 +215,7 @@ here as they are run.
 
 | Target | Skills validated | Date | Notes |
 |---|---|---|---|
-| Claude Code | `debug-abi-failure` | 2026-09-30 | Headless `claude -p`, `claude-sonnet-5-5`, 8-scenario A/B corpus; see `skills-src/evaluation/agents/skills/pilot-results/2026-09-30-debug-abi-failure.md`. |
+| Claude Code | `explain-abi-change` | 2026-09-30 | Headless `claude -p`, `claude-sonnet-5-5`, 10-scenario A/B corpus; see `skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md`. |
 | Claude Code | `check-abi-compatibility` | 2026-09-29 | Headless `claude -p`, `claude-sonnet-5-5`, 14-scenario A/B corpus; see `skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`. Not yet exercised interactively or through a `npx`-installed copy by a person. |
 | Codex | — | — | not yet run |
 | GitHub Copilot | — | — | not yet run |

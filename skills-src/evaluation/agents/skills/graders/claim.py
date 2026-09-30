@@ -222,12 +222,13 @@ def _validate_matrix(matrix: object) -> str | None:
     return None
 
 
-#: debug-abi-failure's closed root-cause vocabulary (claim `diagnosis.cause`).
+#: explain-abi-change's closed mechanism vocabulary (claim `diagnosis.cause`).
 #: tests/test_skill_eval_diagnosis.py keeps this, the claim and scenario
-#: schemas, and the skill's own SKILL.md cause table identical.
+#: schemas, and the skill's own SKILL.md mechanism table identical.
 DIAGNOSIS_CAUSES = frozenset(
     {
         "symbol_removed",
+        "library_older_than_build",
         "symbol_version_missing",
         "layout_changed",
         "stale_library_loaded",
