@@ -32,7 +32,7 @@ frozen as a binding, and the canonical per-occurrence facts
 from __future__ import annotations
 
 import dataclasses
-import sys
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -181,7 +181,9 @@ class _RemovedDeclarationField:
     def __get__(self, obj: Any, objtype: type | None = None) -> Any:
         if obj is None:
             return None
-        if sys._getframe(1).f_code is _REPLACE_CODE:
+        caller = inspect.currentframe()
+        caller = caller.f_back if caller is not None else None
+        if caller is not None and caller.f_code is _REPLACE_CODE:
             # ``replace`` forwards the current value as a builder input --
             # exactly what it did for the plain field, including when the
             # call also swaps in a fresh, store-less ``semantic_ir``.

@@ -62,7 +62,7 @@ def test_copies_keep_the_declarations_and_stay_guarded(clone) -> None:
     assert [f.name for f in other.declarations.functions] == ["f"]
     assert other.declarations.constants == {"K": "1"}
     with pytest.raises(AttributeError):
-        other.functions  # noqa: B018
+        _ = other.functions
 
 
 def test_replace_gives_the_copy_its_own_store() -> None:
