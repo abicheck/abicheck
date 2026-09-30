@@ -88,6 +88,7 @@ check) or directly for a standalone report.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -419,8 +420,35 @@ def current_backend_declaration_readers() -> dict[tuple[str, str, str], int]:
         except SyntaxError:
             continue
         for (qualname, field_name), n in backend_declaration_reads(tree).items():
-            found[(rel, qualname, field_name)] = n
+            name = _unmangled_qualname(qualname)
+            if name is None:
+                continue
+            key = (rel, name, field_name)
+            found[key] = found.get(key, 0) + n
     return found
+
+
+#: mutmut's copy of a function: ``x_<name>__mutmut_<n|orig>`` (module level,
+#: so ``_f`` becomes ``x__f__mutmut_orig``) or ``xǁ<Class>ǁ<name>__mutmut_...``
+#: (method).
+_MUTMUT_NAME = re.compile(r"^x(?:_|ǁ\w+ǁ)(?P<name>\w+?)__mutmut_(?P<which>orig|\d+)$")
+
+
+def _unmangled_qualname(qualname: str) -> str | None:
+    """*qualname* as written in the source, or ``None`` for a mutant copy.
+
+    Run from a mutmut ``mutants/`` tree, every function body exists as
+    ``..._mutmut_orig`` plus one numbered copy per mutant: the original is
+    the reader the baseline names, and the mutants are not readers at all.
+    Without this, the gate reported every baselined reader as new there.
+    """
+    head, _, last = qualname.rpartition(".")
+    match = _MUTMUT_NAME.match(last)
+    if match is None:
+        return qualname
+    if match["which"] != "orig":
+        return None
+    return f"{head}.{match['name']}" if head else match["name"]
 
 
 def backend_declaration_problems(

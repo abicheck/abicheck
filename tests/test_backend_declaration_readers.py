@@ -111,3 +111,28 @@ def test_live_checker_matches_the_baseline() -> None:
     )
     # Vacuity guard: the scan reached the DWARF-layout detector it must see.
     assert any(rel == "abicheck/diff_platform.py" for rel, _, _ in current)
+
+
+@pytest.mark.parametrize(
+    ("qualname", "expected"),
+    [
+        ("f", "f"),
+        ("C.m", "C.m"),
+        ("x__has_type_evidence__mutmut_orig", "_has_type_evidence"),
+        ("x_public__mutmut_orig", "public"),
+        ("x__has_type_evidence__mutmut_7", None),
+        ("C.xǁCǁm__mutmut_orig", "C.m"),
+        ("C.xǁCǁ_m__mutmut_12", None),
+        ("x_a__b__mutmut_orig", "a__b"),
+    ],
+)
+def test_a_mutmut_tree_reports_the_source_reader_not_its_copies(
+    qualname: str, expected: str | None
+) -> None:
+    """Run from mutmut's `mutants/` tree, a function's body exists as its
+    `_mutmut_orig` copy plus one numbered copy per mutant; the gate must see
+    only the original, under its source name, so every cutover test that runs
+    the whole gate keeps passing there."""
+    from semantic_ir_cutover import _unmangled_qualname
+
+    assert _unmangled_qualname(qualname) == expected

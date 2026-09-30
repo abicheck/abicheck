@@ -547,13 +547,6 @@ pytest_add_cli_args = [
     # `scripts/check_docs_contract.py` via `importlib`, itself PyYAML/stdlib
     # only.
     "--deselect=tests/test_docs_contract.py::test_docs_contract_has_no_ownership_errors_on_real_repo",
-    # Same "validates the tree it runs in" class: the ADR-063 6B
-    # `semantic-ir-cutover` gate keys each checker read of
-    # `AbiSnapshot.dwarf`/`dwarf_advanced` by its enclosing function, and a
-    # `mutants/` copy renames every function `x__<name>__mutmut_<n>`, so every
-    # baselined reader reads as a new one. Its scanner lives in `scripts/`,
-    # not an `only_mutate` module, so deselecting it costs no mutation kill.
-    "--deselect=tests/test_backend_declaration_readers.py::test_live_checker_matches_the_baseline",
     # Same "subprocess re-enters the mutated tree with no mutmut config"
     # failure class as the several entries below, and the sixth recorded
     # instance of it: `TestPhases::test_collect_then_aggregate_then_validate`
