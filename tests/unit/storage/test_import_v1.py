@@ -117,7 +117,7 @@ class TestImportLegacySnapshot:
         assert SEMANTIC_IR_SECTION_KIND in sections
         dto = SectionDTO.from_dict(store.get(sections[SEMANTIC_IR_SECTION_KIND].digest))
         ir, _conflicts = semantic_ir_from_dto(dto)
-        assert ir == snap.semantic_ir
+        assert ir == snap.canonical_ir
 
     def test_graph_round_trips_through_its_own_section(self) -> None:
         """ADR-063 Track 4 (8B), second slice: the `"graph"` section is

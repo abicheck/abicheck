@@ -221,9 +221,12 @@ class TestTypedApiThreadsTheLegacyMatch:
         request = self._request(so_path, header, compile_db)
         result = execute_dump_request(resolve_dump_request(request))
         fields = [
-            f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
+            f.name
+            for t in result.snapshot.declarations.types
+            if t.name == "S"
+            for f in t.fields
         ]
-        assert fields, result.snapshot.types
+        assert fields, result.snapshot.declarations.types
         assert "b" not in fields, (
             "typed path unexpectedly saw the -DWIDE=1 define with no "
             "legacy_compile_db_tokens threaded -- either the fold now "
@@ -266,9 +269,12 @@ class TestTypedApiThreadsTheLegacyMatch:
             options=DumpExecutionOptions(legacy_compile_db_tokens=tuple(legacy_flags)),
         )
         fields = [
-            f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
+            f.name
+            for t in result.snapshot.declarations.types
+            if t.name == "S"
+            for f in t.fields
         ]
-        assert fields, result.snapshot.types
+        assert fields, result.snapshot.declarations.types
         assert "b" in fields, (
             "typed path with legacy_compile_db_tokens threaded still did "
             "not see -DWIDE=1 -- the merge into the resolved CompileContext "

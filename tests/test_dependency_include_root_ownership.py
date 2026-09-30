@@ -142,7 +142,7 @@ def _build_dependency_tree(tmp_path: Path) -> tuple[Path, Path, Path]:
 def _origins(snap: object) -> dict[str, str]:
     return {
         f.name: (f.origin.value if f.origin else "unknown")
-        for f in snap.functions  # type: ignore[attr-defined]
+        for f in snap.declarations.functions  # type: ignore[attr-defined]
     }
 
 

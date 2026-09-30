@@ -29,11 +29,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .mangled_name_template_args import (
     skip_substitution as _skip_substitution,
     skip_template_args,
 )
+
+if TYPE_CHECKING:
+    from .snapshot import AbiSnapshot
 
 #: Itanium prefixes whose *operand* is a type whose owning namespace decides
 #: external-vs-native: vtable/typeinfo/typeinfo-name/VTT/construction-vtable
@@ -317,15 +321,15 @@ class PublicTemplateScopes:
         )
 
 
-def public_template_scopes(snapshot: object) -> PublicTemplateScopes:
+def public_template_scopes(snapshot: AbiSnapshot) -> PublicTemplateScopes:
     """Collect :class:`PublicTemplateScopes` from a snapshot's public decls."""
     from .vocabulary import ScopeOrigin
 
     scopes: set[tuple[str, ...]] = set()
     for decls, is_type in (
-        (getattr(snapshot, "functions", ()), False),
-        (getattr(snapshot, "variables", ()), False),
-        (getattr(snapshot, "types", ()), True),
+        (snapshot.declarations.functions, False),
+        (snapshot.declarations.variables, False),
+        (snapshot.declarations.types, True),
     ):
         for d in decls:
             if getattr(d, "origin", None) != ScopeOrigin.PUBLIC_HEADER:

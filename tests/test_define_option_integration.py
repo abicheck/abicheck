@@ -94,7 +94,9 @@ def _dump(tmp_path: Path, so: Path, include: Path, *args: str, out: Path) -> Non
 
 def _guarded_names(snapshot_path: Path) -> set[str]:
     snap = load_snapshot(str(snapshot_path))
-    return {f.name for f in snap.functions if f.name.startswith("guarded_")}
+    return {
+        f.name for f in snap.declarations.functions if f.name.startswith("guarded_")
+    }
 
 
 @pytest.mark.skipif(not (_HAVE_GCC and _HAVE_CASTXML), reason="needs gcc + castxml")
@@ -205,7 +207,7 @@ def test_castxml_driven_by_clang_receives_the_same_definitions(tmp_path: Path) -
     out = tmp_path / "cx-clang.json"
     _dump(tmp_path, so, include, "--config", str(cfg), "-DFEATURE_API", out=out)
     snap = load_snapshot(str(out))
-    assert "guarded_expert" in {f.name for f in snap.functions}
+    assert "guarded_expert" in {f.name for f in snap.declarations.functions}
     assert "-DFEATURE_API" in snap.ast_compile_args
     assert "clang" in (snap.ast_toolchain.get("compiler_selected") or "")
 
@@ -463,7 +465,7 @@ class TestTypedApiParity:
 
     def test_a_typed_request_honours_its_defines(self, tmp_path: Path) -> None:
         snap = self._dump(tmp_path, defines=("FEATURE_API",))
-        names = {f.name for f in snap.functions}
+        names = {f.name for f in snap.declarations.functions}
         assert "guarded_expert" in names
         assert "-DFEATURE_API" in snap.ast_compile_args
 
@@ -473,12 +475,15 @@ class TestTypedApiParity:
         """The negative half: absence must still mean absence, so the test
         above cannot pass for an unrelated reason."""
         snap = self._dump(tmp_path)
-        assert "guarded_expert" not in {f.name for f in snap.functions}
+        assert "guarded_expert" not in {f.name for f in snap.declarations.functions}
 
     def test_a_value_carrying_define_selects_the_right_declaration(
         self, tmp_path: Path
     ) -> None:
-        names = {f.name for f in self._dump(tmp_path, defines=("MODE=2",)).functions}
+        names = {
+            f.name
+            for f in self._dump(tmp_path, defines=("MODE=2",)).declarations.functions
+        }
         assert "guarded_mode_two" in names
         assert "guarded_mode_other" not in names
 
@@ -504,6 +509,6 @@ class TestTypedApiParity:
         so, include = _build(cli_root)
         out = cli_root / "cli.json"
         _dump(cli_root, so, include, "-DFEATURE_API", "-DMODE=2", out=out)
-        assert {f.name for f in api.functions if f.name.startswith("guarded_")} == (
-            _guarded_names(out)
-        )
+        assert {
+            f.name for f in api.declarations.functions if f.name.startswith("guarded_")
+        } == (_guarded_names(out))

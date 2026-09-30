@@ -50,14 +50,14 @@ def test_snapshot_from_abicc_dict_maps_functions_variables_and_types(
 
     assert snap.library == "libdemo"
     assert snap.version == "2.0"
-    assert len(snap.functions) == 1
-    assert snap.functions[0].mangled == "foo"
-    assert snap.functions[0].params[0].name == "x"
-    assert snap.functions[0].params[0].type == "int"
-    assert len(snap.variables) == 1
-    assert snap.variables[0].mangled == "glob"
-    assert snap.variables[0].type == "int"
-    type_names = {t.name for t in snap.types}
+    assert len(snap.declarations.functions) == 1
+    assert snap.declarations.functions[0].mangled == "foo"
+    assert snap.declarations.functions[0].params[0].name == "x"
+    assert snap.declarations.functions[0].params[0].type == "int"
+    assert len(snap.declarations.variables) == 1
+    assert snap.declarations.variables[0].mangled == "glob"
+    assert snap.declarations.variables[0].type == "int"
+    type_names = {t.name for t in snap.declarations.types}
     assert "Demo" in type_names
     assert "DemoU" in type_names
 
@@ -106,7 +106,7 @@ def test_import_abicc_perl_dump_safe_roundtrip_without_perl(tmp_path: Path) -> N
 
     assert snap.library == "libok"
     assert snap.version == "1"
-    assert any(f.mangled == "foo" for f in snap.functions)
+    assert any(f.mangled == "foo" for f in snap.declarations.functions)
 
 
 def test_perl_expr_conversion_preserves_spaceship_inside_strings() -> None:

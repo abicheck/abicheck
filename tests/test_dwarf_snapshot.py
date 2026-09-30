@@ -408,7 +408,7 @@ static int internal_func(int x) {
 
         assert snap.elf_only_mode is False
         assert snap.platform == "elf"
-        func_names = {f.name for f in snap.functions}
+        func_names = {f.name for f in snap.declarations.functions}
         # Exported functions should be present
         assert "add" in func_names
         assert "make_point" in func_names
@@ -430,7 +430,7 @@ static int internal_func(int x) {
             dwarf_adv,
         )
 
-        type_names = {t.name for t in snap.types}
+        type_names = {t.name for t in snap.declarations.types}
         assert "Point" in type_names
 
     def test_snapshot_has_enums(self, simple_lib: Path) -> None:
@@ -448,9 +448,9 @@ static int internal_func(int x) {
             dwarf_adv,
         )
 
-        enum_names = {e.name for e in snap.enums}
+        enum_names = {e.name for e in snap.declarations.enums}
         assert "Color" in enum_names
-        color_enum = next(e for e in snap.enums if e.name == "Color")
+        color_enum = next(e for e in snap.declarations.enums if e.name == "Color")
         member_names = {m.name for m in color_enum.members}
         assert "RED" in member_names
         assert "GREEN" in member_names
@@ -550,7 +550,7 @@ int Derived::f(int z) { return z + a0; }
             dwarf_adv,
         )
 
-        var_names = {v.name for v in snap.variables}
+        var_names = {v.name for v in snap.declarations.variables}
         assert "global_var" in var_names
 
     def test_function_params(self, simple_lib: Path) -> None:
@@ -568,7 +568,9 @@ int Derived::f(int z) { return z + a0; }
             dwarf_adv,
         )
 
-        add_func = next((f for f in snap.functions if f.name == "add"), None)
+        add_func = next(
+            (f for f in snap.declarations.functions if f.name == "add"), None
+        )
         assert add_func is not None
         assert add_func.return_type != "?"
         assert len(add_func.params) == 2
@@ -588,7 +590,7 @@ int Derived::f(int z) { return z + a0; }
             dwarf_adv,
         )
 
-        for func in snap.functions:
+        for func in snap.declarations.functions:
             assert func.visibility == Visibility.PUBLIC
 
     def test_snapshot_json_roundtrip(self, simple_lib: Path, tmp_path: Path) -> None:
@@ -611,7 +613,7 @@ int Derived::f(int z) { return z + a0; }
         json_path.write_text(snapshot_to_json(snap), encoding="utf-8")
         loaded = load_snapshot(json_path)
         assert loaded.library == snap.library
-        assert len(loaded.functions) == len(snap.functions)
+        assert len(loaded.declarations.functions) == len(snap.declarations.functions)
 
 
 # ── Dumper fallback chain tests ─────────────────────────────────────────────
@@ -674,7 +676,7 @@ class TestDumperFallbackChain:
         assert snap.elf_only_mode is False
         assert snap.platform == "elf"
         # Should have extracted function info from DWARF
-        func_names = {f.name for f in snap.functions}
+        func_names = {f.name for f in snap.declarations.functions}
         assert "exported_func" in func_names
 
     def test_no_headers_no_dwarf_uses_symbol_mode(self, stripped_lib: Path) -> None:
@@ -834,7 +836,7 @@ __attribute__((visibility("hidden"))) int hidden_func(int x) { return x * 2; }
             dwarf_adv,
         )
 
-        funcs_by_name = {f.name: f for f in snap.functions}
+        funcs_by_name = {f.name: f for f in snap.declarations.functions}
         assert "public_func" in funcs_by_name
         assert funcs_by_name["public_func"].visibility == Visibility.PUBLIC
         assert "hidden_func" in funcs_by_name
@@ -903,7 +905,7 @@ class TestDumperVariablesOnlyFallback:
 
         # Should use DWARF mode (not symbol-only) because variables are present
         assert snap.elf_only_mode is False
-        var_names = {v.name for v in snap.variables}
+        var_names = {v.name for v in snap.declarations.variables}
         assert "my_global" in var_names
 
 
@@ -927,7 +929,7 @@ class TestDumperDwarfOnlyExplicit:
 
         snap = dump(so_path=so_path, headers=[], dwarf_only=True)
         assert snap.elf_only_mode is False
-        func_names = {f.name for f in snap.functions}
+        func_names = {f.name for f in snap.declarations.functions}
         assert "func_a" in func_names
 
     def test_dwarf_only_with_headers_warns(self, tmp_path: Path) -> None:
@@ -1154,7 +1156,7 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        func_names = {f.name for f in snap.functions}
+        func_names = {f.name for f in snap.declarations.functions}
         assert "add_ref" in func_names
         assert "get_ptr" in func_names
         assert "sum_arr" in func_names
@@ -1176,7 +1178,7 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        type_names = {t.name for t in snap.types}
+        type_names = {t.name for t in snap.declarations.types}
         assert "Base" in type_names or "Derived" in type_names
 
     def test_cpp_bitfield_struct(self, cpp_lib: Path) -> None:
@@ -1193,9 +1195,9 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        type_names = {t.name for t in snap.types}
+        type_names = {t.name for t in snap.declarations.types}
         assert "Flags" in type_names
-        flags_type = next(t for t in snap.types if t.name == "Flags")
+        flags_type = next(t for t in snap.declarations.types if t.name == "Flags")
         # Bitfields should have field entries
         assert len(flags_type.fields) >= 3
         # At least one should be a bitfield
@@ -1216,7 +1218,10 @@ extern "C" SensorData make_sensor(int c, int s) {
         )
 
         # At least one of our typedefs should be present
-        assert "my_int" in snap.typedefs or "my_int2" in snap.typedefs
+        assert (
+            "my_int" in snap.declarations.typedefs
+            or "my_int2" in snap.declarations.typedefs
+        )
 
     def test_cpp_const_variable(self, cpp_lib: Path) -> None:
         """Const global variable should be extracted."""
@@ -1269,7 +1274,7 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        func_names = {f.name for f in snap.functions}
+        func_names = {f.name for f in snap.declarations.functions}
         assert "consume_rval" in func_names
 
     def test_double_pointer_function(self, cpp_lib: Path) -> None:
@@ -1286,7 +1291,7 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        func_names = {f.name for f in snap.functions}
+        func_names = {f.name for f in snap.declarations.functions}
         assert "get_dptr" in func_names
 
     def test_function_pointer_param(self, cpp_lib: Path) -> None:
@@ -1303,7 +1308,7 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        func_names = {f.name for f in snap.functions}
+        func_names = {f.name for f in snap.declarations.functions}
         assert "apply_fn" in func_names
 
     def test_enum_extracted(self, cpp_lib: Path) -> None:
@@ -1320,9 +1325,9 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        enum_names = {e.name for e in snap.enums}
+        enum_names = {e.name for e in snap.declarations.enums}
         assert "Color" in enum_names
-        color_enum = next(e for e in snap.enums if e.name == "Color")
+        color_enum = next(e for e in snap.declarations.enums if e.name == "Color")
         member_names = {m.name for m in color_enum.members}
         assert "RED" in member_names
         assert "GREEN" in member_names
@@ -1342,7 +1347,7 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        type_names = {t.name for t in snap.types}
+        type_names = {t.name for t in snap.declarations.types}
         # Point should be registered as a type (from anonymous struct typedef)
         assert "Point" in type_names
 
@@ -1360,9 +1365,9 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        enum_names = {e.name for e in snap.enums}
+        enum_names = {e.name for e in snap.declarations.enums}
         assert "SizeEnum" in enum_names
-        size_enum = next(e for e in snap.enums if e.name == "SizeEnum")
+        size_enum = next(e for e in snap.declarations.enums if e.name == "SizeEnum")
         member_names = {m.name for m in size_enum.members}
         assert "SMALL" in member_names
         assert "LARGE" in member_names
@@ -1381,9 +1386,9 @@ extern "C" SensorData make_sensor(int c, int s) {
             dwarf_adv,
         )
 
-        type_names = {t.name for t in snap.types}
+        type_names = {t.name for t in snap.declarations.types}
         assert "SensorData" in type_names
-        sensor = next(t for t in snap.types if t.name == "SensorData")
+        sensor = next(t for t in snap.declarations.types if t.name == "SensorData")
         field_map = {f.name: f for f in sensor.fields}
         assert "config" in field_map
         assert "status" in field_map
@@ -1453,9 +1458,9 @@ my_int2_t add_typed(my_int2_t a, my_int2_t b) { return a + b; }
         dwarf_meta, dwarf_adv = parse_dwarf(c_lib)
         snap = build_snapshot_from_dwarf(c_lib, elf_meta, dwarf_meta, dwarf_adv)
 
-        enum_names = {e.name for e in snap.enums}
+        enum_names = {e.name for e in snap.declarations.enums}
         assert "Direction" in enum_names
-        direction = next(e for e in snap.enums if e.name == "Direction")
+        direction = next(e for e in snap.declarations.enums if e.name == "Direction")
         member_names = {m.name for m in direction.members}
         assert member_names == {"NORTH", "SOUTH", "EAST", "WEST"}
 
@@ -1468,7 +1473,7 @@ my_int2_t add_typed(my_int2_t a, my_int2_t b) { return a + b; }
         dwarf_meta, dwarf_adv = parse_dwarf(c_lib)
         snap = build_snapshot_from_dwarf(c_lib, elf_meta, dwarf_meta, dwarf_adv)
 
-        type_names = {t.name for t in snap.types}
+        type_names = {t.name for t in snap.declarations.types}
         assert "CPoint" in type_names
 
     def test_c_anonymous_typedef_enum(self, c_lib: Path) -> None:
@@ -1480,7 +1485,7 @@ my_int2_t add_typed(my_int2_t a, my_int2_t b) { return a + b; }
         dwarf_meta, dwarf_adv = parse_dwarf(c_lib)
         snap = build_snapshot_from_dwarf(c_lib, elf_meta, dwarf_meta, dwarf_adv)
 
-        enum_names = {e.name for e in snap.enums}
+        enum_names = {e.name for e in snap.declarations.enums}
         assert "Switch" in enum_names
 
     def test_c_typedef_chains(self, c_lib: Path) -> None:
@@ -1492,7 +1497,10 @@ my_int2_t add_typed(my_int2_t a, my_int2_t b) { return a + b; }
         dwarf_meta, dwarf_adv = parse_dwarf(c_lib)
         snap = build_snapshot_from_dwarf(c_lib, elf_meta, dwarf_meta, dwarf_adv)
 
-        assert "my_int_t" in snap.typedefs or "my_int2_t" in snap.typedefs
+        assert (
+            "my_int_t" in snap.declarations.typedefs
+            or "my_int2_t" in snap.declarations.typedefs
+        )
 
     def test_c_exported_variable(self, c_lib: Path) -> None:
         """Exported C variables should appear in snapshot."""
@@ -1503,7 +1511,7 @@ my_int2_t add_typed(my_int2_t a, my_int2_t b) { return a + b; }
         dwarf_meta, dwarf_adv = parse_dwarf(c_lib)
         snap = build_snapshot_from_dwarf(c_lib, elf_meta, dwarf_meta, dwarf_adv)
 
-        var_names = {v.name for v in snap.variables}
+        var_names = {v.name for v in snap.declarations.variables}
         assert "global_counter" in var_names
 
 
@@ -1620,7 +1628,7 @@ class TestDwarfSnapshotErrorHandling:
         )
         # Should return an empty but valid snapshot
         assert snap.elf_only_mode is False
-        assert len(snap.functions) == 0
+        assert len(snap.declarations.functions) == 0
 
     def test_nonexistent_file(self, tmp_path: Path) -> None:
         """build_snapshot_from_dwarf on missing file should not crash."""
@@ -1637,7 +1645,7 @@ class TestDwarfSnapshotErrorHandling:
             dwarf_adv,
         )
         assert snap.elf_only_mode is False
-        assert len(snap.functions) == 0
+        assert len(snap.declarations.functions) == 0
 
     def test_empty_elf_meta(self, tmp_path: Path) -> None:
         """build_snapshot_from_dwarf with no symbols in elf_meta."""
@@ -1655,7 +1663,7 @@ class TestDwarfSnapshotErrorHandling:
             dwarf_adv,
         )
         assert snap is not None
-        assert len(snap.functions) == 0
+        assert len(snap.declarations.functions) == 0
 
 
 def test_build_function_is_isolated_from_elf_and_filter():

@@ -489,7 +489,7 @@ def _seed_function_roots(
 ) -> None:
     """The function half of :func:`_seed_export_roots`: signature types seed the
     closure, and a method root additionally seeds its own enclosing class."""
-    for i, fn in enumerate(snap.functions):
+    for i, fn in enumerate(snap.declarations.functions):
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
         matched = _joined_exports(join, join.identities.functions[i] if join else None)
@@ -515,7 +515,7 @@ def _seed_variable_roots(
 ) -> None:
     """The variable half of :func:`_seed_export_roots`. A variable has one type
     and no owner, so both typed-root flags follow from that single answer."""
-    for i, var in enumerate(snap.variables):
+    for i, var in enumerate(snap.declarations.variables):
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys
         matched = _joined_exports(join, join.identities.variables[i] if join else None)
@@ -684,7 +684,7 @@ def _nodes_by_spelling(
         _register_spellings(spellings, name, name)
         if qualified:
             _register_spellings(spellings, qualified, name)
-    for alias in snap.typedefs:
+    for alias in snap.declarations.typedefs:
         _register_spellings(spellings, alias, _typedef_node_id(alias))
     return {k: frozenset(v) for k, v in spellings.items()}
 
@@ -741,7 +741,7 @@ def _nodes_by_walk_key(
         by_key.setdefault(key, set()).update(r.name for r in rec_nodes)
     for key, en_nodes in enum_by_name.items():
         by_key.setdefault(key, set()).update(e.name for e in en_nodes)
-    for alias in snap.typedefs:
+    for alias in snap.declarations.typedefs:
         by_key.setdefault(alias, set()).add(_typedef_node_id(alias))
     return {k: frozenset(v) for k, v in by_key.items()}
 
@@ -758,16 +758,16 @@ def _unscoped_identities(snap: AbiSnapshot) -> frozenset[str]:
     # `(*snap.types, *snap.enums)` tuple, whose element type mypy widens to
     # `object`.
     identities: list[tuple[str, str | None]] = [
-        (rec.name, rec.qualified_name) for rec in snap.types
+        (rec.name, rec.qualified_name) for rec in snap.declarations.types
     ]
-    identities += [(en.name, en.qualified_name) for en in snap.enums]
+    identities += [(en.name, en.qualified_name) for en in snap.declarations.enums]
     scoped_leaves = {
         _namespace_suffix_spellings(qualified)[-1]
         for name, qualified in identities
         if qualified and qualified != name
     }
     candidates = [qualified or name for name, qualified in identities]
-    candidates += list(snap.typedefs)
+    candidates += list(snap.declarations.typedefs)
     return frozenset(c for c in candidates if "::" not in c and c not in scoped_leaves)
 
 
@@ -791,7 +791,7 @@ def _toolchain_owned_aliases(
     be its own, so it is still followed.
     """
     aliases: set[str] = set()
-    for alias in snap.typedefs:
+    for alias in snap.declarations.typedefs:
         colliding = [
             *record_by_name.get(alias, ()),
             *enum_by_name.get(alias, ()),
@@ -967,7 +967,10 @@ def _followed_typedef_aliases(
         if tok in _TYPE_NOISE or _is_dependent_token(match.start(), spans):
             continue
         for ident in _type_identifiers(tok):
-            if ident in snap.typedefs and ident not in index.toolchain_alias_keys:
+            if (
+                ident in snap.declarations.typedefs
+                and ident not in index.toolchain_alias_keys
+            ):
                 aliases.add(ident)
     return aliases
 
@@ -1060,18 +1063,18 @@ def _unresolved_type_edges(
                 if alias in seen_aliases:
                     continue
                 seen_aliases.add(alias)
-                pending.append(snap.typedefs[alias])
+                pending.append(snap.declarations.typedefs[alias])
 
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         if _linker_identity(fn.name, fn.mangled) not in root_identities:
             continue
         scan(fn.return_type)
         for p in fn.params:
             scan(getattr(p, "type", None))
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if _linker_identity(var.name, var.mangled) in root_identities:
             scan(var.type)
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         if rec.name not in reached_types and rec.qualified_name not in reached_types:
             continue
         if (rec.qualified_name or rec.name).startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
@@ -1125,13 +1128,13 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     # scoped design rather than a drive-by change. `ambiguous_type_names` is
     # computed above, from the un-augmented index, so these added keys cannot
     # make an existing name look ambiguous.
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         if rec.qualified_name and rec.qualified_name != rec.name:
             record_by_name.setdefault(rec.qualified_name, []).append(rec)
     # `EnumType` carries the same bare-`name`/separate-`qualified_name` split
     # on the castxml/clang path, so a namespaced enum needs the same exact
     # handle for the same reason (CodeRabbit review).
-    for en in snap.enums:
+    for en in snap.declarations.enums:
         if en.qualified_name and en.qualified_name != en.name:
             enum_by_name.setdefault(en.qualified_name, []).append(en)
 
@@ -1150,7 +1153,7 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     # *qualified* record identity is caught too.
     surface.ambiguous_type_names |= {
         alias
-        for alias in snap.typedefs
+        for alias in snap.declarations.typedefs
         if alias in record_by_name or alias in enum_by_name
     }
 
@@ -1195,7 +1198,7 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     # nested-name -- so the qualified key below is what a genuine owner
     # matches on.
     owner_seed_by_identity: dict[str, str] = {}
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         bare_is_leaf_only = bool(rec.qualified_name) and rec.qualified_name != rec.name
         if not bare_is_leaf_only and rec.name not in surface.ambiguous_type_names:
             owner_seed_by_identity.setdefault(rec.name, rec.name)

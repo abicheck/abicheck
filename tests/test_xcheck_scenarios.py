@@ -124,7 +124,7 @@ def test_export_decl_pair_trips_both_directions():
     snap = _snap(
         elf=ElfMetadata(symbols=[ElfSymbol(name="_Z8internalv", is_default=True)])
     )
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="internal",
             mangled="_Z8internalv",
@@ -152,7 +152,7 @@ def test_export_decl_pair_clean_when_contract_holds():
     snap = _snap(
         elf=ElfMetadata(symbols=[ElfSymbol(name="_Z10public_apiv", is_default=True)])
     )
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="public_api",
             mangled="_Z10public_apiv",
@@ -170,7 +170,7 @@ def test_export_decl_pair_clean_when_contract_holds():
 # --------------------------------------------------------------------------- #
 def _leak_snap(*, with_graph: bool) -> AbiSnapshot:
     snap = _snap(elf=ElfMetadata(symbols=[ElfSymbol(name="_Z3usev")]))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="use",
             mangled="_Z3usev",
@@ -178,7 +178,7 @@ def _leak_snap(*, with_graph: bool) -> AbiSnapshot:
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="detail::Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
         ),

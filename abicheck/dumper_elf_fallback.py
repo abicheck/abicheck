@@ -74,13 +74,13 @@ def _dwarf_semantic_ir(snap: AbiSnapshot) -> SemanticIR:
     carve-outs a ``producer="dwarf"`` call needs.
     """
     return normalize_header_ast(
-        types=snap.types,
-        enums=snap.enums,
-        typedefs_qualified=snap.typedefs,
-        typedef_entity_ids=snap.typedef_entity_ids,
+        types=snap.declarations.types,
+        enums=snap.declarations.enums,
+        typedefs_qualified=snap.declarations.typedefs,
+        typedef_entity_ids=snap.declarations.typedef_entity_ids,
         producer="dwarf",
-        functions=snap.functions,
-        variables=snap.variables,
+        functions=snap.declarations.functions,
+        variables=snap.declarations.variables,
     )
 
 
@@ -157,7 +157,7 @@ def _try_dwarf_snapshot(
         session=session,
     )
     # If DWARF produced functions (or was explicitly forced), use it.
-    if snap.functions or snap.variables or dwarf_only:
+    if snap.declarations.functions or snap.declarations.variables or dwarf_only:
         if not headers and not dwarf_only:
             # Advisory, not a problem: header-less dump is a legitimate mode (a
             # stripped/binary-only library). Demoted from UserWarning to an
@@ -176,7 +176,7 @@ def _try_dwarf_snapshot(
     # the DWARF subprogram filter rejected). Keep the *types* it
     # extracted — they include bases / vtable info that pure-DWARF
     # metadata (DwarfMetadata.structs) does not retain.
-    return None, list(snap.types)
+    return None, list(snap.declarations.types)
 
 
 def _build_symbol_only_snapshot(

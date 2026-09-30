@@ -177,6 +177,7 @@ class _FakeSnapshot:
 
     def __init__(self, types: list[RecordType]) -> None:
         self.types = types
+        self.declarations = self
 
 
 class TestUnrelatedRecordAliasDoesNotHideANamespacedTypeEndToEnd:

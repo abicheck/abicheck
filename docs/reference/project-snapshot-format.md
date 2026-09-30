@@ -231,6 +231,42 @@ facade re-export (`frontends -> workflows -> storage` layering):
   function that actually needs them, reached whether the operand was
   classified as a loose directory or a package.
 
+## One-file transport (zip)
+
+A package directory can be moved as a single file:
+`workflows.storage.pack_project_package(package_dir, out_path)` writes it as
+a zip archive, and `unpack_project_package(archive, dest_dir)` restores it
+file-for-file (`abicheck/storage/project_package_archive.py`,
+storage-format-v2 A1.1).
+
+- **Layout.** A stored `mimetype` member comes first
+  (`application/vnd.abicheck.project-snapshot+zip`), so the file identifies
+  itself without a suffix. The package's own paths follow in sorted order:
+  `manifest.json`, `refs/**`, `objects/**`. Every member is stored
+  uncompressed, because objects are already `zstd`-compressed.
+- **Deterministic.** Every zip header field is pinned (`storage/zip_member.py`,
+  shared with the G40 bundle archive), so the same package always packs to
+  the same bytes.
+- **Untrusted input.** Unpacking refuses, before writing anything:
+  - any member that is not exactly a package path (no `..`, absolute path,
+    backslash, directory entry or stray file);
+  - a symlink, a compressed member or a duplicate name;
+  - an archive over the member-count or size budgets.
+
+  Object digests are verified when each object is read, as for a directory.
+- **Accepted as a `compare` operand** anywhere a package directory is.
+  - The CLI unpacks an archive operand into a private temporary directory
+    for the run (`frontends/cli/options/operand_path.py`). A multi-artifact
+    archive therefore reaches the release fan-out exactly as its directory
+    would.
+  - The typed-API input path reads a single-artifact archive directly
+    (`workflows.project_package_input.resolve_project_package`).
+- **Zip, not `.tar.zst`**, for the reason the G40 bundle archive records:
+  the central directory allows opening one member without reading the rest.
+
+No `dump` flag writes a package, so an archive is produced through the
+typed API, the same way a package directory is.
+
 ## Related
 
 

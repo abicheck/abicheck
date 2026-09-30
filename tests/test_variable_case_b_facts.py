@@ -88,7 +88,7 @@ class TestVariableCaseBFactRoundTrip:
         var = Variable(
             name="g_widget", mangled="g_widget", type="int", **{field_name: value}
         )
-        r = _round_trip(_make_snap(variables=[var])).variables[0]
+        r = _round_trip(_make_snap(variables=[var])).declarations.variables[0]
         assert getattr(r, field_name) == value
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.PRESENT
@@ -99,7 +99,7 @@ class TestVariableCaseBFactRoundTrip:
         self, field_name: str, _value: object
     ) -> None:
         var = Variable(name="g_widget", mangled="g_widget", type="int")
-        r = _round_trip(_make_snap(variables=[var])).variables[0]
+        r = _round_trip(_make_snap(variables=[var])).declarations.variables[0]
         assert getattr(r, field_name) is None
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.NOT_COLLECTED
@@ -114,7 +114,7 @@ class TestVariableCaseBFactRoundTrip:
             type="int",
             **{f"{field_name}_fact": Fact.unsupported("DWARF-only")},
         )
-        r = _round_trip(_make_snap(variables=[var])).variables[0]
+        r = _round_trip(_make_snap(variables=[var])).declarations.variables[0]
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.UNSUPPORTED
         assert fact.diagnostics == ("DWARF-only",)
@@ -135,7 +135,7 @@ class TestVariableCaseBFactRoundTrip:
                 }
             ],
         )
-        r = snapshot_from_dict(d).variables[0]
+        r = snapshot_from_dict(d).declarations.variables[0]
         assert getattr(r, field_name) == value
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.PRESENT
@@ -149,7 +149,7 @@ class TestVariableCaseBFactRoundTrip:
             schema_version=32,
             variables=[{"name": "g_widget", "mangled": "g_widget", "type": "int"}],
         )
-        r = snapshot_from_dict(d).variables[0]
+        r = snapshot_from_dict(d).declarations.variables[0]
         assert getattr(r, field_name) is None
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.NOT_COLLECTED
@@ -170,9 +170,9 @@ class TestVariableCaseBFactRoundTrip:
             ],
         )
         snap = snapshot_from_dict(d)
-        fact = getattr(snap.variables[0], f"{field_name}_fact")
+        fact = getattr(snap.declarations.variables[0], f"{field_name}_fact")
         assert fact.status is FactStatus.NOT_COLLECTED
-        assert getattr(snap.variables[0], field_name) is None
+        assert getattr(snap.declarations.variables[0], field_name) is None
 
     @pytest.mark.parametrize("field_name,value", _CASE_B_FIELDS)
     def test_snapshot_to_dict_encodes_status_as_plain_string(
@@ -196,7 +196,7 @@ class TestVariableCaseBFactRoundTrip:
             type="int",
             elf_binding=SymbolBinding.WEAK,
         )
-        r = _round_trip(_make_snap(variables=[var])).variables[0]
+        r = _round_trip(_make_snap(variables=[var])).declarations.variables[0]
         assert r.elf_binding_fact.value is SymbolBinding.WEAK
         assert r.elf_binding is SymbolBinding.WEAK
 

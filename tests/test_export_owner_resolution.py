@@ -69,8 +69,8 @@ def _snapshot(
         from_headers=True,
         elf=ElfMetadata(machine="x86-64", symbols=[ElfSymbol(name=n) for n in exports]),
     )
-    snap.functions = list(declarations)
-    snap.types = list(types or [])
+    snap.declarations.functions = list(declarations)
+    snap.declarations.types = list(types or [])
     return snap
 
 
@@ -238,7 +238,7 @@ def test_a_bare_name_collision_is_never_a_resolution() -> None:
         declarations=decls,
         types=[RecordType(name="Base", kind="struct")],
     )
-    new = _snapshot(exports=[], declarations=decls, types=list(old.types))
+    new = _snapshot(exports=[], declarations=decls, types=list(old.declarations.types))
     coverage = special_member_export_coverage("_ZN5other4BaseC1Ev", old, new)
     assert coverage.join is OwnerJoin.AMBIGUOUS
     assert coverage.owner == "other::Base"

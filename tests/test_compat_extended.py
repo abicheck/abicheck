@@ -326,7 +326,7 @@ class TestLoadDescriptorOrDump:
         assert isinstance(result, AbiSnapshot)
         assert result.library == "libfoo"
         assert result.version == "1.2.3"
-        assert any(f.mangled == "foo" for f in result.functions)
+        assert any(f.mangled == "foo" for f in result.declarations.functions)
 
     def test_loads_abicc_perl_dump_by_content(self, tmp_path: Path) -> None:
         dump_file = tmp_path / "old.txt"
@@ -619,8 +619,8 @@ class TestCompatDumpRoundTrip:
 
         assert isinstance(loaded, AbiSnapshot)
         assert loaded.version == "3.0"
-        assert len(loaded.functions) == 1
-        assert loaded.functions[0].name == "foo"
+        assert len(loaded.declarations.functions) == 1
+        assert loaded.declarations.functions[0].name == "foo"
 
     def test_dump_json_is_valid(self, tmp_path: Path) -> None:
         snap = _make_snapshot()

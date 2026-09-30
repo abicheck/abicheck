@@ -112,7 +112,7 @@ def test_symtab_only_symbol_is_not_a_confirmed_export(dumps):
     j = join_exports(snap)
     by_name = {
         fn.name: (fn, ident)
-        for fn, ident in zip(snap.functions, j.identities.functions)
+        for fn, ident in zip(snap.declarations.functions, j.identities.functions)
     }
     fn, ident = by_name["static_only_fn"]
     assert binary_export_match(fn) is ExportMatch.STATIC_ONLY

@@ -83,8 +83,8 @@ class TestHeaderOnlyDumpBasics:
         assert snap.pe is None
         assert snap.macho is None
         assert snap.from_headers is True
-        assert [f.name for f in snap.functions] == ["add"]
-        assert [t.name for t in snap.types] == ["Point"]
+        assert [f.name for f in snap.declarations.functions] == ["add"]
+        assert [t.name for t in snap.declarations.types] == ["Point"]
 
     def test_header_only_snapshot_has_real_declarations_on_clang_backend(
         self, tmp_path: Path
@@ -112,11 +112,11 @@ class TestHeaderOnlyDumpBasics:
         )
         snap = run_dump_request(request)
         assert snap.header_only is True
-        assert [f.name for f in snap.functions] == ["add"]
+        assert [f.name for f in snap.declarations.functions] == ["add"]
         # The bug this regression guards: without no_binary_evidence forwarded,
         # every function is misclassified HIDDEN (no export set to match
         # against) and filtered out of the public surface entirely.
-        assert snap.functions[0].visibility.value == "public"
+        assert snap.declarations.functions[0].visibility.value == "public"
 
     def test_bare_headers_alone_are_valid_dump_request_evidence(self, tmp_path: Path):
         """A binary-less DumpRequest with only headers (no sources/
@@ -229,10 +229,10 @@ class TestHeaderOnlyDependencyScoping:
 
         # The library's own declarations survive (castxml also records
         # `Item`'s implicit members, which are the library's too) ...
-        assert "count" in {f.name for f in snap.functions}
-        assert "mylib_global" in {v.name for v in snap.variables}
+        assert "count" in {f.name for f in snap.declarations.functions}
+        assert "mylib_global" in {v.name for v in snap.declarations.variables}
         # ... and nothing located outside the library does.
-        for decl in [*snap.functions, *snap.variables]:
+        for decl in [*snap.declarations.functions, *snap.declarations.variables]:
             assert decl.source_header is not None, decl.name
             assert str(lib) in (decl.source_location or ""), decl.name
 
@@ -272,7 +272,7 @@ class TestHeaderOnlyDependencyScoping:
         result = CliRunner().invoke(main, ["dump", *args, "-o", str(out)])
         assert result.exit_code == 0, result.output
         snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
-        assert [f.name for f in snap.functions] == ["exposed_api"]
+        assert [f.name for f in snap.declarations.functions] == ["exposed_api"]
 
     def test_manifest_public_dir_classifies_its_headers_public(self, tmp_path: Path):
         """A header covered only by a manifest `public_header_dirs` entry --
@@ -310,7 +310,7 @@ class TestHeaderOnlyDependencyScoping:
         )
         assert result.exit_code == 0, result.output
         snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
-        origins = {f.name: f.origin.value for f in snap.functions}
+        origins = {f.name: f.origin.value for f in snap.declarations.functions}
         assert origins == {"root_api": "public_header", "extra_api": "public_header"}
 
     @pytest.mark.skipif(
@@ -364,7 +364,11 @@ class TestHeaderOnlyDependencyScoping:
             located_runs.append(
                 {
                     d.name: (d.source_location or "").rsplit("/", 1)[-1]
-                    for d in [*snap.functions, *snap.variables, *snap.types]
+                    for d in [
+                        *snap.declarations.functions,
+                        *snap.declarations.variables,
+                        *snap.declarations.types,
+                    ]
                 }
             )
         located = located_runs[0]
@@ -386,8 +390,8 @@ class TestHeaderOnlyDependencyScoping:
             "#include <vector>\nint add(int a, int b);\n", encoding="utf-8"
         )
         snap = _dump_header_only(header, "1.0")
-        assert snap.functions
-        assert all(f.source_header is not None for f in snap.functions)
+        assert snap.declarations.functions
+        assert all(f.source_header is not None for f in snap.declarations.functions)
 
 
 @pytest.fixture()
@@ -543,7 +547,7 @@ class TestHeaderOnlyReportContract:
         # in-surface finding. (Before header-only dumps ran
         # `apply_provenance` every origin was UNKNOWN and this addition was
         # pushed to the out-of-surface ledger instead.)
-        assert {e.origin.value for e in old.enums} == {"public_header"}
+        assert {e.origin.value for e in old.declarations.enums} == {"public_header"}
         assert "enum_member_added" in _kinds(result)
         assert result.out_of_surface_count == 0
 

@@ -79,8 +79,8 @@ class TestMergeSnapshotsReconcilesSemanticIr:
             _snap(SemanticIR({castxml_occ: _entity("Foo")}), "castxml"),
             _snap(SemanticIR({clang_occ: _entity("Bar")}), "clang"),
         )
-        assert merged.semantic_ir is not None
-        assert set(merged.semantic_ir.occurrences) == {castxml_occ, clang_occ}
+        assert merged.canonical_ir is not None
+        assert set(merged.canonical_ir.occurrences) == {castxml_occ, clang_occ}
 
     def test_clang_backfills_an_unresolved_castxml_fact(self) -> None:
         occ = OccurrenceId(FOO)
@@ -88,8 +88,8 @@ class TestMergeSnapshotsReconcilesSemanticIr:
             _snap(SemanticIR({occ: _entity("Foo")}), "castxml"),
             _snap(SemanticIR({occ: _entity("Foo", template=("int",))}), "clang"),
         )
-        assert merged.semantic_ir is not None
-        assert merged.semantic_ir.occurrences[occ].template_arguments.value == ("int",)
+        assert merged.canonical_ir is not None
+        assert merged.canonical_ir.occurrences[occ].template_arguments.value == ("int",)
 
     def test_a_two_sided_disagreement_is_recorded_not_dropped(self) -> None:
         occ = OccurrenceId(FOO)
@@ -97,8 +97,8 @@ class TestMergeSnapshotsReconcilesSemanticIr:
             _snap(SemanticIR({occ: _entity("castxml::Foo")}), "castxml"),
             _snap(SemanticIR({occ: _entity("clang::Foo")}), "clang"),
         )
-        assert merged.semantic_ir is not None
-        assert merged.semantic_ir.occurrences[occ].canonical_spelling.value == (
+        assert merged.canonical_ir is not None
+        assert merged.canonical_ir.occurrences[occ].canonical_spelling.value == (
             "castxml::Foo"
         )
         assert merged.semantic_ir_conflicts == {
@@ -107,7 +107,7 @@ class TestMergeSnapshotsReconcilesSemanticIr:
 
     def test_no_ir_on_either_side_leaves_the_field_none(self) -> None:
         merged = merge_snapshots(_snap(None, "castxml"), _snap(None, "clang"))
-        assert merged.semantic_ir is None
+        assert merged.canonical_ir is None
         assert merged.semantic_ir_conflicts == {}
 
     def test_one_sided_ir_survives(self) -> None:
@@ -115,8 +115,8 @@ class TestMergeSnapshotsReconcilesSemanticIr:
         merged = merge_snapshots(
             _snap(None, "castxml"), _snap(SemanticIR({occ: _entity("Foo")}), "clang")
         )
-        assert merged.semantic_ir is not None
-        assert set(merged.semantic_ir.occurrences) == {occ}
+        assert merged.canonical_ir is not None
+        assert set(merged.canonical_ir.occurrences) == {occ}
 
     def test_pre_existing_conflicts_are_preserved(self) -> None:
         """A castxml leg that is itself a merge result (a nested hybrid dump)
@@ -190,14 +190,14 @@ class TestMachoNormalizesFunctionAndVariableOccurrences:
                 ],
             ),
         )
-        assert merged.semantic_ir is not None
+        assert merged.canonical_ir is not None
         # One occurrence, under castxml's prefix-free key -- not two.
-        assert set(merged.semantic_ir.occurrences) == {castxml_occ}
+        assert set(merged.canonical_ir.occurrences) == {castxml_occ}
         # And it actually backfilled from clang's (now correctly matched)
         # occurrence, not merely survived unmerged.
-        assert merged.semantic_ir.occurrences[castxml_occ].template_arguments.value == (
-            "int",
-        )
+        assert merged.canonical_ir.occurrences[
+            castxml_occ
+        ].template_arguments.value == ("int",)
 
 
 class TestCtorDtorSyntheticKeyRewritePropagation:
@@ -246,11 +246,11 @@ class TestCtorDtorSyntheticKeyRewritePropagation:
         )
         assert merged.func_by_mangled(synthetic) is None
         assert merged.func_by_mangled(real_mangled) is not None
-        assert merged.semantic_ir is not None
+        assert merged.canonical_ir is not None
         # One occurrence, under the real (rewritten) key -- not two, and
         # not left stale under the retired synthetic one.
-        assert set(merged.semantic_ir.occurrences) == {clang_occ}
-        assert merged.semantic_ir.occurrences[clang_occ].template_arguments.value == (
+        assert set(merged.canonical_ir.occurrences) == {clang_occ}
+        assert merged.canonical_ir.occurrences[clang_occ].template_arguments.value == (
             "int",
         )
 
@@ -292,13 +292,13 @@ class TestHybridDropsUnmatchedConstantOccurrences:
                 },
             ),
         )
-        assert merged.semantic_ir is not None
-        assert set(merged.semantic_ir.occurrences) == {OccurrenceId(kept_eid)}
+        assert merged.canonical_ir is not None
+        assert set(merged.canonical_ir.occurrences) == {OccurrenceId(kept_eid)}
         # The legacy field stays castxml-only, matching the flat
         # `constants`/`constant_entity_ids` behavior this test guards --
         # `kClangOnly` was correctly never promoted into either.
-        assert merged.constants == {"kShared": "1"}
-        assert merged.constant_entity_ids == {"kShared": kept_eid}
+        assert merged.declarations.constants == {"kShared": "1"}
+        assert merged.declarations.constant_entity_ids == {"kShared": kept_eid}
 
     def test_matched_constant_is_kept_and_backfilled_normally(self) -> None:
         """A constant present in `castxml_snap.constants` on both sides is
@@ -320,8 +320,8 @@ class TestHybridDropsUnmatchedConstantOccurrences:
                 constant_entity_ids={"kShared": eid},
             ),
         )
-        assert merged.semantic_ir is not None
-        assert merged.semantic_ir.occurrences[occ].canonical_spelling.value == "1"
+        assert merged.canonical_ir is not None
+        assert merged.canonical_ir.occurrences[occ].canonical_spelling.value == "1"
 
 
 class TestLegacyFieldsAreUnaffected:
@@ -334,5 +334,5 @@ class TestLegacyFieldsAreUnaffected:
             _snap(None, "castxml", functions=[func]),
             _snap(None, "clang", functions=[func]),
         )
-        assert [f.mangled for f in merged.functions] == ["_Z1fv"]
-        assert merged.semantic_ir is None
+        assert [f.mangled for f in merged.declarations.functions] == ["_Z1fv"]
+        assert merged.canonical_ir is None

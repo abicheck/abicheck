@@ -115,23 +115,23 @@ class PublicSurfaceQuery:
         if not surf.resolvable:
             return None
         ids: set[EntityId] = set()
-        for fn in snapshot.functions:
+        for fn in snapshot.declarations.functions:
             if fn.entity_id is not None and _linker_key_is_public(
                 fn.mangled, fn.name, surf.public_symbols
             ):
                 ids.add(fn.entity_id)
-        for var in snapshot.variables:
+        for var in snapshot.declarations.variables:
             if var.entity_id is not None and _linker_key_is_public(
                 var.mangled, var.name, surf.public_symbols
             ):
                 ids.add(var.entity_id)
-        for rec in snapshot.types:
+        for rec in snapshot.declarations.types:
             if rec.entity_id is not None and (
                 rec.name in surf.public_types
                 or (rec.qualified_name or "") in surf.public_types
             ):
                 ids.add(rec.entity_id)
-        for en in snapshot.enums:
+        for en in snapshot.declarations.enums:
             if en.entity_id is not None and (
                 en.name in surf.public_types
                 or (en.qualified_name or "") in surf.public_types

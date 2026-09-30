@@ -144,7 +144,7 @@ class SurfaceGraph:
 def _build_functions_by_name(snap: AbiSnapshot) -> dict[str, Function]:
     """Index all functions by both demangled and mangled name."""
     functions_by_name: dict[str, Function] = {}
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         for key in (fn.name, fn.mangled):
             functions_by_name.setdefault(key, fn)
     return functions_by_name
@@ -153,7 +153,7 @@ def _build_functions_by_name(snap: AbiSnapshot) -> dict[str, Function]:
 def _build_types_by_name(snap: AbiSnapshot) -> dict[str, RecordType]:
     """Index records by full name and by trailing ``::`` segment."""
     types_by_name: dict[str, RecordType] = {}
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         types_by_name.setdefault(rec.name, rec)
         if "::" in rec.name:
             types_by_name.setdefault(rec.name.rsplit("::", 1)[1], rec)
@@ -169,7 +169,7 @@ def _build_type_refs(snap: AbiSnapshot) -> dict[str, frozenset[str]]:
     ``types_by_name`` avoids duplicate alias entries that would inflate fan-in.
     """
     type_refs: dict[str, frozenset[str]] = {}
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         refs: set[str] = set()
         for f in rec.fields:
             refs |= _type_identifiers(f.type)
@@ -180,7 +180,7 @@ def _build_type_refs(snap: AbiSnapshot) -> dict[str, frozenset[str]]:
         for base in virtual_bases:
             refs |= _type_identifiers(base)
         type_refs[rec.name] = frozenset(refs)
-    for alias, target in snap.typedefs.items():
+    for alias, target in snap.declarations.typedefs.items():
         type_refs.setdefault(alias, frozenset(_type_identifiers(target)))
     return type_refs
 
@@ -204,7 +204,7 @@ def _build_root_seed_types(
     included (Codex/CodeRabbit review, PR #962).
     """
     root_seed_types: dict[str, frozenset[str]] = {}
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         if not _is_public(fn, public_entity_ids):
             continue
         seeds = set(_type_identifiers(fn.return_type))
@@ -213,7 +213,7 @@ def _build_root_seed_types(
         root_seed_types[fn.name] = root_seed_types.get(
             fn.name, frozenset()
         ) | frozenset(seeds)
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if not _is_public(var, public_entity_ids):
             continue
         root_seed_types[var.name] = root_seed_types.get(
@@ -225,16 +225,16 @@ def _build_root_seed_types(
 def _build_by_header(snap: AbiSnapshot) -> dict[str, set[str]]:
     """Map each source header to the declaration names defined there."""
     by_header: dict[str, set[str]] = {}
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         if fn.source_header:
             by_header.setdefault(fn.source_header, set()).add(fn.name)
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if var.source_header:
             by_header.setdefault(var.source_header, set()).add(var.name)
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         if rec.source_header:
             by_header.setdefault(rec.source_header, set()).add(rec.name)
-    for en in snap.enums:
+    for en in snap.declarations.enums:
         if en.source_header:
             by_header.setdefault(en.source_header, set()).add(en.name)
     return by_header
@@ -361,12 +361,12 @@ def _public_type_counts(
     if public_entity_ids is not None:
         public_records = sum(
             1
-            for r in snap.types
+            for r in snap.declarations.types
             if r.entity_id is not None and r.entity_id in public_entity_ids
         )
         public_enums = sum(
             1
-            for e in snap.enums
+            for e in snap.declarations.enums
             if e.entity_id is not None and e.entity_id in public_entity_ids
         )
         return public_records, public_enums
@@ -375,7 +375,7 @@ def _public_type_counts(
 
     psurf = compute_public_surface(snap)
     if not psurf.resolvable:
-        return len(snap.types), len(snap.enums)
+        return len(snap.declarations.types), len(snap.declarations.enums)
 
     def _in_surface(name: str) -> bool:
         # A public signature may name a namespaced record unqualified (``A`` for
@@ -386,8 +386,8 @@ def _public_type_counts(
             return True
         return "::" in name and name.rsplit("::", 1)[1] in psurf.public_types
 
-    public_records = sum(1 for r in snap.types if _in_surface(r.name))
-    public_enums = sum(1 for e in snap.enums if _in_surface(e.name))
+    public_records = sum(1 for r in snap.declarations.types if _in_surface(r.name))
+    public_enums = sum(1 for e in snap.declarations.enums if _in_surface(e.name))
     return public_records, public_enums
 
 
@@ -486,32 +486,34 @@ def compute_surface_metrics(
     graph = build_surface_graph(snap, public_entity_ids=public_entity_ids)
 
     public_functions = sum(
-        1 for f in snap.functions if _is_public(f, public_entity_ids)
+        1 for f in snap.declarations.functions if _is_public(f, public_entity_ids)
     )
     public_variables = sum(
-        1 for v in snap.variables if _is_public(v, public_entity_ids)
+        1 for v in snap.declarations.variables if _is_public(v, public_entity_ids)
     )
     # Not `public_functions + public_variables`: see _is_exported -- an
     # export-named counter reads the export fact, not public membership alone.
     exported_symbols = sum(
-        1 for f in snap.functions if _is_exported(f, public_entity_ids)
-    ) + sum(1 for v in snap.variables if _is_exported(v, public_entity_ids))
+        1 for f in snap.declarations.functions if _is_exported(f, public_entity_ids)
+    ) + sum(
+        1 for v in snap.declarations.variables if _is_exported(v, public_entity_ids)
+    )
 
     undocumented = sum(
         1
-        for f in snap.functions
+        for f in snap.declarations.functions
         if _is_exported(f, public_entity_ids) and f.origin == ScopeOrigin.EXPORT_ONLY
     )
     undocumented += sum(
         1
-        for v in snap.variables
+        for v in snap.declarations.variables
         if _is_exported(v, public_entity_ids) and v.origin == ScopeOrigin.EXPORT_ONLY
     )
     ratio = (undocumented / exported_symbols) if exported_symbols else 0.0
 
     # Iterate canonical record names (each real record once, by full name) so a
     # namespaced record is not listed twice under both ``ns::A`` and ``A``.
-    canonical_type_names = sorted({rec.name for rec in snap.types})
+    canonical_type_names = sorted({rec.name for rec in snap.declarations.types})
     fan_in = sorted(
         ((name, graph.fan_in(name)) for name in canonical_type_names),
         key=lambda kv: (-kv[1], kv[0]),
@@ -528,17 +530,17 @@ def compute_surface_metrics(
         if header:
             table[header] = table.get(header, 0) + 1
 
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         _bump(declared_counts, fn.source_header)
         if _is_exported(fn, public_entity_ids):
             _bump(exported_counts, fn.source_header)
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         _bump(declared_counts, var.source_header)
         if _is_exported(var, public_entity_ids):
             _bump(exported_counts, var.source_header)
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         _bump(declared_counts, rec.source_header)
-    for en in snap.enums:
+    for en in snap.declarations.enums:
         _bump(declared_counts, en.source_header)
 
     coverage: list[HeaderCoverage] = []

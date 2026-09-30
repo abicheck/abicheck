@@ -461,8 +461,10 @@ def export_names_or_modeled_fallback(snap: AbiSnapshot) -> tuple[str, ...]:
     index = build_raw_export_index(snap)
     if index is not None:
         return tuple(sorted(linked_export_names(index)))
-    syms = {fn.mangled for fn in snap.functions if fn.mangled}
-    syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
+    syms = {fn.mangled for fn in snap.declarations.functions if fn.mangled}
+    syms |= {
+        v.mangled for v in snap.declarations.variables if getattr(v, "mangled", "")
+    }
     syms.discard("")
     return tuple(sorted(syms))
 

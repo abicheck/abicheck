@@ -37,7 +37,7 @@ class TestFunctionIsCompilerGeneratedRoundTrip:
         )
         snap = _make_snap(functions=[fn])
         reloaded = _round_trip(snap)
-        assert reloaded.functions[0].is_compiler_generated is True
+        assert reloaded.declarations.functions[0].is_compiler_generated is True
 
     def test_false_survives_roundtrip(self) -> None:
         fn = Function(
@@ -48,7 +48,7 @@ class TestFunctionIsCompilerGeneratedRoundTrip:
         )
         snap = _make_snap(functions=[fn])
         reloaded = _round_trip(snap)
-        assert reloaded.functions[0].is_compiler_generated is False
+        assert reloaded.declarations.functions[0].is_compiler_generated is False
 
     def test_defaults_to_none_when_absent(self) -> None:
         """A pre-v27 snapshot dict predating this field must still load, as
@@ -57,4 +57,4 @@ class TestFunctionIsCompilerGeneratedRoundTrip:
             functions=[{"name": "f", "mangled": "_Z1fv", "return_type": "void"}]
         )
         reloaded = snapshot_from_dict(d)
-        assert reloaded.functions[0].is_compiler_generated is None
+        assert reloaded.declarations.functions[0].is_compiler_generated is None

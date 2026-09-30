@@ -101,14 +101,18 @@ def _detect_evidence_tiers(
         (
             has_old
             and (
-                old.functions or old.types or old.enums or old.typedefs or old.variables
+                old.declarations.functions
+                or old.declarations.types
+                or old.declarations.enums
+                or old.declarations.typedefs
+                or old.declarations.variables
             )
         )
-        or new.functions
-        or new.types
-        or new.enums
-        or new.typedefs
-        or new.variables
+        or new.declarations.functions
+        or new.declarations.types
+        or new.declarations.enums
+        or new.declarations.typedefs
+        or new.declarations.variables
     )
     has_binary_metadata = (
         has_elf

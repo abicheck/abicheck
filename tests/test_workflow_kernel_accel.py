@@ -358,10 +358,10 @@ def test_resolve_input_raw_btf_blob_populates_semantic_ir() -> None:
 
     case = example_catalog.case_dir("case121_kernel_btf_struct_field_added")
     snap = resolve_input(case / "v1.btf")
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
     entity_id = entity_id_for_type((), "task_state")
-    (occ_id,) = snap.semantic_ir.occurrences_for(entity_id)
-    assert snap.semantic_ir.occurrences[occ_id].producer == "btf"
+    (occ_id,) = snap.canonical_ir.occurrences_for(entity_id)
+    assert snap.canonical_ir.occurrences[occ_id].producer == "btf"
 
 
 def test_resolve_input_raw_ctf_blob_populates_semantic_ir() -> None:
@@ -376,10 +376,10 @@ def test_resolve_input_raw_ctf_blob_populates_semantic_ir() -> None:
         blob = Path(td) / "types.ctf"
         blob.write_bytes(_CtfBlob().build_struct("task_state", n_fields=2))
         snap = resolve_input(blob)
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
     entity_id = entity_id_for_type((), "task_state")
-    (occ_id,) = snap.semantic_ir.occurrences_for(entity_id)
-    assert snap.semantic_ir.occurrences[occ_id].producer == "ctf"
+    (occ_id,) = snap.canonical_ir.occurrences_for(entity_id)
+    assert snap.canonical_ir.occurrences[occ_id].producer == "ctf"
 
 
 def test_resolve_input_rejects_truncated_btf_blob() -> None:

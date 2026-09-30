@@ -1011,7 +1011,7 @@ def detect_mandatory_template_param_added(
                 is_public[stem] = True
                 sources[stem].add("function")
         # Types are also indexed.
-        for t in snap.types:
+        for t in snap.declarations.types:
             if "<" not in t.name:
                 continue
             stem = _strip_template_args(t.name)
@@ -1205,16 +1205,16 @@ def detect_missing_instantiations(
 
     old.index()
     new.index()
-    new_mangled = {f.mangled for f in new.functions if is_public_export(f)}
+    new_mangled = {f.mangled for f in new.declarations.functions if is_public_export(f)}
     findings: list[Change] = []
     surviving_stems: set[str] = set()
-    for fn in new.functions:
+    for fn in new.declarations.functions:
         if not is_public_export(fn):
             continue
         qname = _qualified_function_name(fn.name, fn.mangled)
         if _looks_like_template_instantiation(qname):
             surviving_stems.add(_strip_template_args(qname))
-    for fn in old.functions:
+    for fn in old.declarations.functions:
         if not is_public_export(fn):
             continue
         if fn.mangled in new_mangled:

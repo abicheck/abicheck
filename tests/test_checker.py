@@ -656,7 +656,7 @@ class TestEnumAliasOneToOneGuard:
     def test_alias_removal_not_suppressed(self):
         """If two new names share a value, the removed old name should emit REMOVED."""
         old = _snap("1.0")
-        old.enums = [
+        old.declarations.enums = [
             EnumType(
                 name="Color",
                 members=[
@@ -666,7 +666,7 @@ class TestEnumAliasOneToOneGuard:
             )
         ]
         new = _snap("2.0")
-        new.enums = [
+        new.declarations.enums = [
             EnumType(
                 name="Color",
                 members=[
@@ -685,7 +685,7 @@ class TestEnumAliasOneToOneGuard:
         """When two new aliases share a value, the removed old name must NOT
         be suppressed (new-side ambiguity → not a clear rename)."""
         old = _snap("1.0")
-        old.enums = [
+        old.declarations.enums = [
             EnumType(
                 name="Color",
                 members=[
@@ -695,7 +695,7 @@ class TestEnumAliasOneToOneGuard:
             )
         ]
         new = _snap("2.0")
-        new.enums = [
+        new.declarations.enums = [
             EnumType(
                 name="Color",
                 members=[
@@ -714,7 +714,7 @@ class TestEnumAliasOneToOneGuard:
     def test_unique_value_rename_suppresses_removal(self):
         """A true 1:1 rename (unique value) should suppress ENUM_MEMBER_REMOVED."""
         old = _snap("1.0")
-        old.enums = [
+        old.declarations.enums = [
             EnumType(
                 name="Color",
                 members=[
@@ -724,7 +724,7 @@ class TestEnumAliasOneToOneGuard:
             )
         ]
         new = _snap("2.0")
-        new.enums = [
+        new.declarations.enums = [
             EnumType(
                 name="Color",
                 members=[
@@ -745,7 +745,7 @@ class TestEnumWhollyRemoved:
 
     def test_removed_enum_emits_type_removed(self):
         old = _snap("1.0")
-        old.enums = [
+        old.declarations.enums = [
             EnumType(
                 name="attach_mode_t",
                 members=[
@@ -755,7 +755,7 @@ class TestEnumWhollyRemoved:
             )
         ]
         new = _snap("2.0")
-        new.enums = []
+        new.declarations.enums = []
         changes = _diff_enums(old, new)
         removed = [c for c in changes if c.kind == ChangeKind.TYPE_REMOVED]
         assert len(removed) == 1
@@ -763,9 +763,13 @@ class TestEnumWhollyRemoved:
 
     def test_present_enum_emits_no_type_removed(self):
         old = _snap("1.0")
-        old.enums = [EnumType(name="E", members=[EnumMember(name="A", value=0)])]
+        old.declarations.enums = [
+            EnumType(name="E", members=[EnumMember(name="A", value=0)])
+        ]
         new = _snap("2.0")
-        new.enums = [EnumType(name="E", members=[EnumMember(name="A", value=0)])]
+        new.declarations.enums = [
+            EnumType(name="E", members=[EnumMember(name="A", value=0)])
+        ]
         changes = _diff_enums(old, new)
         assert not [c for c in changes if c.kind == ChangeKind.TYPE_REMOVED]
 
@@ -776,9 +780,11 @@ class TestEnumRenamesOneToOneGuard:
     def test_alias_not_treated_as_rename(self):
         """When two new names share a value, no rename should be emitted."""
         old = _snap("1.0")
-        old.enums = [EnumType(name="E", members=[EnumMember(name="A", value=0)])]
+        old.declarations.enums = [
+            EnumType(name="E", members=[EnumMember(name="A", value=0)])
+        ]
         new = _snap("2.0")
-        new.enums = [
+        new.declarations.enums = [
             EnumType(
                 name="E",
                 members=[EnumMember(name="B", value=0), EnumMember(name="C", value=0)],
@@ -791,14 +797,14 @@ class TestEnumRenamesOneToOneGuard:
     def test_unique_rename_detected(self):
         """A true 1:1 rename is detected correctly."""
         old = _snap("1.0")
-        old.enums = [
+        old.declarations.enums = [
             EnumType(
                 name="E",
                 members=[EnumMember(name="A", value=0), EnumMember(name="B", value=1)],
             )
         ]
         new = _snap("2.0")
-        new.enums = [
+        new.declarations.enums = [
             EnumType(
                 name="E",
                 members=[EnumMember(name="X", value=0), EnumMember(name="B", value=1)],

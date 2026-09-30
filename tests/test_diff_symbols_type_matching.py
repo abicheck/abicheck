@@ -476,7 +476,7 @@ class TestVirtualMethodOwnerResolutionAmbiguitySafe:
         import abicheck.diff_symbols as diff_symbols_module
 
         source = inspect.getsource(diff_symbols_module._diff_functions)
-        assert "build_type_map(old.types)" in source
-        assert "build_type_map(new.types)" in source
+        assert "build_type_map(old.declarations.types)" in source
+        assert "build_type_map(new.declarations.types)" in source
         assert "{t.name: t for t in old.types}" not in source
         assert "{t.name: t for t in new.types}" not in source

@@ -77,7 +77,7 @@ def collect_header_origin_unknown_types(
     snap: AbiSnapshot, surface: PublicSurface, qname_eligible: Callable[[str], bool]
 ) -> None:
     """Fill ``surface.header_origin_unknown_types`` for *snap*."""
-    for en in snap.enums:
+    for en in snap.declarations.enums:
         if (
             not en.source_header
             and fact_is_stated_unknown(en.source_header_fact)
@@ -86,7 +86,7 @@ def collect_header_origin_unknown_types(
             surface.header_origin_unknown_types.update(
                 n for n in (en.name, en.qualified_name) if n
             )
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         if _record_seed_blocked(rec, qname_eligible):
             surface.header_origin_unknown_types.update(
                 n for n in (rec.name, rec.qualified_name) if n

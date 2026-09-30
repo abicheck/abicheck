@@ -221,10 +221,10 @@ def ownership_relations(
     contract_of: dict[str, str] = {}
     conflicting: set[str] = set()
     pairs = (
-        (snap.functions, ids.functions),
-        (snap.variables, ids.variables),
-        (snap.types, ids.records),
-        (snap.enums, ids.enums),
+        (snap.declarations.functions, ids.functions),
+        (snap.declarations.variables, ids.variables),
+        (snap.declarations.types, ids.records),
+        (snap.declarations.enums, ids.enums),
     )
     for decls, idents in pairs:
         for decl, ident in zip(decls, idents):

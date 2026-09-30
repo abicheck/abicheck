@@ -351,7 +351,7 @@ def test_private_header_leak_source_index_provider_unchanged_by_migration() -> N
     pre, post = _pre_and_post_phase3_snaps(graph)
     for snap in (pre, post):
         snap.from_headers = True
-        snap.functions = [
+        snap.declarations.functions = [
             Function(
                 name="use",
                 mangled="_Z3usev",
@@ -359,7 +359,7 @@ def test_private_header_leak_source_index_provider_unchanged_by_migration() -> N
                 origin=ScopeOrigin.PUBLIC_HEADER,
             ),
         ]
-        snap.types = [
+        snap.declarations.types = [
             RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER),
         ]
 

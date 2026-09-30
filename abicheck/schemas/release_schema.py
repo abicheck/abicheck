@@ -205,4 +205,11 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       neither side has any -- never an empty list standing in for "not
 #:       read". Additive; the HTML release report's dependency graph is drawn
 #:       from exactly these facts.
-RELEASE_SCHEMA_VERSION = "1.9"
+#: - ``1.10`` adds ``comparison_scope.variant_pairing`` (ADR-062 A1.6),
+#:       present only when both operands are stored ``ProjectSnapshot``
+#:       packages: both packages' ``VariantRef`` sets paired by
+#:       ``variant_id``, with declared-coordinate changes reported as a
+#:       variant-boundary change distinct from captured drift, and a variant
+#:       only one side carries reported as unmatched (never a removal).
+#:       Report-only and additive.
+RELEASE_SCHEMA_VERSION = "1.10"

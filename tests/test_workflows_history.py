@@ -39,10 +39,9 @@ from abicheck.workflows.history import (
 
 
 def _fn(name: str, *, deprecated: str | None = None) -> Function:
-    kwargs: dict[str, object] = {}
-    if deprecated is not None:
-        kwargs["deprecated"] = deprecated
-    return Function(name=name, mangled=name, return_type="int", **kwargs)
+    # Always stated, as a header dump states it (ADR-063 5B: the detector
+    # reads the fact's status, and an omitted field means NOT_COLLECTED).
+    return Function(name=name, mangled=name, return_type="int", deprecated=deprecated)
 
 
 def _save(

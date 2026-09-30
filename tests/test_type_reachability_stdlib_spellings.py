@@ -996,8 +996,8 @@ class TestTypedefsQualifiedClosesBareNameCollisionFalseNegative:
         # The bare dict lost Api's real typedef target to an unrelated
         # bare-name collision with Foo's own -- pre-existing, deliberately
         # unchanged lossy behavior.
-        snap.typedefs = {"value_type": "Unrelated"}
-        snap.typedefs_qualified = {
+        snap.declarations.typedefs = {"value_type": "Unrelated"}
+        snap.declarations.typedefs_qualified = {
             "Foo::value_type": "Unrelated",
             "Api::value_type": "std::string",
         }

@@ -593,7 +593,7 @@ def _phl_isolated_snapshot_with_addition(*, leaked: bool) -> AbiSnapshot:
     the OLD/NEW *delta* attributable to the leak alone.
     """
     snap = _phl_isolated_snapshot(leaked=leaked)
-    snap.functions.append(
+    snap.declarations.functions.append(
         Function(
             name="other",
             mangled="_Z5otherv",

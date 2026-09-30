@@ -245,7 +245,7 @@ class TestEncodePathEquivalence:
         from abicheck.storage.snapshot_codec import snapshot_to_dict
 
         snap = AbiSnapshot(library="libx.so", version="1.0")
-        snap.functions = [
+        snap.declarations.functions = [
             Function(
                 name=f"f{i}",
                 mangled=f"_Z1f{i}v",
@@ -254,8 +254,10 @@ class TestEncodePathEquivalence:
             )
             for i in range(25)
         ]
-        snap.types = [RecordType(name=f"S{i}", kind="struct") for i in range(10)]
-        snap.enums = [EnumType(name="E")]
+        snap.declarations.types = [
+            RecordType(name=f"S{i}", kind="struct") for i in range(10)
+        ]
+        snap.declarations.enums = [EnumType(name="E")]
 
         encoded = snapshot_to_dict(snap)
         # The encoder reads declared fields, not `__dict__` -- which is why

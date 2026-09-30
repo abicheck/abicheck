@@ -266,7 +266,7 @@ def test_inline_on_any_redeclaration_removes_obligation_in_any_order() -> None:
 def _snap(functions: list[Function], exports: list[str]) -> AbiSnapshot:
     snap = AbiSnapshot(library="libx.so", version="1", from_headers=True)
     snap.elf = ElfMetadata(symbols=[ElfSymbol(name=n) for n in exports])
-    snap.functions = functions
+    snap.declarations.functions = functions
     return snap
 
 
@@ -426,14 +426,14 @@ def _parsed(exported: bool) -> dict:
 def test_header_only_additions_do_not_read_as_added_exports() -> None:
     old = AbiSnapshot(library="libk.so", version="1", from_headers=True)
     old.elf = ElfMetadata(symbols=[ElfSymbol(name="_ZN2ns3kvs4sizeEv")])
-    old.functions = [
+    old.declarations.functions = [
         _fn("size", "_ZN2ns3kvs4sizeEv", visibility=Visibility.PUBLIC, **_parsed(True))
     ]
     new = AbiSnapshot(library="libk.so", version="2", from_headers=True)
     new.elf = ElfMetadata(
         symbols=[ElfSymbol(name="_ZN2ns3kvs4sizeEv"), ElfSymbol(name="_ZN2ns3newEv")]
     )
-    new.functions = [
+    new.declarations.functions = [
         _fn("size", "_ZN2ns3kvs4sizeEv", visibility=Visibility.PUBLIC, **_parsed(True)),
         _fn("fresh", "_ZN2ns3newEv", visibility=Visibility.PUBLIC, **_parsed(True)),
         _fn(
@@ -452,7 +452,7 @@ def test_header_only_additions_do_not_read_as_added_exports() -> None:
             **_parsed(False),
         ),
     ]
-    new.variables = [
+    new.declarations.variables = [
         Variable(
             name="invalid_kvs_id",
             mangled="_ZN2nsL14invalid_kvs_idE",

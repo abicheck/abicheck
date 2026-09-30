@@ -101,18 +101,19 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
     falsely claim a public layout change exists when the global stdlib filter has
     kept all the matching records out of the surface (Codex review #345).
     """
+    from .diff_helpers import type_map_key
     from .model import is_non_abi_surface_type
     from .surface import compute_public_surface
 
     surface = compute_public_surface(snap)
     public_types = _public_by_value_type_closure(snap) if surface.resolvable else None
 
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         # Skip non-ABI-surface owner records (std::/__gnu_cxx:: internals): their
         # std:: fields are not a *public* type embedding the stdlib by value.
         if is_non_abi_surface_type(rec.name):
             continue
-        if public_types is not None and rec.name not in public_types:
+        if public_types is not None and type_map_key(rec) not in public_types:
             continue
         for fld in rec.fields:
             tname = (fld.type or "").strip()
@@ -146,13 +147,23 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
     it. There is no pairwise comparison here for
     :func:`~abicheck.compare.fact_comparison.compare_facts` to gate.
     """
+    from .diff_helpers import build_type_map, type_map_key
     from .model import RecordType, resolved_fact_value
     from .model.type_identifiers import type_identifiers as _type_identifiers
 
-    record_by_name: dict[str, RecordType] = {rec.name: rec for rec in snap.types}
-    for rec in snap.types:
+    # ADR-063 2B: resolve a signature spelling through the canonical record map
+    # (qualified key, bare alias only when unambiguous), then a leaf of a
+    # DWARF-qualified name -- again only when exactly one record owns that
+    # leaf. The old ``setdefault`` leaf map answered first-wins, so an
+    # unrelated same-leaf record could stand in for the named one.
+    type_map = build_type_map(snap.declarations.types)
+    leaf_owners: dict[str, list[RecordType]] = {}
+    for rec in snap.declarations.types:
         if "::" in rec.name:
-            record_by_name.setdefault(rec.name.rsplit("::", 1)[1], rec)
+            leaf_owners.setdefault(rec.name.rsplit("::", 1)[1], []).append(rec)
+    record_by_name: dict[str, RecordType] = {
+        leaf: recs[0] for leaf, recs in leaf_owners.items() if len(recs) == 1
+    }
 
     def _add_type(queue: list[str], type_name: str | None) -> None:
         if _is_indirect_type(type_name):
@@ -160,13 +171,13 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
         queue.extend(_type_identifiers(type_name))
 
     queue: list[str] = []
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         if not in_public_surface(fn):
             continue
         _add_type(queue, fn.return_type)
         for param in fn.params:
             _add_type(queue, getattr(param, "type", None))
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if in_public_surface(var):
             _add_type(queue, var.type)
 
@@ -177,13 +188,15 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
         if name in seen:
             continue
         seen.add(name)
-        target = snap.typedefs.get(name)
+        target = snap.declarations.typedefs.get(name)
         if target:
             _add_type(queue, target)
-        record: RecordType | None = record_by_name.get(name)
+        record: RecordType | None = type_map.get(name) or record_by_name.get(name)
         if record is None:
             continue
-        public_by_value.add(record.name)
+        # The qualified identity, so ``ns1::S`` reaching the surface does not
+        # admit an unrelated header-mode ``ns2::S`` sharing ``name="S"``.
+        public_by_value.add(type_map_key(record))
         for fld in record.fields:
             _add_type(queue, fld.type)
         bases = resolved_fact_value(record.bases_fact, [])
@@ -209,7 +222,7 @@ def _layout_evidence_present(snap: AbiSnapshot) -> bool:
     actually diverged; the finding then notes the gap calmly instead of
     claiming a clean bill of health.
     """
-    return any(rec.size_bits is not None for rec in snap.types)
+    return any(rec.size_bits is not None for rec in snap.declarations.types)
 
 
 def _capture_is_complete(bm: BuildMode) -> bool:
@@ -229,8 +242,12 @@ def _capture_is_complete(bm: BuildMode) -> bool:
 
 def _collect_mangled_symbols(snap: AbiSnapshot) -> list[str]:
     """Return all mangled symbol names from a snapshot's functions and variables."""
-    mangled = [f.mangled for f in snap.functions if getattr(f, "mangled", None)]
-    mangled += [v.mangled for v in snap.variables if getattr(v, "mangled", None)]
+    mangled = [
+        f.mangled for f in snap.declarations.functions if getattr(f, "mangled", None)
+    ]
+    mangled += [
+        v.mangled for v in snap.declarations.variables if getattr(v, "mangled", None)
+    ]
     return mangled
 
 

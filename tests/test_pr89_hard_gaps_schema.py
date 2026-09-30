@@ -776,7 +776,7 @@ class TestSchemaVersionBaseline:
             raw = json.loads(tmp.read_text())
             assert raw["schema_version"] == SCHEMA_VERSION
             snap2 = load_snapshot(tmp)
-            assert snap2.functions[0].name == "compute"
+            assert snap2.declarations.functions[0].name == "compute"
         finally:
             tmp.unlink(missing_ok=True)
 

@@ -93,6 +93,7 @@ from .special_member_identity import (
 )
 
 if TYPE_CHECKING:
+    from .declaration_store import Declarations
     from .declarations import Function, Variable
     from .entities import EnumType, RecordType
     from .graph_facts import SurfaceGraphLike
@@ -487,11 +488,8 @@ class SnapshotLike(Protocol):
     so this leaf module never imports ``model.snapshot`` (which sits on the
     ``buildsource.pack -> model.source_graph`` import path)."""
 
-    functions: list[Function]
-    variables: list[Variable]
-    types: list[RecordType]
-    enums: list[EnumType]
-    typedefs: dict[str, str]
+    @property
+    def declarations(self) -> Declarations: ...
 
 
 @dataclass(frozen=True)
@@ -540,11 +538,11 @@ def _function_identities(
     and a real ctor/dtor linker name gains its observed sibling variants as
     aliases. A resolution whose spelling another declaration already owns
     is refused -- the placeholder stays ``unresolved``."""
-    idents = [identity_for_function(f) for f in snap.functions]
+    idents = [identity_for_function(f) for f in snap.declarations.functions]
     if not exports:
         return idents
     resolved = resolve_special_member_linker_names(
-        snap.functions, exports, getattr(snap, "typedefs_qualified", None) or {}
+        snap.declarations.functions, exports, snap.declarations.typedefs_qualified
     )
     owned = {i.node_id for i in idents if i.resolved}
     for idx, names in resolved.items():
@@ -554,7 +552,7 @@ def _function_identities(
         idents[idx] = _with_variant_aliases(
             GraphEntityIdentity(node, IdentityState.RESOLVED), names.variants
         )
-    for idx, (fn, ident) in enumerate(zip(snap.functions, idents)):
+    for idx, (fn, ident) in enumerate(zip(snap.declarations.functions, idents)):
         if idx not in resolved and ident.resolved and is_linker_name(fn.mangled):
             idents[idx] = _with_variant_aliases(
                 ident, special_member_variant_aliases(fn.mangled, exports)
@@ -580,7 +578,9 @@ def snapshot_identities(
     functions = tuple(
         occ.allocate(i) for i in _function_identities(snap, frozenset(export_names))
     )
-    variables = tuple(occ.allocate(identity_for_variable(v)) for v in snap.variables)
+    variables = tuple(
+        occ.allocate(identity_for_variable(v)) for v in snap.declarations.variables
+    )
     # An alias is only a second spelling of *this* entity while no other
     # declaration owns that spelling as its canonical id (Mach-O: `exit`'s
     # decorated `_exit` is also the plain name of a distinct `_exit`). Such an
@@ -590,8 +590,8 @@ def snapshot_identities(
     variables = tuple(_without_aliases_in(i, canonical) for i in variables)
     spellings: dict[str, int] = {}
     for name in (
-        *(r.qualified_name or r.name for r in snap.types),
-        *(e.qualified_name or e.name for e in snap.enums),
+        *(r.qualified_name or r.name for r in snap.declarations.types),
+        *(e.qualified_name or e.name for e in snap.declarations.enums),
     ):
         spellings[name] = spellings.get(name, 0) + 1
 
@@ -605,11 +605,11 @@ def snapshot_identities(
             )
         return occ.allocate(ident)
 
-    records = tuple(_type(r, identity_for_record(r)) for r in snap.types)
-    enums = tuple(_type(e, identity_for_enum(e)) for e in snap.enums)
+    records = tuple(_type(r, identity_for_record(r)) for r in snap.declarations.types)
+    enums = tuple(_type(e, identity_for_enum(e)) for e in snap.declarations.enums)
     tag_names = set(spellings)
     typedefs = {
         alias: identity_for_typedef(alias, target, tag_names)
-        for alias, target in snap.typedefs.items()
+        for alias, target in snap.declarations.typedefs.items()
     }
     return SnapshotIdentities(functions, variables, records, enums, typedefs)

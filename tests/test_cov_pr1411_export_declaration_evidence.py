@@ -50,6 +50,7 @@ def _snapshot(tmp_path: Path, **kw) -> SimpleNamespace:
         excluded_header_patterns=kw.get("patterns", ("detail/*",)),
         excluded_header_matching=kw.get("matching", "glob"),
     )
+    snap.declarations = snap  # the store view the evidence builder reads
     return snap
 
 

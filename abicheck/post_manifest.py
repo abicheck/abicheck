@@ -357,7 +357,7 @@ def _snapshot_contract_symbols(snap: Any) -> set[str]:
     # in the new build still has a Function/symbol entry but clients can no
     # longer link to it, so it must not read as present (else `old − new` would
     # fail to recover the now-unlinkable wrapper and demote its visibility break).
-    for f in getattr(snap, "functions", None) or ():
+    for f in snap.declarations.functions:
         vis = getattr(getattr(f, "visibility", None), "value", "")
         if vis and vis not in ("public", "elf_only"):
             continue  # hidden/internal/protected: not a public export

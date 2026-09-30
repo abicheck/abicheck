@@ -153,11 +153,11 @@ def test_semantic_ir_template_arguments_end_to_end(template_lib, backend: str) -
     source backend")."""
     so, header = template_lib
     snap = dump(so, [header], header_backend=backend)
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
 
     box_entries = [
         e
-        for occ, e in snap.semantic_ir.occurrences.items()
+        for occ, e in snap.canonical_ir.occurrences.items()
         if occ.entity_id.leaf_name.startswith("Box<")
     ]
     if backend == "castxml":
@@ -181,11 +181,11 @@ def test_semantic_ir_closure_parameterized_template_end_to_end(
     ``:line:col`` coordinates."""
     so, header = template_lib
     snap = dump(so, [header], header_backend="castxml")
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
 
     wrapper_entries = [
         (occ, e)
-        for occ, e in snap.semantic_ir.occurrences.items()
+        for occ, e in snap.canonical_ir.occurrences.items()
         if occ.entity_id.leaf_name.startswith("Wrapper<")
     ]
     assert len(wrapper_entries) == 1
@@ -224,19 +224,19 @@ def test_semantic_ir_populated_end_to_end(compiled_lib, backend: str) -> None:
     so, header = compiled_lib
     snap = dump(so, [header], header_backend=backend)
 
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
     # `compute` has a real mangled name, so `entity_id_for_function`'s own
     # mangled branch blanks its `leaf_name` (see that function's own
     # docstring) -- named leaf names cover the record/enum/typedef trio,
     # the mangled function is asserted separately below.
     leaf_names = {
         occ.entity_id.leaf_name
-        for occ in snap.semantic_ir.occurrences
+        for occ in snap.canonical_ir.occurrences
         if occ.entity_id.leaf_name
     }
     assert leaf_names == {"Point", "Color", "PointAlias", "kMaxPoints"}
     assert all(
-        entity.producer == backend for entity in snap.semantic_ir.occurrences.values()
+        entity.producer == backend for entity in snap.canonical_ir.occurrences.values()
     )
 
     # `compute`'s own signature: a top-level by-value cv-qualifier on the
@@ -260,7 +260,7 @@ def test_semantic_ir_populated_end_to_end(compiled_lib, backend: str) -> None:
     # backends (clang's AST walk never emits an implicit node at all).
     compute_entries = [
         e
-        for occ, e in snap.semantic_ir.occurrences.items()
+        for occ, e in snap.canonical_ir.occurrences.items()
         if occ.entity_id.kind.value == "function"
         and e.canonical_spelling.is_present
         and e.canonical_spelling.value.startswith("int(")
@@ -274,7 +274,7 @@ def test_semantic_ir_populated_end_to_end(compiled_lib, backend: str) -> None:
     # backend, per ADR-063 Phase 2's option (a)).
     record_entry = next(
         (occ, e)
-        for occ, e in snap.semantic_ir.occurrences.items()
+        for occ, e in snap.canonical_ir.occurrences.items()
         if occ.entity_id.leaf_name == "Point"
     )
     assert record_entry[1].canonical_spelling.value == "outer::inner::Point"
@@ -287,7 +287,7 @@ def test_semantic_ir_populated_end_to_end(compiled_lib, backend: str) -> None:
     # literal.
     constant_entry = next(
         (occ, e)
-        for occ, e in snap.semantic_ir.occurrences.items()
+        for occ, e in snap.canonical_ir.occurrences.items()
         if occ.entity_id.leaf_name == "kMaxPoints"
     )
     assert constant_entry[0].entity_id.kind.value == "constant"
@@ -309,10 +309,10 @@ def test_hybrid_dump_records_the_real_typedef_spelling_conflict(compiled_lib) ->
     so, header = compiled_lib
     snap = dump(so, [header], header_backend="hybrid")
 
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
     typedef_entry = next(
         (occ, e)
-        for occ, e in snap.semantic_ir.occurrences.items()
+        for occ, e in snap.canonical_ir.occurrences.items()
         if occ.entity_id.leaf_name == "PointAlias"
     )
     occ_id, entity = typedef_entry
@@ -339,13 +339,13 @@ def test_hybrid_dump_merges_a_real_mangled_function_occurrence(compiled_lib) -> 
     so, header = compiled_lib
     snap = dump(so, [header], header_backend="hybrid")
 
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
     # castxml's own compiler-generated copy/move assignment operators are
     # normalized here too (real mangled names) -- `compute` is found by its
     # own distinctive spelling, same as the plain-dump test above.
     compute_entries = [
         (occ, e)
-        for occ, e in snap.semantic_ir.occurrences.items()
+        for occ, e in snap.canonical_ir.occurrences.items()
         if occ.entity_id.kind.value == "function"
         and e.canonical_spelling.is_present
         and e.canonical_spelling.value.startswith("int(")

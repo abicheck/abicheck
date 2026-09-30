@@ -1617,6 +1617,19 @@
               "null"
             ]
           },
+          "declined": {
+            "type": "array",
+            "description": "ADR-063 T9 (schema 5.12): comparisons this detector ran but declined to judge because the evidence it needed was incomplete or unsupported for that entity (e.g. a PDB or partial DWARF vtable). An empty list means nothing was declined; a declined entity is neither a finding nor a clean result.",
+            "items": {
+              "type": "object",
+              "required": ["entity", "reason"],
+              "additionalProperties": false,
+              "properties": {
+                "entity": {"type": "string"},
+                "reason": {"type": "string"}
+              }
+            }
+          },
           "not_evaluated": {
             "type": "boolean",
             "description": "ADR-067 D3 (schema 2.51): true when this detector did not run at all -- its requires_support gate refused it -- as opposed to running and producing no findings. `changes_count` is 0 in both cases, which is the ambiguity this flag removes; `coverage_gap` carries the gate's reason."
@@ -2927,6 +2940,203 @@
             "type": "string"
           },
           "description": "ADR-065 D2: NEW-only not_supplied members whose novelty OLD's proven-complete inventory establishes."
+        },
+        "variant_pairing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema_version",
+            "compared",
+            "pairs",
+            "variant_boundary_changes",
+            "unmatched_required"
+          ],
+          "description": "ADR-062 D9 / storage-format-v2 A1.6: present only when both operands are stored ProjectSnapshot packages -- both packages' VariantRefs paired by variant_id. Report-only: never changes which libraries are compared, a verdict, or an exit code. A declared-coordinate change is a variant-boundary change, distinct from captured drift (e.g. a compiler-version bump); a variant only one side carries is unmatched, never a removal.",
+          "properties": {
+            "schema_version": {
+              "type": "integer"
+            },
+            "compared": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "old",
+                "new"
+              ],
+              "properties": {
+                "old": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "new": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "description": "The variant each side's library comparison ran over."
+            },
+            "pairs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "variant_id",
+                  "status",
+                  "required"
+                ],
+                "properties": {
+                  "variant_id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "paired",
+                      "unmatched_old",
+                      "unmatched_new"
+                    ]
+                  },
+                  "required": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "old": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "declared",
+                      "captured",
+                      "required"
+                    ],
+                    "properties": {
+                      "declared": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "captured": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "required": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
+                  "new": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "declared",
+                      "captured",
+                      "required"
+                    ],
+                    "properties": {
+                      "declared": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "captured": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "required": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    }
+                  },
+                  "variant_boundary_changed": {
+                    "type": "boolean"
+                  },
+                  "declared_changes": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "old",
+                        "new"
+                      ],
+                      "properties": {
+                        "old": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "new": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "captured_changes": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "old",
+                        "new"
+                      ],
+                      "properties": {
+                        "old": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "new": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "variant_boundary_changes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unmatched_required": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },

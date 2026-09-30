@@ -56,7 +56,7 @@ from ..policy.support_promise import (
 from .build_config_schema import (
     TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
     TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
-    deployment_findings as _deployment_type_findings,
+    WHOLE_BLOCK_VALIDATORS as _WHOLE_BLOCK_VALIDATORS,
     opt_int as _opt_int,
     parse_performance_profile_key as _parse_performance_profile_key,
     parse_policy_overrides as _parse_policy_overrides,
@@ -416,6 +416,7 @@ class BuildConfig:
             "aggregate",
             "policy",
             "deployment",
+            "bundle_variants",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
@@ -547,15 +548,13 @@ class BuildConfig:
             if key not in cls._KNOWN_TOP_KEYS:
                 findings.append(f"unknown .abicheck.yml key {key!r}")
                 continue
-            if key == "deployment":
-                # ``environment_matrix.py`` was reclassified ``model`` in
-                # ``architecture/modules.yaml`` (ADR-061), which is exactly
-                # the one extra layer ``build_config_schema.py``'s
-                # ``extract`` classification may import -- so its own
-                # ``deployment_findings()`` is called directly here, the same
-                # module ``_subkey_findings`` above delegates to for every
-                # other block's own subkey type table.
-                findings += _deployment_type_findings(value)
+            if key in _WHOLE_BLOCK_VALIDATORS:  # deployment, bundle_variants
+                # Whole-block validators live in ``build_config_schema.py``
+                # (``extract`` may import the ``model`` layer both
+                # ``EnvironmentMatrix`` and ``model.bundle_variants`` sit
+                # in), the module ``_subkey_findings`` above delegates to for
+                # every other block's own subkey type table.
+                findings += _WHOLE_BLOCK_VALIDATORS[key](value)
                 continue
             known_block = cls._KNOWN_BLOCK_KEYS.get(key)
             if known_block is None:

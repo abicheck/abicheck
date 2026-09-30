@@ -264,22 +264,22 @@ def _declared_source_headers(
     internal boundary ``crosscheck.py``'s checks already gate on.
     """
     headers: set[str] = set()
-    for fn in snapshot.functions:
+    for fn in snapshot.declarations.functions:
         if fn.source_header and (
             not public_only or fn.origin == ScopeOrigin.PUBLIC_HEADER
         ):
             headers.add(fn.source_header)
-    for var in snapshot.variables:
+    for var in snapshot.declarations.variables:
         if var.source_header and (
             not public_only or var.origin == ScopeOrigin.PUBLIC_HEADER
         ):
             headers.add(var.source_header)
-    for rec in snapshot.types:
+    for rec in snapshot.declarations.types:
         if rec.source_header and (
             not public_only or rec.origin == ScopeOrigin.PUBLIC_HEADER
         ):
             headers.add(rec.source_header)
-    for enum in snapshot.enums:
+    for enum in snapshot.declarations.enums:
         if enum.source_header and (
             not public_only or enum.origin == ScopeOrigin.PUBLIC_HEADER
         ):

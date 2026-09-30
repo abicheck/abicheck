@@ -100,7 +100,7 @@ class TestProducerDidNotRun:
         )
         ev = _evidence(snap)
         assert _answer(ev, "declares", "decl://run") == PRESENT  # still observed
-        snap.functions[0].source_header = None
+        snap.declarations.functions[0].source_header = None
         ev = _evidence(snap)
         assert _answer(ev, "declares", "decl://run") == UNKNOWN
         assert _answer(ev, "references", "type://S") == PRESENT

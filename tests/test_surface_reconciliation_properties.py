@@ -368,13 +368,19 @@ class TestReconciliationIsScopedToOneComparison:
         ]
         # The producer now *observed* these out of the public contract: a real
         # finding, not an evidence gap.
-        for decl in new.variables if variables else new.functions:
+        for decl in (
+            new.declarations.variables if variables else new.declarations.functions
+        ):
             decl.in_public_contract_fact = Fact.present(False)
         reused = {
             c.symbol for c in compare(old, new).changes if c.kind in _SURFACE_EXIT_KINDS
         }
         fresh_old, fresh_new = pair()
-        for decl in fresh_new.variables if variables else fresh_new.functions:
+        for decl in (
+            fresh_new.declarations.variables
+            if variables
+            else fresh_new.declarations.functions
+        ):
             decl.in_public_contract_fact = Fact.present(False)
         expected = {
             c.symbol

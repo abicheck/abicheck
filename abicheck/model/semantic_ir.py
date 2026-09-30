@@ -53,6 +53,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import Any
 
+from .declaration_store import Declarations
 from .fact import Fact
 from .frozen_mapping import FrozenMapping
 from .identity import EntityId, _packed
@@ -131,6 +132,14 @@ class CanonicalEntity:
     cv_qualification: Fact[tuple[str, ...]] = field(
         default_factory=lambda: Fact.not_collected()
     )
+    #: A record's ``sizeof`` and alignment, in bits (ADR-063 6B, record-layout
+    #: cohort). ``NOT_COLLECTED`` for every non-record kind and for a record
+    #: whose producer established no layout (an opaque declaration, a clang
+    #: record DWARF could not fill); a present value is always an ``int``.
+    #: See ``model/semantic_ir_record_layout.py`` for how these are kept in
+    #: step with the ``RecordType`` they describe.
+    size_bits: Fact[int] = field(default_factory=lambda: Fact.not_collected())
+    alignment_bits: Fact[int] = field(default_factory=lambda: Fact.not_collected())
     producer: str = ""
 
     def __post_init__(self) -> None:
@@ -151,6 +160,13 @@ class CanonicalEntity:
                     "confirmed absence is spelled with this field's own "
                     'empty value ("" or ()), never None'
                 )
+        for name in ("size_bits", "alignment_bits"):
+            layout = getattr(self, name)
+            # `bool` is an `int` subclass; a JSON `true` must not pass as 1.
+            if layout.is_present and (
+                isinstance(layout.value, bool) or not isinstance(layout.value, int)
+            ):
+                raise ValueError(f"{name} must carry an int, got {layout.value!r}")
         cv = self.cv_qualification
         # `is_present`, not `status is PRESENT`: `PARTIAL` is usable evidence
         # everywhere else in this IR (`Fact.is_present`,
@@ -208,10 +224,47 @@ class SemanticIR:
     """
 
     occurrences: Mapping[OccurrenceId, CanonicalEntity] = field(default_factory=dict)
+    #: The snapshot's parsed declarations (``model/declaration_store.py``),
+    #: or ``None`` for an IR a normalizer produced that no snapshot owns yet.
+    #: ``AbiSnapshot`` attaches its store whenever it takes an IR, so a
+    #: snapshot's IR is never unattached. Compared, never hashed.
+    declarations: Declarations | None = field(default=None, hash=False)
+    #: Whether ``occurrences`` is a real canonical projection. ``False`` for
+    #: the IR of a snapshot no normalizer ran for (a pre-v38 document, a
+    #: producer with no normalizer slice) -- an empty mapping there means
+    #: "never computed", not "computed and found nothing".
+    canonical: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.occurrences, FrozenMapping):
             object.__setattr__(self, "occurrences", FrozenMapping(self.occurrences))
+
+    def attached(self, declarations: Declarations) -> SemanticIR:
+        """This IR, owning *declarations* (the snapshot's store)."""
+        if self.declarations is declarations:
+            return self
+        return SemanticIR(
+            occurrences=self.occurrences,
+            declarations=declarations,
+            canonical=self.canonical,
+        )
+
+    def unattached(self) -> SemanticIR:
+        """This IR's canonical occurrences with no declaration store."""
+        if self.declarations is None:
+            return self
+        return SemanticIR(occurrences=self.occurrences, canonical=self.canonical)
+
+    def with_canonical(self, canonical_ir: SemanticIR | None) -> SemanticIR:
+        """This IR's declarations under *canonical_ir*'s occurrences, or
+        under none (``canonical=False``) when *canonical_ir* is ``None``."""
+        if canonical_ir is None:
+            return SemanticIR(declarations=self.declarations, canonical=False)
+        return SemanticIR(
+            occurrences=canonical_ir.occurrences,
+            declarations=self.declarations,
+            canonical=canonical_ir.canonical,
+        )
 
     def occurrences_for(self, entity_id: EntityId) -> tuple[OccurrenceId, ...]:
         """Every occurrence key naming *entity_id*, in this IR's own order.

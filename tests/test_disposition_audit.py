@@ -85,15 +85,15 @@ def _snapshots(
         )
 
     for i in range(removed):
-        old.functions.append(_fn(f"gone{i}"))
+        old.declarations.functions.append(_fn(f"gone{i}"))
     for i in range(kept):
         fn = _fn(f"stay{i}")
-        old.functions.append(fn)
-        new.functions.append(_fn(f"stay{i}"))
+        old.declarations.functions.append(fn)
+        new.declarations.functions.append(_fn(f"stay{i}"))
     for i in range(added):
-        new.functions.append(_fn(f"new{i}"))
+        new.declarations.functions.append(_fn(f"new{i}"))
     for i in range(variables_removed):
-        old.variables.append(
+        old.declarations.variables.append(
             Variable(
                 name=f"{prefix}::var{i}",
                 mangled=f"_ZN3{prefix}3var{i}E",

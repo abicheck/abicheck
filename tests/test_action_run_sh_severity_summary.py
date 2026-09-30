@@ -48,7 +48,7 @@ _END_MARKER = "    esac"
 #: pass on a script that never asked the question. Their definitions are
 #: extracted with it, from the first one to the first mode dispatch below them.
 _HELPERS_START = "_json_report_src() {"
-_HELPERS_END = 'if [[ "$MODE" == "deps-compare" ]]; then'
+_HELPERS_END = 'if [[ "$MODE" == "deps-compare" || "$MODE" == "deps-tree" ]]; then'
 #: `_report_query` (one of the helpers above) reads `$_PY_BIN`, which is now
 #: resolved once near the top of run.sh -- well before `_HELPERS_START` --
 #: rather than immediately above `_report_query`'s own definition (moved

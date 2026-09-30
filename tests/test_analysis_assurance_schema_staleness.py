@@ -678,7 +678,7 @@ class TestSchemaStalenessStatus:
         # can no longer matter.
         old_projected = project_snapshot_to_depth(old, "binary")
         new_projected = project_snapshot_to_depth(new, "binary")
-        assert old_projected.functions[0].params == []
+        assert old_projected.declarations.functions[0].params == []
         assert old_projected.elf_only_mode is True
 
         result2 = checker.compare(old_projected, new_projected)
@@ -790,7 +790,7 @@ class TestSchemaStalenessStatus:
         new_copy = AbiSnapshot(
             version=new.version,
             library=new.library,
-            functions=list(new.functions),
+            functions=list(new.declarations.functions),
             from_headers=new.from_headers,
             param_kind_facts_reliable=False,
         )
@@ -804,7 +804,7 @@ class TestSchemaStalenessStatus:
         differing = AbiSnapshot(
             version="99.0",
             library=new.library,
-            functions=list(new.functions),
+            functions=list(new.declarations.functions),
             from_headers=new.from_headers,
             param_kind_facts_reliable=False,
         )

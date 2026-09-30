@@ -646,7 +646,7 @@ def _emitted_top_level_fields(tmp_path) -> set[str]:
 
     def _snapshot(names):
         snap = AbiSnapshot(library="libdemo.so", version="1.0")
-        snap.functions = [
+        snap.declarations.functions = [
             Function(name=n, mangled=n, return_type="void") for n in names
         ]
         return snap

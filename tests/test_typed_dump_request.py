@@ -196,7 +196,7 @@ class TestRunDumpRequest:
 
         snap = run_dump_request(DumpRequest(input=InputSpec(path=snap_path)))
         assert snap.library == "libfoo.so.1"
-        assert [f.name for f in snap.functions] == ["foo"]
+        assert [f.name for f in snap.declarations.functions] == ["foo"]
 
     def test_validation_runs_before_any_resolution(self, snap_path: Path, monkeypatch):
         from abicheck import service
@@ -489,8 +489,8 @@ class TestResolveExecuteDumpRequestSplit:
         via_adapter = run_dump_request(request)
         result = execute_dump_request(resolve_dump_request(request))
         assert result.snapshot.library == via_adapter.library == "libfoo.so.1"
-        assert [f.name for f in result.snapshot.functions] == [
-            f.name for f in via_adapter.functions
+        assert [f.name for f in result.snapshot.declarations.functions] == [
+            f.name for f in via_adapter.declarations.functions
         ]
 
     def test_run_dump_request_is_literally_the_composition(self, snap_path: Path):
@@ -505,8 +505,8 @@ class TestResolveExecuteDumpRequestSplit:
         expected = execute_dump_request(resolve_dump_request(request)).snapshot
         actual = service.run_dump_request(request)
         assert actual.library == expected.library
-        assert [f.mangled for f in actual.functions] == [
-            f.mangled for f in expected.functions
+        assert [f.mangled for f in actual.declarations.functions] == [
+            f.mangled for f in expected.declarations.functions
         ]
 
     def test_depth_floor_raises_only_at_execute_time(self, snap_path: Path):

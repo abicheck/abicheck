@@ -234,9 +234,14 @@ class TestBundleFactsArchiveFormat:
             out, format="archive", max_json_object_nodes=5_000_000
         )
         loaded_snap = loaded.per_library_snapshots["libwidget.so"]
-        assert loaded_snap.functions is not None
-        assert len(loaded_snap.functions) == len(snap.functions)
-        assert loaded_snap.functions[-1].name == snap.functions[-1].name
+        assert loaded_snap.declarations.functions is not None
+        assert len(loaded_snap.declarations.functions) == len(
+            snap.declarations.functions
+        )
+        assert (
+            loaded_snap.declarations.functions[-1].name
+            == snap.declarations.functions[-1].name
+        )
         assert result.stored_sha256 is not None
 
     def test_round_trip_with_non_null_instantiation_manifest(

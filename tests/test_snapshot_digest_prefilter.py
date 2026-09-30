@@ -89,7 +89,9 @@ def test_never_claims_difference_for_equal_content(
     old = _snap(**old_kw)
     new = _snap(**new_kw)
     if extra_fn:
-        new.functions.append(Function(name="g", mangled="_Z1gv", return_type="int"))
+        new.declarations.functions.append(
+            Function(name="g", mangled="_Z1gv", return_type="int")
+        )
     if digest(old) == digest(new):
         assert not persisted_content_provably_differs(old, new)
 

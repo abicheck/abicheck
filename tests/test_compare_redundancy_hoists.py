@@ -26,7 +26,7 @@ def _reference_find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[s
     from abicheck.model.surface_facts import is_abi_visible
 
     out: set[str] = set()
-    for func in snap.functions:
+    for func in snap.declarations.functions:
         if not is_abi_visible(func):
             continue
         rt = func.return_type.strip()
@@ -42,7 +42,7 @@ def _reference_find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[s
                     and param.pointer_depth == 0
                 ):
                     out.add(tname)
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if not is_abi_visible(var):
             continue
         vt = var.type.strip()

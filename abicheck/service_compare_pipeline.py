@@ -579,9 +579,11 @@ def classify_compare_pair(
             ),
             base_policy=request.policy,
         )
-    # ADR-068 §3 #23 / ADR-049 D7: fold project-config overrides at the weakest
-    # tier, after the pack fold above. Round 5 finding 3: kept OUT of the receipt call below, which re-derives the project contribution at the correct tier.
-    pf_before_project_fold = pf
+    # 4B: one D7 config from the loaded inputs, pre-project-fold; read by the receipt and context below.
+    from .workflows.compare_gate_receipt import resolve_request_evaluation_config
+
+    evaluation_config = resolve_request_evaluation_config(request, pf, suppression)
+    # ADR-068 §3 #23 / ADR-049 D7: fold project-config overrides at the weakest tier, after the pack fold above.
     if request.project_policy_overrides:
         from .policy.policy_file_project_overrides import (
             apply_lower_precedence_overrides,
@@ -736,8 +738,14 @@ def classify_compare_pair(
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
     install_resolved_gate_receipt(
-        result, request, gate, pf_before_project_fold, suppression
+        result,
+        evaluation_config,
+        gate,
+        packs_forwarded=bool(request.pack_policy_overrides)
+        or request.pack_internal_namespaces is not None,
     )
+    if context is not None:
+        context = context.for_classification(evaluation_config, result.requested_depth)
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
@@ -749,6 +757,7 @@ def classify_compare_pair(
         suppression=suppression,
         exit_decision=exit_decision,
         severity_config=gate.severity,
+        resolved_execution_context=context,
     )
 
 

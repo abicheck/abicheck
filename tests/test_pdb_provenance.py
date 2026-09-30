@@ -417,7 +417,7 @@ class TestParsePdbEndToEnd:
         records, enums = model_types_from_dwarf_metadata(meta)
         snap = AbiSnapshot(library="lib.dll", version="1", types=records, enums=enums)
         out = _apply_native_provenance(snap, [Path("include/api.h")], None)
-        assert out.types[0].origin == ScopeOrigin.PUBLIC_HEADER
+        assert out.declarations.types[0].origin == ScopeOrigin.PUBLIC_HEADER
         # No public set → no-op (origin stays UNKNOWN).
         snap2 = AbiSnapshot(
             library="lib.dll",
@@ -425,7 +425,7 @@ class TestParsePdbEndToEnd:
             types=model_types_from_dwarf_metadata(meta)[0],
         )
         out2 = _apply_native_provenance(snap2, None, None)
-        assert out2.types[0].origin == ScopeOrigin.UNKNOWN
+        assert out2.declarations.types[0].origin == ScopeOrigin.UNKNOWN
 
     def test_cli_apply_native_provenance_forwards_include_search_dirs(
         self,
@@ -464,7 +464,7 @@ class TestParsePdbEndToEnd:
             None,
             [Path("/build/include")],
         )
-        assert out.types[0].origin == ScopeOrigin.PUBLIC_HEADER
+        assert out.declarations.types[0].origin == ScopeOrigin.PUBLIC_HEADER
 
     def test_cli_apply_native_provenance_does_not_own_a_dependency_root(
         self,
@@ -502,7 +502,7 @@ class TestParsePdbEndToEnd:
         # review). UNKNOWN is the exact documented answer for a root the
         # run cannot place -- see `extract.public_root_ownership.
         # compile_only_roots`.
-        assert out.types[0].origin is ScopeOrigin.UNKNOWN
+        assert out.declarations.types[0].origin is ScopeOrigin.UNKNOWN
 
     def test_bridge_feeds_provenance_classification(self) -> None:
         # The decl_file → source_location bridge lets apply_provenance classify
@@ -522,7 +522,7 @@ class TestParsePdbEndToEnd:
         apply_provenance(
             snap, public_headers=["include/api.h"], public_header_dirs=None
         )
-        by_name = {t.name: t for t in snap.types}
+        by_name = {t.name: t for t in snap.declarations.types}
         assert by_name["PublicType"].origin == ScopeOrigin.PUBLIC_HEADER
         assert by_name["PrivateType"].origin == ScopeOrigin.PRIVATE_HEADER
 
@@ -574,7 +574,7 @@ class TestDumpPeFallbackBuildsPdbTypes:
         # PDB type recovered into the model with its source header, and the
         # structured fallback signal recorded.
         assert snap.scope_fallback == "mangling-fallback"
-        names = {t.name: t for t in snap.types}
+        names = {t.name: t for t in snap.declarations.types}
         assert "Widget" in names
         assert names["Widget"].source_location == "api.h"
         # apply_provenance (run by the CLI wrapper) would then classify it; here
@@ -584,10 +584,10 @@ class TestDumpPeFallbackBuildsPdbTypes:
         # ADR-063 Phase 6 (PDB EntityId slice): the real production call
         # chain also populates semantic_ir for this type, through the
         # identical entity_id it was just given.
-        assert snap.semantic_ir is not None
+        assert snap.canonical_ir is not None
         widget_id = names["Widget"].entity_id
         assert widget_id is not None
-        (occ_id,) = snap.semantic_ir.occurrences_for(widget_id)
-        entity = snap.semantic_ir.occurrences[occ_id]
+        (occ_id,) = snap.canonical_ir.occurrences_for(widget_id)
+        entity = snap.canonical_ir.occurrences[occ_id]
         assert entity.canonical_spelling.value == "Widget"
         assert entity.producer == "pdb"

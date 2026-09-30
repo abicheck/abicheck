@@ -53,7 +53,7 @@ def _snap(funcs: set[str], variables: set[str] = frozenset(), dwarf_only_types=N
 
 def test_itanium_mangled_export_gets_mangled_entity_id() -> None:
     snap = _snap({"_Z3addii"})
-    func = next(f for f in snap.functions if f.name == "_Z3addii")
+    func = next(f for f in snap.declarations.functions if f.name == "_Z3addii")
     assert func.entity_id is not None
     assert func.entity_id.kind == EntityKind.FUNCTION
     assert func.entity_id.extra == ("mangled", "_Z3addii")
@@ -65,7 +65,7 @@ def test_plain_c_export_matches_the_extern_c_convention() -> None:
     export -- see this module's own docstring for why that is the accepted
     default rather than always trusting the raw symbol as "mangled"."""
     snap = _snap({"plain_c_fn"})
-    func = next(f for f in snap.functions if f.name == "plain_c_fn")
+    func = next(f for f in snap.declarations.functions if f.name == "plain_c_fn")
     assert func.entity_id is not None
     assert func.entity_id.extra == ("extern_c",)
     assert func.entity_id.leaf_name == "plain_c_fn"
@@ -81,7 +81,7 @@ def test_asm_labeled_export_is_a_documented_residual_gap() -> None:
     as "correct": it exists so a future attempt to disambiguate this case
     doesn't silently regress the far more common plain-C one instead."""
     snap = _snap({"custom_cpp_name"})
-    func = next(f for f in snap.functions if f.name == "custom_cpp_name")
+    func = next(f for f in snap.declarations.functions if f.name == "custom_cpp_name")
     assert func.is_extern_c is True
     assert func.entity_id is not None
     assert func.entity_id.extra == ("extern_c",)
@@ -89,7 +89,7 @@ def test_asm_labeled_export_is_a_documented_residual_gap() -> None:
 
 def test_variable_export_matches_the_extern_c_convention() -> None:
     snap = _snap(set(), {"plain_c_var"})
-    var = next(v for v in snap.variables if v.name == "plain_c_var")
+    var = next(v for v in snap.declarations.variables if v.name == "plain_c_var")
     assert var.entity_id is not None
     assert var.entity_id.kind == EntityKind.VARIABLE
     assert var.entity_id.extra == ("extern_c",)
@@ -97,7 +97,7 @@ def test_variable_export_matches_the_extern_c_convention() -> None:
 
 def test_distinct_exports_never_collide_regardless_of_mangling() -> None:
     snap = _snap({"_Z3addii", "custom_cpp_name", "plain_c_fn"})
-    ids = {f.entity_id for f in snap.functions}
+    ids = {f.entity_id for f in snap.declarations.functions}
     assert len(ids) == 3
 
 
@@ -114,11 +114,11 @@ def test_semantic_ir_is_populated_when_dwarf_types_are_preserved() -> None:
     ``entity_id``s -- a headerless dump silently omitted IR entirely."""
     types = [_record("Widget")]
     snap = _snap({"plain_c_fn"}, dwarf_only_types=types)
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
     entity_id = types[0].entity_id
     assert entity_id is not None
-    (occ_id,) = snap.semantic_ir.occurrences_for(entity_id)
-    entity = snap.semantic_ir.occurrences[occ_id]
+    (occ_id,) = snap.canonical_ir.occurrences_for(entity_id)
+    entity = snap.canonical_ir.occurrences[occ_id]
     assert entity.canonical_spelling.value == "Widget"
     assert entity.producer == "dwarf"
 
@@ -132,10 +132,10 @@ def test_semantic_ir_omits_the_elf_only_functions_and_variables() -> None:
     not a claim of "confirmed empty")."""
     types = [_record("Widget")]
     snap = _snap({"plain_c_fn"}, dwarf_only_types=types)
-    func = next(f for f in snap.functions if f.name == "plain_c_fn")
+    func = next(f for f in snap.declarations.functions if f.name == "plain_c_fn")
     assert func.entity_id is not None
-    assert snap.semantic_ir is not None
-    assert snap.semantic_ir.occurrences_for(func.entity_id) == ()
+    assert snap.canonical_ir is not None
+    assert snap.canonical_ir.occurrences_for(func.entity_id) == ()
 
 
 def test_semantic_ir_stays_none_without_any_dwarf_types() -> None:
@@ -143,4 +143,4 @@ def test_semantic_ir_stays_none_without_any_dwarf_types() -> None:
     at all) must keep behaving exactly as before this fix -- there is no
     DWARF evidence of any kind to normalize."""
     snap = _snap({"plain_c_fn"})
-    assert snap.semantic_ir is None
+    assert snap.canonical_ir is None

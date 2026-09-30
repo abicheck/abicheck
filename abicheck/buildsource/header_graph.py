@@ -221,11 +221,11 @@ class _FlatTypeIndex:
         entries: list[tuple[str, GraphEntityIdentity]] = [
             *(
                 (r.qualified_name or r.name, i)
-                for r, i in zip(snapshot.types, ids.records)
+                for r, i in zip(snapshot.declarations.types, ids.records)
             ),
             *(
                 (e.qualified_name or e.name, i)
-                for e, i in zip(snapshot.enums, ids.enums)
+                for e, i in zip(snapshot.declarations.enums, ids.enums)
             ),
         ]
         for qname, ident in entries:
@@ -301,7 +301,7 @@ def _flat_structural_type_edges(
             seen.add(name)
             edges.append(TypeEdge(src, name, kind, CONF_REDUCED, role, "", resolution))
 
-    for rt, ident in zip(snapshot.types, ids.records):
+    for rt, ident in zip(snapshot.declarations.types, ids.records):
         src = endpoint_key(ident)
         # Fact[T]-bridged read (ADR-063 Phase 0): value-preserving, see
         # `model.resolved_fact_value`'s own docstring. ADR-063 Phase 5B audit
@@ -313,12 +313,12 @@ def _flat_structural_type_edges(
             emit(src, base, EDGE_TYPE_INHERITS, "base")
         for fld in rt.fields:
             emit(src, fld.type, EDGE_TYPE_HAS_FIELD_TYPE, "field")
-    for fn, ident in zip(snapshot.functions, ids.functions):
+    for fn, ident in zip(snapshot.declarations.functions, ids.functions):
         src = endpoint_key(ident)
         emit(src, fn.return_type, EDGE_DECL_HAS_TYPE, "return")
         for p in fn.params:
             emit(src, p.type, EDGE_DECL_HAS_TYPE, "param")
-    for var, ident in zip(snapshot.variables, ids.variables):
+    for var, ident in zip(snapshot.declarations.variables, ids.variables):
         emit(endpoint_key(ident), var.type, EDGE_DECL_HAS_TYPE, "var")
     return edges
 
@@ -339,7 +339,7 @@ def _seed_flat_graph(
     ``.params``/``Variable.type`` identically (see
     :func:`_flat_structural_type_edges`).
     """
-    for rt, ident in zip(snapshot.types, ids.records):
+    for rt, ident in zip(snapshot.declarations.types, ids.records):
         _seed_flat_type_node(
             graph,
             header_node,
@@ -349,7 +349,7 @@ def _seed_flat_graph(
             rt.origin,
             rt.source_header,
         )
-    for en, ident in zip(snapshot.enums, ids.enums):
+    for en, ident in zip(snapshot.declarations.enums, ids.enums):
         _seed_flat_type_node(
             graph,
             header_node,
@@ -573,12 +573,12 @@ def build_header_only_graph(
             )
 
     for fn, ident, table_ident in zip(
-        snapshot.functions, ids.functions, table_ids.functions
+        snapshot.declarations.functions, ids.functions, table_ids.functions
     ):
         if table_ident.node_id != ident.node_id:
             register_identity_alias(graph, table_ident.node_id, ident.node_id)
         seed_decl(fn, ident)
-    for var, ident in zip(snapshot.variables, ids.variables):
+    for var, ident in zip(snapshot.declarations.variables, ids.variables):
         seed_decl(var, ident)
 
     if ast_projection is not None:

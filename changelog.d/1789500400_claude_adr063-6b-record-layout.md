@@ -1,0 +1,3 @@
+### Changed
+
+- ADR-063 6B: `TYPE_SIZE_CHANGED`/`TYPE_ALIGNMENT_CHANGED` are now decided from each side's `SemanticIR` (new `CanonicalEntity.size_bits`/`alignment_bits` facts) rather than from `RecordType` directly. **Snapshot schema is now v53** and the `semantic_ir` document/`ProjectSnapshot` section is at version 2. Older snapshots still load: their record layout is filled from the snapshot's own records on load. A clang record whose layout DWARF fills after parsing now carries that layout into the IR. A layout established on only one side is recorded as a declined comparison in the report's detector `declined` list.

@@ -728,7 +728,7 @@ class TestConstructionTimeConsistency:
             semantic_ir=_typedef_ir({eid: "int"}),
             typedef_entity_ids={"ns::Alias": eid},
         )
-        assert snap.semantic_ir is not None
+        assert snap.canonical_ir is not None
 
     def test_no_sidecar_at_all_is_not_a_failure(self) -> None:
         """The common, forward-looking case: a snapshot carrying only a
@@ -739,7 +739,7 @@ class TestConstructionTimeConsistency:
         it."""
         eid = entity_id_for_typedef((Namespace("ns"),), "Alias")
         snap = _snap(semantic_ir=_typedef_ir({eid: "int"}))
-        assert snap.semantic_ir is not None
+        assert snap.canonical_ir is not None
 
     def test_an_anonymous_scoped_entity_is_checked_by_its_flattened_name(
         self,
@@ -755,7 +755,7 @@ class TestConstructionTimeConsistency:
             semantic_ir=_typedef_ir({anon: "int"}),
             typedef_entity_ids={"Alias": anon},
         )
-        assert snap.semantic_ir is not None
+        assert snap.canonical_ir is not None
 
     def test_an_anonymous_scoped_sidecar_disagreement_is_now_caught(self) -> None:
         """Codex review, PR #1078, eighth round: before keying by the
@@ -789,7 +789,7 @@ class TestConstructionTimeConsistency:
             semantic_ir=_typedef_ir({first: "int", second: "long"}),
             typedef_entity_ids={"Alias": second},
         )
-        assert snap.semantic_ir is not None
+        assert snap.canonical_ir is not None
 
     def test_a_sidecar_entry_with_no_matching_ir_occurrence_is_a_hard_failure(
         self,
@@ -838,7 +838,7 @@ class TestConstructionTimeConsistency:
             semantic_ir=_typedef_ir({typedef_eid: "int"}),
             constant_entity_ids={"ns::K": constant_eid},
         )
-        assert snap.semantic_ir is not None
+        assert snap.canonical_ir is not None
 
     def test_the_constant_family_gets_the_identical_check(self) -> None:
         import pytest
@@ -866,7 +866,7 @@ class TestConsistencyCheckedOnDeserialize:
     snapshot_from_dict`` constructs the ``AbiSnapshot`` (running
     ``__post_init__`` with ``semantic_ir`` still ``None``) and only
     afterward calls ``storage.semantic_ir_codec.decode_semantic_ir``, which
-    mutates ``snap.semantic_ir`` directly -- bypassing ``__post_init__``
+    mutates ``snap.canonical_ir`` directly -- bypassing ``__post_init__``
     entirely. ``snapshot_from_dict`` must re-run the Track T3 consistency
     check itself after that decode."""
 
@@ -904,4 +904,4 @@ class TestConsistencyCheckedOnDeserialize:
             semantic_ir=_typedef_ir({eid: "int"}),
         )
         loaded = snapshot_from_dict(snapshot_to_dict(snap))
-        assert loaded.semantic_ir is not None
+        assert loaded.canonical_ir is not None

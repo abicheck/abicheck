@@ -77,8 +77,8 @@ class TestRoundTrip:
             }
         )
         reloaded = _round_trip(_snapshot(ir))
-        assert reloaded.semantic_ir is not None
-        assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
+        assert reloaded.canonical_ir is not None
+        assert dict(reloaded.canonical_ir.occurrences) == dict(ir.occurrences)
 
     def test_typed_scope_segments_survive(self) -> None:
         """A rendered-string key could not tell these two apart: identical
@@ -96,9 +96,9 @@ class TestRoundTrip:
             }
         )
         reloaded = _round_trip(_snapshot(ir))
-        assert reloaded.semantic_ir is not None
-        assert len(reloaded.semantic_ir.occurrences) == 2
-        scopes = {occ.entity_id.scope for occ in reloaded.semantic_ir.occurrences}
+        assert reloaded.canonical_ir is not None
+        assert len(reloaded.canonical_ir.occurrences) == 2
+        scopes = {occ.entity_id.scope for occ in reloaded.canonical_ir.occurrences}
         assert scopes == {(Record("Outer"),), (Namespace("Outer"),)}
 
     @given(tags=st.lists(_tags, min_size=1, max_size=4, unique=True))
@@ -114,8 +114,8 @@ class TestRoundTrip:
             }
         )
         reloaded = _round_trip(_snapshot(ir))
-        assert reloaded.semantic_ir is not None
-        assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
+        assert reloaded.canonical_ir is not None
+        assert dict(reloaded.canonical_ir.occurrences) == dict(ir.occurrences)
 
     def test_conflicts_round_trip(self) -> None:
         snap = _snapshot(None, semantic_ir_conflicts={"key": "'clang::Foo'"})
@@ -267,8 +267,8 @@ class TestMalformedDocumentsAreRefused:
             }
         )
         reloaded = _round_trip(_snapshot(ir))
-        assert reloaded.semantic_ir is not None
-        assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
+        assert reloaded.canonical_ir is not None
+        assert dict(reloaded.canonical_ir.occurrences) == dict(ir.occurrences)
 
     def test_a_non_string_producer_is_rejected(self) -> None:
         eid = entity_id_for_type((), "Foo")
@@ -334,8 +334,8 @@ class TestMalformedDocumentsAreRefused:
             }
         )
         reloaded = _round_trip(_snapshot(ir))
-        assert reloaded.semantic_ir is not None
-        assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
+        assert reloaded.canonical_ir is not None
+        assert dict(reloaded.canonical_ir.occurrences) == dict(ir.occurrences)
 
     @pytest.mark.parametrize("bad", [False, 0, {}, "", []])
     def test_a_falsey_malformed_diagnostics_value_is_rejected(
@@ -464,8 +464,8 @@ class TestMalformedDocumentsAreRefused:
             }
         )
         reloaded = _round_trip(_snapshot(ir))
-        assert reloaded.semantic_ir is not None
-        assert dict(reloaded.semantic_ir.occurrences) == dict(ir.occurrences)
+        assert reloaded.canonical_ir is not None
+        assert dict(reloaded.canonical_ir.occurrences) == dict(ir.occurrences)
 
     def test_a_present_fact_with_a_null_value_is_rejected(self) -> None:
         """The document form of the model rule above: a persisted
@@ -526,14 +526,14 @@ class TestAbsence:
     def test_a_document_without_the_key_loads_as_none(self) -> None:
         document = snapshot_to_dict(_snapshot(None))
         document.pop("semantic_ir", None)
-        assert snapshot_from_dict(document).semantic_ir is None
+        assert snapshot_from_dict(document).canonical_ir is None
 
     def test_empty_ir_round_trips_as_empty_not_none(self) -> None:
         document = snapshot_to_dict(_snapshot(SemanticIR()))
-        assert document["semantic_ir"] == {"occurrences": []}
+        assert document["semantic_ir"] == {"version": 2, "occurrences": []}
         # An IR that observed nothing is not the same as no IR at all — the
         # first says a narrowed backend ran and found nothing, the second
         # that no backend produced one — so the two must not both decode to
         # ``None``.
         reloaded = snapshot_from_dict(document)
-        assert reloaded.semantic_ir == SemanticIR(occurrences={})
+        assert reloaded.canonical_ir == SemanticIR(occurrences={})

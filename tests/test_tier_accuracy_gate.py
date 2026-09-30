@@ -133,9 +133,9 @@ def test_build_context_catches_what_artifacts_cannot(trajectories):
 def test_l0_projection_strips_types_and_signatures():
     old, _ = _case("public_struct_size_changed").build()
     p = tier_gate.project(old, Tier.L0)
-    assert p.types == [] and p.enums == []
+    assert p.declarations.types == [] and p.declarations.enums == []
     assert p.elf_only_mode is True and p.from_headers is False
-    assert all(f.return_type == "?" and not f.params for f in p.functions)
+    assert all(f.return_type == "?" and not f.params for f in p.declarations.functions)
 
 
 def test_projection_clears_header_constants_below_l2():
@@ -146,11 +146,13 @@ def test_projection_clears_header_constants_below_l2():
     from abicheck.model import AbiSnapshot
 
     snap = AbiSnapshot(library="lib", version="1", from_headers=True)
-    snap.constants = {"SCHEMA_TAG": "7"}
-    assert tier_gate.project(snap, Tier.L0).constants == {}
-    assert tier_gate.project(snap, Tier.L1).constants == {}
+    snap.declarations.constants = {"SCHEMA_TAG": "7"}
+    assert tier_gate.project(snap, Tier.L0).declarations.constants == {}
+    assert tier_gate.project(snap, Tier.L1).declarations.constants == {}
     # L2+ retains header constants.
-    assert tier_gate.project(snap, Tier.L2).constants == {"SCHEMA_TAG": "7"}
+    assert tier_gate.project(snap, Tier.L2).declarations.constants == {
+        "SCHEMA_TAG": "7"
+    }
 
 
 def test_l0_projection_clears_typedefs():
@@ -160,10 +162,10 @@ def test_l0_projection_clears_typedefs():
     from abicheck.model import AbiSnapshot
 
     snap = AbiSnapshot(library="lib", version="1", from_headers=True)
-    snap.typedefs = {"Handle": "int"}
-    assert tier_gate.project(snap, Tier.L0).typedefs == {}
+    snap.declarations.typedefs = {"Handle": "int"}
+    assert tier_gate.project(snap, Tier.L0).declarations.typedefs == {}
     # L1+ (debug/headers) may legitimately retain typedef evidence.
-    assert tier_gate.project(snap, Tier.L1).typedefs == {"Handle": "int"}
+    assert tier_gate.project(snap, Tier.L1).declarations.typedefs == {"Handle": "int"}
 
 
 def test_l0_projection_degrades_variables_to_bare_symbols():
@@ -188,23 +190,23 @@ def test_l0_projection_degrades_variables_to_bare_symbols():
         ],
     )
     l0 = tier_gate.project(snap, Tier.L0)
-    v = l0.variables[0]
+    v = l0.declarations.variables[0]
     assert v.type == "?" and v.is_const is False and v.value is None
     assert v.visibility == Visibility.ELF_ONLY and v.origin == ScopeOrigin.UNKNOWN
     # L1 keeps the type (DWARF carries it) but still no header scoping.
-    v1 = tier_gate.project(snap, Tier.L1).variables[0]
+    v1 = tier_gate.project(snap, Tier.L1).declarations.variables[0]
     assert v1.type == "int" and v1.visibility == Visibility.ELF_ONLY
 
 
 def test_l1_projection_keeps_layout_but_drops_header_scope():
     old, _ = _case("public_struct_size_changed").build()
     p = tier_gate.project(old, Tier.L1)
-    assert p.types, "L1 must retain type layout"
+    assert p.declarations.types, "L1 must retain type layout"
     assert p.from_headers is False
     from abicheck.model import ScopeOrigin, Visibility
 
-    assert all(f.visibility == Visibility.ELF_ONLY for f in p.functions)
-    assert all(t.origin == ScopeOrigin.UNKNOWN for t in p.types)
+    assert all(f.visibility == Visibility.ELF_ONLY for f in p.declarations.functions)
+    assert all(t.origin == ScopeOrigin.UNKNOWN for t in p.declarations.types)
 
 
 def test_l3_projection_retains_build_mode():

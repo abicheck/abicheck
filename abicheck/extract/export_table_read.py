@@ -65,7 +65,10 @@ def reconcile_snapshot_export_absence(snapshot: AbiSnapshot) -> int:
     replacement = unread_export_fact(state, producer=None)
     if replacement is None:
         return withdrawn
-    decls: list[Function | Variable] = [*snapshot.functions, *snapshot.variables]
+    decls: list[Function | Variable] = [
+        *snapshot.declarations.functions,
+        *snapshot.declarations.variables,
+    ]
     for decl in decls:
         if (
             getattr(decl, "binary_exported_fact", None) is None

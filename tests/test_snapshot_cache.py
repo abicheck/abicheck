@@ -340,7 +340,7 @@ class TestLookupStore:
         result = lookup(binary, [], [], "1.0", "c++")
         assert result is not None
         assert result.library == "libfoo.so.1"
-        assert len(result.functions) == 1
+        assert len(result.declarations.functions) == 1
 
     def test_invalidation_on_content_change(self, tmp_path, monkeypatch):
         cache_dir = tmp_path / "cache"

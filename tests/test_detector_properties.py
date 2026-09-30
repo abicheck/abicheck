@@ -285,7 +285,7 @@ def test_same_leaf_name_matching_is_order_independent(
     pair: tuple[AbiSnapshot, AbiSnapshot],
 ) -> None:
     """Two distinct namespace-qualified types sharing a bare leaf name must
-    diff identically no matter what order they appear in ``snap.types`` --
+    diff identically no matter what order they appear in ``snap.declarations.types`` --
     correct old/new matching is keyed by identity, never by list position.
     A detector keying its matching map by bare name alone (the PR #608 bug
     class) makes the result insertion-order-dependent, since a naive
@@ -297,10 +297,14 @@ def test_same_leaf_name_matching_is_order_independent(
     baseline = _change_fingerprint(compare(old, new))
 
     old_reordered = AbiSnapshot(
-        library=old.library, version=old.version, types=list(reversed(old.types))
+        library=old.library,
+        version=old.version,
+        types=list(reversed(old.declarations.types)),
     )
     new_reordered = AbiSnapshot(
-        library=new.library, version=new.version, types=list(reversed(new.types))
+        library=new.library,
+        version=new.version,
+        types=list(reversed(new.declarations.types)),
     )
     reordered = _change_fingerprint(compare(old_reordered, new_reordered))
 
@@ -356,10 +360,14 @@ def test_same_leaf_name_enum_matching_is_order_independent(
     baseline = _change_fingerprint(compare(old, new))
 
     old_reordered = AbiSnapshot(
-        library=old.library, version=old.version, enums=list(reversed(old.enums))
+        library=old.library,
+        version=old.version,
+        enums=list(reversed(old.declarations.enums)),
     )
     new_reordered = AbiSnapshot(
-        library=new.library, version=new.version, enums=list(reversed(new.enums))
+        library=new.library,
+        version=new.version,
+        enums=list(reversed(new.declarations.enums)),
     )
     reordered = _change_fingerprint(compare(old_reordered, new_reordered))
 
@@ -658,7 +666,9 @@ def test_both_sides_captured_still_diffs_normally(
     kinds = {c.kind for c in result.changes}
     if ChangeKind.TYPE_VTABLE_CHANGED not in kinds:
         # The only sanctioned reason to stay silent here.
-        assert len(old.types[0].vtable) == len(new.types[0].vtable)
+        assert len(old.declarations.types[0].vtable) == len(
+            new.declarations.types[0].vtable
+        )
 
 
 # --- Cross-detector evidence-gap consistency (generalized, not example-shaped)

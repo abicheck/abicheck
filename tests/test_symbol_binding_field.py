@@ -52,26 +52,26 @@ class TestModelPopulation:
     ) -> None:
         snap = _snapshot_with_binding(SymbolBinding.WEAK)
         _populate_elf_visibility(snap)
-        assert snap.functions[0].elf_binding == SymbolBinding.WEAK
-        assert snap.variables[0].elf_binding == SymbolBinding.WEAK
+        assert snap.declarations.functions[0].elf_binding == SymbolBinding.WEAK
+        assert snap.declarations.variables[0].elf_binding == SymbolBinding.WEAK
 
     def test_populate_elf_visibility_global_binding(self) -> None:
         snap = _snapshot_with_binding(SymbolBinding.GLOBAL)
         _populate_elf_visibility(snap)
-        assert snap.functions[0].elf_binding == SymbolBinding.GLOBAL
+        assert snap.declarations.functions[0].elf_binding == SymbolBinding.GLOBAL
 
     def test_no_elf_metadata_leaves_binding_none(self) -> None:
         func = Function(name="f", mangled="_Z1fv", return_type="void")
         snap = AbiSnapshot(library="lib.so", version="1.0", functions=[func], elf=None)
         _populate_elf_visibility(snap)
-        assert snap.functions[0].elf_binding is None
+        assert snap.declarations.functions[0].elf_binding is None
 
     def test_no_matching_symbol_leaves_binding_none(self) -> None:
         func = Function(name="f", mangled="_Z1fv", return_type="void")
         elf = ElfMetadata(symbols=[])
         snap = AbiSnapshot(library="lib.so", version="1.0", functions=[func], elf=elf)
         _populate_elf_visibility(snap)
-        assert snap.functions[0].elf_binding is None
+        assert snap.declarations.functions[0].elf_binding is None
 
 
 class TestSerializationRoundTrip:
@@ -80,8 +80,8 @@ class TestSerializationRoundTrip:
         _populate_elf_visibility(snap)
         d = snapshot_to_dict(snap)
         loaded = snapshot_from_dict(d)
-        assert loaded.functions[0].elf_binding == SymbolBinding.WEAK
-        assert loaded.variables[0].elf_binding == SymbolBinding.WEAK
+        assert loaded.declarations.functions[0].elf_binding == SymbolBinding.WEAK
+        assert loaded.declarations.variables[0].elf_binding == SymbolBinding.WEAK
 
     def test_missing_elf_binding_key_backfilled_from_elf_symbols(self) -> None:
         # Simulates an older (pre-this-field) snapshot: the per-declaration
@@ -99,8 +99,8 @@ class TestSerializationRoundTrip:
             v.pop("elf_binding", None)
             v.pop("elf_binding_fact", None)
         loaded = snapshot_from_dict(d)
-        assert loaded.functions[0].elf_binding == SymbolBinding.GLOBAL
-        assert loaded.variables[0].elf_binding == SymbolBinding.GLOBAL
+        assert loaded.declarations.functions[0].elf_binding == SymbolBinding.GLOBAL
+        assert loaded.declarations.variables[0].elf_binding == SymbolBinding.GLOBAL
         # ADR-063 Phase 5 (Codex/CodeRabbit review, fresh evidence): the
         # legacy load-time backfill must keep elf_binding_fact in sync with
         # the recovered legacy value too -- previously it left the fact at
@@ -108,10 +108,22 @@ class TestSerializationRoundTrip:
         # legacy field itself carried a real, recovered binding, so a
         # reserialize-then-reload round trip silently reverted the
         # recovered evidence back to "not collected".
-        assert loaded.functions[0].elf_binding_fact.status is FactStatus.PRESENT
-        assert loaded.functions[0].elf_binding_fact.value == SymbolBinding.GLOBAL
-        assert loaded.variables[0].elf_binding_fact.status is FactStatus.PRESENT
-        assert loaded.variables[0].elf_binding_fact.value == SymbolBinding.GLOBAL
+        assert (
+            loaded.declarations.functions[0].elf_binding_fact.status
+            is FactStatus.PRESENT
+        )
+        assert (
+            loaded.declarations.functions[0].elf_binding_fact.value
+            == SymbolBinding.GLOBAL
+        )
+        assert (
+            loaded.declarations.variables[0].elf_binding_fact.status
+            is FactStatus.PRESENT
+        )
+        assert (
+            loaded.declarations.variables[0].elf_binding_fact.value
+            == SymbolBinding.GLOBAL
+        )
 
     def test_elf_binding_fact_survives_a_second_round_trip_after_backfill(
         self,
@@ -133,8 +145,12 @@ class TestSerializationRoundTrip:
             v.pop("elf_binding_fact", None)
         once_loaded = snapshot_from_dict(d)
         twice_loaded = snapshot_from_dict(snapshot_to_dict(once_loaded))
-        assert twice_loaded.functions[0].elf_binding == SymbolBinding.GLOBAL
-        assert twice_loaded.variables[0].elf_binding == SymbolBinding.GLOBAL
+        assert (
+            twice_loaded.declarations.functions[0].elf_binding == SymbolBinding.GLOBAL
+        )
+        assert (
+            twice_loaded.declarations.variables[0].elf_binding == SymbolBinding.GLOBAL
+        )
 
     def test_missing_elf_binding_stays_none_without_elf_metadata(self) -> None:
         # No elf block at all (e.g. a non-ELF-format snapshot, or one
@@ -145,7 +161,7 @@ class TestSerializationRoundTrip:
         d = snapshot_to_dict(snap)
         d["functions"][0].pop("elf_binding", None)
         loaded = snapshot_from_dict(d)
-        assert loaded.functions[0].elf_binding is None
+        assert loaded.declarations.functions[0].elf_binding is None
 
     def test_missing_elf_binding_stays_none_when_no_matching_symbol(self) -> None:
         # elf block present, but no .dynsym entry for this declaration's
@@ -166,8 +182,8 @@ class TestSerializationRoundTrip:
         d["functions"][0].pop("elf_binding", None)
         d["variables"][0].pop("elf_binding", None)
         loaded = snapshot_from_dict(d)
-        assert loaded.functions[0].elf_binding is None
-        assert loaded.variables[0].elf_binding is None
+        assert loaded.declarations.functions[0].elf_binding is None
+        assert loaded.declarations.variables[0].elf_binding is None
 
     def test_explicit_elf_binding_is_not_overwritten_by_backfill(self) -> None:
         # An already-serialized non-None value must be preserved untouched,
@@ -181,7 +197,7 @@ class TestSerializationRoundTrip:
         d = snapshot_to_dict(snap)
         d["elf"]["symbols"][0]["binding"] = "global"
         loaded = snapshot_from_dict(d)
-        assert loaded.functions[0].elf_binding == SymbolBinding.WEAK
+        assert loaded.declarations.functions[0].elf_binding == SymbolBinding.WEAK
 
 
 class TestChangeSymbolBindingStamp:

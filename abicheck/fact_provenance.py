@@ -224,48 +224,6 @@ def both_known_backed_fact(old: AbiSnapshot, new: AbiSnapshot, key: str) -> bool
     return fact_producer(old, key) is not None and fact_producer(new, key) is not None
 
 
-def both_known_backed_fact_qualified(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-    old_qualified_key: str,
-    new_qualified_key: str,
-    bare_key: str,
-    *,
-    old_bare_unambiguous: bool,
-    new_bare_unambiguous: bool,
-) -> bool:
-    """Like :func:`both_known_backed_fact`, but for a fact whose provenance
-    key was namespace-qualified after a hybrid snapshot may already have
-    been persisted with the former bare key (Codex review, fresh evidence:
-    a ``--ast-frontend hybrid`` baseline written before G31 Phase C's
-    qualification fix has real ``"castxml"``/``"clang"`` provenance recorded
-    under the bare key alone, since every matched declaration already got a
-    provenance entry via ``_backfill_fact`` regardless of that fact's actual
-    value — qualifying only the *lookup* key would silently treat all of
-    that real data as unknown and suppress genuine transitions).
-
-    Takes *old_qualified_key*/*new_qualified_key* SEPARATELY, not one shared
-    key — a matched old/new pair can legitimately have different qualified
-    identities (e.g. *old* predates ``qualified_name`` entirely, so its own
-    ``type_map_key()`` is bare, while *new* carries the real namespaced
-    spelling); probing both sides with only one side's key would miss the
-    other side's real, qualified-keyed entry (Codex review, fresh evidence,
-    second round). Falls back to the shared *bare_key* on either side only
-    when the caller confirms (``old_bare_unambiguous``/``new_bare_unambiguous``
-    — typically ``TypeMap.bare_name_is_unambiguous``) that no OTHER distinct
-    qualified identity on that side shares the same bare name. Without that
-    check, the fallback would reopen the exact bare-name collision the
-    qualification was introduced to close.
-    """
-    old_producer = resolved_fact_producer(
-        old, old_qualified_key, bare_key, bare_unambiguous=old_bare_unambiguous
-    )
-    new_producer = resolved_fact_producer(
-        new, new_qualified_key, bare_key, bare_unambiguous=new_bare_unambiguous
-    )
-    return old_producer is not None and new_producer is not None
-
-
 def resolved_fact_producer(
     snap: AbiSnapshot,
     qualified_key: str,

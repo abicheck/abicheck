@@ -22,6 +22,12 @@ from collections.abc import Collection, Mapping
 from .checker_types import Change
 from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.enum_sentinel import is_sentinel_enum_member
+from .compare.fact_gate import both_facts_present
+from .compare.record_layout import (
+    RecordLayoutIndex,
+    record_layout_changes,
+    record_layout_index,
+)
 from .compare.typedefs import (
     diff_typedefs,
     is_version_stamped_typedef as is_version_stamped_typedef,
@@ -31,10 +37,8 @@ from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name
 from .diff_helpers import (
     build_type_map as _build_type_map,
-    fact_known_qualified,
     lookup_matched_type as _lookup_matched_type,
     make_change,
-    type_map_key,
     typedef_diff_maps as _typedef_diff_maps,
 )
 from .diff_symbols import (
@@ -84,7 +88,6 @@ from .elf_symbol_filter import (
 )
 from .fact_provenance import (
     both_known_backed_fact,
-    enum_fact_key,
     type_fact_key,
 )
 from .model import (
@@ -185,9 +188,9 @@ def _has_type_evidence(snap: AbiSnapshot) -> bool:
     by :func:`_removals_are_unconfirmed` purely because the legacy sidecar
     wasn't populated.
     """
-    if snap.types or snap.enums or snap.typedefs:
+    if snap.declarations.types or snap.declarations.enums or snap.declarations.typedefs:
         return True
-    semantic_ir = snap.semantic_ir
+    semantic_ir = snap.canonical_ir
     if semantic_ir is not None and any(
         semantic_ir_covers_kind(semantic_ir, kind)
         for kind in (EntityKind.TYPE, EntityKind.ENUM, EntityKind.TYPEDEF)
@@ -223,7 +226,7 @@ def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     """
     new_stripped_of_types = (
         getattr(new, "elf_only_mode", False)
-        and bool(new.functions or new.variables)
+        and bool(new.declarations.functions or new.declarations.variables)
         and not _has_type_evidence(new)
         and _has_type_evidence(old)
     )
@@ -269,14 +272,14 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_map = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
     new_map = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
@@ -290,11 +293,16 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # class still resolves when _transitive_bases walks the hierarchy for
     # vtable_slot_is_override_reuse() -- mirrors diff_symbols._diff_functions'
     # own old_types/new_types for the identical virtual_method_addition() walk.
-    old_types = _build_type_map(t for t in old.types)
-    new_types = _build_type_map(t for t in new.types)
+    old_types = _build_type_map(t for t in old.declarations.types)
+    new_types = _build_type_map(t for t in new.declarations.types)
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
     vtable_facts_reliable = (
         old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
+    )
+    # ADR-063 6B: record layout is read from each side's SemanticIR.
+    layout_indexes = (
+        record_layout_index(old.canonical_ir, old.declarations.types),
+        record_layout_index(new.canonical_ir, new.declarations.types),
     )
 
     # Tracked by object identity, not key membership: a legacy-schema-vs-fresh
@@ -353,6 +361,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ),
                 cv_facts_reliable=cv_facts_reliable,
                 vtable_facts_reliable=vtable_facts_reliable,
+                layout_indexes=layout_indexes,
             )
         )
 
@@ -460,6 +469,7 @@ def _diff_type_pair(
     castxml_backed: bool = False,
     cv_facts_reliable: bool = True,
     vtable_facts_reliable: bool = True,
+    layout_indexes: tuple[RecordLayoutIndex, RecordLayoutIndex],
 ) -> list[Change]:
     changes: list[Change] = []
 
@@ -477,7 +487,7 @@ def _diff_type_pair(
         )
         return changes  # no further checks meaningful for opaque type
 
-    _append_type_size_and_alignment_changes(changes, name, t_old, t_new)
+    record_layout_changes(changes, name, t_old, t_new, *layout_indexes)
     if not t_old.is_union:
         changes.extend(
             _diff_type_fields(name, t_old, t_new, cv_facts_reliable=cv_facts_reliable)
@@ -586,52 +596,6 @@ def _append_type_finality_changes(
                 name=name,
                 old_value="final",
                 new_value="non-final",
-                entity_id=t_old.entity_id or t_new.entity_id,
-            )
-        )
-
-
-def _append_type_size_and_alignment_changes(
-    changes: list[Change],
-    name: str,
-    t_old: RecordType,
-    t_new: RecordType,
-) -> None:
-    # This caller knows the matched RecordType pair directly, so it can
-    # stamp real identity even when record_canonical_names' bare-name
-    # bridge can't (an unrelated `a::Widget`/`b::Widget` collision
-    # elsewhere in the snapshot -- Codex review).
-    qualified = t_new.qualified_name or t_old.qualified_name
-    if (
-        t_old.size_bits is not None
-        and t_new.size_bits is not None
-        and t_old.size_bits != t_new.size_bits
-    ):
-        changes.append(
-            make_change(
-                ChangeKind.TYPE_SIZE_CHANGED,
-                symbol=name,
-                name=name,
-                old=str(t_old.size_bits),
-                new=str(t_new.size_bits),
-                qualified_name=qualified,
-                entity_id=t_old.entity_id or t_new.entity_id,
-            )
-        )
-
-    if (
-        t_old.alignment_bits is not None
-        and t_new.alignment_bits is not None
-        and t_old.alignment_bits != t_new.alignment_bits
-    ):
-        changes.append(
-            make_change(
-                ChangeKind.TYPE_ALIGNMENT_CHANGED,
-                symbol=name,
-                name=name,
-                old=str(t_old.alignment_bits),
-                qualified_name=qualified,
-                new=str(t_new.alignment_bits),
                 entity_id=t_old.entity_id or t_new.entity_id,
             )
         )
@@ -881,7 +845,7 @@ def _diff_type_fields(
     changes: list[Change] = []
     old_fields = {f.name: f for f in t_old.fields}
     new_fields = {f.name: f for f in t_new.fields}
-    # Same qualified-identity stamp as _append_type_size_and_alignment_changes
+    # Same qualified-identity stamp as compare.record_layout.record_layout_changes
     # above, threaded down to the field-level emitters (Codex review).
     qualified = t_new.qualified_name or t_old.qualified_name
     # The containing record's own identity, not any one field's -- TypeField
@@ -1137,12 +1101,12 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # across old/new the way a plain ``{e.name: e}`` dict would.
     old_map = _build_type_map(
         e
-        for e in old.enums
+        for e in old.declarations.enums
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
     new_map = _build_type_map(
         e
-        for e in new.enums
+        for e in new.declarations.enums
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
     # A wholly-removed enum is stored in snap.enums, NOT snap.types, so the
@@ -1168,16 +1132,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         # Per-enum key, not a whole-snapshot gate: supports --ast-frontend
         # hybrid (G28 Phase 3); both backends populate is_scoped (G31 Phase C).
-        if fact_known_qualified(
-            old,
-            new,
-            old_map,
-            new_map,
-            name,
-            enum_fact_key(type_map_key(e_old), "is_scoped"),
-            enum_fact_key(type_map_key(e_new), "is_scoped"),
-            enum_fact_key(name, "is_scoped"),
-        ):
+        if both_facts_present(e_old, e_new, "is_scoped", name):
             _append_enum_scoped_changes(changes, name, e_old, e_new)
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}
@@ -1431,7 +1386,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_unions = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
@@ -1439,7 +1394,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
     new_unions = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced

@@ -279,7 +279,7 @@ def test_compare_cli_diffs_compressed_snapshots_at_production_scale(tmp_path, su
     old_snap = graph_heavy_snapshot_at_scale()
     assert _production_scale_size() > 8 * 1024 * 1024
 
-    # dataclasses.replace(), not `new_snap.functions.append(...)`: `old_snap`
+    # dataclasses.replace(), not `new_snap.declarations.functions.append(...)`: `old_snap`
     # is the shared, process-wide cached fixture (see its own docstring) --
     # mutating it in place would corrupt every other test in this worker
     # process that reads it afterwards. This derives a distinct AbiSnapshot
@@ -289,7 +289,7 @@ def test_compare_cli_diffs_compressed_snapshots_at_production_scale(tmp_path, su
     new_snap = dataclasses.replace(
         old_snap,
         functions=[
-            *old_snap.functions,
+            *old_snap.declarations.functions,
             Function(
                 name=_MARKER_NAME,
                 mangled=_MARKER_MANGLED,

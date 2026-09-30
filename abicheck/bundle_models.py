@@ -353,6 +353,14 @@ class BundleSnapshot:
     # unchanged for every pre-existing caller; when given, a member's own
     # membership in this set decides, not the snapshot-wide flag.
     filesystem_backed_names: frozenset[str] | None = None
+    #: ADR-062 A1.8: members that belong to the bundle but that bundle-level
+    #: resolution (DT_NEEDED edges, symbol providers) does not apply to,
+    #: keyed by member name -> `ArtifactRef.kind` (`"pe"`, `"macho"`,
+    #: `"python"`, `"header_only"`, ...). Recorded as an explicit, named fact
+    #: -- "member with no resolution edges, capability not applicable" -- so
+    #: a reader never has to infer it from the member's absence from
+    #: `metadata`/`resolution`. Empty for a pure-ELF bundle.
+    resolution_not_applicable: dict[str, str] = field(default_factory=dict)
 
     def member_is_filesystem_backed(self, name: str) -> bool:
         """Whether *name*'s own `.libraries[name]` path is safe to
@@ -752,6 +760,11 @@ class BundleDiffResult:
     #: put it above `policy_file`, rebinding that slot 6 -> 7 so a caller
     #: passing positionally fed a `PolicyFile` here.
     public_surface_reconciliation: object | None = None
+    #: ADR-062 A1.8: union of both sides' `BundleSnapshot.
+    #: resolution_not_applicable` -- non-ELF members (member -> artifact
+    #: kind) present in the bundle but outside the resolution graph, stated
+    #: rather than silently dropped. Empty for a pure-ELF comparison.
+    resolution_not_applicable_members: dict[str, str] = field(default_factory=dict)
 
     @property
     def bundle_verdict(self) -> Verdict:

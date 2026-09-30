@@ -286,7 +286,7 @@ def test_hidden_friend_removal_survives_manifest_scope() -> None:
         visibility=Visibility.HIDDEN,
         is_hidden_friend=True,
     )
-    snap_old.functions.append(hidden_friend)
+    snap_old.declarations.functions.append(hidden_friend)
     snap_new = _snap([_cfn("pp_foo")])
     ctx = PipelineContext(
         old=snap_old, new=snap_new, public_surface_allowlist={"pp_foo"}

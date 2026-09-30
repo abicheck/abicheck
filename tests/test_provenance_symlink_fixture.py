@@ -80,7 +80,7 @@ def test_symlinked_header_root_matches_canonical_root(tmp_path: Path) -> None:
             lang="C",
             public_header_dirs=[include_dir],
         )
-        return {f.name: f.origin for f in snap.functions}
+        return {f.name: f.origin for f in snap.declarations.functions}
 
     via_real = origins(real_inc)
     via_link = origins(link_inc)

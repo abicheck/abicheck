@@ -57,6 +57,19 @@ _LFS_TYPEDEFS = frozenset(
 _FAMILY = _TIME64_TYPEDEFS | _LFS_TYPEDEFS
 
 
+def _family_leaf(name: str) -> str | None:
+    """The libc family member *name* spells, or ``None``.
+
+    ``typedef_diff_maps`` may key by qualified name (``std::time_t`` from
+    ``<ctime>``). Only the global and ``std`` scopes are libc's: a library's
+    own ``app::time_t`` is not the glibc typedef this detector is about.
+    """
+    scope, _, leaf = name.rpartition("::")
+    if scope not in ("", "std"):
+        return None
+    return leaf if leaf in _FAMILY else None
+
+
 def _is_32bit_elf(snap: AbiSnapshot) -> bool:
     """True when the snapshot targets a 32-bit ELF image.
 
@@ -120,13 +133,13 @@ def _add_tokens(tokens: set[str], spelling: object) -> None:
 def _seed_surface_tokens(snap: AbiSnapshot) -> set[str]:
     """Identifier tokens spelled directly by ABI-visible signatures and variables."""
     tokens: set[str] = set()
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         if not is_abi_visible(fn):
             continue
         _add_tokens(tokens, fn.return_type)
         for p in fn.params:
             _add_tokens(tokens, getattr(p, "type", ""))
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if not is_abi_visible(var):
             continue
         _add_tokens(tokens, var.type)
@@ -174,8 +187,8 @@ def _expand_reachable_types(snap: AbiSnapshot, tokens: set[str]) -> None:
     # accepted limitation: a dumper that spells a type unqualified while
     # keying the record qualified will miss the roll-up, but the ordinary
     # per-typedef/per-field findings still report that change.
-    remaining_aliases = dict(snap.typedefs)
-    remaining_records = {rec.name: rec for rec in snap.types if rec.name}
+    remaining_aliases = dict(snap.declarations.typedefs)
+    remaining_records = {rec.name: rec for rec in snap.declarations.types if rec.name}
     changed = True
     while changed and (remaining_aliases or remaining_records):
         changed = False
@@ -231,10 +244,15 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # comparisons have none, and the surface scan below must not run for them
     # (it walks every signature/record and would tax the scaling benchmarks).
     candidates: list[tuple[str, str, str, str]] = []
-    for name, old_under in old.typedefs.items():
-        if name not in _FAMILY:
+    # ADR-063 2B: qualified-when-trusted maps (``typedef_diff_maps``), so a
+    # library's own ``ns::time_t`` can no longer collapse onto libc's.
+    from .diff_helpers import typedef_diff_maps
+
+    old_typedefs, new_typedefs = typedef_diff_maps(old, new)
+    for name, old_under in old_typedefs.items():
+        if _family_leaf(name) is None:
             continue
-        new_under = new.typedefs.get(name)
+        new_under = new_typedefs.get(name)
         if new_under is None:
             continue
         ob = _bucket(old_under, old_32)
@@ -251,7 +269,9 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     flipped: list[str] = []
     up = down = 0
     for name, old_under, new_under, nb in candidates:
-        if name not in surface_tokens:
+        # A signature spells the family member by its leaf (``time_t``) or by
+        # the qualified key (``std::time_t``); either reaches the surface.
+        if name not in surface_tokens and _family_leaf(name) not in surface_tokens:
             # Present-but-unused system typedef — not part of this library's
             # public ABI, so its resize must not roll up to a break.
             continue
@@ -265,9 +285,9 @@ def _diff_time64_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
 
     macros = []
-    if any(f.split(" ", 1)[0] in _TIME64_TYPEDEFS for f in flipped):
+    if any(_family_leaf(f.split(" ", 1)[0]) in _TIME64_TYPEDEFS for f in flipped):
         macros.append("_TIME_BITS=64")
-    if any(f.split(" ", 1)[0] in _LFS_TYPEDEFS for f in flipped):
+    if any(_family_leaf(f.split(" ", 1)[0]) in _LFS_TYPEDEFS for f in flipped):
         macros.append("_FILE_OFFSET_BITS=64")
     direction = (
         "32-bit → 64-bit (time64/LFS enabled)"

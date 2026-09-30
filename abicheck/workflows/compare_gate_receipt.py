@@ -122,50 +122,28 @@ def _project_inputs_for_request(
     return ProjectCompatibilityInputs(policy_overrides=overrides)
 
 
-def install_resolved_gate_receipt(
-    result: Any,
+def resolve_request_evaluation_config(
     request: CompareRequest,
-    gate: GateOptions,
     policy_file: PolicyFile | None,
     suppression: SuppressionList | None,
-) -> None:
-    """Install *request*'s resolved gate onto *result* in place.
+) -> CompatibilityEvaluationConfig:
+    """The ADR-049 D7 :class:`CompatibilityEvaluationConfig` for *request*.
 
-    Installs ``gate.exit_code_scheme`` directly -- since CLI cleanup phase
-    two PR G2 deleted the manual algorithm selector, `GateOptions.
-    exit_code_scheme` is unconditionally already ``"legacy"``/``"severity"``
-    (never an unresolved ``"auto"``, which `GateConfig` never accepted and
-    used to require the caller to resolve separately before calling this;
-    see this repo's git history for the account of that now-moot gap).
-
-    *suppression* is the already-loaded `SuppressionList` `classify_compare_
-    pair` scored the comparison with -- passed through rather than left for
-    this adapter to re-read `request.suppress` a second time, which could
-    digest a different file than the one that actually scored the findings
-    if it changed between the two reads (Codex review, fresh evidence).
-
-    Resolves and stamps ``result.evaluation_config`` exactly when the
-    native CLI's ``resolve_and_apply`` resolves one: under contract
-    evaluation, or when a pack contributed (here: forwarded
-    ``pack_policy_overrides``/``pack_internal_namespaces`` -- a pack-only
-    run never builds a ``PersistedContractContext``, so without the stamp
-    ``effective_config_digest``'s rich tier would be unreachable for it).
-    A plain request resolves nothing and stays on the digest's documented
-    *baseline* tier (``effective_config_digest``'s module docstring: the
-    rich tier exists only when ``--contract``/``--pack`` resolved a
-    config). An earlier revision stamped unconditionally, so the typed API
-    and every release member reported the ``contract`` tier -- and a
-    different digest -- for a configuration the native CLI reported at the
-    ``baseline`` tier (F2 route-parity harness). Additionally merges the
-    gate into ``result.contract_context`` when one exists.
+    Resolved **once** per ``classify_compare_pair`` call (One Semantic
+    Pipeline plan, sub-phase 4B) and handed to every consumer that needs it
+    -- :func:`install_resolved_gate_receipt` and the pair's
+    ``ResolvedExecutionContext.evaluation_config`` -- rather than each
+    re-deriving it from the request. *policy_file* is the already-loaded,
+    pack-folded policy (before the project-tier fold, which the resolver
+    re-derives at its own tier); *suppression* is the already-loaded list
+    the comparison is scored with (never re-read from ``request.suppress``,
+    which could digest a different file than the one that scored the
+    findings if it changed between the two reads -- Codex review).
     """
     packs_forwarded = bool(request.pack_policy_overrides) or (
         request.pack_internal_namespaces is not None
     )
-    if getattr(result, "contract_context", None) is None and not packs_forwarded:
-        return
     from ..compatibility_evaluation_frontend import (
-        SEVERITY_CATEGORY_FIELDS,
         SuppressionSource,
         compatibility_config_from_compare_request,
     )
@@ -178,6 +156,43 @@ def install_resolved_gate_receipt(
     )
     if packs_forwarded:
         config = _with_pack_forwarded_provenance(config, request)
+    return config
+
+
+def install_resolved_gate_receipt(
+    result: Any,
+    config: CompatibilityEvaluationConfig,
+    gate: GateOptions,
+    *,
+    packs_forwarded: bool = False,
+) -> None:
+    """Install the resolved *config* and *gate* onto *result* in place.
+
+    Installs ``gate.exit_code_scheme`` directly -- since CLI cleanup phase
+    two PR G2 deleted the manual algorithm selector, `GateOptions.
+    exit_code_scheme` is unconditionally already ``"legacy"``/``"severity"``
+    (never an unresolved ``"auto"``, which `GateConfig` never accepted and
+    used to require the caller to resolve separately before calling this;
+    see this repo's git history for the account of that now-moot gap).
+
+    *config* is :func:`resolve_request_evaluation_config`'s answer for this
+    comparison -- read here, never re-resolved (sub-phase 4B).
+
+    Stamps ``result.evaluation_config`` exactly when the native CLI's
+    ``resolve_and_apply`` records one: under contract evaluation, or when a
+    pack contributed (*packs_forwarded*; a pack-only run never builds a
+    ``PersistedContractContext``, so without the stamp
+    ``effective_config_digest``'s rich tier would be unreachable for it).
+    A plain request stays on the digest's documented *baseline* tier -- an
+    earlier revision stamped unconditionally, so the typed API and every
+    release member reported a different tier and digest than the native CLI
+    for the same configuration (F2 route-parity harness). Additionally
+    merges the gate into ``result.contract_context`` when one exists.
+    """
+    from ..compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
+
+    if getattr(result, "contract_context", None) is None and not packs_forwarded:
+        return
     result.evaluation_config = config
 
     # `DiffResult.contract_context` is deliberately typed `object | None`

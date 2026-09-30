@@ -1025,7 +1025,7 @@ class TestInlineAccessorRenamedMember:
         old, new, changes = self._build()
         # Strip inline flag from the function in both snapshots.
         for snap in (old, new):
-            for fn in snap.functions:
+            for fn in snap.declarations.functions:
                 fn.is_inline = False
         assert detect_inline_body_renamed_member(old, new, changes) == []
 

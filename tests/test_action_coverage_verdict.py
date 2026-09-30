@@ -569,8 +569,9 @@ class TestCompareTellsTheTwoAxesApart:
     ) -> None:
         """The genuine "cannot tell": the report query prints nothing, so the
         mapping must not read that as a zero severity contribution. Since
-        ADR-063 Track T8 the stderr notice is not consulted either, so the
-        run keeps the verdict its exit code established."""
+        ADR-063 Track T8 the stderr notice is not consulted either. Exit 1
+        with no readable result attributes no axis at all -- not even
+        severity -- so it publishes the transport-level ERROR."""
         bindir = _stub_abicheck(
             tmp_path,
             exit_code=1,
@@ -590,7 +591,7 @@ class TestCompareTellsTheTwoAxesApart:
             },
             bindir,
         )
-        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+        assert outputs["verdict"] == "ERROR", outputs
 
     def test_the_report_is_found_when_json_goes_to_stdout(self, tmp_path: Path) -> None:
         """`format: json` with no `output-file` is the documented stdout mode:
@@ -935,11 +936,12 @@ class TestAPromotedExitDoesNotUnderstateTheReport:
         assert outputs["_exit"] == 1, outputs["_stdout"]
 
     def test_a_usage_error_is_not_escalated(self, tmp_path: Path) -> None:
-        """Click's usage errors also exit 2. That path sets ERROR before the
-        case statement is reached, so no report reading may override it."""
+        """A usage error is the CLI's own exit 64 (Click's 2 is remapped by
+        the root group), so it never reaches the API_BREAK arm and no report
+        reading may override it -- even a stale BREAKING report on disk."""
         bindir = _stub_abicheck(
             tmp_path,
-            exit_code=2,
+            exit_code=64,
             report=self._report("BREAKING"),
             stderr="Usage: abicheck compare [OPTIONS]",
         )

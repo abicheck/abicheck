@@ -50,6 +50,11 @@ from ..snapshot_io import (
     resolve_write_compression,
     write_snapshot_text,
 )
+from ..storage.project_package_archive import (
+    is_project_package_archive,
+    pack_project_package,
+    unpack_project_package,
+)
 from ..storage.sectioned_document import (
     from_sectioned_document,
     is_sectioned_document,
@@ -62,11 +67,14 @@ __all__ = [
     "bounded_decoded_prefix",
     "detect_snapshot_compression",
     "from_sectioned_document",
+    "is_project_package_archive",
     "is_project_snapshot_package_dir",
     "is_sectioned_document",
+    "pack_project_package",
     "read_legacy_snapshot_document",
     "resolve_write_compression",
     "to_sectioned_document",
+    "unpack_project_package",
     "write_legacy_snapshot_package",
     "write_snapshot_text",
 ]

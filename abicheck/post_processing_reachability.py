@@ -241,22 +241,30 @@ class MarkReachability:
 
             names: set[str] = set()
             names.update(
-                f.name for f in snap.functions if f.origin == ScopeOrigin.PUBLIC_HEADER
+                f.name
+                for f in snap.declarations.functions
+                if f.origin == ScopeOrigin.PUBLIC_HEADER
             )
             names.update(
-                v.name for v in snap.variables if v.origin == ScopeOrigin.PUBLIC_HEADER
+                v.name
+                for v in snap.declarations.variables
+                if v.origin == ScopeOrigin.PUBLIC_HEADER
             )
             names.update(
-                t.name for t in snap.types if t.origin == ScopeOrigin.PUBLIC_HEADER
+                t.name
+                for t in snap.declarations.types
+                if t.origin == ScopeOrigin.PUBLIC_HEADER
             )
             names.update(
-                e.name for e in snap.enums if e.origin == ScopeOrigin.PUBLIC_HEADER
+                e.name
+                for e in snap.declarations.enums
+                if e.origin == ScopeOrigin.PUBLIC_HEADER
             )
             names.update(
                 _qualified_by_mangled(
                     [
                         (f.mangled, f)
-                        for f in snap.functions
+                        for f in snap.declarations.functions
                         if f.origin == ScopeOrigin.PUBLIC_HEADER
                     ]
                 ).values()
@@ -265,7 +273,7 @@ class MarkReachability:
                 _qualified_by_mangled(
                     [
                         (v.mangled, v)
-                        for v in snap.variables
+                        for v in snap.declarations.variables
                         if v.origin == ScopeOrigin.PUBLIC_HEADER
                     ]
                 ).values()
@@ -384,17 +392,17 @@ class MarkReachability:
         # PROVEN_UNREACHABLE. Check the decl's *actual* presence on each
         # snapshot instead of pattern-matching the kind name, which is immune
         # to new one-sided or attribute-toggle kinds being added later.
-        old_decl_names = {f.mangled for f in old_snap.functions} | {
-            f.name for f in old_snap.functions
+        old_decl_names = {f.mangled for f in old_snap.declarations.functions} | {
+            f.name for f in old_snap.declarations.functions
         }
-        old_decl_names |= {v.mangled for v in old_snap.variables} | {
-            v.name for v in old_snap.variables
+        old_decl_names |= {v.mangled for v in old_snap.declarations.variables} | {
+            v.name for v in old_snap.declarations.variables
         }
-        new_decl_names = {f.mangled for f in ctx.new.functions} | {
-            f.name for f in ctx.new.functions
+        new_decl_names = {f.mangled for f in ctx.new.declarations.functions} | {
+            f.name for f in ctx.new.declarations.functions
         }
-        new_decl_names |= {v.mangled for v in ctx.new.variables} | {
-            v.name for v in ctx.new.variables
+        new_decl_names |= {v.mangled for v in ctx.new.declarations.variables} | {
+            v.name for v in ctx.new.declarations.variables
         }
 
         def _relevant_call_graph_trusted(change: Change, root: str) -> bool:
@@ -422,19 +430,19 @@ class MarkReachability:
         # alongside types/enums for TYPEDEF_REMOVED/TYPEDEF_BASE_CHANGED's
         # root (the alias name) to be recognized as layout-walk domain.
         known_type_names = (
-            {t.name for t in old_snap.types}
-            | {e.name for e in old_snap.enums}
-            | {t.name for t in ctx.new.types}
-            | {e.name for e in ctx.new.enums}
-            | set(old_snap.typedefs)
-            | set(ctx.new.typedefs)
+            {t.name for t in old_snap.declarations.types}
+            | {e.name for e in old_snap.declarations.enums}
+            | {t.name for t in ctx.new.declarations.types}
+            | {e.name for e in ctx.new.declarations.enums}
+            | set(old_snap.declarations.typedefs)
+            | set(ctx.new.declarations.typedefs)
         )
         # RecordType.qualified_name (DWARF-backend only) resolves a bare name
         # like "Hidden" ("ns::detail::Hidden") for is_internal_type below --
         # only when unambiguous, else a colliding public/internal type of
         # the same bare name could leak the wrong namespace (Codex review).
         qualified_names_by_bare: dict[str, set[str]] = {}
-        for t in (*old_snap.types, *ctx.new.types):
+        for t in (*old_snap.declarations.types, *ctx.new.declarations.types):
             if t.qualified_name:
                 qualified_names_by_bare.setdefault(t.name, set()).add(t.qualified_name)
         qualified_name_by_bare = {

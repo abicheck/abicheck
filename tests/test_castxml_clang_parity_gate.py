@@ -281,11 +281,15 @@ def c_snapshots(
 
 
 def _public(snap: AbiSnapshot) -> dict[str, Any]:
-    return {f.mangled: f for f in snap.functions if f.visibility == Visibility.PUBLIC}
+    return {
+        f.mangled: f
+        for f in snap.declarations.functions
+        if f.visibility == Visibility.PUBLIC
+    }
 
 
 def _types_by_name(snap: AbiSnapshot) -> dict[str, Any]:
-    return {t.name: t for t in snap.types}
+    return {t.name: t for t in snap.declarations.types}
 
 
 # ── Functions and overloads ─────────────────────────────────────────────────
@@ -340,7 +344,7 @@ class TestConstructorIdentity:
         def ctor_param_lists(snap: AbiSnapshot) -> list[list[str]]:
             return sorted(
                 [canonicalize_type_name(p.type) for p in f.params]
-                for f in snap.functions
+                for f in snap.declarations.functions
                 if f.name == "Widget"
                 and f.visibility == Visibility.PUBLIC
                 and not f.mangled.startswith("~")
@@ -368,7 +372,7 @@ class TestDestructorVisibility:
         def public_dtor_names(snap: AbiSnapshot) -> set[str]:
             return {
                 f.name
-                for f in snap.functions
+                for f in snap.declarations.functions
                 if f.name.startswith("~") and f.visibility == Visibility.PUBLIC
             }
 
@@ -382,7 +386,7 @@ class TestDestructorVisibility:
         """PUBLIC visibility alone is necessary but not sufficient: when the
         snapshot carries real ELF metadata (the normal case for `dump()` on
         a compiled .so — every test above except this one only inspected
-        `snap.functions` directly, never the real diff pipeline),
+        `snap.declarations.functions` directly, never the real diff pipeline),
         `_public_functions()` additionally narrows to keys that match a
         real export, are `is_deleted`, or are explicitly allow-listed via
         `is_synthetic_ctor_key()`. A synthetic destructor key ("~ClassName")
@@ -402,11 +406,11 @@ class TestDestructorVisibility:
         # not bare "~Base1" — see TestDestructorNamespaceQualification below),
         # so look it up by display name rather than hardcoding the key.
         base1_mangled = next(
-            f.mangled for f in castxml_snap.functions if f.name == "~Base1"
+            f.mangled for f in castxml_snap.declarations.functions if f.name == "~Base1"
         )
         new_snap = copy.deepcopy(castxml_snap)
-        new_snap.functions = [
-            f for f in new_snap.functions if f.mangled != base1_mangled
+        new_snap.declarations.functions = [
+            f for f in new_snap.declarations.functions if f.mangled != base1_mangled
         ]
         r = compare(castxml_snap, new_snap)
         kinds = {c.kind for c in r.changes if c.symbol == base1_mangled}
@@ -427,7 +431,9 @@ class TestDestructorNamespaceQualification:
         self, cpp_snapshots
     ) -> None:
         castxml_snap, _clang_snap = cpp_snapshots
-        base1 = next(f for f in castxml_snap.functions if f.name == "~Base1")
+        base1 = next(
+            f for f in castxml_snap.declarations.functions if f.name == "~Base1"
+        )
         assert base1.mangled == "~outer::inner::Base1"
 
     def test_synthetic_constructor_key_is_namespace_qualified(
@@ -436,7 +442,7 @@ class TestDestructorNamespaceQualification:
         castxml_snap, _clang_snap = cpp_snapshots
         widget_ctors = [
             f
-            for f in castxml_snap.functions
+            for f in castxml_snap.declarations.functions
             if f.name == "Widget" and not f.mangled.startswith("~")
         ]
         assert widget_ctors
@@ -532,8 +538,8 @@ class TestCrossProducerUnmangledIdentityKnownLimitation:
 class TestVariablesAndConstants:
     def test_variable_and_constant_agree(self, cpp_snapshots) -> None:
         castxml_snap, clang_snap = cpp_snapshots
-        c_vars = {v.mangled: v for v in castxml_snap.variables}
-        d_vars = {v.mangled: v for v in clang_snap.variables}
+        c_vars = {v.mangled: v for v in castxml_snap.declarations.variables}
+        d_vars = {v.mangled: v for v in clang_snap.declarations.variables}
         mangled = "_ZN5outer5inner9g_counterE"
         assert mangled in c_vars and mangled in d_vars
         assert classify(c_vars[mangled].type, d_vars[mangled].type) is Parity.EQUAL
@@ -541,8 +547,12 @@ class TestVariablesAndConstants:
             classify(c_vars[mangled].visibility, d_vars[mangled].visibility)
             is Parity.EQUAL
         )
-        assert castxml_snap.constants.get("outer::inner::kMaxWidgets") == "16"
-        assert clang_snap.constants.get("outer::inner::kMaxWidgets") == "16"
+        assert (
+            castxml_snap.declarations.constants.get("outer::inner::kMaxWidgets") == "16"
+        )
+        assert (
+            clang_snap.declarations.constants.get("outer::inner::kMaxWidgets") == "16"
+        )
 
 
 # ── Namespaced records, anonymous unions, bitfields, inheritance ───────────
@@ -647,8 +657,8 @@ class TestCHeaderCorpus:
         compiled binary never actually mangles at all. Fixed by extending
         the same real-ELF-export override to parse_variables()."""
         castxml_snap, clang_snap = c_snapshots
-        c_vars = {v.name: v for v in castxml_snap.variables}
-        d_vars = {v.name: v for v in clang_snap.variables}
+        c_vars = {v.name: v for v in castxml_snap.declarations.variables}
+        d_vars = {v.name: v for v in clang_snap.declarations.variables}
         assert c_vars["c_global"].mangled == d_vars["c_global"].mangled == "c_global"
         assert c_vars["c_global"].visibility == Visibility.PUBLIC
         assert d_vars["c_global"].visibility == Visibility.PUBLIC

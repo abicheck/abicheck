@@ -29,7 +29,7 @@ def _make_snapshots_with_removed_func(mangled: str = "_ZN3foo3barEv"):
 
     old = AbiSnapshot(library="libfoo", version="1.0")
     new = AbiSnapshot(library="libfoo", version="2.0")
-    old.functions.append(
+    old.declarations.functions.append(
         Function(
             name="foo::bar",
             mangled=mangled,

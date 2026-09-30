@@ -53,13 +53,13 @@ def _make_snapshot(
 ) -> AbiSnapshot:
     s = AbiSnapshot(library=library, version=version)
     if functions:
-        s.functions = functions
+        s.declarations.functions = functions
     if types:
-        s.types = types
+        s.declarations.types = types
     if variables:
-        s.variables = variables
+        s.declarations.variables = variables
     if enums:
-        s.enums = enums
+        s.declarations.enums = enums
     return s
 
 

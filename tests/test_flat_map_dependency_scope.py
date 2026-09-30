@@ -72,8 +72,8 @@ def _ir(snap: AbiSnapshot) -> tuple[SemanticIR, dict[str, str]]:
     occ = {
         OccurrenceId(eid): CanonicalEntity(canonical_spelling=Fact.present("v"))
         for eid in [
-            *snap.constant_entity_ids.values(),
-            *snap.typedef_entity_ids.values(),
+            *snap.declarations.constant_entity_ids.values(),
+            *snap.declarations.typedef_entity_ids.values(),
         ]
     }
     conflicts = {semantic_ir_conflict_key(o, "canonical_spelling"): "x" for o in occ}
@@ -148,9 +148,9 @@ def test_unattributed_maps_pass_through_as_the_same_objects(constants, typedefs)
         typedefs={k: "int" for k in typedefs},
     )
     out = scope_flat_maps(snap, lambda _h: True, "", None, {})
-    assert out.constants is snap.constants
-    assert out.typedefs is snap.typedefs
-    assert out.typedefs_qualified is snap.typedefs_qualified
+    assert out.constants is snap.declarations.constants
+    assert out.typedefs is snap.declarations.typedefs
+    assert out.typedefs_qualified is snap.declarations.typedefs_qualified
 
 
 @given(entries)

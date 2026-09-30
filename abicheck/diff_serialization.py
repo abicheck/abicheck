@@ -143,13 +143,13 @@ def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, tuple[str, str]]:
     can never disagree about which source a row came from.
     """
     out: dict[str, tuple[str, str]] = {}
-    for name, value in (snap.constants or {}).items():
+    for name, value in (snap.declarations.constants or {}).items():
         if _looks_like_serialization_tag(name) and value is not None:
             out.setdefault(name, (str(value), _ENTITY_VARIABLE))
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if _looks_like_serialization_tag(var.name) and var.value is not None:
             out.setdefault(var.name, (str(var.value), _ENTITY_VARIABLE))
-    for enum_t in snap.enums or []:
+    for enum_t in snap.declarations.enums or []:
         type_is_tag = _enum_type_is_tag_registry(enum_t.name)
         for m in enum_t.members:
             # An end-of-list marker (``*_last``, ``LastSymbol``, ``*_count``)

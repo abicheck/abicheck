@@ -46,6 +46,7 @@ from ..qualified_name_segments_walk import _walk_rewrite_strings
 from .closure_identity import (
     _LAMBDA_IDENTITY_FIELDS,
     _lambda_identity_containers_and_strings,
+    _set_identity_container,
 )
 from .guards import decision_key, identity_text, mapping as _mapping_guard, strict_int
 
@@ -96,7 +97,7 @@ def normalize_anonymous_type_spellings_on_load(snapshot: AbiSnapshot) -> AbiSnap
     for field_name, container in zip(_LAMBDA_IDENTITY_FIELDS, containers):
         new_container = _walk_rewrite_strings(container, strip_anonymous_type_location)
         if new_container is not container:
-            setattr(snapshot, field_name, new_container)
+            _set_identity_container(snapshot, field_name, new_container)
     return snapshot
 
 
@@ -123,7 +124,7 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
     if snap.elf is None:
         return
     sym_map = snap.elf.symbol_map
-    for func in snap.functions:
+    for func in snap.declarations.functions:
         if func.elf_binding is None:
             elf_sym = sym_map.get(func.mangled)
             if elf_sym is not None:
@@ -133,7 +134,7 @@ def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:
                 # (ADR-063 Phase 5 -- same mutation trap already fixed at
                 # dump time in dumper_elf_symbols._populate_elf_visibility).
                 func.elf_binding_fact = Fact.present(elf_sym.binding)
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if var.elf_binding is None:
             elf_sym = sym_map.get(var.mangled)
             if elf_sym is not None:

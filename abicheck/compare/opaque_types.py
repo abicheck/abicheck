@@ -345,7 +345,7 @@ def find_opaque_types(snap: AbiSnapshot) -> OpaqueTypeIndex:
     opaque: set[str] = set()
     declarations: dict[str, list[RecordType]] = {}
 
-    for t in snap.types:
+    for t in snap.declarations.types:
         if t.is_opaque or is_impl_source(t.source_location):
             # In the `is_impl_source` case the type is defined in an
             # implementation file — only consider it opaque if all API
@@ -711,7 +711,7 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
             if tname not in by_value_types and _referenced_by_value(tname, leaf, text):
                 by_value_types.add(tname)
 
-    for func in snap.functions:
+    for func in snap.declarations.functions:
         if not is_abi_visible(func):
             continue
         scan(func.return_type.strip())
@@ -720,7 +720,7 @@ def find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
             if param.pointer_depth == 0:
                 scan(param.type.strip())
     # Also check variables — a public variable of this type means it's by-value
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if not is_abi_visible(var):
             continue
         scan(var.type.strip())

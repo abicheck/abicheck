@@ -333,12 +333,20 @@ def _strip_header_and_above_evidence(
 
     # A confirmed non-export -- the fact, not the conflated enum: a
     # declaration no binary-only view could ever have seen.
-    snap.functions = [f for f in snap.functions if not is_export_confirmed_absent(f)]
-    snap.variables = [v for v in snap.variables if not is_export_confirmed_absent(v)]
+    snap.declarations.functions = [
+        f for f in snap.declarations.functions if not is_export_confirmed_absent(f)
+    ]
+    snap.declarations.variables = [
+        v for v in snap.declarations.variables if not is_export_confirmed_absent(v)
+    ]
     exported = _exported_symbol_names(snap)
     if exported is not None:
-        snap.functions = [f for f in snap.functions if f.mangled in exported]
-        snap.variables = [v for v in snap.variables if v.mangled in exported]
+        snap.declarations.functions = [
+            f for f in snap.declarations.functions if f.mangled in exported
+        ]
+        snap.declarations.variables = [
+            v for v in snap.declarations.variables if v.mangled in exported
+        ]
     # Projecting to a binary-only view *discards* the header evidence; it
     # does not disprove it. So the two header-derived surface facts go back
     # to unknown rather than to a confirmed negative -- a projected
@@ -349,26 +357,26 @@ def _strip_header_and_above_evidence(
     discarded = headers_discarded_surface_facts(
         reason="header evidence discarded by evidence-depth projection"
     )
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         f.visibility = Visibility.ELF_ONLY
         f.origin = ScopeOrigin.UNKNOWN
         for fact_name, fact in discarded.items():
             setattr(f, fact_name, fact)
-    for v in snap.variables:
+    for v in snap.declarations.variables:
         v.visibility = Visibility.ELF_ONLY
         v.origin = ScopeOrigin.UNKNOWN
         for fact_name, fact in discarded.items():
             setattr(v, fact_name, fact)
 
     if dwarf_sourced:
-        for t in snap.types:
+        for t in snap.declarations.types:
             t.origin = ScopeOrigin.UNKNOWN
-        for e in snap.enums:
+        for e in snap.declarations.enums:
             e.origin = ScopeOrigin.UNKNOWN
     else:
-        snap.types = []
-        snap.enums = []
-        snap.typedefs = {}
+        snap.declarations.types = []
+        snap.declarations.enums = []
+        snap.declarations.typedefs = {}
         # Sidecars keyed exactly like `typedefs` (model/snapshot.py's own
         # `typedefs_qualified`/`typedef_entity_ids` docstring) -- clearing
         # only `typedefs` left them standing, so a projected, non-DWARF-
@@ -380,8 +388,8 @@ def _strip_header_and_above_evidence(
         # (found via project_pair_to_depth's own joint-floor fix, which made
         # the params/return_type asymmetry these two sidecars had been
         # masking finally visible).
-        snap.typedefs_qualified = {}
-        snap.typedef_entity_ids = {}
+        snap.declarations.typedefs_qualified = {}
+        snap.declarations.typedef_entity_ids = {}
 
         # See this function's own docstring ("Why a caller ever passes
         # *dwarf_struct_scope*/*dwarf_enum_scope* explicitly"): pre-scope
@@ -403,11 +411,11 @@ def _strip_header_and_above_evidence(
                     k: v for k, v in snap.dwarf.enums.items() if k in dwarf_enum_scope
                 }
 
-    snap.constants = {}
+    snap.declarations.constants = {}
     # Sidecar keyed exactly like `constants` (same docstring as above) --
     # cleared unconditionally alongside it, not gated on `dwarf_sourced`,
     # matching `constants`' own unconditional clear two lines up.
-    snap.constant_entity_ids = {}
+    snap.declarations.constant_entity_ids = {}
     snap.from_headers = False
     snap.python_api = None
     snap.semantic_ir = None
@@ -425,10 +433,10 @@ def _strip_header_and_above_evidence(
     snap.contract = None
 
     if not dwarf_sourced:
-        for f in snap.functions:
+        for f in snap.declarations.functions:
             f.return_type = "?"
             f.params = []
-        for v in snap.variables:
+        for v in snap.declarations.variables:
             v.type = "?"
             v.is_const = False
             v.value = None

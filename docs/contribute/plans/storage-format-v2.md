@@ -108,7 +108,7 @@ and `BundleFacts` document is bit-for-bit unchanged.
 
 ### Phase 1 — unified project and multibuild storage
 
-**Status: A1.1/A1.2/A1.3/A1.4 implemented** — the object model
+**Status: A1.1 (as a zip transport, 2026-09-30)/A1.2/A1.3/A1.4 implemented** — the object model
 (`PackageManifest`/`VariantRef`/`ArtifactRef`/`ObjectRef`/`ObjectStore`,
 `PackageManifest.project_sections`), a real directory-backed store
 (`abicheck/project_snapshot_store.py`'s `DirectoryObjectStore` plus its
@@ -128,7 +128,9 @@ reconciled (Track 1): `bundle_facts_store.py` is now a thin wrapper over
 plus `storage.import_bundle_facts`, so one physical layout serves both the
 live-object and document entry points; see A1.4's own entry below.
 **A1.7 is now also implemented** (directory packages only, matching A1.1's
-own "everything but `.tar.zst`" scope); A1.5, A1.6, and A1.8 remain open.
+own "everything but `.tar.zst`" scope). A1.5's storage criterion holds
+and is tested; its decoded-size criterion is deferred to A2.1/A2.5. A1.6
+is implemented (see its own entry); A1.8 is implemented (see its own entry).
 See "Landed in Phase 1" below.
 
 - **A1.1** `ProjectSnapshotStore` reads and writes the D6 layout over a
@@ -171,14 +173,16 @@ See "Landed in Phase 1" below.
   are stored once per project/variant and referenced by digest.
 - **A1.6** `bundle_variants:` is wired into `.abicheck.yml` discovery, the
   capture pipeline is told which variant it is producing, and both declared
-  and captured coordinates are stored and verified.
+  and captured coordinates are stored and verified. **Implemented** — see
+  A1.6's own entry below.
 - **A1.7** Stored/live and stored/stored release comparison is reachable
   from the standard CLI. **Implemented** for directory packages (the
   `.tar.zst` transport form remains A1.1's own open item) — see "Landed in
   Phase 1" below and A1.7's own detailed entry.
 - **A1.8** Non-ELF artifacts (PE, Mach-O, Python-visible, header-only) are
   retained as project members with bundle-level *resolution* declared as an
-  ELF-only capability rather than silently excluded.
+  ELF-only capability rather than silently excluded. **Implemented** — see
+  A1.8's own entry below.
 
 ### Phase 2 — scale and performance
 
@@ -236,8 +240,8 @@ nothing in the existing pipeline changes behavior.
    A1.7's own entry below.
 6. **Open, designed below**: the `.tar.zst` transport form (the remainder of
    A1.1), `BuildSourcePack`/source-graph digest-deduplicated shared evidence
-   (the remainder of A1.4/A1.5), `bundle_variants:` CLI wiring (A1.6), and
-   non-ELF artifact membership (A1.8).
+   (the remainder of A1.4/A1.5). `bundle_variants:` CLI wiring (A1.6) and
+   non-ELF artifact membership (A1.8) have landed.
 
 `AvailabilityLedger.declare` and `.override` rebuild, revalidate, and
 re-sort the whole mapping per call, so building a ledger of *n* overrides
@@ -256,7 +260,35 @@ insertion.
 
 #### A1.1 remainder — the `.tar.zst` transport form
 
-**Status: not implemented.** Everything else D6 specifies for the directory
+**Status (2026-09-30): implemented as a zip, not a `.tar.zst`.** The
+container was changed by a maintainer decision, for the reason G40's plan
+records ("Zip, not tar"): random access to one member through the central
+directory. This keeps the repository at one single-file zip family instead
+of adding a tar container beside G40's zip, which this plan's own "no third
+persisted bundle shape" rule argues against.
+
+- `abicheck/storage/project_package_archive.py` implements
+  `pack_project_package`/`unpack_project_package`/
+  `is_project_package_archive`. Members are stored uncompressed, the file
+  identifies itself by a leading `mimetype` member, and the pinned `ZipInfo`
+  is shared with G40 in `storage/zip_member.py`.
+- `compare` accepts an archive anywhere it accepts a package directory. The
+  CLI unpacks at the operand boundary (`frontends/cli/options/operand_path.
+  py`); the typed API reads a single-artifact archive via
+  `workflows.project_package_input`.
+- `tests/test_project_package_archive.py` covers:
+  - byte-identical round trip and determinism;
+  - every hostile member shape refused before any write, including
+    traversal, absolute, backslash, symlink, compressed, duplicate, stray and
+    wrong-mimetype members;
+  - `compare` on two archives equal to `compare` on their directories;
+  - a corrupt operand exiting 64;
+  - the typed API leaving no unpacked copy behind.
+
+The design text below is kept as the record of the original `.tar.zst`
+proposal.
+
+**Earlier status: not implemented.** Everything else D6 specifies for the directory
 layout is real (`project_snapshot_store.DirectoryObjectStore` plus its
 manifest/ref writer and reader over ADR-059's physical envelope); only the
 single-file transport wrapper is missing, which is why a package today is
@@ -447,7 +479,31 @@ and cross-schema-version-mismatch behavior; `test_dto.py`/
 
 #### A1.5 — digest-deduplicated shared evidence (`BuildSourcePack`/source graph)
 
-**Status: not implemented.** Distinct from A1.4 above: this item is about a
+**Status (2026-09-30): the storage criterion holds and is now tested; the
+decoded-size criterion is not met and belongs with A2.1/A2.5.** Checked
+rather than assumed. The `build` section is `{build_source_pack,
+build_source}` and nothing per-library. The graph is its own `graph` section,
+and every package writer, including `import_bundle_facts`, goes through
+`import_legacy_snapshot`. So N libraries embedding one capture write N
+byte-identical `build` sections, and `ObjectStore.put` stores them once
+under one digest.
+
+`tests/test_shared_build_evidence_dedup.py` states this as a property over
+2-5 libraries and generated evidence:
+- identical evidence is exactly one `build` object;
+- each library keeps its own `declarations` object;
+- every library reads its own pack back;
+- two different packs are never merged.
+
+No new writer or section shape was needed. What remains is the second
+criterion. Loading still decodes each artifact's `build` section into its
+own `BuildSourcePack`, so decoded size scales with N even though stored size
+does not. Sharing one decoded object across snapshots is unsafe while
+`BuildSourcePack` is mutable, and this is A2.1's lazy-loading and A2.5's
+measurement territory, not a storage-layout change. The earlier text is kept
+below for the design record.
+
+**Earlier status: not implemented.** Distinct from A1.4 above: this item is about a
 shared `BuildSourcePack`/project source graph/toolchain profile — evidence
 several libraries in one bundle can genuinely share byte-for-byte — being
 stored **once** and referenced by digest from every artifact that needs it,
@@ -474,71 +530,90 @@ shared-evidence size); it scales with (sum of per-library sizes) +
 
 #### A1.6 — `bundle_variants:` CLI wiring
 
-**Status: not implemented, and the module this item originally named as
-"exists, just needs a consumer" is gone.** `abicheck/bundle_variants_config.py`
-(`parse_bundle_variants_config`/`pair_variants`) was deleted outright in
-ADR-065 S1 (2026-09-06, [`model/release_selection.py`]'s `ReleaseSelection`
-landed instead) rather than given a consumer — its `required:` field
-addressed a different axis (multibuild *variant* identity) from what S1
-needed (release *member* selection), and no capture pipeline tags a variant
-name to feed it, so wiring the old module would have been a parser-only
-slice with nothing downstream to drive. This item therefore needs a
-**deliberately new, specified** config-schema-and-pairing design — not
-"wire the existing module" — before any of the "Design" paragraph below can
-be implemented; the design below still describes the target shape
-(`VariantRef.declared`/`.captured`) correctly, but its own reference to a
-`BundleVariantSpec` producer no longer has a starting implementation to
-build from.
+**Status: implemented** (directory packages; the one-file transport form is
+A1.1's own concern). A deliberately new design — the deleted
+`bundle_variants_config.py` (ADR-065 S1) was not restored.
 
-**Goal.** A project's `bundle_variants:` block (variant name →
-`target_triple`/`compiler_family`/`feature_toggles`/`required`) drives a
-real multi-variant capture, and both what was *declared* in config and what
-was *actually captured* end up on the package's own `VariantRef.declared`/
-`.captured` maps (already exactly this two-map shape, per that class's own
-docstring) — so a later comparison can tell a genuine variant-boundary
-change from an ordinary version bump.
+**What landed.**
 
-**Design.** `BundleVariantSpec`'s four fields map onto `VariantRef.declared`
-verbatim (`{"target_triple": ..., "compiler_family": ..., **feature_toggles}`)
-at config-parse time, before any capture runs — this is the `declared` half,
-knowable from `.abicheck.yml` alone. `.captured` is filled in per real
-capture run from whatever the toolchain/build actually reports (compiler
-version, resolved standard, resolved feature-toggle values where a build
-system can confirm them) — the same "two independent coordinate maps"
-split `VariantRef`'s own docstring already specifies, so this item is
-wiring a real producer for the `VariantRef` schema that already exists —
-the config-parsing/pairing half (formerly `bundle_variants_config.py`,
-deleted per the note above) needs to be designed and written fresh,
-not restored. A `required: true` variant that fails to capture is a hard error
-for the release-capture command (mirrors `AnalysisPlanner`'s "reject before
-extraction" discipline: knowing a required variant is unreachable belongs
-at plan time, not discovered as a silently-incomplete package after a long
-capture run); `required: false` degrades to a package missing that
-`VariantRef` entirely, not a placeholder with empty `captured`.
+- **Config** — `model/bundle_variants.py`: the `.abicheck.yml`
+  `bundle_variants:` block (variant name → `target_triple`,
+  `compiler_family`, `feature_toggles` mapping, `required` bool, default
+  `true`) parsed into `BundleVariantsConfig`/`BundleVariantSpec`, with
+  total, eager validation (unknown keys, wrong types, missing coordinates, a
+  toggle shadowing a fixed coordinate, an unsafe or case-colliding variant
+  name — every finding at once). `bundle_variants` is a recognized
+  `BuildConfig` top-level key, and the same validator runs on **every**
+  `.abicheck.yml` ingestion (`build_config_schema.WHOLE_BLOCK_VALIDATORS`,
+  shared with `deployment:`), not only in the capture command.
+  `BundleVariantSpec.declared()` is the `VariantRef.declared` map
+  (`{"target_triple", "compiler_family", **feature_toggles}`).
+- **Capture** — `workflows/bundle_variants_capture.py`, driven by
+  `abicheck project capture-variants --variant NAME=PATH ... --package DIR
+  [--config FILE] [--variant-header NAME=PATH] [--variant-include NAME=DIR]
+  [--dry-run] [-o FORMAT=DEST]` (`frontends/cli/project_capture_variants.py`,
+  attached to the existing `project` group — no new root command). Three
+  ordered phases: `plan_variant_capture` (before any extraction: an
+  undeclared/duplicate input, or a required variant with no input, a
+  missing path, or nothing capturable, is a `VariantCaptureError` → exit
+  64; an optional one becomes a reported skip); `capture_variants` (every
+  variant dumped in memory through the shared `run_dump_request`; a required
+  variant's extractor failure raises with nothing written, an optional one
+  is skipped and reported); then one write into a staging directory renamed
+  into place last, so a failure never leaves a partial package. Each
+  captured variant is one `VariantRef` with `declared` from config and
+  `captured` from `captured_coordinates()` — only what the snapshots
+  recorded (`dwarf_advanced.toolchain` compiler family/version/producer,
+  DWARF target arch, container format, ELF machine/class, header-parse
+  standard/frontend; a mixed variant records the sorted distinct values).
+  The two maps are never merged. A variant-level `bundle_variant_spec`
+  section records `required` and the toggle keys. A skipped optional
+  variant has no `VariantRef` at all.
+- **Artifact ids are namespaced by variant** (`<variant>.<library-id>`,
+  opaque via `resolve_ref_ids` when that is not ref-id safe), closing A1.7's
+  carried-forward limitation that two variants of one package could not
+  share a library name; every reader already recovers the library name from
+  `ArtifactRef.native_identity`.
+- **Pairing** — `compare/variant_pairing.pair_variant_views` (the
+  replacement for the deleted `pair_variants()`): by `variant_id` only,
+  never by coordinates. `workflows/variant_pairing.release_variant_pairing`
+  reads both packages' views when *both* release operands are stored
+  packages; the result rides `ReleaseScopePlan.variant_pairing` onto the
+  ADR-065 acquisition record and out as the release JSON's
+  `comparison_scope.variant_pairing` (release schema 1.10;
+  `$defs/comparison_scope` in `compare_report.schema.json`). A
+  declared-coordinate difference is `variant_boundary_changed` with
+  `declared_changes`, distinct from `captured_changes` (a version bump). A
+  variant only one side carries is `unmatched_old`/`unmatched_new` with a
+  "absence is not removal" reason and its recorded `required` flag;
+  `unmatched_required` lists the required ones. Report-only: which variant's
+  libraries are compared is still `--variant old=/new=`, and no verdict or
+  exit code changes.
 
-**Files.** `abicheck/cli_project.py` (a new subcommand, per this
-repository's root-command admission bar in `AGENTS.md` — this is advanced,
-multi-target CI-integration surface that fits the existing `project` group,
-not a new root command) or an extension of whatever multi-library capture
-entry point A1.7 below settles on, since the two are naturally one CLI
-surface (capture N variants of M libraries into one package) rather than
-two independent flags. `abicheck/bundle_variants_capture.py` (new) —
-resolves a `.abicheck.yml` `bundle_variants:` block plus a real build
-description into one capture run per variant, writing each into the shared
-`bundle_facts_store.py` writer from A1.4/A1.5 above with the right
-`VariantRef`.
+**Tests.** `tests/test_bundle_variants_config.py` (every wrong type for
+every key from an independent table, unsafe names, compositional finding
+collection over every subset of breakages, strict `.abicheck.yml`
+ingestion); `tests/test_bundle_variants_capture.py` (an exhaustive 64-case
+matrix — two variants × required/optional × {captured, no input, missing
+path, extractor failure} — against an independently written oracle,
+including "no file and no staging directory is left behind"; declared vs.
+captured disagreeing and both kept; pairing properties over every pair of
+subsets of four ids in both orders; pairing over packages written by real
+`capture-variants` runs, through the real `compare` CLI, schema-validated;
+an unmatched required variant; an unrelated extra baseline variant not
+changing the selected comparison; and an `integration`-marked capture of a
+real gcc-built `-g` shared object whose `captured.compiler_family` comes
+from `DW_AT_producer`).
 
-**Tests.** A `bundle_variants:` block with two variants (one `required`,
-one not) against a fixture build; the `required` variant's simulated
-capture failure raises before any file is written (no partial package);
-`declared` vs. `captured` disagree on at least one field in the fixture
-(e.g. `.abicheck.yml` under-specifies a compiler version the real build
-reports), asserting both maps are kept, not merged/overwritten.
-
-**Acceptance criteria.** The new pairing algorithm (replacing the deleted
-`pair_variants()`) operates correctly over `VariantRef`s produced by a real
-capture run, not only over hand-constructed fixtures — closing the
-"modelled but not captured" half of finding #7.
+**Open, deliberately not in this slice.** An unmatched *required* variant is
+reported, not gated — whether it should contribute to the ADR-065
+`--on-incomplete-scope` axis is a policy decision for that ADR. Pairing is
+reported, but the per-library fan-out still compares exactly one selected
+variant per side (a multi-variant package with no `--variant` selection is
+still A1.7's usage error), so "compare every paired variant in one run" is a
+future fan-out extension. `captured` records toolchain facts DWARF carries;
+a build-system-confirmed feature-toggle value is not captured (no producer
+records one today).
 
 ---
 
@@ -638,29 +713,44 @@ requirement. Also covers the ambiguous-variant usage error and
 `--old-variant` disambiguation.
 
 **Acceptance criteria.** Closes finding #7's "no coherent multi-variant
-baseline from a normal workflow" for the comparison half (A1.6 above still
-owns the capture half — `bundle_variants:` CLI wiring remains open); no new
+baseline from a normal workflow" for the comparison half (A1.6 above owns
+the capture half, now landed too); no new
 root CLI command (`AGENTS.md`'s admission bar) — this is `compare`'s
 existing release fan-out gaining a new operand shape, not a new verb.
-**Known limitation carried forward, not closed by this item**: two variants
-of one package cannot share a library name today, since
+**Known limitation carried forward, closed by A1.6**: two variants
+of one package could not share a library name, since
 `bundle_facts_store._artifact_id_for_library` derives `ArtifactRef.artifact_id`
-from the library name alone, not `(variant, name)` — a real multi-variant
-capture (A1.6) will need that reconciled before this item's variant
-selection is exercised against a real multi-variant capture rather than a
-hand-assembled fixture.
+from the library name alone, not `(variant, name)`. A1.6's capture now
+namespaces every artifact id by its variant, and its tests exercise this
+item's variant selection against packages a real multi-variant capture
+wrote.
 
 ---
 
 #### A1.8 — non-ELF artifact membership
 
-**Status: not implemented**, and deliberately the narrowest item here.
-`ArtifactRef.kind` already accepts any string (`"elf"`, `"pe"`, `"macho"`,
-`"python"`, `"header_only"`, ...) per its own docstring — the object model
-was built D6-complete from the start. What's missing is purely on the
-*producer* side: nothing today constructs an `ArtifactRef` for a PE/Mach-O/
-Python-visible/header-only member, because A1.3/A1.4's own capture paths
-have so far only ever fed them an ELF `AbiSnapshot`.
+**Status: implemented.** `storage/import_v1.artifact_kind_for_document`
+(and its live-snapshot twin `workflows/bundle_facts_capture.
+artifact_kind_of_snapshot`, both over one `artifact_kind_from_facts` rule)
+derives `ArtifactRef.kind` first-match-wins: `header_only` → `"header_only"`,
+a stated `platform` (`"elf"`/`"pe"`/`"macho"`) verbatim, a Python-visible
+surface (`python_ext`/`python_api`) → `"python"`, else the historical
+`"elf"`. Previously a header-only or Python-only member was mislabeled
+`"elf"`. A member manifest with no `"binary"` section reads back without
+error. `bundle_snapshot_from_facts` no longer drops a non-ELF member
+silently: it records it on `BundleSnapshot.resolution_not_applicable`
+(member → kind), `bundle_analysis.analyze_bundle` carries both sides' entries
+into `BundleDiffResult.resolution_not_applicable_members`, and the
+BundleFacts compare JSON emits a `resolution_not_applicable_members` block
+(`{"artifact_kind", "resolution": "not_applicable"}` per member, only when
+non-empty). The ELF members' resolution graph is unchanged. Tests:
+`tests/test_non_elf_artifact_membership.py` (parametrized over every non-ELF
+kind, plus an exhaustive kind-rule enumeration against an independent
+oracle). Not covered: the live directory fan-out's own
+`bundle.build_bundle_snapshot` still skips non-ELF files during discovery
+(it never dumps them into a member in the first place).
+
+The original design text follows.
 
 **Goal.** A PE/Mach-O/Python-visible/header-only library is a first-class
 package member — representable, storable, and readable — even though
@@ -836,6 +926,8 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/ast_cache_budget.py` | `DEFAULT_MAX_BYTES`, `MIN_AGE_SECONDS`, `RECHECK_INTERVAL_SECONDS`, `configured_max_bytes`, `enforce_ast_cache_budget`, `note_use` — a least-recently-used byte budget (env ABICHECK_AST_CACHE_MAX_BYTES, default 16 GiB, 0 disables) for each L2 header-AST cache backend directory, re-checked at most every five minutes; each use stamps the entry mtime, and entries used in the last hour are never evicted. Internal, not re-exported by the package |
 | `abicheck/storage/castxml_xml.py` | `parse_castxml_xml` — parses a castxml XML document (a cached L2 header-AST entry or fresh castxml output) through defusedxml's parser with a tree builder that stores one object per distinct attribute value, cutting the parsed tree by about a third, and that keeps only `ARGUMENT_ATTRIBUTES_READ` on each Argument element and shares one element per distinct parameter spelling (116 → 26 MiB live on a 26 MB MKL header dump). Internal, not re-exported by the package |
 | `abicheck/storage/atomic_file.py` | `atomic_write`, `atomic_copy` — write or stream-copy a cache file through a same-directory temp file and `os.replace`, so a concurrent reader sees either no file or a complete one, never a torn one. Moved unchanged from `dumper_cache.py`. Internal, not re-exported by the package |
+| `abicheck/storage/project_package_archive.py` | `pack_project_package`, `unpack_project_package`, `is_project_package_archive`, `MIMETYPE` — A1.1's one-file zip transport of a package directory; unpacking refuses any non-layout, symlinked, compressed, duplicate or over-budget member before writing. Internal, reached through `workflows.storage` |
+| `abicheck/storage/zip_member.py` | `deterministic_zipinfo` — the pinned zip member header shared by G40's bundle archive and the package transport. Internal, not re-exported by the package |
 | `abicheck/storage/json_compact.py` | `compact_json_stream`, `compacted_ast`, `CompactedAst`, `migrate_legacy_entry`, `open_cached_entry` — streams a JSON document (clang's `-ast-dump=json`) into a compact, ASCII-only copy that is parsed and then renamed into the L2 AST cache; value-preserving by construction (a line never starts or ends inside a JSON string). `migrate_legacy_entry` rewrites a pretty-printed entry stored before compaction-at-store in place, on first read. Internal, not re-exported by the package |
 | `abicheck/storage/ref_ids.py` | `REF_SUFFIX`, `safe_ref_id`, `reject_filesystem_collisions` — cross-platform ref-id path safety, split out of `package.py`'s own 800-line production cap (ADR-063 Track C 8B); `resolve_ref_ids` — name-to-safe-artifact-id resolver the two bundle/baseline-set import adapters use for a library name they don't control -- internal, not re-exported by the package |
 | `abicheck/storage/dto.py` | `BASELINE_SET_SECTION_KIND`, `BINARY_SECTION_KIND`, `BUILD_SECTION_KIND`, `BUNDLE_COMPOSITION_SECTION_KIND`, `DEBUG_SECTION_KIND`, `DECLARATIONS_SECTION_KIND`, `GRAPH_SECTION_KIND`, `LAYOUT_SECTION_KIND`, `PROVENANCE_SECTION_KIND`, `SECTION_SCHEMA_VERSIONS`, `SEMANTIC_IR_SECTION_KIND`, `TYPES_SECTION_KIND`, `SectionDTO`, `baseline_set_metadata_from_dto`, `baseline_set_metadata_to_dto`, `binary_from_dto`, `binary_to_dto`, `build_from_dto`, `build_to_dto`, `bundle_composition_from_dto`, `bundle_composition_to_dto`, `debug_from_dto`, `debug_to_dto`, `declarations_from_dto`, `declarations_to_dto`, `graph_from_dto`, `graph_to_dto`, `layout_from_dto`, `layout_to_dto`, `legacy_section_from_dto`, `legacy_section_to_dto`, `migrate_section_dto`, `provenance_from_dto`, `provenance_to_dto`, `semantic_ir_from_dto`, `semantic_ir_to_dto`, `types_from_dto`, `types_to_dto` (A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint; `TYPES_SECTION_KIND`/`types_from_dto`/`types_to_dto` are ADR-063 Track 4 (8B)'s first typed-DTO promotion beyond semantic_ir, see types_section_codec.py; `GRAPH_SECTION_KIND`/`graph_from_dto`/`graph_to_dto` are its second, see graph_section_codec.py; the remaining six `*_SECTION_KIND`/`*_from_dto`/`*_to_dto` triples are its third slice, see sparse_section_codec.py -- every D8 legacy section kind now has a dedicated DTO; `BUNDLE_COMPOSITION_SECTION_KIND`/`BASELINE_SET_SECTION_KIND` and their `*_from_dto`/`*_to_dto` pairs are A1.4's own two variant-level section kinds, ADR-063 Track C 8B, see `import_bundle_facts.py`/`import_baseline_set.py` below) |
@@ -910,9 +1002,9 @@ each to its section kind's current version, and reassembles the original
 **Not yet implemented, and still open**: storing `BuildSourcePack`/project
 source graphs/toolchain profiles once per project and referencing them by
 digest (A1.5 — folding baseline sets/`BundleFacts` into sections, A1.4, is
-done), `bundle_variants:` CLI/config wiring (A1.6/A1.7), non-ELF artifact
-membership specifics beyond `ArtifactRef.kind` (A1.8), and the `.tar.zst`
-transport form. Decoding a legacy section's *internal* shape into a typed
+done) and the `.tar.zst` transport form. (`bundle_variants:` CLI/config
+wiring, A1.6, and stored release comparison, A1.7, have landed.)
+Decoding a legacy section's *internal* shape into a typed
 domain object (rather than carrying the existing JSON as-is), and giving
 `ArtifactRef.sections` a per-section `FactAvailability` (the "known,
 deliberately deferred gap" below), are both real future work this landing

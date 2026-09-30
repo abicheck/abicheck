@@ -136,8 +136,11 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
     """Reconstruct a live-equivalent :class:`~abicheck.bundle_models.
     BundleSnapshot` from *facts*, with no binaries read.
 
-    A per-library entry whose ``AbiSnapshot.elf`` is ``None`` is dropped,
-    as ``bundle.build_bundle_snapshot`` drops a non-ELF file.
+    A per-library entry whose ``AbiSnapshot.elf`` is ``None`` (PE, Mach-O,
+    Python-visible, header-only) contributes no resolution edges, but is
+    never silently dropped: ADR-062 A1.8 records it on the result's
+    ``resolution_not_applicable`` (member -> artifact kind) as an explicit
+    "capability not applicable" fact.
 
     ``facts.filesystem_aliases`` (captured symlink/hard-link basenames)
     feeds ``build_bundle_snapshot_from_metadata``'s ``extra_aliases`` so a
@@ -160,18 +163,38 @@ def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:
         )
     metadata = {}
     paths = {}
+    not_applicable: dict[str, str] = {}
     for name, snap in facts.per_library_snapshots.items():
         if snap.elf is None:
+            kind = artifact_kind_of_snapshot(snap)
+            # A snapshot claiming "elf" with no ELF metadata still has no
+            # edges to contribute; name that fact rather than mislabel it.
+            not_applicable[name] = kind if kind != "elf" else "elf_without_metadata"
             log.debug(
-                "bundle_facts: %s carries no ELF metadata (non-ELF or "
-                "header-only dump) -- excluded from the reconstructed bundle",
+                "bundle_facts: %s (%s) carries no ELF metadata -- a member "
+                "with no resolution edges (resolution not applicable)",
                 name,
+                not_applicable[name],
             )
             continue
         metadata[name] = snap.elf
         filename = facts.library_filenames.get(name)
         if filename:
             paths[name] = Path(filename)
-    return build_bundle_snapshot_from_metadata(
+    snapshot = build_bundle_snapshot_from_metadata(
         metadata, paths=paths or None, extra_aliases=facts.filesystem_aliases or None
+    )
+    snapshot.resolution_not_applicable = not_applicable
+    return snapshot
+
+
+def artifact_kind_of_snapshot(snap: AbiSnapshot) -> str:
+    """`snap`'s `ArtifactRef.kind`, by the same first-match-wins rule the
+    package importer applies to a serialized document (ADR-062 A1.8)."""
+    from ..storage.import_v1 import artifact_kind_from_facts
+
+    return artifact_kind_from_facts(
+        header_only=bool(snap.header_only),
+        platform=snap.platform,
+        python_visible=snap.python_ext is not None or snap.python_api is not None,
     )

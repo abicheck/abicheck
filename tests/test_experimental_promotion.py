@@ -182,7 +182,7 @@ class TestPromotionToStableNamespace:
         # Only one could have been promoted; neither is proven, both reported.
         assert len(_removed(detect_experimental_namespace_changes(old, new))) == 2
         # Reordering the OLD declarations does not change the outcome.
-        old_rev = _snap(funcs=list(reversed(old.functions)))
+        old_rev = _snap(funcs=list(reversed(old.declarations.functions)))
         assert len(_removed(detect_experimental_namespace_changes(old_rev, new))) == 2
 
     def test_surviving_sibling_does_not_block_promotion(self) -> None:

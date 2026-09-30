@@ -594,7 +594,10 @@ def test_dump_scoping_keeps_declarations_under_a_symlinked_root(
     apply_provenance(snap, public_header_dirs=[link])
 
     kept = {
-        f.name for f in scope_snapshot_excluding_dependencies(snap, [link]).functions
+        f.name
+        for f in scope_snapshot_excluding_dependencies(
+            snap, [link]
+        ).declarations.functions
     }
     assert "foo" in kept, "the library's own declaration was pruned as a dependency"
     assert "dep" not in kept, "a real toolchain declaration survived pruning"

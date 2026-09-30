@@ -85,7 +85,7 @@ class TestRecordTypeCaseBFactRoundTrip:
         self, field_name: str, value: object
     ) -> None:
         rec = RecordType(name="Widget", kind="class", **{field_name: value})
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         assert getattr(r, field_name) == value
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.PRESENT
@@ -96,7 +96,7 @@ class TestRecordTypeCaseBFactRoundTrip:
         self, field_name: str, _value: object
     ) -> None:
         rec = RecordType(name="Widget", kind="class")
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         assert getattr(r, field_name) is None
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.NOT_COLLECTED
@@ -110,7 +110,7 @@ class TestRecordTypeCaseBFactRoundTrip:
             kind="struct",
             **{f"{field_name}_fact": Fact.unsupported("DWARF-only")},
         )
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.UNSUPPORTED
         assert fact.diagnostics == ("DWARF-only",)
@@ -124,7 +124,7 @@ class TestRecordTypeCaseBFactRoundTrip:
             schema_version=30,
             types=[{"name": "Foo", "kind": "class", field_name: value}],
         )
-        r = snapshot_from_dict(d).types[0]
+        r = snapshot_from_dict(d).declarations.types[0]
         assert getattr(r, field_name) == value
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.PRESENT
@@ -138,7 +138,7 @@ class TestRecordTypeCaseBFactRoundTrip:
             schema_version=30,
             types=[{"name": "Foo", "kind": "class"}],
         )
-        r = snapshot_from_dict(d).types[0]
+        r = snapshot_from_dict(d).declarations.types[0]
         assert getattr(r, field_name) is None
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.NOT_COLLECTED
@@ -156,9 +156,9 @@ class TestRecordTypeCaseBFactRoundTrip:
             types=[{"name": "Foo", "kind": "class", field_name: value}],
         )
         snap = snapshot_from_dict(d)
-        fact = getattr(snap.types[0], f"{field_name}_fact")
+        fact = getattr(snap.declarations.types[0], f"{field_name}_fact")
         assert fact.status is FactStatus.NOT_COLLECTED
-        assert getattr(snap.types[0], field_name) is None
+        assert getattr(snap.declarations.types[0], field_name) is None
 
     @pytest.mark.parametrize("field_name,value", _CASE_B_FIELDS)
     def test_snapshot_to_dict_encodes_status_as_plain_string(

@@ -195,7 +195,7 @@ def _pair_with_a_change() -> tuple[AbiSnapshot, AbiSnapshot]:
 
 
 def _stamped(snap: AbiSnapshot) -> AbiSnapshot:
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         fn.ownership_fact = Fact.present(EntityOwnership("target", "public", "r"))
     snap.extraction_scope = ExtractionScope(_RULES_A)
     return snap

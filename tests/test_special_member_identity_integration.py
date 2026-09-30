@@ -111,7 +111,7 @@ def _special_member_nodes(snap):
     ids = identities_for_snapshot(snap)
     return {
         i.node_id: set(i.aliases)
-        for f, i in zip(snap.functions, ids.functions)
+        for f, i in zip(snap.declarations.functions, ids.functions)
         if i.resolved and ("C1E" in i.node_id or "D1E" in i.node_id)
     }
 
@@ -121,7 +121,10 @@ def test_castxml_placeholders_resolve_to_the_exported_variant_families(
 ) -> None:
     snap = _load(_dump(built, "castxml"))
     # castxml really recorded placeholders, not manglings -- the premise.
-    assert any(f.mangled.startswith("__abicheck_ctor__ns::W(") for f in snap.functions)
+    assert any(
+        f.mangled.startswith("__abicheck_ctor__ns::W(")
+        for f in snap.declarations.functions
+    )
     assert _special_member_nodes(snap) == EXPECTED
 
 

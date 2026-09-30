@@ -65,7 +65,7 @@ def _shape_plain(extra: tuple[str, ...]) -> AbiSnapshot:
         from_headers=True,
         elf=ElfMetadata(symbols=[ElfSymbol(name=n) for n in ("add", "sub", *extra)]),
     )
-    snap.functions = [_public_fn("add", "add")]  # `sub` stays undocumented
+    snap.declarations.functions = [_public_fn("add", "add")]  # `sub` stays undocumented
     return snap
 
 
@@ -78,7 +78,7 @@ def _shape_versioned(extra: tuple[str, ...]) -> AbiSnapshot:
         from_headers=True,
         elf=ElfMetadata(symbols=syms, versions_defined=["M_1"]),
     )
-    snap.functions = [_public_fn("api", "_Z3apiv")]
+    snap.declarations.functions = [_public_fn("api", "_Z3apiv")]
     return snap
 
 
@@ -90,8 +90,8 @@ def _shape_private_type(extra: tuple[str, ...]) -> AbiSnapshot:
         from_headers=True,
         elf=ElfMetadata(symbols=[ElfSymbol(name=n) for n in names]),
     )
-    snap.functions = [_public_fn("api", "_Z3apiv")]
-    snap.types = [
+    snap.declarations.functions = [_public_fn("api", "_Z3apiv")]
+    snap.declarations.types = [
         RecordType(name="Internal", kind="class", origin=ScopeOrigin.PRIVATE_HEADER)
     ]
     return snap

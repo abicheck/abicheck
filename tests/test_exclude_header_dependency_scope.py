@@ -98,7 +98,9 @@ def _snapshot(scope: str | None = "filtered") -> AbiSnapshot:
 
 
 def _names(snap: AbiSnapshot) -> set[str]:
-    return {f.name for f in snap.functions} | {t.name for t in snap.types}
+    return {f.name for f in snap.declarations.functions} | {
+        t.name for t in snap.declarations.types
+    }
 
 
 def test_transitively_included_excluded_header_is_scoped_out() -> None:

@@ -820,8 +820,8 @@ class TestCliIntegration:
 
         assert snap.platform == "pe"
         assert snap.elf_only_mode is False
-        assert len(snap.functions) == 1
-        assert snap.functions[0].name == "test_func"
+        assert len(snap.declarations.functions) == 1
+        assert snap.declarations.functions[0].name == "test_func"
         assert snap.pe is pe_meta
 
     def test_dump_native_binary_macho(self, tmp_path):
@@ -842,8 +842,8 @@ class TestCliIntegration:
 
         assert snap.platform == "macho"
         assert snap.elf_only_mode is False
-        assert len(snap.functions) == 1
-        assert snap.functions[0].name == "macho_func"
+        assert len(snap.declarations.functions) == 1
+        assert snap.declarations.functions[0].name == "macho_func"
         assert snap.macho is macho_meta
 
     def test_dump_native_binary_pe_empty_exports_raises(self, tmp_path):

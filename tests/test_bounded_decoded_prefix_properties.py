@@ -615,7 +615,7 @@ def test_zstd_snapshot_resolves_through_service_entry_point(tmp_path):
 
     resolved = resolve_input(path)
     assert resolved.library == snap.library
-    assert len(resolved.functions) == len(snap.functions)
+    assert len(resolved.declarations.functions) == len(snap.declarations.functions)
 
 
 def test_zstd_snapshot_classifies_as_abi_json(tmp_path):

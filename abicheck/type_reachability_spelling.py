@@ -621,7 +621,7 @@ def _partition_snapshot_types(
     stdlib_identities: list[str] = []
     non_stdlib_identities: set[str] = set()
     non_stdlib_records: dict[str, list[RecordType]] = {}
-    for t in snapshot.types:
+    for t in snapshot.declarations.types:
         identity = _record_identity(t.name, t.qualified_name)
         if identity.startswith(STDLIB_TYPE_NAMESPACE_PREFIXES):
             stdlib_identities.append(identity)

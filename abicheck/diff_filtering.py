@@ -122,26 +122,26 @@ def _build_location_index(
 ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """Build type, function, and variable location lookup dicts from snapshots."""
     type_loc: dict[str, str] = {}
-    for t in old.types:
+    for t in old.declarations.types:
         if t.source_location:
             type_loc[t.name] = t.source_location
-    for t in new.types:
+    for t in new.declarations.types:
         if t.source_location:
             type_loc.setdefault(t.name, t.source_location)
 
     func_loc: dict[str, str] = {}
-    for f in old.functions:
+    for f in old.declarations.functions:
         if f.source_location:
             func_loc[f.mangled] = f.source_location
-    for f in new.functions:
+    for f in new.declarations.functions:
         if f.source_location:
             func_loc.setdefault(f.mangled, f.source_location)
 
     var_loc: dict[str, str] = {}
-    for v in old.variables:
+    for v in old.declarations.variables:
         if v.source_location:
             var_loc[v.mangled] = v.source_location
-    for v in new.variables:
+    for v in new.declarations.variables:
         if v.source_location:
             var_loc.setdefault(v.mangled, v.source_location)
 
@@ -312,7 +312,7 @@ def _enum_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
         return {}
     by_bare: dict[str, set[str | None]] = {}
     out: dict[str, str] = {}
-    for e in getattr(snap, "enums", None) or ():
+    for e in snap.declarations.enums:
         if e.qualified_name:
             by_bare.setdefault(e.name, set()).add(e.qualified_name)
             out[e.qualified_name] = e.qualified_name
@@ -562,7 +562,7 @@ def _build_type_embed_index(
     """Build a child_type→{parent_type} embedding index from old snapshot fields."""
     type_embeds: dict[str, set[str]] = {}
     ac = matcher if matcher is not None else _SubstringMatcher(affected_types)
-    for t in old.types:
+    for t in old.declarations.types:
         for fld in t.fields:
             for tname in ac.find(fld.type):
                 type_embeds.setdefault(tname, set()).add(t.name)
@@ -684,9 +684,13 @@ def _attribute_stdlib_embedding(changes: list[Change], new: AbiSnapshot) -> None
     ]
     if not owner_changes:
         return
-    by_name = {t.name: t for t in new.types}
+    # ADR-063 2B: the owner by the finding's identity, never a last-wins
+    # bare-name dict; an ambiguous owner gets no clause (informational only).
+    from .compare.record_lookup import RecordLookup
+
+    records = RecordLookup(new.declarations.types)
     for c in owner_changes:
-        rec = by_name.get(_root_type_name(c))
+        rec = records.resolve(_root_type_name(c), c.entity_id)
         if rec is None:
             continue
         embedded = _embedded_stdlib_fields(rec)
@@ -1039,7 +1043,7 @@ def _public_function_uses_type_by_value(
     snap: AbiSnapshot, bare_re: re.Pattern[str]
 ) -> bool:
     """True if any PUBLIC function uses the type (matched by *bare_re*) by value."""
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         if not is_abi_visible(f):
             continue
         if _type_used_by_value(f.return_type, bare_re):
@@ -1054,7 +1058,7 @@ def _public_variable_uses_type_by_value(
     snap: AbiSnapshot, bare_re: re.Pattern[str]
 ) -> bool:
     """True if any PUBLIC variable uses the type (matched by *bare_re*) by value."""
-    for v in snap.variables:
+    for v in snap.declarations.variables:
         if not is_abi_visible(v):
             continue
         if _type_used_by_value(v.type, bare_re):
@@ -1108,7 +1112,7 @@ def _has_public_pointer_factory(
         factory_re = re.compile(r"\b" + re.escape(type_name) + r"\s*\*")
         if _factory_re_cache is not None:
             _factory_re_cache[type_name] = factory_re
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         if not is_abi_visible(f):
             continue
         rt = f.return_type or ""
@@ -1191,7 +1195,7 @@ def _opaque_usage_index(
         return used_by_value, has_factory
     ac = _SubstringMatcher(candidates)
 
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         if not is_abi_visible(f):
             continue
         _record_factory_returns(f.return_type, ac, factory_re_cache, has_factory)
@@ -1199,7 +1203,7 @@ def _opaque_usage_index(
         for p in f.params:
             _record_by_value_uses(p.type, ac, bare_re_cache, used_by_value)
 
-    for v in snap.variables:
+    for v in snap.declarations.variables:
         if not is_abi_visible(v):
             continue
         _record_by_value_uses(v.type, ac, bare_re_cache, used_by_value)

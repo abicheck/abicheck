@@ -41,3 +41,8 @@ class DetectorResult:
     #: own reason (why it did not run); this flag carries the *state*, so a
     #: consumer never has to infer one from the presence of the other.
     not_evaluated: bool = False
+    #: ADR-063 T9: ``(entity, reason)`` for each comparison this detector ran
+    #: but *declined* to judge -- the per-entity counterpart of
+    #: ``not_evaluated`` (``compare/declined_comparisons.py``). Plain pairs
+    #: rather than that module's dataclass, so this leaf type imports nothing.
+    declined: tuple[tuple[str, str], ...] = ()

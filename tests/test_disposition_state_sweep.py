@@ -612,7 +612,7 @@ class TestEveryHtmlPathCarriesTheAudit:
         old = AbiSnapshot(library="libfoo", version="1.0")
         new = AbiSnapshot(library="libfoo", version="2.0")
         for i in range(3):
-            old.functions.append(
+            old.declarations.functions.append(
                 Function(
                     name=f"gone{i}",
                     mangled=f"_Z4gone{i}v",

@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
 def _public_function_names(snap) -> set[str]:  # type: ignore[no-untyped-def]
     out: set[str] = set()
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         if not in_public_surface(f):
             continue
         out.add(f.name or f.mangled)
@@ -62,7 +62,7 @@ def _public_function_names(snap) -> set[str]:  # type: ignore[no-untyped-def]
 
 
 def _public_type_names(snap) -> set[str]:  # type: ignore[no-untyped-def]
-    return {t.name for t in snap.types if t.name}
+    return {t.name for t in snap.declarations.types if t.name}
 
 
 # ---------------------------------------------------------------------------

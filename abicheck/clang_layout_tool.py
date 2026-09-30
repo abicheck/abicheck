@@ -426,7 +426,7 @@ def apply_layout_facts(
 
     new_types = []
     changed = False
-    for t in snapshot.types:
+    for t in snapshot.declarations.types:
         facts = (
             by_name.get(t.qualified_name or t.name)
             if not t.is_template_pattern

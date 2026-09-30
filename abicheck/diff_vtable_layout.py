@@ -52,7 +52,7 @@ from collections.abc import Mapping
 
 from .checker_types import Change
 from .detector_registry import registry
-from .diff_helpers import make_change
+from .diff_helpers import TypeMap, build_type_map, lookup_matched_type, make_change
 from .diff_types_vtable import _virtual_signatures_by_owner
 from .model import (
     AbiSnapshot,
@@ -66,13 +66,18 @@ from .model import (
 from .model.change_catalog.kinds import ChangeKind
 
 
-def _type_map(snap: AbiSnapshot) -> dict[str, RecordType]:
-    return {t.name: t for t in snap.types}
+def _type_map(snap: AbiSnapshot) -> TypeMap[RecordType]:
+    """*snap*'s records under the canonical old/new identity (ADR-045's
+    ``TypeMap``: qualified key, collision-safe bare alias) -- ADR-063 2B.
+    A bare-``name`` dict let two records sharing a leaf spelling
+    (``ns1::Impl``/``ns2::Impl``) overwrite each other, pairing and base
+    lookups then reading whichever was visited last."""
+    return build_type_map(snap.declarations.types)
 
 
 def _is_polymorphic(
     name: str,
-    types: dict[str, RecordType],
+    types: Mapping[str, RecordType],
     memo: dict[str, bool | None],
     *,
     vtable_facts_reliable: bool = True,
@@ -280,7 +285,7 @@ def _is_polymorphic(
 
 def _secondary_groups(
     rec: RecordType,
-    types: dict[str, RecordType],
+    types: Mapping[str, RecordType],
     memo: dict[str, bool | None],
     *,
     vtable_facts_reliable: bool = True,
@@ -335,7 +340,10 @@ def _secondary_groups(
 @registry.detector(
     "vtable_layout",
     requires_support=lambda o, n: (
-        not o.elf_only_mode and not n.elf_only_mode and bool(o.types) and bool(n.types),
+        not o.elf_only_mode
+        and not n.elf_only_mode
+        and bool(o.declarations.types)
+        and bool(n.declarations.types),
         "missing DWARF/header type metadata (inheritance)",
     ),
 )
@@ -367,10 +375,18 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         else None
     )
 
-    for name in sorted(old_types.keys() & new_types.keys()):
+    # Paired through the same `lookup_matched_type` `diff_types` uses, so this
+    # detector and the per-type diff agree on which records are "the same
+    # class" (a namespace move is a removal plus an addition, never a pair).
+    # Emitted symbols stay the bare declaration name, as `diff_types`' do.
+    for key in sorted(old_types):
+        o = old_types[key]
+        n = lookup_matched_type(old_types, new_types, o)
+        if n is None:
+            continue
+        name = o.name
         if is_non_abi_surface_type(name, exclude_stdlib_namespaces=exclude_stdlib):
             continue
-        o, n = old_types[name], new_types[name]
         o_bases = resolved_fact_value(o.bases_fact, [])
         n_bases = resolved_fact_value(n.bases_fact, [])
         o_virtual_bases = resolved_fact_value(o.virtual_bases_fact, [])

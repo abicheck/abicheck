@@ -272,7 +272,12 @@ def _assert_classified(path: Path) -> None:
     snap = load_snapshot(path)
     assert snap.from_headers
     assert snap.extraction_scope is not None
-    decls = [*snap.functions, *snap.variables, *snap.types, *snap.enums]
+    decls = [
+        *snap.declarations.functions,
+        *snap.declarations.variables,
+        *snap.declarations.types,
+        *snap.declarations.enums,
+    ]
     assert decls
     assert all(getattr(d, "ownership_fact", None) is not None for d in decls)
 
@@ -329,7 +334,9 @@ def test_pre_v52_snapshot_reads_unknown_never_a_guessed_owner(tmp_path: Path) ->
     doc.pop("extraction_scope", None)
     old = snapshot_from_dict(doc)
     assert old.extraction_scope is None
-    assert all(getattr(f, "ownership_fact", None) is None for f in old.functions)
+    assert all(
+        getattr(f, "ownership_fact", None) is None for f in old.declarations.functions
+    )
     rel = contract_relations(old)
     assert rel.identities is None
     out = _check_public_not_exported(old, CrosscheckConfig())  # type: ignore[arg-type]

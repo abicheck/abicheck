@@ -45,6 +45,7 @@ from abicheck.model import (
 from abicheck.model.fact_registry import FACT_REGISTRY, KNOWN_UNCONVERTED_ELIGIBLE_FACTS
 from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 from abicheck.storage.fact_codec import _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS
+from tests.snapshot_fields import field_of
 
 _LEGACY = _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS - 1
 
@@ -89,13 +90,13 @@ class TestParamIsRestrictFact:
     @pytest.mark.parametrize("value", [True, False])
     def test_explicit_value_round_trips_present(self, value: bool) -> None:
         snap = _snap(functions=[_fn([Param(name="p", type="int*", is_restrict=value)])])
-        p = _round_trip(snap).functions[0].params[0]
+        p = _round_trip(snap).declarations.functions[0].params[0]
         assert p.is_restrict is value
         assert p.is_restrict_fact.status is FactStatus.PRESENT
 
     def test_omitted_is_not_collected(self) -> None:
         p = _round_trip(_snap(functions=[_fn([Param(name="p", type="int*")])]))
-        param = p.functions[0].params[0]
+        param = p.declarations.functions[0].params[0]
         assert param.is_restrict is False
         assert param.is_restrict_fact.status is FactStatus.NOT_COLLECTED
 
@@ -112,7 +113,7 @@ class TestParamIsRestrictFact:
                 }
             ],
         )
-        param = snapshot_from_dict(d).functions[0].params[0]
+        param = snapshot_from_dict(d).declarations.functions[0].params[0]
         assert param.is_restrict is False
         assert param.is_restrict_fact.status is FactStatus.NOT_COLLECTED
 
@@ -129,7 +130,7 @@ class TestParamIsRestrictFact:
                 }
             ],
         )
-        param = snapshot_from_dict(d).functions[0].params[0]
+        param = snapshot_from_dict(d).declarations.functions[0].params[0]
         assert param.is_restrict is True
         assert param.is_restrict_fact.status is FactStatus.PRESENT
 
@@ -139,7 +140,7 @@ class TestParamIsRestrictFact:
         snap = _snap(
             functions=[_fn([Param(name="p", type="va_list", is_va_list=True)])]
         )
-        param = _round_trip(snap).functions[0].params[0]
+        param = _round_trip(snap).declarations.functions[0].params[0]
         assert param.is_va_list is True
         assert param.is_va_list_fact.status is FactStatus.PRESENT
 
@@ -150,7 +151,7 @@ class TestVariableAccessFact:
         self, level: AccessLevel
     ) -> None:
         v = Variable(name="g", mangled="g", type="int", access=level)
-        got = _round_trip(_snap(variables=[v])).variables[0]
+        got = _round_trip(_snap(variables=[v])).declarations.variables[0]
         assert got.access is level
         assert got.access_fact.status is FactStatus.PRESENT
         # The elf_binding_fact-shaped trap: a bare decoded string would
@@ -163,12 +164,14 @@ class TestVariableAccessFact:
         got = _round_trip(
             _snap(variables=[Variable(name="g", mangled="g", type="int")])
         )
-        assert got.variables[0].access is AccessLevel.PUBLIC
-        assert got.variables[0].access_fact.status is FactStatus.NOT_COLLECTED
+        assert got.declarations.variables[0].access is AccessLevel.PUBLIC
+        assert (
+            got.declarations.variables[0].access_fact.status is FactStatus.NOT_COLLECTED
+        )
 
     def test_explicit_public_is_a_confirmed_fact(self) -> None:
         v = Variable(name="g", mangled="g", type="int", access=AccessLevel.PUBLIC)
-        got = _round_trip(_snap(variables=[v])).variables[0]
+        got = _round_trip(_snap(variables=[v])).declarations.variables[0]
         assert got.access_fact.status is FactStatus.PRESENT
 
     def test_legacy_unreliable_snapshot_downgrades_a_blanket_public(self) -> None:
@@ -179,7 +182,7 @@ class TestVariableAccessFact:
                 {"name": "g", "mangled": "g", "type": "int", "access": "public"}
             ],
         )
-        got = snapshot_from_dict(d).variables[0]
+        got = snapshot_from_dict(d).declarations.variables[0]
         assert got.access is AccessLevel.PUBLIC
         assert got.access_fact.status is FactStatus.NOT_COLLECTED
 
@@ -191,7 +194,7 @@ class TestVariableAccessFact:
                 {"name": "g", "mangled": "g", "type": "int", "access": "private"}
             ],
         )
-        got = snapshot_from_dict(d).variables[0]
+        got = snapshot_from_dict(d).declarations.variables[0]
         assert got.access is AccessLevel.PRIVATE
         assert got.access_fact.status is FactStatus.PRESENT
         assert isinstance(got.access_fact.value, AccessLevel)
@@ -200,7 +203,7 @@ class TestVariableAccessFact:
         v = Variable(
             name="g", mangled="g", type="int", access_fact=Fact.unsupported("DWARF")
         )
-        got = _round_trip(_snap(variables=[v])).variables[0]
+        got = _round_trip(_snap(variables=[v])).declarations.variables[0]
         assert got.access_fact.status is FactStatus.UNSUPPORTED
         assert got.access is AccessLevel.PUBLIC
 
@@ -284,7 +287,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         d = _minimal_dict(
             schema_version=_PRE_CASE_A, from_headers=False, **{collection: [raw]}
         )
-        obj = getattr(snapshot_from_dict(d), collection)[0]
+        obj = field_of(snapshot_from_dict(d), collection)[0]
         assert getattr(obj, f"{field}_fact").status is FactStatus.NOT_COLLECTED
 
     def test_param_is_restrict_too(self) -> None:
@@ -300,7 +303,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
                 }
             ],
         )
-        param = snapshot_from_dict(d).functions[0].params[0]
+        param = snapshot_from_dict(d).declarations.functions[0].params[0]
         assert param.is_restrict_fact.status is FactStatus.NOT_COLLECTED
 
     def test_a_tri_state_false_is_kept_as_evidence_not_downgraded(self) -> None:
@@ -316,7 +319,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
             from_headers=False,
             enums=[{"name": "E", "is_scoped": False}],
         )
-        got = snapshot_from_dict(d).enums[0]
+        got = snapshot_from_dict(d).declarations.enums[0]
         assert got.is_scoped is False
         assert got.is_scoped_fact.status is FactStatus.PRESENT
 
@@ -331,7 +334,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
                 {"name": "g", "mangled": "g", "type": "int", "access": "private"}
             ],
         )
-        got = snapshot_from_dict(d).variables[0]
+        got = snapshot_from_dict(d).declarations.variables[0]
         assert got.access is AccessLevel.PRIVATE
         assert got.access_fact.status is FactStatus.PRESENT
 
@@ -401,7 +404,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
             ],
         }
         d = _minimal_dict(schema_version=_PRE_CASE_A, **{**base, **extra})
-        f = snapshot_from_dict(d).types[0].fields[0]
+        f = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert f.is_const_fact.status is expected
 
     def test_no_debug_block_is_producer_evidence(self) -> None:
@@ -467,7 +470,8 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
             d["dwarf_advanced"]["has_dwarf"] = advanced
             got = snapshot_from_dict(json.loads(json.dumps(d)))
             assert (
-                got.types[0].fields[0].is_const_fact.status is FactStatus.NOT_COLLECTED
+                got.declarations.types[0].fields[0].is_const_fact.status
+                is FactStatus.NOT_COLLECTED
             ), f"has_dwarf={basic}/{advanced} was treated as producer evidence"
 
     def test_a_dwarf_producible_fact_is_left_alone(self) -> None:
@@ -487,7 +491,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
                 }
             ],
         )
-        f = snapshot_from_dict(d).types[0].fields[0]
+        f = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert f.is_const is True
         assert f.is_const_fact.status is FactStatus.PRESENT
 
@@ -504,7 +508,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         snap = snapshot_from_dict(d)
         assert snap.from_headers is True
         assert snap.from_headers_inferred is True
-        obj = getattr(snap, collection)[0]
+        obj = field_of(snap, collection)[0]
         assert getattr(obj, f"{field}_fact").status is FactStatus.NOT_COLLECTED
 
     def test_a_header_snapshot_is_unaffected(self) -> None:
@@ -523,7 +527,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
                 }
             ],
         )
-        got = snapshot_from_dict(d).functions[0]
+        got = snapshot_from_dict(d).declarations.functions[0]
         assert got.deprecated_fact.status is FactStatus.PRESENT
 
 
@@ -750,7 +754,7 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
 
     @staticmethod
     def _loaded(snap: AbiSnapshot, owner: str, collection: str) -> object:
-        obj = getattr(snap, collection)[0]
+        obj = field_of(snap, collection)[0]
         if owner == "TypeField":
             return obj.fields[0]
         if owner == "Param":

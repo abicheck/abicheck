@@ -95,7 +95,7 @@ def case143_audit_accidental_export() -> AbiSnapshot:
     snap = _snap(
         elf=_elf(ElfSymbol(name="_Z6renderv"), ElfSymbol(name="_Z11debug_dumpv"))
     )
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="render",
             mangled="_Z6renderv",
@@ -117,7 +117,7 @@ def case143_audit_accidental_export() -> AbiSnapshot:
 # ── case144: private header leak (private_header_leak) ───────────────────────
 def case144_audit_private_header_leak() -> AbiSnapshot:
     snap = _snap(elf=_elf(ElfSymbol(name="_Z11make_widgetv")))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="make_widget",
             mangled="_Z11make_widgetv",
@@ -125,7 +125,7 @@ def case144_audit_private_header_leak() -> AbiSnapshot:
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="detail::WidgetImpl",
             kind="struct",
@@ -156,7 +156,7 @@ def case146_audit_rtti_for_internal() -> AbiSnapshot:
             ElfSymbol(name="_ZTV12InternalNode"),
         )
     )
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="render",
             mangled="_Z6renderv",
@@ -164,7 +164,7 @@ def case146_audit_rtti_for_internal() -> AbiSnapshot:
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="InternalNode", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
         ),
@@ -178,7 +178,7 @@ def case147_scan_depth_ladder() -> AbiSnapshot:
     # confirm a genuine private_header_leak (adds the source_index provider). The
     # README shows what each depth proved (S3 lexical → S5 semantic).
     snap = _snap(elf=_elf(ElfSymbol(name="_Z7connectv")))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="connect",
             mangled="_Z7connectv",
@@ -187,7 +187,7 @@ def case147_scan_depth_ladder() -> AbiSnapshot:
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="detail::SessionState",
             kind="struct",
@@ -253,7 +253,7 @@ def case149_xcheck_odr_variant() -> AbiSnapshot:
 # ── case150: bidirectional export ↔ decl pair ────────────────────────────────
 def case150_xcheck_export_public_pair() -> AbiSnapshot:
     snap = _snap(elf=_elf(ElfSymbol(name="_Z8internalv", is_default=True)))
-    snap.functions = [
+    snap.declarations.functions = [
         # Exported with no public declaration → exported_not_public.
         Function(
             name="internal",

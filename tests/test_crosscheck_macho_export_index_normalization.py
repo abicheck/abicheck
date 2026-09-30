@@ -70,7 +70,7 @@ class TestMachoExportCorrelationNotDoubleStripped:
         ``exported_not_public`` and ``public_not_exported`` for the same,
         unchanged symbol on a self-comparison."""
         snap = _snap(macho=MachoMetadata(exports=[MachoExport(name="_ZN2ns3fooEv")]))
-        snap.functions = [
+        snap.declarations.functions = [
             Function(
                 name="foo",
                 mangled="_ZN2ns3fooEv",
@@ -94,7 +94,7 @@ class TestMachoExportCorrelationNotDoubleStripped:
                 ]
             )
         )
-        snap.functions = [
+        snap.declarations.functions = [
             Function(
                 name="foo",
                 mangled="_ZN2ns3fooEv",
@@ -119,7 +119,7 @@ class TestMachoExportCorrelationNotDoubleStripped:
                 ]
             )
         )
-        snap.functions = [
+        snap.declarations.functions = [
             Function(
                 name="ns_func",
                 mangled="_ZN2ns7ns_funcEi",

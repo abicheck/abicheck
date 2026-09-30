@@ -177,8 +177,8 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
 
     # Sanity: both paths actually extracted the same real work, not near-empty
     # snapshots that would make the timing comparison meaningless.
-    assert len(legacy_snap.types) == len(session_snap.types)
-    assert legacy_snap.types
+    assert len(legacy_snap.declarations.types) == len(session_snap.declarations.types)
+    assert legacy_snap.declarations.types
 
     # Validation measured ~8x on a comparable fixture; require only a modest,
     # CI-noise-tolerant fraction of that so this doesn't flake on a busy
@@ -217,7 +217,9 @@ def test_dwarf_only_dump_scaling_with_cu_count_stays_subquadratic(
         start = time.perf_counter()
         snap = dump(so, [], dwarf_only=True)
         elapsed = max(time.perf_counter() - start, 1e-3)
-        assert snap.functions, f"expected exported functions at n_cus={n_cus}"
+        assert snap.declarations.functions, (
+            f"expected exported functions at n_cus={n_cus}"
+        )
         return elapsed
 
     # Four CU counts, median-of-3 per count, least-squares exponent (see

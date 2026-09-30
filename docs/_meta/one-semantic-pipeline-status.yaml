@@ -183,11 +183,12 @@ concepts:
       (bases/virtual_bases/vtable/vptr_offset_bits/is_va_list) -- not the
       implementation-consolidation removal gate, which stays open for the
       vtable/TYPE_VTABLE_CHANGED cluster (see the 2026-09-05 re-assessment
-      correction below). Residual,
-      separately tracked: seven case-(a) fields (default, the five
-      deprecated/is_scoped surfaces) left on the existing fact_provenance
-      mechanism after their own fourth-through-seventh-slice investigation
-      found no safe conversion without a legacy-hybrid load-path fix.
+      correction below). The seven case-(a)
+      fields (default, the five deprecated/is_scoped surfaces) left on
+      fact_provenance by the fourth-through-seventh slices moved onto
+      FactStatus on 2026-09-30 (compare/fact_gate.both_facts_present) once
+      T9's load-path fix closed the legacy-hybrid blocker; TypeField.default
+      keeps its same-producer check for value comparability only.
       **2026-09-05 re-assessment correction:** the vtable/
       TYPE_VTABLE_CHANGED "final closure" is an *investigated decline* of a
       behavioral change, which does not close this concept's implementation
@@ -278,11 +279,10 @@ concepts:
           already treats any non-PRESENT status as incomplete via
           _fact_str_list_confirmed. vptr_offset_bits_fact is deliberately
           left untouched (see compare/vtable_evidence.py's own "NOT
-          consulted here" note). What remains open: the seven case-(a)
-          fields still on the fact_provenance mechanism (a separate,
-          blocked item -- no safe conversion without a legacy-hybrid
-          load-path fix, not a decline), and the shared declined-comparison
-          accounting this item's text also calls for.
+          consulted here" note). The seven case-(a) fields formerly on
+          the fact_provenance mechanism moved onto FactStatus (2026-09-30,
+          compare/fact_gate.py), and the shared declined-comparison
+          accounting landed with T9.
         tracked_as: >-
           duplication-and-convergence-assessment.md Phase 6 item 4 / track
           T9; the full three-round reasoning lives once, canonically, in
@@ -428,6 +428,23 @@ concepts:
       contribution without an entity_id, stable tier restricted to
       cross-snapshot-stable ids) -- see
       tests/test_opaque_identity_tiers.py.
+      2026-09-29 (2B consumer sweep): an inventory of every remaining
+      cross-snapshot or finding-to-record lookup keyed by bare
+      RecordType.name found eleven; the ones deciding findings now resolve
+      through the canonical record identity -- diff_vtable_layout (pairing
+      and base lookups via TypeMap/lookup_matched_type, previously
+      last-wins on same-leaf records), diff_cpp_patterns' tag-rename and
+      detail::-leak scans, diff_type_spellings' field pass,
+      diff_reconcile and diff_filtering's stdlib attribution (the new
+      compare.record_lookup.RecordLookup: entity_id first, bare name only
+      when unambiguous), diff_stdlib_impl's leaf fallback (unique leaves
+      only), and diff_integer_model/diff_time64's typedef scans
+      (typedef_diff_maps). Deliberately left: diff_platform's DWARF
+      StructLayout dicts (no entity_id in that model),
+      compare/opaque_struct_types' existence sets (spelling questions by
+      design), buildsource/source_diff's concept map (SourceEntity has no
+      identity model), and export-name maps (the export name is the
+      symbol identity).
     investigated_declined:
       - item: >-
           Promoting the `entity:` alias into a real match tier in
@@ -476,8 +493,20 @@ concepts:
     authority: mixed
     lifecycle: wired
     removal_gate: >-
-      Phase 6B (semantic-ir-checker-cutover), two cohorts landed so far.
-      First cohort (2026-09-03): the TYPEDEF family now reads SemanticIR
+      Phase 6B (semantic-ir-checker-cutover), three cohorts landed so far.
+      Third cohort (2026-09-30): RECORD LAYOUT -- TYPE_SIZE_CHANGED/
+      TYPE_ALIGNMENT_CHANGED read CanonicalEntity.size_bits/alignment_bits
+      (snapshot schema v53, semantic_ir document/section version 2) through
+      each side's index (abicheck/compare/record_layout.py), per-side
+      authority as T3 defines it, with no legacy adjudication. It supersedes
+      the "records: nothing to close" reasoning below in one respect found
+      while implementing it: the IR and the RecordType CAN disagree, since
+      dumper_layout_backfill fills a clang record's layout from DWARF after
+      normalization; model/semantic_ir_record_layout.py now carries that
+      fill into the IR at the snapshot boundary (AbiSnapshot.__post_init__
+      and the storage decode), and the same fill migrates a pre-v53 IR.
+      One-sided layout is recorded as a declined comparison (T9) instead of
+      passing silently. First cohort (2026-09-03): the TYPEDEF family now reads SemanticIR
       through SemanticIRIndex (abicheck/compare/typedefs.py). Second
       cohort (2026-09-03): the CONSTANT family too
       (abicheck/compare/constants.py). Both share one
@@ -1427,6 +1456,13 @@ concepts:
       remains open, along with evaluation_config (still None on every real
       instance) and T4's other two items (splitting backend selection from
       fallback policy; a source-only dump execution variant).
+      2026-09-29: evaluation_config is no longer None on the typed compare
+      path -- classify_compare_pair resolves it once
+      (compare_gate_receipt.resolve_request_evaluation_config) and returns
+      it on CompareResult.resolved_execution_context, the same object the
+      receipt and DiffResult.evaluation_config read. Open: the native
+      compare CLI (cli_compare_receipt) still resolves its own; dump has no
+      compatibility policy, so None there is not-applicable.
   run_outcome:
     primitive: complete
     producers: complete
@@ -1530,6 +1566,17 @@ concepts:
       floors blind, since the CLI's single `--write` slot means this
       script's own JSON-targeted append always loses to the user's later,
       non-JSON one. Both track T8 and track T6 are now complete.
+      2026-09-29 T8 follow-up: _is_cli_error()'s stderr check no longer
+      decides anything for mode compare or dump. Usage errors are the CLI's
+      own exit 64 (Click's 2 is remapped at the root group, so exit 2 is
+      always API_BREAK and a forged Usage line can no longer downgrade it),
+      and compare's exit 1 is attributed from the report via
+      _report_validity or published as ERROR when no readable result
+      exists. Same day, deps-tree/deps-compare too: run.sh requests their
+      JSON report as a sidecar and report_query recognizes its
+      verdict.loadability/abi_risk object, so _is_cli_error is deleted and
+      run.sh reads no stderr at all. Remaining for this gate: only the P0
+      EffectiveGate fold-target item above.
   sectioned_storage:
     primitive: complete
     producers: complete
@@ -1582,12 +1629,15 @@ concepts:
       doesn't explicitly build or pass a package still gets the
       pre-existing single-artifact representation. Per
       docs/contribute/plans/storage-format-v2.md's own Phase 1 status,
-      closing that gap needs: the `.tar.zst` single-file transport form
-      (A1.1's own remainder), digest-deduplicated shared
-      BuildSourcePack/toolchain evidence (A1.5), `bundle_variants:`
-      config/CLI wiring (A1.6), stored/live and stored/stored
-      release-comparison reachability from the standard CLI (A1.7), and
-      non-ELF artifact membership (A1.8).
+      closing that gap needs: (the single-file transport, A1.1's own
+      remainder, landed 2026-09-30 as a zip archive --
+      storage/project_package_archive.py, accepted by compare -- and the
+      storage half of digest-deduplicated shared evidence is tested,
+      tests/test_shared_build_evidence_dedup.py) digest-deduplicated shared
+      BuildSourcePack/toolchain evidence (A1.5); `bundle_variants:`
+      config/CLI wiring (A1.6, `project capture-variants`), stored/live and
+      stored/stored release-comparison reachability from the standard CLI
+      (A1.7) and non-ELF artifact membership (A1.8) have landed.
 
   report_document:
     primitive: complete

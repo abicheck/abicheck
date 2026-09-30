@@ -59,7 +59,7 @@ def _snap_with_object(
         ],
     )
     if variable is not None:
-        s.variables.append(variable)
+        s.declarations.variables.append(variable)
     return s
 
 

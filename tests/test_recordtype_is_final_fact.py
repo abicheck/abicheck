@@ -80,7 +80,7 @@ def _minimal_dict(**overrides: object) -> dict:
 class TestIsFinalFactRoundTrip:
     def test_fresh_snapshot_round_trips_true(self) -> None:
         rec = RecordType(name="Widget", kind="class", is_final=True)
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         assert r.is_final is True
         assert r.is_final_fact.status is FactStatus.PRESENT
         assert r.is_final_fact.value is True
@@ -89,14 +89,14 @@ class TestIsFinalFactRoundTrip:
         self,
     ) -> None:
         rec = RecordType(name="Widget", kind="class", is_final=False)
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         assert r.is_final is False
         assert r.is_final_fact.status is FactStatus.PRESENT
         assert r.is_final_fact.value is False
 
     def test_omitted_is_final_round_trips_not_collected(self) -> None:
         rec = RecordType(name="Widget", kind="class")
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         assert r.is_final is None
         assert r.is_final_fact.status is FactStatus.NOT_COLLECTED
 
@@ -104,7 +104,7 @@ class TestIsFinalFactRoundTrip:
         rec = RecordType(
             name="Gapped", kind="struct", is_final_fact=Fact.unsupported("DWARF-only")
         )
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         assert r.is_final_fact.status is FactStatus.UNSUPPORTED
         assert r.is_final_fact.diagnostics == ("DWARF-only",)
         assert r.is_final is None
@@ -114,7 +114,7 @@ class TestIsFinalFactRoundTrip:
             schema_version=29,
             types=[{"name": "Foo", "kind": "class", "is_final": True}],
         )
-        r = snapshot_from_dict(d).types[0]
+        r = snapshot_from_dict(d).declarations.types[0]
         assert r.is_final is True
         assert r.is_final_fact.status is FactStatus.PRESENT
         assert r.is_final_fact.value is True
@@ -126,7 +126,7 @@ class TestIsFinalFactRoundTrip:
             schema_version=29,
             types=[{"name": "Foo", "kind": "class"}],
         )
-        r = snapshot_from_dict(d).types[0]
+        r = snapshot_from_dict(d).declarations.types[0]
         assert r.is_final is None
         assert r.is_final_fact.status is FactStatus.NOT_COLLECTED
 
@@ -139,8 +139,10 @@ class TestIsFinalFactRoundTrip:
             types=[{"name": "Foo", "kind": "class", "is_final": True}],
         )
         snap = snapshot_from_dict(d)
-        assert snap.types[0].is_final_fact.status is FactStatus.NOT_COLLECTED
-        assert snap.types[0].is_final is None
+        assert (
+            snap.declarations.types[0].is_final_fact.status is FactStatus.NOT_COLLECTED
+        )
+        assert snap.declarations.types[0].is_final is None
 
     def test_snapshot_to_dict_encodes_status_as_plain_string(self) -> None:
         rec = RecordType(name="Foo", kind="class", is_final_fact=Fact.present(True))
@@ -207,5 +209,5 @@ class TestIsFinalReplaceBridge:
         assert rec.is_final_fact is not None
         assert rec.is_final_fact.value is False  # already stale before any I/O
 
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         assert r.is_final is False  # the mutation to True did not survive

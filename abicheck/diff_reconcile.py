@@ -68,6 +68,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .compare.record_lookup import RecordLookup
 from .model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
@@ -229,8 +230,8 @@ def reconcile_build_context(
     if not have_evidence:
         return changes, []
 
-    old_types = {t.name: t for t in old.types}
-    new_types = {t.name: t for t in new.types}
+    old_types = RecordLookup(old.declarations.types)
+    new_types = RecordLookup(new.declarations.types)
 
     kept: list[Change] = []
     reconciled: list[Change] = []
@@ -238,8 +239,10 @@ def reconcile_build_context(
         if change.kind not in _RECONCILABLE_KINDS:
             kept.append(change)
             continue
-        t_old = old_types.get(change.symbol)
-        t_new = new_types.get(change.symbol)
+        # ADR-063 2B: the finding's own identity, never a last-wins bare-name
+        # dict (see `RecordLookup`); no answer keeps the finding.
+        t_old = old_types.resolve(change.symbol, change.entity_id)
+        t_new = new_types.resolve(change.symbol, change.entity_id)
         if t_old is None or t_new is None:
             kept.append(change)
             continue

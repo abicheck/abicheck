@@ -63,6 +63,8 @@ from ..serialization import load_snapshot
 from ..service_dump_cache import cached_run_dump
 from .header_exclusion_audit import record_achieved_header_exclusions
 from .ownership_request import classify_extracted
+from .project_package_input import resolve_project_package
+from .storage import is_project_package_archive
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -201,6 +203,8 @@ def is_stored_snapshot_operand(path: Path) -> bool:
             # package's own `manifest.json` content rather than its
             # filename, which a `BuildSourcePack` shares.
             return is_project_snapshot_package_dir(path)
+        if is_project_package_archive(path):
+            return True
         return sniff_text_format(path) in {"json", "perl"}
     except OSError:
         return False
@@ -242,45 +246,6 @@ def input_spec_is_live(spec: Any) -> bool:
     return side_is_live(
         spec.path, had_raw_evidence=bool(spec.sources or spec.build_info)
     )
-
-
-def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
-    """*path* as a directory-backed ADR-062/ADR-063 storage-v2
-    `ProjectSnapshot` package (`project_snapshot_legacy
-    .read_legacy_snapshot_document` — manifest.json + refs/ + objects/,
-    produced via `project_snapshot_legacy.write_legacy_snapshot_package` --
-    no `dump` CLI flag writes one today, see that module's own docstring for
-    why `dump`'s real output is the single-file sectioned shape instead),
-    decoded into an `AbiSnapshot` exactly the way a legacy `.abi.json` file
-    already is (`serialization.snapshot_from_dict`).
-
-    Single-artifact packages only, matching what `write_legacy_snapshot_
-    package` ever writes (ADR-062 A1.3's "one-artifact project" shape) — a
-    real multi-library `ProjectSnapshot` is real, separately-scoped future
-    work this function does not guess at (see `read_legacy_snapshot_document`'s
-    own docstring for the same limit).
-
-    Raises `SnapshotError` for anything that goes wrong reading or decoding
-    the package -- a missing/malformed `manifest.json`, a multi-artifact
-    package with no artifact named explicitly, an unreadable section object
-    -- the identical translation every other `resolve_input` branch applies
-    at its own boundary.
-    """
-    from ..project_snapshot_legacy import read_legacy_snapshot_document
-    from ..serialization import snapshot_from_dict
-
-    try:
-        document = read_legacy_snapshot_document(path)
-    except (SnapshotError, OSError, KeyError, ValueError, TypeError) as exc:
-        raise SnapshotError(
-            f"Failed to load ProjectSnapshot package '{path}': {exc}"
-        ) from exc
-    try:
-        return snapshot_from_dict(document)
-    except (TypeError, ValueError, KeyError, UnicodeDecodeError) as exc:
-        raise SnapshotError(
-            f"Failed to decode ProjectSnapshot package '{path}': {exc}"
-        ) from exc
 
 
 def _resolve_symvers(path: Path, version: str) -> AbiSnapshot | None:
@@ -564,8 +529,8 @@ def _resolve_input_impl(
     # `IsADirectoryError`, so this must run first, unconditionally (a
     # directory is never ELF/PE/Mach-O/BTF/CTF/symvers/JSON-file regardless
     # of `is_elf`).
-    if path.is_dir():
-        return _resolve_project_snapshot_directory(path)
+    if path.is_dir() or is_project_package_archive(path):
+        return resolve_project_package(path)
 
     # Fast path: caller already knows it's ELF
     if is_elf is True:

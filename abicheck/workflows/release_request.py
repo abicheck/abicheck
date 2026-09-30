@@ -344,6 +344,22 @@ def resolve_release_compare_plan(
         scope_plan = resolve_release_scope_plan(
             old_map, new_map, plan_matched_keys, inventory_evidence
         )
+        if old_stored and new_stored:
+            # ADR-062 A1.6: pair both packages' VariantRefs by variant_id
+            # (report-only -- the selected variants are what gets compared).
+            from dataclasses import replace as _replace
+
+            from .variant_pairing import release_variant_pairing
+
+            scope_plan = _replace(
+                scope_plan,
+                variant_pairing=release_variant_pairing(
+                    request.old_dir,
+                    request.new_dir,
+                    old_variant=request.old_variant,
+                    new_variant=request.new_variant,
+                ),
+            )
 
         gate = resolve_release_gate_options(
             request.pack_application,

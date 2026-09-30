@@ -120,7 +120,7 @@ def test_config_rejects_bad_blocks(raw, message):
 
 def _snap(path, version, fns):
     snap = AbiSnapshot(library="libx.so", version=version)
-    snap.functions = [
+    snap.declarations.functions = [
         Function(name=n, mangled=n, return_type="int", visibility=Visibility.PUBLIC)
         for n in fns
     ]

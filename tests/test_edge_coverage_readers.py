@@ -56,10 +56,12 @@ class TestDepthProjection:
         return project_snapshot_to_depth(_snap([_fn()], elf=elf), "binary")
 
     def test_unread_table_does_not_strip_every_declaration(self):
-        assert [f.mangled for f in self._project(UNREAD()).functions] == ["_Z1fv"]
+        assert [f.mangled for f in self._project(UNREAD()).declarations.functions] == [
+            "_Z1fv"
+        ]
 
     def test_read_table_still_strips_an_unexported_declaration(self):
-        assert self._project(_read("other")).functions == []
+        assert self._project(_read("other")).declarations.functions == []
 
 
 # -- ELF deleted fallback -----------------------------------------------------

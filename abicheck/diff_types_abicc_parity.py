@@ -98,14 +98,14 @@ def _diff_type_kind_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_map = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
     new_map = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
@@ -152,7 +152,7 @@ def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_map = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if not t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
@@ -160,7 +160,7 @@ def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
     new_map = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if not t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced

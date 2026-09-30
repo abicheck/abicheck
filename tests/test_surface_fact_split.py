@@ -726,12 +726,16 @@ class TestLegacyBridgeIsBehaviourPreserving:
         fn = _fn(visibility=visibility)
         var = Variable(name="v", mangled="_Z1v", type="int", visibility=visibility)
         snap = _snap("1.0", fn)
-        snap.variables = [var]
+        snap.declarations.variables = [var]
         path = tmp_path / "snap.json"
         save_snapshot(snap, str(path))
         loaded = load_snapshot(str(path))
-        assert surface_fact_summary(loaded.functions[0]) == surface_fact_summary(fn)
-        assert surface_fact_summary(loaded.variables[0]) == surface_fact_summary(var)
+        assert surface_fact_summary(
+            loaded.declarations.functions[0]
+        ) == surface_fact_summary(fn)
+        assert surface_fact_summary(
+            loaded.declarations.variables[0]
+        ) == surface_fact_summary(var)
 
 
 class TestLegacyElfOnlyKeepsHeaderEvidenceUnknown:
@@ -883,11 +887,17 @@ class TestExportNamedSubjectsNeedTheIntersection:
             )
 
         old_snap = _snap("1.0")
-        old_snap.functions = [inst(mangled_old, _TRUE), inst(surviving, _TRUE)]
+        old_snap.declarations.functions = [
+            inst(mangled_old, _TRUE),
+            inst(surviving, _TRUE),
+        ]
         new_snap = _snap("2.0")
         # The stale `extern template` declaration: still in the headers,
         # no longer emitted into the binary.
-        new_snap.functions = [inst(mangled_old, _FALSE), inst(surviving, _TRUE)]
+        new_snap.declarations.functions = [
+            inst(mangled_old, _FALSE),
+            inst(surviving, _TRUE),
+        ]
         kinds = {c.kind for c in compare(old_snap, new_snap).changes}
         assert ChangeKind.INSTANTIATION_MISSING_FROM_BINARY in kinds, sorted(
             k.value for k in kinds

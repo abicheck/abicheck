@@ -146,7 +146,7 @@ def _diff_same_mangling(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # C++ return-only breaks and C/extern-"C" exports alike.
     ld_by_mangled = {
         f.mangled
-        for f in old.functions
+        for f in old.declarations.functions
         if (f.return_type and "long double" in f.return_type)
         or any("long double" in p.type for p in f.params)
     }

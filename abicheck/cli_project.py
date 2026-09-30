@@ -70,6 +70,7 @@ from .buildsource.validation_input import (
 from .cli import main
 from .cli_options import export_options, verbose_option
 from .frontends.cli.options.export import ExportSet
+from .frontends.cli.project_capture_variants import capture_variants_cmd
 from .frontends.cli.runtime import _setup_verbosity, emit_export_set
 from .workflows.extraction import (
     BindingsFile,
@@ -92,6 +93,8 @@ def project_group() -> None:
                        impact-use-cases.yaml manifest.
       plan             Derive run-plan.json from .abicheck.yml + build-output.json.
       history          Derive lifecycle events + coverage from N stored snapshots.
+      capture-variants Capture every declared bundle_variants: variant into
+                       one ProjectSnapshot package.
 
     Most libraries never need this group — it exists for projects that check
     several targets/build profiles/baseline channels together, wired through
@@ -767,3 +770,8 @@ def project_history_cmd(
     emit_export_set(exports, _render_history)
 
     sys.exit(0)
+
+
+# ADR-062 A1.6: defined in frontends/cli/ (this module is near its line cap),
+# attached here so that module needs no import back into the CLI cycle.
+project_group.add_command(capture_variants_cmd)

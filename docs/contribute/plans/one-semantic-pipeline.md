@@ -196,7 +196,7 @@ which track closes each:
 | 2B/6B | The landed typedef and constant cohorts are *fidelity gates*, not authority transfers: both indexes are built every comparison and the legacy projection adjudicates | T3 |
 | 4B | Built, not unwired, on both paths — what is open is consumption: partial on compare (`classify_compare_pair` reads `requested_depth`), absent on dump | T4 |
 | 5B | The `vtable` "final closure" is an investigated decline of a behavioral change; the PDB fabrication path and the authority transfer are still open | T9 |
-| 7B | `action/run.sh` is partially migrated — the residual is the raw exit/stderr path | T8 |
+| 7B | `action/run.sh` is partially migrated — the residual is the raw exit/stderr path (compare/dump closed 2026-09-29; deps modes remain) | T8 |
 
 One finding bears on this plan's own guardrail design rather than on a row:
 `scripts/semantic_ir_cutover.py`'s module-level "no legacy attribute read"
@@ -217,11 +217,32 @@ when a first PR lands against a sub-phase:
 | Sub-phase | Status | Closes | One-line goal |
 |---|---|---|---|
 | **2B — Identity consumer migration** | in progress | Phase 2's remaining string-identity call sites | Migrate `diff_filtering.py`/`type_reachability.py` onto `EntityId` once DWARF-side blockers clear; split `EntityId`/`OccurrenceId` matching into a `StableEntityId` tier (cross-release, suppression-alias-safe) vs. a `SnapshotLocalIdentity` fallback, rather than a further attempt at globally-stable `Anonymous`/`LocalToFunction` ordinals (two prior attempts already reverted). The `StableEntityId`/`SnapshotLocalIdentity` split landed (`abicheck/model/identity_tiers.py`), and two post-parse consumers migrated onto it — `diff_filtering.py`'s opaque-type suppression (`compare/opaque_types.OpaqueTypeIndex`, matching on `StableEntityId` first and the `RecordType.name` spelling second) and `type_reachability.py`'s closure-walk record-tracking keys (`SnapshotLocalIdentity` rather than bare `str`). Bare-name-collision narrowing landed (2026-09-03, see the note below the table): `OpaqueTypeIndex.complete` gates `contains(..., strict=...)` on both sides' stable tier being provably complete for the comparison at hand, closing the collision exactly when doing so cannot drop a real suppression. The `entity:` alias promotion in `finding_identity.resolve_change_identity`/`report_canonical_finding_id` was investigated (2026-09-03) and declined rather than deferred: no currently-identifiable finding needs it (typedefs/constants already get a fine NORMALIZED tier off their own spelling, functions/variables already get the stronger CANONICAL mangled tier), so wiring it in would trade real suppression-file compatibility for a benefit that cannot be demonstrated today — see the ledger's `identity` concept for the full reasoning |
-| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. A fourth slice (2026-09-04, "Track 3") closed the "unread" half of that gap for one concrete site: `classify_compare_pair`'s own `DiffResult.requested_depth` stamp — previously a second, independent `request.depth.lower()` normalization living a few lines away from the identical one `ResolvedExecutionContext.from_plan` already performs — now reads `pair.resolved_execution_context.requested_depth` instead, when it agrees with the call's own `request.depth` (Codex review, PR #1047: this function's own two-phase split lets a caller pass a *different* `request` than built `pair`, and `old`/`new` are always projected to *this* call's `request.depth`, so a disagreement defers to it rather than reporting a depth the classification never actually saw), falling back to the direct computation for a caller that attaches no context at all (a hand-built `ResolvedComparePair`, as some unit tests still do). `classify_compare_pair` is the typed Python API's `run_compare_request` path specifically -- the native `compare` CLI calls `compare_snapshots()` directly and does not go through it. **Correction to this row's own prior text:** `resolve_dump_request`/`execute_dump_request` are *not* "fully unwired" -- `execute_dump_request` already calls `with_assurance()` (landed 2026-09-03, commit `280b6c614`, the same day as the third slice above), the real post-execution caller this row previously said didn't exist yet; `DumpResult.resolved_execution_context` is fully built, assurance-enriched, and even carries a per-side `compile_contexts` entry when a header-AST parse ran -- but nothing downstream of `execute_dump_request` (no CLI, nothing outside the function itself) reads it back, so it remains a genuinely *unread*, not unbuilt, object. A fifth slice (2026-09-04) closed one more concrete site on the `compare` path: `resolve_compare_request` was carrying no `compile_contexts` at all (`evaluation_config`/`compile_contexts` were both named as deferred in the third slice's own note) even though each side's resolved `CompileContext` was reachable a few lines away -- switching `_resolve_side`/`_resolve_old_side`/`_resolve_new_side` from `resolve_side_snapshot` to `_resolve_side_snapshot_impl` recovers `SideResolution.effective_compile_context` per side, threaded through the identical safety gate the dump path already applied (lifted out of `execute_dump_request`'s own inline conditional into one shared predicate so the two paths share one decision instead of two hand-copies -- Codex review, PR #1037, six rounds, the dump-path original). A sixth slice (2026-09-04, Codex review, fresh evidence on the same PR) relocated that shared predicate a second time, to `workflows.artifact.compile_context_gate.side_effective_compile_context` (a new leaf module, not `workflows.artifact.execute` as first landed): the initial placement grew `service_compare_pipeline.py`/`workflows/artifact/execute.py` past the 800-line production cap, and a bare `SideResolution` type import would have pulled the helper into the large, already-allowlisted `workflows.artifact.execute -> service -> ...` import cycle as a genuinely new member -- so the function now takes the bare `CompileContext | None` it actually reads off `SideResolution.effective_compile_context` instead of the whole object, needing no import from `execute.py` at all. `evaluation_config` remains unresolved on both paths (still `None` on every real `ResolvedComparePair`/`ResolvedDumpRequest`), and every *other* independently-re-derived value this sub-phase names (policy/pack resolution) is still read the old way — this slice closes two concrete sites (compile-context threading, plus the dedup itself), not the sub-phase |
-| **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`). Second PR landed (see the note below the table): every remaining reader of `bases`/`virtual_bases`/`is_va_list` audited and closed — one genuine pairwise fabrication risk (`diff_cxx_rules._transitive_bases`, feeding `virtual_method_addition`) gated the same way, the rest (single-snapshot reachability/classification aids) documented as already safe. `vtable`/`vptr_offset_bits` remain on the old collapse, deliberately (their own dedicated, higher-scrutiny slice — see below), so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed. Third PR landed (see the note below the table): the dedicated `vtable`/`vptr_offset_bits` slice — `diff_vtable_layout._is_polymorphic`/`diff_layout._check_vptr_introduced` now read `FactStatus` directly (additive, per-record); the `TYPE_VTABLE_CHANGED` cluster (`diff_types_vtable.py`) itself was re-audited and found unsafe to convert without a `diff_cxx_rules.virtual_method_addition`-side fix blocked by an import-cycle constraint, so the removal gate remains open for that one cluster specifically. Fourth through seventh PRs landed (see the note below the table): closed the case-(a) field inventory's audit status entirely -- `is_const`/`is_volatile`/`is_mutable`/`is_restrict`/`access` gated directly; `default` and the five `deprecated`/`is_scoped` surfaces investigated, found not safely convertible without a legacy-hybrid load-path fix (a real end-to-end test regression, not a hypothetical), and left on their existing `fact_provenance` mechanism with the specific finding recorded. Eighth PR landed (see the note below the table): audited the entire remaining case-(b) field inventory (nineteen per-declaration fields plus six detector-unconsumed snapshot-level ones) and found it already safe -- zero findings, no code changes -- closing this sub-phase's audit scope for every model field carrying a `Fact[T]` sibling as of this session; the sub-phase's own remaining work was the `vtable`/`TYPE_VTABLE_CHANGED` cluster (`vptr_offset_bits` is fully gated — see the corrected note further down). Track 4's 5B final closure (2026-09-04, see the note below the table) closed that last cluster as a formal, investigated decline, after a three-round investigation: round 1 declined, round 2 landed a `FactStatus` decline once Codex review found it closed a real, reachable PDB-driven fabrication, and round 3 reverted round 2 after it silently regressed a real detection scenario (a hand-constructed/typed-API `RecordType` omitting `vtable=` -- indistinguishable via `FactStatus` alone from PDB's own non-evidence -- means non-polymorphic, not "unknown"). `vtable_transition_is_evidenced`'s heuristic is unchanged from before this closure; the PDB fabrication remains a real, open, explicitly-documented gap. This closes 5B's removal gate for every named field family; the sub-phase's remaining open scope is the seven `fact_provenance`-gated fields from the fourth-through-seventh PRs, not a further audit sweep |
+| **4B — Resolved execution context** | in progress | The gap between `AnalysisPlan`'s deliberately narrow preflight scope and real execution's need for one resolved object | A `ResolvedExecutionContext` built only for real (non-dry-run) execution — effective config with per-field provenance, resolved compile/toolchain context, effective/available evidence depth, resolved policy/pack/contract — so downstream code stops independently re-reading `.abicheck.yml`, re-deriving precedence, or re-resolving severity scheme. First PR landed, in two slices (see Phase 4's own "Adjacent, additive infrastructure landed" note, below, under "Phases"): the `ResolvedExecutionContext` type itself (composing an `AnalysisPlan` with an already-resolved `CompatibilityEvaluationConfig`/`CompileContext`s, provenance access, and a resolution digest), then a second slice closing the "requested/effective/available depth" field list via a new `EvidenceView` (copied off `AnalysisAssurance`, never re-derived). A third slice (2026-09-03) landed the sub-phase's first real call site: `service_compare_pipeline.resolve_compare_request` now builds one from its own already-resolved `AnalysisPlan` and attaches it on `ResolvedComparePair` — additive, unread by any consumer yet, but no longer "a dataclass nothing outside its own tests constructs" for the `compare` path. A fourth slice (2026-09-04, "Track 3") closed the "unread" half of that gap for one concrete site: `classify_compare_pair`'s own `DiffResult.requested_depth` stamp — previously a second, independent `request.depth.lower()` normalization living a few lines away from the identical one `ResolvedExecutionContext.from_plan` already performs — now reads `pair.resolved_execution_context.requested_depth` instead, when it agrees with the call's own `request.depth` (Codex review, PR #1047: this function's own two-phase split lets a caller pass a *different* `request` than built `pair`, and `old`/`new` are always projected to *this* call's `request.depth`, so a disagreement defers to it rather than reporting a depth the classification never actually saw), falling back to the direct computation for a caller that attaches no context at all (a hand-built `ResolvedComparePair`, as some unit tests still do). `classify_compare_pair` is the typed Python API's `run_compare_request` path specifically -- the native `compare` CLI calls `compare_snapshots()` directly and does not go through it. **Correction to this row's own prior text:** `resolve_dump_request`/`execute_dump_request` are *not* "fully unwired" -- `execute_dump_request` already calls `with_assurance()` (landed 2026-09-03, commit `280b6c614`, the same day as the third slice above), the real post-execution caller this row previously said didn't exist yet; `DumpResult.resolved_execution_context` is fully built, assurance-enriched, and even carries a per-side `compile_contexts` entry when a header-AST parse ran -- but nothing downstream of `execute_dump_request` (no CLI, nothing outside the function itself) reads it back, so it remains a genuinely *unread*, not unbuilt, object. A fifth slice (2026-09-04) closed one more concrete site on the `compare` path: `resolve_compare_request` was carrying no `compile_contexts` at all (`evaluation_config`/`compile_contexts` were both named as deferred in the third slice's own note) even though each side's resolved `CompileContext` was reachable a few lines away -- switching `_resolve_side`/`_resolve_old_side`/`_resolve_new_side` from `resolve_side_snapshot` to `_resolve_side_snapshot_impl` recovers `SideResolution.effective_compile_context` per side, threaded through the identical safety gate the dump path already applied (lifted out of `execute_dump_request`'s own inline conditional into one shared predicate so the two paths share one decision instead of two hand-copies -- Codex review, PR #1037, six rounds, the dump-path original). A sixth slice (2026-09-04, Codex review, fresh evidence on the same PR) relocated that shared predicate a second time, to `workflows.artifact.compile_context_gate.side_effective_compile_context` (a new leaf module, not `workflows.artifact.execute` as first landed): the initial placement grew `service_compare_pipeline.py`/`workflows/artifact/execute.py` past the 800-line production cap, and a bare `SideResolution` type import would have pulled the helper into the large, already-allowlisted `workflows.artifact.execute -> service -> ...` import cycle as a genuinely new member -- so the function now takes the bare `CompileContext | None` it actually reads off `SideResolution.effective_compile_context` instead of the whole object, needing no import from `execute.py` at all. `evaluation_config` remains unresolved on both paths (still `None` on every real `ResolvedComparePair`/`ResolvedDumpRequest`), and every *other* independently-re-derived value this sub-phase names (policy/pack resolution) is still read the old way — this slice closes two concrete sites (compile-context threading, plus the dedup itself), not the sub-phase. **Seventh slice (2026-09-29):** `classify_compare_pair` now resolves the D7 `CompatibilityEvaluationConfig` once (`workflows.compare_gate_receipt.resolve_request_evaluation_config`, from the already-loaded policy/suppression/pack inputs), `install_resolved_gate_receipt` takes that object instead of re-deriving it from the request, and `CompareResult.resolved_execution_context` returns the pair's context with `evaluation_config` filled in (`ResolvedExecutionContext.with_evaluation_config`) — the same object `DiffResult.evaluation_config` carries (`tests/test_classify_evaluation_config_once.py`: one resolution per classification, identity across consumers, equality with an independent resolver call, over eight request shapes). `ResolvedComparePair` itself still carries `None` by design: the config's inputs are loaded by classification, not artifact resolution. Still open: the native `compare` CLI builds its config through `cli_compare_receipt` and does not go through `classify_compare_pair`, and dump has no compatibility policy to resolve (its `evaluation_config` stays `None` as not-applicable, not unresolved) |
+| **5B — Fact semantic consumption** | in progress | Phase 5's "no fact reaches `CONSUMED`" gap | For each fact family, an explicit `FactStatus` → detector-meaning table (e.g. `FAILED` means "incomplete evidence," not "confirmed absent") instead of the uniform legacy-default collapse — inventory every present-or-default unwrap first (`resolved_fact_value` call sites *and* local equivalents like `diff_param_qualifiers._fact_bool`/`diff_cxx_rules._fact_str_list`/`compare.surface_graph.fact_list`), not only the shared primitive's own callers; first vertical cohort on the five fields with an existing fabricated-finding history (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`), since those are where the behavior change is easiest to justify and test. First PR landed (see the note below the table): the shared `compare_facts`/`FactComparison` primitive plus two of the five fields' primary finding-emitting call sites (`bases`/`virtual_bases` in `diff_types._diff_type_bases`, `is_va_list` in `diff_param_qualifiers.param_va_list_changes`). Second PR landed (see the note below the table): every remaining reader of `bases`/`virtual_bases`/`is_va_list` audited and closed — one genuine pairwise fabrication risk (`diff_cxx_rules._transitive_bases`, feeding `virtual_method_addition`) gated the same way, the rest (single-snapshot reachability/classification aids) documented as already safe. `vtable`/`vptr_offset_bits` remain on the old collapse, deliberately (their own dedicated, higher-scrutiny slice — see below), so this sub-phase's own gate ("every detector... for at least one full fact family") is not yet closed. Third PR landed (see the note below the table): the dedicated `vtable`/`vptr_offset_bits` slice — `diff_vtable_layout._is_polymorphic`/`diff_layout._check_vptr_introduced` now read `FactStatus` directly (additive, per-record); the `TYPE_VTABLE_CHANGED` cluster (`diff_types_vtable.py`) itself was re-audited and found unsafe to convert without a `diff_cxx_rules.virtual_method_addition`-side fix blocked by an import-cycle constraint, so the removal gate remains open for that one cluster specifically. Fourth through seventh PRs landed (see the note below the table): closed the case-(a) field inventory's audit status entirely -- `is_const`/`is_volatile`/`is_mutable`/`is_restrict`/`access` gated directly; `default` and the five `deprecated`/`is_scoped` surfaces investigated, found not safely convertible without a legacy-hybrid load-path fix (a real end-to-end test regression, not a hypothetical), and left on their existing `fact_provenance` mechanism with the specific finding recorded. Eighth PR landed (see the note below the table): audited the entire remaining case-(b) field inventory (nineteen per-declaration fields plus six detector-unconsumed snapshot-level ones) and found it already safe -- zero findings, no code changes -- closing this sub-phase's audit scope for every model field carrying a `Fact[T]` sibling as of this session; the sub-phase's own remaining work was the `vtable`/`TYPE_VTABLE_CHANGED` cluster (`vptr_offset_bits` is fully gated — see the corrected note further down). Track 4's 5B final closure (2026-09-04, see the note below the table) closed that last cluster as a formal, investigated decline, after a three-round investigation: round 1 declined, round 2 landed a `FactStatus` decline once Codex review found it closed a real, reachable PDB-driven fabrication, and round 3 reverted round 2 after it silently regressed a real detection scenario (a hand-constructed/typed-API `RecordType` omitting `vtable=` -- indistinguishable via `FactStatus` alone from PDB's own non-evidence -- means non-polymorphic, not "unknown"). `vtable_transition_is_evidenced`'s heuristic is unchanged from before this closure; the PDB fabrication remains a real, open, explicitly-documented gap. This closes 5B's removal gate for every named field family; the seven `fact_provenance`-gated fields from the fourth-through-seventh PRs moved onto `FactStatus` in the ninth PR (2026-09-30, see the note below the table); what remains open is the `vtable` authority transfer / PDB fabrication path |
 | **6B — SemanticIR checker cutover** | in progress | The gap this review calls the single largest: `SemanticIR` computed and persisted but never read by the checker | One read index over `SemanticIR` (`entity()`, `occurrences()`, `functions()`, `records()`, `facts()`, `references()`) with a legacy-flat-snapshot adapter producing the same read shape, migrated one detector family/cohort at a time, each cohort closing with an architecture-gate rule forbidding a direct legacy-collection read for that family |
-| **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary); the release fan-out's gate-pack-fold duplication (a distinct residual, not ADR-064's own `GateOptions` rewrite, which already landed 2026-09-02); the release fan-out's explicit rejection of a `--pack`-asserted `contract.unresolved` | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; a real per-pair executor for depth/suppression/policy/compile-context/`--contract` mode-and-domain already exists (`service.run_compare`) and ADR-064's `GateOptions` already resolves the release fan-out's severity/exit-code-scheme gate config exactly once (confirmed by the 2026-09-03 investigation below) — what remains is narrower still, since T6 landed 2026-09-05: `apply_release_gate_pack` no longer mirrors `pack_application.apply_to_compare_config` — both call one shared `policy/gate_pack_fold.fold_gate_pack_severity`, leaving only the two callers' different fold targets (raw strings vs. a resolved `SeverityConfig`) for the duplication-and-convergence-assessment plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig` target; and `resolve_release_pack_application` unconditionally rejects `contract.unresolved` for a release comparison — not for lack of a per-library `PersistedContractContext` (`service.run_compare` already creates one, `record_release_resolved_config` already merges into it after every pair), but as the rejection's own deliberate choice, unverified whether still necessary — no landed fix or confirmed-necessary rationale yet |
+| **7B — Boundary consumer migration** | in progress | `action/run.sh`'s raw-exit-code decoding (Phase 7's named scope boundary); the release fan-out's gate-pack-fold duplication (a distinct residual, not ADR-064's own `GateOptions` rewrite, which already landed 2026-09-02); the release fan-out's explicit rejection of a `--pack`-asserted `contract.unresolved` | Action reads `run_outcome`/`exit` from the machine report instead of re-deriving a verdict from the raw process exit code and stderr text; a real per-pair executor for depth/suppression/policy/compile-context/`--contract` mode-and-domain already exists (`service.run_compare`) and ADR-064's `GateOptions` already resolves the release fan-out's severity/exit-code-scheme gate config exactly once (confirmed by the 2026-09-03 investigation below) — what remains is narrower still, since T6 landed 2026-09-05: `apply_release_gate_pack` no longer mirrors `pack_application.apply_to_compare_config` — both call one shared `policy/gate_pack_fold.fold_gate_pack_severity`, leaving only the two callers' different fold targets (raw strings vs. a resolved `SeverityConfig`) for the duplication-and-convergence-assessment plan's own P0 `EffectiveGate`/`EffectiveEvaluationConfig` target; The release fan-out's former unconditional rejection of a pack-asserted `contract.unresolved` is closed: `resolve_release_pack_application` now accepts it, since the per-library `PersistedContractContext` already carries the resolved config to `contract_coverage_exit` (see that function's own docstring) |
 | **8B — Multi-artifact canonical storage** | in progress | Phase 8's "one legacy blob per section, single-artifact only" residual | Typed DTOs for the remaining sections beyond `semantic_ir`; multi-artifact `ProjectSnapshot` packages; baseline-set/`BundleFacts` folded into sections instead of staying separate document shapes |
+
+**2B consumer sweep (2026-09-29).** A repository-wide inventory of
+cross-snapshot and finding-to-record lookups still keyed by bare
+`RecordType.name` (or the bare `typedefs` map) moved every one that decides
+a finding onto the canonical identity: `diff_vtable_layout` (pairing and base
+resolution via `TypeMap`/`lookup_matched_type`), `diff_cpp_patterns`'
+empty-tag rename and `detail::` field-leak scans, `diff_type_spellings`'
+field pass, `diff_reconcile` and `diff_filtering`'s stdlib-embedding
+attribution (new `compare/record_lookup.RecordLookup`: the finding's own
+`entity_id` first, the bare name only when exactly one record carries it,
+otherwise no answer), `diff_stdlib_impl`'s leaf fallback (unique leaves
+only), and `diff_integer_model`/`diff_time64`'s typedef scans
+(`typedef_diff_maps`). Each bare-name dict answered "whichever same-leaf
+record was listed last". Tests state the contract over every listing order
+(`tests/test_vtable_layout_identity_pairing.py`,
+`tests/test_record_lookup_identity.py`); each fails against the pre-sweep
+code. Left on spellings deliberately, with the reason: `diff_platform`'s
+DWARF `StructLayout` maps (that model carries no identity),
+`compare/opaque_struct_types`' existence sets (spelling questions by design),
+`buildsource/source_diff`'s concept map (`SourceEntity` has no identity
+model) and export-name maps (the export name is the symbol identity).
 
 **2B's bare-name-collision narrowing landed (2026-09-03).** The gap
 `compare/opaque_types.py`'s own docstring named as still-open since the
@@ -676,6 +697,43 @@ residual `TYPE_VTABLE_CHANGED` cluster, and seven (`default` plus the five
 `fact_provenance` mechanism with a substantiated, tested reason recorded
 for each rather than left silently unaudited.
 
+**5B's ninth PR (2026-09-30) — the seven `fact_provenance`-gated fields
+now gate on `FactStatus`.** The blocker the fourth-through-seventh PRs
+recorded (a legacy hybrid document's `deprecated: null` bridged to
+`PRESENT(None)` for a declaration no backend confirmed) was closed by T9's
+load-path fix: `storage/fact_backfill.py` now downgrades that case to
+`NOT_COLLECTED` using the same qualified-then-bare provenance probe. So every
+place the detector-side lookup used to answer from now writes the answer into
+the status instead: a fresh dump states it per declaration, and a stored
+document is corrected on load, including non-header documents, unrecognized
+producers, pre-v19 clang documents and legacy hybrid documents.
+`compare/fact_gate.both_facts_present` is the one gate the seven detectors
+use (`func_deprecated`, `var_deprecated`, `type_deprecated`,
+`field_deprecated`, `enum_deprecated`, the enum `is_scoped` pass, and
+`field_default_initializer`). A decline is recorded for T9 accounting only
+when it is informative: one side is `PRESENT`, or a side is
+`FAILED`/`PARTIAL`. `fact_known_qualified` and
+`both_known_backed_fact_qualified` had no callers left and were deleted.
+
+One exception is deliberate. `TypeField.default` keeps its same-producer
+check *in addition to* the status gate. That check answers whether two
+present values are cross-comparable (castxml's source text vs. clang's
+fingerprint), which is not an availability question and has no `FactStatus`
+spelling.
+
+Empirical check before switching: instrumenting the old and new gates side by
+side over the fact/hybrid/serialization test areas (8,723 tests), every
+disagreement was a hand-built in-memory fixture. Each was one of:
+- an omitted field (which reads as `NOT_COLLECTED`);
+- `from_headers=False` or an unknown producer alongside a `PRESENT` fact, a
+  state no producer creates.
+
+Those tests now either state the field as a header dump does, or go through
+the load path (`tests/_legacy_snapshot_doc.py`). Behavioural contract:
+`tests/test_fact_gate_status_matrix.py` sweeps all seven facts × 6×6 status
+pairs against a status-only oracle; all seven cells fail against the
+pre-change gates.
+
 **5B's eighth PR (2026-09-03) audited the entire remaining case-(b) field
 inventory and found it already safe — no code changes.** Every model field
 carrying a `Fact[T]` sibling that isn't one of the fifteen case-(a) rows
@@ -1022,6 +1080,42 @@ pins that a pack asserting the field is still rejected as decorative when
 this release invocation passes no `--contract` at all. `run_outcome`'s
 ledger row above is updated to reflect this as closed rather than open.
 
+**7B: T8 follow-up (2026-09-29) — `mode: compare`/`dump` no longer read
+stderr.** Track T8 (2026-09-05) had kept `_is_cli_error()` as an accepted
+transport-level fallback; this slice removes it for the two modes that have a
+structured source to use instead. The last stderr-prose decision in the compare dispatch was
+`_is_cli_error()`: a `^Usage:|^Error:|^Try ` match at exit 2 turned the
+verdict into `ERROR`, and a broader match (`Traceback`, `click.`) at exit 1
+did the same. Both were redundant with, or weaker than, a structured source
+that already existed. Exit 2 can no longer be a usage error at all -- the
+root group remaps Click's usage exit to `64` (`frontends/cli/runtime.py`'s
+`_AbicheckGroup`) -- so the exit-2 check could only ever *downgrade a real
+API break* when a build step printed a `Usage:`-shaped line. At exit 1 the
+question "did an axis fire, or did the invocation fail before answering?"
+is now asked of the report (`_report_validity`, the same predicate exit 0
+already used): no readable result publishes `ERROR` with a transport-level
+diagnostic instead of an unattributed `SEVERITY_ERROR`; a readable one goes
+through the existing axis attribution unchanged. Exit `64` has its own arm.
+`tests/test_action_run_sh_no_stderr_verdict.py` states the invariant over
+the space rather than one input: for each dispatched exit code (plus an
+unknown one), with and without a report, every stderr text in a corpus of
+the heuristic's own prefixes publishes the same verdict as empty stderr,
+with a vacuity guard on that oracle.
+
+**Deps modes closed too (2026-09-29, same PR).** `deps-tree`/`deps-compare`
+no longer read stderr either: `run.sh` injects the same internal
+`-o json=` sidecar for them whenever the primary format is not JSON, and
+`report_query.py` recognizes the `deps` report's own `verdict.loadability`/
+`abi_risk` object (`STACK_VERDICTS`, pinned to `StackVerdict` and checked
+through the real renderer for every combination), so an exit `1` reads as
+`WARN`/`FAIL` only with a readable result and as `ERROR` otherwise; exit `64`
+is the usage error. `_is_cli_error()` and `STDERR_CONTENT` are deleted --
+nothing in `run.sh` reads the CLI's stderr any more. No `run_outcome` block
+was needed: the report already carried a structured verdict; what was
+missing was the Action requesting and recognizing it.
+The gate-fold *target* duplication stays with the convergence plan's P0
+`EffectiveGate` item, as recorded above.
+
 **8B's first PR landed (2026-09-03).** `storage.types_section_codec
 .TypesSection` is the `"types"` D8 legacy section's own typed DTO, wired
 through `storage.dto.types_to_dto`/`types_from_dto` in place of the generic
@@ -1144,6 +1238,24 @@ both texts name as the failure mode to avoid. Recorded here, per this
 repo's own "say so explicitly and record the gap" convention, rather than
 attempted against the plan's own stated blocker or left silently
 unaddressed.
+
+**Status correction (2026-09-30): the two items above are no longer
+blocked, and one of them has landed.** Both landed through the
+storage-format-v2 plan rather than here, which is why this note did not see
+them. That plan owns the shared container, so going through it was the G38
+coordination this section asked for:
+- `BundleFacts`/baseline sets folded into `VariantRef.sections`: A1.4,
+  reconciled to one physical layout by Track 1.
+- Multi-artifact packages reachable from the standard `compare` CLI: A1.7.
+
+The one-file transport (A1.1) landed on the same day as a zip archive (`storage/project_package_archive.py`). What remains of 8B is that plan's own open list:
+- digest-deduplicated shared `BuildSourcePack`/source-graph evidence
+  (A1.5), whose storage half holds and is tested, leaving decoded size
+  (A2.x);
+- ~~`bundle_variants:` wiring (A1.6)~~ -- landed (see the storage-format-v2 plan's A1.6 entry);
+- ~~non-ELF artifact membership (A1.8)~~ -- landed (see the storage-format-v2 plan's A1.8 entry).
+
+It is tracked there, not restated here.
 
 **Recommended sequencing:** 2B and 6B are
 the highest-value pair, in that order — 2B closes the last identity-provider
@@ -11842,6 +11954,70 @@ check`/`ruff format --check`/`mypy abicheck/` clean;
 `check_architecture.py`/`check_ai_readiness.py`/`semantic_ir_cutover.py`/
 `check_fp_rate.py`/`check_tier_accuracy.py` all pass with zero regressions.
 
+**Landed (2026-09-30): Phase 6B's third checker cutover -- record layout
+(`TYPE_SIZE_CHANGED`/`TYPE_ALIGNMENT_CHANGED`), with the snapshot schema bump
+the IR needed to carry it (v53).** Approved as a public stored-format change
+before it landed.
+
+*What the IR gained.* `CanonicalEntity.size_bits`/`alignment_bits`
+(`Fact[int]`, `NOT_COLLECTED` for every non-record kind). The normalizer
+fills them for every record it sees. Every producer reaches the IR through
+`normalize_header_ast`, including the DWARF ELF fallback, PDB, BTF/CTF and
+the manifest path, so no producer was left out. On the wire, the layout pair
+is written only for a `TYPE` occurrence, inside a `semantic_ir` document now
+stamped `"version": 2`. The `ProjectSnapshot` `semantic_ir` section is also
+at v2, with a registered v1->v2 migration that refuses a v1 section claiming
+an IR version.
+
+*The correction to the "records: nothing to close" finding above.* That
+finding held that the IR and `RecordType` could never disagree on layout,
+because the normalizer reads the same field. Implementing the cohort showed
+otherwise. The direct-clang backend leaves `size_bits` unset, and
+`dumper_layout_backfill` fills it from DWARF *after* normalization
+(`dumper.py`). A cutover that trusted the IR as normalized would therefore
+have silently dropped every size change on a clang dump. The fill lives in
+`model/semantic_ir_record_layout.py` and runs at the two places a snapshot's
+IR and records meet: `AbiSnapshot.__post_init__`, and the storage decode,
+which assigns `semantic_ir` after construction. It fills only a
+`NOT_COLLECTED` fact, never overrides an established or `FAILED` one, and
+refuses when two records under one identity disagree. The same fill is the
+pre-v53 migration: a version-1 document decodes the layout pair as
+`NOT_COLLECTED` with `LEGACY_LAYOUT_DIAGNOSTIC`, and the load then fills it
+from the snapshot's own records.
+
+*Authority, not a fidelity gate.* `compare/record_layout.py` follows the T3
+rule. A side whose IR has record occurrences is read from that IR alone.
+Otherwise the side is read from the adapter's projection of its own records
+(`legacy_record_ir`). Nothing re-reads `RecordType` to check the IR. The one
+supplement is a record with no `entity_id`: no producer can give it an
+occurrence, so it is projected under a synthetic identity that cannot
+collide with a real one. When exactly one side establishes a layout value,
+the comparison is recorded as declined (T9 accounting) instead of passing
+silently.
+
+*The gate.* The `MIGRATED_COHORTS` entry `record_layout` forbids
+`types`/`size_bits`/`alignment_bits` reads in `compare/record_layout.py`.
+The entity-level read is `semantic_ir_record_layout.entity_layout`. Pairing
+stays with the caller's `TypeMap`.
+
+*Verification.* `tests/test_record_layout_cutover.py`:
+- A Hypothesis property over every mix of IR-backed/adapted side,
+  identified/unidentified record and present/absent layout, checked against
+  an oracle written from the documented legacy contract rather than by
+  calling the old helper.
+- An authority test: an IR that disagrees with its record is believed.
+- The DWARF-backfill fill, the no-override and conflict rules.
+- Codec round-trip, v1 load and fill, and refusal of non-integer values,
+  future versions and truncated v2 records.
+- The section migration, an end-to-end `compare()`, and the gate firing on
+  each forbidden read.
+
+Before the switch, the old and new paths ran side by side over the whole fast
+unit lane.
+
+*Still open.* Every other record fact (fields, bases, vtable, flags) and
+every other detector family still reads the legacy collections.
+
 ---
 
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
@@ -16802,7 +16978,8 @@ decoding a section's own *internal* shape into a typed domain object beyond
 `semantic_ir` (each section still carries the pre-existing JSON encoding
 for its fields); multi-artifact packages (a real multi-library
 `ProjectSnapshot`); folding baseline sets/`BundleFacts` into sections, the
-`.tar.zst` transport form, `bundle_variants:` config wiring (A1.4-A1.7),
+`.tar.zst` transport form, `bundle_variants:` config wiring (A1.4-A1.7 --
+A1.4, A1.6 and A1.7 have since landed),
 and non-ELF membership specifics beyond `ArtifactRef.kind` (A1.8) remain
 open. See `docs/contribute/plans/
 storage-format-v2.md`'s "Landed in Phase 1" section and
@@ -16998,6 +17175,22 @@ removed, not left as a second path. This phase is the accounting pass,
 not new design.
 
 **Checklist (one row per phase, each a real PR removing code):**
+
+- **Declaration fields (closed, 2026-09-30).** `AbiSnapshot.functions`/
+  `variables`/`types`/`enums`/`typedefs`/`typedefs_qualified`/`constants`/
+  `typedef_entity_ids`/`constant_entity_ids` are no longer snapshot fields.
+  The snapshot's `SemanticIR` owns an ordered declaration store
+  (`model/declaration_store.py`'s `Declarations`, read as
+  `snapshot.declarations.<kind>`); the constructor keeps the nine names
+  only as builder `InitVar`s. `snapshot.canonical_ir` is the old
+  `semantic_ir` meaning (canonical occurrences, or `None` when no
+  normalizer ran). Reading a removed name raises `AttributeError` naming
+  its replacement (only `dataclasses.replace` still sees the InitVar
+  default), and assigning one raises too, so a stale caller cannot
+  silently get `None` or create a stray attribute. mypy enforces the
+  package side statically. The document format is unchanged: the
+  declarations serialize under their historical keys, in their historical
+  order.
 
 - Phase 0: the *domain-side* `AbiSnapshot.clang_*_facts_reliable` boolean
   attributes are removed once every consumer reads the `Fact[...]` field

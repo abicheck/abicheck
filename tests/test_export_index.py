@@ -320,7 +320,7 @@ class TestExportNamesOrModeledFallback:
         from abicheck.model import Function
 
         snap = _snap()
-        snap.functions = [
+        snap.declarations.functions = [
             Function(name="foo", mangled="_Z3foov", return_type="void", params=[])
         ]
         snap.elf = ElfMetadata()
@@ -331,10 +331,10 @@ class TestExportNamesOrModeledFallback:
         from abicheck.model import Function, Variable
 
         snap = _snap()
-        snap.functions = [
+        snap.declarations.functions = [
             Function(name="foo", mangled="_Z3foov", return_type="void", params=[])
         ]
-        snap.variables = [Variable(name="g", mangled="_Z1g", type="int")]
+        snap.declarations.variables = [Variable(name="g", mangled="_Z1g", type="int")]
         assert export_names_or_modeled_fallback(snap) == ("_Z1g", "_Z3foov")
 
     def test_raw_table_used_alone_not_unioned_with_modeled_names(self) -> None:
@@ -343,7 +343,7 @@ class TestExportNamesOrModeledFallback:
         snap = _snap()
         # A DWARF-modeled ctor whose linkage name is the non-ABI C4 unified tag,
         # never present in the real export table.
-        snap.functions = [
+        snap.declarations.functions = [
             Function(
                 name="Foo::Foo", mangled="_ZN3FooC4Ev", return_type="void", params=[]
             )

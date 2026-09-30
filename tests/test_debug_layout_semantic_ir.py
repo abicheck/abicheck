@@ -147,10 +147,10 @@ class TestBuildSymbolOnlySnapshotBtfCtf:
     def test_btf_struct_reaches_semantic_ir(self) -> None:
         meta = DwarfMetadata(structs={"widget": _struct("widget")}, has_dwarf=True)
         snap = self._snap(meta, "btf")
-        assert snap.semantic_ir is not None
+        assert snap.canonical_ir is not None
         entity_id = entity_id_for_type((), "widget")
-        (occ_id,) = snap.semantic_ir.occurrences_for(entity_id)
-        assert snap.semantic_ir.occurrences[occ_id].producer == "btf"
+        (occ_id,) = snap.canonical_ir.occurrences_for(entity_id)
+        assert snap.canonical_ir.occurrences[occ_id].producer == "btf"
 
     def test_ctf_enum_reaches_semantic_ir(self) -> None:
         meta = DwarfMetadata(
@@ -158,10 +158,10 @@ class TestBuildSymbolOnlySnapshotBtfCtf:
             has_dwarf=True,
         )
         snap = self._snap(meta, "ctf")
-        assert snap.semantic_ir is not None
+        assert snap.canonical_ir is not None
         entity_id = entity_id_for_enum((), "color")
-        (occ_id,) = snap.semantic_ir.occurrences_for(entity_id)
-        assert snap.semantic_ir.occurrences[occ_id].producer == "ctf"
+        (occ_id,) = snap.canonical_ir.occurrences_for(entity_id)
+        assert snap.canonical_ir.occurrences[occ_id].producer == "ctf"
 
     def test_snapshot_types_and_enums_stay_untouched(self) -> None:
         """The one deliberate scope boundary this slice draws (see the
@@ -170,8 +170,8 @@ class TestBuildSymbolOnlySnapshotBtfCtf:
         -- only ``semantic_ir`` gains occurrences."""
         meta = DwarfMetadata(structs={"widget": _struct("widget")}, has_dwarf=True)
         snap = self._snap(meta, "btf")
-        assert snap.types == []
-        assert snap.enums == []
+        assert snap.declarations.types == []
+        assert snap.declarations.enums == []
 
     def test_real_dwarf_format_is_unaffected(self) -> None:
         """Negative control: ``resolved_debug_format="dwarf"`` must never
@@ -179,8 +179,8 @@ class TestBuildSymbolOnlySnapshotBtfCtf:
         (via *dwarf_only_types*), not this module's."""
         meta = DwarfMetadata(structs={"widget": _struct("widget")}, has_dwarf=True)
         snap = self._snap(meta, "dwarf")
-        assert snap.semantic_ir is None
+        assert snap.canonical_ir is None
 
     def test_no_debug_info_at_all_stays_none(self) -> None:
         snap = self._snap(DwarfMetadata(), "btf")
-        assert snap.semantic_ir is None
+        assert snap.canonical_ir is None

@@ -64,7 +64,7 @@ def encode_extraction_scope(d: dict[str, Any], snap: AbiSnapshot) -> None:
     per_list: dict[str, list[int]] = {}
     for name in _LISTS:
         indices: list[int] = []
-        for decl in getattr(snap, name):
+        for decl in getattr(snap.declarations, name):
             decision = ownership_of(decl)
             if decision is None:
                 indices.append(-1)
@@ -106,7 +106,7 @@ def decode_extraction_scope(d: Mapping[str, Any], snap: AbiSnapshot) -> None:
             decisions.append(Fact.not_collected("malformed ownership decision"))
     for name in _LISTS:
         indices = ownership.get(name)
-        decls = getattr(snap, name)
+        decls = getattr(snap.declarations, name)
         if not isinstance(indices, Sequence) or len(indices) != len(decls):
             continue
         for decl, index in zip(decls, indices):

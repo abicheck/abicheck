@@ -156,15 +156,15 @@ def scope_flat_maps(
     def retain_constant(key: str) -> bool:
         return opaque or retain(key)
 
-    keep_constants = _kept_keys(snap.constants, is_dep, retain_constant)
-    keep_typedefs = _kept_keys(snap.typedefs, is_dep, retain)
-    keep_qualified = _kept_keys(snap.typedefs_qualified, is_dep, retain)
+    keep_constants = _kept_keys(snap.declarations.constants, is_dep, retain_constant)
+    keep_typedefs = _kept_keys(snap.declarations.typedefs, is_dep, retain)
+    keep_qualified = _kept_keys(snap.declarations.typedefs_qualified, is_dep, retain)
     unchanged = FlatMapScope(
-        snap.constants,
-        snap.constant_entity_ids,
-        snap.typedefs,
-        snap.typedefs_qualified,
-        snap.typedef_entity_ids,
+        snap.declarations.constants,
+        snap.declarations.constant_entity_ids,
+        snap.declarations.typedefs,
+        snap.declarations.typedefs_qualified,
+        snap.declarations.typedef_entity_ids,
         semantic_ir,
         semantic_ir_conflicts,
     )
@@ -174,8 +174,8 @@ def scope_flat_maps(
     dropped_ids: set[EntityId] = set()
     kept_ids: set[EntityId] = set()
     for ids, keep in (
-        (snap.constant_entity_ids, keep_constants),
-        (snap.typedef_entity_ids, keep_qualified),
+        (snap.declarations.constant_entity_ids, keep_constants),
+        (snap.declarations.typedef_entity_ids, keep_qualified),
     ):
         for key, entity_id in ids.items():
             (kept_ids if keep is None or key in keep else dropped_ids).add(entity_id)
@@ -183,11 +183,17 @@ def scope_flat_maps(
 
     scoped = dataclasses.replace(
         unchanged,
-        constants=_restrict(snap.constants, keep_constants),
-        typedefs=_restrict(snap.typedefs, keep_typedefs),
-        typedefs_qualified=_restrict(snap.typedefs_qualified, keep_qualified),
-        constant_entity_ids=_restrict_ids(snap.constant_entity_ids, keep_constants),
-        typedef_entity_ids=_restrict_ids(snap.typedef_entity_ids, keep_qualified),
+        constants=_restrict(snap.declarations.constants, keep_constants),
+        typedefs=_restrict(snap.declarations.typedefs, keep_typedefs),
+        typedefs_qualified=_restrict(
+            snap.declarations.typedefs_qualified, keep_qualified
+        ),
+        constant_entity_ids=_restrict_ids(
+            snap.declarations.constant_entity_ids, keep_constants
+        ),
+        typedef_entity_ids=_restrict_ids(
+            snap.declarations.typedef_entity_ids, keep_qualified
+        ),
     )
     if semantic_ir is None or not dropped_ids:
         return scoped

@@ -180,11 +180,11 @@ class TestStrSubclassEnumsSurviveTheWalkUnrewritten:
         snap = AbiSnapshot(library="lib.so", version="1", functions=[marked, hidden])
         renumber_anonymous_closure_identities(snap)
 
-        assert "#1" in snap.functions[0].mangled
-        assert isinstance(snap.functions[1].visibility, Visibility)
-        assert snap.functions[1].visibility is Visibility.HIDDEN
+        assert "#1" in snap.declarations.functions[0].mangled
+        assert isinstance(snap.declarations.functions[1].visibility, Visibility)
+        assert snap.declarations.functions[1].visibility is Visibility.HIDDEN
         # The actual crash site: `.value` must resolve.
-        assert snap.functions[1].visibility.value == "hidden"
+        assert snap.declarations.functions[1].visibility.value == "hidden"
 
     def test_loading_a_legacy_snapshot_preserves_visibility_enum_identity(self) -> None:
         # End-to-end through the real load path: a legacy (raw-marker)
@@ -213,8 +213,8 @@ class TestStrSubclassEnumsSurviveTheWalkUnrewritten:
             ],
         }
         loaded = snapshot_from_dict(legacy)
-        assert "#" in loaded.types[0].qualified_name
-        for fn in loaded.functions:
+        assert "#" in loaded.declarations.types[0].qualified_name
+        for fn in loaded.declarations.functions:
             assert isinstance(fn.visibility, Visibility)
             assert fn.visibility is Visibility.HIDDEN
             assert fn.visibility.value == "hidden"

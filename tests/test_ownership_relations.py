@@ -135,7 +135,7 @@ class TestOwnershipRelations:
             EntityOwnership("toolchain", "external", "system_path")
         )
         snap = _snap([])
-        snap.types.append(rec)
+        snap.declarations.types.append(rec)
         rel = ownership_relations(snap)
         assert rel.owner(snapshot_identities(snap).records[0].node_id) == "toolchain"
 

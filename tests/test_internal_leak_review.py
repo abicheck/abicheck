@@ -148,7 +148,7 @@ class TestSeedQueueSkipsOnDwarfFallback:
         queue: collections.deque[tuple[str, list[str]]] = collections.deque()
         _seed_queue_from_public_types(
             type_map,
-            _build_qualified_index(snap.types),
+            _build_qualified_index(snap.declarations.types),
             {"detail", "impl", "internal"},
             queue,
             is_dwarf_fallback=True,
@@ -167,7 +167,7 @@ class TestSeedQueueSkipsOnDwarfFallback:
         queue: collections.deque[tuple[str, list[str]]] = collections.deque()
         _seed_queue_from_public_types(
             type_map,
-            _build_qualified_index(snap.types),
+            _build_qualified_index(snap.declarations.types),
             {"detail", "impl", "internal"},
             queue,
             is_dwarf_fallback=False,

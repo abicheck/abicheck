@@ -124,8 +124,8 @@ class TestIdenticalSnapshotsNoChange:
         """Moving a function to a different line is not an ABI break."""
         old = _base_snap()
         new = copy.deepcopy(old)
-        old.functions[0].source_location = "foo.h:10"
-        new.functions[0].source_location = "foo.h:42"
+        old.declarations.functions[0].source_location = "foo.h:10"
+        new.declarations.functions[0].source_location = "foo.h:42"
         result = compare(old, new)
         assert result.verdict == Verdict.NO_CHANGE
 
@@ -136,7 +136,9 @@ class TestSingleMutationDetection:
     def test_func_removed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.functions = [f for f in new.functions if f.name != "process"]
+        new.declarations.functions = [
+            f for f in new.declarations.functions if f.name != "process"
+        ]
         result = compare(old, new)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.FUNC_REMOVED for c in result.changes)
@@ -144,7 +146,7 @@ class TestSingleMutationDetection:
     def test_func_added_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.functions.append(
+        new.declarations.functions.append(
             Function(
                 name="cleanup",
                 mangled="_Z7cleanupv",
@@ -160,7 +162,7 @@ class TestSingleMutationDetection:
     def test_return_type_changed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.functions[0].return_type = "long"
+        new.declarations.functions[0].return_type = "long"
         result = compare(old, new)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.FUNC_RETURN_CHANGED for c in result.changes)
@@ -168,7 +170,7 @@ class TestSingleMutationDetection:
     def test_param_type_changed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.functions[0].params[0].type = "int *"
+        new.declarations.functions[0].params[0].type = "int *"
         result = compare(old, new)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes)
@@ -176,7 +178,7 @@ class TestSingleMutationDetection:
     def test_var_removed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.variables = []
+        new.declarations.variables = []
         result = compare(old, new)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.VAR_REMOVED for c in result.changes)
@@ -184,7 +186,7 @@ class TestSingleMutationDetection:
     def test_var_type_changed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.variables[0].type = "int"
+        new.declarations.variables[0].type = "int"
         result = compare(old, new)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.VAR_TYPE_CHANGED for c in result.changes)
@@ -192,7 +194,7 @@ class TestSingleMutationDetection:
     def test_type_size_changed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.types[0].size_bits = 128
+        new.declarations.types[0].size_bits = 128
         # Raw detector check: Config is not wired to a public function here, so
         # disable surface scoping (orthogonal concern, default-on since ADR-024).
         result = compare(old, new, scope_to_public_surface=False)
@@ -202,7 +204,9 @@ class TestSingleMutationDetection:
     def test_type_field_removed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.types[0].fields = [new.types[0].fields[0]]  # keep only 'width'
+        new.declarations.types[0].fields = [
+            new.declarations.types[0].fields[0]
+        ]  # keep only 'width'
         result = compare(old, new, scope_to_public_surface=False)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPE_FIELD_REMOVED for c in result.changes)
@@ -210,7 +214,9 @@ class TestSingleMutationDetection:
     def test_enum_member_removed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.enums[0].members = [m for m in new.enums[0].members if m.name != "BLUE"]
+        new.declarations.enums[0].members = [
+            m for m in new.declarations.enums[0].members if m.name != "BLUE"
+        ]
         # Raw detector check: Color is not wired to a public function here, so
         # disable surface scoping (orthogonal concern, default-on since ADR-024).
         result = compare(old, new, scope_to_public_surface=False)
@@ -220,7 +226,7 @@ class TestSingleMutationDetection:
     def test_enum_member_value_changed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.enums[0].members[1] = EnumMember(name="GREEN", value=42)
+        new.declarations.enums[0].members[1] = EnumMember(name="GREEN", value=42)
         # Raw detector check: Color is not wired to a public function here, so
         # disable surface scoping (orthogonal concern, default-on since ADR-024).
         result = compare(old, new, scope_to_public_surface=False)
@@ -232,7 +238,7 @@ class TestSingleMutationDetection:
     def test_enum_member_added_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.enums[0].members.append(EnumMember(name="YELLOW", value=3))
+        new.declarations.enums[0].members.append(EnumMember(name="YELLOW", value=3))
         # Raw detector check: Color is not wired to a public function here, so
         # disable surface scoping (orthogonal concern, default-on since ADR-024).
         result = compare(old, new, scope_to_public_surface=False)
@@ -242,7 +248,7 @@ class TestSingleMutationDetection:
     def test_typedef_removed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.typedefs = {}
+        new.declarations.typedefs = {}
         result = compare(old, new, scope_to_public_surface=False)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes)
@@ -250,7 +256,7 @@ class TestSingleMutationDetection:
     def test_typedef_base_changed_detected(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        new.typedefs["ColorType"] = "int"
+        new.declarations.typedefs["ColorType"] = "int"
         result = compare(old, new, scope_to_public_surface=False)
         assert result.verdict == Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPEDEF_BASE_CHANGED for c in result.changes)
@@ -263,7 +269,7 @@ class TestHiddenSymbolsFalsePositiveResistance:
         old = _base_snap()
         new = copy.deepcopy(old)
         # Add a hidden function to old, remove it from new
-        old.functions.append(
+        old.declarations.functions.append(
             Function(
                 name="internal",
                 mangled="_Z8internalv",
@@ -278,7 +284,7 @@ class TestHiddenSymbolsFalsePositiveResistance:
     def test_hidden_var_change_not_reported(self):
         old = _base_snap()
         new = copy.deepcopy(old)
-        old.variables.append(
+        old.declarations.variables.append(
             Variable(
                 name="secret",
                 mangled="_Z6secretv",
@@ -300,10 +306,10 @@ class TestCrossDetectorDeduplication:
             library="libtest.so.1",
             version="1.0",
             functions=[],
-            variables=old.variables,
-            types=old.types,
-            enums=old.enums,
-            typedefs=old.typedefs,
+            variables=old.declarations.variables,
+            types=old.declarations.types,
+            enums=old.declarations.enums,
+            typedefs=old.declarations.typedefs,
         )
         result = compare(old, new)
         removed = [c for c in result.changes if c.kind == ChangeKind.FUNC_REMOVED]

@@ -329,7 +329,7 @@ _MOVED_NAMED = 10
 def _ownership_index(snapshot: object) -> dict[tuple[str, str], EntityOwnership]:
     index: dict[tuple[str, str], EntityOwnership] = {}
     for kind in ("functions", "variables", "types", "enums"):
-        for decl in getattr(snapshot, kind, ()) or ():
+        for decl in getattr(getattr(snapshot, "declarations"), kind):
             decision = ownership_of(decl)
             if decision is None:
                 continue

@@ -76,11 +76,14 @@ def test_excluded_header_constants_and_typedefs_are_scoped(tmp_path, frontend):
         snaps.append(out)
 
     snap = load_snapshot(snaps[0])
-    assert set(snap.constants) == {"API_CONSTANT"}
-    assert set(snap.constant_entity_ids) == {"API_CONSTANT"}
+    assert set(snap.declarations.constants) == {"API_CONSTANT"}
+    assert set(snap.declarations.constant_entity_ids) == {"API_CONSTANT"}
     # The used alias stays (the public signature names it); the unused one goes.
-    assert "dep_used_t" in snap.typedefs and "dep_unused_t" not in snap.typedefs
-    assert "dep_unused_t" not in snap.typedefs_qualified
+    assert (
+        "dep_used_t" in snap.declarations.typedefs
+        and "dep_unused_t" not in snap.declarations.typedefs
+    )
+    assert "dep_unused_t" not in snap.declarations.typedefs_qualified
 
     # DEP_CONSTANT changed 1 -> 2 in the excluded header: not a finding.
     r = _run("compare", str(snaps[0]), str(snaps[1]), frontend=frontend)

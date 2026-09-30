@@ -42,9 +42,9 @@ def _fn(name: str, mangled: str) -> Function:
 
 def _snap(ver: str = "1.0", funcs=None, types=None, enums=None) -> AbiSnapshot:
     s = AbiSnapshot(library="libtest.so", version=ver)
-    s.functions = funcs or []
-    s.types = types or []
-    s.enums = enums or []
+    s.declarations.functions = funcs or []
+    s.declarations.types = types or []
+    s.declarations.enums = enums or []
     return s
 
 
@@ -455,7 +455,7 @@ class TestRemovedChangeScenarios:
         """,
         )
         old = _snap("1.0")
-        old.variables.append(
+        old.declarations.variables.append(
             Variable(
                 name="foo::g_var",
                 mangled="_ZN3foo6g_varE",

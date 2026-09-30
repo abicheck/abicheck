@@ -98,7 +98,7 @@ class TestExcludesDependencies:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [f.name for f in scoped.functions] == ["run"]
+        assert [f.name for f in scoped.declarations.functions] == ["run"]
 
     def test_drops_type_from_system_header(self):
         snap = AbiSnapshot(
@@ -111,11 +111,11 @@ class TestExcludesDependencies:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Own"]
+        assert [t.name for t in scoped.declarations.types] == ["Own"]
 
     def test_semantic_ir_occurrence_is_dropped_alongside_its_flat_type(self):
         """ADR-063 Phase 6 (second slice, Codex review, PR #1001):
-        dataclasses.replace() used to carry ``snap.semantic_ir`` over
+        dataclasses.replace() used to carry ``snap.canonical_ir`` over
         unfiltered, so an excluded dependency type's occurrence stayed
         reachable through the "filtered" snapshot's own canonical IR even
         though ``types`` correctly dropped it -- a SemanticIR-aware
@@ -145,9 +145,9 @@ class TestExcludesDependencies:
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
 
-        assert [t.name for t in scoped.types] == ["Own"]
-        assert scoped.semantic_ir is not None
-        assert list(scoped.semantic_ir.occurrences) == [OccurrenceId(own.entity_id)]
+        assert [t.name for t in scoped.declarations.types] == ["Own"]
+        assert scoped.canonical_ir is not None
+        assert list(scoped.canonical_ir.occurrences) == [OccurrenceId(own.entity_id)]
 
     def test_semantic_ir_occurrence_is_dropped_alongside_its_flat_function(self):
         """ADR-063 Phase 6 (third slice, Codex review): once functions/
@@ -202,10 +202,10 @@ class TestExcludesDependencies:
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
 
-        assert [f.name for f in scoped.functions] == ["run"]
-        assert [v.name for v in scoped.variables] == ["own_var"]
-        assert scoped.semantic_ir is not None
-        assert set(scoped.semantic_ir.occurrences) == {
+        assert [f.name for f in scoped.declarations.functions] == ["run"]
+        assert [v.name for v in scoped.declarations.variables] == ["own_var"]
+        assert scoped.canonical_ir is not None
+        assert set(scoped.canonical_ir.occurrences) == {
             OccurrenceId(own.entity_id),
             OccurrenceId(var_own.entity_id),
         }
@@ -231,7 +231,9 @@ class TestExcludesDependencies:
             semantic_ir=semantic_ir,
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.semantic_ir is semantic_ir
+        # `snap.canonical_ir`, not the object passed in: construction fills
+        # the record's layout facts into a new IR (ADR-063 6B).
+        assert scoped.canonical_ir == snap.canonical_ir
 
     def test_semantic_ir_conflict_for_an_excluded_occurrence_is_dropped_too(self):
         """ADR-063 Phase 6 (second slice, Codex review, PR #1001, second
@@ -292,7 +294,7 @@ class TestExcludesDependencies:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [f.name for f in scoped.functions] == ["internal_helper"]
+        assert [f.name for f in scoped.declarations.functions] == ["internal_helper"]
 
     def test_keeps_declaration_with_no_header_info(self):
         """A declaration with no source_header at all (e.g. export-only, no
@@ -312,7 +314,7 @@ class TestExcludesDependencies:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [f.name for f in scoped.functions] == ["exported_only"]
+        assert [f.name for f in scoped.declarations.functions] == ["exported_only"]
 
     def test_keeps_variables_and_enums_from_own_headers_drops_system(self):
         from abicheck.model import EnumMember, EnumType
@@ -349,8 +351,8 @@ class TestExcludesDependencies:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [v.name for v in scoped.variables] == ["own_var"]
-        assert [e.name for e in scoped.enums] == ["OwnEnum"]
+        assert [v.name for v in scoped.declarations.variables] == ["own_var"]
+        assert [e.name for e in scoped.declarations.enums] == ["OwnEnum"]
 
     def test_keeps_typedefs_unconditionally(self):
         """typedefs carry no per-entry header provenance, so they're kept
@@ -363,7 +365,10 @@ class TestExcludesDependencies:
             typedefs={"size_type": "unsigned long", "Alias": "Own"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.typedefs == {"size_type": "unsigned long", "Alias": "Own"}
+        assert scoped.declarations.typedefs == {
+            "size_type": "unsigned long",
+            "Alias": "Own",
+        }
 
     def test_noop_without_header_derived_declarations(self):
         """A binary-only/DWARF-only dump (from_headers=False) has no header
@@ -388,9 +393,9 @@ class TestExcludesDependencies:
                 _fn("sys", mangled="_Z3sys", source_header=_SYSTEM_HEADER),
             ],
         )
-        original_count = len(snap.functions)
+        original_count = len(snap.declarations.functions)
         scope_snapshot_excluding_dependencies(snap)
-        assert len(snap.functions) == original_count
+        assert len(snap.declarations.functions) == original_count
 
     def test_lazy_lookup_indexes_rebuild_from_scoped_lists(self):
         sys_fn = _fn(
@@ -449,7 +454,7 @@ class TestResolveDependencyScope:
         )
         resolved = resolve_dependency_scope(snap, include_dependencies=False)
         assert resolved.dependency_scope == "filtered"
-        assert [f.name for f in resolved.functions] == ["run"]
+        assert [f.name for f in resolved.declarations.functions] == ["run"]
 
     def test_include_dependencies_tags_full_without_filtering(self):
         snap = AbiSnapshot(
@@ -463,7 +468,7 @@ class TestResolveDependencyScope:
         )
         resolved = resolve_dependency_scope(snap, include_dependencies=True)
         assert resolved.dependency_scope == "full"
-        assert {f.name for f in resolved.functions} == {"run", "sys"}
+        assert {f.name for f in resolved.declarations.functions} == {"run", "sys"}
 
     def test_include_dependencies_on_non_header_snapshot_stays_untagged(self):
         snap = AbiSnapshot(
@@ -662,7 +667,7 @@ class TestCrossPlatformSystemHeaderPaths:
             types=[_rec("Own"), _rec("basic_string", source_header=win_path)],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Own"]
+        assert [t.name for t in scoped.declarations.types] == ["Own"]
 
     def test_windows_sdk_header_excluded(self):
         win_path = (
@@ -675,7 +680,7 @@ class TestCrossPlatformSystemHeaderPaths:
             types=[_rec("Own"), _rec("HWND__", source_header=win_path)],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Own"]
+        assert [t.name for t in scoped.declarations.types] == ["Own"]
 
     def test_macos_sdk_header_excluded(self):
         mac_path = (
@@ -689,7 +694,7 @@ class TestCrossPlatformSystemHeaderPaths:
             types=[_rec("Own"), _rec("__sFILE", source_header=mac_path)],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Own"]
+        assert [t.name for t in scoped.declarations.types] == ["Own"]
 
     def test_generated_header_is_not_excluded(self):
         """A machine-generated header (protobuf/moc/...) is part of the
@@ -702,7 +707,7 @@ class TestCrossPlatformSystemHeaderPaths:
             types=[_rec("Message", source_header="/src/myproject/generated/msg.pb.h")],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Message"]
+        assert [t.name for t in scoped.declarations.types] == ["Message"]
 
 
 class TestInstalledLibraryUnderSystemPrefix:
@@ -724,8 +729,8 @@ class TestInstalledLibraryUnderSystemPrefix:
             types=[_rec("MyLibStruct", source_header=root)],
         )
         scoped = scope_snapshot_excluding_dependencies(snap, header_roots=[root])
-        assert [f.name for f in scoped.functions] == ["mylib_run"]
-        assert [t.name for t in scoped.types] == ["MyLibStruct"]
+        assert [f.name for f in scoped.declarations.functions] == ["mylib_run"]
+        assert [t.name for t in scoped.declarations.types] == ["MyLibStruct"]
 
     def test_own_private_header_under_same_root_directory_kept(self):
         """A private header the root #include's (not itself passed as -H)
@@ -747,7 +752,10 @@ class TestInstalledLibraryUnderSystemPrefix:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap, header_roots=[root])
-        assert {f.name for f in scoped.functions} == {"mylib_run", "mylib_internal"}
+        assert {f.name for f in scoped.declarations.functions} == {
+            "mylib_run",
+            "mylib_internal",
+        }
 
     def test_real_dependency_still_excluded_alongside_installed_root(self):
         """The fix must not become "keep everything under /usr/include" --
@@ -764,7 +772,7 @@ class TestInstalledLibraryUnderSystemPrefix:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap, header_roots=[root])
-        assert [t.name for t in scoped.types] == ["MyLibStruct"]
+        assert [t.name for t in scoped.declarations.types] == ["MyLibStruct"]
 
     def test_no_header_roots_falls_back_to_bare_heuristic(self):
         """Without a recorded root set at all, the old bare-path check still
@@ -776,7 +784,7 @@ class TestInstalledLibraryUnderSystemPrefix:
             types=[_rec("MyLibStruct", source_header="/usr/include/mylib/api.h")],
         )
         scoped = scope_snapshot_excluding_dependencies(snap, header_roots=None)
-        assert scoped.types == []
+        assert scoped.declarations.types == []
 
 
 class TestQualifiedNameCollision:
@@ -863,8 +871,8 @@ class TestEndToEndCompareAfterScoping:
         # The hazard condition: the dependency type never made it into either
         # scoped snapshot, so a real 256->512 size change on it cannot be
         # observed even though it genuinely happened.
-        assert "std::string" not in {t.name for t in old_scoped.types}
-        assert "std::string" not in {t.name for t in new_scoped.types}
+        assert "std::string" not in {t.name for t in old_scoped.declarations.types}
+        assert "std::string" not in {t.name for t in new_scoped.declarations.types}
 
         result = compare(old_scoped, new_scoped)
         symbols_mentioned = {c.symbol for c in result.changes if c.symbol}
@@ -904,8 +912,8 @@ class TestEndToEndCompareAfterScoping:
         old_scoped = scope_snapshot_excluding_dependencies(_snap(256))
         new_scoped = scope_snapshot_excluding_dependencies(_snap(512))
 
-        assert "std::string" in {t.name for t in old_scoped.types}
-        assert "std::string" in {t.name for t in new_scoped.types}
+        assert "std::string" in {t.name for t in old_scoped.declarations.types}
+        assert "std::string" in {t.name for t in new_scoped.declarations.types}
 
         result = compare(old_scoped, new_scoped)
         assert result.verdict != Verdict.NO_CHANGE
@@ -967,7 +975,7 @@ class TestWrapRunDumpWithDependencyScope:
         run_dump = wrap_run_dump_with_dependency_scope(self._uncached(snap))
         result = run_dump(Path("/lib.so"), "elf", include_dependencies=False)
         assert result.dependency_scope == "filtered"
-        assert [f.name for f in result.functions] == ["run"]
+        assert [f.name for f in result.declarations.functions] == ["run"]
 
     def test_non_header_snapshot_stays_untagged(self):
         snap = AbiSnapshot(library="lib.so", version="1.0", from_headers=False)
@@ -1056,8 +1064,8 @@ class TestWrapRunDumpWithDependencyScope:
         by_keyword = run_dump(
             Path("/lib.so"), "elf", headers=[root], include_dependencies=False
         )
-        assert [f.name for f in by_positional.functions] == ["mylib_run"]
-        assert [f.name for f in by_keyword.functions] == ["mylib_run"]
+        assert [f.name for f in by_positional.declarations.functions] == ["mylib_run"]
+        assert [f.name for f in by_keyword.declarations.functions] == ["mylib_run"]
 
     def test_dump_manifest_roots_recovered_when_no_headers_given(self):
         """Codex review: ``--dump-manifest`` is mutually exclusive with
@@ -1085,7 +1093,7 @@ class TestWrapRunDumpWithDependencyScope:
         result = run_dump(
             Path("/lib.so"), "elf", include_dependencies=False, dump_manifest=manifest
         )
-        assert [f.name for f in result.functions] == ["mylib_run"]
+        assert [f.name for f in result.declarations.functions] == ["mylib_run"]
 
     def test_public_header_dirs_recovered_as_roots(self, tmp_path):
         """Codex review (ADR-055 D1): a declared-public directory
@@ -1118,7 +1126,7 @@ class TestWrapRunDumpWithDependencyScope:
             include_dependencies=False,
             public_header_dirs=[root],
         )
-        assert [f.name for f in result.functions] == ["mylib_run"]
+        assert [f.name for f in result.declarations.functions] == ["mylib_run"]
 
     def test_public_headers_recovered_as_roots(self):
         """Codex review, second pass: the first fix only folded in
@@ -1141,4 +1149,4 @@ class TestWrapRunDumpWithDependencyScope:
             include_dependencies=False,
             public_headers=[header],
         )
-        assert [f.name for f in result.functions] == ["mylib_run"]
+        assert [f.name for f in result.declarations.functions] == ["mylib_run"]

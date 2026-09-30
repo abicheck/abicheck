@@ -1296,7 +1296,7 @@ class TestDumpWithManifest:
             dump_manifest=self._manifest(tmp_path),
         )
         assert snap.from_headers is True
-        assert {f.name for f in snap.functions} == {"add_a", "add_b"}
+        assert {f.name for f in snap.declarations.functions} == {"add_a", "add_b"}
         assert snap.ast_producer == "clang"
         assert snap.contract is not None
         assert snap.contract.scope_fingerprint is not None
@@ -1439,7 +1439,7 @@ class TestDumpWithManifest:
             header_backend="clang",
             dump_manifest=manifest,
         )
-        assert [fn.name for fn in snapshot.functions] == ["shared_fn"]
+        assert [fn.name for fn in snapshot.declarations.functions] == ["shared_fn"]
 
     def test_dump_manifest_raises_on_genuinely_conflicting_across_tus(
         self, tmp_path: Path

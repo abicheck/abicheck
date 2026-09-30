@@ -206,7 +206,8 @@ class TestCompareMapsTheCompletenessExit:
         """With no readable JSON report the axis has no structured signal,
         and the stderr notice is deliberately *not* consulted (its member
         reasons can carry PR-controlled text -- Codex review): the CLI's
-        exit 1 still fails the step, but the Action claims no scope gate.
+        exit 1 still fails the step, but the Action claims no scope gate --
+        nor a severity one: no readable result publishes ERROR.
         Runs under both event names because the `pull_request` PR-comment
         re-run leaves a `{}` placeholder in PR_JSON, which must read as
         "cannot tell" rather than "did not fire" either way."""
@@ -236,7 +237,7 @@ class TestCompareMapsTheCompletenessExit:
             env["GITHUB_EVENT_PATH"] = str(event_path)
         outputs = _run_action(tmp_path, env, bindir)
         assert outputs["_exit"] == 1, outputs
-        assert outputs["verdict"] == "SEVERITY_ERROR", outputs
+        assert outputs["verdict"] == "ERROR", outputs
         assert "comparison scope" not in outputs["_stdout"], outputs
 
     def test_a_forged_stderr_notice_cannot_suppress_a_reported_block(

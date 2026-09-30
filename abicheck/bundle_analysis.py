@@ -183,6 +183,11 @@ def analyze_bundle(
             analysis_errors=[f"bundle analysis raised: {exc}"],
         )
 
+    # ADR-062 A1.8: carry each side's non-ELF members forward as a named fact.
+    for side in (old, new):
+        for member, kind in getattr(side, "resolution_not_applicable", {}).items():
+            result.resolution_not_applicable_members.setdefault(member, kind)
+
     if old_signature_evidence and new_signature_evidence:
         # G38 Phase 4, now shared by both callers instead of being a second,
         # independently-wired call site: same additive-degradation contract

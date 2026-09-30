@@ -76,7 +76,7 @@ def test_no_active_deadline_scans_normally(built_lib: tuple[Path, Path]) -> None
     # scope), the ordinary header scan must succeed exactly as before.
     so, header = built_lib
     snap = dump(so, [header], header_backend="clang")
-    assert {f.name for f in snap.functions} == {"add"}
+    assert {f.name for f in snap.declarations.functions} == {"add"}
 
 
 def test_already_expired_deadline_aborts_before_reparsing(
@@ -109,7 +109,7 @@ def test_deadline_scope_does_not_leak_into_later_scans(
         with pytest.raises(deadline.DeadlineExceeded):
             dump(so, [header], header_backend="clang")
     snap = dump(so, [header], header_backend="clang")
-    assert {f.name for f in snap.functions} == {"add"}
+    assert {f.name for f in snap.declarations.functions} == {"add"}
 
 
 def test_generous_budget_is_not_truncated_to_internal_default(
@@ -124,7 +124,7 @@ def test_generous_budget_is_not_truncated_to_internal_default(
     with deadline.deadline_scope(600.0):
         snap = dump(so, [header], header_backend="clang")
     assert time.monotonic() - start < 60
-    assert {f.name for f in snap.functions} == {"add"}
+    assert {f.name for f in snap.declarations.functions} == {"add"}
 
 
 # --- SVS-shaped pathological header: real, measurable compile cost ----------
@@ -232,7 +232,7 @@ def test_pathological_header_natural_cost_is_tracked(
     start = time.monotonic()
     snap = dump(so, [header], header_backend="clang")
     elapsed = time.monotonic() - start
-    assert {f.name for f in snap.functions} == {"touch"}
+    assert {f.name for f in snap.declarations.functions} == {"touch"}
     assert elapsed < 60.0, (
         f"natural cost grew to {elapsed:.1f}s for depth {_DEEP_TEMPLATE_DEPTH} "
         "-- recalibrate _DEEP_TEMPLATE_DEPTH down if this fixture (or the "

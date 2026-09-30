@@ -100,7 +100,7 @@ def _index(snap: AbiSnapshot, *, exclude_stdlib: bool) -> TypeMap[RecordType]:
             return False
         return not is_non_abi_surface_type(rec.name, exclude_stdlib_namespaces=False)
 
-    return build_type_map(rec for rec in snap.types if _keep(rec))
+    return build_type_map(rec for rec in snap.declarations.types if _keep(rec))
 
 
 def _has_layout_descriptor(

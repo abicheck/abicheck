@@ -157,7 +157,7 @@ def _has_idiom(
 
 
 def _type_names(snap: AbiSnapshot) -> frozenset[str]:
-    return frozenset(rec.name for rec in snap.types)
+    return frozenset(rec.name for rec in snap.declarations.types)
 
 
 def _verdict_label(v: Verdict) -> str:
@@ -174,7 +174,7 @@ def _exact_record(snap: AbiSnapshot, name: str) -> object | None:
     ``OPAQUE_INVARIANT_BROKEN`` instead of letting the normal removed/renamed
     handling cover it (ADR-027 review).
     """
-    return next((rec for rec in snap.types if rec.name == name), None)
+    return next((rec for rec in snap.declarations.types if rec.name == name), None)
 
 
 def apply_pattern_verdicts(
@@ -331,7 +331,9 @@ def _emit_lost_invariants(
         if not any(t.idiom == Idiom.OPAQUE_POINTER for t in tags):
             continue
         if public_use is None:
-            public_use = build_public_use_index(new_graph.snapshot.functions)
+            public_use = build_public_use_index(
+                new_graph.snapshot.declarations.functions
+            )
         new_rec = _exact_record(new, name)
         if new_rec is None:
             continue  # removed entirely → handled by TYPE_REMOVED, not this
@@ -400,10 +402,13 @@ def _emit_lost_invariants(
     for alias, tags in old_idioms.items():
         if not any(t.idiom == Idiom.HANDLE for t in tags):
             continue
-        if alias not in old.typedefs or alias not in new.typedefs:
+        if (
+            alias not in old.declarations.typedefs
+            or alias not in new.declarations.typedefs
+        ):
             continue
-        old_target = old.typedefs[alias].strip()
-        new_target = new.typedefs[alias].strip()
+        old_target = old.declarations.typedefs[alias].strip()
+        new_target = new.declarations.typedefs[alias].strip()
         if old_target == new_target:
             continue
         key = (ChangeKind.HANDLE_TYPE_CHANGED, alias)

@@ -51,7 +51,7 @@ def _snapshot(library: str, *, declares: tuple[str, ...], exports: tuple[str, ..
         from_headers=True,
         elf=ElfMetadata(symbols=[ElfSymbol(name=n) for n in exports]),
     )
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name=name,
             mangled=name,

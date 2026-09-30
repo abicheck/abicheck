@@ -152,7 +152,7 @@ class TestEndToEndMarkerBearingSnapshotLoadPreservesParamKind:
     def test_normalize_on_load_preserves_param_kind_enum(self) -> None:
         snap = _marker_bearing_snapshot(ParamKind.POINTER)
         normalize_anonymous_type_spellings_on_load(snap)
-        for fn in snap.functions:
+        for fn in snap.declarations.functions:
             for p in fn.params:
                 assert isinstance(p.kind, ParamKind)
 
@@ -173,7 +173,9 @@ class TestEndToEndMarkerBearingSnapshotLoadPreservesParamKind:
         # A real const-overload removal too (const dropped, non-const
         # kept), so the detector's own finding is exercised, not just its
         # grouping key.
-        new.functions = [f for f in new.functions if not f.is_const]
+        new.declarations.functions = [
+            f for f in new.declarations.functions if not f.is_const
+        ]
 
         result = compare(old, new)
 
@@ -190,7 +192,7 @@ class TestEndToEndMarkerBearingSnapshotLoadPreservesParamKind:
             "version": snap.version,
             "types": [
                 {"name": t.name, "kind": t.kind, "size_bits": t.size_bits}
-                for t in snap.types
+                for t in snap.declarations.types
             ],
             "functions": [
                 {
@@ -208,10 +210,10 @@ class TestEndToEndMarkerBearingSnapshotLoadPreservesParamKind:
                         for p in f.params
                     ],
                 }
-                for f in snap.functions
+                for f in snap.declarations.functions
             ],
         }
         loaded = snapshot_from_dict(raw)
-        for fn in loaded.functions:
+        for fn in loaded.declarations.functions:
             for p in fn.params:
                 assert isinstance(p.kind, ParamKind)

@@ -241,6 +241,19 @@ def _is_compatibility_verdict(value: object) -> bool:
     return _is_known_verdict(value) and value not in OPERATIONAL_VERDICTS
 
 
+#: `abicheck.stack_checker.StackVerdict`'s values -- pinned against the enum
+#: by `tests/test_action_report_query.py`, like `KNOWN_VERDICTS`.
+STACK_VERDICTS = frozenset({"pass", "warn", "fail"})
+
+
+def _is_stack_verdict(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("loadability") in STACK_VERDICTS
+        and value.get("abi_risk") in STACK_VERDICTS
+    )
+
+
 def _carries_a_result(document: dict[str, Any]) -> bool:
     """Whether a verdict can actually be read out of *document*.
 
@@ -266,6 +279,13 @@ def _carries_a_result(document: dict[str, Any]) -> bool:
     # (Codex review, P2). Both emitters write a literal `null` there, so this is
     # faithful to them rather than stricter.
     if document.get("verdict") is None and isinstance(document.get("reason"), dict):
+        return True
+    # `deps tree`/`deps compare`'s report (`abicheck/report/stack.py`): its
+    # `verdict` is an object of two independent axes on their own
+    # pass/warn/fail scale, never a compatibility tier. Recognized so the
+    # Action can tell "the deps run answered" from "it failed before
+    # answering" by the report rather than by stderr prose (ADR-063 T8).
+    if _is_stack_verdict(document.get("verdict")):
         return True
     return (
         document.get("verdict") is None

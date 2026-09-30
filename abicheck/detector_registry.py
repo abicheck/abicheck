@@ -51,6 +51,7 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from .compare.declined_comparisons import declined_scope
 from .detectors import DetectorResult
 
 if TYPE_CHECKING:
@@ -279,14 +280,17 @@ class DetectorRegistry:
                     )
                     continue
 
-            # Run detector
-            detected = entry.fn(old, new)
+            # Run detector, collecting any per-entity declines it records
+            # (ADR-063 T9) so "judged nothing here" is not lost in the list.
+            with declined_scope() as declined:
+                detected = entry.fn(old, new)
             changes.extend(detected)
             detector_results.append(
                 DetectorResult(
                     name=entry.name,
                     changes_count=len(detected),
                     enabled=True,
+                    declined=tuple((d.entity, d.reason) for d in declined),
                 )
             )
 

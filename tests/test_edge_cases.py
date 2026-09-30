@@ -215,7 +215,10 @@ class TestSerializationEdgeCases:
         json_str = snapshot_to_json(snap)
         roundtripped = snapshot_from_dict(json.loads(json_str))
         assert roundtripped.library == snap.library
-        assert roundtripped.functions[0].name == snap.functions[0].name
+        assert (
+            roundtripped.declarations.functions[0].name
+            == snap.declarations.functions[0].name
+        )
 
     def test_roundtrip_very_long_function_name(self) -> None:
         long_name = "f" * 10_000
@@ -228,7 +231,7 @@ class TestSerializationEdgeCases:
         )
         json_str = snapshot_to_json(snap)
         roundtripped = snapshot_from_dict(json.loads(json_str))
-        assert roundtripped.functions[0].name == long_name
+        assert roundtripped.declarations.functions[0].name == long_name
 
     def test_load_corrupted_json(self) -> None:
         """Corrupted JSON must raise json.JSONDecodeError, not an internal error."""

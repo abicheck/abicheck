@@ -232,7 +232,7 @@ def _index_surface_types(
     why that distinction matters for ``ambiguous_type_names`` specifically.
     """
     record_by_name: dict[str, list[RecordType]] = {}
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         surface.all_types.add(rec.name)
         keys = {rec.name}
         record_by_name.setdefault(rec.name, []).append(rec)
@@ -259,7 +259,7 @@ def _index_surface_types(
                 surface.origin_by_qualified_key.get(rec.qualified_name), origin
             )
     enum_by_name: dict[str, list[EnumType]] = {}
-    for en in snap.enums:
+    for en in snap.declarations.enums:
         surface.all_types.add(en.name)
         keys = {en.name}
         enum_by_name.setdefault(en.name, []).append(en)
@@ -275,7 +275,7 @@ def _index_surface_types(
             surface.origin_by_qualified_key[en.qualified_name] = _merge_origin(
                 surface.origin_by_qualified_key.get(en.qualified_name), origin
             )
-    for alias in snap.typedefs:
+    for alias in snap.declarations.typedefs:
         surface.all_types.add(alias)
     # Combine both kinds before counting: a bare name ambiguous *across*
     # records and enums (one record entry, one enum entry -- neither list

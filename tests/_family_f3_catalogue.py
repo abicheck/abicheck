@@ -603,17 +603,29 @@ def finding_ids(result: Any) -> list[str]:
 
 
 def snapshot_identity_keys(snap: AbiSnapshot) -> list[str]:
-    keys = [finding_mod.resolve_function_identity(f).primary_id for f in snap.functions]
-    keys += [
-        finding_mod.resolve_variable_identity(v).primary_id for v in snap.variables
+    keys = [
+        finding_mod.resolve_function_identity(f).primary_id
+        for f in snap.declarations.functions
     ]
-    keys += [f"type:{nc_mod.strip_anonymous_type_location(t.name)}" for t in snap.types]
-    keys += [f"enum:{e.name}" for e in snap.enums]
+    keys += [
+        finding_mod.resolve_variable_identity(v).primary_id
+        for v in snap.declarations.variables
+    ]
+    keys += [
+        f"type:{nc_mod.strip_anonymous_type_location(t.name)}"
+        for t in snap.declarations.types
+    ]
+    keys += [f"enum:{e.name}" for e in snap.declarations.enums]
     return sorted(keys)
 
 
 def entity_count(snap: AbiSnapshot) -> int:
-    return len(snap.functions) + len(snap.variables) + len(snap.types) + len(snap.enums)
+    return (
+        len(snap.declarations.functions)
+        + len(snap.declarations.variables)
+        + len(snap.declarations.types)
+        + len(snap.declarations.enums)
+    )
 
 
 def hashseed_fingerprint() -> str:
@@ -629,7 +641,7 @@ def hashseed_fingerprint() -> str:
             "finding_ids": finding_ids(result),
             "old_keys": [
                 finding_mod.resolve_function_identity(f).primary_id
-                for f in old.functions
+                for f in old.declarations.functions
             ],
             "entity_ids": [
                 repr(ident_mod.entity_id_for_function((), n, mangled_name=n))
@@ -640,7 +652,7 @@ def hashseed_fingerprint() -> str:
                 for fam in CTOR_FAMILIES.values()
                 for s in fam
             ],
-            "types": [t.name for t in old.types],
+            "types": [t.name for t in old.declarations.types],
         },
         sort_keys=True,
     )

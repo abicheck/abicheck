@@ -107,6 +107,14 @@ def json_scope_fields(
             for k, (kind, msg) in not_comparable.items()
         },
     }
+    not_applicable = dict(
+        getattr(result, "resolution_not_applicable_members", {}) or {}
+    )
+    if not_applicable:  # ADR-062 A1.8: named, never silently dropped
+        fields["resolution_not_applicable_members"] = {
+            k: {"artifact_kind": kind, "resolution": "not_applicable"}
+            for k, kind in sorted(not_applicable.items())
+        }
     if terms.section is not None:
         fields["comparison_scope"] = terms.section
     return fields

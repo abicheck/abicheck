@@ -395,7 +395,7 @@ def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
     from it would produce spurious ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API``
     findings with no real public entry point.
     """
-    out: dict[str, RecordType] = {t.name: t for t in snap.types}
+    out: dict[str, RecordType] = {t.name: t for t in snap.declarations.types}
     if out:
         return out, False
     dwarf = getattr(snap, "dwarf", None)
@@ -704,7 +704,7 @@ def compute_leak_paths(
     # ambiguous bare name is still detectable; naturally empty/inert in the
     # DWARF-fallback case (snap.types is empty there and DWARF carries no
     # qualified_name anyway).
-    qualified_index = _build_qualified_index(snap.types)
+    qualified_index = _build_qualified_index(snap.declarations.types)
 
     queue: collections.deque[tuple[str, list[str]]] = collections.deque()
     _seed_queue_from_functions(snap, queue)
@@ -718,7 +718,7 @@ def compute_leak_paths(
     )
 
     paths = _bfs_collect_paths(
-        queue, type_map, qualified_index, internal_set, snap.typedefs
+        queue, type_map, qualified_index, internal_set, snap.declarations.typedefs
     )
     return _dedup_paths(paths)
 
@@ -1361,7 +1361,7 @@ def detect_internal_leaks(
     # name shared by two distinct types across old+new stays detectable as
     # ambiguous rather than silently resolved via one arbitrary record.
     merged_qualified_index: dict[str, set[str | None]] = collections.defaultdict(set)
-    for t in (*old.types, *new.types):
+    for t in (*old.declarations.types, *new.declarations.types):
         merged_qualified_index[t.name].add(t.qualified_name)
     internal_changes = _collect_internal_changes(
         changes, internal_set, merged_qualified_index

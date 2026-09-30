@@ -528,5 +528,5 @@ def test_scope_header_dirs_does_not_enable_provenance_tagging(
 
     from abicheck.model import ScopeOrigin
 
-    assert snap.functions
-    assert all(fn.origin == ScopeOrigin.UNKNOWN for fn in snap.functions)
+    assert snap.declarations.functions
+    assert all(fn.origin == ScopeOrigin.UNKNOWN for fn in snap.declarations.functions)

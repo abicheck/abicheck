@@ -101,7 +101,7 @@ def _produce(producer: str, platform: str, read: str) -> Function:
     """What each producer records, then the builder's shared tail."""
     snap = _unreconciled(producer, platform, read)
     reconcile_snapshot_export_absence(snap)
-    return snap.functions[0]
+    return snap.declarations.functions[0]
 
 
 def test_oracle_is_not_constant() -> None:
@@ -152,7 +152,7 @@ def test_stored_baseline_agrees_with_live(
     stored = _unreconciled(producer, platform, read)
     loaded = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(stored))))
     live = _produce(producer, platform, read)
-    assert is_export_confirmed_absent(loaded.functions[0]) is (
+    assert is_export_confirmed_absent(loaded.declarations.functions[0]) is (
         is_export_confirmed_absent(live)
     ), (producer, platform, read)
 
@@ -184,7 +184,9 @@ def test_pre_v46_hidden_follows_the_read(platform: str, stored: bool) -> None:
             snap = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
         else:
             reconcile_snapshot_export_absence(snap)
-        assert is_export_confirmed_absent(snap.functions[0]) is expect_absent, (
+        assert (
+            is_export_confirmed_absent(snap.declarations.functions[0]) is expect_absent
+        ), (
             platform,
             read,
             stored,
@@ -194,7 +196,7 @@ def test_pre_v46_hidden_follows_the_read(platform: str, stored: bool) -> None:
 def test_no_platform_block_is_left_alone() -> None:
     snap = AbiSnapshot(library="h", version="1", functions=[_absent_fn(legacy=False)])
     assert reconcile_snapshot_export_absence(snap) == 0
-    assert is_export_confirmed_absent(snap.functions[0])
+    assert is_export_confirmed_absent(snap.declarations.functions[0])
 
 
 def test_cli_failed_read_never_reports_a_removal(tmp_path: Path) -> None:

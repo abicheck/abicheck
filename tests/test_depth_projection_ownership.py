@@ -71,6 +71,7 @@ from abicheck.policy.depth_projection import (
     project_pair_to_depth,
     project_snapshot_to_depth,
 )
+from tests.snapshot_fields import field_of
 
 #: Every public rung, so a new rung joins these invariants automatically
 #: rather than silently escaping them.
@@ -164,11 +165,11 @@ class TestArgumentIsNeverMutated:
         assert snap.build_mode == before.build_mode
         assert (snap.build_source is None) == (before.build_source is None)
         for field in SURFACE_FIELDS:
-            got, want = getattr(snap, field), getattr(before, field)
+            got, want = field_of(snap, field), field_of(before, field)
             assert len(got) == len(want)
             assert [d.name for d in got] == [d.name for d in want]
-        assert snap.typedefs == before.typedefs
-        assert snap.constants == before.constants
+        assert snap.declarations.typedefs == before.declarations.typedefs
+        assert snap.declarations.constants == before.declarations.constants
         assert snap.from_headers == before.from_headers
 
     @pytest.mark.parametrize("depth", ALL_DEPTHS)
@@ -176,12 +177,12 @@ class TestArgumentIsNeverMutated:
         old, new = _snapshot(dwarf=True), _snapshot(dwarf=True)
         counts = [
             (len(getattr(s, f)) for f in SURFACE_FIELDS)
-            and tuple(len(getattr(s, f)) for f in SURFACE_FIELDS)
+            and tuple(len(field_of(s, f)) for f in SURFACE_FIELDS)
             for s in (old, new)
         ]
         project_pair_to_depth(old, new, depth)
         assert [
-            tuple(len(getattr(s, f)) for f in SURFACE_FIELDS) for s in (old, new)
+            tuple(len(field_of(s, f)) for f in SURFACE_FIELDS) for s in (old, new)
         ] == counts
 
     @pytest.mark.parametrize("depth", ALL_DEPTHS)
@@ -210,8 +211,8 @@ class TestRungOwnership:
         snap = _snapshot(from_headers=False, dwarf=True)
         projected = project_snapshot_to_depth(snap, depth)
 
-        assert getattr(projected, field) is not getattr(snap, field)
-        for got, want in zip(getattr(projected, field), getattr(snap, field)):
+        assert field_of(projected, field) is not field_of(snap, field)
+        for got, want in zip(field_of(projected, field), field_of(snap, field)):
             assert got is not want
 
     @pytest.mark.parametrize("depth", AT_OR_ABOVE_HEADERS)
@@ -225,7 +226,7 @@ class TestRungOwnership:
         memory again."""
         snap = _snapshot()
         projected = project_snapshot_to_depth(snap, depth)
-        assert getattr(projected, field) is getattr(snap, field)
+        assert field_of(projected, field) is field_of(snap, field)
 
     @pytest.mark.parametrize("depth", AT_OR_ABOVE_HEADERS)
     def test_a_surviving_build_source_pack_is_still_owned(self, depth: str) -> None:
@@ -304,11 +305,17 @@ class TestSharingIsSafeForTheWaysCallersActuallyUse_A_Projection:
             depth = next(
                 d
                 for d in ALL_DEPTHS
-                if len(alone[d].functions) == len(projected.functions)
-                and len(alone[d].types) == len(projected.types)
+                if len(alone[d].declarations.functions)
+                == len(projected.declarations.functions)
+                and len(alone[d].declarations.types)
+                == len(projected.declarations.types)
             )
-            assert len(projected.functions) == len(alone[depth].functions)
-            assert len(projected.types) == len(alone[depth].types)
+            assert len(projected.declarations.functions) == len(
+                alone[depth].declarations.functions
+            )
+            assert len(projected.declarations.types) == len(
+                alone[depth].declarations.types
+            )
 
     @pytest.mark.parametrize("depth", ALL_DEPTHS)
     def test_serializing_a_projection_does_not_disturb_the_input(
@@ -367,9 +374,9 @@ class TestTheShallowCopyIsAWholeObjectCopy:
         calls: list[object] = []
         original = AbiSnapshot.__post_init__
 
-        def counting_post_init(self: AbiSnapshot) -> None:
+        def counting_post_init(self: AbiSnapshot, *builder_inputs: object) -> None:
             calls.append(self)
-            original(self)
+            original(self, *builder_inputs)
 
         AbiSnapshot.__post_init__ = counting_post_init  # type: ignore[method-assign]
         try:

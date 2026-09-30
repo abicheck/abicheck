@@ -181,22 +181,22 @@ def project(snap: AbiSnapshot, tier: Tier) -> AbiSnapshot:
     if tier <= Tier.L1:
         # No headers: strip header-derived visibility/provenance so nothing is
         # scoped as public/private (matches a DWARF/symbols-only dump).
-        for f in s.functions:
+        for f in s.declarations.functions:
             f.visibility = Visibility.ELF_ONLY
             f.origin = ScopeOrigin.UNKNOWN
-        for v in s.variables:
+        for v in s.declarations.variables:
             v.visibility = Visibility.ELF_ONLY
             v.origin = ScopeOrigin.UNKNOWN
-        for t in s.types:
+        for t in s.declarations.types:
             t.origin = ScopeOrigin.UNKNOWN
-        for e in s.enums:
+        for e in s.declarations.enums:
             e.origin = ScopeOrigin.UNKNOWN
         # Macro/constexpr constants are a header (L2) fact — a stripped binary
         # and its DWARF carry no macro/constexpr values. Clear them below L2, else
         # DetectCppPatterns.detect_serialization_tag_changes (which reads
         # `constants` directly, not via from_headers) would report a constant
         # change at L0/L1 and overstate a constant-axis case (Codex review #487).
-        s.constants = {}
+        s.declarations.constants = {}
         s.from_headers = False
         # A CPython extension's Python-visible API is recovered from a `.pyi`
         # type stub — a header-equivalent (L2) fact. A stripped binary and its
@@ -211,13 +211,13 @@ def project(snap: AbiSnapshot, tier: Tier) -> AbiSnapshot:
         # symbol (no type/const/value evidence). Anything richer would let
         # compare() overstate what a stripped binary can see for a type-, enum-,
         # typedef- or variable-axis case (Codex review #487).
-        s.types = []
-        s.enums = []
-        s.typedefs = {}
-        for f in s.functions:
+        s.declarations.types = []
+        s.declarations.enums = []
+        s.declarations.typedefs = {}
+        for f in s.declarations.functions:
             f.return_type = "?"
             f.params = []
-        for v in s.variables:
+        for v in s.declarations.variables:
             v.type = "?"
             v.is_const = False
             v.value = None

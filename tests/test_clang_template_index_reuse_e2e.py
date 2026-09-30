@@ -412,9 +412,9 @@ int Base::kind() const { return 1; }
     ], [c.kind.value for c in reuse_result.changes]
     # And the control must actually have parsed a real surface, or "clean"
     # is vacuous.
-    assert any("distance" in (f.name or "") for f in reuse_snap.functions), [
-        f.name for f in reuse_snap.functions
-    ]
+    assert any(
+        "distance" in (f.name or "") for f in reuse_snap.declarations.functions
+    ), [f.name for f in reuse_snap.declarations.functions]
 
 
 _CASTXML_CONTROL = pytest.mark.skipif(
@@ -477,8 +477,10 @@ def test_the_castxml_backend_is_an_unchanged_control(
         assert getattr(old_snap, "ast_producer", None) == "castxml", getattr(
             old_snap, "ast_producer", None
         )
-        spellings = {t.name for t in old_snap.types if "<" in (t.name or "")}
-        assert spellings, sorted(t.name for t in old_snap.types)
+        spellings = {
+            t.name for t in old_snap.declarations.types if "<" in (t.name or "")
+        }
+        assert spellings, sorted(t.name for t in old_snap.declarations.types)
 
     # Nothing in this change is reachable from the castxml path at all.
     assert builds == [0, 0], builds

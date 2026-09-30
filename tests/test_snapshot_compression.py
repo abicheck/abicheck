@@ -114,10 +114,10 @@ def test_round_trip_all_encodings(tmp_path, compression):
     assert result.compression.value == compression
     loaded = load_snapshot(path)
     assert loaded.library == snap.library
-    assert len(loaded.functions) == 1
-    assert loaded.functions[0].mangled == "_Z8foo_initv"
-    assert len(loaded.types) == 1
-    assert loaded.types[0].name == "Widget"
+    assert len(loaded.declarations.functions) == 1
+    assert loaded.declarations.functions[0].mangled == "_Z8foo_initv"
+    assert len(loaded.declarations.types) == 1
+    assert loaded.declarations.types[0].name == "Widget"
 
 
 def test_snapshot_from_dict_equal_across_encodings(tmp_path):
@@ -1353,7 +1353,7 @@ def test_empty_minimal_snapshot(tmp_path):
         write_snapshot(snap, p)
         loaded = load_snapshot(p)
         assert loaded.library == "empty"
-        assert loaded.functions == []
+        assert loaded.declarations.functions == []
 
 
 def test_graph_heavy_snapshot_round_trips_and_compresses_well(tmp_path):
@@ -1363,7 +1363,7 @@ def test_graph_heavy_snapshot_round_trips_and_compresses_well(tmp_path):
     write_snapshot(snap, plain)
     result = write_snapshot(snap, zst)
     loaded = load_snapshot(zst)
-    assert len(loaded.functions) == 400
+    assert len(loaded.declarations.functions) == 400
     # Repeated, path-heavy content compresses well -- generous bound (not the
     # tuned ~10-15% target from ADR-059's real-world benchmark) so this stays
     # robust to CPU/zstd-version noise while still catching a regression to

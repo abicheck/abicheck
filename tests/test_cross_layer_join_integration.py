@@ -152,7 +152,7 @@ class TestExportJoinOnStoredDump:
         snap = _load(dumps["v1"])
         j = join_exports(snap)
         checked = 0
-        for fn, ident in zip(snap.functions, j.identities.functions):
+        for fn, ident in zip(snap.declarations.functions, j.identities.functions):
             fact = fn.binary_exported_fact
             if fact is None or fact.status is not FactStatus.PRESENT:
                 continue
@@ -244,7 +244,9 @@ class TestCompareUsesTheJoins:
             ids = snapshot_identities(snap)
             expected = sorted(
                 ident.node_id
-                for fn, ident in zip(snap.functions, ids.functions, strict=True)
+                for fn, ident in zip(
+                    snap.declarations.functions, ids.functions, strict=True
+                )
                 if fn.mangled in rooted
             )
             assert len(expected) == len(rooted)

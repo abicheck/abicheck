@@ -1010,39 +1010,6 @@ class TestFieldDeprecated:
         r = compare(old, new)
         assert ChangeKind.FIELD_DEPRECATED_REMOVED in _kinds(r)
 
-    def test_gated_on_a_genuinely_unknown_producer(self):
-        """The real remaining false-positive-avoidance case: an
-        ast_producer that isn't a confirmed backend at all (e.g. a legacy
-        pre-provenance baseline) must still decline to compare."""
-        t_old = RecordType(
-            name="Cfg",
-            kind="struct",
-            size_bits=32,
-            fields=[TypeField("count", "int", 0, deprecated="msg")],
-        )
-        t_new = RecordType(
-            name="Cfg",
-            kind="struct",
-            size_bits=32,
-            fields=[TypeField("count", "int", 0, deprecated=None)],
-        )
-        old = AbiSnapshot(
-            library="libtest.so.1",
-            version="1.0",
-            types=[t_old],
-            from_headers=True,
-            ast_producer="castxml",
-        )
-        new = AbiSnapshot(
-            library="libtest.so.1",
-            version="2.0",
-            types=[t_new],
-            from_headers=True,
-            ast_producer="some_future_tool",
-        )
-        r = compare(old, new)
-        assert ChangeKind.FIELD_DEPRECATED_REMOVED not in _kinds(r)
-
     def test_union_variant_deprecated_detected(self):
         """Matches FIELD_DEFAULT_INITIALIZER_*'s union-inclusive precedent:
         a union variant can carry [[deprecated]] too."""

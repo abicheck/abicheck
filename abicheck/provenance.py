@@ -704,9 +704,8 @@ def apply_provenance(
         origin_cache=origin_cache,
         compile_only_dir_segs=compile_only,
     )
-    for decl in chain(
-        snapshot.functions, snapshot.variables, snapshot.types, snapshot.enums
-    ):
+    decls = snapshot.declarations
+    for decl in chain(decls.functions, decls.variables, decls.types, decls.enums):
         tag(decl)
     return snapshot
 

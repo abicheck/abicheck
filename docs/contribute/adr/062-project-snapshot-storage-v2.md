@@ -105,12 +105,25 @@ select among multiple declared variants. Directory packages only — the
 `.tar.zst` transport form (A1.1's own remainder, below) is not yet produced
 by anything, so nothing yet exercises this against one.
 
-Digest-deduplicated shared evidence beyond what the two slices above already
-give, variant capture, and the `.tar.zst` transport form (the remainder of
-A1.5/A1.6/A1.1) remain not implemented, along with `BuildSourcePack`/project
-source-graph dedup (the ~57-59 MB-per-artifact finding this ADR's Context
-names), `bundle_variants:` capture wiring, and non-ELF artifact
-membership (A1.8) — note this is the
+**A1.6 (`bundle_variants:` capture wiring) has landed**: the
+`.abicheck.yml` `bundle_variants:` block (`model/bundle_variants.py`,
+strictly validated on every config load) drives `abicheck project
+capture-variants`, which captures every declared variant into one package
+(`workflows/bundle_variants_capture.py`) — one `VariantRef` per variant
+with D9's two maps kept apart (`declared` from config, `captured` from what
+the dumps recorded), a required variant that cannot be captured refused
+before anything is written, an optional one skipped and reported with no
+`VariantRef`. Two stored packages compared through `compare` now report
+`comparison_scope.variant_pairing` (by `variant_id`; declared-coordinate
+changes as a variant-boundary change distinct from captured drift; an
+unmatched variant never read as removed). See the plan's A1.6 entry.
+
+Digest-deduplicated shared evidence beyond what the slices above already
+give and the `.tar.zst` transport form (the remainder of A1.5/A1.1) remain
+not implemented, along with `BuildSourcePack`/project source-graph dedup
+(the ~57-59 MB-per-artifact finding this ADR's Context names) (non-ELF
+artifact membership, A1.8, has since landed — see the plan's A1.8 entry) —
+note this is the
 **remainder of Phase 1**, not Phase 2 (Phase 2 is the separate
 scale/performance work: lazy loading, streaming encode, cache migration,
 indexes). A full per-item design for A1.1's `.tar.zst` remainder and

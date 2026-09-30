@@ -53,7 +53,7 @@ class TestHiddenVisibilityModel:
         d = snapshot_to_dict(snap)
         assert d["functions"][0]["visibility"] == "hidden"
         snap2 = snapshot_from_dict(d)
-        assert snap2.functions[0].visibility == Visibility.HIDDEN
+        assert snap2.declarations.functions[0].visibility == Visibility.HIDDEN
 
 
 class TestHiddenFunctionNotReported:

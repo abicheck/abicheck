@@ -112,7 +112,9 @@ class TestDwarfEntityIdCLib:
         dwarf_meta, dwarf_adv = parse_dwarf(c_lib)
         snap = build_snapshot_from_dwarf(c_lib, elf_meta, dwarf_meta, dwarf_adv)
 
-        add_func = next((f for f in snap.functions if f.name == "add"), None)
+        add_func = next(
+            (f for f in snap.declarations.functions if f.name == "add"), None
+        )
         assert add_func is not None
         assert add_func.entity_id is not None
         assert add_func.entity_id.kind == EntityKind.FUNCTION
@@ -124,7 +126,9 @@ class TestDwarfEntityIdCLib:
         dwarf_meta, dwarf_adv = parse_dwarf(c_lib)
         snap = build_snapshot_from_dwarf(c_lib, elf_meta, dwarf_meta, dwarf_adv)
 
-        gv = next((v for v in snap.variables if v.name == "global_var"), None)
+        gv = next(
+            (v for v in snap.declarations.variables if v.name == "global_var"), None
+        )
         assert gv is not None
         assert gv.entity_id is not None
         assert gv.entity_id.kind == EntityKind.VARIABLE
@@ -139,8 +143,10 @@ class TestDwarfEntityIdCLib:
         dwarf_meta, dwarf_adv = parse_dwarf(c_lib)
         snap = build_snapshot_from_dwarf(c_lib, elf_meta, dwarf_meta, dwarf_adv)
 
-        assert set(snap.typedef_entity_ids) == set(snap.typedefs)
-        point_id = snap.typedef_entity_ids["Point"]
+        assert set(snap.declarations.typedef_entity_ids) == set(
+            snap.declarations.typedefs
+        )
+        point_id = snap.declarations.typedef_entity_ids["Point"]
         assert point_id.kind == EntityKind.TYPEDEF
         assert point_id.leaf_name == "Point"
 
@@ -389,7 +395,10 @@ class TestDwarfEntityIdAsmLabeledLinkageName:
         dwarf_meta, dwarf_adv = parse_dwarf(so_path)
         snap = build_snapshot_from_dwarf(so_path, elf_meta, dwarf_meta, dwarf_adv)
 
-        func = next((f for f in snap.functions if f.mangled == "custom_cpp_name"), None)
+        func = next(
+            (f for f in snap.declarations.functions if f.mangled == "custom_cpp_name"),
+            None,
+        )
         assert func is not None
         assert func.entity_id is not None
         assert func.entity_id.kind == EntityKind.FUNCTION
@@ -412,7 +421,10 @@ class TestDwarfEntityIdAsmLabeledLinkageName:
         dwarf_meta, dwarf_adv = parse_dwarf(so_path)
         snap = build_snapshot_from_dwarf(so_path, elf_meta, dwarf_meta, dwarf_adv)
 
-        func = next((f for f in snap.functions if f.mangled == "custom_c_name"), None)
+        func = next(
+            (f for f in snap.declarations.functions if f.mangled == "custom_c_name"),
+            None,
+        )
         assert func is not None
         assert func.is_extern_c is True
         assert func.entity_id is not None

@@ -324,7 +324,7 @@ class TestMarkReachabilityTriState:
         `proven-unreachable-only` rule hide a real source/API break that the
         L4 surface itself already proved was public."""
         old = _snap(functions=[_public_fn("foo", "int")])
-        old.typedefs["ns::detail::PublicAlias"] = "int"
+        old.declarations.typedefs["ns::detail::PublicAlias"] = "int"
         new = _snap(functions=[_public_fn("foo", "int")])
         raw_change = Change(
             kind=ChangeKind.PUBLIC_TYPEDEF_REMOVED,
@@ -1497,7 +1497,7 @@ class TestFunctionShapedChangeWithNoCallGraphIsUnknown:
                 RecordType(name="ns::detail::Base", kind="class", size_bits=64),
             ],
         )
-        old.typedefs["ns::detail::Alias"] = "int"
+        old.declarations.typedefs["ns::detail::Alias"] = "int"
         new = _snap(
             functions=[_public_fn("make", "ns::Widget*")],
             types=[

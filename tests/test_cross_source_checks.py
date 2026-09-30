@@ -97,7 +97,7 @@ def _coverage(result, check: str) -> dict:
 
 def test_exported_not_public_flags_export_only_symbol():
     snap = _snap(elf=_elf("_Z3fooi", "_Z6secretv"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -124,7 +124,7 @@ def test_exported_not_public_flags_export_only_symbol():
 
 def test_exported_not_public_covers_variables():
     snap = _snap(elf=_elf("g_secret"))
-    snap.variables = [
+    snap.declarations.variables = [
         Variable(
             name="g_secret",
             mangled="g_secret",
@@ -141,7 +141,7 @@ def test_exported_not_public_flags_elf_only_visibility_symbol():
     # provenance pass only tags EXPORT_ONLY for ELF_ONLY-visibility decls, so the
     # check must not require PUBLIC visibility (Codex review).
     snap = _snap(elf=_elf("_Z6secretv"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="secret",
             mangled="_Z6secretv",
@@ -161,7 +161,7 @@ def test_exported_not_public_flags_exported_private_header_symbol():
     # EXPORT_ONLY) but actually exported is undocumented ABI surface too (Codex
     # review). An un-exported private decl must NOT be flagged.
     snap = _snap(elf=_elf("_Z8exportedv"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="exported",
             mangled="_Z8exportedv",
@@ -186,7 +186,7 @@ def test_exported_not_public_flags_export_with_no_decl_object():
     # lives ONLY in the export table has no Function object, so the check must be
     # driven by the export table itself (Codex review).
     snap = _snap(elf=_elf("_Z3fooi", "_Z6secretv"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -206,7 +206,7 @@ def test_exported_not_public_skips_constructor_exports():
     # never match the class's decls; skip structor exports to avoid a false
     # positive (Codex review).
     snap = _snap(elf=_elf("_ZN6WidgetC1Ev", "_ZN6WidgetD1Ev"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="Widget::Widget",
             mangled="Widget",
@@ -223,7 +223,7 @@ def test_exported_not_public_cxx_variable_does_not_document_bare_name():
     # export literally named `g` must NOT be treated as documented by the public
     # variable (Codex review).
     snap = _snap(elf=_elf("_Z1g", "g"))
-    snap.variables = [
+    snap.declarations.variables = [
         Variable(
             name="g",
             mangled="_Z1g",
@@ -242,7 +242,7 @@ def test_exported_not_public_skips_msvc_constructor_exports():
     # header-side member unmangled; skip them to avoid a false positive (Codex
     # review).
     snap = _snap(pe=PeMetadata(exports=[PeExport(name="??0Widget@@QEAA@XZ")]))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="Widget::Widget",
             mangled="Widget",
@@ -259,7 +259,7 @@ def test_exported_not_public_skips_rtti_and_vtable_exports():
     # RecordType (not a Function/Variable), so these compiler artifacts must be
     # exempt, not reported as undocumented (Codex review).
     snap = _snap(elf=_elf("_Z3fooi", "_ZTV6Widget", "_ZTI6Widget", "_ZTS6Widget"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -267,7 +267,7 @@ def test_exported_not_public_skips_rtti_and_vtable_exports():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Widget", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
     ]
     res = run_crosschecks(snap)
@@ -276,7 +276,7 @@ def test_exported_not_public_skips_rtti_and_vtable_exports():
 
 def test_exported_not_public_clean_when_everything_declared():
     snap = _snap(elf=_elf("_Z3fooi"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -309,7 +309,7 @@ def test_exported_not_public_marks_external_dependency_leak():
     # accounted as an external dependency, name the originating library, and say so
     # in the message — a maintainer fixes a leak differently from an API mistake.
     snap = _snap(elf=_elf("_Z3fooi", "_ZNSt6vectorIiSaIiEE9push_backEOi"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -331,7 +331,7 @@ def test_exported_not_public_marks_external_dependency_leak():
 def test_exported_not_public_marks_vendored_third_party():
     # A statically-linked, re-exported {fmt} symbol is a vendored third-party leak.
     snap = _snap(elf=_elf("_Z3fooi", "_ZN3fmt3v106detail11format_errorEPKc"))
-    snap.functions = [_public_fn()]
+    snap.declarations.functions = [_public_fn()]
     res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
     hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
     assert len(hits) == 1
@@ -344,7 +344,7 @@ def test_exported_not_public_marks_internal_namespace():
     # An export in the library's own ``::impl`` namespace is a visibility leak,
     # distinct from an external dependency: no origin lib, internal_namespace bucket.
     snap = _snap(elf=_elf("_Z3fooi", "_ZN3lib4impl6secretEv"))
-    snap.functions = [_public_fn()]
+    snap.declarations.functions = [_public_fn()]
     res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
     hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
     assert len(hits) == 1
@@ -358,7 +358,7 @@ def test_exported_not_public_marks_template_instantiation():
     # An exported template instantiation (Itanium ``I…E`` args) with no matching
     # public decl is its own accounted reason, not a bare undeclared export.
     snap = _snap(elf=_elf("_Z3fooi", "_ZN3lib9transformIdEEvT_"))
-    snap.functions = [_public_fn()]
+    snap.declarations.functions = [_public_fn()]
     res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
     hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
     assert len(hits) == 1
@@ -371,7 +371,7 @@ def test_exported_not_public_malformed_long_length_is_conservative():
     # not abort the audit when the digit run exceeds Python's int-string limit.
     malformed = "_ZN" + ("9" * 5000) + "Av"
     snap = _snap(elf=_elf("_Z3fooi", malformed))
-    snap.functions = [_public_fn()]
+    snap.declarations.functions = [_public_fn()]
     res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
     hits = _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)
     assert [c.symbol for c in hits] == [malformed]
@@ -419,7 +419,7 @@ def test_exported_not_public_accounting_sums_to_all_exports():
             "raw_entry",  # undeclared
         )
     )
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -427,7 +427,7 @@ def test_exported_not_public_accounting_sums_to_all_exports():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Widget", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
     ]
     res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
@@ -458,8 +458,8 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
             "_ZThn8_N6Widget3fooEv",  # native class thunk -> cxx artifact
         )
     )
-    snap.functions = [_public_fn()]
-    snap.types = [
+    snap.declarations.functions = [_public_fn()]
+    snap.declarations.types = [
         RecordType(name="Widget", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
     ]
     res = run_crosschecks(snap, CrosscheckConfig(max_per_check=0))
@@ -869,7 +869,7 @@ def test_exported_not_public_allocator_interposer_is_native_not_leak():
             "_ZnwmSt11align_val_t",
         )
     )
-    proxy.functions = [_public_fn()]
+    proxy.declarations.functions = [_public_fn()]
     res = run_crosschecks(proxy, CrosscheckConfig(max_per_check=0))
     counters = _coverage(res, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
     assert counters.get("external_dependency", 0) == 0
@@ -884,7 +884,7 @@ def test_exported_not_public_allocator_interposer_is_native_not_leak():
 
     # The same operator new in a library that is NOT an interposer is a real leak.
     leaky = _snap(elf=_elf("_Znwm"))
-    leaky.functions = [_public_fn()]
+    leaky.declarations.functions = [_public_fn()]
     res2 = run_crosschecks(leaky, CrosscheckConfig(max_per_check=0))
     counters2 = _coverage(res2, CHECK_EXPORTED_NOT_PUBLIC)["counters"]
     assert counters2.get("external_dependency", 0) == 1
@@ -898,7 +898,7 @@ def test_exported_not_public_allocator_interposer_is_native_not_leak():
 def test_public_not_exported_flags_missing_symbol():
     # `bar` is declared in a public header but the binary exports only `foo`.
     snap = _snap(elf=_elf("_Z3fooi"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -927,7 +927,7 @@ def test_public_not_exported_sibling_export_satisfies_obligation():
     # obligation is satisfied and no finding fires; a symbol no set member
     # exports at all (`gone`) is still flagged.
     snap = _snap(elf=_elf("_Z3fooi"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -960,7 +960,7 @@ def test_public_not_exported_without_sibling_exports_flags_everything_missing():
     # feature existed, confirming the new field is a strictly additive
     # relaxation that changes nothing when unset.
     snap = _snap(elf=_elf("_Z3fooi"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -986,7 +986,7 @@ def test_public_not_exported_reconciles_l4_variant_export():
     # the reconciliation set it would false-positive; with the L4 mapping attached
     # it must stay silent. A genuinely-absent decl in the same snapshot still fires.
     snap = _snap(elf=_elf("_ZN6WidgetC2Ev"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="Widget::Widget",
             mangled="_ZN6WidgetC1Ev",  # complete-object ctor; binary lists only C2
@@ -1018,7 +1018,7 @@ def test_public_not_exported_reconciles_l4_variant_variable():
     # linker tied to a currently-exported symbol under a spelling drift (here an
     # ABI-tag) is not flagged; a genuinely-absent one still is.
     snap = _snap(elf=_elf("_ZN2ns3fooB5cxx11E"))
-    snap.variables = [
+    snap.declarations.variables = [
         Variable(
             name="ns::foo",
             mangled="_ZN2ns3fooE",  # drifts from the exported ABI-tag spelling
@@ -1047,7 +1047,7 @@ def test_public_not_exported_reconciles_macho_underscore_variant():
     # Reconciliation keys are Mach-O-normalized: a plugin-recorded `__ZN…` decl key
     # must still exempt the L2 `_ZN…` mangled decl (Codex Mach-O normalization).
     snap = _snap(elf=_elf("_ZN1A3fooEv"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="A::foo",
             mangled="_ZN1A3fooEv",
@@ -1074,7 +1074,7 @@ def test_public_not_exported_reconciliation_ignores_stale_mapping():
     # snapshot no longer exports must still be flagged — the reconciliation only
     # trusts a mapping whose target is in the current export table (Codex review).
     snap = _snap(elf=_elf("_Z4livev"))  # current binary exports only `live`
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="stale",
             mangled="_Z5stalev",
@@ -1140,7 +1140,7 @@ def test_public_not_exported_excludes_non_exporting_decls(mutate):
         origin=ScopeOrigin.PUBLIC_HEADER,
     )
     mutate(fn)
-    snap.functions = [fn]
+    snap.declarations.functions = [fn]
     res = run_crosschecks(snap)
     assert _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED) == []
 
@@ -1151,7 +1151,7 @@ def test_public_not_exported_flags_non_public_visibility(vis):
     # that the binary fails to export is HIDDEN/ELF_ONLY here — it must still be
     # flagged, not skipped on visibility (Codex review).
     snap = _snap(elf=_elf("_Z3fooi"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="bar",
             mangled="_Z3barv",
@@ -1172,7 +1172,7 @@ def test_public_not_exported_skips_member_with_mangle_fallback():
     # so a non-extern-C decl without a real mangled symbol has no obligation
     # (Codex review).
     snap = _snap(elf=_elf("_ZN6WidgetC1Ev"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="Widget::Widget",
             mangled="Widget",  # castxml fallback, not a real symbol
@@ -1193,7 +1193,7 @@ def test_public_not_exported_ignores_non_default_version_alias():
             symbols=[ElfSymbol(name="foo", version="LIB_1", is_default=False)]
         )
     )
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="foo",
@@ -1217,7 +1217,7 @@ def test_public_not_exported_flags_missing_operator(op_name):
     # Operators legitimately contain '<' but are not templates — a missing
     # exported operator must still be reported (Codex review).
     snap = _snap(elf=_elf("_Z3fooi"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name=op_name,
             mangled="_ZltRK1AS1_",
@@ -1232,7 +1232,7 @@ def test_public_not_exported_flags_missing_operator(op_name):
 def test_public_not_exported_skips_header_constants():
     # A const header constant with a baked-in value emits no symbol.
     snap = _snap(elf=_elf())
-    snap.variables = [
+    snap.declarations.variables = [
         Variable(
             name="kMax",
             mangled="kMax",
@@ -1251,7 +1251,7 @@ def test_public_not_exported_skips_parsed_const_constant_no_value():
     # Variable.value None — the constant still emits no symbol and must not be
     # flagged as a missing export (Codex review).
     snap = _snap(elf=_elf())
-    snap.variables = [
+    snap.declarations.variables = [
         Variable(
             name="kMax",
             mangled="_ZL4kMax",
@@ -1267,7 +1267,7 @@ def test_public_not_exported_skips_parsed_const_constant_no_value():
 
 def test_public_not_exported_uses_pe_exports():
     snap = _snap(pe=PeMetadata(exports=[PeExport(name="foo")]))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="bar",
             mangled="bar",
@@ -1284,7 +1284,7 @@ def test_public_not_exported_normalizes_macho_underscore():
     # `macho_metadata` already strips the leading underscore while parsing
     # the real export table (PR #1140 follow-up) -- "foo", not "_foo".
     snap = _snap(macho=MachoMetadata(exports=[MachoExport(name="foo")]))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="foo",
@@ -1363,7 +1363,7 @@ def test_header_build_context_mismatch_skipped_without_build_evidence():
 
 def test_private_header_leak_flags_public_api_exposing_private_type():
     snap = _snap(elf=_elf("_Z3usev"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="use",
             mangled="_Z3usev",
@@ -1371,7 +1371,7 @@ def test_private_header_leak_flags_public_api_exposing_private_type():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER),
     ]
     res = run_crosschecks(snap)
@@ -1386,7 +1386,7 @@ def test_private_header_leak_flags_non_public_generated_type():
     # not public — exposing it in a public API leaks an un-installed header
     # (Codex review).
     snap = _snap(elf=_elf("_Z3usev"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="use",
             mangled="_Z3usev",
@@ -1394,7 +1394,7 @@ def test_private_header_leak_flags_non_public_generated_type():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="InternalConfig", kind="struct", origin=ScopeOrigin.GENERATED),
     ]
     res = run_crosschecks(snap)
@@ -1407,7 +1407,7 @@ def test_private_header_leak_skips_pimpl_with_public_forward_decl():
     # and defined in a private one. The type IS on the public surface, so a
     # public API taking `Impl *` is not a leak (Codex review).
     snap = _snap(elf=_elf("_Z3usev"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="use",
             mangled="_Z3usev",
@@ -1415,7 +1415,7 @@ def test_private_header_leak_skips_pimpl_with_public_forward_decl():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
         RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER),
     ]
@@ -1428,7 +1428,7 @@ def test_private_header_leak_basename_collision_with_public_type():
     # public `Impl *` signature uses the public type and must not leak; only an
     # explicit `detail::Impl` reference is a genuine private leak (Codex review).
     snap = _snap(elf=_elf("_Z4makev", "_Z6make2v"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="make",
             mangled="_Z4makev",
@@ -1442,7 +1442,7 @@ def test_private_header_leak_basename_collision_with_public_type():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
         RecordType(
             name="detail::Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
@@ -1456,7 +1456,7 @@ def test_private_header_leak_basename_collision_with_public_type():
 
 def test_private_header_leak_matches_namespaced_param_type():
     snap = _snap(elf=_elf("_Z3usev"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="use",
             mangled="_Z3usev",
@@ -1465,7 +1465,7 @@ def test_private_header_leak_matches_namespaced_param_type():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="ns::detail::Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
         ),
@@ -1476,7 +1476,7 @@ def test_private_header_leak_matches_namespaced_param_type():
 
 def test_private_header_leak_clean_when_type_is_public():
     snap = _snap(elf=_elf("_Z3usev"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="use",
             mangled="_Z3usev",
@@ -1484,7 +1484,7 @@ def test_private_header_leak_clean_when_type_is_public():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Widget", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
     ]
     res = run_crosschecks(snap)
@@ -1493,7 +1493,7 @@ def test_private_header_leak_clean_when_type_is_public():
 
 def test_private_header_leak_adds_source_index_provider_with_graph():
     snap = _snap(elf=_elf("_Z3usev"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="use",
             mangled="_Z3usev",
@@ -1501,7 +1501,7 @@ def test_private_header_leak_adds_source_index_provider_with_graph():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER),
     ]
     # An empty graph object alone must NOT claim source_index corroboration —
@@ -2086,7 +2086,7 @@ def test_unversioned_exported_symbol_skipped_on_non_elf():
 
 def test_rtti_for_internal_type_flags_typeinfo_of_private_type():
     snap = _snap(elf=_elf("_ZTI8Internal", "_ZTV8Internal", "_ZTI6Widget"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="api",
             mangled="_Z3apiv",
@@ -2094,7 +2094,7 @@ def test_rtti_for_internal_type_flags_typeinfo_of_private_type():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Internal", kind="class", origin=ScopeOrigin.PRIVATE_HEADER),
         RecordType(name="Widget", kind="class", origin=ScopeOrigin.PUBLIC_HEADER),
     ]
@@ -2106,7 +2106,7 @@ def test_rtti_for_internal_type_flags_typeinfo_of_private_type():
 
 def test_rtti_for_internal_type_clean_for_public_type():
     snap = _snap(elf=_elf("_ZTI6Widget", "_ZTV6Widget"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="api",
             mangled="_Z3apiv",
@@ -2114,7 +2114,7 @@ def test_rtti_for_internal_type_clean_for_public_type():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(name="Widget", kind="class", origin=ScopeOrigin.PUBLIC_HEADER),
     ]
     res = run_crosschecks(snap)
@@ -2123,7 +2123,7 @@ def test_rtti_for_internal_type_clean_for_public_type():
 
 def test_rtti_for_internal_type_handles_nested_name():
     snap = _snap(elf=_elf("_ZTIN2ns8InternalE"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="api",
             mangled="_Z3apiv",
@@ -2131,7 +2131,7 @@ def test_rtti_for_internal_type_handles_nested_name():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="ns::Internal", kind="class", origin=ScopeOrigin.PRIVATE_HEADER
         ),
@@ -2147,7 +2147,7 @@ def test_rtti_for_internal_type_matches_private_template_instantiation():
     # (no template args), so the private type's base spelling must resolve back to
     # the instantiation (Codex review).
     snap = _snap(elf=_elf("_ZTIN6detail3BoxIiEE"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="api",
             mangled="_Z3apiv",
@@ -2155,7 +2155,7 @@ def test_rtti_for_internal_type_matches_private_template_instantiation():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="detail::Box<int>", kind="class", origin=ScopeOrigin.PRIVATE_HEADER
         ),
@@ -2170,7 +2170,7 @@ def test_rtti_for_internal_type_template_base_collision_with_public_skips():
     # base `Box`. RTTI for the PUBLIC template must NOT be flagged (the leaf base
     # alias is suppressed by the public-collision guard).
     snap = _snap(elf=_elf("_ZTIN3api3BoxIiEE"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="api",
             mangled="_Z3apiv",
@@ -2178,7 +2178,7 @@ def test_rtti_for_internal_type_template_base_collision_with_public_skips():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="api::Box<int>", kind="class", origin=ScopeOrigin.PUBLIC_HEADER
         ),
@@ -2196,7 +2196,7 @@ def test_rtti_for_internal_type_matches_qualified_over_leaf_collision():
     # private detail::Internal must still be matched on its qualified name from the
     # nested mangling (Codex review).
     snap = _snap(elf=_elf("_ZTIN6detail8InternalE", "_Z3apiv"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="api",
             mangled="_Z3apiv",
@@ -2204,7 +2204,7 @@ def test_rtti_for_internal_type_matches_qualified_over_leaf_collision():
             origin=ScopeOrigin.PUBLIC_HEADER,
         ),
     ]
-    snap.types = [
+    snap.declarations.types = [
         RecordType(
             name="api::Internal", kind="class", origin=ScopeOrigin.PUBLIC_HEADER
         ),
@@ -2231,7 +2231,7 @@ def test_rtti_for_internal_type_skipped_without_provenance():
 def test_elf_only_snapshot_skips_origin_checks_no_false_positives():
     # No public-header provenance: every origin-based check must skip cleanly.
     snap = _snap(from_headers=False, elf=_elf("_Z3fooi", "_Z6secretv"))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(name="secret", mangled="_Z6secretv", return_type="void"),
         Function(name="foo", mangled="_Z3fooi", return_type="void"),
     ]
@@ -2265,7 +2265,7 @@ def test_max_per_check_caps_findings_and_marks_partial():
     # One documented export makes provenance resolvable; five undocumented
     # exports in the table are capped to 2 → partial.
     snap = _snap(elf=_elf("_Z3fooi", *(f"_Z2s{i}v" for i in range(5))))
-    snap.functions = [
+    snap.declarations.functions = [
         Function(
             name="foo",
             mangled="_Z3fooi",
@@ -2280,7 +2280,7 @@ def test_max_per_check_caps_findings_and_marks_partial():
 
 def test_result_to_dict_roundtrips_counts():
     snap = _snap(elf=_elf("g"))
-    snap.variables = [
+    snap.declarations.variables = [
         Variable(name="g", mangled="g", type="int", origin=ScopeOrigin.EXPORT_ONLY),
     ]
     res = run_crosschecks(snap)

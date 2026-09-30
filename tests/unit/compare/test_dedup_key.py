@@ -41,7 +41,7 @@ from __future__ import annotations
 import copy
 
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import assume, given, strategies as st
 
 from abicheck.compare.dedup_key import hashable_value
 
@@ -151,7 +151,11 @@ class TestTheResultIsAlwaysHashable:
 class TestEqualValuesKeyEqually:
     @given(_EXACT)
     def test_a_value_keys_the_same_as_an_equal_copy(self, value: object) -> None:
-        assert hashable_value(value) == hashable_value(copy.deepcopy(value))
+        copied = copy.deepcopy(value)
+        # The contract is about *equal* inputs; a NaN is not equal to its own
+        # copy, so it is outside this property's premise.
+        assume(value == copied)
+        assert hashable_value(value) == hashable_value(copied)
 
     def test_repeated_calls_agree(self) -> None:
         value = ["a", ["b"]]

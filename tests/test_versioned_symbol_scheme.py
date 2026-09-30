@@ -59,7 +59,7 @@ def _fn(name: str, ptypes: list[str]) -> Function:
 
 def _snap(version: str, suffix: str) -> AbiSnapshot:
     s = AbiSnapshot(library="libicuuc.so", version=version)
-    s.functions = [_fn(f"u_{b}_{suffix}", pt) for b, pt in _BASES.items()]
+    s.declarations.functions = [_fn(f"u_{b}_{suffix}", pt) for b, pt in _BASES.items()]
     return s
 
 
@@ -354,7 +354,7 @@ def _snap_with_soname(version: str, suffix: str, soname: str) -> AbiSnapshot:
     from abicheck.elf_metadata import ElfMetadata
 
     s = AbiSnapshot(library=f"libicuuc.so.{suffix}", version=version)
-    s.functions = [_fn(f"u_{b}_{suffix}", pt) for b, pt in _BASES.items()]
+    s.declarations.functions = [_fn(f"u_{b}_{suffix}", pt) for b, pt in _BASES.items()]
     s.elf = ElfMetadata(soname=soname)
     return s
 
@@ -458,9 +458,9 @@ def test_no_soname_note_inferred_from_library_name_without_elf():
     # manufacture a SONAME-bump/relink note from the library *name* — that name is
     # the input path, not an observed DT_SONAME (source-only / hand-authored JSON).
     old = AbiSnapshot(library="libicuuc.so.75", version="75.1")
-    old.functions = [_fn(f"u_{b}_75", pt) for b, pt in _BASES.items()]
+    old.declarations.functions = [_fn(f"u_{b}_75", pt) for b, pt in _BASES.items()]
     new = AbiSnapshot(library="libicuuc.so.78", version="78.3")
-    new.functions = [_fn(f"u_{b}_78", pt) for b, pt in _BASES.items()]
+    new.declarations.functions = [_fn(f"u_{b}_78", pt) for b, pt in _BASES.items()]
     adv = _versioned_advisory(compare(old, new, collapse_versioned_symbols=True))
     assert adv is not None
     assert "relink" not in adv.description and "SONAME" not in adv.description

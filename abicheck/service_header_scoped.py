@@ -65,8 +65,8 @@ def _has_matched_public_surface(snap: AbiSnapshot) -> bool:
     Clang/GCC toolchain that emits Itanium names — every symbol collapses to
     ``HIDDEN`` and header scoping has had no effect.
     """
-    return any(in_public_surface(f) for f in snap.functions) or any(
-        in_public_surface(v) for v in snap.variables
+    return any(in_public_surface(f) for f in snap.declarations.functions) or any(
+        in_public_surface(v) for v in snap.declarations.variables
     )
 
 

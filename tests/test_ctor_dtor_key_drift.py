@@ -85,6 +85,7 @@ def _func(
         visibility=Visibility.PUBLIC,
         access=access,
         is_inline=is_inline,
+        deprecated=None,  # stated, as a header dump states it (ADR-063 5B)
     )
 
 

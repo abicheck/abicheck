@@ -696,7 +696,10 @@ def test_the_single_compare_branch_carries_the_write_guard() -> None:
     guarded = [
         line for line in text.splitlines() if "_extra_args_write_would_conflict" in line
     ]
-    # One definition, plus one actual call site -- assert on the call
-    # specifically.
+    # compare's one call site (release-aware `$_write_kind`), plus one per
+    # deps mode (ADR-063 T8: deps-tree/deps-compare read their verdict from
+    # the same JSON sidecar, and a deps operand is always single-shaped).
     calls = [line for line in guarded if "! _extra_args_write_would_conflict" in line]
-    assert len(calls) == 1, guarded
+    assert sum('"$_write_kind"' in c for c in calls) == 1, guarded
+    assert sum('"single"' in c for c in calls) == 2, guarded
+    assert len(calls) == 3, guarded

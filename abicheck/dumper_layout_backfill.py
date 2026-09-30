@@ -127,7 +127,7 @@ def dwarf_layout_types_or_empty(
             version=version,
             language_profile=language_profile,
             session=session,
-        ).types
+        ).declarations.types
     )
 
 

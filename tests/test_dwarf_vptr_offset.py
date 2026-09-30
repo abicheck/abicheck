@@ -115,7 +115,7 @@ extern "C" Y* get_y() { return &g_y; }
         elf_meta = parse_elf_metadata(lib)
         dwarf_meta, dwarf_adv = parse_dwarf(lib)
         snap = build_snapshot_from_dwarf(lib, elf_meta, dwarf_meta, dwarf_adv)
-        return {t.name: t for t in snap.types}
+        return {t.name: t for t in snap.declarations.types}
 
     def test_non_polymorphic_is_none(self, vptr_lib: Path) -> None:
         """A type with no vtable anywhere in its hierarchy stays None."""

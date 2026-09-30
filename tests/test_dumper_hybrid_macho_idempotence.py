@@ -63,6 +63,6 @@ class TestMachoMangledNormalizationIdempotence:
         clang = _snap(functions=[f], ast_producer="clang", platform="macho")
         merged = merge_snapshots(castxml, clang)
 
-        assert len(merged.functions) == 1
+        assert len(merged.declarations.functions) == 1
         assert merged.func_by_mangled("_ZN2ns3fooEv") is not None
         assert merged.func_by_mangled("ZN2ns3fooEv") is None

@@ -298,11 +298,11 @@ def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
             acc.setdefault(node_id, set()).update(idents)
         contributor_counts[node_id] = contributor_counts.get(node_id, 0) + 1
 
-    for fn, ident in zip(snap.functions, ids.functions):
+    for fn, ident in zip(snap.declarations.functions, ids.functions):
         _add(fn, ident.node_id, fn.return_type, *(p.type for p in fn.params))
-    for var, ident in zip(snap.variables, ids.variables):
+    for var, ident in zip(snap.declarations.variables, ids.variables):
         _add(var, ident.node_id, var.type)
-    for rec, ident in zip(snap.types, ids.records):
+    for rec, ident in zip(snap.declarations.types, ids.records):
         _add(
             rec,
             ident.node_id,
@@ -310,9 +310,9 @@ def referenced_identifiers_by_node(snap: AbiSnapshot) -> ReferencedIdentifiers:
             *fact_list(rec.bases_fact),
             *fact_list(rec.virtual_bases_fact),
         )
-    for en, ident in zip(snap.enums, ids.enums):
+    for en, ident in zip(snap.declarations.enums, ids.enums):
         node_ids[id(en)] = ident.node_id
-    for alias, target in snap.typedefs.items():
+    for alias, target in snap.declarations.typedefs.items():
         _add(None, ids.typedefs[alias].node_id, target)
     by_node = {node_id: sorted(idents) for node_id, idents in acc.items()}
     collided = frozenset(
@@ -381,15 +381,15 @@ def type_spelling_index(
     entries: list[tuple[str, str, str]] = [
         *(
             (rec.qualified_name or rec.name, rec.name, ident.node_id)
-            for rec, ident in zip(snap.types, ids.records)
+            for rec, ident in zip(snap.declarations.types, ids.records)
         ),
         *(
             (en.qualified_name or en.name, en.name, ident.node_id)
-            for en, ident in zip(snap.enums, ids.enums)
+            for en, ident in zip(snap.declarations.enums, ids.enums)
         ),
         *(
             (alias, alias.rsplit("::", 1)[-1], ids.typedefs[alias].node_id)
-            for alias in snap.typedefs
+            for alias in snap.declarations.typedefs
         ),
     ]
     for qname, bare, node_id in entries:
@@ -426,11 +426,11 @@ def _build_type_index(
             )
         )
 
-    for rec, ident in zip(snap.types, ids.records):
+    for rec, ident in zip(snap.declarations.types, ids.records):
         _register(rec.qualified_name or rec.name, ident, NODE_KIND_RECORD_TYPE)
-    for en, ident in zip(snap.enums, ids.enums):
+    for en, ident in zip(snap.declarations.enums, ids.enums):
         _register(en.qualified_name or en.name, ident, NODE_KIND_ENUM_TYPE)
-    for alias in snap.typedefs:
+    for alias in snap.declarations.typedefs:
         _register(alias, ids.typedefs[alias], NODE_KIND_TYPEDEF)
     return type_spelling_index(snap, ids).by_spelling
 
@@ -530,7 +530,7 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
         _add_header_declares(graph, source_header, node_id)
         return node_id
 
-    for fn, ident in zip(snap.functions, ids.functions):
+    for fn, ident in zip(snap.declarations.functions, ids.functions):
         node_id = _declaration(ident, fn.name, fn.source_header)
         _add_references(
             graph, node_id, type_index, fn.return_type, *(p.type for p in fn.params)
@@ -538,13 +538,13 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
         if fn.mangled and ident.resolved:
             decl_node_ids[fn.mangled] = node_id
 
-    for var, ident in zip(snap.variables, ids.variables):
+    for var, ident in zip(snap.declarations.variables, ids.variables):
         node_id = _declaration(ident, var.name, var.source_header)
         _add_references(graph, node_id, type_index, var.type)
         if var.mangled and ident.resolved:
             decl_node_ids[var.mangled] = node_id
 
-    for rec, ident in zip(snap.types, ids.records):
+    for rec, ident in zip(snap.declarations.types, ids.records):
         node_id = ident.node_id
         _add_header_declares(graph, rec.source_header, node_id)
         _add_references(
@@ -556,10 +556,10 @@ def build_public_surface_facts(snap: AbiSnapshot, graph: SurfaceGraphLike) -> No
             *fact_list(rec.virtual_bases_fact),
         )
 
-    for en, ident in zip(snap.enums, ids.enums):
+    for en, ident in zip(snap.declarations.enums, ids.enums):
         _add_header_declares(graph, en.source_header, ident.node_id)
 
-    for alias, target in snap.typedefs.items():
+    for alias, target in snap.declarations.typedefs.items():
         _add_references(graph, ids.typedefs[alias].node_id, type_index, target)
 
     _add_linker_name_edges(graph, decl_node_ids)

@@ -121,7 +121,7 @@ class TestTypeFieldCvFactRoundTrip:
         self, field_name: str, value: bool
     ) -> None:
         rec = _record_with_field(**{field_name: value})
-        f = _round_trip(_make_snap(types=[rec])).types[0].fields[0]
+        f = _round_trip(_make_snap(types=[rec])).declarations.types[0].fields[0]
         assert getattr(f, field_name) is value
         fact = getattr(f, f"{field_name}_fact")
         assert fact.status is FactStatus.PRESENT
@@ -131,7 +131,11 @@ class TestTypeFieldCvFactRoundTrip:
     def test_omitted_field_round_trips_not_collected(self, field_name: str) -> None:
         # The distinction case (a) exists for: an untouched field is False
         # *and* NOT_COLLECTED, never present(False).
-        f = _round_trip(_make_snap(types=[_record_with_field()])).types[0].fields[0]
+        f = (
+            _round_trip(_make_snap(types=[_record_with_field()]))
+            .declarations.types[0]
+            .fields[0]
+        )
         assert getattr(f, field_name) is False
         assert getattr(f, f"{field_name}_fact").status is FactStatus.NOT_COLLECTED
 
@@ -140,7 +144,7 @@ class TestTypeFieldCvFactRoundTrip:
         self, field_name: str
     ) -> None:
         rec = _record_with_field(**{f"{field_name}_fact": Fact.unsupported("PDB")})
-        f = _round_trip(_make_snap(types=[rec])).types[0].fields[0]
+        f = _round_trip(_make_snap(types=[rec])).declarations.types[0].fields[0]
         fact = getattr(f, f"{field_name}_fact")
         assert fact.status is FactStatus.UNSUPPORTED
         assert fact.diagnostics == ("PDB",)
@@ -170,7 +174,7 @@ class TestTypeFieldCvFactRoundTrip:
                 }
             ],
         )
-        f = snapshot_from_dict(d).types[0].fields[0]
+        f = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert getattr(f, field_name) is True
         assert getattr(f, f"{field_name}_fact").status is FactStatus.PRESENT
 
@@ -192,7 +196,7 @@ class TestTypeFieldCvFactRoundTrip:
                 }
             ],
         )
-        f = snapshot_from_dict(d).types[0].fields[0]
+        f = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert getattr(f, field_name) is False
         assert getattr(f, f"{field_name}_fact").status is FactStatus.NOT_COLLECTED
 
@@ -214,7 +218,7 @@ class TestTypeFieldCvFactRoundTrip:
                 }
             ],
         )
-        f = snapshot_from_dict(d).types[0].fields[0]
+        f = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert getattr(f, f"{field_name}_fact").status is FactStatus.NOT_COLLECTED
 
     @pytest.mark.parametrize("field_name", _CV_FIELDS)
@@ -231,7 +235,7 @@ class TestTypeFieldCvFactRoundTrip:
                 }
             ],
         )
-        f = snapshot_from_dict(d).types[0].fields[0]
+        f = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert getattr(f, f"{field_name}_fact").status is FactStatus.NOT_COLLECTED
 
     def test_schema_version_is_39_or_higher(self) -> None:
@@ -367,7 +371,7 @@ class TestTypeFieldValueFactRoundTrip:
         self, field_name: str, value: object, _default: object
     ) -> None:
         rec = _record_with_field(**{field_name: value})
-        f = _round_trip(_make_snap(types=[rec])).types[0].fields[0]
+        f = _round_trip(_make_snap(types=[rec])).declarations.types[0].fields[0]
         assert getattr(f, field_name) == value
         fact = getattr(f, f"{field_name}_fact")
         assert fact.status is FactStatus.PRESENT
@@ -377,7 +381,11 @@ class TestTypeFieldValueFactRoundTrip:
     def test_omitted_field_is_not_collected_at_its_normalized_default(
         self, field_name: str, _value: object, default: object
     ) -> None:
-        f = _round_trip(_make_snap(types=[_record_with_field()])).types[0].fields[0]
+        f = (
+            _round_trip(_make_snap(types=[_record_with_field()]))
+            .declarations.types[0]
+            .fields[0]
+        )
         assert getattr(f, field_name) == default
         assert getattr(f, f"{field_name}_fact").status is FactStatus.NOT_COLLECTED
 
@@ -388,7 +396,7 @@ class TestTypeFieldValueFactRoundTrip:
         # The whole point of the private omission sentinel: a producer that
         # looked and found nothing states it, and that is a *fact*, not a gap.
         rec = _record_with_field(**{field_name: default})
-        f = _round_trip(_make_snap(types=[rec])).types[0].fields[0]
+        f = _round_trip(_make_snap(types=[rec])).declarations.types[0].fields[0]
         assert getattr(f, field_name) == default
         assert getattr(f, f"{field_name}_fact").status is FactStatus.PRESENT
 
@@ -413,7 +421,7 @@ class TestTypeFieldValueFactRoundTrip:
             ],
             **{flag: False},
         )
-        f = snapshot_from_dict(d).types[0].fields[0]
+        f = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert getattr(f, field_name) is None
         assert getattr(f, f"{field_name}_fact").status is FactStatus.NOT_COLLECTED
 
@@ -450,6 +458,6 @@ class TestTypeFieldValueFactRoundTrip:
             ],
             **{flag: False},
         )
-        f = snapshot_from_dict(d).types[0].fields[0]
+        f = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert getattr(f, f"{field_name}_fact").status is FactStatus.NOT_COLLECTED
         assert getattr(f, f"{other}_fact").status is FactStatus.PRESENT

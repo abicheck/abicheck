@@ -415,7 +415,7 @@ def test_find_by_value_types_array_subscript_relational_angle_is_not_a_bracket()
     snap = AbiSnapshot(
         library="libfoo.so.1",
         version="1.0.0",
-        types=snap.types,
+        types=snap.declarations.types,
         functions=[
             Function(
                 name="f",
@@ -447,7 +447,7 @@ def test_find_by_value_types_quoted_literal_angle_is_not_a_bracket():
     snap = AbiSnapshot(
         library="libfoo.so.1",
         version="1.0.0",
-        types=snap.types,
+        types=snap.declarations.types,
         functions=[
             Function(
                 name="f",

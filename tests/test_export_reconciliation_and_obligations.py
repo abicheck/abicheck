@@ -489,7 +489,7 @@ def test_end_to_end_public_not_exported_ignores_a_header_defined_template() -> N
         from_headers=True,
         elf=ElfMetadata(machine="x86-64", symbols=[ElfSymbol(name="_Z5otherv")]),
     )
-    snap.functions = [template, ordinary]
+    snap.declarations.functions = [template, ordinary]
     result = run_crosschecks(snap)
     findings = [c for c in result.findings if c.kind is ChangeKind.PUBLIC_NOT_EXPORTED]
     symbols = {c.symbol for c in findings}
@@ -622,7 +622,7 @@ def test_a_declared_symbol_is_left_to_the_declaration_aware_diff() -> None:
             from_headers=True,
             elf=ElfMetadata(machine="x86-64", symbols=symbols),
         )
-        s.functions = functions
+        s.declarations.functions = functions
         return s
 
     old = snap([ElfSymbol(name="_Z4gonev")], [declared])
@@ -755,8 +755,8 @@ def _ctor_snapshot(symbols: list[str], *, declare_widget: bool, inline: bool = T
         elf=ElfMetadata(machine="x86-64", symbols=[ElfSymbol(name=n) for n in symbols]),
     )
     if declare_widget:
-        snap.types = [RecordType(name="Widget", kind="class")]
-        snap.functions = [
+        snap.declarations.types = [RecordType(name="Widget", kind="class")]
+        snap.declarations.functions = [
             Function(
                 name="Widget",
                 mangled="__abicheck_ctor__Widget()",

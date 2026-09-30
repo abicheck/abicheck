@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 from ..errors import IncompatibleSnapshotSchemaError, SnapshotError
 from ..model import AbiSnapshot, DependencyInfo
 from ..model.header_exclusion_record import normalize_matching
-from ..model.semantic_ir_legacy_adapter import assert_snapshot_semantic_ir_consistent
+from ..model.semantic_ir_legacy_adapter import finalize_snapshot_semantic_ir
 from ..snapshot_platform_blocks import (
     dwarf_advanced_from_dict as _dwarf_advanced_from_dict,
     dwarf_from_dict as _dwarf_from_dict,
@@ -581,7 +581,9 @@ def decode_snapshot(
     # after AbiSnapshot.__post_init__ already ran (with semantic_ir still None
     # at that point) -- so a loaded snapshot's own Track T3 consistency check
     # never ran at all without this second, explicit call (Codex review).
-    assert_snapshot_semantic_ir_consistent(snap)
+    # ADR-063 6B: the same call also fills record layout a pre-v53 IR never
+    # recorded, from the snapshot's own records.
+    finalize_snapshot_semantic_ir(snap)
     return snap, _schema_version
 
 

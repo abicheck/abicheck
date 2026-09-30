@@ -44,9 +44,9 @@ GOLDEN_DIR = TESTS_DIR / "golden"
 
 def _snap(ver: str = "1.0", funcs=None, types=None, enums=None) -> AbiSnapshot:
     s = AbiSnapshot(library="libfoo.so", version=ver)
-    s.functions = funcs or []
-    s.types = types or []
-    s.enums = enums or []
+    s.declarations.functions = funcs or []
+    s.declarations.types = types or []
+    s.declarations.enums = enums or []
     return s
 
 

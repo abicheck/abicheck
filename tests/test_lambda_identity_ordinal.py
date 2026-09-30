@@ -188,18 +188,36 @@ class TestSnapshotRenumbering:
         renumber_anonymous_closure_identities(old)
         renumber_anonymous_closure_identities(new)
 
-        assert old.types[0].qualified_name == new.types[0].qualified_name
-        assert old.types[1].qualified_name == new.types[1].qualified_name
-        assert old.functions[0].mangled == new.functions[0].mangled
-        assert old.functions[0].params[0].type == new.functions[0].params[0].type
+        assert (
+            old.declarations.types[0].qualified_name
+            == new.declarations.types[0].qualified_name
+        )
+        assert (
+            old.declarations.types[1].qualified_name
+            == new.declarations.types[1].qualified_name
+        )
+        assert (
+            old.declarations.functions[0].mangled
+            == new.declarations.functions[0].mangled
+        )
+        assert (
+            old.declarations.functions[0].params[0].type
+            == new.declarations.functions[0].params[0].type
+        )
 
     def test_without_renumbering_the_line_shift_is_visible(self) -> None:
         # Sanity check that the fixture actually reproduces the bug absent
         # the fix, so the assertions above are testing something real.
         old = self._snapshot("2021.13.0", 522, 520)
         new = self._snapshot("2022.3.0", 539, 528)
-        assert old.types[0].qualified_name != new.types[0].qualified_name
-        assert old.functions[0].mangled != new.functions[0].mangled
+        assert (
+            old.declarations.types[0].qualified_name
+            != new.declarations.types[0].qualified_name
+        )
+        assert (
+            old.declarations.functions[0].mangled
+            != new.declarations.functions[0].mangled
+        )
 
     def test_compare_reports_no_findings_for_pure_line_drift(self) -> None:
         """End-to-end: renumbering both sides before compare() eliminates the
@@ -230,9 +248,15 @@ class TestSnapshotRenumbering:
     def test_renumbering_is_idempotent(self) -> None:
         snap = self._snapshot("2021.13.0", 522, 520)
         renumber_anonymous_closure_identities(snap)
-        once = (snap.types[0].qualified_name, snap.functions[0].mangled)
+        once = (
+            snap.declarations.types[0].qualified_name,
+            snap.declarations.functions[0].mangled,
+        )
         renumber_anonymous_closure_identities(snap)
-        twice = (snap.types[0].qualified_name, snap.functions[0].mangled)
+        twice = (
+            snap.declarations.types[0].qualified_name,
+            snap.declarations.functions[0].mangled,
+        )
         assert once == twice
 
     def test_a_snapshot_with_no_closures_is_untouched(self) -> None:
@@ -248,11 +272,11 @@ class TestSnapshotRenumbering:
                 )
             ],
         )
-        before_type = snap.types[0].qualified_name
-        before_func = snap.functions[0].mangled
+        before_type = snap.declarations.types[0].qualified_name
+        before_func = snap.declarations.functions[0].mangled
         renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].qualified_name == before_type
-        assert snap.functions[0].mangled == before_func
+        assert snap.declarations.types[0].qualified_name == before_type
+        assert snap.declarations.functions[0].mangled == before_func
 
 
 class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
@@ -288,8 +312,8 @@ class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
 
     def test_loading_a_legacy_snapshot_renumbers_it(self) -> None:
         loaded = snapshot_from_dict(self._legacy_dict(522))
-        assert "#" in loaded.types[0].qualified_name
-        assert ":522:" not in loaded.types[0].qualified_name
+        assert "#" in loaded.declarations.types[0].qualified_name
+        assert ":522:" not in loaded.declarations.types[0].qualified_name
 
     def test_legacy_baseline_agrees_with_a_fresh_dump_across_line_drift(
         self,
@@ -321,8 +345,14 @@ class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
         )
         renumber_anonymous_closure_identities(fresh)
 
-        assert legacy_baseline.types[0].qualified_name == fresh.types[0].qualified_name
-        assert legacy_baseline.functions[0].mangled == fresh.functions[0].mangled
+        assert (
+            legacy_baseline.declarations.types[0].qualified_name
+            == fresh.declarations.types[0].qualified_name
+        )
+        assert (
+            legacy_baseline.declarations.functions[0].mangled
+            == fresh.declarations.functions[0].mangled
+        )
 
         result = compare(legacy_baseline, fresh)
         noisy_kinds = {
@@ -346,7 +376,9 @@ class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
             ],
         }
         loaded = snapshot_from_dict(already_ordinal)
-        assert loaded.types[0].name == "raii_guard<(lambda:task_group.h#1)>"
+        assert (
+            loaded.declarations.types[0].name == "raii_guard<(lambda:task_group.h#1)>"
+        )
 
 
 class TestKnownLimitationDifferentFilesSharingABasename:
@@ -670,7 +702,7 @@ class TestHybridMergeDefersRenumbering:
 
         merged = run_hybrid_dump(fake_dump, Path("lib.so"), [])
 
-        matched = [t for t in merged.types if t.name.startswith("Foo<")]
+        matched = [t for t in merged.declarations.types if t.name.startswith("Foo<")]
         assert len(matched) == 1, "the shared closure must merge into one type"
         assert matched[0].is_abstract is True, (
             "clang's is_abstract fact must have reached the merged type -- "
@@ -746,7 +778,7 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
         ):
             merged = run_dump(p, "elf", header_backend="hybrid")
 
-        matched = [t for t in merged.types if t.name.startswith("Foo<")]
+        matched = [t for t in merged.declarations.types if t.name.startswith("Foo<")]
         assert len(matched) == 1, "the shared closure must merge into one type"
         assert matched[0].is_abstract is True, (
             "clang's is_abstract fact must have reached the merged type -- "
@@ -781,7 +813,7 @@ class TestFactProvenanceKeysAreRenumberedToo:
         )
         renumber_anonymous_closure_identities(snap)
 
-        new_name = snap.types[0].qualified_name
+        new_name = snap.declarations.types[0].qualified_name
         assert new_name is not None
         assert "#" in new_name
         assert type_fact_key(new_name, "is_abstract") in snap.fact_provenance
@@ -804,7 +836,7 @@ class TestFactProvenanceKeysAreRenumberedToo:
         )
         renumber_anonymous_closure_identities(snap)
 
-        new_name = snap.types[0].qualified_name
+        new_name = snap.declarations.types[0].qualified_name
         assert new_name is not None
         assert field_fact_key(new_name, "x", "default") in snap.fact_provenance
 
@@ -822,7 +854,7 @@ class TestFactProvenanceKeysAreRenumberedToo:
             fact_provenance={type_fact_key(owner, "is_abstract"): "castxml"},
         )
         renumber_anonymous_closure_identities(snap)
-        renamed_owner = snap.types[0].qualified_name
+        renamed_owner = snap.declarations.types[0].qualified_name
         assert renamed_owner is not None
         key = type_fact_key(renamed_owner, "is_abstract")
         assert fact_producer(snap, key) == "castxml"
@@ -898,7 +930,7 @@ class TestL5SourceGraphIdentitiesAreNotRenumbered:
         renumber_anonymous_closure_identities(snap)
 
         # The flat side did its job: the raw :line:col marker is gone.
-        renamed = snap.types[0].qualified_name
+        renamed = snap.declarations.types[0].qualified_name
         assert renamed is not None
         assert "522" not in renamed and "26" not in renamed
 
@@ -1048,16 +1080,16 @@ class TestFrozenDataclassesReachableFromTheWalkAreRebuilt:
         )
         renumber_anonymous_closure_identities(snap)
 
-        renumbered_record_id = snap.types[0].entity_id
+        renumbered_record_id = snap.declarations.types[0].entity_id
         assert renumbered_record_id is not None
         scope_names = [getattr(seg, "name", "") for seg in renumbered_record_id.scope]
         assert any("#2" in name for name in scope_names), scope_names
         assert not any(":20:4" in name for name in scope_names)
 
-        renumbered_fn_id = snap.functions[0].entity_id
+        renumbered_fn_id = snap.declarations.functions[0].entity_id
         assert renumbered_fn_id is not None
         assert any("#2" in part for part in renumbered_fn_id.extra)
         assert not any(":20:4" in part for part in renumbered_fn_id.extra)
         # ...and the carrier agrees with the flat spelling it was built
         # from, which is the whole point of renumbering it at all.
-        assert renumbered_fn_id.extra[1] == snap.functions[0].mangled
+        assert renumbered_fn_id.extra[1] == snap.declarations.functions[0].mangled

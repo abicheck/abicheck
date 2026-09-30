@@ -448,7 +448,7 @@ def _func_index_items(
     """
     demangled = _batch_demangle_public(snap)
     out: list[_IndexItem] = []
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         if not in_source_declaration_index(f):
             continue
         # qname keeps its parameter list (when demangled) — that's what
@@ -560,7 +560,7 @@ def _type_index_items(
     of scope here, same as the analogous gap for constants.
     """
     out: list[_IndexItem] = []
-    for t in snap.types:
+    for t in snap.declarations.types:
         qname = t.name
         segs = _segments(qname)
         if not segs:
@@ -1108,8 +1108,8 @@ def detect_experimental_namespace_changes(
             new_type_index,
             experimental_namespaces,
             "type",
-            old_origins=_origin_by_name(old.types),
-            new_origins=_origin_by_name(new.types),
+            old_origins=_origin_by_name(old.declarations.types),
+            new_origins=_origin_by_name(new.declarations.types),
             old_items=old_type_items,
             new_items=new_type_items,
         )

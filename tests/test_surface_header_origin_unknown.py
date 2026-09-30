@@ -204,7 +204,7 @@ def test_no_fact_statement_keeps_the_legacy_non_public_reading(
     # not_collected -- the established "no header recorded" spelling.
     surf = compute_public_surface(snap)
     assert not surf.header_origin_unknown_types
-    change = _enum_change() if snap.enums else _record_change()
+    change = _enum_change() if snap.declarations.enums else _record_change()
     assert classify_change_surface(change, surf, surf) in {
         (False, REASON_NON_PUBLIC_TYPE),
         (False, REASON_NO_PROVENANCE),
@@ -293,7 +293,7 @@ def test_unreached_type_keeps_its_confirmed_exclusion() -> None:
     """The extension follows the closure only: a record no blocked seed
     reaches keeps ``non-public-type``."""
     snap = _nested_pair(Fact.failed("parse error"))
-    snap.types.append(
+    snap.declarations.types.append(
         RecordType(
             name="detail::Other",
             kind="struct",

@@ -40,9 +40,7 @@ directory selects every member on either side like any other directory,
 so its unmatched OLD members are ``not_supplied`` and flow into D6's
 incompleteness outcome -- otherwise a PR-controlled NEW tree could trim
 itself to one library and turn ``--on-incomplete-scope block`` into a
-clean pass. S1 replaces the filename tier with identity/coordinate
-selection and a ``--dry-run`` plan view; the record shape it populates is
-this one.
+clean pass (S1's declared selection populates this same record shape).
 
 **Inventory proof.** Two things prove a side complete, and nothing else
 does. A stored ``ProjectSnapshot`` package (or ``BundleFacts`` document)
@@ -54,9 +52,8 @@ return only directories, which is why an archive was ``UNPROVEN`` before).
 A live directory and a direct file pair still prove nothing: a directory
 may have been populated partially, and one artifact is not a release.
 
-Order-independent by construction: members are emitted in sorted key
-order, so the record -- and everything derived from it -- cannot depend on
-directory listing order (an ADR-065 acceptance invariant).
+Order-independent: members are emitted in sorted key order, so nothing
+derived from the record depends on directory listing order (ADR-065).
 """
 
 from __future__ import annotations
@@ -70,6 +67,7 @@ if TYPE_CHECKING:
     from ..bundle_manifest import InstantiationManifest
     from ..model.bundle_facts import BundleFacts
     from ..model.package_inventory import PackageInventory
+    from ..model.variant_pairing import VariantPairing
 
 from ..model.scope_acquisition import (
     AcquisitionState,
@@ -156,15 +154,15 @@ class ReleaseInventoryEvidence:
 class ReleaseScopePlan:
     """ADR-061 gap D / DoD item 8: the release fan-out's resolved scope-
     *selection* plan (the ``workflows/artifact`` Request->ResolvedPlan->
-    Result pattern, applied to ADR-065's scope model) -- replaces four
-    locals ``cli_compare_release.py`` used to thread by hand. Knowable
-    before any comparison executes; the acquisition record (D1) is only
-    knowable afterward -- see :class:`ReleaseScopeResult`."""
+    Result pattern, applied to ADR-065's scope model). Knowable before any
+    comparison executes; the acquisition record (D1) only afterward -- see
+    :class:`ReleaseScopeResult`."""
 
     old_map: Mapping[str, Path]
     new_map: Mapping[str, Path]
     matched_keys: tuple[str, ...]
     evidence: ReleaseInventoryEvidence
+    variant_pairing: VariantPairing | None = None  # ADR-062 A1.6, stored/stored
 
 
 def resolve_release_scope_plan(
@@ -195,7 +193,9 @@ class ReleaseScopeResult:
 def resolve_release_scope_result(
     plan: ReleaseScopePlan, record: ScopeAcquisitionRecord
 ) -> ReleaseScopeResult:
-    """Pair an already-built record with the *plan* it was resolved against."""
+    """Pair *record* with its *plan*; the plan's variant pairing rides onto it."""
+    if plan.variant_pairing is not None and record.variant_pairing is None:
+        record = replace(record, variant_pairing=plan.variant_pairing)
     return ReleaseScopeResult(plan=plan, record=record)
 
 

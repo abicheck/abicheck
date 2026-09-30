@@ -708,6 +708,14 @@ class CompareResult:
     # recomputing a `None`-severity legacy exit that contradicts it. `None`
     # under the legacy scheme, where there is nothing to disagree with.
     severity_config: SeverityConfig | None = None
+    # One Semantic Pipeline sub-phase 4B: the pair's `ResolvedExecutionContext`
+    # with its `evaluation_config` filled in -- the one resolved object the
+    # classification, `exit_decision` and the receipt were all scored from.
+    # `None` only for a hand-built pair that carried no context at all. Typed
+    # `object` (a `ResolvedExecutionContext` by construction): importing it,
+    # even under TYPE_CHECKING, closes a contracts -> resolved_execution_context
+    # -> plan -> contracts cycle the import-cycle-growth gate rejects.
+    resolved_execution_context: object | None = None
 
     def as_tuple(self) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
         """Return ``(diff, old_snapshot, new_snapshot)`` — the pre-0.6 shape.

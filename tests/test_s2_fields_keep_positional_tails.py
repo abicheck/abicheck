@@ -54,6 +54,9 @@ _S2_BUNDLE_FIELDS = (
     # which is the failure the sibling assertion below names, caught here
     # rather than in production.
     "public_surface_reconciliation",
+    # ADR-062 A1.8's non-ELF membership fact: appended after the existing
+    # tail for the identical reason.
+    "resolution_not_applicable_members",
 )
 _S2_TARGET_FIELDS = (
     "scope_completeness_exit",

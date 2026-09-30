@@ -204,7 +204,7 @@ class TestSurfaceEvidenceAsymmetry:
         """
         old = _snapshot(names, evidence=True)
         new = _snapshot(names, evidence=False)
-        for fn in new.functions:
+        for fn in new.declarations.functions:
             fn.return_type = "int"  # was "void"
         reported = {
             c.symbol
@@ -223,7 +223,7 @@ class TestSurfaceEvidenceAsymmetry:
         a separate call site and so needs its own guard."""
         old = _snapshot(names, evidence=True, variables=True)
         new = _snapshot(names, evidence=False, variables=True)
-        for var in new.variables:
+        for var in new.declarations.variables:
             var.type = "long"  # was "int"
         reported = {
             c.symbol
@@ -249,7 +249,7 @@ class TestSurfaceEvidenceAsymmetry:
         old = _snapshot(names, evidence=True)
         new = _snapshot(names, evidence=False)
         for snap, default in ((old, "1"), (new, "2")):
-            for fn in snap.functions:
+            for fn in snap.declarations.functions:
                 fn.params = [Param(name="n", type="int", default=default)]
         reported = {
             c.symbol
@@ -272,9 +272,11 @@ class TestSurfaceEvidenceAsymmetry:
         """
         old = _snapshot(["c_func"], evidence=evidence_on_old)
         new = _snapshot(["_Z6c_funcv"], evidence=not evidence_on_old)
-        old.functions[0].name = new.functions[0].name = "c_func"
-        old.functions[0].is_extern_c = True
-        new.functions[0].is_extern_c = False
+        old.declarations.functions[0].name = new.declarations.functions[0].name = (
+            "c_func"
+        )
+        old.declarations.functions[0].is_extern_c = True
+        new.declarations.functions[0].is_extern_c = False
         kinds = {c.kind for c in compare(old, new).changes}
         assert not (kinds & _SURFACE_EXIT_KINDS), (
             f"the pair was split into a removal/addition: {kinds}"
@@ -350,11 +352,11 @@ class TestSurfaceEvidenceAsymmetry:
         review, P2).
         """
         overloads = _snapshot(["_Z3fooi", "_Z3food"], evidence=evidence_on_old)
-        for fn in overloads.functions:
+        for fn in overloads.declarations.functions:
             fn.name = "foo"
         single = _snapshot(["foo"], evidence=not evidence_on_old)
-        single.functions[0].name = "foo"
-        single.functions[0].is_extern_c = True
+        single.declarations.functions[0].name = "foo"
+        single.declarations.functions[0].is_extern_c = True
         old, new = (overloads, single) if evidence_on_old else (single, overloads)
         changes = compare(old, new).changes
         # No declaration may be compared against a peer it reached only
@@ -385,7 +387,9 @@ class TestSurfaceEvidenceAsymmetry:
         only an unestablished (b) is an evidence gap."""
         old = _snapshot(names, evidence=True, variables=variables)
         new = _snapshot(names, evidence=True, variables=variables)
-        for decl in new.variables if variables else new.functions:
+        for decl in (
+            new.declarations.variables if variables else new.declarations.functions
+        ):
             decl.in_public_contract_fact = Fact.present(False)
         reported = {
             c.symbol for c in compare(old, new).changes if c.kind in _SURFACE_EXIT_KINDS
@@ -505,7 +509,9 @@ class TestListShapedSurfaceDetectors:
         """
         old = _snapshot(names, evidence=evidence_on_old, variables=True)
         new = _snapshot(names, evidence=not evidence_on_old, variables=True)
-        for i, (v_old, v_new) in enumerate(zip(old.variables, new.variables)):
+        for i, (v_old, v_new) in enumerate(
+            zip(old.declarations.variables, new.declarations.variables)
+        ):
             v_old.value = old_value + i
             v_new.value = old_value + i + 1
         reported = {
@@ -522,7 +528,7 @@ class TestListShapedSurfaceDetectors:
     ) -> None:
         old = _snapshot(names, evidence=evidence_on_old, variables=True)
         new = _snapshot(names, evidence=not evidence_on_old, variables=True)
-        for v_old, v_new in zip(old.variables, new.variables):
+        for v_old, v_new in zip(old.declarations.variables, new.declarations.variables):
             v_old.value = v_new.value = 7
         assert _diff_var_values(old, new) == []
 
@@ -608,7 +614,7 @@ class TestTypeSpellingAndIntegerModelDetectors:
         # A second overload of the same name on the evidence-poor side makes
         # the alias ambiguous; nothing may be paired through it.
         ambiguous = new if evidence_on_old else old
-        ambiguous.functions.append(
+        ambiguous.declarations.functions.append(
             Function(
                 name="fn",
                 mangled="_Z2fni",

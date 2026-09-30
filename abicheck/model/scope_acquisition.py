@@ -39,7 +39,8 @@ whose extraction failed, keeps its own state and flows into D6's
 incompleteness outcome instead -- never demoted to out-of-scope, never
 promoted to a removal.
 
-A leaf ``model`` module: no imports beyond the standard library, so
+A leaf ``model`` module: no imports beyond the standard library and the
+sibling leaf ``model.variant_pairing``, so
 ``policy`` (the completeness axis), ``workflows`` (the release builder), and
 ``report`` (the rendered section) can all depend on it without a cycle.
 """
@@ -50,6 +51,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+
+from .variant_pairing import VariantPairing
 
 __all__ = [
     "SCOPE_ACQUISITION_SCHEMA_VERSION",
@@ -266,6 +269,10 @@ class ScopeAcquisitionRecord:
     selection: str
     selection_reason: str = ""
     schema_version: str = field(default=SCOPE_ACQUISITION_SCHEMA_VERSION)
+    #: ADR-062 A1.6: both stored operands' variants paired by ``variant_id``
+    #: (``None`` unless both operands are stored packages). Appended last so
+    #: a positional caller keeps binding the older tail.
+    variant_pairing: VariantPairing | None = None
 
     def __post_init__(self) -> None:
         """Reject a record naming the same member twice."""

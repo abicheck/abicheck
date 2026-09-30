@@ -159,8 +159,8 @@ class TestDetectorFindings:
             stdlib=StdlibFamily.LIBCXX,
             types=[private_owner, public_owner],
         )
-        old.functions.append(public_fn)
-        new.functions.append(public_fn)
+        old.declarations.functions.append(public_fn)
+        new.declarations.functions.append(public_fn)
 
         result = compare(old, new)
         finding = next(
@@ -201,8 +201,8 @@ class TestDetectorFindings:
             stdlib=StdlibFamily.LIBCXX,
             types=[impl, public_owner],
         )
-        old.functions.append(public_fn)
-        new.functions.append(public_fn)
+        old.declarations.functions.append(public_fn)
+        new.declarations.functions.append(public_fn)
 
         result = compare(old, new)
         finding = next(

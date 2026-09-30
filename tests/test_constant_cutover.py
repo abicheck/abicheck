@@ -1022,7 +1022,10 @@ class TestThroughCompare:
         )
         new = _snap(constants={})
         old_index, new_index = constant_index_pair(
-            old, new, old_constants=old.constants, new_constants=new.constants
+            old,
+            new,
+            old_constants=old.declarations.constants,
+            new_constants=new.declarations.constants,
         )
         (change,) = _run(old_index, new_index)
         assert change.kind is ChangeKind.CONSTANT_REMOVED

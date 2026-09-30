@@ -260,7 +260,7 @@ class TestExcludeHeaderEndToEnd:
         snap = load_snapshot(tmp_path / "excluded.json")
         # The surviving headers really were parsed: the excluded one's
         # absence must not have silently emptied the surface.
-        assert any(f.name == "good_fn" for f in snap.functions), (
+        assert any(f.name == "good_fn" for f in snap.declarations.functions), (
             "excluding one header must not drop the rest of the parse"
         )
         assert without.exit_code != 0 or not without.output.strip() == ""

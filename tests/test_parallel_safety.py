@@ -133,8 +133,8 @@ class TestConcurrentSharedSnapshots:
             assert found
 
         # Verify inputs were not mutated
-        assert len(old.functions) == 1
-        assert len(new.functions) == 1
+        assert len(old.declarations.functions) == 1
+        assert len(new.declarations.functions) == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════

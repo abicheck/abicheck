@@ -59,7 +59,7 @@ def _result(snap: AbiSnapshot) -> DiffResult:
     r.changes = [
         Change(
             kind=ChangeKind.FUNC_REMOVED,
-            symbol=snap.functions[0].mangled,
+            symbol=snap.declarations.functions[0].mangled,
             description="removed",
         ),
         Change(
@@ -99,7 +99,7 @@ class TestEquivalenceWithTheFullSnapshot:
         assert len(cases) == 12 + 6 + 4 + 3 + 1
         failing = {c.get("name") for c in cases if c.find("failure") is not None}
         passing = [c for c in cases if c.find("failure") is None]
-        assert snap.functions[0].mangled in failing
+        assert snap.declarations.functions[0].mangled in failing
         assert len(passing) == len(cases) - len(failing)
 
     def test_show_only_still_drops_the_unchanged_set(self):
@@ -115,10 +115,10 @@ class TestProjection:
     def test_categories_and_order_follow_the_snapshot(self):
         snap = _snapshot(12)
         inv = build_symbol_inventory(snap)
-        assert inv.functions == tuple(f.mangled for f in snap.functions)
-        assert inv.variables == tuple(v.mangled for v in snap.variables)
-        assert inv.types == tuple(t.name for t in snap.types)
-        assert inv.enums == tuple(e.name for e in snap.enums)
+        assert inv.functions == tuple(f.mangled for f in snap.declarations.functions)
+        assert inv.variables == tuple(v.mangled for v in snap.declarations.variables)
+        assert inv.types == tuple(t.name for t in snap.declarations.types)
+        assert inv.enums == tuple(e.name for e in snap.declarations.enums)
         mapping = inv.as_symbol_map()
         assert list(mapping) == (
             list(inv.functions)

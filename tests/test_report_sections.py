@@ -29,7 +29,7 @@ from abicheck.reporter import to_markdown
 
 def _snap(ver: str, funcs: list[Function]) -> AbiSnapshot:
     s = AbiSnapshot(library="libfoo.so", version=ver)
-    s.functions = funcs
+    s.declarations.functions = funcs
     return s
 
 

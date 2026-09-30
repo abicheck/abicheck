@@ -359,7 +359,10 @@ def _check_exported_not_public(
     # header.
     public_syms: set[str] = set()
     decl_by_sym: dict[str, Function | Variable] = {}
-    all_decls: list[Function | Variable] = [*snapshot.functions, *snapshot.variables]
+    all_decls: list[Function | Variable] = [
+        *snapshot.declarations.functions,
+        *snapshot.declarations.variables,
+    ]
     for d in all_decls:
         for sym in _candidate_symbols(d):
             decl_by_sym.setdefault(sym, d)
@@ -498,8 +501,8 @@ def _check_public_not_exported(
     # read through the one graph relation, never re-derived from paths.
     owned = contract_relations(snapshot)
     findings: list[Change] = []
-    inline_symbols = inline_declared_symbols(snapshot.functions)
-    for i, fn in enumerate(snapshot.functions):
+    inline_symbols = inline_declared_symbols(snapshot.declarations.functions)
+    for i, fn in enumerate(snapshot.declarations.functions):
         if not _has_export_obligation(
             fn, inline_symbols
         ) or owned.function_owes_no_export(i):
@@ -517,7 +520,7 @@ def _check_public_not_exported(
                     source_location=fn.source_location,
                 )
             )
-    for i, var in enumerate(snapshot.variables):
+    for i, var in enumerate(snapshot.declarations.variables):
         if not _var_has_export_obligation(var) or owned.variable_owes_no_export(i):
             continue
         if var.mangled not in satisfied:
@@ -647,7 +650,7 @@ def _check_private_header_leak(
 
     findings: list[Change] = []
     seen: set[tuple[str, str]] = set()
-    for fn in snapshot.functions:
+    for fn in snapshot.declarations.functions:
         if fn.origin != ScopeOrigin.PUBLIC_HEADER:
             continue
         for leaked in _referenced_private_types(_function_type_refs(fn), private_types):
@@ -668,7 +671,7 @@ def _check_private_header_leak(
                     caused_by_type=leaked,
                 )
             )
-    for var in snapshot.variables:
+    for var in snapshot.declarations.variables:
         if var.origin != ScopeOrigin.PUBLIC_HEADER:
             continue
         for leaked in _referenced_private_types({var.type}, private_types):
@@ -1347,13 +1350,13 @@ def _origin_resolvable(snapshot: AbiSnapshot) -> bool:
     """
     if not snapshot.from_headers:
         return False
-    for fn in snapshot.functions:
+    for fn in snapshot.declarations.functions:
         if fn.origin != ScopeOrigin.UNKNOWN:
             return True
-    for var in snapshot.variables:
+    for var in snapshot.declarations.variables:
         if var.origin != ScopeOrigin.UNKNOWN:
             return True
-    for rec in snapshot.types:
+    for rec in snapshot.declarations.types:
         if rec.origin != ScopeOrigin.UNKNOWN:
             return True
     return False
@@ -1659,8 +1662,8 @@ def _private_type_names(snapshot: AbiSnapshot) -> dict[str, str]:
     """
     # (name, origin) for every record and enum, so both type kinds are scanned
     # with one pass and no `object`-typed merged iteration.
-    type_decls = [(rec.name, rec.origin) for rec in snapshot.types] + [
-        (en.name, en.origin) for en in snapshot.enums
+    type_decls = [(rec.name, rec.origin) for rec in snapshot.declarations.types] + [
+        (en.name, en.origin) for en in snapshot.declarations.enums
     ]
 
     public_tokens: set[str] = set()

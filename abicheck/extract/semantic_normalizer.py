@@ -203,6 +203,7 @@ from ..model.fact import Fact
 from ..model.identity import EntityId
 from ..model.occurrence import OccurrenceId
 from ..model.semantic_ir import CanonicalEntity, SemanticIR, canonical_cv_qualification
+from ..model.semantic_ir_record_layout import record_layout_facts
 from ..model.signature_normalization import canonicalize_function_signature_param_type
 from ..name_classification import canonicalize_type_name
 from . import semantic_normalizer_dwarf
@@ -559,6 +560,7 @@ def _add_occurrence(
     producer: str,
     cv_qualification: Fact[tuple[str, ...]] | None = None,
     template_arguments: Fact[tuple[str, ...]] | None = None,
+    layout: tuple[Fact[int], Fact[int]] | None = None,
     disambiguator: str = "",
 ) -> None:
     """Record one occurrence, first-observation-wins on a key collision.
@@ -585,19 +587,18 @@ def _add_occurrence(
     occ_id = OccurrenceId(entity_id, disambiguator)
     if occ_id in occurrences:
         return
+    size, align = layout if layout is not None else (Fact.not_collected(),) * 2
     occurrences[occ_id] = CanonicalEntity(
         canonical_spelling=canonical_spelling,
         producer=producer,
-        **(
-            {"cv_qualification": cv_qualification}
-            if cv_qualification is not None
-            else {}
+        cv_qualification=(
+            Fact.not_collected() if cv_qualification is None else cv_qualification
         ),
-        **(
-            {"template_arguments": template_arguments}
-            if template_arguments is not None
-            else {}
+        template_arguments=(
+            Fact.not_collected() if template_arguments is None else template_arguments
         ),
+        size_bits=size,
+        alignment_bits=align,
     )
 
 
@@ -673,6 +674,7 @@ def normalize_header_ast(
             Fact.present(rt_name),
             producer=producer,
             template_arguments=Fact.present(split_template_arguments(rt_name) or ()),
+            layout=record_layout_facts(rt),
             disambiguator=_location_disambiguator(rt.source_location),
         )
     for et in enums:
