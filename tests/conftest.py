@@ -609,8 +609,31 @@ def _keep_mutmut_stats_out_of_child_processes() -> None:
     os.environ.pop("MUTANT_UNDER_TEST", None)
 
 
+#: Git settings forced on every git process a test starts. A test that
+#: makes real commits otherwise inherits the developer's global config, and
+#: commit signing there (an SSH/GPG signer, a pinentry prompt, a hardware
+#: key) makes those tests fail -- or hang -- on that machine only: 22 tests
+#: failed at once when a signing helper went missing. `GIT_CONFIG_COUNT`
+#: overrides every config file without replacing the rest of the user's
+#: config (identity, `safe.directory`), so nothing else changes.
+_HERMETIC_GIT_CONFIG = (("commit.gpgsign", "false"), ("tag.gpgsign", "false"))
+
+
+def _make_git_hermetic() -> None:
+    start = int(os.environ.get("GIT_CONFIG_COUNT", "0") or 0)
+    for offset, (key, value) in enumerate(_HERMETIC_GIT_CONFIG):
+        os.environ[f"GIT_CONFIG_KEY_{start + offset}"] = key
+        os.environ[f"GIT_CONFIG_VALUE_{start + offset}"] = value
+    os.environ["GIT_CONFIG_COUNT"] = str(start + len(_HERMETIC_GIT_CONFIG))
+
+
 def pytest_configure(config: pytest.Config) -> None:
     _keep_mutmut_stats_out_of_child_processes()
+    if not any(
+        os.environ.get(f"GIT_CONFIG_KEY_{i}") == "commit.gpgsign"
+        for i in range(int(os.environ.get("GIT_CONFIG_COUNT", "0") or 0))
+    ):
+        _make_git_hermetic()
     _materialize_generated_skill_trees()
     config.addinivalue_line(
         "markers",
