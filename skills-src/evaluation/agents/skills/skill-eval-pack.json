@@ -815,7 +815,7 @@
         "check-abi-compatibility",
         "explain-abi-change"
       ],
-      "digest": "sha256:4918b76fa48e5ed61fcaa6e752f0a307e93ff33f0bd89cf76be0d873f2c4607c",
+      "digest": "sha256:8b946a4f6ccc68817fc26afaf63de2d41e1030f9cb95ed0d6033aaf6f3e468b5",
       "roots": [
         "skills-src/evaluation/agents/skills/grade_bundle.py",
         "skills-src/evaluation/agents/skills/graders",

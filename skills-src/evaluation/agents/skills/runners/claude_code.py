@@ -1429,7 +1429,19 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument(
+        "--skill-tree",
+        help=(
+            "Install the skill arm's skill from this directory (one "
+            "subdirectory per skill, like .claude/skills/) instead of the "
+            "generated tree: for measuring a candidate variant against the "
+            "published one. Recorded on every row as `skill_tree`."
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.skill_tree:
+        global PUBLISHED_SKILLS
+        PUBLISHED_SKILLS = Path(args.skill_tree).resolve()
 
     # These checks run before the first model call: a run that discovers any of
     # them afterwards has spent real money producing output that *looks* like a
@@ -1654,6 +1666,8 @@ def main(argv: list[str] | None = None) -> int:
                     record = _run_once(
                         sid, scenario, arm, rep, out_dir, args.timeout, args.model
                     )
+                    if args.skill_tree:
+                        record["skill_tree"] = str(PUBLISHED_SKILLS)
                 except subprocess.TimeoutExpired as exc:
                     # subprocess.run() kills the process and still populates
                     # TimeoutExpired.stdout/.stderr with whatever had already

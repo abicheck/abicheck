@@ -210,3 +210,23 @@ def test_the_table_gets_one_column_per_arm_present(capsys):
     )
     assert per_correct.split()[-3:] == ["0.300", "0.200", "0.200"]
     assert json.dumps(graded)  # rows stay serializable for --json
+
+
+def test_a_skill_tree_override_is_what_the_skill_arm_installs(tmp_path, monkeypatch):
+    # The variant differs from the published skill in a way the check can
+    # see, so an install from the wrong tree cannot pass by coincidence.
+    tree = tmp_path / "variant"
+    (tree / "explain-abi-change").mkdir(parents=True)
+    (tree / "explain-abi-change" / "SKILL.md").write_text(
+        "variant marker\n", encoding="utf-8"
+    )
+    pack = json.loads((EVAL_DIR / "skill-eval-pack.json").read_text(encoding="utf-8"))
+    scenario = pack["scenarios"]["explain-missing-symbol"]
+    monkeypatch.setattr(runner, "PUBLISHED_SKILLS", tree)
+    work = tmp_path / "ws"
+    runner._prepare_workspace(work, scenario, "skill")
+    installed = work / ".claude" / "skills" / "explain-abi-change" / "SKILL.md"
+    assert installed.read_text(encoding="utf-8") == "variant marker\n"
+    base = tmp_path / "base"
+    runner._prepare_workspace(base, scenario, "baseline")
+    assert not (base / ".claude").exists()
