@@ -478,7 +478,7 @@ class TestCachedRunDump:
         snap2 = cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
 
         assert len(calls) == 1
-        assert snap1.functions[0].name == snap2.functions[0].name == "foo"
+        assert snap1.declarations.functions[0].name == snap2.functions[0].name == "foo"
 
     def test_bumped_cache_version_invalidates_pre_dependency_scope_entries(
         self, tmp_path, monkeypatch
@@ -577,8 +577,8 @@ class TestCachedRunDump:
         second = cached_run_dump(
             fake_run_dump, binary, "elf", [header], [], "1.0", "c++"
         )
-        assert first.functions[0].name == "OLD"
-        assert second.functions[0].name == "NEW"
+        assert first.declarations.functions[0].name == "OLD"
+        assert second.declarations.functions[0].name == "NEW"
         assert calls == ["OLD", "NEW"]
 
     def test_binary_content_change_invalidates_cache(self, tmp_path):
@@ -614,8 +614,8 @@ class TestCachedRunDump:
         snap_pe = cached_run_dump(fake_run_dump, binary, "pe", [], [], "1.0", "c++")
 
         assert calls == ["elf", "pe"]
-        assert snap_elf.functions[0].name == "elf"
-        assert snap_pe.functions[0].name == "pe"
+        assert snap_elf.declarations.functions[0].name == "elf"
+        assert snap_pe.declarations.functions[0].name == "pe"
 
     def test_inferred_header_root_sibling_edit_invalidates_cache(self, tmp_path):
         # Codex review: header_utils.resolve_inferred_header_roots() adds a
@@ -861,7 +861,7 @@ class TestCachedRunDumpManifest:
         )
         assert len(calls) == 1
         assert calls[0] is manifest
-        assert snap1.functions[0].name == snap2.functions[0].name == "foo"
+        assert snap1.declarations.functions[0].name == snap2.functions[0].name == "foo"
 
     def test_forced_include_content_edit_invalidates_manifest_cache(self, tmp_path):
         binary = tmp_path / "lib.so"

@@ -392,16 +392,16 @@ def _snapshot() -> AbiSnapshot:
 
 def test_apply_provenance_opt_in_classification():
     snap = apply_provenance(_snapshot(), public_headers=["include/api.h"])
-    by_name = {f.name: f for f in snap.functions}
+    by_name = {f.name: f for f in snap.declarations.functions}
     assert by_name["pub"].source_header == "/build/include/api.h"
     assert by_name["pub"].origin is ScopeOrigin.PUBLIC_HEADER
     assert by_name["priv"].origin is ScopeOrigin.PRIVATE_HEADER
     # No source location → no header, UNKNOWN origin.
     assert by_name["noloc"].source_header is None
     assert by_name["noloc"].origin is ScopeOrigin.UNKNOWN
-    assert snap.variables[0].origin is ScopeOrigin.PUBLIC_HEADER
-    assert snap.types[0].origin is ScopeOrigin.PUBLIC_HEADER
-    assert snap.enums[0].origin is ScopeOrigin.PUBLIC_HEADER
+    assert snap.declarations.variables[0].origin is ScopeOrigin.PUBLIC_HEADER
+    assert snap.declarations.types[0].origin is ScopeOrigin.PUBLIC_HEADER
+    assert snap.declarations.enums[0].origin is ScopeOrigin.PUBLIC_HEADER
 
 
 def test_apply_provenance_source_header_fact_matches_presence_of_a_real_header():
@@ -425,7 +425,7 @@ def test_apply_provenance_source_header_fact_matches_presence_of_a_real_header()
         ),
         public_headers=["include/api.h"],
     )
-    by_name = {t.name: t for t in snap.types}
+    by_name = {t.name: t for t in snap.declarations.types}
     with_header = by_name["WithHeader"]
     assert with_header.source_header == "/build/include/api.h"
     assert with_header.source_header_fact.status is FactStatus.PRESENT
@@ -440,9 +440,9 @@ def test_apply_provenance_no_set_keeps_unknown_but_fills_header():
     # source_header is descriptive metadata and is always populated; origin
     # stays UNKNOWN without a public set (decision D4).
     snap = apply_provenance(_snapshot())
-    assert snap.functions[0].source_header == "/build/include/api.h"
-    assert snap.functions[0].origin is ScopeOrigin.UNKNOWN
-    assert snap.types[0].origin is ScopeOrigin.UNKNOWN
+    assert snap.declarations.functions[0].source_header == "/build/include/api.h"
+    assert snap.declarations.functions[0].origin is ScopeOrigin.UNKNOWN
+    assert snap.declarations.types[0].origin is ScopeOrigin.UNKNOWN
 
 
 # ── include_search_dirs: headers reached transitively from a -H root ─────────
@@ -486,7 +486,7 @@ def test_include_search_dirs_promotes_transitively_included_header_to_public():
         public_headers=["/build/include/api.h"],
         include_search_dirs=["/build/include"],
     )
-    by_name = {f.name: f for f in snap.functions}
+    by_name = {f.name: f for f in snap.declarations.functions}
     assert by_name["pub"].origin is ScopeOrigin.PUBLIC_HEADER
     assert by_name["priv"].origin is ScopeOrigin.PUBLIC_HEADER
 
@@ -499,7 +499,7 @@ def test_include_search_dirs_omitted_keeps_prior_private_header_behavior():
         _snapshot_with_transitive_private_header(),
         public_headers=["/build/include/api.h"],
     )
-    by_name = {f.name: f for f in snap.functions}
+    by_name = {f.name: f for f in snap.declarations.functions}
     assert by_name["pub"].origin is ScopeOrigin.PUBLIC_HEADER
     assert by_name["priv"].origin is ScopeOrigin.PRIVATE_HEADER
 
@@ -512,7 +512,7 @@ def test_include_search_dirs_cannot_opt_in_classification_by_itself():
         _snapshot_with_transitive_private_header(),
         include_search_dirs=["/build/include"],
     )
-    by_name = {f.name: f for f in snap.functions}
+    by_name = {f.name: f for f in snap.declarations.functions}
     assert by_name["pub"].origin is ScopeOrigin.UNKNOWN
     assert by_name["priv"].origin is ScopeOrigin.UNKNOWN
 
@@ -536,7 +536,7 @@ def test_include_search_dirs_does_not_override_bare_system_prefix():
         public_headers=["/build/include/api.h"],
         include_search_dirs=["/usr/include"],
     )
-    assert snap.functions[0].origin is ScopeOrigin.SYSTEM_HEADER
+    assert snap.declarations.functions[0].origin is ScopeOrigin.SYSTEM_HEADER
 
 
 def test_include_search_dirs_does_not_promote_nested_toolchain_root():
@@ -564,7 +564,7 @@ def test_include_search_dirs_does_not_promote_nested_toolchain_root():
         public_headers=["/build/include/api.h"],
         include_search_dirs=["/usr/include/c++/12"],
     )
-    assert snap.functions[0].origin is ScopeOrigin.SYSTEM_HEADER
+    assert snap.declarations.functions[0].origin is ScopeOrigin.SYSTEM_HEADER
 
 
 # ── origin_cache (tag_provenance / apply_provenance memoization) ─────────────
@@ -748,12 +748,12 @@ def test_serialization_round_trip_preserves_provenance():
     assert d["functions"][0]["source_header"] == "/build/include/api.h"
 
     back = snapshot_from_dict(d)
-    assert back.functions[0].origin is ScopeOrigin.PUBLIC_HEADER
-    assert back.functions[0].source_header == "/build/include/api.h"
-    assert back.enums[0].origin is ScopeOrigin.PUBLIC_HEADER
-    assert back.enums[0].source_header == "/build/include/api.h"
-    assert back.types[0].origin is ScopeOrigin.PUBLIC_HEADER
-    assert back.variables[0].origin is ScopeOrigin.PUBLIC_HEADER
+    assert back.declarations.functions[0].origin is ScopeOrigin.PUBLIC_HEADER
+    assert back.declarations.functions[0].source_header == "/build/include/api.h"
+    assert back.declarations.enums[0].origin is ScopeOrigin.PUBLIC_HEADER
+    assert back.declarations.enums[0].source_header == "/build/include/api.h"
+    assert back.declarations.types[0].origin is ScopeOrigin.PUBLIC_HEADER
+    assert back.declarations.variables[0].origin is ScopeOrigin.PUBLIC_HEADER
 
 
 def test_old_snapshot_without_provenance_loads_as_unknown():
@@ -767,11 +767,11 @@ def test_old_snapshot_without_provenance_loads_as_unknown():
         "enums": [{"name": "E", "members": []}],
     }
     snap = snapshot_from_dict(legacy)
-    assert snap.functions[0].origin is ScopeOrigin.UNKNOWN
-    assert snap.functions[0].source_header is None
-    assert snap.variables[0].origin is ScopeOrigin.UNKNOWN
-    assert snap.types[0].origin is ScopeOrigin.UNKNOWN
-    assert snap.enums[0].origin is ScopeOrigin.UNKNOWN
+    assert snap.declarations.functions[0].origin is ScopeOrigin.UNKNOWN
+    assert snap.declarations.functions[0].source_header is None
+    assert snap.declarations.variables[0].origin is ScopeOrigin.UNKNOWN
+    assert snap.declarations.types[0].origin is ScopeOrigin.UNKNOWN
+    assert snap.declarations.enums[0].origin is ScopeOrigin.UNKNOWN
 
 
 # ── castxml dumper wires source_location onto records/variables/enums ─────────

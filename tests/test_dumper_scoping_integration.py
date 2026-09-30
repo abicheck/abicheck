@@ -92,13 +92,13 @@ def test_real_system_header_type_directly_referenced_is_kept(tmp_path: Path) -> 
     # classification (ScopeOrigin stays UNKNOWN throughout this test).
     snap = dump(so, headers=[api], compiler="cc", lang="C")
 
-    type_names = {t.name for t in snap.types}
+    type_names = {t.name for t in snap.declarations.types}
     assert "tm" in type_names, "castxml did not surface struct tm from <time.h>"
     assert "Internal" in type_names, "castxml did not surface the private struct"
-    assert any(f.name == "public_fn" for f in snap.functions)
+    assert any(f.name == "public_fn" for f in snap.declarations.functions)
 
     scoped = scope_snapshot_excluding_dependencies(snap)
-    scoped_type_names = {t.name for t in scoped.types}
+    scoped_type_names = {t.name for t in scoped.declarations.types}
     assert "tm" in scoped_type_names, (
         "struct tm (from a real <time.h> system header) is directly named "
         "in public_fn's own signature, so it must survive default scoping"
@@ -107,7 +107,7 @@ def test_real_system_header_type_directly_referenced_is_kept(tmp_path: Path) -> 
         "the library's own private struct must be kept -- this is a "
         "header-origin filter, not a public-API-visibility one"
     )
-    assert any(f.name == "public_fn" for f in scoped.functions)
+    assert any(f.name == "public_fn" for f in scoped.declarations.functions)
 
 
 @pytest.mark.integration
@@ -120,4 +120,4 @@ def test_include_dependencies_keeps_real_system_header_type(tmp_path: Path) -> N
 
     # No scoping applied at all (the CLI --include-system-declarations path) -- the
     # unscoped snapshot straight from dump() must still carry struct tm.
-    assert "tm" in {t.name for t in snap.types}
+    assert "tm" in {t.name for t in snap.declarations.types}

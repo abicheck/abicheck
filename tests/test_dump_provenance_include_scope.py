@@ -115,7 +115,7 @@ def test_private_sibling_header_not_promoted_by_auto_derived_include_dir(
         # longer falls back to widening off extra_includes when this is
         # absent.
     )
-    by_name = {f.name: f for f in snap.functions}
+    by_name = {f.name: f for f in snap.declarations.functions}
     assert by_name["pub"].origin is ScopeOrigin.PUBLIC_HEADER
     assert by_name["priv"].origin is ScopeOrigin.PRIVATE_HEADER, (
         "a private sibling header living next to the public -H header must "
@@ -177,7 +177,7 @@ def test_explicit_include_dir_still_promotes_transitively_reached_header(
         # `public_include_search_dirs`.
         public_include_search_dirs=[include_dir],
     )
-    by_name = {f.name: f for f in snap.functions}
+    by_name = {f.name: f for f in snap.declarations.functions}
     assert by_name["pub"].origin is ScopeOrigin.PUBLIC_HEADER
     assert by_name["dep"].origin is ScopeOrigin.PUBLIC_HEADER, (
         "a header reached transitively under an explicit -I root must "

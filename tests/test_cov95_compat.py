@@ -163,7 +163,7 @@ class TestSnapshotFromDictEdgeCases:
             "TypeInfo": {"0": {"Name": "void", "Type": "Intrinsic"}},
         }
         snap = _snapshot_from_abicc_dict(data, tmp_path / "x.dump")
-        assert [f.mangled for f in snap.functions] == ["good"]
+        assert [f.mangled for f in snap.declarations.functions] == ["good"]
 
     def test_symbol_without_mangled_name_skipped(self, tmp_path: Path) -> None:
         """A symbol dict missing MnglName is skipped (line 163)."""
@@ -176,7 +176,7 @@ class TestSnapshotFromDictEdgeCases:
             },
         }
         snap = _snapshot_from_abicc_dict(data, tmp_path / "x.dump")
-        assert [f.mangled for f in snap.functions] == ["kept"]
+        assert [f.mangled for f in snap.declarations.functions] == ["kept"]
 
     def test_param_non_dict_entry_skipped(self, tmp_path: Path) -> None:
         """A Param map entry that is not a dict is skipped (line 210)."""
@@ -231,8 +231,8 @@ class TestSnapshotFromDictEdgeCases:
             },
         }
         snap = _snapshot_from_abicc_dict(data, tmp_path / "x.dump")
-        assert [v.mangled for v in snap.variables] == ["gvar"]
-        assert snap.variables[0].type == "int"
+        assert [v.mangled for v in snap.declarations.variables] == ["gvar"]
+        assert snap.declarations.variables[0].type == "int"
 
     def test_extract_record_types_skips_non_dict_and_blank_name(self) -> None:
         """Non-dict type info (244) and blank-named records (251) are skipped."""

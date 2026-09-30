@@ -182,11 +182,11 @@ def _surface(snapshot_path: Path) -> dict[str, list[str]]:
     from abicheck.serialization import load_snapshot
 
     snap = load_snapshot(snapshot_path)
-    functions = [f.name for f in snap.functions]
+    functions = [f.name for f in snap.declarations.functions]
     return {
-        "types": _only([t.name for t in snap.types], {"V", "R"}),
-        "enums": _only([e.name for e in snap.enums], {"K"}),
-        "typedefs": _only(list(snap.typedefs), {"T", "L"}),
+        "types": _only([t.name for t in snap.declarations.types], {"V", "R"}),
+        "enums": _only([e.name for e in snap.declarations.enums], {"K"}),
+        "typedefs": _only(list(snap.declarations.typedefs), {"T", "L"}),
         "q_functions": _only(functions, {"mk", "mk2", "mk3", "h", "cmp", "use"}),
         # A local record's own members (castxml emits its implicit special
         # members) must not leak either.

@@ -94,7 +94,9 @@ def _dump(tmp_path: Path, so: Path, include: Path, *args: str, out: Path) -> Non
 
 def _guarded_names(snapshot_path: Path) -> set[str]:
     snap = load_snapshot(str(snapshot_path))
-    return {f.name for f in snap.functions if f.name.startswith("guarded_")}
+    return {
+        f.name for f in snap.declarations.functions if f.name.startswith("guarded_")
+    }
 
 
 @pytest.mark.skipif(not (_HAVE_GCC and _HAVE_CASTXML), reason="needs gcc + castxml")
@@ -205,7 +207,7 @@ def test_castxml_driven_by_clang_receives_the_same_definitions(tmp_path: Path) -
     out = tmp_path / "cx-clang.json"
     _dump(tmp_path, so, include, "--config", str(cfg), "-DFEATURE_API", out=out)
     snap = load_snapshot(str(out))
-    assert "guarded_expert" in {f.name for f in snap.functions}
+    assert "guarded_expert" in {f.name for f in snap.declarations.functions}
     assert "-DFEATURE_API" in snap.ast_compile_args
     assert "clang" in (snap.ast_toolchain.get("compiler_selected") or "")
 

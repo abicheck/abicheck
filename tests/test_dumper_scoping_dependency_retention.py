@@ -102,7 +102,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        kept_names = {t.name for t in scoped.types}
+        kept_names = {t.name for t in scoped.declarations.types}
         assert "string" in kept_names, (
             "std::string is directly named in run()'s own signature -- "
             "the library's ABI genuinely depends on its layout"
@@ -126,7 +126,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert {t.name for t in scoped.types} == {"Internal", "tm"}
+        assert {t.name for t in scoped.declarations.types} == {"Internal", "tm"}
 
     def test_hidden_function_does_not_retain_a_dependency_type_it_names(self):
         # Regression: a hidden/private function naming a dependency type in
@@ -149,7 +149,7 @@ class TestDirectlyReferencedDependencyRetention:
             types=[_rec("tm", source_header="/usr/include/time.h")],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert {t.name for t in scoped.types} == set(), (
+        assert {t.name for t in scoped.declarations.types} == set(), (
             "a hidden function is never a direct-reference retention root"
         )
 
@@ -164,7 +164,7 @@ class TestDirectlyReferencedDependencyRetention:
             types=[_rec("tm", source_header="/usr/include/time.h")],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert {t.name for t in scoped.types} == {"tm"}
+        assert {t.name for t in scoped.declarations.types} == {"tm"}
 
     def test_private_origin_kept_record_does_not_retain_a_dependency_type_it_names(
         self,
@@ -191,7 +191,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert {t.name for t in scoped.types} == {"Internal"}, (
+        assert {t.name for t in scoped.declarations.types} == {"Internal"}, (
             "a private-origin kept record is never a direct-reference retention root"
         )
 
@@ -214,7 +214,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert {t.name for t in scoped.types} == {"Own", "tm"}
+        assert {t.name for t in scoped.declarations.types} == {"Own", "tm"}
 
     def test_dependency_type_referenced_only_via_field_of_kept_type_is_kept(self):
         snap = AbiSnapshot(
@@ -232,7 +232,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert {t.name for t in scoped.types} == {"Wrapper", "string"}
+        assert {t.name for t in scoped.declarations.types} == {"Wrapper", "string"}
 
     def test_dependency_enum_directly_referenced_is_kept(self):
         from abicheck.model import EnumMember, EnumType
@@ -251,7 +251,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [e.name for e in scoped.enums] == ["errc"]
+        assert [e.name for e in scoped.declarations.enums] == ["errc"]
 
     def test_ambiguous_bare_name_does_not_cross_admit_unrelated_type(self):
         """Codex review (P2): two dependency records sharing a bare `name`
@@ -279,7 +279,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["std::Thing"]
 
     def test_typedef_alias_resolves_dependency_target_record(self):
         """Codex review (P1): a signature spells a dependency type through a
@@ -302,7 +302,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"std::string": "std::__cxx11::basic_string<char>"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == [
+        assert [t.qualified_name for t in scoped.declarations.types] == [
             "std::__cxx11::basic_string<char>"
         ]
 
@@ -335,7 +335,7 @@ class TestDirectlyReferencedDependencyRetention:
             },
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["basic_string"]
+        assert [t.name for t in scoped.declarations.types] == ["basic_string"]
 
     def test_chained_typedef_alias_resolves_dependency_target(self):
         """Codex review (P1, third round): `using Handle = Thing; using
@@ -357,7 +357,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "Thing", "Thing": "std::Thing"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["std::Thing"]
 
     def test_decorated_typedef_target_resolves_dependency_record(self):
         """Codex review (P1, third round): `using Handle = std::Thing *;` --
@@ -380,7 +380,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "std::Thing *"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["std::Thing"]
 
     def test_chained_decorated_typedef_target_resolves_dependency_record(self):
         """Codex review (P1, fourth round): `using Ptr = Handle *; using
@@ -404,7 +404,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Ptr": "Handle *", "Handle": "std::Thing"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["std::Thing"]
 
     def test_long_typedef_chain_resolves_beyond_a_fixed_hop_count(self):
         """Codex review (P2, fifth/sixth rounds): a chain of fifty distinct
@@ -433,7 +433,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs=typedefs,
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["std::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["std::Thing"]
 
     def test_typedef_resolution_stays_fast_with_many_typedefs(self):
         """Self-review follow-up: an earlier version recompiled the
@@ -503,7 +503,7 @@ class TestDirectlyReferencedDependencyRetention:
         # canonical coverage lane's shared-runner, full-suite-under-coverage
         # conditions add to an otherwise sub-second run.
         assert elapsed < 15.0, f"long typedef chain reachability took {elapsed:.2f}s"
-        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["dep::Thing"]
 
     def test_self_referential_typedefs_do_not_blow_up(self):
         """Codex review (ninth round): `typedef struct Foo Foo;` -- a
@@ -537,7 +537,7 @@ class TestDirectlyReferencedDependencyRetention:
         # See test_typedef_resolution_stays_fast_with_many_typedefs above for
         # why this bound is generous rather than tight.
         assert elapsed < 15.0, f"self-referential typedefs took {elapsed:.2f}s"
-        assert [t.name for t in scoped.types] == ["Foo0"]
+        assert [t.name for t in scoped.declarations.types] == ["Foo0"]
 
     def test_branching_typedef_chain_does_not_blow_up(self):
         """Codex review (tenth round): `using A0 = Pair<A1, A1>; using A1 =
@@ -573,7 +573,7 @@ class TestDirectlyReferencedDependencyRetention:
         # See test_typedef_resolution_stays_fast_with_many_typedefs above for
         # why this bound is generous rather than tight.
         assert elapsed < 15.0, f"branching typedef chain took {elapsed:.2f}s"
-        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["dep::Thing"]
 
     def test_typedef_alias_pointing_at_kept_type_excludes_ambiguous_dependency(self):
         """Codex review (tenth round): an own typedef `Handle -> api::Own`
@@ -604,7 +604,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "api::Own"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["api::Own"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["api::Own"]
 
     def test_compound_typedef_alias_retains_both_kept_and_dependency_components(self):
         """Codex review (eleventh round): `using Alias = Pair<api::Own,
@@ -636,7 +636,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Alias": "Pair<api::Own, dep::Thing>"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert sorted(t.qualified_name for t in scoped.types) == [
+        assert sorted(t.qualified_name for t in scoped.declarations.types) == [
             "api::Own",
             "dep::Thing",
         ]
@@ -676,7 +676,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Alias": "Pair<dep::A, dep::B>"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert sorted(t.qualified_name for t in scoped.types) == [
+        assert sorted(t.qualified_name for t in scoped.declarations.types) == [
             "dep::A",
             "dep::B",
         ]
@@ -715,7 +715,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"api::Handle": "dep::A", "vendor::Handle": "dep::B"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.types == []
+        assert scoped.declarations.types == []
 
     def test_two_separate_aliases_still_resolve_via_their_own_qualified_spelling(
         self,
@@ -747,7 +747,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"api::Handle": "dep::A", "vendor::Handle": "dep::B"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["dep::A"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["dep::A"]
 
     def test_kept_touched_alias_suffix_guards_coincidental_dependency_suffix(
         self,
@@ -784,7 +784,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"api::Handle": "api::Own"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["api::Own"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["api::Own"]
 
     def test_primitive_typedef_alias_shadows_coincidental_dependency_suffix(
         self,
@@ -816,7 +816,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "int"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.types == []
+        assert scoped.declarations.types == []
 
     def test_primitive_typedef_alias_shadows_exact_tag_identity_too(self):
         """Codex review (twenty-third round): unlike the previous test's
@@ -846,7 +846,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "int"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.types == []
+        assert scoped.declarations.types == []
 
     def test_resolved_alias_takes_precedence_over_colliding_exact_tag(self):
         """Codex review (twenty-eighth round): `typedef struct Actual
@@ -879,7 +879,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "struct Actual"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Actual"]
+        assert [t.name for t in scoped.declarations.types] == ["Actual"]
 
     def test_elaborated_tag_reference_survives_colliding_primitive_typedef(
         self,
@@ -908,7 +908,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "int"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Handle"]
+        assert [t.name for t in scoped.declarations.types] == ["Handle"]
 
     def test_elaborated_spelling_still_collision_guards_against_kept_type(
         self,
@@ -944,7 +944,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["api::Foo"]
 
     def test_elaborated_spelling_guards_both_class_and_struct_keyword(self):
         """Codex review (thirty-third round, P2): a kept type declared as
@@ -975,7 +975,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["api::Foo"]
 
     def test_elaborated_reference_does_not_also_resolve_nested_typedef_alias(
         self,
@@ -1010,7 +1010,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Foo": "struct Other"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Foo"]
+        assert [t.name for t in scoped.declarations.types] == ["Foo"]
 
     def test_typedef_chain_through_a_shadowing_key_does_not_reach_dependency(
         self,
@@ -1039,7 +1039,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "int", "B": "Handle"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.types == []
+        assert scoped.declarations.types == []
 
     def test_globally_qualified_signature_spelling_still_matches(self):
         """Codex review (twenty-sixth round): direct-clang preserves a
@@ -1067,7 +1067,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["dep::Thing"]
 
     def test_globally_qualified_unnamespaced_signature_spelling_matches(self):
         """Codex review (twenty-seventh round): the previous fix only
@@ -1093,7 +1093,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Foo"]
+        assert [t.name for t in scoped.declarations.types] == ["Foo"]
 
     def test_globally_qualified_typedef_alias_reference_matches(self):
         """Codex review (twenty-ninth round): direct-clang preserves an
@@ -1121,7 +1121,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "dep::Thing"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["dep::Thing"]
 
     def test_alias_colliding_with_a_non_resolving_alias_stays_ambiguous(self):
         """Codex review (thirtieth round, P2): `api::Handle -> dep::A` and
@@ -1149,7 +1149,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"api::Handle": "dep::A", "vendor::Handle": "int"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.types == []
+        assert scoped.declarations.types == []
 
     def test_partially_agreeing_aliases_retain_their_common_owner(self):
         """Codex review (thirtieth round, P1): `api::Handle -> Pair<dep::A,
@@ -1186,7 +1186,7 @@ class TestDirectlyReferencedDependencyRetention:
             },
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["dep::A"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["dep::A"]
 
     def test_agreeing_colliding_aliases_retain_their_shared_target(self):
         """Codex review (twentieth round, P1): unlike the previous test's
@@ -1215,7 +1215,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "dep::Thing", "api::Handle": "dep::Thing"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["dep::Thing"]
 
     def test_alias_reaching_an_already_ambiguous_target_key_retains_neither(
         self,
@@ -1252,7 +1252,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Alias": "Thing"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.types == []
+        assert scoped.declarations.types == []
 
     def test_resolved_typedef_owner_takes_precedence_over_coincidental_suffix(
         self,
@@ -1289,7 +1289,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "dep::Actual"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["dep::Actual"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["dep::Actual"]
 
     def test_typedef_matching_stays_fast_with_many_candidates_and_typedefs(self):
         """Codex review (sixth round): matching resolved typedef targets
@@ -1339,7 +1339,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"std::string": "std::__cxx11::basic_string<char>"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["basic_string"]
+        assert [t.name for t in scoped.declarations.types] == ["basic_string"]
 
     def test_typedef_target_namespace_suffix_resolves_non_stdlib_dependency(self):
         """Codex review (seventh round): castxml's own
@@ -1364,7 +1364,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Handle": "Thing"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["dep::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["dep::Thing"]
 
     def test_ambiguous_typedef_target_kept_type_collision_not_trusted(self):
         """Codex review (eighth round): a resolved typedef target spelled
@@ -1395,7 +1395,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Alias": "Thing"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["api::Thing"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["api::Thing"]
 
     def test_kept_enum_collision_guards_bare_dependency_spelling(self):
         """Codex review (P2, fourth round): a kept enum's bare spelling
@@ -1428,8 +1428,8 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.types == []
-        assert [e.qualified_name for e in scoped.enums] == ["api::Status"]
+        assert scoped.declarations.types == []
+        assert [e.qualified_name for e in scoped.declarations.enums] == ["api::Status"]
 
     def test_bare_dependency_identity_guarded_against_kept_type_collision(self):
         """Codex review (P2, fourth round): a dependency candidate's own
@@ -1458,7 +1458,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["api::Foo"]
+        assert [t.qualified_name for t in scoped.declarations.types] == ["api::Foo"]
 
     def test_partially_qualified_nested_dependency_type_is_kept(self):
         """Codex review (P2, second round): a direct-clang-style backend
@@ -1481,7 +1481,9 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.qualified_name for t in scoped.types] == ["vendor::Outer::Inner"]
+        assert [t.qualified_name for t in scoped.declarations.types] == [
+            "vendor::Outer::Inner"
+        ]
 
     def test_typedef_derived_spelling_colliding_with_kept_type_not_trusted(self):
         """Codex review (P2, third round): a scope-losing typedef entry
@@ -1506,7 +1508,7 @@ class TestDirectlyReferencedDependencyRetention:
             typedefs={"Alias": "std::Thing"},
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Alias"]
+        assert [t.name for t in scoped.declarations.types] == ["Alias"]
 
     def test_stripped_spelling_colliding_with_kept_type_not_trusted(self):
         """Codex review (P2, third round): a stdlib-stripped spelling
@@ -1529,7 +1531,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["basic_string<char>"]
+        assert [t.name for t in scoped.declarations.types] == ["basic_string<char>"]
 
     def test_unreferenced_dependency_type_still_excluded(self):
         snap = AbiSnapshot(
@@ -1547,7 +1549,7 @@ class TestDirectlyReferencedDependencyRetention:
             ],
         )
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert [t.name for t in scoped.types] == ["Own"]
+        assert [t.name for t in scoped.declarations.types] == ["Own"]
 
 
 class TestRawCandidateSpellings:

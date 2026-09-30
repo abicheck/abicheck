@@ -101,13 +101,13 @@ class TestEnumQualifiedNameRoundTrip:
         d = snapshot_to_dict(snap)
         assert d["enums"][0]["qualified_name"] == "ns::Status"
         reloaded = snapshot_from_dict(d)
-        assert reloaded.enums[0].qualified_name == "ns::Status"
+        assert reloaded.declarations.enums[0].qualified_name == "ns::Status"
 
     def test_defaults_to_none_when_absent(self) -> None:
         """A pre-existing snapshot dict predating this field must still load."""
         d = _minimal_dict(enums=[{"name": "Status", "members": []}])
         reloaded = snapshot_from_dict(d)
-        assert reloaded.enums[0].qualified_name is None
+        assert reloaded.declarations.enums[0].qualified_name is None
 
 
 # ── elf_only_mode ─────────────────────────────────────────────────────────
@@ -924,11 +924,11 @@ class TestConstantsRoundTrip:
         snap = _make_snap(constants={"MAX_SIZE": "256", "VERSION": "3"})
         j = _json_round_trip_dict(snap)
         restored = snapshot_from_dict(j)
-        assert restored.constants == {"MAX_SIZE": "256", "VERSION": "3"}
+        assert restored.declarations.constants == {"MAX_SIZE": "256", "VERSION": "3"}
 
     def test_defaults_to_empty_dict_when_absent(self) -> None:
         """Old snapshots without constants must deserialise to an empty dict."""
-        assert snapshot_from_dict(_minimal_dict()).constants == {}
+        assert snapshot_from_dict(_minimal_dict()).declarations.constants == {}
 
 
 # ── Function.deleted_from_dwarf ───────────────────────────────────────────
@@ -958,15 +958,15 @@ class TestDeletedFromDwarfRoundTrip:
         j = _json_round_trip_dict(snap)
         assert j["functions"][0]["deleted_from_dwarf"] is True
         restored = snapshot_from_dict(j)
-        assert restored.functions[0].deleted_from_dwarf is True
-        assert restored.functions[0].is_deleted is True
+        assert restored.declarations.functions[0].deleted_from_dwarf is True
+        assert restored.declarations.functions[0].is_deleted is True
 
     def test_false_survives_roundtrip(self) -> None:
         snap = _make_snap(
             functions=[self._func(is_deleted=True, deleted_from_dwarf=False)]
         )
         restored = snapshot_from_dict(json.loads(snapshot_to_json(snap)))
-        assert restored.functions[0].deleted_from_dwarf is False
+        assert restored.declarations.functions[0].deleted_from_dwarf is False
 
     def test_defaults_to_false_when_absent(self) -> None:
         """Legacy snapshots without the key deserialise to False."""
@@ -974,7 +974,9 @@ class TestDeletedFromDwarfRoundTrip:
             functions=[{"name": "f", "mangled": "f", "return_type": "void"}]
         )
         assert "deleted_from_dwarf" not in d["functions"][0]
-        assert snapshot_from_dict(d).functions[0].deleted_from_dwarf is False
+        assert (
+            snapshot_from_dict(d).declarations.functions[0].deleted_from_dwarf is False
+        )
 
 
 # ── inferred from_headers provenance ──────────────────────────────────────
@@ -1026,7 +1028,7 @@ class TestFileRoundTrip:
         save_snapshot(snap, p)
         restored = load_snapshot(p)
         assert restored.elf_only_mode is True
-        assert restored.constants == {"FOO": "bar"}
+        assert restored.declarations.constants == {"FOO": "bar"}
 
 
 # ── ExtractionContract round-trip (ADR-050 D1, schema v12) ─────────────────
@@ -1095,19 +1097,19 @@ class TestFactFieldRoundTrip:
         param = Param(name="args", type="va_list", is_va_list=True)
         func = Function(name="f", mangled="_Z1fz", return_type="void", params=[param])
         restored = _round_trip(_make_snap(types=[rec], functions=[func]))
-        r = restored.types[0]
+        r = restored.declarations.types[0]
         assert r.vtable_fact.status is FactStatus.PRESENT
         assert r.vtable_fact.value == ["_ZN6WidgetD1Ev"]
         assert r.bases_fact.status is FactStatus.PRESENT
         assert r.bases_fact.value == ["Base"]
 
-        p = restored.functions[0].params[0]
+        p = restored.declarations.functions[0].params[0]
         assert p.is_va_list_fact.status is FactStatus.PRESENT
         assert p.is_va_list_fact.value is True
 
     def test_fresh_snapshot_confirmed_empty_survives_as_present(self) -> None:
         rec = RecordType(name="Plain", kind="struct", vtable=[])
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         assert r.vtable_fact.status is FactStatus.PRESENT
         assert r.vtable_fact.value == []
 
@@ -1115,7 +1117,7 @@ class TestFactFieldRoundTrip:
         rec = RecordType(
             name="Gapped", kind="struct", vtable_fact=Fact.not_collected("depth capped")
         )
-        r = _round_trip(_make_snap(types=[rec])).types[0]
+        r = _round_trip(_make_snap(types=[rec])).declarations.types[0]
         assert r.vtable_fact.status is FactStatus.NOT_COLLECTED
         assert r.vtable_fact.diagnostics == ("depth capped",)
         assert r.vtable == []
@@ -1128,7 +1130,7 @@ class TestFactFieldRoundTrip:
             clang_vtable_facts_reliable=True,
             types=[{"name": "Foo", "kind": "struct", "vtable": ["_ZN3FooD1Ev"]}],
         )
-        r = snapshot_from_dict(d).types[0]
+        r = snapshot_from_dict(d).declarations.types[0]
         assert r.vtable_fact.status is FactStatus.PRESENT
         assert r.vtable_fact.value == ["_ZN3FooD1Ev"]
 
@@ -1142,7 +1144,7 @@ class TestFactFieldRoundTrip:
             clang_vtable_facts_reliable=False,
             types=[{"name": "Foo", "kind": "struct", "vtable": []}],
         )
-        r = snapshot_from_dict(d).types[0]
+        r = snapshot_from_dict(d).declarations.types[0]
         assert r.vtable_fact.status is FactStatus.NOT_COLLECTED
         assert r.vtable == []
 
@@ -1154,7 +1156,7 @@ class TestFactFieldRoundTrip:
             clang_va_list_facts_reliable=False,
             functions=[_va_list_func(False)],
         )
-        p = snapshot_from_dict(d).functions[0].params[0]
+        p = snapshot_from_dict(d).declarations.functions[0].params[0]
         assert p.is_va_list_fact.status is FactStatus.NOT_COLLECTED
 
     def test_legacy_castxml_snapshot_va_list_backfills_not_collected(self) -> None:
@@ -1166,7 +1168,7 @@ class TestFactFieldRoundTrip:
             from_headers=True,
             functions=[_va_list_func(False)],
         )
-        p = snapshot_from_dict(d).functions[0].params[0]
+        p = snapshot_from_dict(d).declarations.functions[0].params[0]
         assert p.is_va_list_fact.status is FactStatus.NOT_COLLECTED
 
     def test_legacy_snapshot_bases_always_backfills_present(self) -> None:
@@ -1174,7 +1176,7 @@ class TestFactFieldRoundTrip:
         # type_base_changed entry) — always backfills to Fact.present(raw).
         types = [{"name": "Foo", "kind": "struct", "bases": ["Base"]}]
         d = _minimal_dict(schema_version=20, types=types)
-        r = snapshot_from_dict(d).types[0]
+        r = snapshot_from_dict(d).declarations.types[0]
         assert r.bases_fact.status is FactStatus.PRESENT
         assert r.bases_fact.value == ["Base"]
 
@@ -1186,9 +1188,9 @@ class TestFactFieldRoundTrip:
             functions=[_va_list_func(True)],
         )
         snap = snapshot_from_dict(d)
-        assert snap.types[0].bases_fact.status is FactStatus.NOT_COLLECTED
-        assert snap.types[0].bases == []
-        param = snap.functions[0].params[0]
+        assert snap.declarations.types[0].bases_fact.status is FactStatus.NOT_COLLECTED
+        assert snap.declarations.types[0].bases == []
+        param = snap.declarations.functions[0].params[0]
         assert param.is_va_list_fact.status is FactStatus.NOT_COLLECTED
 
     def test_snapshot_to_dict_encodes_status_as_plain_string(self) -> None:

@@ -511,6 +511,16 @@ def _snapshot_abi_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
             setattr(result, name, [copy.copy(v) for v in value])
         elif isinstance(value, dict):
             setattr(result, name, dict(value))
+    # The parsed declarations live in the semantic IR's own store, not in
+    # ``vars(snapshot)``: give the copy a store of its own with the same
+    # per-element treatment, so no container or element is shared.
+    decls = copy.copy(snapshot.declarations)
+    for name, value in vars(decls).items():
+        if isinstance(value, list):
+            setattr(decls, name, [copy.copy(v) for v in value])
+        elif isinstance(value, dict):
+            setattr(decls, name, dict(value))
+    object.__setattr__(result, "semantic_ir", snapshot.semantic_ir.attached(decls))  # type: ignore[union-attr]
     if result.dependency_info is not None:
         dep = copy.copy(result.dependency_info)
         for name, value in vars(dep).items():

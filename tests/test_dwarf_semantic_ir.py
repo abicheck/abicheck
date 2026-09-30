@@ -69,8 +69,8 @@ def _one_entity(snapshot, entity_id):
     every fixture in this file is built to have exactly one occurrence per
     entity (a real multi-occurrence case is ``test_semantic_ir_merge.py``'s
     concern, not this module's)."""
-    (occ_id,) = snapshot.semantic_ir.occurrences_for(entity_id)
-    return snapshot.semantic_ir.occurrences[occ_id]
+    (occ_id,) = snapshot.canonical_ir.occurrences_for(entity_id)
+    return snapshot.canonical_ir.occurrences[occ_id]
 
 
 def _build_snapshot(so_path: Path):
@@ -137,7 +137,7 @@ class TestDwarfSemanticIrCvQualification:
 
     def _cv_qualification_for(self, snapshot, var_name: str) -> tuple[str, ...]:
         var = next(v for v in snapshot.variables if v.name == var_name)
-        assert snapshot.semantic_ir is not None
+        assert snapshot.canonical_ir is not None
         entity = _one_entity(snapshot, var.entity_id)
         # PARTIAL, not PRESENT (Codex review, fresh evidence): DWARF never
         # extracts a volatile fact for a variable at all, so even a
@@ -148,8 +148,8 @@ class TestDwarfSemanticIrCvQualification:
         return entity.cv_qualification.value
 
     def test_semantic_ir_is_populated(self, snapshot) -> None:
-        assert snapshot.semantic_ir is not None
-        assert len(snapshot.semantic_ir.occurrences) > 0
+        assert snapshot.canonical_ir is not None
+        assert len(snapshot.canonical_ir.occurrences) > 0
 
     def test_by_value_const_is_top_level(self, snapshot) -> None:
         assert self._cv_qualification_for(snapshot, "g_const_int") == ("const",)
@@ -228,7 +228,7 @@ class TestDwarfSemanticIrFunctionsAndTypes:
 
     def test_function_occurrences_populated(self, snapshot) -> None:
         assert snapshot.functions, "fixture should export at least one function"
-        assert snapshot.semantic_ir is not None
+        assert snapshot.canonical_ir is not None
         for fn in snapshot.functions:
             assert fn.entity_id is not None
             entity = _one_entity(snapshot, fn.entity_id)
@@ -269,8 +269,8 @@ def test_dwarf_semantic_ir_has_no_constant_occurrences(
     )
     assert result.returncode == 0, f"Compilation failed: {result.stderr}"
     snapshot = _build_snapshot(so_path)
-    assert snapshot.semantic_ir is not None
+    assert snapshot.canonical_ir is not None
     assert all(
         occ_id.entity_id.kind is not EntityKind.CONSTANT
-        for occ_id in snapshot.semantic_ir.occurrences
+        for occ_id in snapshot.canonical_ir.occurrences
     )

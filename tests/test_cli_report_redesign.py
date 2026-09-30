@@ -13,7 +13,7 @@ from abicheck.service_render import render_output
 def _write_pair(tmp_path):
     old = AbiSnapshot(library="libx.so", version="1", from_headers=True)
     new = AbiSnapshot(library="libx.so", version="2", from_headers=True)
-    old.functions.append(
+    old.declarations.functions.append(
         Function("gone", "_Z4gonev", "void", visibility=Visibility.PUBLIC)
     )
     old_path, new_path = tmp_path / "old.json", tmp_path / "new.json"
@@ -38,7 +38,7 @@ def test_typed_terminal_renderer_uses_the_same_finalized_document() -> None:
 
     old = AbiSnapshot(library="libx.so", version="1", from_headers=True)
     new = AbiSnapshot(library="libx.so", version="2", from_headers=True)
-    old.functions.append(
+    old.declarations.functions.append(
         Function("gone", "_Z4gonev", "void", visibility=Visibility.PUBLIC)
     )
     text = render_output("terminal", compare(old, new), old, new)
@@ -70,7 +70,7 @@ def test_terminal_distinguishes_breaking_compatibility_from_accepted_gate() -> N
 
     old = AbiSnapshot(library="libx.so", version="1")
     new = AbiSnapshot(library="libx.so", version="2")
-    old.functions.append(
+    old.declarations.functions.append(
         Function("gone", "_Z4gonev", "void", visibility=Visibility.PUBLIC)
     )
     text = render_output(

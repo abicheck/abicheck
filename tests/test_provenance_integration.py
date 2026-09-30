@@ -81,14 +81,16 @@ def test_dump_tags_public_and_private_origin(tmp_path: Path) -> None:
 
     snap = dump(so, headers=[pub], compiler="cc", lang="C", public_headers=[pub])
 
-    fns = {f.name: f for f in snap.functions}
+    fns = {f.name: f for f in snap.declarations.functions}
     assert "public_fn" in fns, "castxml/DWARF did not surface the public function"
     pf = fns["public_fn"]
     assert pf.source_header is not None and pf.source_header.endswith("api.h")
     assert pf.origin is ScopeOrigin.PUBLIC_HEADER
 
     # The struct pulled in from the (non-public) impl.h must be PRIVATE_HEADER.
-    impl_types = [t for t in snap.types if (t.source_header or "").endswith("impl.h")]
+    impl_types = [
+        t for t in snap.declarations.types if (t.source_header or "").endswith("impl.h")
+    ]
     assert impl_types, "Impl type not captured from the private header"
     assert all(t.origin is ScopeOrigin.PRIVATE_HEADER for t in impl_types)
 
@@ -104,7 +106,7 @@ def test_dump_without_public_set_leaves_origin_unknown(tmp_path: Path) -> None:
 
     snap = dump(so, headers=[pub], compiler="cc", lang="C")  # no public set
 
-    pf = {f.name: f for f in snap.functions}.get("public_fn")
+    pf = {f.name: f for f in snap.declarations.functions}.get("public_fn")
     assert pf is not None
     assert pf.origin is ScopeOrigin.UNKNOWN
     assert pf.source_header is not None and pf.source_header.endswith("api.h")

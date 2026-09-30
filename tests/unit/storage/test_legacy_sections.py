@@ -11,6 +11,7 @@ import dataclasses
 
 import pytest
 
+from abicheck.model.declaration_store import Declarations
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.storage.legacy_sections import (
     _SECTION_FIELDS,
@@ -78,6 +79,9 @@ class TestSectionFieldsCompleteness:
             | {"semantic_ir", "semantic_ir_conflicts"}
             | set(_DOCUMENT_ONLY_KEYS)
         )
+        # ADR-063 Phase 10: declaration kinds are the IR store's fields,
+        # still serialized under their historical keys.
+        fields |= {f.name for f in dataclasses.fields(Declarations)}
         assert fields <= accounted, (
             f"AbiSnapshot fields missing from storage.legacy_sections: "
             f"{sorted(fields - accounted)}"

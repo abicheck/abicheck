@@ -167,8 +167,8 @@ class TestArgumentIsNeverMutated:
             got, want = getattr(snap, field), getattr(before, field)
             assert len(got) == len(want)
             assert [d.name for d in got] == [d.name for d in want]
-        assert snap.typedefs == before.typedefs
-        assert snap.constants == before.constants
+        assert snap.declarations.typedefs == before.typedefs
+        assert snap.declarations.constants == before.constants
         assert snap.from_headers == before.from_headers
 
     @pytest.mark.parametrize("depth", ALL_DEPTHS)
@@ -304,11 +304,11 @@ class TestSharingIsSafeForTheWaysCallersActuallyUse_A_Projection:
             depth = next(
                 d
                 for d in ALL_DEPTHS
-                if len(alone[d].functions) == len(projected.functions)
-                and len(alone[d].types) == len(projected.types)
+                if len(alone[d].declarations.functions) == len(projected.functions)
+                and len(alone[d].declarations.types) == len(projected.types)
             )
-            assert len(projected.functions) == len(alone[depth].functions)
-            assert len(projected.types) == len(alone[depth].types)
+            assert len(projected.declarations.functions) == len(alone[depth].functions)
+            assert len(projected.declarations.types) == len(alone[depth].types)
 
     @pytest.mark.parametrize("depth", ALL_DEPTHS)
     def test_serializing_a_projection_does_not_disturb_the_input(
@@ -367,9 +367,9 @@ class TestTheShallowCopyIsAWholeObjectCopy:
         calls: list[object] = []
         original = AbiSnapshot.__post_init__
 
-        def counting_post_init(self: AbiSnapshot) -> None:
+        def counting_post_init(self: AbiSnapshot, *builder_inputs: object) -> None:
             calls.append(self)
-            original(self)
+            original(self, *builder_inputs)
 
         AbiSnapshot.__post_init__ = counting_post_init  # type: ignore[method-assign]
         try:

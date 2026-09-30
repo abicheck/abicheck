@@ -115,7 +115,7 @@ def encode_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
     ``getattr(snap, attr_name)``.
     """
     for list_key, attr_name in _DECLARATION_LIST_KEYS:
-        decls = getattr(snap, attr_name)
+        decls = getattr(snap.declarations, attr_name)
         decl_dicts = d.get(list_key, []) or []
         # Both sides are derived from the same list in the same call
         # (`snapshot_to_dict` builds `d` via `asdict(snap)` before this
@@ -166,7 +166,7 @@ def encode_sidecar_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str,
     from a bare ``.items()`` call (Codex review).
     """
     for key in _SIDECAR_KEYS:
-        sidecar = getattr(snap, key)
+        sidecar = getattr(snap.declarations, key)
         mapping(sidecar, key)
         d[key] = {
             identity_text(name, f"{key} key"): domain_entity_id_to_dto(entity_id)

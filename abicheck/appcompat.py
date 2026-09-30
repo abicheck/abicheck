@@ -1534,10 +1534,10 @@ def _snapshot_export_names(snap: AbiSnapshot) -> set[str]:
     ``model/surface_facts.py``.
     """
     names: set[str] = set()
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         if is_binary_exported(fn):
             names |= _resolvable_symbol_names(fn.name, fn.mangled)
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if is_binary_exported(var):
             names |= _resolvable_symbol_names(var.name, getattr(var, "mangled", None))
     return names

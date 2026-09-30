@@ -160,8 +160,8 @@ class TestSnapshotRoundtrip:
         """Function list preserved through JSON roundtrip."""
         orig = _rich_snap()
         restored = _roundtrip(orig)
-        assert len(restored.functions) == len(orig.functions)
-        for f_orig, f_rest in zip(orig.functions, restored.functions):
+        assert len(restored.declarations.functions) == len(orig.functions)
+        for f_orig, f_rest in zip(orig.declarations.functions, restored.functions):
             assert f_rest.name == f_orig.name
             assert f_rest.mangled == f_orig.mangled
             assert f_rest.return_type == f_orig.return_type
@@ -171,8 +171,8 @@ class TestSnapshotRoundtrip:
         """Function parameters preserved through roundtrip."""
         orig = _rich_snap()
         restored = _roundtrip(orig)
-        orig_f = orig.functions[0]
-        rest_f = restored.functions[0]
+        orig_f = orig.declarations.functions[0]
+        rest_f = restored.declarations.functions[0]
         assert len(rest_f.params) == len(orig_f.params)
         assert rest_f.params[0].name == orig_f.params[0].name
         assert rest_f.params[0].type == orig_f.params[0].type
@@ -181,9 +181,9 @@ class TestSnapshotRoundtrip:
         """RecordType list preserved through roundtrip."""
         orig = _rich_snap()
         restored = _roundtrip(orig)
-        assert len(restored.types) == len(orig.types)
-        p_orig = orig.types[0]
-        p_rest = restored.types[0]
+        assert len(restored.declarations.types) == len(orig.types)
+        p_orig = orig.declarations.types[0]
+        p_rest = restored.declarations.types[0]
         assert p_rest.name == p_orig.name
         assert p_rest.kind == p_orig.kind
         assert p_rest.size_bits == p_orig.size_bits
@@ -193,9 +193,9 @@ class TestSnapshotRoundtrip:
         """EnumType list preserved through roundtrip."""
         orig = _rich_snap()
         restored = _roundtrip(orig)
-        assert len(restored.enums) == len(orig.enums)
-        e_orig = orig.enums[0]
-        e_rest = restored.enums[0]
+        assert len(restored.declarations.enums) == len(orig.enums)
+        e_orig = orig.declarations.enums[0]
+        e_rest = restored.declarations.enums[0]
         assert e_rest.name == e_orig.name
         assert e_rest.underlying_type == e_orig.underlying_type
         assert [(m.name, m.value) for m in e_rest.members] == [
@@ -206,13 +206,13 @@ class TestSnapshotRoundtrip:
         """Typedef dict preserved through roundtrip."""
         orig = _rich_snap()
         restored = _roundtrip(orig)
-        assert restored.typedefs == orig.typedefs
+        assert restored.declarations.typedefs == orig.typedefs
 
     def test_constants_survive_roundtrip(self) -> None:
         """Constants dict preserved through roundtrip."""
         orig = _rich_snap()
         restored = _roundtrip(orig)
-        assert restored.constants == orig.constants
+        assert restored.declarations.constants == orig.constants
 
     def test_elf_only_mode_false_preserved(self) -> None:
         """elf_only_mode=False preserved."""
@@ -232,8 +232,8 @@ class TestSnapshotRoundtrip:
         """Type bases and virtual_bases preserved through roundtrip."""
         orig = _rich_snap()
         restored = _roundtrip(orig)
-        w_orig = orig.types[1]
-        w_rest = restored.types[1]
+        w_orig = orig.declarations.types[1]
+        w_rest = restored.declarations.types[1]
         assert w_rest.bases == w_orig.bases
         assert w_rest.virtual_bases == w_orig.virtual_bases
 
@@ -372,11 +372,11 @@ class TestStableSerialization:
         # Core fields
         assert loaded.library == orig.library
         assert loaded.version == orig.version
-        assert len(loaded.functions) == len(orig.functions)
-        assert len(loaded.types) == len(orig.types)
-        assert len(loaded.enums) == len(orig.enums)
-        assert loaded.typedefs == orig.typedefs
-        assert loaded.constants == orig.constants
+        assert len(loaded.declarations.functions) == len(orig.functions)
+        assert len(loaded.declarations.types) == len(orig.types)
+        assert len(loaded.declarations.enums) == len(orig.enums)
+        assert loaded.declarations.typedefs == orig.typedefs
+        assert loaded.declarations.constants == orig.constants
 
     def test_empty_lists_serialized_as_arrays(self) -> None:
         """Empty list fields serialize as [] not null."""
@@ -400,8 +400,8 @@ class TestEdgeCases:
         orig = _minimal_snap()
         restored = _roundtrip(orig)
         assert restored.library == orig.library
-        assert restored.functions == []
-        assert restored.types == []
+        assert restored.declarations.functions == []
+        assert restored.declarations.types == []
 
     def test_snapshot_with_only_enums(self) -> None:
         """Snapshot with only enum types roundtrips correctly."""
@@ -411,15 +411,15 @@ class TestEdgeCases:
             EnumType("B", [EnumMember("P", 100)], underlying_type="unsigned int"),
         ]
         restored = _roundtrip(orig)
-        assert len(restored.enums) == 2
-        assert restored.enums[1].underlying_type == "unsigned int"
+        assert len(restored.declarations.enums) == 2
+        assert restored.declarations.enums[1].underlying_type == "unsigned int"
 
     def test_unicode_names_preserved(self) -> None:
         """Unicode characters in names survive roundtrip."""
         orig = AbiSnapshot(library="libunicode.so", version="1.0")
         orig.typedefs = {"café_type": "unsigned char", "naïve_t": "int"}
         restored = _roundtrip(orig)
-        assert restored.typedefs == orig.typedefs
+        assert restored.declarations.typedefs == orig.typedefs
 
     def test_large_constant_values(self) -> None:
         """Large integer constants survive roundtrip as strings."""
@@ -429,7 +429,7 @@ class TestEdgeCases:
             "NEG": "-9223372036854775808",
         }
         restored = _roundtrip(orig)
-        assert restored.constants == orig.constants
+        assert restored.declarations.constants == orig.constants
 
     def test_function_with_many_params(self) -> None:
         """Function with many params roundtrips completely."""
@@ -446,4 +446,4 @@ class TestEdgeCases:
             )
         ]
         restored = _roundtrip(orig)
-        assert len(restored.functions[0].params) == 20
+        assert len(restored.declarations.functions[0].params) == 20

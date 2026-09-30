@@ -260,7 +260,7 @@ class TestEndToEndJsonReport:
             library="libfoo.so.1",
             version="2.0",
             from_headers=True,
-            functions=old.functions,
+            functions=old.declarations.functions,
             types=[
                 pub,
                 _Rec(

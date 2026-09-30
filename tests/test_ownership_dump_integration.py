@@ -149,7 +149,7 @@ def _dump(root: Path, out: str, *extra: str) -> Path:
 def _decisions(path: Path) -> dict[str, tuple[str, str]]:
     snap = load_snapshot(path)
     out = {}
-    for decl in (*snap.functions, *snap.types):
+    for decl in (*snap.declarations.functions, *snap.declarations.types):
         decision = ownership_of(decl)
         if decision is not None:
             out[decl.name] = (decision.owner, decision.contract)
@@ -307,7 +307,7 @@ def test_typed_api_classifies_exactly_as_the_cli(
     snap = run_dump_request(request)
     api = {
         d.name: (o.owner, o.contract)
-        for d in (*snap.functions, *snap.types)
+        for d in (*snap.declarations.functions, *snap.declarations.types)
         if (o := ownership_of(d)) is not None
     }
     assert api == _decisions(dumped["a"])

@@ -35,9 +35,9 @@ class TestSerialization:
         snap2 = snapshot_from_dict(d)
         assert snap2.library == snap.library
         assert snap2.version == snap.version
-        assert len(snap2.functions) == 1
-        assert snap2.functions[0].mangled == "_Z11sample_initv"
-        assert snap2.functions[0].is_noexcept is True
+        assert len(snap2.declarations.functions) == 1
+        assert snap2.declarations.functions[0].mangled == "_Z11sample_initv"
+        assert snap2.declarations.functions[0].is_noexcept is True
 
     def test_roundtrip_file(self):
         snap = _sample_snap()
@@ -47,7 +47,7 @@ class TestSerialization:
             save_snapshot(snap, tmp)
             snap2 = load_snapshot(tmp)
             assert snap2.version == snap.version
-            assert snap2.functions[0].name == "sample_init"
+            assert snap2.declarations.functions[0].name == "sample_init"
         finally:
             tmp.unlink(missing_ok=True)
 
@@ -139,7 +139,7 @@ class TestSerialization:
         d = snapshot_to_dict(snap)
         assert d["functions"][0]["is_inline"] is True
         snap2 = snapshot_from_dict(d)
-        assert snap2.functions[0].is_inline is True
+        assert snap2.declarations.functions[0].is_inline is True
 
     def test_is_inline_false_roundtrip(self):
         """is_inline=False must survive snapshot_to_dict → snapshot_from_dict roundtrip."""
@@ -159,7 +159,7 @@ class TestSerialization:
         d = snapshot_to_dict(snap)
         assert d["functions"][0]["is_inline"] is False
         snap2 = snapshot_from_dict(d)
-        assert snap2.functions[0].is_inline is False
+        assert snap2.declarations.functions[0].is_inline is False
 
 
 class TestSerializationRoundtripExtended:
@@ -209,9 +209,9 @@ class TestSerializationRoundtripExtended:
         assert params_raw[2]["default"] is None
 
         snap2 = snapshot_from_dict(d)
-        assert snap2.functions[0].params[0].default == "42"
-        assert snap2.functions[0].params[1].default == "true"
-        assert snap2.functions[0].params[2].default is None
+        assert snap2.declarations.functions[0].params[0].default == "42"
+        assert snap2.declarations.functions[0].params[1].default == "true"
+        assert snap2.declarations.functions[0].params[2].default is None
 
     def test_typefield_qualifiers_roundtrip(self) -> None:
         """TypeField with is_const, is_volatile, is_mutable must survive roundtrip.
@@ -293,7 +293,7 @@ class TestSerializationRoundtripExtended:
 
         # Verify deserialization
         snap2 = snapshot_from_dict(d)
-        f = snap2.types[0].fields
+        f = snap2.declarations.types[0].fields
         assert (
             f[0].is_const is True
             and f[0].is_volatile is False
@@ -344,8 +344,8 @@ class TestSerializationRoundtripExtended:
         assert d["types"][1]["is_template_pattern"] is False
 
         snap2 = snapshot_from_dict(d)
-        assert snap2.types[0].is_template_pattern is True
-        assert snap2.types[1].is_template_pattern is False
+        assert snap2.declarations.types[0].is_template_pattern is True
+        assert snap2.declarations.types[1].is_template_pattern is False
 
     def test_has_anonymous_aggregate_fields_roundtrip(self) -> None:
         """RecordType.has_anonymous_aggregate_fields must survive a
@@ -373,8 +373,8 @@ class TestSerializationRoundtripExtended:
         assert d["types"][1]["has_anonymous_aggregate_fields"] is False
 
         snap2 = snapshot_from_dict(d)
-        assert snap2.types[0].has_anonymous_aggregate_fields is True
-        assert snap2.types[1].has_anonymous_aggregate_fields is False
+        assert snap2.declarations.types[0].has_anonymous_aggregate_fields is True
+        assert snap2.declarations.types[1].has_anonymous_aggregate_fields is False
 
     def test_param_default_none_roundtrip(self) -> None:
         """Param.default=None (no default) must round-trip correctly."""
@@ -396,7 +396,7 @@ class TestSerializationRoundtripExtended:
         d = snapshot_to_dict(snap)
         assert d["functions"][0]["params"][0]["default"] is None
         snap2 = snapshot_from_dict(d)
-        assert snap2.functions[0].params[0].default is None
+        assert snap2.declarations.functions[0].params[0].default is None
 
 
 class TestFromHeadersBackCompat:

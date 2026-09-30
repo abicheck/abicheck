@@ -78,8 +78,8 @@ def test_scope_and_every_decision_round_trip() -> None:
 
 def test_unclassified_declaration_stays_unknown_after_round_trip() -> None:
     back = _round_trip(_snapshot())
-    assert ownership_of(back.functions[2]) is None
-    assert ownership_of(back.enums[0]) is None
+    assert ownership_of(back.declarations.functions[2]) is None
+    assert ownership_of(back.declarations.enums[0]) is None
 
 
 def test_declaration_lists_carry_no_per_entity_field() -> None:
@@ -135,7 +135,12 @@ def test_pre_v52_snapshot_loads_unrecorded_and_unknown() -> None:
     assert back.extraction_scope is None
     assert all(
         ownership_of(x) is None
-        for x in (*back.functions, *back.variables, *back.types, *back.enums)
+        for x in (
+            *back.declarations.functions,
+            *back.declarations.variables,
+            *back.declarations.types,
+            *back.declarations.enums,
+        )
     )
 
 
@@ -143,9 +148,9 @@ def test_list_length_mismatch_leaves_that_list_unclassified() -> None:
     d = _flat(_snapshot())
     d["extraction_scope"]["entity_ownership"]["functions"].append(0)
     back = snapshot_from_dict(d)
-    assert [ownership_of(f) for f in back.functions] == [None, None, None]
+    assert [ownership_of(f) for f in back.declarations.functions] == [None, None, None]
     # Other lists are unaffected.
-    assert ownership_of(back.variables[0]) == _TARGET
+    assert ownership_of(back.declarations.variables[0]) == _TARGET
 
 
 @pytest.mark.parametrize("bad", [7, -3, "0", None, True, False, 1.0])
@@ -153,8 +158,8 @@ def test_out_of_range_or_malformed_index_is_unclassified(bad: object) -> None:
     d = _flat(_snapshot())
     d["extraction_scope"]["entity_ownership"]["functions"][0] = bad
     back = snapshot_from_dict(d)
-    assert ownership_of(back.functions[0]) is None
-    assert ownership_of(back.functions[1]) == _DEP
+    assert ownership_of(back.declarations.functions[0]) is None
+    assert ownership_of(back.declarations.functions[1]) == _DEP
 
 
 def test_a_mode_this_build_cannot_produce_is_kept_verbatim() -> None:
@@ -201,5 +206,5 @@ def test_a_malformed_decision_classifies_nothing(bad: object) -> None:
     back = snapshot_from_dict(d)
     first = d["extraction_scope"]["entity_ownership"]["functions"][0]
     assert first == 0  # non-vacuous: the first function pointed at it
-    assert ownership_of(back.functions[0]) is None
-    assert ownership_of(back.functions[1]) == _DEP
+    assert ownership_of(back.declarations.functions[0]) is None
+    assert ownership_of(back.declarations.functions[1]) == _DEP

@@ -227,7 +227,9 @@ class TestHeaderChangeIsDetectedPerMember:
         if not any(expected_removed.values()):
             # Force the case to be a real differential for this seed.
             member = members[0]
-            declared = [f.name for f in baseline_snapshots[member].functions]
+            declared = [
+                f.name for f in baseline_snapshots[member].declarations.functions
+            ]
             expected_removed[member] = {declared[0]}
             _write_snapshot(
                 candidate_dir / f"{member}.abicheck.json",
@@ -319,7 +321,7 @@ class TestHeaderEvidenceAssessment:
                 snapshot = AbiSnapshot(
                     library=member,
                     version="1.0",
-                    functions=list(snapshot.functions),
+                    functions=list(snapshot.declarations.functions),
                     from_headers=False,
                 )
             snapshots[member] = snapshot
@@ -591,7 +593,7 @@ class TestResolveBaselineActionWiring:
                 snapshot = AbiSnapshot(
                     library=member,
                     version="1.0",
-                    functions=list(snapshot.functions),
+                    functions=list(snapshot.declarations.functions),
                     from_headers=False,
                 )
             snapshots[member] = snapshot

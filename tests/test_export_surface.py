@@ -975,7 +975,7 @@ class TestUnresolvedTypeEdges:
         assert surf.exclusion_is_provable
         # Positive control on the same shape: the *root*'s own absent type
         # is still flagged, so the narrowing didn't simply stop scanning.
-        snap.functions[0].return_type = "Cfg *"
+        snap.declarations.functions[0].return_type = "Cfg *"
         assert compute_export_surface(snap).unresolved_type_edges == frozenset({"Cfg"})
 
     def test_a_signature_naming_an_absent_type_blocks_exclusion(self) -> None:
@@ -1104,7 +1104,7 @@ class TestUnresolvedTypeEdges:
 
         # ...and the chain is genuinely walked, not silently truncated: an
         # absent target at the far end is still reported.
-        snap.typedefs[f"A{depth}"] = "Gone"
+        snap.declarations.typedefs[f"A{depth}"] = "Gone"
         assert compute_export_surface(snap).unresolved_type_edges == frozenset({"Gone"})
 
     def test_a_scope_lost_alias_key_is_followed_to_its_target(self) -> None:
@@ -1205,7 +1205,7 @@ class TestUnresolvedTypeEdges:
 
         # The exact key is traversable, so the same alias resolves and the
         # target really does enter the closure -- the guard tracks the walk.
-        snap.functions[0].params[0].type = "outer::ns::Alias *"
+        snap.declarations.functions[0].params[0].type = "outer::ns::Alias *"
         exact = compute_export_surface(snap)
         assert "Victim" in exact.export_types
         assert not exact.unresolved_type_edges
@@ -1253,7 +1253,7 @@ class TestUnresolvedTypeEdges:
 
         # The dependent argument alone is still not an edge, so the
         # narrowing didn't simply stop excluding.
-        snap.functions[0].params[0].type = "Wrapper<typename T::type> *"
+        snap.declarations.functions[0].params[0].type = "Wrapper<typename T::type> *"
         assert not compute_export_surface(snap).unresolved_type_edges
 
     @pytest.mark.parametrize(

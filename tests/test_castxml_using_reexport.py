@@ -314,9 +314,14 @@ class TestUsingReexportAgainstProductionDumpPath:
             }
             """,
         )
-        assert snapshot.constants.get("detail::v1::cpu_feature_map") == "42"
-        assert "detail::cpu_feature_map" not in snapshot.constants
-        assert sum(1 for k in snapshot.constants if "cpu_feature_map" in k) == 1
+        assert (
+            snapshot.declarations.constants.get("detail::v1::cpu_feature_map") == "42"
+        )
+        assert "detail::cpu_feature_map" not in snapshot.declarations.constants
+        assert (
+            sum(1 for k in snapshot.declarations.constants if "cpu_feature_map" in k)
+            == 1
+        )
 
     def test_reexported_type_is_not_duplicated(self, tmp_path: Path) -> None:
         snapshot = self._dump_via_production_path(
@@ -335,7 +340,7 @@ class TestUsingReexportAgainstProductionDumpPath:
         )
         names = [
             t.qualified_name or t.name
-            for t in snapshot.types
+            for t in snapshot.declarations.types
             if "range" in (t.name or "")
         ]
         assert names == ["detail::v1::range"]

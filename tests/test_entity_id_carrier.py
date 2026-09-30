@@ -67,6 +67,7 @@ from abicheck.model import (
     RecordType,
     Variable,
 )
+from abicheck.model.declaration_store import Declarations
 from abicheck.model.identity import (
     EntityId,
     EntityKind,
@@ -282,13 +283,15 @@ class TestSidecarFieldShape:
         "field_name", ["typedef_entity_ids", "constant_entity_ids"]
     )
     def test_defaults_to_empty_and_is_keyword_only(self, field_name: str) -> None:
+        # ADR-063 Phase 10: the sidecars live in the IR's declaration store;
+        # ``AbiSnapshot`` takes them only as optional builder inputs.
         snap = AbiSnapshot(library="libx.so", version="1.0")
-        assert getattr(snap, field_name) == {}
-        sidecar = next(
-            f for f in dataclasses.fields(AbiSnapshot) if f.name == field_name
+        assert getattr(snap.declarations, field_name) == {}
+        store_field = next(
+            f for f in dataclasses.fields(Declarations) if f.name == field_name
         )
-        assert sidecar.kw_only is True
-        assert sidecar.default_factory is dict
+        assert store_field.default_factory is dict
+        assert field_name not in {f.name for f in dataclasses.fields(AbiSnapshot)}
 
     @pytest.mark.parametrize(
         ("field_name", "partner"),
@@ -331,8 +334,8 @@ class TestSidecarIsPersisted:
         reloaded = snapshot_from_dict(
             json.loads(json.dumps(snapshot_to_dict(original)))
         )
-        assert reloaded.typedef_entity_ids == original.typedef_entity_ids
-        assert reloaded.constant_entity_ids == original.constant_entity_ids
+        assert reloaded.declarations.typedef_entity_ids == original.typedef_entity_ids
+        assert reloaded.declarations.constant_entity_ids == original.constant_entity_ids
 
     def test_scope_kind_survives_rather_than_a_rendered_string(self) -> None:
         # The same counterexample the declaration carrier's own round-trip
@@ -347,12 +350,12 @@ class TestSidecarIsPersisted:
         )
         reloaded = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
         assert (
-            reloaded.typedef_entity_ids["ns::Alias"]
-            == snap.typedef_entity_ids["ns::Alias"]
+            reloaded.declarations.typedef_entity_ids["ns::Alias"]
+            == snap.declarations.typedef_entity_ids["ns::Alias"]
         )
-        assert reloaded.typedef_entity_ids["ns::Alias"] != entity_id_for_typedef(
-            (Namespace("ns"),), "Alias"
-        )
+        assert reloaded.declarations.typedef_entity_ids[
+            "ns::Alias"
+        ] != entity_id_for_typedef((Namespace("ns"),), "Alias")
 
     def test_pre_v31_snapshot_loads_with_empty_sidecars(self) -> None:
         d = snapshot_to_dict(_snapshot_with_sidecars())
@@ -360,11 +363,11 @@ class TestSidecarIsPersisted:
         d.pop("typedef_entity_ids", None)
         d.pop("constant_entity_ids", None)
         reloaded = snapshot_from_dict(json.loads(json.dumps(d)))
-        assert reloaded.typedef_entity_ids == {}
-        assert reloaded.constant_entity_ids == {}
+        assert reloaded.declarations.typedef_entity_ids == {}
+        assert reloaded.declarations.constant_entity_ids == {}
         # An absent sidecar must not disturb the dicts it annotates.
-        assert reloaded.typedefs_qualified == {"ns::Alias": "int"}
-        assert reloaded.constants == {"ns::kLimit": "7"}
+        assert reloaded.declarations.typedefs_qualified == {"ns::Alias": "int"}
+        assert reloaded.declarations.constants == {"ns::kLimit": "7"}
 
     def test_schema_version_moved_to_31(self) -> None:
         from abicheck.serialization import SCHEMA_VERSION
@@ -438,10 +441,16 @@ class TestCarrierIsPersisted:
         reloaded = snapshot_from_dict(
             json.loads(json.dumps(snapshot_to_dict(original)))
         )
-        assert reloaded.functions[0].entity_id == original.functions[0].entity_id
-        assert reloaded.variables[0].entity_id == original.variables[0].entity_id
-        assert reloaded.types[0].entity_id == original.types[0].entity_id
-        assert reloaded.enums[0].entity_id == original.enums[0].entity_id
+        assert (
+            reloaded.declarations.functions[0].entity_id
+            == original.functions[0].entity_id
+        )
+        assert (
+            reloaded.declarations.variables[0].entity_id
+            == original.variables[0].entity_id
+        )
+        assert reloaded.declarations.types[0].entity_id == original.types[0].entity_id
+        assert reloaded.declarations.enums[0].entity_id == original.enums[0].entity_id
 
     def test_record_nested_in_record_survives_the_round_trip(self) -> None:
         # The exact counterexample the wire-schema-v2 Design section's own
@@ -463,8 +472,8 @@ class TestCarrierIsPersisted:
             ],
         )
         reloaded = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
-        assert reloaded.types[0].entity_id == snap.types[0].entity_id
-        assert reloaded.types[0].entity_id != entity_id_for_type(
+        assert reloaded.declarations.types[0].entity_id == snap.types[0].entity_id
+        assert reloaded.declarations.types[0].entity_id != entity_id_for_type(
             (Namespace("ns"),), "A"
         )
 
@@ -480,7 +489,7 @@ class TestCarrierIsPersisted:
         d = snapshot_to_dict(snap)
         assert "entity_id" not in d["functions"][0]
         reloaded = snapshot_from_dict(json.loads(json.dumps(d)))
-        assert reloaded.functions[0].entity_id is None
+        assert reloaded.declarations.functions[0].entity_id is None
 
     def test_schema_version_moved_to_28(self) -> None:
         from abicheck.serialization import SCHEMA_VERSION
@@ -500,10 +509,10 @@ class TestCarrierIsPersisted:
             for decl in d[list_key]:
                 decl.pop("entity_id", None)
         reloaded = snapshot_from_dict(d)
-        assert reloaded.functions[0].entity_id is None
-        assert reloaded.variables[0].entity_id is None
-        assert reloaded.types[0].entity_id is None
-        assert reloaded.enums[0].entity_id is None
+        assert reloaded.declarations.functions[0].entity_id is None
+        assert reloaded.declarations.variables[0].entity_id is None
+        assert reloaded.declarations.types[0].entity_id is None
+        assert reloaded.declarations.enums[0].entity_id is None
 
 
 class TestMalformedEntityIdDocumentIsRefused:

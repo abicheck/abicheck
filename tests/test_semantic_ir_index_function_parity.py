@@ -137,12 +137,14 @@ def test_index_functions_matches_legacy_function_list_exactly(
     _require_backend(backend)
     so, header = match_lib
     snap = dump(so, [header], header_backend=backend)
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
 
-    legacy_ids = {f.entity_id for f in snap.functions if f.entity_id is not None}
+    legacy_ids = {
+        f.entity_id for f in snap.declarations.functions if f.entity_id is not None
+    }
     assert legacy_ids, "fixture must produce at least one identified function"
 
-    index = SemanticIRIndex(snap.semantic_ir)
+    index = SemanticIRIndex(snap.canonical_ir)
     index_ids = set(index.functions())
 
     assert index_ids == legacy_ids
@@ -160,7 +162,7 @@ def test_distinct_mangled_names_never_collapse_onto_one_entity_id(
     snap = dump(so, [header], header_backend=backend)
 
     by_mangled: dict[str, list] = {}
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         if f.entity_id is None:
             continue
         by_mangled.setdefault(f.mangled, []).append(f)
@@ -192,7 +194,7 @@ def test_index_entity_lookup_is_deterministic(match_lib, backend: str) -> None:
     _require_backend(backend)
     so, header = match_lib
     snap = dump(so, [header], header_backend=backend)
-    index = SemanticIRIndex(snap.semantic_ir)
+    index = SemanticIRIndex(snap.canonical_ir)
 
     for entity_id in index.functions():
         first = index.entity(entity_id)

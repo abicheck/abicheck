@@ -100,9 +100,9 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
         )
         renumber_anonymous_closure_identities(snap)
 
-        assert snap.semantic_ir is not None
-        (renumbered_occ_id,) = snap.semantic_ir.occurrences.keys()
-        (renumbered_entity,) = snap.semantic_ir.occurrences.values()
+        assert snap.canonical_ir is not None
+        (renumbered_occ_id,) = snap.canonical_ir.occurrences.keys()
+        (renumbered_entity,) = snap.canonical_ir.occurrences.values()
 
         scope_names = [
             getattr(seg, "name", "") for seg in renumbered_occ_id.entity_id.scope
@@ -112,9 +112,10 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
         # Key and value agree with each other and with the flat `types`
         # spelling this occurrence describes -- the whole point of
         # renumbering all three reach paths together rather than some.
-        assert renumbered_occ_id.entity_id == snap.types[0].entity_id
+        assert renumbered_occ_id.entity_id == snap.declarations.types[0].entity_id
         assert (
-            renumbered_entity.canonical_spelling.value == snap.types[0].qualified_name
+            renumbered_entity.canonical_spelling.value
+            == snap.declarations.types[0].qualified_name
         )
 
     def test_semantic_ir_conflicts_key_is_renumbered_to_match_a_fresh_lookup(
@@ -155,8 +156,8 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
         )
         renumber_anonymous_closure_identities(snap)
 
-        assert snap.semantic_ir is not None
-        (renumbered_occ_id,) = snap.semantic_ir.occurrences.keys()
+        assert snap.canonical_ir is not None
+        (renumbered_occ_id,) = snap.canonical_ir.occurrences.keys()
         fresh_key = semantic_ir_conflict_key(renumbered_occ_id, "canonical_spelling")
 
         assert fresh_key in snap.semantic_ir_conflicts
@@ -190,8 +191,8 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
         )
         renumber_anonymous_closure_identities(snap)
 
-        assert snap.semantic_ir is not None
-        (renumbered_occ_id,) = snap.semantic_ir.occurrences.keys()
+        assert snap.canonical_ir is not None
+        (renumbered_occ_id,) = snap.canonical_ir.occurrences.keys()
         fresh_key = semantic_ir_conflict_key(renumbered_occ_id, "canonical_spelling")
 
         assert ":20:4" not in snap.semantic_ir_conflicts[fresh_key]
@@ -229,8 +230,8 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
         )
         renumber_anonymous_closure_identities(snap)
 
-        assert snap.semantic_ir is not None
-        (unchanged_occ_id,) = snap.semantic_ir.occurrences.keys()
+        assert snap.canonical_ir is not None
+        (unchanged_occ_id,) = snap.canonical_ir.occurrences.keys()
         assert unchanged_occ_id == occ_id  # the key really didn't move
 
         assert key in snap.semantic_ir_conflicts
@@ -274,8 +275,8 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
         )
         renumber_anonymous_closure_identities(snap)
 
-        assert snap.semantic_ir is not None
-        (unchanged_occ_id,) = snap.semantic_ir.occurrences.keys()
+        assert snap.canonical_ir is not None
+        (unchanged_occ_id,) = snap.canonical_ir.occurrences.keys()
         assert unchanged_occ_id == occ_id  # the key really didn't move
 
         assert key in snap.semantic_ir_conflicts
@@ -343,8 +344,8 @@ class TestSemanticIrReachableFromTheWalkIsRebuilt:
 
         # The two REAL closures keep the ordinals they'd get without the
         # conflict at all -- #1 for line 20, #2 for line 30.
-        renumbered_r = snap.types[0].qualified_name
-        renumbered_s = snap.types[1].qualified_name
+        renumbered_r = snap.declarations.types[0].qualified_name
+        renumbered_s = snap.declarations.types[1].qualified_name
         assert renumbered_r is not None
         assert renumbered_s is not None
         assert "#1" in renumbered_r

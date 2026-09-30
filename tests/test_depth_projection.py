@@ -201,7 +201,7 @@ class TestProjectSnapshotToDepthNoOps:
             library="lib", version="1", constants={"FOO": "1"}, from_headers=True
         )
         project_snapshot_to_depth(snap, "binary")
-        assert snap.constants == {"FOO": "1"}
+        assert snap.declarations.constants == {"FOO": "1"}
         assert snap.from_headers is True
 
 
@@ -224,7 +224,7 @@ class TestBinaryDepthNoDwarf:
             ("typedefs", {}),
             ("constants", {}),
             ("python_api", None),
-            ("semantic_ir", None),
+            ("canonical_ir", None),
             ("from_headers", False),
             ("elf_only_mode", True),
         ],
@@ -237,11 +237,11 @@ class TestBinaryDepthNoDwarf:
     def test_function_and_variable_signatures_cleared(self) -> None:
         old, _ = _headers_only_pair(dwarf=False)
         projected = project_snapshot_to_depth(old, "binary")
-        fn = projected.functions[0]
+        fn = projected.declarations.functions[0]
         assert fn.return_type == "?"
         assert fn.params == []
         assert fn.visibility is Visibility.ELF_ONLY
-        var = projected.variables[0]
+        var = projected.declarations.variables[0]
         assert var.type == "?"
         assert var.is_const is False
         assert var.value is None
@@ -558,19 +558,19 @@ class TestHiddenVisibilityDropped:
 
     def test_hidden_function_and_variable_dropped(self) -> None:
         projected = project_snapshot_to_depth(self._snap(), "binary")
-        assert [f.name for f in projected.functions] == ["pub"]
-        assert [v.name for v in projected.variables] == ["pub_v"]
+        assert [f.name for f in projected.declarations.functions] == ["pub"]
+        assert [v.name for v in projected.declarations.variables] == ["pub_v"]
 
     def test_surviving_public_declarations_still_demoted_to_elf_only(self) -> None:
         projected = project_snapshot_to_depth(self._snap(), "binary")
-        assert projected.functions[0].visibility is Visibility.ELF_ONLY
-        assert projected.variables[0].visibility is Visibility.ELF_ONLY
+        assert projected.declarations.functions[0].visibility is Visibility.ELF_ONLY
+        assert projected.declarations.variables[0].visibility is Visibility.ELF_ONLY
 
     def test_no_false_removal_finding_from_a_hidden_declaration(self) -> None:
         old = self._snap()
         new = self._snap()
-        new.functions = [f for f in new.functions if f.name != "hid"]
-        new.variables = [v for v in new.variables if v.name != "hid_v"]
+        new.functions = [f for f in new.declarations.functions if f.name != "hid"]
+        new.variables = [v for v in new.declarations.variables if v.name != "hid_v"]
         old_b = project_snapshot_to_depth(old, "binary")
         new_b = project_snapshot_to_depth(new, "binary")
         result = checker.compare(old_b, new_b)
@@ -620,13 +620,13 @@ class TestExportTableGatesVisibilityPromotion:
         projected = project_snapshot_to_depth(
             self._snap("1", include_unconfirmed=True), "binary"
         )
-        assert [v.name for v in projected.variables] == ["pub_v"]
+        assert [v.name for v in projected.declarations.variables] == ["pub_v"]
 
     def test_confirmed_declaration_still_promoted(self) -> None:
         projected = project_snapshot_to_depth(
             self._snap("1", include_unconfirmed=True), "binary"
         )
-        assert projected.variables[0].visibility is Visibility.ELF_ONLY
+        assert projected.declarations.variables[0].visibility is Visibility.ELF_ONLY
 
     def test_removing_an_unconfirmed_declaration_is_not_reported(self) -> None:
         old = self._snap("1", include_unconfirmed=True)
@@ -657,8 +657,8 @@ class TestExportTableGatesVisibilityPromotion:
             ],
         )
         projected = project_snapshot_to_depth(snap, "binary")
-        assert [v.name for v in projected.variables] == ["cpo"]
-        assert projected.variables[0].visibility is Visibility.ELF_ONLY
+        assert [v.name for v in projected.declarations.variables] == ["cpo"]
+        assert projected.declarations.variables[0].visibility is Visibility.ELF_ONLY
 
 
 class TestBuildSourcePackCoverageProjection:
@@ -886,11 +886,11 @@ class TestProjectPairToDepthJointFloor:
         old, new = project_pair_to_depth(
             self._header_derived(), self._dwarf_derived(), "binary"
         )
-        assert old.functions[0].params == []
-        assert old.functions[0].return_type == "?"
-        assert new.functions[0].params == []
-        assert new.functions[0].return_type == "?"
-        assert old.types == new.types == []
+        assert old.declarations.functions[0].params == []
+        assert old.declarations.functions[0].return_type == "?"
+        assert new.declarations.functions[0].params == []
+        assert new.declarations.functions[0].return_type == "?"
+        assert old.declarations.types == new.types == []
 
     def test_typedef_and_constant_identity_sidecars_cleared_symmetrically(
         self,
@@ -902,11 +902,11 @@ class TestProjectPairToDepthJointFloor:
         old, new = project_pair_to_depth(
             self._header_derived(), self._dwarf_derived(), "binary"
         )
-        assert old.typedefs == {}
-        assert old.typedefs_qualified == {}
-        assert old.typedef_entity_ids == {}
-        assert old.constants == {}
-        assert old.constant_entity_ids == {}
+        assert old.declarations.typedefs == {}
+        assert old.declarations.typedefs_qualified == {}
+        assert old.declarations.typedef_entity_ids == {}
+        assert old.declarations.constants == {}
+        assert old.declarations.constant_entity_ids == {}
         result = checker.compare(old, new)
         assert result.verdict == checker.Verdict.NO_CHANGE
 
@@ -925,17 +925,20 @@ class TestProjectPairToDepthJointFloor:
         really do qualify for L1 -- only a MISMATCH forces the lower rung."""
         dwarf = self._dwarf_derived()
         old, new = project_pair_to_depth(dwarf, dwarf, "binary")
-        assert old.functions[0].params[0].kind is ParamKind.POINTER
-        assert old.types != []
+        assert old.declarations.functions[0].params[0].kind is ParamKind.POINTER
+        assert old.declarations.types != []
 
     def test_project_snapshot_to_depth_solo_default_is_unchanged(self) -> None:
         """``project_snapshot_to_depth`` called on its own (no comparison
         partner) still defaults to the per-snapshot answer -- only
         ``project_pair_to_depth`` computes a joint one."""
         projected = project_snapshot_to_depth(self._header_derived(), "binary")
-        assert projected.functions[0].params == []
+        assert projected.declarations.functions[0].params == []
         dwarf_projected = project_snapshot_to_depth(self._dwarf_derived(), "binary")
-        assert dwarf_projected.functions[0].params[0].kind is ParamKind.POINTER
+        assert (
+            dwarf_projected.declarations.functions[0].params[0].kind
+            is ParamKind.POINTER
+        )
 
 
 class TestProjectPairToDepthPreservesDwarfPublicScope:

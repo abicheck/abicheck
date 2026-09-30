@@ -243,7 +243,7 @@ def reconcile_export_absence(snapshot: Any, state: ExportTableState) -> int:
     if state is ExportTableState.READ:
         return 0
     withdrawn = 0
-    for decl in (*snapshot.functions, *snapshot.variables):
+    for decl in (*snapshot.declarations.functions, *snapshot.declarations.variables):
         fact = getattr(decl, "binary_exported_fact", None)
         if (
             fact is None

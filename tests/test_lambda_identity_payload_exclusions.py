@@ -68,7 +68,7 @@ class TestQualifiedNameFactIsRenumberedToo:
         )
         snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
         renumber_anonymous_closure_identities(snap)
-        renumbered = snap.types[0]
+        renumbered = snap.declarations.types[0]
         assert "#" in renumbered.qualified_name
         assert ":522:" not in renumbered.qualified_name
         assert renumbered.qualified_name_fact.value == renumbered.qualified_name
@@ -95,7 +95,7 @@ class TestPayloadTextIsNeverCorrupted:
             ],
         )
         renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].deprecated == message
+        assert snap.declarations.types[0].deprecated == message
 
     def test_a_default_initializer_matching_the_marker_syntax_is_untouched(
         self,
@@ -109,7 +109,7 @@ class TestPayloadTextIsNeverCorrupted:
         )
         snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
         renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].fields[0].default == expr
+        assert snap.declarations.types[0].fields[0].default == expr
 
     def test_payload_text_does_not_fabricate_an_ordinal_for_a_real_closure(
         self,
@@ -133,8 +133,8 @@ class TestPayloadTextIsNeverCorrupted:
         # collected) -- not #2, which it would get if the deprecated
         # message's coincidental marker at line 1 (earlier than line 5)
         # had also been collected as a competing coordinate.
-        assert "#1)" in snap.types[0].qualified_name
-        assert snap.types[0].deprecated == message
+        assert "#1)" in snap.declarations.types[0].qualified_name
+        assert snap.declarations.types[0].deprecated == message
 
     def test_a_variable_initializer_value_matching_the_marker_syntax_is_untouched(
         self,
@@ -155,7 +155,7 @@ class TestPayloadTextIsNeverCorrupted:
         )
         snap = AbiSnapshot(library="lib.so", version="1.0", variables=[var])
         renumber_anonymous_closure_identities(snap)
-        assert snap.variables[0].value == value
+        assert snap.declarations.variables[0].value == value
 
     def test_a_constant_value_matching_the_marker_syntax_is_untouched(self) -> None:
         """Codex review, fresh evidence: ``AbiSnapshot.constants`` (a
@@ -165,7 +165,7 @@ class TestPayloadTextIsNeverCorrupted:
         value = f"text {_closure('x.h', 10, 2)}"
         snap = AbiSnapshot(library="lib.so", version="1.0", constants={"MSG": value})
         renumber_anonymous_closure_identities(snap)
-        assert snap.constants["MSG"] == value
+        assert snap.declarations.constants["MSG"] == value
 
     def test_a_constant_value_does_not_fabricate_an_ordinal_for_a_real_closure(
         self,
@@ -182,8 +182,8 @@ class TestPayloadTextIsNeverCorrupted:
             constants={"MSG": value},
         )
         renumber_anonymous_closure_identities(snap)
-        assert "#1)" in snap.types[0].qualified_name
-        assert snap.constants["MSG"] == value
+        assert "#1)" in snap.declarations.types[0].qualified_name
+        assert snap.declarations.constants["MSG"] == value
 
     def test_a_source_location_matching_the_marker_syntax_is_untouched(
         self,
@@ -211,9 +211,9 @@ class TestPayloadTextIsNeverCorrupted:
         )
         snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
         renumber_anonymous_closure_identities(snap)
-        assert snap.types[0].source_location == f"{path}:42"
-        assert snap.types[0].source_header == path
-        assert snap.types[0].source_header_fact.value == path
+        assert snap.declarations.types[0].source_location == f"{path}:42"
+        assert snap.declarations.types[0].source_header == path
+        assert snap.declarations.types[0].source_header_fact.value == path
 
     def test_a_source_header_matching_a_real_closures_own_marker_is_untouched(
         self,
@@ -234,7 +234,7 @@ class TestPayloadTextIsNeverCorrupted:
         )
         snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
         renumber_anonymous_closure_identities(snap)
-        renumbered = snap.types[0]
+        renumbered = snap.declarations.types[0]
         # The real closure in qualified_name DOES get renumbered...
         assert "#1)" in renumbered.qualified_name
         assert renumbered.qualified_name_fact.value == renumbered.qualified_name
@@ -257,9 +257,9 @@ class TestPayloadTextIsNeverCorrupted:
         )
         snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
         renumber_anonymous_closure_identities(snap)
-        assert "#1)" in snap.types[0].qualified_name
-        assert snap.types[0].source_location == f"{path}:42"
-        assert snap.types[0].source_header == path
+        assert "#1)" in snap.declarations.types[0].qualified_name
+        assert snap.declarations.types[0].source_location == f"{path}:42"
+        assert snap.declarations.types[0].source_header == path
 
     def test_collect_strings_excludes_source_header_facts_diagnostics_too(
         self,
@@ -319,7 +319,7 @@ class TestFactProducerFieldIsRecognizedAndExcluded:
         )
         snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
         renumber_anonymous_closure_identities(snap)
-        renumbered = snap.types[0]
+        renumbered = snap.declarations.types[0]
         assert "#1)" in renumbered.qualified_name
         assert renumbered.qualified_name_fact is not None
         assert renumbered.qualified_name_fact.value == renumbered.qualified_name
@@ -344,7 +344,7 @@ class TestFactProducerFieldIsRecognizedAndExcluded:
         )
         snap = AbiSnapshot(library="lib.so", version="1.0", types=[rec])
         renumber_anonymous_closure_identities(snap)
-        renumbered = snap.types[0]
+        renumbered = snap.declarations.types[0]
         assert "#1)" in renumbered.qualified_name
         assert renumbered.qualified_name_fact is not None
         assert renumbered.qualified_name_fact.producer == marker_producer

@@ -136,6 +136,8 @@ def test_enrich_source_locations_skips_none_and_unindexable():
         types = []
         functions = []
         variables = []
+        enums = []
+        declarations = property(lambda self: self)
 
         def index(self):
             raise RuntimeError("boom")

@@ -144,23 +144,23 @@ def test_encoder_does_not_clear_skipped_fields_during_the_walk() -> None:
     snap.surface_graph = None  # baseline; populated below via a real value
     probe = _Probe(name="probe", mangled="_Z5probe", return_type="int")
     probe.watch(snap)
-    snap.functions.append(probe)  # type: ignore[arg-type]
+    snap.declarations.functions.append(probe)  # type: ignore[arg-type]
     # Give two skipped fields non-default values, so "cleared" is observable.
-    snap._type_by_name = {"T0": snap.types[0]}
+    snap._type_by_name = {"T0": snap.declarations.types[0]}
     snap.semantic_ir = None
 
     snapshot_to_dict(snap)
 
     assert probe.seen, "probe was never walked -- the test proves nothing"
     for observation in probe.seen:
-        assert observation["_type_by_name"] == {"T0": snap.types[0]}, (
+        assert observation["_type_by_name"] == {"T0": snap.declarations.types[0]}, (
             "the encoder cleared a lookup cache on the caller's snapshot mid-walk"
         )
 
 
 def test_encoding_leaves_the_snapshot_equal_to_its_pre_encode_self() -> None:
     snap = _snapshot()
-    snap._type_by_name = {"T0": snap.types[0]}
+    snap._type_by_name = {"T0": snap.declarations.types[0]}
     before = copy.deepcopy(snap)
     snapshot_to_dict(snap)
     assert snap == before
@@ -186,8 +186,8 @@ def test_returned_containers_are_detached_from_the_snapshot() -> None:
     encoded = snapshot_to_dict(snap)
     encoded["functions"][0]["params"][0]["name"] = "MUTATED"
     encoded["functions"].append({"name": "added"})
-    assert snap.functions[0].params[0].name == "a"
-    assert all(getattr(f, "name", None) != "added" for f in snap.functions)
+    assert snap.declarations.functions[0].params[0].name == "a"
+    assert all(getattr(f, "name", None) != "added" for f in snap.declarations.functions)
 
 
 def test_unknown_mutable_leaf_is_deep_copied_not_aliased() -> None:
@@ -251,7 +251,12 @@ def test_fused_walk_matches_asdict_then_sets_to_lists(
     making the same mistake.
     """
     snap = _snapshot(n_functions, n_types)
-    for declaration in (snap.functions, snap.variables, snap.types, snap.enums):
+    for declaration in (
+        snap.declarations.functions,
+        snap.declarations.variables,
+        snap.declarations.types,
+        snap.declarations.enums,
+    ):
         for item in declaration:
             expected = _oracle_sets_to_lists(asdict(item))
             assert _encode_value(item) == expected
@@ -319,10 +324,10 @@ def test_mutable_subclass_of_an_immutable_builtin_is_copied(
 def test_mutable_subclass_nested_in_a_snapshot_cannot_reach_back() -> None:
     """The same hazard through the real entry point, not just the helper."""
     snap = _snapshot(1)
-    snap.functions[0].return_type = _TaggedStr("int")  # type: ignore[assignment]
+    snap.declarations.functions[0].return_type = _TaggedStr("int")  # type: ignore[assignment]
     encoded = snapshot_to_dict(snap)
     encoded["functions"][0]["return_type"].attached.append("mutated")
-    assert snap.functions[0].return_type.attached == []  # type: ignore[union-attr]
+    assert snap.declarations.functions[0].return_type.attached == []  # type: ignore[union-attr]
 
 
 @pytest.mark.parametrize(

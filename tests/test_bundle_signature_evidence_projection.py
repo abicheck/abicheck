@@ -304,7 +304,10 @@ class TestRetention:
         of this test and fails this one).
         """
         snapshot = _mixed_snapshot(False)
-        declarations = [*snapshot.functions, *snapshot.variables]
+        declarations = [
+            *snapshot.declarations.functions,
+            *snapshot.declarations.variables,
+        ]
         assert declarations, "fixture declares nothing"
         compact = build_bundle_signature_evidence(snapshot)
         reachable = self._reachable_from(compact)

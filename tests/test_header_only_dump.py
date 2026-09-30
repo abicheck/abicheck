@@ -112,11 +112,11 @@ class TestHeaderOnlyDumpBasics:
         )
         snap = run_dump_request(request)
         assert snap.header_only is True
-        assert [f.name for f in snap.functions] == ["add"]
+        assert [f.name for f in snap.declarations.functions] == ["add"]
         # The bug this regression guards: without no_binary_evidence forwarded,
         # every function is misclassified HIDDEN (no export set to match
         # against) and filtered out of the public surface entirely.
-        assert snap.functions[0].visibility.value == "public"
+        assert snap.declarations.functions[0].visibility.value == "public"
 
     def test_bare_headers_alone_are_valid_dump_request_evidence(self, tmp_path: Path):
         """A binary-less DumpRequest with only headers (no sources/
@@ -229,10 +229,10 @@ class TestHeaderOnlyDependencyScoping:
 
         # The library's own declarations survive (castxml also records
         # `Item`'s implicit members, which are the library's too) ...
-        assert "count" in {f.name for f in snap.functions}
-        assert "mylib_global" in {v.name for v in snap.variables}
+        assert "count" in {f.name for f in snap.declarations.functions}
+        assert "mylib_global" in {v.name for v in snap.declarations.variables}
         # ... and nothing located outside the library does.
-        for decl in [*snap.functions, *snap.variables]:
+        for decl in [*snap.declarations.functions, *snap.declarations.variables]:
             assert decl.source_header is not None, decl.name
             assert str(lib) in (decl.source_location or ""), decl.name
 
@@ -272,7 +272,7 @@ class TestHeaderOnlyDependencyScoping:
         result = CliRunner().invoke(main, ["dump", *args, "-o", str(out)])
         assert result.exit_code == 0, result.output
         snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
-        assert [f.name for f in snap.functions] == ["exposed_api"]
+        assert [f.name for f in snap.declarations.functions] == ["exposed_api"]
 
     def test_manifest_public_dir_classifies_its_headers_public(self, tmp_path: Path):
         """A header covered only by a manifest `public_header_dirs` entry --
@@ -310,7 +310,7 @@ class TestHeaderOnlyDependencyScoping:
         )
         assert result.exit_code == 0, result.output
         snap = snapshot_from_dict(json.loads(out.read_text(encoding="utf-8")))
-        origins = {f.name: f.origin.value for f in snap.functions}
+        origins = {f.name: f.origin.value for f in snap.declarations.functions}
         assert origins == {"root_api": "public_header", "extra_api": "public_header"}
 
     @pytest.mark.skipif(
@@ -364,7 +364,11 @@ class TestHeaderOnlyDependencyScoping:
             located_runs.append(
                 {
                     d.name: (d.source_location or "").rsplit("/", 1)[-1]
-                    for d in [*snap.functions, *snap.variables, *snap.types]
+                    for d in [
+                        *snap.declarations.functions,
+                        *snap.declarations.variables,
+                        *snap.declarations.types,
+                    ]
                 }
             )
         located = located_runs[0]

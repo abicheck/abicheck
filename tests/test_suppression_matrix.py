@@ -455,7 +455,7 @@ class TestRemovedChangeScenarios:
         """,
         )
         old = _snap("1.0")
-        old.variables.append(
+        old.declarations.variables.append(
             Variable(
                 name="foo::g_var",
                 mangled="_ZN3foo6g_varE",

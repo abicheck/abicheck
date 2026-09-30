@@ -64,7 +64,7 @@ def _fake_attach_clang_layout(snap: AbiSnapshot, *_args, **_kwargs) -> AbiSnapsh
     """Mirrors clang_layout_tool._apply_record_facts: the tool's own base
     name, independent of whatever this snapshot's bases entry currently
     spells it as."""
-    snap.types[0].base_offsets = {_RAW_BASE: 64}
+    snap.declarations.types[0].base_offsets = {_RAW_BASE: 64}
     return snap
 
 
@@ -86,7 +86,7 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         ):
             result = run_dump(p, "elf", header_backend="clang")
 
-        rec = result.types[0]
+        rec = result.declarations.types[0]
         assert list(rec.base_offsets) == rec.bases
         assert rec.bases == ["Base<(lambda:x.h#1)>"]
 
@@ -109,7 +109,7 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         ):
             result = run_dump(p, "pe", header_backend="clang")
 
-        rec = result.types[0]
+        rec = result.declarations.types[0]
         assert list(rec.base_offsets) == rec.bases
         assert rec.bases == ["Base<(lambda:x.h#1)>"]
 
@@ -132,6 +132,6 @@ class TestRunDumpRenumbersAfterClangLayoutAttach:
         ):
             result = run_dump(p, "macho", header_backend="clang")
 
-        rec = result.types[0]
+        rec = result.declarations.types[0]
         assert list(rec.base_offsets) == rec.bases
         assert rec.bases == ["Base<(lambda:x.h#1)>"]

@@ -131,7 +131,10 @@ class TestMergeSnapshotsBasics:
             _snap(functions=[clang_fn], ast_producer="clang"),
         )
 
-        assert merged.functions[0].contract_attributes == ["ms_abi", "nonnull(1)"]
+        assert merged.declarations.functions[0].contract_attributes == [
+            "ms_abi",
+            "nonnull(1)",
+        ]
 
     def test_clang_backfills_cc_when_castxml_has_no_attributes(self):
         castxml_fn = Function(name="api", mangled="api", return_type="void")
@@ -146,7 +149,7 @@ class TestMergeSnapshotsBasics:
             _snap(functions=[clang_fn], ast_producer="clang"),
         )
 
-        assert merged.functions[0].contract_attributes == ["ms_abi"]
+        assert merged.declarations.functions[0].contract_attributes == ["ms_abi"]
         assert (
             merged.fact_provenance[func_fact_key("api", "calling_convention")]
             == "clang"
@@ -170,7 +173,7 @@ class TestMergeSnapshotsBasics:
             _snap(functions=[clang_fn], ast_producer="clang"),
         )
 
-        assert merged.functions[0].contract_attributes == ["sysv_abi"]
+        assert merged.declarations.functions[0].contract_attributes == ["sysv_abi"]
         assert (
             merged.fact_provenance[func_fact_key("api", "calling_convention")]
             == "castxml"
@@ -195,7 +198,7 @@ class TestMergeSnapshotsBasics:
             _snap(functions=[clang_fn], ast_producer="clang"),
         )
 
-        assert merged.functions[0].contract_attributes == ["nonnull(1)"]
+        assert merged.declarations.functions[0].contract_attributes == ["nonnull(1)"]
 
     def test_clang_matching_cc_does_not_replace_existing_contract(self):
         castxml_fn = Function(
@@ -215,7 +218,7 @@ class TestMergeSnapshotsBasics:
             _snap(functions=[clang_fn], ast_producer="clang"),
         )
 
-        assert merged.functions[0].contract_attributes == ["ms_abi"]
+        assert merged.declarations.functions[0].contract_attributes == ["ms_abi"]
 
     def test_clang_only_function_is_appended(self):
         clang_only = Function(name="bar", mangled="_Z3barv", return_type="void")
@@ -821,7 +824,7 @@ class TestMachoMangledNormalization:
         clang = _snap(functions=[clang_f], ast_producer="clang", platform="macho")
         merged = merge_snapshots(castxml, clang)
 
-        assert len(merged.functions) == 1
+        assert len(merged.declarations.functions) == 1
         assert merged.func_by_mangled("_ZN2ns3fooEv") is not None
         assert merged.func_by_mangled("__ZN2ns3fooEv") is None
 
@@ -832,7 +835,7 @@ class TestMachoMangledNormalization:
         clang = _snap(functions=[clang_f], ast_producer="clang", platform="macho")
         merged = merge_snapshots(castxml, clang)
 
-        assert len(merged.functions) == 1
+        assert len(merged.declarations.functions) == 1
         assert merged.func_by_mangled("foo") is not None
 
     def test_variable_not_duplicated_when_mangled_differs_by_darwin_underscore(self):
@@ -842,7 +845,7 @@ class TestMachoMangledNormalization:
         clang = _snap(variables=[clang_v], ast_producer="clang", platform="macho")
         merged = merge_snapshots(castxml, clang)
 
-        assert len(merged.variables) == 1
+        assert len(merged.declarations.variables) == 1
         assert merged.var_by_mangled("_ZN2ns1gE") is not None
         assert merged.var_by_mangled("__ZN2ns1gE") is None
 
@@ -882,7 +885,7 @@ class TestMachoMangledNormalization:
         clang = _snap(functions=[clang_f], ast_producer="clang", platform="elf")
         merged = merge_snapshots(castxml, clang)
 
-        assert len(merged.functions) == 1
+        assert len(merged.declarations.functions) == 1
         assert merged.func_by_mangled("_Z3foov") is not None
 
 
@@ -1186,7 +1189,7 @@ class TestEnumFactBackfill:
         castxml = _snap(enums=[e], ast_producer="castxml")
         clang = _snap(ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        merged_e = next(x for x in merged.enums if x.name == "Color")
+        merged_e = next(x for x in merged.declarations.enums if x.name == "Color")
         assert merged_e.is_scoped is True
         assert merged_e.deprecated == "msg"
         assert is_castxml_backed_fact(merged, enum_fact_key("Color", "is_scoped"))
@@ -1438,8 +1441,8 @@ class TestNamespaceQualifiedMerging:
         clang = _snap(types=[a_foo_clang, b_foo_clang], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        merged_by_qualname = {t.qualified_name: t for t in merged.types}
-        assert len(merged.types) == 2
+        merged_by_qualname = {t.qualified_name: t for t in merged.declarations.types}
+        assert len(merged.declarations.types) == 2
         assert merged_by_qualname["a::Foo"].is_standard_layout is True
         assert merged_by_qualname["b::Foo"].is_standard_layout is False
 
@@ -1462,7 +1465,7 @@ class TestNamespaceQualifiedMerging:
         clang = _snap(types=[b_foo_clang_only], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        merged_qualnames = {t.qualified_name for t in merged.types}
+        merged_qualnames = {t.qualified_name for t in merged.declarations.types}
         assert merged_qualnames == {"a::Foo", "b::Foo"}
 
     def test_two_same_bare_name_enums_in_different_namespaces_merge_independently(
@@ -1473,7 +1476,7 @@ class TestNamespaceQualifiedMerging:
         castxml = _snap(enums=[a_color, b_color], ast_producer="castxml")
         clang = _snap(ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        assert len(merged.enums) == 2
+        assert len(merged.declarations.enums) == 2
 
     def test_deprecated_provenance_keyed_qualified_not_bare(self):
         """A third review round found the matching fix above didn't reach
@@ -1521,7 +1524,7 @@ class TestTypedefsQualifiedMerge:
             typedefs_qualified={"Bar::value_type": "std::string"},
         )
         merged = merge_snapshots(castxml, clang)
-        assert merged.typedefs_qualified == {
+        assert merged.declarations.typedefs_qualified == {
             "Foo::value_type": "int",
             "Bar::value_type": "std::string",
         }
@@ -1530,7 +1533,7 @@ class TestTypedefsQualifiedMerge:
         castxml = _snap(ast_producer="castxml", typedefs_qualified={"ns::Alias": "int"})
         clang = _snap(ast_producer="clang", typedefs_qualified={"ns::Alias": "long"})
         merged = merge_snapshots(castxml, clang)
-        assert merged.typedefs_qualified == {"ns::Alias": "int"}
+        assert merged.declarations.typedefs_qualified == {"ns::Alias": "int"}
 
     def test_clang_only_qualified_typedef_closes_a_real_reachability_gap_end_to_end(
         self,
@@ -1583,9 +1586,9 @@ class TestConstantEntityIdSidecarStaysAlignedWithConstants:
         merged = merge_snapshots(castxml, clang)
         # constants itself stays castxml-only (pre-existing, unchanged
         # behavior) -- the clang-only constant is not retained.
-        assert merged.constants == {"kShared": "1"}
+        assert merged.declarations.constants == {"kShared": "1"}
         # So its identity must not survive into the sidecar either.
-        assert "kClangOnly" not in merged.constant_entity_ids
+        assert "kClangOnly" not in merged.declarations.constant_entity_ids
 
     def test_shared_constant_keeps_its_identity_from_either_side(self):
         from abicheck.model.identity import entity_id_for_constant
@@ -1603,7 +1606,7 @@ class TestConstantEntityIdSidecarStaysAlignedWithConstants:
             constant_entity_ids={"kShared": clang_id},
         )
         merged = merge_snapshots(castxml, clang)
-        assert merged.constant_entity_ids == {"kShared": castxml_id}
+        assert merged.declarations.constant_entity_ids == {"kShared": castxml_id}
 
     def test_every_sidecar_key_names_a_retained_constant(self):
         from abicheck.model.identity import entity_id_for_constant
@@ -1619,7 +1622,9 @@ class TestConstantEntityIdSidecarStaysAlignedWithConstants:
             constant_entity_ids={"kDropped": entity_id_for_constant((), "kDropped")},
         )
         merged = merge_snapshots(castxml, clang)
-        assert set(merged.constant_entity_ids) <= set(merged.constants)
+        assert set(merged.declarations.constant_entity_ids) <= set(
+            merged.declarations.constants
+        )
 
 
 class TestFactProvenanceHelpers:

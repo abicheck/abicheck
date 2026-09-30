@@ -281,11 +281,15 @@ def c_snapshots(
 
 
 def _public(snap: AbiSnapshot) -> dict[str, Any]:
-    return {f.mangled: f for f in snap.functions if f.visibility == Visibility.PUBLIC}
+    return {
+        f.mangled: f
+        for f in snap.declarations.functions
+        if f.visibility == Visibility.PUBLIC
+    }
 
 
 def _types_by_name(snap: AbiSnapshot) -> dict[str, Any]:
-    return {t.name: t for t in snap.types}
+    return {t.name: t for t in snap.declarations.types}
 
 
 # ── Functions and overloads ─────────────────────────────────────────────────
@@ -340,7 +344,7 @@ class TestConstructorIdentity:
         def ctor_param_lists(snap: AbiSnapshot) -> list[list[str]]:
             return sorted(
                 [canonicalize_type_name(p.type) for p in f.params]
-                for f in snap.functions
+                for f in snap.declarations.functions
                 if f.name == "Widget"
                 and f.visibility == Visibility.PUBLIC
                 and not f.mangled.startswith("~")
@@ -368,7 +372,7 @@ class TestDestructorVisibility:
         def public_dtor_names(snap: AbiSnapshot) -> set[str]:
             return {
                 f.name
-                for f in snap.functions
+                for f in snap.declarations.functions
                 if f.name.startswith("~") and f.visibility == Visibility.PUBLIC
             }
 

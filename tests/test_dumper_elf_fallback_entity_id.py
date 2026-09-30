@@ -114,11 +114,11 @@ def test_semantic_ir_is_populated_when_dwarf_types_are_preserved() -> None:
     ``entity_id``s -- a headerless dump silently omitted IR entirely."""
     types = [_record("Widget")]
     snap = _snap({"plain_c_fn"}, dwarf_only_types=types)
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
     entity_id = types[0].entity_id
     assert entity_id is not None
-    (occ_id,) = snap.semantic_ir.occurrences_for(entity_id)
-    entity = snap.semantic_ir.occurrences[occ_id]
+    (occ_id,) = snap.canonical_ir.occurrences_for(entity_id)
+    entity = snap.canonical_ir.occurrences[occ_id]
     assert entity.canonical_spelling.value == "Widget"
     assert entity.producer == "dwarf"
 
@@ -134,8 +134,8 @@ def test_semantic_ir_omits_the_elf_only_functions_and_variables() -> None:
     snap = _snap({"plain_c_fn"}, dwarf_only_types=types)
     func = next(f for f in snap.functions if f.name == "plain_c_fn")
     assert func.entity_id is not None
-    assert snap.semantic_ir is not None
-    assert snap.semantic_ir.occurrences_for(func.entity_id) == ()
+    assert snap.canonical_ir is not None
+    assert snap.canonical_ir.occurrences_for(func.entity_id) == ()
 
 
 def test_semantic_ir_stays_none_without_any_dwarf_types() -> None:
@@ -143,4 +143,4 @@ def test_semantic_ir_stays_none_without_any_dwarf_types() -> None:
     at all) must keep behaving exactly as before this fix -- there is no
     DWARF evidence of any kind to normalize."""
     snap = _snap({"plain_c_fn"})
-    assert snap.semantic_ir is None
+    assert snap.canonical_ir is None

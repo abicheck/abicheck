@@ -113,7 +113,7 @@ class TestDwarfVariableIsConstCvQualifierOrder:
         snap = build_snapshot_from_dwarf(
             so_path, elf_meta, dwarf_meta, dwarf_adv, session=session
         )
-        return {v.name: v for v in snap.variables}
+        return {v.name: v for v in snap.declarations.variables}
 
     def test_plain_variable_is_not_const(self, variables_by_name) -> None:
         assert variables_by_name["g_plain"].is_const is False
@@ -207,7 +207,7 @@ class TestDwarfConstPointerSpellingPlacement:
         snap = build_snapshot_from_dwarf(
             so_path, elf_meta, dwarf_meta, dwarf_adv, session=session
         )
-        return {v.name: v for v in snap.variables}
+        return {v.name: v for v in snap.declarations.variables}
 
     def test_plain_pointer_has_no_qualifier_text(self, variables_by_name) -> None:
         assert variables_by_name["g_plain_ptr"].type == "int *"

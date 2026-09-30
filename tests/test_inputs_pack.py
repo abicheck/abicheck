@@ -389,7 +389,9 @@ def test_dump_inputs_folds_pack_into_snapshot_like_merge(tmp_path: Path) -> None
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
     # a binary-side snapshot that exports the same symbol
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+    snap.declarations.functions.append(
+        Function(name="foo", mangled="_Z3foov", return_type="void")
+    )
 
     embed_inputs_pack(snap, pack, tmp_path / "out.json")
 
@@ -422,7 +424,9 @@ def test_embed_build_source_links_inputs_pack_against_binary_exports(
     tu.target_id = "target://libfoo.so"
     pack = _write_inputs_pack(tmp_path, [tu])
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+    snap.declarations.functions.append(
+        Function(name="foo", mangled="_Z3foov", return_type="void")
+    )
 
     embed_build_source(snap, pack, None)
 
@@ -448,7 +452,9 @@ def test_compare_side_pack_relinks_inputs_against_binary_exports(
     tu.target_id = "target://libfoo.so"  # match manifest library for validation
     pack = _write_inputs_pack(tmp_path, [tu])
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+    snap.declarations.functions.append(
+        Function(name="foo", mangled="_Z3foov", return_type="void")
+    )
 
     side = _resolve_side_pack(pack, None, snap)
     assert side is not None and side.source_abi is not None
@@ -485,7 +491,9 @@ def test_dump_inputs_preserves_source_edges_coverage_across_export_relink(
     ]
     pack = _write_inputs_pack(tmp_path, [tu])  # no exported_symbols -> relink runs
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+    snap.declarations.functions.append(
+        Function(name="foo", mangled="_Z3foov", return_type="void")
+    )
 
     embed_inputs_pack(snap, pack, tmp_path / "out.json")
 
@@ -511,7 +519,9 @@ def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
 
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+    snap.declarations.functions.append(
+        Function(name="foo", mangled="_Z3foov", return_type="void")
+    )
     out = tmp_path / "baseline.json"
     _write_snapshot_output(snap, out, inputs_pack=pack)
 
@@ -932,7 +942,9 @@ def _artifact_snapshot(tmp_path: Path) -> Path:
     from abicheck.serialization import snapshot_to_json
 
     snap = AbiSnapshot(library="libfoo.so", version="1.0")
-    snap.functions.append(Function(name="foo", mangled="_Z3foov", return_type="void"))
+    snap.declarations.functions.append(
+        Function(name="foo", mangled="_Z3foov", return_type="void")
+    )
     out = tmp_path / "libfoo.bin.json"
     out.write_text(snapshot_to_json(snap), encoding="utf-8")
     return out
@@ -977,7 +989,7 @@ def test_merge_ingests_flow2_pack(tmp_path: Path) -> None:
     _run_merge(tmp_path, [bin_json, pack], out)
     baseline = load_snapshot(out)
     # Base ABI surface preserved.
-    assert any(f.mangled == "_Z3foov" for f in baseline.functions)
+    assert any(f.mangled == "_Z3foov" for f in baseline.declarations.functions)
     # Source-side L3/L4 facts folded in.
     assert baseline.build_source is not None
     assert baseline.build_source.source_abi is not None

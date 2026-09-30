@@ -85,8 +85,8 @@ def _run(old: AbiSnapshot, new: AbiSnapshot, o: RecordType, n: RecordType):
         o.name,
         o,
         n,
-        record_layout_index(old.semantic_ir, old.types),
-        record_layout_index(new.semantic_ir, new.types),
+        record_layout_index(old.canonical_ir, old.declarations.types),
+        record_layout_index(new.canonical_ir, new.declarations.types),
     )
     return [(c.kind, c.old_value, c.new_value) for c in got]
 
@@ -119,10 +119,10 @@ def test_the_ir_is_the_authority_not_the_record() -> None:
     o, n = _record("R", 32, 32), _record("R", 32, 32)
     old, new = _snap([o], with_ir=True), _snap([n], with_ir=True)
     occ = OccurrenceId(n.entity_id)
-    entity = new.semantic_ir.occurrences[occ]
+    entity = new.canonical_ir.occurrences[occ]
     new_ir = SemanticIR(
         occurrences={
-            **new.semantic_ir.occurrences,
+            **new.canonical_ir.occurrences,
             occ: dataclasses.replace(entity, size_bits=Fact.present(64)),
         }
     )
@@ -151,7 +151,7 @@ def test_backfilled_layout_reaches_the_ir_at_construction() -> None:
     )
     filled = dataclasses.replace(bare, size_bits=64, alignment_bits=32)
     snap = AbiSnapshot(library="l", version="1", types=[filled], semantic_ir=ir)
-    entity = snap.semantic_ir.occurrences[OccurrenceId(bare.entity_id)]
+    entity = snap.canonical_ir.occurrences[OccurrenceId(bare.entity_id)]
     assert entity.size_bits == Fact.present(64)
     assert entity.alignment_bits == Fact.present(32)
 
@@ -186,12 +186,12 @@ def test_conflicting_records_under_one_identity_fill_nothing() -> None:
 class TestCodec:
     def test_round_trip_writes_version_2_and_layout_only_for_records(self) -> None:
         snap = _snap([_record("R", 64, 32)], with_ir=True)
-        doc = semantic_ir_to_document(snap.semantic_ir, {})
+        doc = semantic_ir_to_document(snap.canonical_ir, {})
         assert doc["semantic_ir"]["version"] == 2
         entity = doc["semantic_ir"]["occurrences"][0]["entity"]
         assert entity["size_bits"]["value"] == 64
         ir, _ = semantic_ir_from_document(json.loads(json.dumps(doc)))
-        assert ir == snap.semantic_ir
+        assert ir == snap.canonical_ir
 
     def test_a_version_1_document_loads_and_is_filled_from_its_records(self) -> None:
         snap = _snap([_record("R", 64, 32)], with_ir=True)
@@ -204,7 +204,7 @@ class TestCodec:
         assert LEGACY_LAYOUT_DIAGNOSTIC in entity.size_bits.diagnostics
         loaded = snapshot_from_dict(d)
         assert next(
-            iter(loaded.semantic_ir.occurrences.values())
+            iter(loaded.canonical_ir.occurrences.values())
         ).size_bits == Fact.present(64)
 
     @pytest.mark.parametrize("bad", [True, "64", 6.4])

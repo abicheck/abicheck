@@ -114,7 +114,7 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
 
     def test_loading_a_raw_pre_strip_snapshot_strips_and_renumbers_it(self) -> None:
         loaded = snapshot_from_dict(self._raw_legacy_dict(522))
-        qualified = loaded.types[0].qualified_name
+        qualified = loaded.declarations.types[0].qualified_name
         assert qualified is not None
         assert "#" in qualified
         assert " at " not in qualified
@@ -134,7 +134,7 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
 
         loaded = load_snapshot(path)
 
-        qualified = loaded.types[0].qualified_name
+        qualified = loaded.declarations.types[0].qualified_name
         assert qualified is not None
         assert "#" in qualified
         assert " at " not in qualified
@@ -171,8 +171,14 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
         normalize_anonymous_type_spellings_on_load(fresh)
         renumber_anonymous_closure_identities(fresh)
 
-        assert legacy_baseline.types[0].qualified_name == fresh.types[0].qualified_name
-        assert legacy_baseline.functions[0].mangled == fresh.functions[0].mangled
+        assert (
+            legacy_baseline.declarations.types[0].qualified_name
+            == fresh.types[0].qualified_name
+        )
+        assert (
+            legacy_baseline.declarations.functions[0].mangled
+            == fresh.functions[0].mangled
+        )
 
         result = compare(legacy_baseline, fresh)
         noisy_kinds = {
@@ -217,7 +223,7 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
         normalize_anonymous_type_spellings_on_load(fresh)
         renumber_anonymous_closure_identities(fresh)
 
-        assert legacy_baseline.types[0].name == fresh.types[0].name
+        assert legacy_baseline.declarations.types[0].name == fresh.types[0].name
 
         result = compare(legacy_baseline, fresh)
         noisy_kinds = {ChangeKind.TYPE_REMOVED, ChangeKind.TYPE_ADDED}
@@ -233,18 +239,18 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
             version="2022.3.0",
             types=[_record(f"raii_guard<{_closure('task_group.h', 539, 26)}>")],
         )
-        before = already_stripped.types[0].name
+        before = already_stripped.declarations.types[0].name
         normalize_anonymous_type_spellings_on_load(already_stripped)
-        assert already_stripped.types[0].name == before
+        assert already_stripped.declarations.types[0].name == before
 
         already_ordinal = AbiSnapshot(
             library="libtbb.so",
             version="2022.3.0",
             types=[_record("raii_guard<(lambda:task_group.h#1)>")],
         )
-        before = already_ordinal.types[0].name
+        before = already_ordinal.declarations.types[0].name
         normalize_anonymous_type_spellings_on_load(already_ordinal)
-        assert already_ordinal.types[0].name == before
+        assert already_ordinal.declarations.types[0].name == before
 
     def test_multiple_raw_lambdas_in_one_header_still_get_distinct_ordinals(
         self,
@@ -265,7 +271,7 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
             "types": [{"name": n, "kind": "class"} for n in raw_names],
         }
         loaded = snapshot_from_dict(legacy_dict)
-        loaded_names = [t.name for t in loaded.types]
+        loaded_names = [t.name for t in loaded.declarations.types]
 
         stripped_then_renumbered = [
             f"raii_guard<{_closure('task_group.h', line, 26)}>"
@@ -277,7 +283,7 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
             types=[_record(n) for n in stripped_then_renumbered],
         )
         renumber_anonymous_closure_identities(expected_snapshot)
-        expected_names = [t.name for t in expected_snapshot.types]
+        expected_names = [t.name for t in expected_snapshot.declarations.types]
 
         assert loaded_names == expected_names
         # Every entry actually got an ordinal -- none left in :line:col form.

@@ -31,6 +31,7 @@ frozen as a binding, and the canonical per-occurrence facts
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -100,7 +101,9 @@ _BUILDER_INPUT_ORDER = (
 )
 
 
-def attach_declarations(snapshot: Any, builder_inputs: tuple[object, ...]) -> None:
+def attach_declarations(
+    snapshot: Any, builder_inputs: tuple[object, ...], empty_ir: Callable[[], Any]
+) -> None:
     """``AbiSnapshot.__post_init__``'s first step: give the snapshot an IR
     that owns a declaration store built from its builder inputs.
 
@@ -110,12 +113,10 @@ def attach_declarations(snapshot: Any, builder_inputs: tuple[object, ...]) -> No
     never share one store -- the same "new containers, same declaration
     objects" semantics ``replace`` had when these were plain fields.
     """
-    from .semantic_ir import SemanticIR
-
     given = dict(zip(_BUILDER_INPUT_ORDER, builder_inputs, strict=True))
     ir = snapshot.__dict__.get("semantic_ir")
     if ir is None:
-        ir = SemanticIR(canonical=False)
+        ir = empty_ir()
     base = ir.declarations
     values: dict[str, Any] = {
         kind: (

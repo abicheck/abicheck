@@ -1656,8 +1656,8 @@ class TestDumpPe:
             with patch("abicheck.pdb_utils.locate_pdb", return_value=None):
                 result = _dump_pe(p, "1.0")
         assert result.platform == "pe"
-        assert len(result.functions) == 1
-        assert result.functions[0].name == "MyFunc"
+        assert len(result.declarations.functions) == 1
+        assert result.declarations.functions[0].name == "MyFunc"
 
     def test_pe_import_error(self, tmp_path):
         from abicheck.service import _dump_pe
@@ -1697,7 +1697,7 @@ class TestDumpPe:
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
             with patch("abicheck.pdb_utils.locate_pdb", return_value=None):
                 result = _dump_pe(p, "1.0")
-        assert result.functions[0].name == "ordinal:42"
+        assert result.declarations.functions[0].name == "ordinal:42"
 
     def test_pdb_found_and_parsed(self, tmp_path):
         from abicheck.service import _dump_pe
@@ -1754,7 +1754,7 @@ class TestDumpPe:
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
             with patch("abicheck.pdb_utils.locate_pdb", return_value=None):
                 result = _dump_pe(p, "1.0")
-        assert result.functions[0].is_extern_c is False
+        assert result.declarations.functions[0].is_extern_c is False
 
 
 # ── _dump_macho() ───────────────────────────────────────────────────────────
@@ -1777,7 +1777,7 @@ class TestDumpMacho:
         ):
             result = _dump_macho(p, "1.0")
         assert result.platform == "macho"
-        assert len(result.functions) == 1
+        assert len(result.declarations.functions) == 1
 
     def test_no_exports_no_metadata_raises(self, tmp_path):
         from abicheck.service import _dump_macho
@@ -1823,7 +1823,7 @@ class TestDumpMacho:
             "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
         ):
             result = _dump_macho(p, "1.0")
-        assert len(result.functions) == 1
+        assert len(result.declarations.functions) == 1
 
     def test_cpp_symbol_not_extern_c(self, tmp_path):
         from abicheck.service import _dump_macho
@@ -1840,7 +1840,7 @@ class TestDumpMacho:
             "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
         ):
             result = _dump_macho(p, "1.0")
-        assert result.functions[0].is_extern_c is False
+        assert result.declarations.functions[0].is_extern_c is False
 
 
 # ── collect_metadata() ──────────────────────────────────────────────────────
@@ -3892,11 +3892,11 @@ class TestPeHeaderScoping:
         called_headers = mock_dump.call_args.args[1]
         assert called_headers == [tmp_path / "api.h"]
         # Surface is scoped: private export absent, public symbol present.
-        names = [f.name for f in result.functions]
+        names = [f.name for f in result.declarations.functions]
         assert "PublicApiFunc" in names
         assert "InternalPrivateFunc" not in names
         # Type info preserved so reachable layout changes still diff.
-        assert any(t.name == "PublicStruct" for t in result.types)
+        assert any(t.name == "PublicStruct" for t in result.declarations.types)
 
     def test_private_export_absent_from_headers_not_compared(self, tmp_path):
         """An exported-but-private symbol removed in 'new' must not surface."""
@@ -3952,7 +3952,7 @@ class TestPeHeaderScoping:
                 result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         # Fell back to the full export table.
-        names = [f.name for f in result.functions]
+        names = [f.name for f in result.declarations.functions]
         assert "?realFunc@@YAHXZ" in names
 
     def test_fallback_when_castxml_unavailable(self, tmp_path):
@@ -3975,7 +3975,7 @@ class TestPeHeaderScoping:
             ):
                 result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
-        names = [f.name for f in result.functions]
+        names = [f.name for f in result.declarations.functions]
         assert "PublicApiFunc" in names
 
     def test_no_headers_uses_export_table(self, tmp_path):
@@ -3994,9 +3994,11 @@ class TestPeHeaderScoping:
             result = _dump_pe(p, "1.0")
 
         assert not mock_dump.called  # castxml path never taken
-        names = {f.name for f in result.functions}
+        names = {f.name for f in result.declarations.functions}
         assert names == {"PublicApiFunc", "InternalPrivateFunc"}
-        assert all(f.visibility == Visibility.PUBLIC for f in result.functions)
+        assert all(
+            f.visibility == Visibility.PUBLIC for f in result.declarations.functions
+        )
 
     def test_pdb_debug_preserved_on_scoped_snapshot(self, tmp_path):
         from abicheck.service import _dump_pe
@@ -4085,7 +4087,7 @@ class TestMachoHeaderScoping:
             result = _dump_macho(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert mock_dump.called
-        assert [f.name for f in result.functions] == ["publicFn"]
+        assert [f.name for f in result.declarations.functions] == ["publicFn"]
 
     def test_fallback_when_no_header_match(self, tmp_path):
         from abicheck.service import _dump_macho
@@ -4111,7 +4113,7 @@ class TestMachoHeaderScoping:
             ):
                 result = _dump_macho(p, "1.0", headers=[_mk_header(tmp_path)])
 
-        assert [f.name for f in result.functions] == ["_publicFn"]
+        assert [f.name for f in result.declarations.functions] == ["_publicFn"]
 
 
 class TestRunDumpHeaderWiring:

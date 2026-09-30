@@ -471,7 +471,7 @@ def test_the_effective_total_agrees_with_the_verdict(
     old = AbiSnapshot(library="libmatrix", version="1.0")
     new = AbiSnapshot(library="libmatrix", version="2.0")
     for i in range(removed):
-        old.functions.append(
+        old.declarations.functions.append(
             Function(
                 name=f"gone{i}",
                 mangled=f"_Z4gone{i}v",
@@ -480,7 +480,7 @@ def test_the_effective_total_agrees_with_the_verdict(
             )
         )
     for i in range(added):
-        new.functions.append(
+        new.declarations.functions.append(
             Function(
                 name=f"new{i}",
                 mangled=f"_Z3new{i}v",

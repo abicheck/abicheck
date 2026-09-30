@@ -84,7 +84,7 @@ def test_distinct_members_round_trip(tmp_path) -> None:
     assert set(back.per_library_snapshots) == set(per)
     for name, snap in per.items():
         assert [f.name for f in back.per_library_snapshots[name].functions] == [
-            f.name for f in snap.functions
+            f.name for f in snap.declarations.functions
         ]
 
 

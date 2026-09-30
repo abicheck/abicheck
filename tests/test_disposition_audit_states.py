@@ -61,15 +61,15 @@ def _snapshots(
         )
 
     for i in range(removed):
-        old.functions.append(_fn(f"gone{i}"))
+        old.declarations.functions.append(_fn(f"gone{i}"))
     for i in range(kept):
         fn = _fn(f"stay{i}")
-        old.functions.append(fn)
-        new.functions.append(_fn(f"stay{i}"))
+        old.declarations.functions.append(fn)
+        new.declarations.functions.append(_fn(f"stay{i}"))
     for i in range(added):
-        new.functions.append(_fn(f"new{i}"))
+        new.declarations.functions.append(_fn(f"new{i}"))
     for i in range(variables_removed):
-        old.variables.append(
+        old.declarations.variables.append(
             Variable(
                 name=f"{prefix}::var{i}",
                 mangled=f"_ZN3{prefix}3var{i}E",
@@ -398,7 +398,7 @@ def test_the_plugin_host_entry_point_closes_its_own_scope() -> None:
     old, new = _snapshots(removed=2, prefix="plug")
     # The host requires only the first of the two removed entrypoints; the
     # other removal is real, observed, and irrelevant to this contract.
-    required = old.functions[0].mangled
+    required = old.declarations.functions[0].mangled
     scoped = check_plugin_host_contract(old, new, [required])
 
     diff = scoped.full_diff

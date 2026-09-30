@@ -35,8 +35,8 @@ def test_dump_without_headers_logs_info_and_returns_exported_symbols(
 
     assert not any("No headers provided" in str(w.message) for w in caught)
     assert any("No headers provided" in rec.message for rec in caplog.records)
-    assert [f.name for f in snap.functions] == ["a_sym", "z_sym"]
-    assert all(f.visibility == Visibility.ELF_ONLY for f in snap.functions)
+    assert [f.name for f in snap.declarations.functions] == ["a_sym", "z_sym"]
+    assert all(f.visibility == Visibility.ELF_ONLY for f in snap.declarations.functions)
 
 
 class _FakeParser:
@@ -112,9 +112,9 @@ def test_dump_with_headers_uses_castxml_parser_results(tmp_path, monkeypatch):
     )
 
     assert snap.version == "2.0"
-    assert len(snap.functions) == 1
-    assert snap.functions[0].mangled == "_Z3foov"
-    assert snap.typedefs == {"SizeT": "unsigned long"}
+    assert len(snap.declarations.functions) == 1
+    assert snap.declarations.functions[0].mangled == "_Z3foov"
+    assert snap.declarations.typedefs == {"SizeT": "unsigned long"}
 
 
 def test_dump_with_headers_propagates_castxml_error(tmp_path, monkeypatch):

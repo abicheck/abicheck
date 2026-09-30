@@ -138,7 +138,7 @@ def _snapshot(combo: tuple[int, ...]) -> AbiSnapshot:
         value = factory()  # type: ignore[operator]
         if bucket == "typedefs":
             alias, target = value
-            snap.typedefs[alias] = target
+            snap.declarations.typedefs[alias] = target
         else:
             getattr(snap, bucket).append(value)
     return snap

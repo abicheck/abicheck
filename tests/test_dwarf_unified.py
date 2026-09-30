@@ -355,9 +355,9 @@ class TestDwarfSession:
 
         assert snapshot_to_json(snap_a) == snapshot_to_json(snap_b)
         # And the snapshot genuinely exercised the type/function/enum paths.
-        assert snap_b.types
-        assert snap_b.functions
-        assert snap_b.enums
+        assert snap_b.declarations.types
+        assert snap_b.declarations.functions
+        assert snap_b.declarations.enums
 
     def test_snapshot_usable_after_session_closed(self, tmp_path: Path) -> None:
         """The built snapshot holds extracted model objects, not live DIEs, so it

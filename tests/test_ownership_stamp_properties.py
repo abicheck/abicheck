@@ -104,13 +104,13 @@ def test_owner_matches_the_oracle_and_ignores_every_order(case) -> None:
     stamp_ownership(first, _request(roots, order_a))
 
     second = _snapshot(files)
-    second.functions.reverse()
-    rng.shuffle(second.types)
+    second.declarations.functions.reverse()
+    rng.shuffle(second.declarations.types)
     stamp_ownership(second, _request(roots, order_b))
 
     def by_name(snap: AbiSnapshot) -> dict[str, tuple[str, str]]:
         out = {}
-        for d in (*snap.functions, *snap.types):
+        for d in (*snap.declarations.functions, *snap.declarations.types):
             decision = ownership_of(d)
             assert decision is not None  # every declaration is classified
             out[d.name] = (decision.owner, decision.contract)
@@ -149,7 +149,7 @@ def test_recorded_roots_are_relative_to_the_project_root() -> None:
     # form, which on Windows carries the current drive.
     outside = Path(os.path.abspath("/elsewhere/include")).as_posix()
     assert snap.extraction_scope.ownership_rules.target_roots == ("inc", outside)
-    decision = ownership_of(snap.functions[0])
+    decision = ownership_of(snap.declarations.functions[0])
     assert decision is not None and decision.rule_id == "target_root:inc"
 
 
@@ -203,5 +203,5 @@ def test_castxml_leaf_name_gets_its_scope_from_the_linker_name() -> None:
             )
         ),
     )
-    contracts = {f.name: ownership_of(f).contract for f in snap.functions}  # type: ignore[union-attr]
+    contracts = {f.name: ownership_of(f).contract for f in snap.declarations.functions}  # type: ignore[union-attr]
     assert contracts == {"hidden": "private", "shown": "public", "c_api": "public"}

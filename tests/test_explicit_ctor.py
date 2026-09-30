@@ -120,7 +120,7 @@ class TestExplicitCtor:
             "types": [],
         }
         snap = snapshot_from_dict(d)
-        assert snap.functions[0].is_explicit is None
+        assert snap.declarations.functions[0].is_explicit is None
 
     def test_castxml_converter_fallback_reads_multiline_explicit_operator(
         self, tmp_path

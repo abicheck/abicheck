@@ -92,7 +92,7 @@ class TestFunctionCaseBFactRoundTrip:
         fn = Function(
             name="f", mangled="_Z1fv", return_type="void", **{field_name: value}
         )
-        r = _round_trip(_make_snap(functions=[fn])).functions[0]
+        r = _round_trip(_make_snap(functions=[fn])).declarations.functions[0]
         assert getattr(r, field_name) == value
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.PRESENT
@@ -103,7 +103,7 @@ class TestFunctionCaseBFactRoundTrip:
         self, field_name: str, _value: object
     ) -> None:
         fn = Function(name="f", mangled="_Z1fv", return_type="void")
-        r = _round_trip(_make_snap(functions=[fn])).functions[0]
+        r = _round_trip(_make_snap(functions=[fn])).declarations.functions[0]
         assert getattr(r, field_name) is None
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.NOT_COLLECTED
@@ -118,7 +118,7 @@ class TestFunctionCaseBFactRoundTrip:
             return_type="void",
             **{f"{field_name}_fact": Fact.unsupported("DWARF-only")},
         )
-        r = _round_trip(_make_snap(functions=[fn])).functions[0]
+        r = _round_trip(_make_snap(functions=[fn])).declarations.functions[0]
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.UNSUPPORTED
         assert fact.diagnostics == ("DWARF-only",)
@@ -139,7 +139,7 @@ class TestFunctionCaseBFactRoundTrip:
                 }
             ],
         )
-        r = snapshot_from_dict(d).functions[0]
+        r = snapshot_from_dict(d).declarations.functions[0]
         assert getattr(r, field_name) == value
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.PRESENT
@@ -153,7 +153,7 @@ class TestFunctionCaseBFactRoundTrip:
             schema_version=33,
             functions=[{"name": "f", "mangled": "_Z1fv", "return_type": "void"}],
         )
-        r = snapshot_from_dict(d).functions[0]
+        r = snapshot_from_dict(d).declarations.functions[0]
         assert getattr(r, field_name) is None
         fact = getattr(r, f"{field_name}_fact")
         assert fact.status is FactStatus.NOT_COLLECTED
@@ -174,9 +174,9 @@ class TestFunctionCaseBFactRoundTrip:
             ],
         )
         snap = snapshot_from_dict(d)
-        fact = getattr(snap.functions[0], f"{field_name}_fact")
+        fact = getattr(snap.declarations.functions[0], f"{field_name}_fact")
         assert fact.status is FactStatus.NOT_COLLECTED
-        assert getattr(snap.functions[0], field_name) is None
+        assert getattr(snap.declarations.functions[0], field_name) is None
 
     @pytest.mark.parametrize("field_name,value", _CASE_B_FIELDS)
     def test_snapshot_to_dict_encodes_status_as_plain_string(
@@ -200,7 +200,7 @@ class TestFunctionCaseBFactRoundTrip:
             return_type="void",
             elf_binding=SymbolBinding.WEAK,
         )
-        r = _round_trip(_make_snap(functions=[fn])).functions[0]
+        r = _round_trip(_make_snap(functions=[fn])).declarations.functions[0]
         assert r.elf_binding_fact.value is SymbolBinding.WEAK
         assert r.elf_binding is SymbolBinding.WEAK
 

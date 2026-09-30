@@ -89,7 +89,7 @@ def test_real_compare_never_sets_evolution() -> None:
     output must be indistinguishable from any other pre-ADR-068 result."""
     old = AbiSnapshot(library="libfoo", version="1.0")
     new = AbiSnapshot(library="libfoo", version="2.0")
-    old.functions.append(
+    old.declarations.functions.append(
         Function(
             name="foo::gone",
             mangled="_ZN3foo4goneEv",

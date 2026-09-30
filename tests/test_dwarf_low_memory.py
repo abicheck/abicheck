@@ -280,8 +280,8 @@ class TestLowMemoryModeIsOutputNeutral:
             sess_b.close()
 
         assert snapshot_to_json(snap_a) == snapshot_to_json(snap_b)
-        assert snap_b.types
-        assert snap_b.functions
+        assert snap_b.declarations.types
+        assert snap_b.declarations.functions
 
     def test_low_memory_snapshot_matches_non_low_memory_direct_open(
         self,

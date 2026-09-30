@@ -194,8 +194,8 @@ class TestTheUnmodifiedDescriptorCompiles:
         snap = load_snapshot(out)
         # The declaration only parses when <dii_dfti.h> resolved, which only
         # happens when the descriptor's own <headers> root was searched.
-        assert any(f.name == "dii_api" for f in snap.functions), [
-            f.name for f in snap.functions
+        assert any(f.name == "dii_api" for f in snap.declarations.functions), [
+            f.name for f in snap.declarations.functions
         ]
 
 

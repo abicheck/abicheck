@@ -184,15 +184,19 @@ class TestMachoExportOnlyEntityId:
             snap = dumper._dump_macho(dylib, [], [], "1.0", "c++")
 
         assert snap.from_headers is False
-        mangled_fn = next(f for f in snap.functions if f.mangled == "_Z3addii")
+        mangled_fn = next(
+            f for f in snap.declarations.functions if f.mangled == "_Z3addii"
+        )
         assert mangled_fn.entity_id is not None
         assert mangled_fn.entity_id.extra == ("mangled", "_Z3addii")
 
-        plain_fn = next(f for f in snap.functions if f.name == "plain_c_fn")
+        plain_fn = next(
+            f for f in snap.declarations.functions if f.name == "plain_c_fn"
+        )
         assert plain_fn.entity_id is not None
         assert plain_fn.entity_id.extra == ("extern_c",)
 
-        var = next(v for v in snap.variables if v.name == "plain_c_var")
+        var = next(v for v in snap.declarations.variables if v.name == "plain_c_var")
         assert var.entity_id is not None
         assert var.entity_id.kind == EntityKind.VARIABLE
         assert var.entity_id.extra == ("extern_c",)
@@ -219,15 +223,19 @@ class TestPeExportOnlyEntityId:
             snap = dumper._dump_pe(dll, [], [], "1.0", "c++")
 
         assert snap.from_headers is False
-        mangled_fn = next(f for f in snap.functions if f.name == "?add@@YAHHH@Z")
+        mangled_fn = next(
+            f for f in snap.declarations.functions if f.name == "?add@@YAHHH@Z"
+        )
         assert mangled_fn.entity_id is not None
         assert mangled_fn.entity_id.extra == ("mangled", "?add@@YAHHH@Z")
 
-        plain_fn = next(f for f in snap.functions if f.name == "PlainExport")
+        plain_fn = next(
+            f for f in snap.declarations.functions if f.name == "PlainExport"
+        )
         assert plain_fn.entity_id is not None
         assert plain_fn.entity_id.extra == ("extern_c",)
 
-        mingw_fn = next(f for f in snap.functions if f.name == "_Z3subii")
+        mingw_fn = next(f for f in snap.declarations.functions if f.name == "_Z3subii")
         assert mingw_fn.entity_id is not None
         assert mingw_fn.entity_id.extra == ("mangled", "_Z3subii")
 
@@ -245,7 +253,7 @@ class TestPeExportOnlyEntityId:
         with patch.object(_pe, "parse_pe_metadata", return_value=meta):
             snap = dumper._dump_pe(dll, [], [], "1.0", "c")
 
-        fn = next(f for f in snap.functions if f.name == "_f@4")
+        fn = next(f for f in snap.declarations.functions if f.name == "_f@4")
         assert fn.entity_id is not None
         assert fn.entity_id.leaf_name == "f"
 
@@ -266,6 +274,6 @@ class TestPeExportOnlyEntityId:
         with patch.object(_pe, "parse_pe_metadata", return_value=meta):
             snap = dumper._dump_pe(dll, [], [], "1.0", "c")
 
-        fn = next(f for f in snap.functions if f.name == "_secret")
+        fn = next(f for f in snap.declarations.functions if f.name == "_secret")
         assert fn.entity_id is not None
         assert fn.entity_id.leaf_name == "_secret"

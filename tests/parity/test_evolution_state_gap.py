@@ -87,7 +87,7 @@ def test_f9_resolved_is_expressible_via_the_generic_primitive() -> None:
     """
     baseline = AbiSnapshot(library="libfoo", version="0.0")
     with_issue = AbiSnapshot(library="libfoo", version="1.0")
-    with_issue.functions.append(
+    with_issue.declarations.functions.append(
         Function(
             name="foo::gone",
             mangled="_ZN3foo4goneEv",

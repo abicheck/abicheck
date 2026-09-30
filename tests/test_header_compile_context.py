@@ -1900,7 +1900,7 @@ def test_e2e_forced_cxx_dump_succeeds_against_c_compile_unit_std(
     snap = service.run_dump_request(req)
     assert snap.from_headers is True
     assert snap.parsed_with_build_context is True
-    widget = next(t for t in snap.types if t.name == "Widget")
+    widget = next(t for t in snap.declarations.types if t.name == "Widget")
     assert [f.name for f in widget.fields] == ["x", "y"]
 
 

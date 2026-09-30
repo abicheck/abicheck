@@ -111,6 +111,7 @@ class TestDwarfLayoutTypesOrEmpty:
 
         class _FakeSnap:
             types = expected
+            declarations = property(lambda self: self)
 
         calls = []
 
@@ -157,6 +158,7 @@ class TestDwarfLayoutTypesOrEmpty:
 
         class _FakeSnap:
             types = expected
+            declarations = property(lambda self: self)
 
         monkeypatch.setattr(
             dwarf_snapshot,

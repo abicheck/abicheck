@@ -85,7 +85,7 @@ class TestHeaderVsDwarfParamKindNoLongerManufacturesChanges:
         headers_snap = dump(so_path, [header])
         dwarf_snap = dump(so_path, [])
 
-        by_name = {f.name: f for f in headers_snap.functions}
+        by_name = {f.name: f for f in headers_snap.declarations.functions}
         for name in ("take_ptr", "free_s"):
             assert by_name[name].params[0].kind is ParamKind.POINTER, (
                 "castxml must now determine a pointer parameter's real kind "
@@ -154,8 +154,8 @@ class TestTypedefWrappedParamKindAgreesAcrossProducers:
         headers_snap = dump(so_path, [header])
         dwarf_snap = dump(so_path, [])
 
-        headers_by_name = {f.name: f for f in headers_snap.functions}
-        dwarf_by_name = {f.name: f for f in dwarf_snap.functions}
+        headers_by_name = {f.name: f for f in headers_snap.declarations.functions}
+        dwarf_by_name = {f.name: f for f in dwarf_snap.declarations.functions}
         for fname, expected in (
             ("take_ref", ParamKind.REFERENCE),
             ("take_rref", ParamKind.RVALUE_REF),
@@ -198,8 +198,8 @@ class TestTypedefWrappedParamKindAgreesAcrossProducers:
         castxml_snap = dump(so_path, [header], header_backend="castxml")
         clang_snap = dump(so_path, [header], header_backend="clang")
 
-        castxml_by_name = {f.name: f for f in castxml_snap.functions}
-        clang_by_name = {f.name: f for f in clang_snap.functions}
+        castxml_by_name = {f.name: f for f in castxml_snap.declarations.functions}
+        clang_by_name = {f.name: f for f in clang_snap.declarations.functions}
         for fname, expected in (
             ("take_ref", ParamKind.REFERENCE),
             ("take_rref", ParamKind.RVALUE_REF),

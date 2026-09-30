@@ -547,9 +547,12 @@ class TestTypedApiHonorsTheFilterInTheFold:
         request = self._request(so_path, header, compile_db, compile_db_filter=pick)
         result = execute_dump_request(resolve_dump_request(request))
         fields = [
-            f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
+            f.name
+            for t in result.snapshot.declarations.types
+            if t.name == "S"
+            for f in t.fields
         ]
-        assert fields, result.snapshot.types
+        assert fields, result.snapshot.declarations.types
         assert ("b" in fields) is expects_wide_field, (pick, fields)
 
 
@@ -903,7 +906,10 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
         )
         result = execute_dump_request(resolve_dump_request(request))
         fields = [
-            f.name for t in result.snapshot.types if t.name == "S" for f in t.fields
+            f.name
+            for t in result.snapshot.declarations.types
+            if t.name == "S"
+            for f in t.fields
         ]
         assert "b" in fields, fields  # a.cpp's -DWIDE field, confirms narrowing
 

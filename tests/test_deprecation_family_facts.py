@@ -199,7 +199,7 @@ class TestDeprecatedFamilyRoundTrip:
                 }
             ],
         )
-        f = snapshot_from_dict(d).types[0].fields[0]
+        f = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert f.deprecated_fact.status is FactStatus.NOT_COLLECTED
 
 
@@ -253,7 +253,7 @@ class TestLegacyHybridProvenanceBackfill:
             ],
             fact_provenance={"type:ns::Foo:deprecated": "castxml"},
         )
-        rec = snapshot_from_dict(d).types[0]
+        rec = snapshot_from_dict(d).declarations.types[0]
         assert rec.deprecated_fact.status is FactStatus.PRESENT
 
     def test_no_provenance_entry_downgrades_a_resting_default(self) -> None:
@@ -272,7 +272,7 @@ class TestLegacyHybridProvenanceBackfill:
             ],
             fact_provenance={},
         )
-        rec = snapshot_from_dict(d).types[0]
+        rec = snapshot_from_dict(d).declarations.types[0]
         assert rec.deprecated is None
         assert rec.deprecated_fact.status is FactStatus.NOT_COLLECTED
 
@@ -295,7 +295,7 @@ class TestLegacyHybridProvenanceBackfill:
             ],
             fact_provenance={},
         )
-        rec = snapshot_from_dict(d).types[0]
+        rec = snapshot_from_dict(d).declarations.types[0]
         assert rec.deprecated == "use Bar"
         assert rec.deprecated_fact.status is FactStatus.PRESENT
 
@@ -318,7 +318,7 @@ class TestLegacyHybridProvenanceBackfill:
             ],
             fact_provenance={"type:Foo:deprecated": "castxml"},
         )
-        rec = snapshot_from_dict(d).types[0]
+        rec = snapshot_from_dict(d).declarations.types[0]
         assert rec.deprecated_fact.status is FactStatus.PRESENT
 
     def test_bare_key_fallback_declined_when_ambiguous(self) -> None:
@@ -347,7 +347,7 @@ class TestLegacyHybridProvenanceBackfill:
             ],
             fact_provenance={"type:Foo:deprecated": "castxml"},
         )
-        recs = snapshot_from_dict(d).types
+        recs = snapshot_from_dict(d).declarations.types
         assert {r.deprecated_fact.status for r in recs} == {FactStatus.NOT_COLLECTED}
 
     def test_typefield_deprecated_uses_owning_type_provenance_key(self) -> None:
@@ -375,7 +375,7 @@ class TestLegacyHybridProvenanceBackfill:
             ],
             fact_provenance={"type:ns::Foo:field:m:deprecated": "clang"},
         )
-        field = snapshot_from_dict(d).types[0].fields[0]
+        field = snapshot_from_dict(d).declarations.types[0].fields[0]
         assert field.deprecated_fact.status is FactStatus.PRESENT
 
     def test_function_and_variable_use_mangled_name_key(self) -> None:
@@ -399,8 +399,14 @@ class TestLegacyHybridProvenanceBackfill:
             fact_provenance={},
         )
         snap = snapshot_from_dict(d)
-        assert snap.functions[0].deprecated_fact.status is FactStatus.NOT_COLLECTED
-        assert snap.variables[0].deprecated_fact.status is FactStatus.NOT_COLLECTED
+        assert (
+            snap.declarations.functions[0].deprecated_fact.status
+            is FactStatus.NOT_COLLECTED
+        )
+        assert (
+            snap.declarations.variables[0].deprecated_fact.status
+            is FactStatus.NOT_COLLECTED
+        )
 
     def test_enum_is_scoped_uses_the_enum_provenance_key(self) -> None:
         d = _minimal_dict(
@@ -417,7 +423,7 @@ class TestLegacyHybridProvenanceBackfill:
             ],
             fact_provenance={"enum:ns::Color:is_scoped": "clang"},
         )
-        e = snapshot_from_dict(d).enums[0]
+        e = snapshot_from_dict(d).declarations.enums[0]
         assert e.is_scoped_fact.status is FactStatus.PRESENT
 
     def test_non_hybrid_producer_is_unaffected(self) -> None:
@@ -439,18 +445,20 @@ class TestLegacyHybridProvenanceBackfill:
             ],
             fact_provenance={},
         )
-        rec = snapshot_from_dict(d).types[0]
+        rec = snapshot_from_dict(d).declarations.types[0]
         assert rec.deprecated_fact.status is FactStatus.PRESENT
 
 
 class TestEnumIsScopedFact:
     def test_explicit_value_round_trips_present(self) -> None:
-        e = _round_trip(_make_snap(enums=[EnumType(name="E", is_scoped=True)])).enums[0]
+        e = _round_trip(
+            _make_snap(enums=[EnumType(name="E", is_scoped=True)])
+        ).declarations.enums[0]
         assert e.is_scoped is True
         assert e.is_scoped_fact.status is FactStatus.PRESENT
 
     def test_omitted_is_not_collected(self) -> None:
-        e = _round_trip(_make_snap(enums=[EnumType(name="E")])).enums[0]
+        e = _round_trip(_make_snap(enums=[EnumType(name="E")])).declarations.enums[0]
         assert e.is_scoped is None
         assert e.is_scoped_fact.status is FactStatus.NOT_COLLECTED
 
@@ -461,7 +469,7 @@ class TestEnumIsScopedFact:
             clang_deprecation_facts_reliable=False,
             enums=[{"name": "E", "is_scoped": False}],
         )
-        e = snapshot_from_dict(d).enums[0]
+        e = snapshot_from_dict(d).declarations.enums[0]
         assert e.is_scoped is None
         assert e.is_scoped_fact.status is FactStatus.NOT_COLLECTED
 
@@ -471,7 +479,7 @@ class TestEnumIsScopedFact:
             clang_deprecation_facts_reliable=True,
             enums=[{"name": "E", "is_scoped": False}],
         )
-        e = snapshot_from_dict(d).enums[0]
+        e = snapshot_from_dict(d).declarations.enums[0]
         assert e.is_scoped is False
         assert e.is_scoped_fact.status is FactStatus.PRESENT
 

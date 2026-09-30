@@ -129,8 +129,8 @@ class TestSerializationBenchmark:
         assert elapsed < budget_seconds, (
             f"Round-trip took {elapsed:.2f}s, expected < {budget_seconds:.0f}s"
         )
-        assert len(loaded.functions) == 1000
-        assert len(loaded.types) == 500
+        assert len(loaded.declarations.functions) == 1000
+        assert len(loaded.declarations.types) == 500
 
 
 # ===========================================================================

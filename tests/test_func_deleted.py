@@ -65,7 +65,7 @@ class TestFuncDeletedModel:
         d = snapshot_to_dict(snap)
         assert d["functions"][0]["is_deleted"] is True
         snap2 = snapshot_from_dict(d)
-        assert snap2.functions[0].is_deleted is True
+        assert snap2.declarations.functions[0].is_deleted is True
 
     def test_is_deleted_false_roundtrip(self) -> None:
         """is_deleted=False (default) must also survive roundtrip."""
@@ -75,7 +75,7 @@ class TestFuncDeletedModel:
         d = snapshot_to_dict(snap)
         assert d["functions"][0]["is_deleted"] is False
         snap2 = snapshot_from_dict(d)
-        assert snap2.functions[0].is_deleted is False
+        assert snap2.declarations.functions[0].is_deleted is False
 
 
 class TestFuncDeletedChangeKind:

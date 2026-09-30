@@ -217,7 +217,7 @@ class TestAnonUnionFalsePositive:
         """Anonymous union fields share the same offset_bits."""
         new = _snap_v2_anon_union_added()
         # In v2, x and y both have offset_bits=0 (union semantics)
-        s_new = new.types[0]
+        s_new = new.declarations.types[0]
         x_field = next(f for f in s_new.fields if f.name == "x")
         y_field = next(f for f in s_new.fields if f.name == "y")
         assert x_field.offset_bits == y_field.offset_bits == 0

@@ -183,6 +183,6 @@ class TestOrphanStruct:
         )
         d = snapshot_to_dict(snap)
         snap2 = snapshot_from_dict(d)
-        assert len(snap2.types) == 1
-        assert snap2.types[0].name == "Orphan"
-        assert snap2.types[0].fields[0].name == "x"
+        assert len(snap2.declarations.types) == 1
+        assert snap2.declarations.types[0].name == "Orphan"
+        assert snap2.declarations.types[0].fields[0].name == "x"

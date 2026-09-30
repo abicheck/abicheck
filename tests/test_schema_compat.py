@@ -50,9 +50,9 @@ class TestLoadAllVersions:
         snap = snapshot_from_dict(d)
         assert snap.library == "libcompat.so.1"
         assert snap.version == "1.0.0"
-        assert len(snap.functions) == 2
-        assert len(snap.types) == 1
-        assert len(snap.enums) == 1
+        assert len(snap.declarations.functions) == 2
+        assert len(snap.declarations.types) == 1
+        assert len(snap.declarations.enums) == 1
 
     @pytest.mark.parametrize("fixture", SCHEMA_VERSIONS)
     def test_self_compare_no_change(self, fixture):
@@ -65,22 +65,22 @@ class TestLoadAllVersions:
     def test_functions_correct(self, fixture):
         d = _load_fixture(fixture)
         snap = snapshot_from_dict(d)
-        names = {f.name for f in snap.functions}
+        names = {f.name for f in snap.declarations.functions}
         assert names == {"compat_init", "compat_free"}
 
     @pytest.mark.parametrize("fixture", SCHEMA_VERSIONS)
     def test_types_correct(self, fixture):
         d = _load_fixture(fixture)
         snap = snapshot_from_dict(d)
-        assert snap.types[0].name == "compat_config"
-        assert len(snap.types[0].fields) == 2
+        assert snap.declarations.types[0].name == "compat_config"
+        assert len(snap.declarations.types[0].fields) == 2
 
     @pytest.mark.parametrize("fixture", SCHEMA_VERSIONS)
     def test_enums_correct(self, fixture):
         d = _load_fixture(fixture)
         snap = snapshot_from_dict(d)
-        assert snap.enums[0].name == "compat_status"
-        assert len(snap.enums[0].members) == 2
+        assert snap.declarations.enums[0].name == "compat_status"
+        assert len(snap.declarations.enums[0].members) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +150,9 @@ class TestReserialization:
         snap = snapshot_from_dict(d)
         reserialized = snapshot_to_dict(snap)
         snap2 = snapshot_from_dict(reserialized)
-        assert len(snap2.functions) == len(snap.functions)
-        assert len(snap2.types) == len(snap.types)
-        assert len(snap2.enums) == len(snap.enums)
+        assert len(snap2.declarations.functions) == len(snap.functions)
+        assert len(snap2.declarations.types) == len(snap.types)
+        assert len(snap2.declarations.enums) == len(snap.enums)
         assert snap2.library == snap.library
         assert snap2.version == snap.version
 
@@ -492,7 +492,7 @@ def _load_with_producer_and_header_confirmation(producer, header_confirmed):
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
         snap = snapshot_from_dict(d)
-    assert snap.functions, (
+    assert snap.declarations.functions, (
         "fixture must carry at least one function for from_headers to infer True"
     )
     return str(record[0].message) if record else ""

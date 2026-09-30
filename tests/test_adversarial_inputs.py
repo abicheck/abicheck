@@ -174,9 +174,9 @@ class TestMalformedJsonSnapshots:
         """snapshot_from_dict when functions is None (not present)."""
         data = {"library": "lib.so", "version": "1.0"}
         snap = snapshot_from_dict(data)
-        assert snap.functions == []
-        assert snap.variables == []
-        assert snap.types == []
+        assert snap.declarations.functions == []
+        assert snap.declarations.variables == []
+        assert snap.declarations.types == []
 
 
 # ---------------------------------------------------------------------------
@@ -482,8 +482,8 @@ class TestAbiccDumpImportEdgeCases:
         p.write_text("$VAR1 = {};", encoding="utf-8")
         snap = import_abicc_perl_dump(p)
         assert isinstance(snap, AbiSnapshot)
-        assert snap.functions == []
-        assert snap.variables == []
+        assert snap.declarations.functions == []
+        assert snap.declarations.variables == []
 
     def test_perl_dump_minimal_sections(self, tmp_path: Path) -> None:
         """Perl dump with minimal sections: TypeInfo and SymbolInfo empty."""
@@ -500,7 +500,7 @@ class TestAbiccDumpImportEdgeCases:
         snap = import_abicc_perl_dump(p)
         assert snap.library == "libtest.so"
         assert snap.version == "0.1"
-        assert snap.functions == []
+        assert snap.declarations.functions == []
 
     def test_perl_dump_not_starting_with_var1(self, tmp_path: Path) -> None:
         """File that does not start with $VAR1 -- should raise."""

@@ -402,7 +402,7 @@ class TestDumpSymbolFiltering:
             snap = dump(so_path=so_path, headers=[], version="1.0")
 
         # Only FUNC symbols appear as functions in no-header mode
-        func_names = {f.name for f in snap.functions}
+        func_names = {f.name for f in snap.declarations.functions}
         assert "func_sym" in func_names
         # Object symbols should NOT be in functions
         assert "obj_sym" not in func_names
@@ -480,7 +480,7 @@ class TestDumpSymbolFiltering:
         monkeypatch.setattr("abicheck.dumper._resolve_debug_metadata", _unexpected)
         snap = dump(so_path=so_path, headers=[], version="1.0", symbols_only=True)
 
-        assert [f.mangled for f in snap.functions] == ["_Z3foov"]
+        assert [f.mangled for f in snap.declarations.functions] == ["_Z3foov"]
         assert snap.elf_only_mode is True
 
     def test_symbols_only_skips_header_ast_even_with_headers(
@@ -521,7 +521,7 @@ class TestDumpSymbolFiltering:
             symbols_only=True,
         )
 
-        assert [f.mangled for f in snap.functions] == ["foo"]
+        assert [f.mangled for f in snap.declarations.functions] == ["foo"]
         assert snap.elf_only_mode is True
 
 

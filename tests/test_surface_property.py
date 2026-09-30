@@ -133,8 +133,8 @@ def test_surface_resolution_is_order_independent(snap: AbiSnapshot):
     base = compute_public_surface(snap)
 
     shuffled = copy.deepcopy(snap)
-    shuffled.functions.reverse()
-    shuffled.types.reverse()
+    shuffled.declarations.functions.reverse()
+    shuffled.declarations.types.reverse()
     other = compute_public_surface(shuffled)
 
     assert base.resolvable == other.resolvable
@@ -183,8 +183,8 @@ def test_adding_private_symbol_preserves_public_findings(
         params=[],
         visibility=Visibility.ELF_ONLY,
     )
-    old2.functions.append(priv)
-    new2.functions.append(copy.deepcopy(priv))
+    old2.declarations.functions.append(priv)
+    new2.declarations.functions.append(copy.deepcopy(priv))
 
     after = compare(old2, new2, scope_to_public_surface=True)
 

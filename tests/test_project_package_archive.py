@@ -240,8 +240,8 @@ def test_resolve_input_reads_a_single_artifact_archive_like_its_directory(
     from_dir = resolve_input(pkg)
     from_zip = resolve_input(archive)
     assert (
-        [f.mangled for f in from_zip.functions]
-        == [f.mangled for f in from_dir.functions]
+        [f.mangled for f in from_zip.declarations.functions]
+        == [f.mangled for f in from_dir.declarations.functions]
         == ["_Z1fv"]
     )
     assert set(Path(tempfile.gettempdir()).glob("abicheck-package-*")) == before

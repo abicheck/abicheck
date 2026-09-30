@@ -108,6 +108,7 @@ def test_public_template_scopes_collects_types_templates_and_mangled() -> None:
         variables=[],
         types=[_decl("ccl::v1::Widget")],
     )
+    snap.declarations = snap
     scopes = public_template_scopes(snap)
     assert ("ns", "Box") in scopes.scopes
     assert ("ns", "Box", "get") in scopes.scopes

@@ -76,7 +76,7 @@ def _ref_public_pointer_only(graph: SurfaceGraph, type_name: str) -> tuple[bool,
     referenced = False
     only_pointer = True
     short = type_name.rsplit("::", 1)[-1]
-    for fn in graph.snapshot.functions:
+    for fn in graph.snapshot.declarations.functions:
         if not in_public_surface(fn):
             continue
         sites: list[tuple[str, int]] = [(fn.return_type, fn.return_pointer_depth)]
@@ -621,7 +621,7 @@ class TestRecogniseOpaqueReordering:
         # and splice them over the production result's opaque entries.
         expected_opaque = sorted(
             (rec.name, tag)
-            for rec in graph.snapshot.types
+            for rec in graph.snapshot.declarations.types
             if (tag := _ref_recognise_opaque(graph, rec)) is not None
         )
         got_opaque = sorted(
@@ -636,7 +636,7 @@ class TestRecogniseOpaqueReordering:
     @pytest.mark.parametrize("case", sorted(_SNAPSHOT_CASES))
     def test_predicate_parity_for_every_record(self, case: str) -> None:
         graph = build_surface_graph(_SNAPSHOT_CASES[case])
-        for rec in graph.snapshot.types:
+        for rec in graph.snapshot.declarations.types:
             assert idioms._public_pointer_only(
                 graph, rec.name
             ) == _ref_public_pointer_only(graph, rec.name)
@@ -714,7 +714,9 @@ class TestRecogniseOpaqueReordering:
 
     def test_index_holds_only_strings_and_bools(self) -> None:
         graph = build_surface_graph(_mixed_snapshot())
-        index = public_use_index.build_public_use_index(graph.snapshot.functions)
+        index = public_use_index.build_public_use_index(
+            graph.snapshot.declarations.functions
+        )
         for mapping in (index.by_short, index.by_exact):
             assert mapping
             assert all(isinstance(k, str) for k in mapping)
@@ -729,8 +731,8 @@ class TestRecogniseOpaqueReordering:
         queried against it.
         """
         snap = _uniform_snapshot(400, 40, opaque=True)
-        sites = sum(1 + len(fn.params) for fn in snap.functions)
-        index = public_use_index.build_public_use_index(snap.functions)
+        sites = sum(1 + len(fn.params) for fn in snap.declarations.functions)
+        index = public_use_index.build_public_use_index(snap.declarations.functions)
         assert len(index.by_exact) <= 2 * sites
         assert len(index.by_short) <= 2 * sites
         # 400 records, 40 functions: far fewer entries than records x sites.
@@ -755,13 +757,20 @@ class TestRecogniseOpaqueReordering:
     def test_negative_control_excluding_all_public_functions_is_caught(self) -> None:
         graph = build_surface_graph(_mixed_snapshot())
         empty = public_use_index.PublicUseIndex({}, {})
-        got = [idioms.query_public_use(empty, rec.name) for rec in graph.snapshot.types]
+        got = [
+            idioms.query_public_use(empty, rec.name)
+            for rec in graph.snapshot.declarations.types
+        ]
         assert got == [(False, True)] * len(got)
         # ...and an index built with the public-surface test inverted would
         # admit the hidden overload's by-value Ctx use, which the real one does
         # not -- so the admission test is load-bearing, not incidental.
         hidden_only = public_use_index.build_public_use_index(
-            [fn for fn in graph.snapshot.functions if fn.name == "ctx_hidden"]
+            [
+                fn
+                for fn in graph.snapshot.declarations.functions
+                if fn.name == "ctx_hidden"
+            ]
         )
         assert idioms.query_public_use(hidden_only, "Ctx") == (False, True)
 
@@ -779,9 +788,13 @@ class TestPublicUseIndexInvertsThePredicateExactly:
         self, case: str
     ) -> None:
         graph = build_surface_graph(_SNAPSHOT_CASES[case])
-        index = public_use_index.build_public_use_index(graph.snapshot.functions)
-        names = {rec.name for rec in graph.snapshot.types}
-        names |= {rec.name.rsplit("::", 1)[-1] for rec in graph.snapshot.types}
+        index = public_use_index.build_public_use_index(
+            graph.snapshot.declarations.functions
+        )
+        names = {rec.name for rec in graph.snapshot.declarations.types}
+        names |= {
+            rec.name.rsplit("::", 1)[-1] for rec in graph.snapshot.declarations.types
+        }
         names |= {"Absent", "ns::Absent", "int", "void", ""}
         for name in sorted(names):
             assert public_use_index.query_public_use(
@@ -790,9 +803,9 @@ class TestPublicUseIndexInvertsThePredicateExactly:
 
     def test_order_independence(self) -> None:
         snap = _mixed_snapshot()
-        forward = public_use_index.build_public_use_index(snap.functions)
+        forward = public_use_index.build_public_use_index(snap.declarations.functions)
         reverse = public_use_index.build_public_use_index(
-            list(reversed(snap.functions))
+            list(reversed(snap.declarations.functions))
         )
         assert forward.by_short == reverse.by_short
         assert forward.by_exact == reverse.by_exact
@@ -1070,11 +1083,11 @@ class TestPatternVerdictsSharesOneIndex:
         """One shared index answers identically to per-name one-shot calls."""
         _, new = self._opaque_lost_pair()
         graph = build_surface_graph(new)
-        shared = public_use_index.build_public_use_index(new.functions)
+        shared = public_use_index.build_public_use_index(new.declarations.functions)
         assert {
             rec.name: idioms._public_pointer_only(graph, rec.name)
-            for rec in graph.snapshot.types
+            for rec in graph.snapshot.declarations.types
         } == {
             rec.name: public_use_index.query_public_use(shared, rec.name)
-            for rec in graph.snapshot.types
+            for rec in graph.snapshot.declarations.types
         }

@@ -284,7 +284,7 @@ class TestClosureIgnoresSurfaceGraphEntirely:
         from abicheck.model.graph_vocabulary import CONF_HIGH
 
         snap = _outer_inner_snapshot()
-        outer = next(t for t in snap.types if t.name == "Outer")
+        outer = next(t for t in snap.declarations.types if t.name == "Outer")
         poisoned_id = referenced_identifiers_by_node(snap).node_id(outer)
         graph = SourceGraphSummary()
         graph.add_node(

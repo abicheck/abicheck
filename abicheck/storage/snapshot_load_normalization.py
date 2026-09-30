@@ -46,6 +46,7 @@ from ..qualified_name_segments_walk import _walk_rewrite_strings
 from .closure_identity import (
     _LAMBDA_IDENTITY_FIELDS,
     _lambda_identity_containers_and_strings,
+    _set_identity_container,
 )
 from .guards import decision_key, identity_text, mapping as _mapping_guard, strict_int
 
@@ -96,7 +97,7 @@ def normalize_anonymous_type_spellings_on_load(snapshot: AbiSnapshot) -> AbiSnap
     for field_name, container in zip(_LAMBDA_IDENTITY_FIELDS, containers):
         new_container = _walk_rewrite_strings(container, strip_anonymous_type_location)
         if new_container is not container:
-            setattr(snapshot, field_name, new_container)
+            _set_identity_container(snapshot, field_name, new_container)
     return snapshot
 
 

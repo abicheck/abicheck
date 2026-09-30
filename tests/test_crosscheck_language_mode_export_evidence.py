@@ -210,7 +210,7 @@ def test_declaration_identity_correct_for_every_sibling_shape(
         header_backend=ast_frontend,
     )
 
-    funcs = {f.name: f for f in snap.functions}
+    funcs = {f.name: f for f in snap.declarations.functions}
     assert funcs["plain_func"].mangled == "_Z10plain_funci"
     assert funcs["plain_func"].is_extern_c is False
     assert funcs["plain_func"].visibility == Visibility.PUBLIC
@@ -228,5 +228,5 @@ def test_declaration_identity_correct_for_every_sibling_shape(
     assert funcs["c_func"].is_extern_c is True
     assert funcs["c_func"].visibility == Visibility.PUBLIC
 
-    variables = {v.name: v for v in snap.variables}
+    variables = {v.name: v for v in snap.declarations.variables}
     assert variables["g_variable"].visibility == Visibility.PUBLIC

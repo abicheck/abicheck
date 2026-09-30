@@ -129,8 +129,10 @@ class TestSemanticIrConsistencyCheckAvoidsReduction:
 
         class _Snap:
             semantic_ir = ir
+            canonical_ir = ir
             typedef_entity_ids: dict = {}
             constant_entity_ids = {"K": eid}
+            declarations = property(lambda self: self)
 
         assert_snapshot_semantic_ir_consistent(_Snap())  # type: ignore[arg-type]
         assert calls["n"] == 0

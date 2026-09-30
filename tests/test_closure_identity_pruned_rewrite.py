@@ -184,7 +184,7 @@ def test_vacuity_guard_markers_really_get_renumbered() -> None:
         ],
     )
     renumber_anonymous_closure_identities(snap)
-    assert snap.types[0].qualified_name == "W<(lambda:a.h#1)>"
+    assert snap.declarations.types[0].qualified_name == "W<(lambda:a.h#1)>"
 
 
 @settings(max_examples=200, deadline=None)

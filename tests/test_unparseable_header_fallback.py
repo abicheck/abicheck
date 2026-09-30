@@ -302,7 +302,7 @@ def test_real_castxml_directory_with_unparseable_header(tmp_path):
         lang="c",
         header_backend="castxml",
     )
-    names = {f.name for f in snap.functions if f.source_header}
+    names = {f.name for f in snap.declarations.functions if f.source_header}
     assert "good_fn" in names
     recorded = excluded_headers_from_toolchain(snap.ast_toolchain)
     assert [Path(p).name for p in recorded] == ["bad_sycl.h"]

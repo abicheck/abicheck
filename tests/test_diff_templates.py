@@ -1188,7 +1188,7 @@ def test_lambda_only_instantiations_are_examined() -> None:
     moved = _snap(
         funcs=[
             _fn(f.name.replace("/r/", "/elsewhere/"), mangled=f.mangled)
-            for f in old.functions
+            for f in old.declarations.functions
         ]
     )
     assert detect_internal_template_leaks(old, moved) == []

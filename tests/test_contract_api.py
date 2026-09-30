@@ -356,10 +356,10 @@ class TestSnapshotJsonSchema:
         loaded = load_snapshot(path)
         assert loaded.library == "libtest.so"
         assert loaded.version == "1.0"
-        assert len(loaded.functions) == 1
-        assert loaded.functions[0].name == "foo"
-        assert len(loaded.variables) == 1
-        assert len(loaded.types) == 1
+        assert len(loaded.declarations.functions) == 1
+        assert loaded.declarations.functions[0].name == "foo"
+        assert len(loaded.declarations.variables) == 1
+        assert len(loaded.declarations.types) == 1
 
 
 # ===========================================================================

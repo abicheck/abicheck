@@ -262,7 +262,7 @@ class TestManifestRoundTrip:
             store.get(art.sections[SEMANTIC_IR_SECTION_KIND].digest)
         )
         ir, _conflicts = semantic_ir_from_dto(dto)
-        assert ir == snap.semantic_ir
+        assert ir == snap.canonical_ir
 
     def test_a_manifest_naming_an_object_never_put_is_refused(
         self, tmp_path: Path

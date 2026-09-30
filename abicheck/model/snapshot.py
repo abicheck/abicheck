@@ -60,6 +60,12 @@ if TYPE_CHECKING:
     from .sycl_facts import SyclMetadata
 
 
+def _empty_ir() -> SemanticIR:
+    from .semantic_ir import SemanticIR
+
+    return SemanticIR(canonical=False)
+
+
 @dataclass
 class AbiSnapshot:
     """Complete ABI snapshot of one version of a library."""
@@ -689,7 +695,7 @@ class AbiSnapshot:
     )
 
     def __post_init__(self, *builder_inputs: object) -> None:
-        _attach_declarations(self, builder_inputs)
+        _attach_declarations(self, builder_inputs, _empty_ir)
         self.ast_resolved_standard, self.ast_resolved_standard_fact = (
             bridge_legacy_and_fact(
                 self.ast_resolved_standard, self.ast_resolved_standard_fact, None, None

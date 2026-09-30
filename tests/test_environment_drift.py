@@ -1474,7 +1474,7 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.typedefs["Stat"] = "stat_rec"
+            snap.declarations.typedefs["Stat"] = "stat_rec"
             snap.types = [
                 RecordType(
                     name="stat_rec",
@@ -1501,7 +1501,7 @@ class TestTime64AbiFlip:
         old = _snap32({"time_t": "long int"}, referenced=False)
         new = _snap32({"time_t": "long long int"}, referenced=False)
         for snap in (old, new):
-            snap.typedefs["Stat"] = "stat_rec"
+            snap.declarations.typedefs["Stat"] = "stat_rec"
             snap.types = [
                 RecordType(
                     name="stat_rec",

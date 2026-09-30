@@ -114,7 +114,7 @@ class TestSerializationErrorHandling:
     def test_minimal_valid_dict(self):
         snap = snapshot_from_dict({"library": "lib.so", "version": "1.0"})
         assert snap.library == "lib.so"
-        assert snap.functions == []
+        assert snap.declarations.functions == []
 
     def test_unknown_visibility_in_function(self):
         with pytest.raises(ValueError):
@@ -160,7 +160,7 @@ class TestSerializationErrorHandling:
         )
         d = snapshot_to_dict(snap)
         snap2 = snapshot_from_dict(d)
-        assert snap2.functions[0].is_extern_c is True
+        assert snap2.declarations.functions[0].is_extern_c is True
 
     def test_roundtrip_preserves_alignment_bits(self):
         """Verify alignment_bits survives serialization round-trip."""
@@ -178,7 +178,7 @@ class TestSerializationErrorHandling:
         )
         d = snapshot_to_dict(snap)
         snap2 = snapshot_from_dict(d)
-        assert snap2.types[0].alignment_bits == 64
+        assert snap2.declarations.types[0].alignment_bits == 64
 
     def test_is_union_derived_from_kind_when_missing(self):
         """When is_union is absent from JSON, derive from kind."""
@@ -188,7 +188,7 @@ class TestSerializationErrorHandling:
             "types": [{"name": "U", "kind": "union", "fields": []}],
         }
         snap = snapshot_from_dict(d)
-        assert snap.types[0].is_union is True
+        assert snap.declarations.types[0].is_union is True
 
     def test_elf_metadata_roundtrip(self):
         from abicheck.elf_metadata import ElfSymbol, SymbolBinding, SymbolType

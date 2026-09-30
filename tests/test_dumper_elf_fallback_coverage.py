@@ -83,7 +83,7 @@ def test_dwarf_only_with_headers_warns_and_ignores_them(
     assert dwarf_only_types == []
     # dwarf_only=True forces the "use DWARF" branch even with empty
     # functions/variables -- semantic_ir is always populated on that path.
-    assert snap.semantic_ir is not None
+    assert snap.canonical_ir is not None
 
 
 def test_headers_present_suppresses_the_no_headers_info_log(

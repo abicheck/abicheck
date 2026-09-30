@@ -57,7 +57,7 @@ def _snapshots() -> tuple[AbiSnapshot, AbiSnapshot]:
         return_type="void",
         visibility=Visibility.PUBLIC,
     )
-    old.functions.append(gone)
+    old.declarations.functions.append(gone)
 
     stay = Function(
         name="foo::stay",
@@ -65,8 +65,8 @@ def _snapshots() -> tuple[AbiSnapshot, AbiSnapshot]:
         return_type="void",
         visibility=Visibility.PUBLIC,
     )
-    old.functions.append(stay)
-    new.functions.append(stay)
+    old.declarations.functions.append(stay)
+    new.declarations.functions.append(stay)
 
     changed_old = Function(
         name="foo::changed",
@@ -80,8 +80,8 @@ def _snapshots() -> tuple[AbiSnapshot, AbiSnapshot]:
         return_type="double",
         visibility=Visibility.PUBLIC,
     )
-    old.functions.append(changed_old)
-    new.functions.append(changed_new)
+    old.declarations.functions.append(changed_old)
+    new.declarations.functions.append(changed_new)
 
     new_fn = Function(
         name="foo::brand_new",
@@ -89,7 +89,7 @@ def _snapshots() -> tuple[AbiSnapshot, AbiSnapshot]:
         return_type="void",
         visibility=Visibility.PUBLIC,
     )
-    new.functions.append(new_fn)
+    new.declarations.functions.append(new_fn)
 
     return old, new
 
@@ -172,7 +172,7 @@ def test_compatible_additions_are_visible_even_on_a_clean_run() -> None:
     and stop there."""
     old = AbiSnapshot(library="libfoo", version="1.0")
     new = AbiSnapshot(library="libfoo", version="2.0")
-    new.functions.append(
+    new.declarations.functions.append(
         Function(
             name="foo::only_addition",
             mangled="_ZN3foo13only_additionEv",

@@ -68,7 +68,7 @@ def test_symbols_only_btf_presence_probe_never_populates_semantic_ir(
         debug_format="btf",
     )
 
-    assert snap.semantic_ir is None
+    assert snap.canonical_ir is None
 
 
 def test_debug_presence_only_ctf_probe_never_populates_semantic_ir(
@@ -89,4 +89,4 @@ def test_debug_presence_only_ctf_probe_never_populates_semantic_ir(
         debug_format="ctf",
     )
 
-    assert snap.semantic_ir is None
+    assert snap.canonical_ir is None

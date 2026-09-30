@@ -730,8 +730,12 @@ class TestLegacyBridgeIsBehaviourPreserving:
         path = tmp_path / "snap.json"
         save_snapshot(snap, str(path))
         loaded = load_snapshot(str(path))
-        assert surface_fact_summary(loaded.functions[0]) == surface_fact_summary(fn)
-        assert surface_fact_summary(loaded.variables[0]) == surface_fact_summary(var)
+        assert surface_fact_summary(
+            loaded.declarations.functions[0]
+        ) == surface_fact_summary(fn)
+        assert surface_fact_summary(
+            loaded.declarations.variables[0]
+        ) == surface_fact_summary(var)
 
 
 class TestLegacyElfOnlyKeepsHeaderEvidenceUnknown:
