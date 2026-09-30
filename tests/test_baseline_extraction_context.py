@@ -255,7 +255,9 @@ _WORKFLOWS = {
 
 
 def _steps(workflow: str) -> list[dict[str, Any]]:
-    wf = yaml.safe_load((REPO_ROOT / ".github/workflows" / workflow).read_text())
+    wf = yaml.safe_load(
+        (REPO_ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
+    )
     jobs = [
         j
         for j in wf["jobs"].values()
@@ -293,7 +295,9 @@ def test_both_baseline_workflows_resolve_then_dump_under_the_context(workflow):
     assert (
         dump["extraction-context"] == "${{ steps.context.outputs.extraction-context }}"
     )
-    wf = yaml.safe_load((REPO_ROOT / ".github/workflows" / workflow).read_text())
+    wf = yaml.safe_load(
+        (REPO_ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
+    )
     inputs = (
         wf[True]["workflow_call"]["inputs"]
         if True in wf
