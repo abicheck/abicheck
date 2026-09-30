@@ -113,6 +113,7 @@ from ..model.graph_join import EDGE_KIND_EXPORTS
 from ..model.surface_facts import in_public_surface
 from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..model.vocabulary import ScopeOrigin
+from .header_origin_evidence import collect_header_origin_unknown_types
 from .public_surface import (
     _DEMOTE_ORIGINS,
     PublicSurface,
@@ -639,6 +640,25 @@ def _record_is_confirmed_public_seed(
     )
 
 
+def _extend_unknown_origin_through_closure(
+    refs: ReferencedIdentifiers,
+    snap: AbiSnapshot,
+    surface: PublicSurface,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> None:
+    """A type reached only through a seed blocked on an unread header origin
+    is as undecided as the seed itself: walk the same closure from those
+    seeds and mark every type it reaches that the real closure did not."""
+    blocked = set(surface.header_origin_unknown_types)
+    if not blocked:
+        return
+    scratch = PublicSurface()
+    scratch.all_types = surface.all_types
+    _walk_type_closure(refs, snap, scratch, record_by_name, enum_by_name, blocked)
+    surface.header_origin_unknown_types |= scratch.public_types - surface.public_types
+
+
 def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     """Computes *snap*'s public-ABI surface from
     :func:`~abicheck.compare.surface_graph.referenced_identifiers_by_node`
@@ -699,6 +719,14 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
         for rec in snap.types
         if _record_is_confirmed_public_seed(rec, record_identities)
     }
+    collect_header_origin_unknown_types(
+        snap,
+        surface,
+        lambda q: (
+            not _is_internal_type(q)
+            and not _record_nested_in_known_record(q, record_identities)
+        ),
+    )
 
     # Provenance is available iff some declaration was classified to a real
     # origin (only happens when the snapshot was dumped with a public-header
@@ -718,6 +746,9 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
 
     # Transitive closure over the record/typedef graph.
     _walk_type_closure(refs, snap, surface, record_by_name, enum_by_name, seed_types)
+    _extend_unknown_origin_through_closure(
+        refs, snap, surface, record_by_name, enum_by_name
+    )
     # Separate, ambiguity-vetoing closure -- see its own docstring for why
     # this can't be folded into the walk above.
     _walk_exact_type_closure(

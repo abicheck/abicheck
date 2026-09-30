@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from xml.etree.ElementTree import Element, SubElement
 
+import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.diff_helpers import type_map_key
@@ -565,3 +566,37 @@ class TestQualifiedNameCheckoutIndependenceProperty:
             # coincidentally matched between the two sides.
             assert "/tmp/checkout_a" not in old_qn
             assert "/tmp/checkout_b_longer_path" not in new_qn
+
+
+# Every location strip that removes ``at <path>:<line>:<col>`` must reach the
+# coordinates for any checkout path spelling -- spaces, a literal ``)``, a
+# Windows drive -- so two relocations of one tree compare equal (bug class
+# identity.environment_taint). Oracle: the stripped spelling of the same
+# declaration under a plain ``/src`` root.
+_ROOTS = (
+    "/src",
+    "/home/dev/my projects/x",
+    "/tmp/release (old)/x",
+    "C:\\Program Files\\x",
+    "/a b/(c) d/x",
+)
+_SHAPES = (
+    "S<(lambda at {p}/api.h:4:37)>",
+    "enum (unnamed enum at {p}/api.h:56:5)",
+    "outer<(unnamed struct at {p}/api.h:9:1), int>",
+)
+
+
+@pytest.mark.parametrize("root", _ROOTS)
+@pytest.mark.parametrize("shape", _SHAPES)
+def test_every_location_strip_is_checkout_path_independent(
+    root: str, shape: str
+) -> None:
+    from abicheck.dumper_clang_expr import _normalize_qual_type
+    from abicheck.name_classification import canonicalize_type_name
+
+    spelled, oracle = shape.format(p=root), shape.format(p="/src")
+    for strip in (canonicalize_type_name, _normalize_qual_type):
+        out = strip(spelled)
+        assert out == strip(oracle), (strip.__name__, spelled, out)
+        assert root not in out

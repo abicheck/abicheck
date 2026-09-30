@@ -168,6 +168,7 @@ def test_cgroup_none_when_nothing_bounded(monkeypatch, tmp_path: Path) -> None:
     assert pr.cgroup_available_mem_gib() is None
 
 
+@pytest.mark.host_memory_probe
 def test_available_mem_takes_min_of_host_and_cgroup(monkeypatch) -> None:
     # The cgroup limit (4 GiB) is smaller than host MemAvailable (64 GiB): a pod
     # on a big host must use the cgroup headroom, not the host RAM.
@@ -176,6 +177,7 @@ def test_available_mem_takes_min_of_host_and_cgroup(monkeypatch) -> None:
     assert pr.available_mem_gib() == pytest.approx(4.0)
 
 
+@pytest.mark.host_memory_probe
 def test_available_mem_none_when_neither_readable(monkeypatch) -> None:
     monkeypatch.setattr(pr, "meminfo_available_gib", lambda path="": None)
     monkeypatch.setattr(pr, "cgroup_available_mem_gib", lambda: None)

@@ -61,44 +61,16 @@ from tests import _family_f3_catalogue as cat
 REPO = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
-# Known real bugs this harness found (strict xfail -- a fix flips them red)
+# Known real bugs this harness found (strict xfail -- a fix flips them red).
+# Currently none.
 # ---------------------------------------------------------------------------
 
-_SPACE_ROOT_BUG = (
-    "canonicalize_type_name's comparison-only location strip "
-    "(name_classification._ANON_TYPE_LOCATION_RE, `at\\s+\\S+:`) cannot match "
-    "a path containing a space, so a checkout under '/home/dev/my projects/' "
-    "leaks the absolute path into the canonical spelling and into "
-    "finding_identity.resolve_function_identity's sig: key. The sibling "
-    "_ANON_TYPE_LOCATION_DISCRIMINATOR_RE already uses `.*?` for exactly "
-    "this reason; the two regexes disagree."
-)
-_VECTORCALL_BUG = (
-    "export_symbol_identity._PE_VECTORCALL_DECORATION_RE (`^_?(.+)@@\\d+$`) "
-    "strips an optional leading underscore that is part of the real name: "
-    "MSVC __vectorcall decoration is `name@@N` with no prefix on any "
-    "machine, so the exports `_f@@8` (function `_f`) and `f@@8` (function "
-    "`f`) get one EntityId -- two distinct entities join. "
-    "graph_entity_identity.pe_c_decoration_base decodes `_f@@8` as `_f`, so "
-    "the two production PE decoders also disagree."
-)
-
-_XFAIL_STRING = {
-    (
-        "abicheck.name_classification:canonicalize_type_name",
-        "relocate_checkout_with_space",
-    ): _SPACE_ROOT_BUG,
-    (
-        "abicheck.finding_identity:resolve_function_identity",
-        "relocate_checkout_with_space",
-    ): _SPACE_ROOT_BUG,
-}
-_XFAIL_PE = {
-    (
-        "abicheck.extract.export_symbol_identity:msvc_export_function",
-        "vectorcall",
-    ): _VECTORCALL_BUG,
-}
+# Formerly: the comparison-only anonymous-type location strip could not
+# match a checkout path containing a space (relocate_checkout_with_space
+# cells), and the vectorcall decoder stripped a leading "_" that is part of
+# the real name. Both are fixed; the cells now run as regular tests.
+_XFAIL_STRING: dict[tuple[str, str], str] = {}
+_XFAIL_PE: dict[tuple[str, str], str] = {}
 
 
 def _cell(values: tuple, reasons: dict, key: tuple) -> object:
@@ -179,7 +151,6 @@ def test_x86_pe_decoration_codec_joins_and_separates(decoder: str, scheme: str) 
     assert cat.pe_violations(decoder, scheme) == []
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_VECTORCALL_BUG)
 def test_non_x86_pe_leading_underscore_is_part_of_the_name() -> None:
     assert cat.pe_x64_collisions() == []
 
@@ -456,7 +427,7 @@ _U = "UNCOVERED: "
 COVERAGE: dict[str, str] = {
     # -- exercised --------------------------------------------------------
     "abicheck.name_classification:strip_anonymous_type_location": "string probe x path transforms",
-    "abicheck.name_classification:canonicalize_type_name": "string probe x path transforms (space-root cell xfail)",
+    "abicheck.name_classification:canonicalize_type_name": "string probe x path transforms",
     "abicheck.model.graph_identity:checkout_stable_spelling": "string probe x path transforms",
     "abicheck.model.graph_identity:closure_location_free_identity": "string probe x path transforms",
     "abicheck.model.graph_entity_identity:signature_key": "string probe x path transforms; mutant M1",
@@ -467,9 +438,9 @@ COVERAGE: dict[str, str] = {
     "abicheck.model.source_graph:function_decl_identity": "string probe x path transforms",
     "abicheck.model.mangled_name:strip_macho_itanium_decoration": "Mach-O codec",
     "abicheck.extract.headers.clang.context:strip_darwin_itanium_decoration": "Mach-O codec",
-    "abicheck.extract.export_symbol_identity:msvc_export_function": "x86 PE codec (vectorcall cell xfail)",
+    "abicheck.extract.export_symbol_identity:msvc_export_function": "x86 PE codec",
     "abicheck.model.special_member_identity:special_member_variant_aliases": "ctor/dtor codec; mutant M6",
-    "abicheck.finding_identity:resolve_function_identity": "string probe + snapshot level (space-root cell xfail)",
+    "abicheck.finding_identity:resolve_function_identity": "string probe + snapshot level",
     "abicheck.finding_identity:resolve_variable_identity": "snapshot level identity keys",
     "abicheck.finding_identity:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id)",
     "abicheck.model.identity:entity_id_for_function": "negative control + castxml dumps; mutant M4",
