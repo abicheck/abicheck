@@ -130,7 +130,7 @@ live-object and document entry points; see A1.4's own entry below.
 **A1.7 is now also implemented** (directory packages only, matching A1.1's
 own "everything but `.tar.zst`" scope). A1.5's storage criterion holds
 and is tested; its decoded-size criterion is deferred to A2.1/A2.5. A1.6
-and A1.8 remain open.
+remains open; A1.8 is implemented (see its own entry).
 See "Landed in Phase 1" below.
 
 - **A1.1** `ProjectSnapshotStore` reads and writes the D6 layout over a
@@ -180,7 +180,8 @@ See "Landed in Phase 1" below.
   Phase 1" below and A1.7's own detailed entry.
 - **A1.8** Non-ELF artifacts (PE, Mach-O, Python-visible, header-only) are
   retained as project members with bundle-level *resolution* declared as an
-  ELF-only capability rather than silently excluded.
+  ELF-only capability rather than silently excluded. **Implemented** — see
+  A1.8's own entry below.
 
 ### Phase 2 — scale and performance
 
@@ -238,8 +239,8 @@ nothing in the existing pipeline changes behavior.
    A1.7's own entry below.
 6. **Open, designed below**: the `.tar.zst` transport form (the remainder of
    A1.1), `BuildSourcePack`/source-graph digest-deduplicated shared evidence
-   (the remainder of A1.4/A1.5), `bundle_variants:` CLI wiring (A1.6), and
-   non-ELF artifact membership (A1.8).
+   (the remainder of A1.4/A1.5), and `bundle_variants:` CLI wiring (A1.6).
+   Non-ELF artifact membership (A1.8) has landed.
 
 `AvailabilityLedger.declare` and `.override` rebuild, revalidate, and
 re-sort the whole mapping per call, so building a ledger of *n* overrides
@@ -708,13 +709,28 @@ hand-assembled fixture.
 
 #### A1.8 — non-ELF artifact membership
 
-**Status: not implemented**, and deliberately the narrowest item here.
-`ArtifactRef.kind` already accepts any string (`"elf"`, `"pe"`, `"macho"`,
-`"python"`, `"header_only"`, ...) per its own docstring — the object model
-was built D6-complete from the start. What's missing is purely on the
-*producer* side: nothing today constructs an `ArtifactRef` for a PE/Mach-O/
-Python-visible/header-only member, because A1.3/A1.4's own capture paths
-have so far only ever fed them an ELF `AbiSnapshot`.
+**Status: implemented.** `storage/import_v1.artifact_kind_for_document`
+(and its live-snapshot twin `workflows/bundle_facts_capture.
+artifact_kind_of_snapshot`, both over one `artifact_kind_from_facts` rule)
+derives `ArtifactRef.kind` first-match-wins: `header_only` → `"header_only"`,
+a stated `platform` (`"elf"`/`"pe"`/`"macho"`) verbatim, a Python-visible
+surface (`python_ext`/`python_api`) → `"python"`, else the historical
+`"elf"`. Previously a header-only or Python-only member was mislabeled
+`"elf"`. A member manifest with no `"binary"` section reads back without
+error. `bundle_snapshot_from_facts` no longer drops a non-ELF member
+silently: it records it on `BundleSnapshot.resolution_not_applicable`
+(member → kind), `bundle_analysis.analyze_bundle` carries both sides' entries
+into `BundleDiffResult.resolution_not_applicable_members`, and the
+BundleFacts compare JSON emits a `resolution_not_applicable_members` block
+(`{"artifact_kind", "resolution": "not_applicable"}` per member, only when
+non-empty). The ELF members' resolution graph is unchanged. Tests:
+`tests/test_non_elf_artifact_membership.py` (parametrized over every non-ELF
+kind, plus an exhaustive kind-rule enumeration against an independent
+oracle). Not covered: the live directory fan-out's own
+`bundle.build_bundle_snapshot` still skips non-ELF files during discovery
+(it never dumps them into a member in the first place).
+
+The original design text follows.
 
 **Goal.** A PE/Mach-O/Python-visible/header-only library is a first-class
 package member — representable, storable, and readable — even though
@@ -966,8 +982,7 @@ each to its section kind's current version, and reassembles the original
 **Not yet implemented, and still open**: storing `BuildSourcePack`/project
 source graphs/toolchain profiles once per project and referencing them by
 digest (A1.5 — folding baseline sets/`BundleFacts` into sections, A1.4, is
-done), `bundle_variants:` CLI/config wiring (A1.6/A1.7), non-ELF artifact
-membership specifics beyond `ArtifactRef.kind` (A1.8), and the `.tar.zst`
+done), `bundle_variants:` CLI/config wiring (A1.6/A1.7), and the `.tar.zst`
 transport form. Decoding a legacy section's *internal* shape into a typed
 domain object (rather than carrying the existing JSON as-is), and giving
 `ArtifactRef.sections` a per-section `FactAvailability` (the "known,

@@ -1253,7 +1253,7 @@ The one-file transport (A1.1) landed on the same day as a zip archive (`storage/
   (A1.5), whose storage half holds and is tested, leaving decoded size
   (A2.x);
 - `bundle_variants:` wiring (A1.6);
-- non-ELF artifact membership (A1.8).
+- ~~non-ELF artifact membership (A1.8)~~ -- landed (see the storage-format-v2 plan's A1.8 entry).
 
 It is tracked there, not restated here.
 

@@ -268,10 +268,9 @@ def import_legacy_snapshot(
     project or one of many).
 
     `artifact_kind` defaults to `None`, meaning "derive it from the document
-    itself": the legacy document's own `platform` field (`AbiSnapshot.
-    platform`, `"elf"`/`"pe"`/`"macho"`) is used when stated, and only a
-    document that never states a platform at all (a pre-Phase-3 snapshot, or
-    a synthetic one built without it) falls back to `"elf"`. An explicit
+    itself" via `artifact_kind_for_document` (`header_only`, then the
+    stated `platform`, then a Python-visible surface, then the historical
+    `"elf"` fallback). An explicit
     `artifact_kind` argument always wins over the document — a caller that
     already knows the real kind (or is intentionally overriding it) is never
     second-guessed. What this closes: silently mislabeling a PE or Mach-O
@@ -286,16 +285,7 @@ def import_legacy_snapshot(
     Raises `ValueError` if the document's own `schema_version` exceeds it.
     """
     if artifact_kind is None:
-        stated_platform = (
-            legacy_document.get("platform")
-            if isinstance(legacy_document, Mapping)
-            else None
-        )
-        artifact_kind = (
-            stated_platform
-            if isinstance(stated_platform, str) and stated_platform
-            else "elf"
-        )
+        artifact_kind = artifact_kind_for_document(legacy_document)
     source_schema_version, section_dtos = legacy_section_dtos(
         legacy_document, max_known_schema_version=max_known_schema_version
     )
@@ -321,6 +311,44 @@ def import_legacy_snapshot(
     return PackageManifest(
         versions=versions, variant_refs=(variant,), artifact_refs=(artifact,)
     )
+
+
+def artifact_kind_for_document(legacy_document: Mapping[str, Any]) -> str:
+    """The `ArtifactRef.kind` a `snapshot_to_dict()`-shaped document
+    describes (ADR-062 A1.8: non-ELF artifact membership).
+
+    First match wins: a document marking itself `header_only` is
+    `"header_only"` (it has no binary at all, so any stated platform would
+    describe a binary that does not exist); a stated `platform`
+    (`"elf"`/`"pe"`/`"macho"`) is used verbatim; a document with no platform
+    but a Python-visible surface (`python_ext`/`python_api`) is `"python"`;
+    only a document stating none of these (a pre-Phase-3 snapshot, or a
+    synthetic one) falls back to `"elf"`, the historical default.
+    """
+    if not isinstance(legacy_document, Mapping):
+        return "elf"
+    return artifact_kind_from_facts(
+        header_only=legacy_document.get("header_only") is True,
+        platform=legacy_document.get("platform"),
+        python_visible=bool(
+            legacy_document.get("python_ext") or legacy_document.get("python_api")
+        ),
+    )
+
+
+def artifact_kind_from_facts(
+    *, header_only: bool, platform: object, python_visible: bool
+) -> str:
+    """The one first-match-wins `ArtifactRef.kind` rule, shared by
+    `artifact_kind_for_document` (a serialized document) and live
+    `AbiSnapshot` callers (`workflows.bundle_facts_capture`)."""
+    if header_only:
+        return "header_only"
+    if isinstance(platform, str) and platform:
+        return platform
+    if python_visible:
+        return "python"
+    return "elf"
 
 
 def legacy_section_dtos(
