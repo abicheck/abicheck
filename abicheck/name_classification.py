@@ -565,16 +565,18 @@ _PTR_REF_SIGIL_RE = re.compile(r"\s*([*&])\s*")
 # identical declaration (e.g. ".../old/include/foo.h" vs ".../new/include/foo.h")
 # then falsely reports a type change purely from the differing root, even
 # though both spellings denote the same anonymous type at the same line/column
-# within the (unchanged) header. Stripping the location leaves just the
-# "this is anonymous" marker, which is what should actually be compared.
-_ANON_TYPE_LOCATION_RE = re.compile(r"\bat\s+\S+:\d+:\d+(?=\s*\))")
+# within the (unchanged) header. Stripping the location leaves the "this is
+# anonymous" marker. Path matched ``.*?`` and marker-anchored, as below.
+_ANON_TYPE_LOCATION_RE = re.compile(
+    r"(\((?:lambda|unnamed(?:\s+\w+)?|anonymous(?:\s+\w+)?))\s+at\s+.*?:\d+:\d+(?=\s*\))"
+)
 
 #: Like _ANON_TYPE_LOCATION_RE, but keeps the trailing ``:<line>:<col>`` as a
 #: captured discriminator instead of discarding it outright — see
 #: strip_anonymous_type_location's docstring for why identity extraction
 #: needs the discriminator kept while a downstream *comparison*
 #: (canonicalize_type_name) does not. The path itself is matched with
-#: ``.*?`` (not ``\S+?``, unlike _ANON_TYPE_LOCATION_RE above) because a
+#: ``.*?`` (not ``\S+?``) because a
 #: real checkout or Windows path can contain spaces (Codex review: a
 #: checkout directory literally named "release build", or a bare "Program
 #: Files" component) -- \S+? cannot reach the trailing coordinates in that
@@ -832,7 +834,7 @@ def canonicalize_type_name(name: str) -> str:
     # 0b. Strip the absolute-path/line/col clang embeds in an anonymous
     #     struct/union/enum spelling — it identifies "where the tool ran", not
     #     the type. See _ANON_TYPE_LOCATION_RE above.
-    result = _ANON_TYPE_LOCATION_RE.sub("", result)
+    result = _ANON_TYPE_LOCATION_RE.sub(r"\1", result)
     result = _MULTI_SPACE_RE.sub(" ", result).replace(" )", ")").strip()
     # 1. Strip elaborated type specifier prefix (handles leading whitespace).
     result = _STRUCT_PREFIX_RE.sub("", result)
