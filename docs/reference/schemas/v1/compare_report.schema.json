@@ -1607,6 +1607,19 @@
               "null"
             ]
           },
+          "declined": {
+            "type": "array",
+            "description": "ADR-063 T9 (schema 5.11): comparisons this detector ran but declined to judge because the evidence it needed was incomplete or unsupported for that entity (e.g. a PDB or partial DWARF vtable). An empty list means nothing was declined; a declined entity is neither a finding nor a clean result.",
+            "items": {
+              "type": "object",
+              "required": ["entity", "reason"],
+              "additionalProperties": false,
+              "properties": {
+                "entity": {"type": "string"},
+                "reason": {"type": "string"}
+              }
+            }
+          },
           "not_evaluated": {
             "type": "boolean",
             "description": "ADR-067 D3 (schema 2.51): true when this detector did not run at all -- its requires_support gate refused it -- as opposed to running and producing no findings. `changes_count` is 0 in both cases, which is the ambiguity this flag removes; `coverage_gap` carries the gate's reason."

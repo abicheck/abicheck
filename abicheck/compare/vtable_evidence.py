@@ -163,6 +163,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 
 from ..model import FactStatus, Function, RecordType, resolved_fact_value
+from .declined_comparisons import record_declined
 
 OwnerClassOf = Callable[[Function], "str | None"]
 NamespaceSuffixSpellings = Callable[[str], "list[str]"]
@@ -199,11 +200,18 @@ def vtable_fact_declined(t_old: RecordType, t_new: RecordType) -> bool:
     suppress, just through the sibling detector instead of the primary
     one.
     """
-    return (
-        t_old.vtable_fact is not None and t_old.vtable_fact.status in _DECLINE_STATUSES
-    ) or (
-        t_new.vtable_fact is not None and t_new.vtable_fact.status in _DECLINE_STATUSES
-    )
+    for side, rec in (("old", t_old), ("new", t_new)):
+        fact = rec.vtable_fact
+        if fact is not None and fact.status in _DECLINE_STATUSES:
+            # T9: a decline is recorded, not only returned -- otherwise the
+            # detector's empty result reads as "no vtable change" rather
+            # than "vtable evidence incomplete, not judged".
+            record_declined(
+                rec.qualified_name or rec.name,
+                f"vtable evidence {fact.status.value} on the {side} side",
+            )
+            return True
+    return False
 
 
 def _owned_virtual_signatures(
