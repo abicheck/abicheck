@@ -40,8 +40,8 @@ don't actually satisfy it. Two distinct gaps, both fixed here:
   means a sixth future field can never be missed here again the same way.
 - A pre-1.22 `NOT_COMPARABLE` scan report's `diff` has *no* `exit` key at
   all (`{"reason": ...}` was the whole shape before ADR-064 stage 1b wired
-  that outcome) -- synthesize the same decision `scan_engine.py` itself
-  now persists for it, rather than leaving the promised block absent.
+  that outcome) -- synthesize the same decision the retired `scan_engine.py` (ADR-068 Phase 6)
+  persisted for it, rather than leaving the promised block absent.
 """
 
 from __future__ import annotations

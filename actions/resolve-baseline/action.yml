@@ -1,7 +1,7 @@
 name: 'abicheck resolve-baseline'
 description: >-
   Resolve one check's baseline: channel x target/bundle x profile against an
-  already-staged baseline-set, returning one of ADR-047 Section 6's typed
+  already-staged baseline-set, returning one of the typed
   outcomes (resolved, not_found, ambiguous, wrong_profile, stale_schema,
   incompatible_evidence, wrong_project_ref, stale_generation, new_target) --
   never a compatibility verdict, and never silently degraded to "no baseline =
@@ -17,7 +17,7 @@ inputs:
       Path to this channel's baseline-set, already staged by the calling
       workflow (e.g. via actions/cache, actions/download-artifact, or gh
       release download -- this Action does not itself know how to fetch
-      from a baseline channel's storage backend, see ADR-047 §10). Either a
+      from a baseline channel's storage backend). Either a
       directory already containing manifest.json (plus per-target
       snapshots, and binaries/ for a bundle-scoped baseline), or a
       .tar.zst/.tar.gz/.tgz/.tar archive of the same, which is extracted
@@ -63,7 +63,7 @@ inputs:
       For kind: bundle, e.g.
       '["libpvxs", "libpvxsIoc"]'. Required when kind is bundle -- every
       member must have a staged binary in the baseline-set's binaries/
-      directory for the bundle to resolve (ADR-047 §6/§8 S14: bundle
+      directory for the bundle to resolve (bundle
       analysis reads real ELF binaries, never JSON snapshots).
     required: false
     default: '[]'
@@ -84,7 +84,7 @@ inputs:
     default: 'true'
   candidate-build-output:
     description: >
-      Path to the candidate build's build-output.json (ADR-047 §2), read
+      Path to the candidate build's build-output.json, read
       only for its evidence_producer block, used for the
       incompatible_evidence check (the baseline's recorded evidence
       producer -- wrapper, clang-plugin, replay -- disagreeing with the

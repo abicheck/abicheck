@@ -87,7 +87,7 @@ differences LTO can introduce elsewhere.
 (as embedded by `dump --build-info`/`--sources`, or supplied out-of-band via
 `--old/new-build-info`) and diffs the `lto` option directly — the same
 `diff_build_evidence()` routine `tests/test_l3l4l5_examples.py` exercises
-against the committed fixtures. Per ADR-028 D3 this build-evidence finding
+against the committed fixtures. By the authority rule, this build-evidence finding
 never decides a shipped-ABI break on its own — it flags the elevated risk
 and localizes the cause; an artifact diff of the actual compiled symbol
 sets and layouts is what would confirm a concrete break.

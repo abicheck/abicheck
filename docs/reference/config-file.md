@@ -14,7 +14,7 @@ generated: false
 
 # The `.abicheck.yml` config file
 
-`.abicheck.yml` is the per-project configuration file (ADR-037 D4). It holds
+`.abicheck.yml` is the per-project configuration file. It holds
 the *stable, reviewed-in-a-PR* properties of a project's ABI contract — build
 system, header compile context, severity policy, public-surface scoping, and
 suppression hygiene — as opposed to per-run invocation flags. See the
@@ -76,7 +76,7 @@ pass `build_config` explicitly there.
 > opt-in flag is needed or exists any more (the old `--allow-build-query` was
 > always a no-op, and has since been removed outright).
 
-### Strict loading (ADR-043)
+### Strict loading
 
 Config loading is **strict**: an unknown top-level key, an unknown sub-key
 inside a recognized block, a value of the wrong type, or a bad enum value are
@@ -121,8 +121,7 @@ the auto-discovered warn-and-continue leniency even for a run that would
 otherwise get it through `merge_compile_config()` alone.
 
 There is no longer an `init`/`config` scaffolding or diagnostic command
-(`abicheck init`, `config validate`, `config show-effective` are all gone —
-ADR-043) — write `.abicheck.yml` by hand, using this page as the schema/key
+(`abicheck init`, `config validate`, `config show-effective` are all gone) — write `.abicheck.yml` by hand, using this page as the schema/key
 reference. Since unknown keys are now a hard error rather than a silent
 warning, a typo or a key from a newer abicheck release will fail loudly
 instead of being ignored — set the top-level `version:` if you need to
@@ -231,7 +230,7 @@ declaration a header parse sees: the target (this library), a named
 dependency, or the toolchain. **They classify, they do not filter**: every
 header dump records each declaration's owner and contract, and the rules it
 was classified under, in the snapshot's `extraction_scope`
-([ADR-075](../contribute/adr/075-target-ownership-and-extraction-scope.md)).
+.
 No declaration is kept or dropped because of them. A declaration whose
 contract is `private` or `external` owes no export, so it produces no
 `public_not_exported` finding. `abicheck dump … --dry-run` previews the
@@ -291,11 +290,11 @@ recorded rules; it is compared with a note saying so.
 (one-comparison-product.md §4.1) CONFIG-only replacement for the former
 `compare --on-incomplete-scope` on the directory/package release fan-out —
 **no CLI spelling exists any more**. Governs what an incompletely checked
-comparison scope does to the exit code (ADR-065 D6): `warn` reports every
+comparison scope does to the exit code: `warn` reports every
 unchecked member and contributes `0`; `block` contributes `1`, folded with
 `max()` like the contract-coverage axis. A run that completed no comparison
 at all contributes `1` under either setting. See
-[Multi-binary § Comparison scope and completeness](../use/multi-binary.md#comparison-scope-and-completeness-adr-065).
+[Multi-binary § Comparison scope and completeness](../use/multi-binary.md#comparison-scope-and-completeness).
 
 ---
 
@@ -331,10 +330,10 @@ See [Evidence depth](../use/evidence-depth.md) and the
 
 ### `compile:`
 
-The L2 header compile context (ADR-037 D4). This is Phase 7's CONFIG
-surface (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1) — every field
+The L2 header compile context. This is Phase 7's CONFIG
+surface (one-comparison-product.md §4.1/§4.2) — every field
 below has **no CLI spelling at all**, on any command, with no escape hatch
-(ADR-068 D5 guard #2) and no per-side spelling. See
+ and no per-side spelling. See
 [Upgrading to 0.6 §C1](../start/upgrading-to-0.6.md#c1-compiler-frontend)
 for the flag→key mapping.
 
@@ -344,7 +343,7 @@ for the flag→key mapping.
 - `std:` — C/C++ standard, e.g. `c++17`.
 - `include_dirs:`/`defines:` — lists. `defines:` is the **stable** half of a
   pair: `dump`/`compare` also accept a per-invocation `-D/--define NAME[=VALUE]`
-  (ADR-074), which merges with this list **by macro name** — the CLI value wins
+ , which merges with this list **by macro name** — the CLI value wins
   for the macro it names and every other entry here stays in force. Prefer this
   key for CI and baseline generation; use `-D` for one-off runs and
   experiments. It is one of two `compile:` fields with a per-run CLI
@@ -354,8 +353,7 @@ for the flag→key mapping.
 - `nostdinc:` — boolean; was `--nostdinc`/`--no-nostdinc` on compare/dump.
 - `compiler:` — path to the compiler binary, **or** a cross-toolchain
   prefix (e.g. `aarch64-linux-gnu-`) when the value ends in `-`. Merges the
-  former `--compiler`/`--compiler-prefix` pair into one spelling (ADR-068
-  D5 guard #1: "not one-for-one" — `--compiler-prefix` does not become its
+  former `--compiler`/`--compiler-prefix` pair into one spelling ("not one-for-one" — `--compiler-prefix` does not become its
   own `compiler_prefix:` key).
 - `options:` — a list of raw compiler flags passed through verbatim, each a
   single whitespace-free atom like `std:`/`defines:` below. Was the
@@ -385,13 +383,12 @@ for the flag→key mapping.
 
 ### `debug:`
 
-Separate-debug-file resolution for ELF (ADR-021a). On `compare`/`dump` this
+Separate-debug-file resolution for ELF. On `compare`/`dump` this
 is Phase 7's CONFIG surface (one-comparison-product.md §4.1/§4.2) — every
-field below has **no CLI spelling at all** on those two commands (ADR-040
-Lever 2 first demoted them to a config-key-with-override; Phase 7 removed
+field below has **no CLI spelling at all** on those two commands (0.5.0 first demoted them to a config-key-with-override; Phase 7 removed
 the override itself, since this repo runs no deprecation window). The
 coarse per-run `--debug-info` stays a visible CLI flag on both commands —
-it is a per-run evidence input (ADR-068 D5 guard #3), not a stable project
+it is a per-run evidence input, not a stable project
 property. (It was spelled `--debug-root` until plan Phase 7n merged it into
 `--debug-info`, which now carries the whole role: a directory to search, a
 detached debug file, or — on `compare` — a debug package.)
@@ -420,8 +417,7 @@ co-versioned library name prefixes enabling the `BUNDLE_SONAME_SKEW` check).
 Entries are stripped of surrounding whitespace and empty entries dropped at
 parse time. `system_providers:` and `cohorts:` (the SONAME-skew check) both apply to
 `compare`'s directory/package fan-out. (`system_providers:` also reached
-`scan --artifact-set` until ADR-068's second 2026-09-09 amendment retired
-that mode.) Distinct from the
+`scan --artifact-set` until 0.6 retired that mode.) Distinct from the
 plural `bundles:` block below, which serves a different, unrelated purpose
 (the `project` command family's target declarations). See
 [Multi-binary § The bundle-analysis flags](../use/multi-binary.md#the-bundle-analysis-flags).
@@ -436,7 +432,7 @@ CPython extension-module properties. One key today: `abi3_floor:` — the
 rather than coerced.
 
 Which floor a project targets is a stable, reviewed-in-a-PR property, not a
-per-run decision (ADR-068 D5), so it lives here — and `compare --abi3
+per-run decision, so it lives here — and `compare --abi3
 VERSION` is the per-run override on top of it. With either in effect,
 `compare` audits the **candidate** (NEW) side's imported CPython C-API
 against that floor and reports `python_stable_abi_violation` findings, marked
@@ -456,11 +452,11 @@ CI gate policy demoted off the CLI (Phase 7d, one-comparison-product.md
 former `compare --fail-on-removed-library`/`--no-fail-on-removed-library`,
 **no CLI spelling any more**. Exits `8` when a library present in `OLD` is
 proven removed in `NEW` on `compare`'s directory/package fan-out — `NEW`'s
-inventory must be proven complete (ADR-065 D2); an unmatched library under
+inventory must be proven complete; an unmatched library under
 an unproven inventory is reported as an incomplete scope instead. Whether a
 release enforces this gate is a stable project policy, not a per-run
 choice. See
-[Multi-binary § Comparison scope and completeness](../use/multi-binary.md#comparison-scope-and-completeness-adr-065).
+[Multi-binary § Comparison scope and completeness](../use/multi-binary.md#comparison-scope-and-completeness).
 
 ---
 
@@ -487,9 +483,9 @@ key today: `require_complete:` (default `false`) — the former `compare
 --require-complete-analysis`: fail the step when `analysis_assurance.status`
 is not `complete`, independent of the compatibility verdict. Contributes
 exit `1`, folded with `max` the same way `--contract`'s coverage axis is
-(ADR-049 Phase 7): it raises a clean `0` to `1` and never lowers a `2`/`4`.
+: it raises a clean `0` to `1` and never lowers a `2`/`4`.
 Applies to a single-pair `compare` and to a directory/package (release)
-fan-out alike (ADR-071 — the release operand used to reject it). A release
+fan-out alike (the release operand used to reject it). A release
 has one `analysis_assurance` per compared member, not one for the run, so its
 contribution is `max` over the members': over a one-member package that is
 the identity (it gates exactly as the scalar path does for the same pair),
@@ -509,8 +505,8 @@ assurance:
 
 ### `deployment:`
 
-The project's declared deployment constraints (ADR-020b), demoted off the
-CLI (ADR-068 D5) — **no CLI spelling exists any more**: the former `compare
+The project's declared deployment constraints, demoted off the
+CLI — **no CLI spelling exists any more**: the former `compare
 --env-matrix FILE` is now this key, embedding
 [`EnvironmentMatrix`](../learn/environment-drift.md)'s own YAML shape
 inline instead of a side file. When `runtime_floors` is set, a new
@@ -541,7 +537,7 @@ full worked example, including CI/GitHub Action usage.
 
 ### `policy:`
 
-ADR-068 §3 #23's documented project-config policy override mechanism. One key today: `overrides:`, a `ChangeKind` slug ->
+The documented project-config policy override mechanism. One key today: `overrides:`, a `ChangeKind` slug ->
 severity mapping (`break`/`warn`/`risk`/`ignore`) — the identical vocabulary
 and validation `--policy <file>`'s own `overrides:` block uses (an unknown
 slug or severity spelling is a hard load error, not a silently-skipped
@@ -671,10 +667,9 @@ error), but they are handled outside the `compare` config merge:
   weight: <int> }` path-glob risk profile, parsed by `RiskRules.from_dict` in
   `buildsource/risk.py`. **Nothing loads it any more, and there is no
   replacement:** `scan --risk-rules`, the one option that ever read a
-  `risk_rules:` block, was retired ahead of the command itself (ADR-068's
-  second 2026-09-09 amendment, ruling (b)), and `buildsource/risk.py` —
+  `risk_rules:` block, was retired ahead of the command itself, and `buildsource/risk.py` —
   including the risk scorer, not only the `auto`-depth-escalation half —
-  was deleted outright along with the rest of `scan` in ADR-068 Phase 6 (no
+  was deleted outright along with the rest of `scan` in 0.6 (no
   alias, no deprecation window). There is now no risk score of any kind,
   reported or otherwise; `compare`'s `--depth` is always an explicit pin.
   The key stays recognized (so an existing file does not trigger the
@@ -684,7 +679,7 @@ error), but they are handled outside the `compare` config merge:
   (`buildsource/cross_source_checks.py`) run unconditionally as part of every
   `compare` invocation, with no per-check tuning surface — the `scan`
   command's repeatable `--crosscheck KEY=LEVEL` flag that once tuned them was
-  deleted along with `scan` itself (ADR-068 Phase 6).
+  deleted along with `scan` itself.
 
 ---
 

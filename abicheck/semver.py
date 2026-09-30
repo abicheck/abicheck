@@ -352,6 +352,30 @@ def recommend_release(
     )
 
 
+def stated_versioning_policy(result: DiffResult) -> VersioningPolicy | None:
+    """The versioning policy the project stated for this run, or ``None``.
+
+    Read off the run's own policy file, and only when that file actually
+    has a ``versioning:`` block: a built-in default is not a statement, so
+    a run without one keeps ``policy_acceptance`` unset ("not evaluated")
+    rather than reporting a default it never chose.
+    """
+    policy_file = getattr(result, "policy_file", None)
+    if policy_file is None or not getattr(policy_file, "versioning_stated", False):
+        return None
+    policy = getattr(policy_file, "versioning", None)
+    return policy if isinstance(policy, VersioningPolicy) else None
+
+
+def recommend_release_for_report(result: DiffResult) -> ReleaseRecommendation:
+    """:func:`recommend_release` with the run's stated versioning policy.
+
+    The one call every report projection makes, so the JSON, Markdown and
+    HTML views cannot disagree about whether acceptance was evaluated.
+    """
+    return recommend_release(result, versioning_policy=stated_versioning_policy(result))
+
+
 def _recommend_release_observed(result: DiffResult) -> ReleaseRecommendation:
     """The pre-existing, policy-unaware recommendation logic (unchanged)."""
     suppressed_major = _suppressed_major_class_recommendation(result)

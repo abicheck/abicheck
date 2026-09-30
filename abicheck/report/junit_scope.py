@@ -100,8 +100,8 @@ def append_scope_suite(
         error.set("type", "no_comparison_completed")
         error.set(
             "message",
-            "comparison scope: the selected scope produced no valid comparison "
-            "(ADR-065 D7) -- never a clean pass under any policy",
+            "comparison scope: the selected scope produced no valid comparison"
+            " -- never a clean pass under any policy",
         )
         tests += 1
         errors += 1

@@ -96,13 +96,13 @@ RETIRED_TOKENS: dict[str, str] = {
         "root-type changes -- so it never showed evidence 'root-cause' "
         "lacked, and often showed less"
     ),
-    "patterns": "the pattern-modulation ledger is always disclosed (ADR-067)",
+    "patterns": "the pattern-modulation ledger is always disclosed",
     "filtered": (
         "the scope/reconciliation ledger of findings excluded from the "
-        "verdict is always disclosed (ADR-067)"
+        "verdict is always disclosed"
     ),
     "suppressions": (
-        "the --suppress audit is always disclosed when suppression was given (ADR-067)"
+        "the --suppress audit is always disclosed when suppression was given"
     ),
 }
 

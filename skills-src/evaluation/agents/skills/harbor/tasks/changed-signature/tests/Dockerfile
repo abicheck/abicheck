@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # each exists. `_normalize_pinned_ref`/`_DIGEST_LINE` in this generator are
 # file-path-agnostic, so the identical two-line convention here is picked up
 # by `--check` without any further changes to that comparison machinery.
-ARG ABICHECK_REF=13c26e69a301fcde11b457442769d58ef7a2fee1
-# ABICHECK_RUNTIME_DIGEST=dd8d7c50982fe68c4da521b71ac4b5235f31c6c062191623a7ba3468255d947a
+ARG ABICHECK_REF=78578e49c8d7b8cf3ca8379a072c134ecc807b5e
+# ABICHECK_RUNTIME_DIGEST=74b71b9faef13a5e602d57d0fdc991a0d8ef1019939b5ccdf88662949fdb49f2
 RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \
     && cd /opt/abicheck-src \
     && (git checkout "$ABICHECK_REF" 2>/dev/null \
@@ -34,10 +34,10 @@ RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \
 # attack surface are not substitutes for each other.
 RUN set -eux; \
     cd /opt/abicheck-src; \
-    mkdir -p /tmp/rt-keep/agent-evals/skills/harbor; \
+    mkdir -p /tmp/rt-keep/skills-src/evaluation/agents/skills/harbor; \
     mv abicheck /tmp/rt-keep/abicheck; \
-    mv skills-src/evaluation/agents/skills/graders /tmp/rt-keep/agent-evals/skills/graders; \
-    mv skills-src/evaluation/agents/skills/harbor/verify_run.py /tmp/rt-keep/agent-evals/skills/harbor/verify_run.py; \
+    mv skills-src/evaluation/agents/skills/graders /tmp/rt-keep/skills-src/evaluation/agents/skills/graders; \
+    mv skills-src/evaluation/agents/skills/harbor/verify_run.py /tmp/rt-keep/skills-src/evaluation/agents/skills/harbor/verify_run.py; \
     cd /; \
     rm -rf /opt/abicheck-src; \
     mv /tmp/rt-keep /opt/abicheck-src

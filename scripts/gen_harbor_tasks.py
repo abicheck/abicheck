@@ -268,7 +268,7 @@ RUN set -eux; \\
 RUN real="$(command -v abicheck)" \\
     && [ "$real" = /usr/local/bin/abicheck ] \\
     && mv "$real" "$real-real" \\
-    && cp /opt/abicheck-src/agent-evals/skills/shim/abicheck "$real" \\
+    && cp /opt/abicheck-src/skills-src/evaluation/agents/skills/shim/abicheck "$real" \\
     && chmod +x "$real" "$real-real"
 ENV SKILL_EVAL_REAL_ABICHECK=/usr/local/bin/abicheck-real
 ENV SKILL_EVAL_CALLS=/workspace/calls.jsonl
@@ -477,10 +477,10 @@ RUN git clone https://github.com/abicheck/abicheck.git /opt/abicheck-src \\
 # attack surface are not substitutes for each other.
 RUN set -eux; \\
     cd /opt/abicheck-src; \\
-    mkdir -p /tmp/rt-keep/agent-evals/skills/harbor; \\
+    mkdir -p /tmp/rt-keep/skills-src/evaluation/agents/skills/harbor; \\
     mv abicheck /tmp/rt-keep/abicheck; \\
-    mv skills-src/evaluation/agents/skills/graders /tmp/rt-keep/agent-evals/skills/graders; \\
-    mv skills-src/evaluation/agents/skills/harbor/verify_run.py /tmp/rt-keep/agent-evals/skills/harbor/verify_run.py; \\
+    mv skills-src/evaluation/agents/skills/graders /tmp/rt-keep/skills-src/evaluation/agents/skills/graders; \\
+    mv skills-src/evaluation/agents/skills/harbor/verify_run.py /tmp/rt-keep/skills-src/evaluation/agents/skills/harbor/verify_run.py; \\
     cd /; \\
     rm -rf /opt/abicheck-src; \\
     mv /tmp/rt-keep /opt/abicheck-src
@@ -614,7 +614,7 @@ esac
 set -euo pipefail
 {arch_guard}
 mkdir -p /logs/verifier
-python3 /opt/abicheck-src/agent-evals/skills/harbor/verify_run.py \\
+python3 /opt/abicheck-src/skills-src/evaluation/agents/skills/harbor/verify_run.py \\
     --workspace /workspace \\
     --scenario /tests/scenario.json \\
     --reward-txt /logs/verifier/reward.txt \\
@@ -644,7 +644,7 @@ def _readme_abicheck_command(fixture: Path) -> tuple[str, str] | None:
     evidence, so a reference solution that dropped them would silently
     reproduce the wrong verdict rather than the documented one. `None`
     when the block is missing or carries no `abicheck compare` line (e.g.
-    a case documented only via `abicheck scan`), in which case `_solve_sh`
+    a case documented only via some other command), in which case `_solve_sh`
     falls back to its unimplemented stub rather than guessing.
     """
     readme = fixture / "README.md"

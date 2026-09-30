@@ -275,7 +275,7 @@ class TestGeneratorCheck:
         """CodeRabbit review, fresh evidence: `_runtime_relevant_digest`
         must key each file by `path.relative_to(root).as_posix()`, not
         `str(...)` -- `str()` on a `PureWindowsPath` renders backslashes
-        (`agent-evals\\skills\\graders\\dimensions.py`), which would make
+        (`skills-src\\evaluation\\agents\\skills\\graders\\dimensions.py`), which would make
         the digest differ from a POSIX checkout's forward-slash rendering
         of the identical relative path even once the content bytes
         themselves are LF-stable, so a genuinely unchanged tree would still
@@ -443,12 +443,13 @@ class TestGeneratorCheck:
         assert "mv /tmp/rt-keep /opt/abicheck-src" in cleanup_block
         assert "mv abicheck /tmp/rt-keep/abicheck" in cleanup_block
         assert (
-            "mv skills-src/evaluation/agents/skills/graders /tmp/rt-keep/agent-evals/skills/graders"
+            "mv skills-src/evaluation/agents/skills/graders /tmp/rt-keep/skills-src/evaluation/agents/skills/graders"
             in cleanup_block
         )
         assert (
             "mv skills-src/evaluation/agents/skills/harbor/verify_run.py "
-            "/tmp/rt-keep/agent-evals/skills/harbor/verify_run.py" in cleanup_block
+            "/tmp/rt-keep/skills-src/evaluation/agents/skills/harbor/verify_run.py"
+            in cleanup_block
         )
         assert cleanup_block.count("/tmp/rt-keep/") == 4  # mkdir -p + 3 mv targets
         # No compiler toolchain needed -- click/rich-click/pyelftools are all

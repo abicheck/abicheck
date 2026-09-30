@@ -1300,7 +1300,7 @@ def attach_build_context_for_parsed_headers(
     phase two, PR 3A (dump/scan resolver convergence). Two resolvers reach the
     collector today -- the typed pipeline's
     :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl` and
-    :func:`~abicheck.scan_engine._build_new_snapshot`; three until ADR-063
+    the retired ``scan_engine._build_new_snapshot`` (deleted by ADR-068 Phase 6); three until ADR-063
     Track 1 deleted the dead ``perform_elf_dump``. Before this helper each
     gate was hand-written, which is how ``scan`` ended up as the one candidate
     resolver that never collected ADR-039 evidence at all while a ``dump``

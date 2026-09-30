@@ -1325,17 +1325,20 @@ def _find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
 # cycle — e.g. Click sub-command modules that register on a parent's group.
 IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
     {
-        # cli.py imports cli_compare_release / cli_baseline / cli_debian_symbols /
-        # cli_appcompat / cli_plugin / cli_pr_comment / cli_probe / cli_stack /
-        # cli_suggest / cli_surface / cli_buildsource at module-load
+        # cli.py imports cli_compare_release / cli_pr_comment / cli_stack /
+        # cli_buildsource (and the other registered sibling modules) at module-load
         # tail to register their @main.command(...) decorators; those
         # sub-modules import `main` and shared helpers back from cli. Each of
         # these once had its own standalone `{"cli", "cli_X"}` (or, for
         # cli_buildsource, three-item) entry here; all twelve were
         # removed (2026-08-31 IMPORT_CYCLE_ALLOWLIST audit) once confirmed
-        # (`cli_scan`/`scan_engine` were later removed outright, ADR-068
-        # Phase 6 -- see the `IMPORT_CYCLE_ALLOWLIST` shrinkage note in that
-        # PR)
+        # (`cli_scan`/`scan_engine` were later removed outright by ADR-068
+        # Phase 6; ten more members naming deleted modules -- `cli_baseline`,
+        # `cli_doctor`, `cli_plugin`, `cli_appcompat`, `cli_config`,
+        # `cli_surface`, `cli_debian_symbols`, `cli_probe`, `cli_suggest`,
+        # `cli_inputs` -- were dropped in the 2026-09-29 CLI-cleanup
+        # reconciliation; `tests/test_ai_readiness.py` now fails on any
+        # member that names no module)
         # redundant — every module they name is already a member of the one
         # big cluster below, so `short <= allowed` already matches any
         # detected cycle naming a subset of them via that cluster entry alone,
@@ -1493,28 +1496,21 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
             {
                 "appcompat",
                 "cli",
-                # `cli_aggregate` joins this SCC exactly like `cli_inputs`: its
+                # `cli_aggregate` joins this SCC: its
                 # `aggregate` command reuses the shared `-o FORMAT=DESTINATION` export request via
                 # `cli_options.export_options` (module-load import), and
                 # `cli_options` is already a member — so `cli -> cli_aggregate ->
                 # cli_options -> ... -> cli` closes through already-member
                 # modules, not a new dependency direction. No init deadlock.
                 "cli_aggregate",
-                "cli_appcompat",
-                "cli_baseline",
                 "cli_buildsource",
                 "cli_buildsource_helpers",
                 "cli_compare_helpers",
                 "cli_compare_release",
-                "cli_config",
-                "cli_debian_symbols",
-                "cli_doctor",
                 "cli_dump_helpers",
                 "cli_graph",
                 "cli_helpers_compare",
-                "cli_inputs",
                 "cli_options",
-                "cli_plugin",
                 # `cli_project` (G30 P1.1/P1.4/P1.5, consolidated by ADR-054's
                 # CLI-organization review) joins this SCC exactly like the
                 # three former standalone groups it replaces
@@ -1527,11 +1523,8 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # modules, not a new dependency direction. No init deadlock.
                 "cli_project",
                 "cli_pr_comment",
-                "cli_probe",
                 "cli_resolve",
                 "cli_stack",
-                "cli_suggest",
-                "cli_surface",
                 "l0_export_delta",
                 "service",
                 "service_compare_pipeline",

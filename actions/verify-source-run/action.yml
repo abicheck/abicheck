@@ -5,7 +5,7 @@ description: >-
   attempt and conclusion; resolve the pull request through the GitHub API
   rather than from the artifact; distinguish the PR head SHA from the
   commit that was actually analysed and verify their association; and
-  extract the artifact as hostile input (ADR-073). Runs no analysis.
+  extract the artifact as hostile input. Runs no analysis.
 
 branding:
   icon: 'shield'

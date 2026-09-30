@@ -88,7 +88,7 @@ build option, not in either binary alone.
 (as embedded by `dump --build-info`/`--sources`, or supplied out-of-band via
 `--old/new-build-info`) and diffs the `enum_size` option directly — the same
 `diff_build_evidence()` routine `tests/test_l3l4l5_examples.py` exercises
-against the committed fixtures. Per ADR-028 D3 a build-evidence finding never
+against the committed fixtures. By the authority rule, a build-evidence finding never
 decides a shipped-ABI break on its own; it flags the elevated risk and
 localizes the cause, and an artifact (L0/L1) diff is what would confirm any
 concrete layout break.

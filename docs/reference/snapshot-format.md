@@ -66,7 +66,7 @@ maps are verbatim; each `payload` is elided.)*
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
 
 Every `dump` invocation produces this, with no flag. Compression
-(`--compression`, see [Storage encoding](#storage-encoding-adr-059)) wraps it
+(`--compression`, see [Storage encoding](#storage-encoding)) wraps it
 but never changes it.
 
 > **This is not the same number as the report's.** `schema_version` versions
@@ -147,13 +147,13 @@ AST frontend's per-fact producer map, the resolved AST toolchain identity,
 (v13) the CastXML version-gate outcome (`ast_toolchain_supported` /
 `ast_toolchain_unsupported_reasons`), (v14) extraction-contract fingerprints
 proving two snapshots were compared under a comparable profile/scope
-(`AbiSnapshot.contract`, ADR-050 D1 — *verdict-blocking*: see the
+(`AbiSnapshot.contract` — *verdict-blocking*: see the
 compatibility table below), (v15) structured compile-context provenance
 for the header-AST parse (`ast_resolved_standard`, `ast_cplusplus_macro`,
 `ast_compile_args`, `ast_sysroot`), (v16) DWARF-vs-header-AST layout
 coherence (`dwarf_layout_coherence`, `dwarf_layout_coherence_mismatches` —
 see "Compile-context provenance" below), (v17) which SYCL/DPC++ AST pass
-a header-AST snapshot was built from (`frontend_context_kind`, ADR-050 D5),
+a header-AST snapshot was built from (`frontend_context_kind`),
 (v18) whether `dump`'s default toolchain/system-header exclusion was
 applied (`dependency_scope`, see `dumper_scoping.py`), (v19) whether the
 direct-clang backend's `deprecated`/`is_scoped` facts are reliable
@@ -185,7 +185,7 @@ flag, since an empty dict degrades identically to "no typedefs at all" for
 a pre-v25 snapshot, unlike the real-but-wrong scalar defaults v19-v23 above
 guard against, (v26) `Fact[T]` siblings for `RecordType.bases_fact`/
 `virtual_bases_fact`/`vtable_fact`/`vptr_offset_bits_fact` and
-`Param.is_va_list_fact` (ADR-063 Phase 0, see `storage/fact_codec.py`),
+`Param.is_va_list_fact` (see `storage/fact_codec.py`),
 (v27) `Function.is_compiler_generated` — closes a castxml L4 extractor bug
 where a compiler-synthesized implicit special member leaked into the source
 graph as if it were genuine public API; needs no reliability flag, since
@@ -193,16 +193,15 @@ graph as if it were genuine public API; needs no reliability flag, since
 behavior rather than being misread as "confirmed user-written", (v28) each
 declaration's `entity_id` carrier persisted through its own codec
 (`storage/entity_id_codec.py`), (v29) `AbiSnapshot.surface_graph` — the
-unconditional public-surface/L5 evidence graph (ADR-063 Phase 3 D5, see
+unconditional public-surface/L5 evidence graph (see
 "Fields" below) persisted through its own `to_dict()` encoding, not
 `asdict()`'s naive recursion (from v49 in the compact graph-table encoding
 described in "Fields" below), and (v30) `RecordType.is_final_fact` — the
-fact/capability registry's (ADR-063 Phase 5 D7,
-`abicheck/model/fact_registry.py`) first registered `Fact[T]` conversion;
+fact/capability registry's (`abicheck/model/fact_registry.py`) first registered `Fact[T]` conversion;
 needs no reliability flag, since `is_final`'s own `None` already
 unambiguously means "not captured", (v31) `EntityId` sidecars for
 typedefs and constants (`AbiSnapshot.typedef_entity_ids`/
-`constant_entity_ids`, ADR-063 Phase 2's closing slice) — additive twins of
+`constant_entity_ids`) — additive twins of
 `typedefs_qualified`/`constants` carrying the structural identity both
 header-AST backends already resolve while walking their own intermediate
 representation, keyed identically to their partner dict; empty on a
@@ -228,8 +227,7 @@ readers unconditionally access `.value` on it, and (v35)
 `is_hidden_friend_fact`/`source_header_fact`/`is_variadic_fact`/
 `exception_spec_fact`/`is_override_fact`/`hidden_friend_owner_fact`/
 `elf_binding_fact`/`is_compiler_generated_fact` — the same case-(b)
-pattern applied to `Function`'s own ten remaining fields, closing out
-this dataclass's ADR-063 Phase 5 conversion; `elf_binding_fact` gets the
+pattern applied to `Function`'s own ten remaining fields, closing out this dataclass's `Fact[T]` conversion; `elf_binding_fact` gets the
 identical `SymbolBinding` reconstruction as `Variable.elf_binding_fact`,
 and (v36) `AbiSnapshot.ast_resolved_standard_fact` — the same case-(b)
 pattern applied to the last remaining case-(b) field outside the four
@@ -243,7 +241,7 @@ backend-driven since each block is parsed by exactly one backend;
 (`snapshot_platform_blocks.elf_from_dict`), the identical reconstruction
 `Variable.elf_binding_fact`/`Function.elf_binding_fact` already need for
 their own non-JSON-native value type, and (v38) `AbiSnapshot.semantic_ir`
-— ADR-063 Phase 6's canonical, backend-independent IR, plus its
+— the canonical, backend-independent IR, plus its
 `semantic_ir_conflicts` sibling. Encoded by `storage/semantic_ir_codec.py`
 as a **list of `{"occurrence": …, "entity": …}` entries**, not a JSON
 object: the IR is keyed by an `OccurrenceId` dataclass, and rendering that
@@ -254,7 +252,7 @@ every snapshot written by a backend not yet narrowed onto the shared
 normalizer. `semantic_ir_conflicts` is sparse the same way, so for such a
 snapshot a v38 document differs from the v37 one only in the version
 stamp. Then (v39) `TypeField.is_const_fact`/
-`is_volatile_fact`/`is_mutable_fact` — ADR-063 Phase 5's first **case-(a)**
+`is_volatile_fact`/`is_mutable_fact` — the first **case-(a)**
 conversion: unlike every `_fact` sibling above, these three fields' own
 values (a plain `False`) carry no availability signal at all, so the
 snapshot-level `header_cv_facts_reliable` flag is what a pre-v39 document's
@@ -266,13 +264,12 @@ before a blanket `False` may be read as `Fact.present(False)` rather than
 case-(a) family `clang_deprecation_facts_reliable` guards, converted the
 same way (`TypeField.deprecated`'s own sibling landed one version earlier,
 with the rest of that dataclass's fields), and (v41) `Param.is_restrict_fact`
-and `Variable.access_fact` — the last two fields ADR-063 Phase 5's registry
-tracked as eligible-but-unconverted, closing that phase's field-by-field
+and `Variable.access_fact` — the last two fields the fact registry tracked as eligible-but-unconverted, closing that phase's field-by-field
 conversion. `access_fact`'s decoded value is rebuilt into a real
 `AccessLevel` member, the same reconstruction `elf_binding_fact` needs.
 
 Then (v42) the on-disk wire format itself changed, not just a field:
-ADR-062/063 Phase 8's redesign made `snapshot_to_json()` write
+The storage redesign made `snapshot_to_json()` write
 `storage.sectioned_document`'s single-file sectioned envelope instead of a flat
 document. Bumped specifically so a pre-Phase-8 reader (whose own
 `SCHEMA_VERSION` was already 41) hits the hard-rejection path below instead of
@@ -345,8 +342,7 @@ reports a conflicted name as ambiguous rather than trusting the first
 definition.
 
 (v52) `extraction_scope` — the ownership rules a header-derived snapshot's
-declarations were classified under ([ADR-075](../contribute/adr/075-target-ownership-and-extraction-scope.md);
-see [Extraction scope and ownership](#extraction-scope-and-ownership-schema-v52)
+declarations were classified under (see [Extraction scope and ownership](#extraction-scope-and-ownership-schema-v52)
 below). Declaration lists encode exactly as v51. A pre-v52 snapshot loads with
 the field absent — *unrecorded*, never read as "no rules" — and every
 declaration's owner unknown.
@@ -360,8 +356,7 @@ carried as appearing out of nowhere. Absent on a pre-v47 snapshot, which
 loads as the empty tuple — correct for every such snapshot, since the flag
 did not exist. Before
 that (v45)
-`Param.kind_fact` persisted — closes the last case-(a) field ADR-063 Phase
-5's "field-by-field conversion complete" note missed: neither header-AST
+`Param.kind_fact` persisted — closes the last case-(a) field the "field-by-field conversion complete" note missed: neither header-AST
 backend had ever determined a parameter's indirection kind
 (value/pointer/reference/rvalue-reference) before this version, so a
 pre-v45 header-derived snapshot's blanket `"value"` is a placeholder, not
@@ -389,7 +384,7 @@ Two consequences worth internalising:
 - **A newer snapshot usually warns rather than fails — but not once a
   verdict-blocking field exists.** Prior to v14 every bump was purely
   additive, so an older reader can safely ignore a field it doesn't
-  recognise. Starting at v14, `AbiSnapshot.contract` (ADR-050 D1) makes a
+  recognise. Starting at v14, `AbiSnapshot.contract` makes a
   bump *verdict-blocking*: a reader that silently dropped it could compare
   two possibly-incomparable snapshots and produce an ordinary, wrong
   verdict. `snapshot_from_dict` therefore hard-rejects (rather than
@@ -403,7 +398,7 @@ Two consequences worth internalising:
 
 ---
 
-## Storage encoding (ADR-059)
+## Storage encoding
 
 Everything above describes the **logical** snapshot — the decoded JSON
 payload. On disk, that payload may be stored plain, gzip-compressed, or
@@ -424,11 +419,10 @@ transparently — detected from magic bytes, not just the filename suffix.
 `abicheck dump` *produces* one: it infers the encoding from `-o/--output`'s
 suffix by default (`--compression auto`), or accepts an explicit
 `--compression {none,gzip,zstd}`; `write_snapshot` is the Python API
-equivalent for writing. See [ADR-059](../contribute/adr/059-compressed-snapshot-storage.md)
-for the full storage-envelope model (determinism, atomic writes,
+equivalent for writing. The full storage-envelope model (determinism, atomic writes,
 decompression limits, and what's still deferred).
 
-### Sectioned packaging (ADR-062/063 Phase 8)
+### Sectioned packaging
 
 Orthogonal to compression: the envelope shown in
 [What `dump` writes today](#what-dump-writes-today) is this page's field set
@@ -470,7 +464,7 @@ model rather than against either physical layout. Optional keys are omitted or `
 | `git_tag` | string \| null | Git tag (e.g. `v2.0.0`), supplied or auto-detected. |
 | `created_at` | string \| null | ISO 8601 timestamp set at dump time. |
 | `build_id` | string \| null | Opaque CI identifier (run ID, build number). |
-| `contract` | object \| null | ADR-050 D1 extraction-contract fingerprints (schema v14, *verdict-blocking* — see "Forward / backward compatibility" above): `profile_fingerprint`/`scope_fingerprint` plus their named resolved sub-inputs, proving two snapshots were extracted under a comparable profile/scope. `null` when no producer populated it yet. |
+| `contract` | object \| null | Extraction-contract fingerprints (schema v14, *verdict-blocking* — see "Forward / backward compatibility" above): `profile_fingerprint`/`scope_fingerprint` plus their named resolved sub-inputs, proving two snapshots were extracted under a comparable profile/scope. `null` when no producer populated it yet. |
 | `dependency_scope` | string \| null | (schema v18) `"filtered"` when the toolchain/system-header exclusion (`dumper_scoping.py`) was applied, `"full"` when opted out via `--include-system-declarations`. **Every front end filters by default** (`include_dependencies=False`): the `dump`/`compare` CLI, `service.run_dump` and `InputSpec` all share that default since the 0.6 defaults-alignment pass — before it, a typed-API caller that omitted the field got the *unfiltered* surface while the identical CLI invocation got the filtered one, and the two were not comparable. `null` on any pre-v18 snapshot or any snapshot with no header-derived declarations. `comparability.check_contracts_comparable` raises `ScopeMismatchError` only when BOTH sides carry an explicit, non-null value and they differ — `null` is deliberately NOT treated as `"full"` (an ordinary pre-v18 baseline is usually already-filtered content that simply predates this tag; assuming `"full"` for it would spuriously flag the routine "compare a cached baseline against a fresh dump" workflow), so a genuinely ambiguous untagged snapshot is left unchecked on this axis rather than guessed at. |
 | `header_only` | boolean | (schema v44) `true` only for a snapshot built by the binary-less header-AST dump path — either `dump -H api.h` (no `SO_PATH`/`--sources`/`--build-info`) or a pathless `dump --dump-manifest m.yaml` naming real header-AST roots (workstream F S1, "Header-only comparison"). Explicit, not inferred from `platform`/`from_headers`: a pre-existing `--sources`/`--build-info` source-only dump also has `platform: null`, but carries no header-AST declarations at all. **`public_header_dirs` alone does NOT select this path** — it is a declaration-provenance (public-vs-internal) classifier only, never a source of headers to parse; a binary-less request naming only `public_header_dirs` (no header file, no manifest) is rejected before extraction. `false` (the default) for every snapshot predating this field and every ordinary binary dump. |
 
@@ -533,14 +527,13 @@ gets backfilled, only report on it.
 
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
-| `frontend_context_kind` | string \| null | `null` | Which AST pass (`"host"` or `"device"`) this header-AST snapshot's clang backend selected via `--frontend-context` (ADR-050 D5, `sycl_context.py`). `null` on any non-SYCL/DPC++ invocation and on any pre-v17 snapshot. |
+| `frontend_context_kind` | string \| null | `null` | Which AST pass (`"host"` or `"device"`) this header-AST snapshot's clang backend selected via `--frontend-context` (`sycl_context.py`). `null` on any non-SYCL/DPC++ invocation and on any pre-v17 snapshot. |
 
 ### Extraction scope and ownership (schema v52)
 
 Written for every snapshot a run extracts from headers; absent on a
 binary- or debug-only snapshot and on any snapshot a run *loaded* (a stored
-baseline keeps the scope it was dumped under). Decided by
-[ADR-075](../contribute/adr/075-target-ownership-and-extraction-scope.md).
+baseline keeps the scope it was dumped under). 
 
 | Key | Type | Meaning |
 |-----|------|---------|
@@ -579,7 +572,7 @@ unknown.
 | `elf_only_mode` | bool | True when dumped without headers (all functions carry ELF-only provenance). |
 | `from_headers` | bool | True when the surface was parsed from public headers (drives the header-aware evidence tier). Omitted from the file when it was only *inferred* on load, so a reload re-runs the same inference. |
 | `scope_fallback` | string \| null | Public-scope fallback marker. |
-| `parsed_with_build_context` | bool | True when parsed with build-context evidence (ADR-029). |
+| `parsed_with_build_context` | bool | True when parsed with build-context evidence. |
 
 ### Platform and debug metadata (optional)
 
@@ -598,11 +591,11 @@ unknown.
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `build_source_pack` | object \| null | Reference to an out-of-band build/source pack (ADR-028). Older snapshots may store this under the legacy key `evidence_pack`, which the loader still reads. |
+| `build_source_pack` | object \| null | Reference to an out-of-band build/source pack. Older snapshots may store this under the legacy key `evidence_pack`, which the loader still reads. |
 | `build_source` | object \| null | Inline-embedded build/source facts for single-artifact workflows. Omitted when nothing was embedded. |
-| `surface_graph` | object \| omitted | (v29, ADR-063 Phase 3 D5) The unconditional public-surface/L5 evidence graph — never gated on `build_source`, unlike the row above. The key is omitted entirely (not written as `null`) for a snapshot predating this field, a binary-only snapshot, or one whose headers were never parsed — `encode_surface_graph()` pops the key rather than writing a null placeholder. When `build_source.source_graph` is the identical object, it is omitted from `build_source`'s own encoding rather than written twice; the loader restores that alias on read. **From v49** the value is `storage/graph_table_codec.py`'s compact encoding (`"encoding": "graph-table/1"`): one `strings` table, `nodes`/`edges` objects of equal-length index columns (`id`/`src`/`dst`, `kind`, `label` for nodes, and `facts`), and deduplicated `attrs` and `facts` tables. Only observed evidence is written: nothing the loader rederives (`indexes`, `graph_id`, finalize-owned `coverage` counts, and each entity's `resolved`/`conflicts`/`occurrences`/`attrs`/`provenance`/`confidence`, all rebuilt from its facts), and no fact from a producer that projects the snapshot's own records (the public-surface builder's `declaration`/`type`/`symbol`/`binary_symbol`/`debug_type` nodes and `declares`/`references`/`declares_linker_name`/`exports`/`debug_type_of` edges), which a reader rebuilds on demand. A value without `encoding` is the pre-v49 per-entity form and still loads. The graph is decoded on first access, not at load (a corrupt value raises then). |
-| `build_context_defines` | array of strings | The build's active `-D` macro set, harvested from a compile database (ADR-039). Empty when no compile database was supplied. |
-| `conditional_fields` | object | `{type: {field: {guard, type, is_bitfield, ...}}}` registry of record fields guarded by a single positive `#ifdef`/`#if defined(...)`, including fields a context-free header parse pruned from `types[].fields` (ADR-039). Feeds the build-context reconciliation diff pass, which runs unconditionally whenever both snapshots carry this field (one-comparison-product.md Phase 7i); empty when no compile database was supplied at dump time. |
+| `surface_graph` | object \| omitted | (v29) The unconditional public-surface/L5 evidence graph — never gated on `build_source`, unlike the row above. The key is omitted entirely (not written as `null`) for a snapshot predating this field, a binary-only snapshot, or one whose headers were never parsed — `encode_surface_graph()` pops the key rather than writing a null placeholder. When `build_source.source_graph` is the identical object, it is omitted from `build_source`'s own encoding rather than written twice; the loader restores that alias on read. **From v49** the value is `storage/graph_table_codec.py`'s compact encoding (`"encoding": "graph-table/1"`): one `strings` table, `nodes`/`edges` objects of equal-length index columns (`id`/`src`/`dst`, `kind`, `label` for nodes, and `facts`), and deduplicated `attrs` and `facts` tables. Only observed evidence is written: nothing the loader rederives (`indexes`, `graph_id`, finalize-owned `coverage` counts, and each entity's `resolved`/`conflicts`/`occurrences`/`attrs`/`provenance`/`confidence`, all rebuilt from its facts), and no fact from a producer that projects the snapshot's own records (the public-surface builder's `declaration`/`type`/`symbol`/`binary_symbol`/`debug_type` nodes and `declares`/`references`/`declares_linker_name`/`exports`/`debug_type_of` edges), which a reader rebuilds on demand. A value without `encoding` is the pre-v49 per-entity form and still loads. The graph is decoded on first access, not at load (a corrupt value raises then). |
+| `build_context_defines` | array of strings | The build's active `-D` macro set, harvested from a compile database. Empty when no compile database was supplied. |
+| `conditional_fields` | object | `{type: {field: {guard, type, is_bitfield, ...}}}` registry of record fields guarded by a single positive `#ifdef`/`#if defined(...)`, including fields a context-free header parse pruned from `types[].fields`. Feeds the build-context reconciliation diff pass, which runs unconditionally whenever both snapshots carry this field (one-comparison-product.md Phase 7i); empty when no compile database was supplied at dump time. |
 
 > Internal cache fields on the model (`_func_by_mangled`, `_var_by_mangled`,
 > `_type_by_name`) and the runtime-only `from_headers_inferred` qualifier are
@@ -651,7 +644,7 @@ contract and its stability policy, see
 
 - [Baseline Management](../use/baseline-management.md) — producing, storing, and comparing snapshots as ABI baselines.
 - [Output Formats](../use/output-formats.md) — the comparison-report JSON and `report_schema_version`.
-- [ADR-059](../contribute/adr/059-compressed-snapshot-storage.md) — the compressed storage envelope (plain/gzip/zstd).
+
 
 ---
 
@@ -668,5 +661,4 @@ contract and its stability policy, see
 - Command lines and paths are **redacted** (home prefixes, secret-looking
   `-D` macros) before they are persisted.
 
-See ADR-028 (umbrella) and ADR-029 (build context) under
-[Development → ADRs](../contribute/adr/index.md) for the full design.
+See [Source & Build Data](../learn/build-source-data.md) for the full model.

@@ -52,6 +52,7 @@ from .checker import (
     Verdict,
 )
 from .finding_identity import missing_contract_kind, report_finding_id
+from .impact.use_case_impact import use_cases_by_finding_for as use_cases_by_finding_for
 from .model.change_catalog.kinds import HasKind
 from .policy.classification import (
     evidence_status_for_result,
@@ -82,7 +83,7 @@ from .report_correlation import (
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
 )
 from .report_summary import build_summary, surface_breakdown
-from .semver import recommend_release
+from .semver import recommend_release_for_report
 
 _VERDICT_EMOJI = {
     Verdict.NO_CHANGE: "✅",
@@ -1590,7 +1591,7 @@ def compute_review_digest(
     scoped = result.scope_to_public_surface
     additions_label = "Public additions" if scoped else "Additions"
 
-    rec = recommend_release(result)
+    rec = recommend_release_for_report(result)
 
     # Top impacted symbols (breaking + API), capped for readability. Filters
     # by each change's *effective* verdict (DiffResult._effective_verdict_for_change)
@@ -1607,6 +1608,8 @@ def compute_review_digest(
     # section elsewhere in the report; this list is the digest of what gated.
     from .report.surface_changes import compute_surface_changes
 
+    uc = use_cases_by_finding_for(result)  # `compare --use-cases` only
+    groups = tuple(review_groups or _review_compute.review_groups_for(findings))
     impacted = [
         f.change
         for f in findings
@@ -1640,7 +1643,11 @@ def compute_review_digest(
         bump_value=rec.bump.value,
         soname_value=rec.soname.value,
         impacted=tuple(
-            _review.ImpactedSymbol(symbol=c.symbol or "?", kind=c.kind.value)
+            _review.ImpactedSymbol(
+                symbol=c.symbol or "?",
+                kind=c.kind.value,
+                use_cases=(uc or {}).get(_finding_id(c), ()),
+            )
             for c in impacted
         ),
         disposition_audit=(
@@ -1651,9 +1658,8 @@ def compute_review_digest(
         surface_changes=compute_surface_changes(result, findings),
         env_matrix_source_sha256=result.env_matrix_source_sha256,
         pattern_modulations=tuple(getattr(result, "pattern_modulations", ()) or ()),
-        review_groups=tuple(
-            review_groups or _review_compute.review_groups_for(findings)
-        ),
+        review_groups=groups,
+        review_group_use_cases=_review_compute.use_cases_by_group(groups, uc),
         result_counts=result_counts or {},
         policy=result.policy or "strict_abi",
         gate_exit_code=gate.exit_code if gate is not None else gate_exit_code,
@@ -1661,6 +1667,9 @@ def compute_review_digest(
         show_release_recommendation=bool(
             result.policy_file is not None
             and getattr(result.policy_file, "versioning_stated", False)
+        ),
+        policy_acceptance=(
+            None if rec.policy_acceptance is None else rec.policy_acceptance.to_dict()
         ),
     )
 
@@ -1834,13 +1843,16 @@ _BUMP_EMOJI = {"major": "🔴", "minor": "🟢", "patch": "🟢", "none": "✅"}
 
 def compute_recommendation_section(result: DiffResult) -> _rmd.RecommendationSection:
     """The structured intermediate for :func:`_append_recommendation_section`."""
-    rec = recommend_release(result)
+    rec = recommend_release_for_report(result)
     return _rmd.RecommendationSection(
         bump_emoji=_BUMP_EMOJI.get(rec.bump.value, ""),
         bump_upper=rec.bump.value.upper(),
         soname_value=rec.soname.value,
         state_value=rec.state.value,
         rationale=rec.rationale,
+        policy_acceptance=(
+            None if rec.policy_acceptance is None else rec.policy_acceptance.to_dict()
+        ),
     )
 
 

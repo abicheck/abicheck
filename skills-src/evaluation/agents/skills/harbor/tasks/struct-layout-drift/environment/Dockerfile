@@ -23,8 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # real fix (vendoring the runtime sources directly, or a published
 # release tag) is a bigger, cross-cutting change than this generator's
 # own scope; see skills-src/evaluation/agents/skills/harbor/CLAUDE.md.
-ARG ABICHECK_REF=13c26e69a301fcde11b457442769d58ef7a2fee1
-# ABICHECK_RUNTIME_DIGEST=dd8d7c50982fe68c4da521b71ac4b5235f31c6c062191623a7ba3468255d947a
+ARG ABICHECK_REF=78578e49c8d7b8cf3ca8379a072c134ecc807b5e
+# ABICHECK_RUNTIME_DIGEST=74b71b9faef13a5e602d57d0fdc991a0d8ef1019939b5ccdf88662949fdb49f2
 # ^ content digest of `_RUNTIME_RELEVANT_PATHS` at generation time -- what
 # `--check` (scripts/gen_harbor_tasks.py) actually compares to detect real
 # staleness, independent of whether ABICHECK_REF above is still a
@@ -71,7 +71,7 @@ RUN set -eux; \
 RUN real="$(command -v abicheck)" \
     && [ "$real" = /usr/local/bin/abicheck ] \
     && mv "$real" "$real-real" \
-    && cp /opt/abicheck-src/agent-evals/skills/shim/abicheck "$real" \
+    && cp /opt/abicheck-src/skills-src/evaluation/agents/skills/shim/abicheck "$real" \
     && chmod +x "$real" "$real-real"
 ENV SKILL_EVAL_REAL_ABICHECK=/usr/local/bin/abicheck-real
 ENV SKILL_EVAL_CALLS=/workspace/calls.jsonl

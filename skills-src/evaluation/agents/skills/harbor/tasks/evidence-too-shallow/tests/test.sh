@@ -18,7 +18,7 @@ case "$allowed_archs" in
 esac
 
 mkdir -p /logs/verifier
-python3 /opt/abicheck-src/agent-evals/skills/harbor/verify_run.py \
+python3 /opt/abicheck-src/skills-src/evaluation/agents/skills/harbor/verify_run.py \
     --workspace /workspace \
     --scenario /tests/scenario.json \
     --reward-txt /logs/verifier/reward.txt \

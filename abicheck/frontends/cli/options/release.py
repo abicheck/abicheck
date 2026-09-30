@@ -107,7 +107,7 @@ def release_options(func: F) -> F:
         type=click.Path(exists=True, path_type=Path),
         default=None,
         help="ABI instantiation manifest (YAML/JSON) listing symbols the release "
-        "publicly promises (ADR-023). Renamed from --manifest (CLI cleanup "
+        "publicly promises. Renamed from --manifest (CLI cleanup "
         "phase two, PR J): the bare spelling collided with aggregate's own "
         "--manifest and the product's several other manifest-shaped concepts "
         "(dump manifest, run plan, bundle facts, project config). "
@@ -115,7 +115,7 @@ def release_options(func: F) -> F:
         "Phase 7d (one-comparison-product.md §4.1) classes this CONFIG ("
         '"a declared contract is a project property") with no stated '
         "prerequisite, but its natural home -- a project-config document "
-        "-- already has an owner: ADR-049's CompatibilityEvaluationConfig "
+        "-- already has an owner: the compatibility evaluation config "
         "resolves a whole `contract.*` namespace through its own D7 "
         "precedence tiers (compatibility_evaluation_frontend.py), separate "
         "from this plain BuildConfig/.abicheck.yml schema. Adding a second, "
@@ -123,7 +123,7 @@ def release_options(func: F) -> F:
         "resolver, no receipt, no pack-conflict detection -- would be "
         "exactly the ad hoc config plumbing this workstream's own task "
         "instructions warn against inventing casually, not a mechanical "
-        "rename. Kept as a CLI flag pending a real ADR-049-coordinated "
+        "rename. Kept as a CLI flag pending a real "
         "design for where a declared instantiation manifest belongs.",
     )(func)
     func = click.option(
@@ -132,8 +132,8 @@ def release_options(func: F) -> F:
         type=click.Path(path_type=Path),
         default=None,
         help="Persist this run's OLD-side bundle facts (per-library snapshots "
-        "plus the instantiation manifest, if any) to PATH (G38 Phase 2, "
-        "ADR-023 amendment) for a later stored-baseline bundle comparison. "
+        "plus the instantiation manifest, if any) to PATH "
+        "for a later stored-baseline bundle comparison. "
         "Additive output alongside the ordinary live-vs-live comparison. "
         "(directory/package inputs only)\n\n"
         "Phase 7d (one-comparison-product.md §4.1) originally classed this "
@@ -234,7 +234,7 @@ def debug_resolution_options(func: F) -> F:
         "operand is comes from its content, not its name. Applies to both "
         "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "
         "per side (e.g. --debug-info old=dbg1 --debug-info new=b-dbg.rpm). "
-        "Repeatable (ADR-040).",
+        "Repeatable.",
     )(func)
     return func
 
@@ -354,12 +354,12 @@ def build_source_dump_options(func: F) -> F:
         "build_config",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         default=None,
-        help="Path to the project `.abicheck.yml` (ADR-037 D4): build system, "
+        help="Path to the project `.abicheck.yml`: build system, "
         "query command, compile-DB location, plus the stable severity/scope/"
         "suppression/source settings. Defaults to `.abicheck.yml` at the "
         "--sources tree root for non-executing settings; build.query runs ONLY "
         "from an explicit --config -- an auto-discovered one never executes "
-        "it, and no CLI flag can authorize it (ADR-032 D5).",
+        "it, and no CLI flag can authorize it.",
     )(func)
     func = click.option(
         "--sources",
@@ -425,7 +425,7 @@ def evidence_options(func: F) -> F:
         "embedding build/source/graph facts) or a pre-built `collect` pack, "
         "overriding embedded. Applies to both sides; scope to one with an "
         "'old='/'new=' prefix, repeating the flag per side "
-        "(e.g. --sources old=src_v1 --sources new=src_v2) (ADR-040).",
+        "(e.g. --sources old=src_v1 --sources new=src_v2).",
     )(func)
     func = click.option(
         "--build-info",
@@ -441,7 +441,7 @@ def evidence_options(func: F) -> F:
         "comparison's verdict and report (G2: probe -> compare). Applies to "
         "both sides; scope to one "
         "with an 'old='/'new=' prefix, repeating the flag per side "
-        "(e.g. --build-info old=b1 --build-info new=b2) (ADR-040).",
+        "(e.g. --build-info old=b1 --build-info new=b2).",
     )(func)
     return func
 

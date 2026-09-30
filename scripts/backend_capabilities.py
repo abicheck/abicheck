@@ -270,7 +270,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 5: Fact[bool | None] sibling of is_explicit. "
+            "Fact[bool | None] sibling of is_explicit. "
             "Both backends now construct it directly as an explicit kwarg "
             "-- Fact.present(is_explicit) for a Constructor/Method/"
             "Converter (castxml) or CXXConstructorDecl/CXXConversionDecl "
@@ -295,7 +295,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _OTHER,
         _OTHER,
         note=(
-            "ADR-063 Phase 5 (fifth batch): Fact[str | None] sibling of "
+            "Fact[str | None] sibling of "
             "source_header, mirroring RecordType/EnumType/Variable."
             "source_header_fact exactly -- another layer "
             "(provenance.tag_provenance()) owns it."
@@ -340,7 +340,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5 (ninth batch): Fact[str | None] sibling of "
+            "Fact[str | None] sibling of "
             "deprecated. NONE for both backends because neither names the "
             "keyword -- each passes the real value and the dataclass's own "
             "__post_init__ bridge derives the Fact, the same honest reading "
@@ -418,7 +418,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _OTHER,
         _OTHER,
         note=(
-            "ADR-063 Phase 5 (fifth batch): Fact[SymbolBinding | None] "
+            "Fact[SymbolBinding | None] "
             "sibling of elf_binding, mirroring Variable.elf_binding_fact "
             "exactly -- another layer "
             "(dumper_elf_symbols._populate_elf_visibility) owns it, kept "
@@ -454,7 +454,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 2: the parse-time `model.identity.EntityId` carrier. "
+            "The parse-time `model.identity.EntityId` carrier. "
             "Both backends resolve one from the typed scope path they record "
             "during their own walk. Runtime-only -- never serialized, so a "
             "reloaded snapshot carries None; a hybrid merge does not backfill "
@@ -467,7 +467,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         Capability.OTHER_LAYER,
         Capability.OTHER_LAYER,
         note=(
-            "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
+            "Owner/contract/rule id, stamped after the parse by "
             "`extract.ownership_stamp` from the declaring file -- neither "
             "backend's parser sets it, and it is identical for both. "
             "Persisted in `AbiSnapshot.extraction_scope`."
@@ -536,7 +536,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5 (tenth batch): Fact[AccessLevel] sibling of "
+            "Fact[AccessLevel] sibling of "
             "access. NONE for both backends because neither names the "
             "keyword -- each passes the real value and Variable."
             "__post_init__'s bridge derives the Fact. Availability is "
@@ -551,7 +551,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _OTHER,
         _OTHER,
         note=(
-            "ADR-063 Phase 5 (fourth batch): Fact[str | None] sibling of "
+            "Fact[str | None] sibling of "
             "source_header, mirroring RecordType.source_header_fact/"
             "EnumType.source_header_fact exactly -- another layer "
             "(provenance.tag_provenance()) owns it."
@@ -577,7 +577,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5 (fourth batch): Fact[int | None] sibling of "
+            "Fact[int | None] sibling of "
             "alignment_bits. Deliberately NOT constructed as an explicit "
             "keyword the way qualified_name_fact is -- neither backend "
             "passes it literally at Variable(...) construction; it is "
@@ -637,7 +637,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _OTHER,
         _OTHER,
         note=(
-            "ADR-063 Phase 5 (fourth batch): Fact[SymbolBinding | None] "
+            "Fact[SymbolBinding | None] "
             "sibling of elf_binding -- another layer "
             "(dumper_elf_symbols._populate_elf_visibility) owns it, kept "
             "in sync explicitly since it sets elf_binding by attribute "
@@ -650,7 +650,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 2: the parse-time `model.identity.EntityId` carrier. "
+            "The parse-time `model.identity.EntityId` carrier. "
             "Both backends resolve one from the typed scope path they record "
             "during their own walk. Runtime-only -- never serialized, so a "
             "reloaded snapshot carries None; a hybrid merge does not backfill "
@@ -663,7 +663,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         Capability.OTHER_LAYER,
         Capability.OTHER_LAYER,
         note=(
-            "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
+            "Owner/contract/rule id, stamped after the parse by "
             "`extract.ownership_stamp` from the declaring file -- neither "
             "backend's parser sets it, and it is identical for both. "
             "Persisted in `AbiSnapshot.extraction_scope`."
@@ -693,7 +693,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5 (eighth batch): Fact[bool] sibling of is_const, "
+            "Fact[bool] sibling of is_const, "
             "and the phase's first case-(a) conversion. NONE for both "
             "backends because neither names the keyword: each passes the "
             "real is_const value and TypeField.__post_init__'s generic "
@@ -747,7 +747,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5 (eighth batch): Fact[str | None] sibling of "
+            "Fact[str | None] sibling of "
             "default. NONE for both backends for the same reason as "
             "is_const_fact -- each passes the real value and TypeField."
             "__post_init__'s bridge derives the Fact. Availability is "
@@ -805,7 +805,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 0: `Fact[list[str]]` sibling of `bases`. Both "
+            "`Fact[list[str]]` sibling of `bases`. Both "
             "backends construct it directly (`model.record_layout_facts()`) "
             "alongside `bases` itself, opaque records included."
         ),
@@ -816,7 +816,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "virtual_bases_fact",
         _FULL,
         _FULL,
-        note="ADR-063 Phase 0: `Fact[list[str]]` sibling of `virtual_bases` — see `bases_fact`.",
+        note="`Fact[list[str]]` sibling of `virtual_bases` — see `bases_fact`.",
     ),
     FactRow(
         "RecordType",
@@ -835,7 +835,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         "vtable_fact",
         _FULL,
         _FULL,
-        note="ADR-063 Phase 0: `Fact[list[str]]` sibling of `vtable` — see `bases_fact`.",
+        note="`Fact[list[str]]` sibling of `vtable` — see `bases_fact`.",
     ),
     FactRow("RecordType", "source_location", _FULL, _FULL),
     FactRow("RecordType", "is_union", _FULL, _FULL),
@@ -867,7 +867,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 5: `Fact[bool | None]` sibling of `is_final`. "
+            "`Fact[bool | None]` sibling of `is_final`. "
             "Same convention as `bases_fact`/`vtable_fact` above: both "
             "backends construct it directly, as an explicit kwarg "
             "(`Fact.present(is_final)`) rather than relying on "
@@ -920,7 +920,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _OTHER,
         _OTHER,
         note=(
-            "ADR-063 Phase 5: `Fact[str | None]` sibling of `source_header`. "
+            "`Fact[str | None]` sibling of `source_header`. "
             "Same non-header ownership as the legacy field — `provenance."
             "tag_provenance()` keeps both representations in sync via an "
             "explicit post-construction update (mirroring "
@@ -947,7 +947,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5: `Fact[int | None]` sibling of `data_size_bits`. "
+            "`Fact[int | None]` sibling of `data_size_bits`. "
             "Unlike `bases_fact`/`vtable_fact`/`is_final_fact`, neither "
             "backend passes this keyword literally at `RecordType(...)` "
             "construction — it is correctly derived by the generic "
@@ -979,7 +979,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5: `Fact[bool | None]` sibling of "
+            "`Fact[bool | None]` sibling of "
             "`is_standard_layout`. Same shape as `data_size_bits_fact` "
             "above — derived by the generic `__post_init__` bridge, not a "
             "literal constructor keyword, so `NONE` reflects scan evidence "
@@ -1020,7 +1020,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _PARTIAL,
         _PARTIAL,
         note=(
-            "ADR-063 Phase 0: `Fact[int | None]` sibling of `vptr_offset_bits`. "
+            "`Fact[int | None]` sibling of `vptr_offset_bits`. "
             "Unlike `bases_fact`/`virtual_bases_fact`/`vtable_fact`, this one is "
             "`PARTIAL` on both backends, not `FULL` — `Fact.partial(...)`, not "
             "`Fact.present(...)` — matching `vptr_offset_bits`'s own row exactly: "
@@ -1047,7 +1047,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 5 (Codex review, second pass): `Fact[str | "
+            "`Fact[str | "
             "None]` sibling of `qualified_name`. Both backends construct "
             "it directly (`Fact.present(qualified_name)`), unlike "
             "`data_size_bits_fact`/`is_standard_layout_fact`/etc — "
@@ -1080,7 +1080,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5: `Fact[bool | None]` sibling of `is_abstract`. "
+            "`Fact[bool | None]` sibling of `is_abstract`. "
             "Deliberately NOT constructed as an explicit "
             "`Fact.present(is_abstract)` keyword the way `is_final_fact` is "
             "-- `is_abstract` is genuinely `None` on castxml for an opaque/"
@@ -1114,7 +1114,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 2: the parse-time `model.identity.EntityId` carrier. "
+            "The parse-time `model.identity.EntityId` carrier. "
             "Both backends resolve one from the typed scope path they record "
             "during their own walk. Runtime-only -- never serialized, so a "
             "reloaded snapshot carries None; a hybrid merge does not backfill "
@@ -1127,7 +1127,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         Capability.OTHER_LAYER,
         Capability.OTHER_LAYER,
         note=(
-            "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
+            "Owner/contract/rule id, stamped after the parse by "
             "`extract.ownership_stamp` from the declaring file -- neither "
             "backend's parser sets it, and it is identical for both. "
             "Persisted in `AbiSnapshot.extraction_scope`."
@@ -1168,7 +1168,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _OTHER,
         _OTHER,
         note=(
-            "ADR-063 Phase 5 (third batch): Fact[str | None] sibling of "
+            "Fact[str | None] sibling of "
             "source_header, mirroring RecordType.source_header_fact -- "
             "another layer (provenance.tag_provenance()) owns it, kept in "
             "sync explicitly since it sets source_header by attribute "
@@ -1190,7 +1190,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5 (ninth batch): Fact[bool | None] sibling of "
+            "Fact[bool | None] sibling of "
             "is_scoped, guarded by the same clang_deprecation_facts_"
             "reliable flag its own conversion batch shares. NONE for the "
             "same bridge-derived reason as Function.deprecated_fact."
@@ -1218,7 +1218,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 5 (third batch): Fact[str | None] sibling of "
+            "Fact[str | None] sibling of "
             "qualified_name, mirroring RecordType.qualified_name_fact -- "
             "both backends construct it directly as "
             "Fact.present(qualified_name)."
@@ -1230,7 +1230,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 2: the parse-time `model.identity.EntityId` carrier. "
+            "The parse-time `model.identity.EntityId` carrier. "
             "Both backends resolve one from the typed scope path they record "
             "during their own walk. Runtime-only -- never serialized, so a "
             "reloaded snapshot carries None; a hybrid merge does not backfill "
@@ -1243,7 +1243,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         Capability.OTHER_LAYER,
         Capability.OTHER_LAYER,
         note=(
-            "ADR-075 D2: owner/contract/rule id, stamped after the parse by "
+            "Owner/contract/rule id, stamped after the parse by "
             "`extract.ownership_stamp` from the declaring file -- neither "
             "backend's parser sets it, and it is identical for both. "
             "Persisted in `AbiSnapshot.extraction_scope`."
@@ -1258,7 +1258,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _FULL,
         note=(
-            "ADR-063 Phase 5 (eleventh batch, schema v45): the value/pointer/"
+            "Schema v45: the value/pointer/"
             "reference/rvalue-ref classification. castxml resolves it "
             "structurally from its own type graph "
             "(`extract/headers/castxml/type_resolution.top_level_param_kind`); "
@@ -1275,7 +1275,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5 (eleventh batch): Fact[ParamKind] sibling of "
+            "Fact[ParamKind] sibling of "
             "kind, bridge-derived on both backends the same way "
             "is_restrict_fact is; guarded by "
             "AbiSnapshot.param_kind_facts_reliable."
@@ -1312,7 +1312,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _NONE,
         note=(
-            "ADR-063 Phase 5 (tenth batch): Fact[bool] sibling of "
+            "Fact[bool] sibling of "
             "is_restrict, bridge-derived on both backends the same way "
             "Variable.access_fact is; guarded by AbiSnapshot."
             "clang_restrict_facts_reliable."
@@ -1342,7 +1342,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         _PARTIAL,
         note=(
-            "ADR-063 Phase 0: `Fact[bool]` sibling of `is_va_list`, now "
+            "`Fact[bool]` sibling of `is_va_list`, now "
             "constructed directly by both backends. castxml is `NONE`: it "
             "explicitly states `Fact.unsupported()` — a deliberate status, "
             "not a hardcoded default, but a status carrying no determined "

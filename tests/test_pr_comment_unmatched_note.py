@@ -89,7 +89,7 @@ def test_each_unmatched_member_carries_its_own_state(state: str, label: str) -> 
     note = next(ln for ln in body.splitlines() if "Unmatched libraries" in ln)
     assert f"`libgone.so` {label}" in note
     assert "unproven" not in note
-    assert "ADR-065 D2" in note
+    assert "see the comparison scope" in note
 
 
 def test_a_pre_s2_report_renders_the_neutral_note_without_states() -> None:

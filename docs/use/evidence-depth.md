@@ -23,10 +23,9 @@ inputs directly. `abicheck dump INPUT --depth …` pins the same dial when you
 are capturing a reusable snapshot instead of comparing.
 
 !!! warning "`scan` has been retired"
-    [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    retired `scan` as a second analysis product — it duplicated `compare`
+    0.6 retired `scan` as a second analysis product — it duplicated `compare`
     (with/without a stored baseline). Its removal was a **hard removal with
-    no deprecation window** (ADR-068 D8): `abicheck scan` now exits `64`
+    no deprecation window**: `abicheck scan` now exits `64`
     with `No such command`, naming `compare`/`compare --no-baseline` in the
     error. This page describes `compare` (and `dump`) only; a handful of
     passages below still explain `scan`'s own historical behavior for
@@ -58,10 +57,9 @@ warning below for the one remaining difference between the three commands
 (what each writes when it fires).
 
 `--budget` no longer belongs on that list: `compare` gained its own
-`--budget` wall-clock guard (ADR-068 §3 #19) — exit `5` on overflow applies
+`--budget` wall-clock guard — exit `5` on overflow applies
 to both commands now. Neither does risk-driven `auto` depth, which was
-**retired** rather than mirrored (ADR-068's second 2026-09-09 amendment,
-ruling (b)): omitting `--depth` on `scan` now resolves to the fixed
+**retired** rather than mirrored: omitting `--depth` on `scan` now resolves to the fixed
 `headers` rung, exactly the default omitting it on `compare` always gave.
 `scan --build-target` was retired the same way, and `dump --build-target`
 was later retired outright too (a hard usage error, exit 64) — put root
@@ -92,8 +90,7 @@ deleted.
 
 **One dial selects how deep it goes — `--depth`, named by the evidence you get:**
 
-- **`--depth binary|headers|build|source`** — the single knob (ADR-037 D5 /
-  ADR-043 D2). `binary` = L0/L1 exported symbols + binary metadata; `headers` =
+- **`--depth binary|headers|build|source`** — the single knob. `binary` = L0/L1 exported symbols + binary metadata; `headers` =
   +L2 header AST; `build` = +L3 build context; `source` = +L4 replay & the L5
   graph. On both `compare` and `dump`, omitting `--depth` is **not** a fixed
   `headers` default: each command infers the deepest rung its other inputs
@@ -106,9 +103,9 @@ deleted.
   specific rung regardless of what other inputs are present, rather than
   relying on this inference. (Legacy `scan`'s own unpinned default resolves
   to the fixed `headers` rung; it used to score the risk of the changed
-  paths and sometimes escalate, which ADR-068's second amendment retired.)
+  paths and sometimes escalate, which 0.6 retired.)
 - **When `--depth source` actually replays source, it always analyses
-  *something* real, never a zero-TU no-op** (ADR-043 D3): with a
+  *something* real, never a zero-TU no-op**: with a
   `--since`/`--changed-path` seed it replays the *changed* TUs; without one
   it replays the **whole current library target** (what an older,
   now-removed `--depth full` rung used to require explicitly) — so a replay
@@ -119,7 +116,7 @@ deleted.
   `--depth source` in that state fails loud (see the warning above), never
   silently exiting on a shallow verdict.
 - A single-build, no-baseline audit is `compare --no-baseline CANDIDATE`
-  (ADR-068 D2), or legacy `scan CANDIDATE` with no `--against`. There is no
+ , or legacy `scan CANDIDATE` with no `--against`. There is no
   separate `--audit` flag on either. A pinned depth is a contract on the
   `--no-baseline` path too: `compare --no-baseline CANDIDATE --depth build`
   with no `--sources`/`--build-info` exits `7`, same as the two-sided form
@@ -216,7 +213,7 @@ abicheck compare old/libfoo.so new/libfoo.so \
   **body** changes, and it folds the L5 reachability graph. With a diff seed
   (`--since`/`--changed-path`) it replays only the *changed* TUs (cheap,
   PR-sized); without one it replays the **whole current library target**
-  (ADR-043 D3 — never a zero-TU no-op, but potentially as expensive as a full
+  (never a zero-TU no-op, but potentially as expensive as a full
   release-baseline replay). Needs a compile DB and the source checkout
   (`--sources`).
 
@@ -278,7 +275,7 @@ matches your goal, then supply the input named in column 3.
 | Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `binary` | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
 | Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **file or directory** + a C/C++ frontend | `-H include/` or `-H include/foo.h` on `compare`/`dump` (both establish the boundary identically; legacy `scan` instead takes `--public-header-dir DIRECTORY`, directory-only); `castxml` **or** `clang` on `PATH` | with no `-H` at all, there is no public-header set → provenance/cross-checks stay dormant |
 | Build-flag / toolchain / visibility drift (+ macro/include divergence) | `build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info` | L3 `not_collected`; the scan advises the exact remedy |
-| Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) + L5 graph | `source` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `source` replays the **whole current library target** instead of just the changed TUs (ADR-043 D3 — never a zero-TU no-op, but more expensive); missing generated headers → L4 `partial` |
+| Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) + L5 graph | `source` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `source` replays the **whole current library target** instead of just the changed TUs (never a zero-TU no-op, but more expensive); missing generated headers → L4 `partial` |
 | Full-library source replay (an amortized release baseline) | `source` (unseeded — no `--since`/`--changed-path`) | as above, whole library | amortized baseline build | expensive — the one cost cliff is at L4 |
 | Single-build hygiene lint (accidental exports, leaks, unversioned/RTTI) | any depth, no `--against` | binary + public-header **dir** (+ optional L3/L4) | as above | `header_build_context_mismatch` needs L3; `odr_type_variant` needs L4 |
 
@@ -295,7 +292,7 @@ abicheck compare old/libfoo.abi.json new/libfoo.so -H include/ \
   --build-info new=build --sources new=. --since origin/main --depth source
 
 # Bazel: query the action graph (no build); --build-info sniffs the aquery
-# jsonproto and routes it straight to the Bazel adapter (ADR-037 D5 — no pack step)
+# jsonproto and routes it straight to the Bazel adapter (no pack step)
 bazel aquery 'mnemonic("CppCompile", //...)' --output=jsonproto > aq.json
 abicheck compare old/libonedal_core.abi.json new/libonedal_core.so -H include/ \
   --build-info new=aq.json --depth build
@@ -314,7 +311,7 @@ abicheck compare old/libonedal_core.abi.json new/libonedal_core.so -H include/ \
     at `dump` time, or pass matching `--sources old=`/`--build-info old=`
     alongside the `new=` one shown.
 
-!!! tip "`--build-info` auto-detects the format (ADR-037 D5)"
+!!! tip "`--build-info` auto-detects the format"
     `--build-info` sniffs its argument by content, so each kind "just works":
     a `compile_commands.json` (CMake/Meson/`bear`), a Bazel
     `--output=jsonproto` **aquery** or **cquery** dump, a build **directory**
@@ -377,13 +374,10 @@ removals get reported as BREAKING.
 
 **On `compare` and `dump` the compile context is a `.abicheck.yml` property,
 not a flag** — the toolchain a project's headers parse under is a stable
-property of the project, not a per-run decision
-([ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-D5). Both commands take exactly two per-run compile-context inputs on the
+property of the project, not a per-run decision. Both commands take exactly two per-run compile-context inputs on the
 CLI: `-I/--include DIR` (an include root, repeatable — searched before the
 configured `include_dirs`) and `-D/--define NAME[=VALUE]` (a preprocessor
-macro, repeatable — merged with `defines` by macro name, the CLI value
-winning; [ADR-074](../contribute/adr/074-logical-macro-definitions-on-the-cli.md)).
+macro, repeatable — merged with `defines` by macro name, the CLI value winning).
 Everything else lives in the `compile:` block:
 
 | `compile:` key | Purpose |
@@ -404,7 +398,7 @@ These are config-only: the general compiler/frontend CLI family
 `--sysroot`, `--nostdinc`, `--lang`) was removed, and the retired `scan`
 command took the last of those spellings with it. The one exception is
 `defines`, which also has a per-invocation `-D/--define NAME[=VALUE]` on
-`dump`/`compare` (ADR-074), merged with this key by macro name. The full key
+`dump`/`compare`, merged with this key by macro name. The full key
 reference is
 [Config Keys](../reference/config-keys-reference.md); the `compile:` block's
 own semantics are in [Config File](../reference/config-file.md).
@@ -493,7 +487,7 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
 
 ### Single-build audit — no baseline
 
-`abicheck compare --no-baseline CANDIDATE` (ADR-068 D2) runs the
+`abicheck compare --no-baseline CANDIDATE` runs the
 intra-version cross-source hygiene checks against **one** build — no
 previous version required. With just the binary and headers it catches
 accidental exports, private-header leaks, and unversioned symbols:
@@ -504,7 +498,7 @@ abicheck compare --no-baseline libfoo.so -H include/
 
 The findings land under `findings[]` — `changes[]` stays empty and `verdict`
 stays `null`, because an audit reports no addition, removal, or
-compatibility verdict (ADR-068 D2). Legacy `abicheck scan CANDIDATE` (no
+compatibility verdict. Legacy `abicheck scan CANDIDATE` (no
 `--against`) still runs the same checks; the audit is pinned to report at
 least as many findings of every kind across all eleven G20 audit fixtures
 below by `tests/parity/test_no_baseline_audit_corpus_parity.py`.
@@ -540,7 +534,7 @@ abicheck compare --no-baseline libfoo.so -H include/ \
   --build-info build/compile_commands.json
 ```
 
-This reports the full ADR-035 cross-source / single-release finding set
+This reports the full cross-source / single-release finding set
 (`CROSS_SOURCE_EVOLUTION_CHECKS`) rather than a two-version diff. The
 flagship cross-source cases —
 [case148](../reference/examples/case148_xcheck_header_build_mismatch.md)
@@ -621,7 +615,7 @@ abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
 To get a whole-library comparison *report* of a release (replays every TU,
 folds the full graph) for human review — as opposed to the reusable baseline
 above — run `compare --depth source` **without** a `--since`/`--changed-path`
-seed (which resolves to the whole current library target, ADR-043 D3 — what
+seed (which resolves to the whole current library target — what
 a now-removed `--depth full` rung used to require explicitly) and send its
 report to `-o`:
 
@@ -634,8 +628,7 @@ abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
 
 Omitting `--depth` on `scan` resolves `auto` to the fixed `headers` rung —
 the same default `compare` has always used. Through 2026-09-09 it read a
-*risk score* over the changed paths and escalated on its own; ADR-068's
-second amendment retired that (ruling (b)), along with the `--risk-rules`
+*risk score* over the changed paths and escalated on its own; 0.6 retired that, along with the `--risk-rules`
 profile that configured it.
 
 > **This can hide findings a previous run reported.** A seeded scan whose
@@ -659,7 +652,7 @@ does it bottom out at `headers`.
 
 The `--since`/`--changed-path` seed still matters, on both commands, for a
 different axis: it scopes a `--depth source` replay to the changed TUs
-instead of the whole current library target (ADR-043 D3).
+instead of the whole current library target.
 
 ### Reading the coverage block
 
@@ -707,8 +700,7 @@ Measured on two UXL libraries (full data: `skills-src/evaluation/validation/`):
   only); `headers` adds the L2 API surface; `build` adds L3 build context.
 - **`source` is only cheap when you give it a diff seed.** Without
   `--since <ref>` or `--changed-path <file>`, `source` replays the **whole
-  current library target** instead of just the changed TUs (ADR-043 D3 — never a
-  zero-TU no-op, but the most expensive shape, same cost as an amortized release
+  current library target** instead of just the changed TUs (never a zero-TU no-op, but the most expensive shape, same cost as an amortized release
   baseline). With a real PR diff, `source` scopes L4 to the touched TUs and can be
   **an order of magnitude faster** for the identical verdict. Always pass
   `--since`/`--changed-path` in PR CI.

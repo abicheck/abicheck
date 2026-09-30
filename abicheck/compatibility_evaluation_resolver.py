@@ -207,7 +207,7 @@ class ConflictingFieldValuesError(FieldResolutionError):
         layers = ", ".join(sorted({c.layer.value for c in self.candidates}))
         super().__init__(
             f"{field_name}: conflicting values supplied at the same "
-            f"precedence tier ({layers}) (ADR-049 D7)"
+            f"precedence tier ({layers})"
         )
 
 
@@ -229,7 +229,7 @@ class LegacyAliasConflictError(FieldResolutionError):
         self.legacy = legacy
         super().__init__(
             f"{field_name}: legacy alias value disagrees with an explicit "
-            f"CLI/API value for the same field (ADR-049 D7)"
+            f"CLI/API value for the same field"
         )
 
 
@@ -423,7 +423,7 @@ class PackConflictError(ValueError):
         )
         super().__init__(
             f"{field_name!r}: conflicting values from selected packs "
-            f"({packs}) (ADR-049 D8) -- add an explicit override entry for "
+            f"({packs}) -- add an explicit override entry for "
             f"{field_name!r} to resolve the conflict"
         )
 

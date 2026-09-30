@@ -63,7 +63,9 @@ from pathlib import Path
 #: exercised directly against a checkout (`tests/test_gen_harbor_tasks.py`)
 #: without a container at all.
 _GRADERS_ROOT = Path(
-    os.environ.get("HARBOR_GRADERS_ROOT", "/opt/abicheck-src/agent-evals/skills")
+    os.environ.get(
+        "HARBOR_GRADERS_ROOT", "/opt/abicheck-src/skills-src/evaluation/agents/skills"
+    )
 )
 if str(_GRADERS_ROOT) not in sys.path:
     sys.path.insert(0, str(_GRADERS_ROOT))

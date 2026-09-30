@@ -7348,7 +7348,7 @@ threading the resolved `contract_mode`/`contract_evaluation` config through
 `_run_no_baseline_compare_cmd` into `run_no_baseline_compare`, the same way
 the two-sided `compare` path already does via
 `compatibility_evaluation_frontend`/`contract_pipeline`. Recorded in
-[`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact)
+[`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-single-artifact)
 rather than left as a silent behavioral gap in the doc that would otherwise
 claim the axis "applies exactly as it would for a two-sided run."
 
@@ -9385,7 +9385,7 @@ changelog entry and `tests/test_one_comparison_product_parity.py`.
 
 **1. The format set.** `compare` renders
 `json`/`markdown`/`sarif`/`html`/`junit`/`review`/`oneline`; a directory or
-package operand renders `json`/`markdown`/`junit`/`oneline` and rejects the
+package operand renders `json`/`markdown`/`junit`/`oneline`/`html` and rejects the
 rest
 (`frontends/cli/commands/compare.py`'s `_RELEASE_FORMATS`). The rejection is
 loud rather than silent, and it is not arbitrary — the missing formats are
@@ -9397,21 +9397,23 @@ the ones whose renderers take a single `DiffResult`:
   across a whole release). Producing a real release SARIF means either
   keeping every member's findings live or projecting SARIF per member and
   merging runs — a design choice, not a wiring gap.
-- `html` and `review` are narrative renderings of *one* comparison (a
-  verdict badge, an OLD→NEW headline, a release recommendation, a
-  root-cause graph). `review` in particular is a PR-comment digest whose
-  aggregate shape ("which of 40 libraries broke, and how badly") is a
-  product question nobody has answered yet.
+- `review` is a narrative rendering of *one* comparison, a PR-comment
+  digest whose aggregate shape ("which of 40 libraries broke, and how
+  badly") is a product question nobody has answered yet.
 `oneline` was the fourth of that list and is **closed**: it never needed a
 `DiffResult` at all (it is a count summary, and the release summary already
 carries every count), so `report/release_oneline.py` folds the per-library
 counts through the same `format_stat_line` a single-pair `compare` renders
 and the release path accepts `-o oneline=...`/`-o oneline=...` like
-any other.
+any other. `html` is **closed** the same way: `report/render_release_html.py`
+renders the release JSON document itself (headline, per-member table,
+comparison scope, release coherence findings and the recorded dependency
+graph), so it needs no member `DiffResult` either. It is a release page, not
+the single-pair HTML report; per-member finding detail stays in the JSON.
 
-So library count still changes which of `sarif`/`html`/`review` are
+So library count still changes which of `sarif`/`review` are
 available -- a real parity gap, stated here rather than implied by a usage
-error -- and no longer changes anything about `oneline`.
+error -- and no longer changes anything about `oneline` or `html`.
 
 **2. Scope policy at bundle level.** ADR-065's scope policy is fully
 expressible for a directory/package `compare` — `--select`,

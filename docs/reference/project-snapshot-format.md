@@ -27,7 +27,7 @@ generated: false
 > older flat `.abi.json` a prior build wrote stays fully readable.
 >
 > The directory-backed package this page otherwise describes
-> ([ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md)'s
+> (the
 > `manifest.json`/`refs/`/`objects/sha256/...` layout) still exists as a
 > typed-API primitive (`project_snapshot_legacy.write_legacy_snapshot_package`)
 > and `compare` still accepts one as an input path — but no
@@ -39,12 +39,10 @@ generated: false
 > (many small files instead of one, awkward to `scp`/commit/upload as a CI
 > artifact). See the ADR's own Status for the full picture.
 
-`ProjectSnapshot` is ADR-062's replacement for four separate persistence
+`ProjectSnapshot` is the replacement for four separate persistence
 shapes (per-library `.abi.json` snapshots, baseline sets, `BundleFacts`, and
 embedded `BuildSourcePack` data) — one content-addressed package per
 project, addressed by digest rather than embedded whole. See
-[ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md) for the full
-design rationale and
 [the storage-format-v2 plan](../contribute/plans/storage-format-v2.md) for
 phasing and acceptance criteria; this page documents the on-disk shape
 itself.
@@ -112,7 +110,7 @@ An artifact's content is split into independently-addressable *sections*
 `source_abi`, `graph`, `provenance`, `diagnostics`, `raw_refs` are the named
 vocabulary, though `ArtifactRef.sections` accepts any section kind string.
 
-`SemanticIR` (ADR-063 Phase 6's cross-backend declaration/type
+`SemanticIR` (the cross-backend declaration/type
 representation) is the one domain type actually promoted onto a typed,
 versioned section built from a real domain object, under section kind
 `"semantic_ir"`, via `abicheck/storage/dto.py`'s
@@ -180,7 +178,7 @@ invocation gets it by default. `abicheck/project_snapshot_legacy.py`'s
 real, directory-backed round trip built on the primitives above
 (`DirectoryObjectStore` + `import_legacy_snapshot`/`export_legacy_snapshot`
 + `write_project_manifest`), reached through `abicheck.workflows.storage`'s
-facade re-export (`frontends -> workflows -> storage`, ADR-061's layering):
+facade re-export (`frontends -> workflows -> storage` layering):
 
 - **No `dump` CLI flag writes a directory package today** — every
   `dump` invocation writes the single-file sectioned shape instead (see
@@ -196,8 +194,7 @@ facade re-export (`frontends -> workflows -> storage`, ADR-061's layering):
   identical in-memory `AbiSnapshot` a `.abi.json`/sectioned file resolves
   to, so every downstream detector, report, and exit code behaves the same
   regardless of which of the three shapes the input actually is.
-- **`compare`'s release fan-out (a directory/package operand, ADR-062
-  A1.7)** also accepts a *multi*-artifact `ProjectSnapshot` package
+- **`compare`'s release fan-out (a directory/package operand)** also accepts a *multi*-artifact `ProjectSnapshot` package
   directory as either side, alongside its original loose-directory-of-`.so`-
   files operand — `cli_resolve.classify_compare_operand` distinguishes a
   multi-artifact package (routed to the fan-out) from the single-artifact
@@ -236,6 +233,6 @@ facade re-export (`frontends -> workflows -> storage`, ADR-061's layering):
 
 ## Related
 
-- [ADR-062](../contribute/adr/062-project-snapshot-storage-v2.md) — the design decision this format implements
+
 - [Storage format v2 plan](../contribute/plans/storage-format-v2.md) — phasing, acceptance criteria, what remains open
 - [Snapshot Format (`.abi.json`)](snapshot-format.md) — the flat legacy shape `snapshot_from_dict` still reads unchanged

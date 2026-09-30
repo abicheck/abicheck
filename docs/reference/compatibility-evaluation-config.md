@@ -10,7 +10,7 @@ lifecycle: active
 generated: false
 ---
 
-# Compatibility evaluation configuration (ADR-049)
+# Compatibility evaluation configuration
 
 !!! info "Status: resolved *and* applied — opt-in via `--contract`"
 
@@ -23,7 +23,7 @@ generated: false
     `contract_context.evaluation_context` block of its JSON report.
 
     **The object is not merely reported — under `--contract` it is
-    authoritative** (ADR-049 Phase 7, `contract_pipeline.py`). Two
+    authoritative** (`contract_pipeline.py`). Two
     independent things follow from a resolved `contract.mode`:
 
     - **Per-finding contract relevance.** Each finding's relevance is
@@ -65,14 +65,11 @@ generated: false
     consumes it otherwise — see "Pack manifests" below.)
 
     The historical shadow/advisory design this feature shipped with first —
-    where relevance was computed but never consulted by policy — is recorded
-    in
-    [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md)
-    itself, not repeated here. Today's live behaviour is also documented in
+    where relevance was computed but never consulted by policy — is recorded in the contributor documentation, not repeated here. Today's live behaviour is also documented in
     [Configuration File](config-file.md), [Exit Codes](exit-codes.md), and
     [CI Gating](../use/ci-gating.md).
 
-ADR-049 D7 requires that **one** typed object carry every setting that decides
+**One** typed object must carry every setting that decides
 what a comparison promises, how a change to it is classified, and what blocks
 CI — resolved once, identically, whichever front end asked for the run. This
 page is the reference for that object: which real input feeds each field, in
@@ -96,7 +93,7 @@ the FFI boundary never moves a severity.
 
 ## Precedence
 
-Each field is resolved **independently** (ADR-049 D7):
+Each field is resolved **independently**:
 
 ```text
 explicit CLI flag / explicit API request field
@@ -119,7 +116,7 @@ Rules that fall out of it:
   `--policy` and `--scope-public-headers`, whose defaults are not `None`.
 - **A selected pack never silently overrides a stated value.** Packs sit
   directly above the built-in default: a pack fills a field only when neither
-  the user nor the project stated it (ADR-049 D8's "explicit override >
+  the user nor the project stated it ("explicit override >
   selected packs > base", read conservatively). "Stated" includes a value
   *derived* from a statement: choosing `--severity-preset strict` states every
   `gate.severity.*` category the preset expands into, so a gate pack cannot
@@ -167,8 +164,7 @@ the shadowed input is retained in the receipt
 | `suppressions` | `--suppress` | `suppress` | — | — |
 
 `surface.explicit_scope` is the one **additive** field: the CLI overlay widens
-the project's symbol list rather than replacing it (ADR-037 D4's existing
-behaviour), so the resolved value is the union and the receipt lists every
+the project's symbol list rather than replacing it (the existing behaviour), so the resolved value is the union and the receipt lists every
 contributor.
 
 `gate.exit_code_scheme` is absent from the table above on purpose: it is not
@@ -184,14 +180,14 @@ carries no `field_provenance` receipt entry either, for the same
 reason — there is no selector whose source layer it could name.
 
 `suppression.strict: true` and `suppression.require_justification: true` are real inputs with no
-field in ADR-049's typed shape; they stay outside this object.
+field in the typed shape; they stay outside this object.
 
 ### The `run_profile` tier: removed
 
 D7 originally reserved a `run_profile` precedence tier (below an explicit
 flag, above `.abicheck.yml`) for `--profile`'s injected values — in
 practice, exactly one field, `gate.preset` (`ci-gate` set it to `default`).
-ADR-068 D5 / plan Phase 7e removed `--profile` outright rather than
+0.6 removed `--profile` outright rather than
 replacing it (it bundled evidence depth, report rendering, and gate policy
 behind one word), and its own D7 amendment note removed the now-permanently-
 unpopulated `run_profile` tier along with it. `SelectorLayer` has five
@@ -219,15 +215,14 @@ assignments:
 | `gate` | `gate.severity.abi_breaking`, `gate.severity.potential_breaking`, `gate.severity.quality_issues`, `gate.severity.addition` | all (`compare`, single-pair or directory/package) |
 
 Deliberately **not** assignable: `contract.mode` (which evidence domain a run
-judges against stays the user's own per-run choice — ADR-049 D3 forbids a
-hidden preset that switches it), `policy.base` (packs compose over a base, they
+judges against stays the user's own per-run choice — a hidden preset may never that switches it), `policy.base` (packs compose over a base, they
 do not replace it), `gate.exit_code_scheme` (CLI cleanup phase two PR G2
 deleted the manual algorithm selector entirely — a gate pack asserting it is
 a hard load error, `may not assign gate.exit_code_scheme`, the same as any
 other out-of-namespace field below), and any `*.packs` field
 (self-reference).
 
-Conflicts are checked **within one kind only** (ADR-049 D8): two selected gate
+Conflicts are checked **within one kind only**: two selected gate
 packs assigning different values to the same field are a usage error until an
 explicit value resolves it; a contract pack and a gate pack can never conflict
 with each other. Load order is never a tiebreak.
@@ -255,11 +250,10 @@ On a directory/package (release) `compare`, a
 `gate.severity.<category>` all
 apply to every library uniformly (CLI cleanup phase two, "PR B" slices 1
 and 2, and Track 2's 7B residual) — the gate half is folded into the
-release fan-out's own resolved `GateOptions` object (ADR-064, landed
-2026-09-02), and `contract.unresolved` still needs `--contract` on that
+release fan-out's own resolved `GateOptions` object, and `contract.unresolved` still needs `--contract` on that
 release comparison, exactly as it does everywhere else (see the "7B's
 release-fan-out investigation landed" section of
-[the ADR-063 implementation plan](../contribute/plans/one-semantic-pipeline.md)
+[the one-semantic-pipeline plan](../contribute/plans/one-semantic-pipeline.md)
 for the history of that rejection's own removal). `gate.exit_code_scheme`
 was removed along with `--exit-code-scheme` (CLI cleanup phase two PR G2)
 — the one automatic gate algorithm is fully determined by whether a
@@ -366,8 +360,7 @@ request type names the same input differently.
 
 Today there is only one such type. `ScanRequest` used to name three of these
 inputs differently (`scope_to_public_surface`, `policy_file`, `suppression`)
-— the defect that motivated both parameters — and it was removed in ADR-068
-Phase 4 along with its `SCAN_REQUEST_SPELLINGS` remap. The parameters stay
+— the defect that motivated both parameters — and it was removed in 0.6 along with its `SCAN_REQUEST_SPELLINGS` remap. The parameters stay
 because the *rule* they enforce is what makes a receipt replayable, and a
 second typed front end would reintroduce the hazard immediately.
 
@@ -381,6 +374,6 @@ composed scope) genuinely have no flag.
 
 ## See also
 
-- [ADR-049](../contribute/adr/049-contract-relevance-and-compatibility-configuration.md) — the normative decision
+
 - [Configuration File](config-file.md) — the `.abicheck.yml` keys in effect today
 - [Exit Codes](exit-codes.md) — the live exit contract

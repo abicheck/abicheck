@@ -134,7 +134,7 @@ footer { margin: 20px 32px 32px; padding: 12px 16px; font-size: 0.8em;
 </div>
 
 <div class='section' style='background:#fff3e0; padding:10px; border-left:4px solid #ff9800;'><strong>ℹ️ 2 redundant change(s)</strong> hidden (derived from root type changes). Set <code>scope.show_redundant: true</code> in <code>.abicheck.yml</code> to show all.</div>
-<div class='section section-removed' id='removed'><h3>⛔ Removed Symbols (1)</h3><table class='changes'>
+<div class='section' id='surface-changes'><h3>Surface changes (4)</h3><h4>Additions (1)</h4><table class='changes'><thead><tr><th>Symbol</th><th>Verdict</th><th>Declaration (old &rarr; new)</th></tr></thead><tbody><tr><td><code>_ZN3foo3newEv</code></td><td>COMPATIBLE</td><td><code>void foo::new()</code></td></tr></tbody></table><h4>Removals (1)</h4><table class='changes'><thead><tr><th>Symbol</th><th>Verdict</th><th>Declaration (old &rarr; new)</th></tr></thead><tbody><tr><td><code>_ZN3foo6removeEv</code></td><td>BREAKING</td><td><code>void foo::remove()</code> <span class='empty'>(include/foo.h:42)</span></td></tr></tbody></table><h4>Modifications (2)</h4><table class='changes'><thead><tr><th>Symbol</th><th>Verdict</th><th>Declaration (old &rarr; new)</th></tr></thead><tbody><tr><td><code>foo::Widget</code></td><td>BREAKING</td><td><code>16</code> &rarr; <code>24</code></td></tr><tr><td><code>_ZN3foo7privateEi</code></td><td>BREAKING</td><td><code>int</code> &rarr; <code>long</code></td></tr></tbody></table></div><div class='section section-removed' id='removed'><h3>⛔ Removed Symbols (1)</h3><table class='changes'>
   <thead>
     <tr>
       <th>Kind</th><th>Symbol</th><th>Category</th>

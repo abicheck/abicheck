@@ -119,7 +119,7 @@ def require_degraded_members_known(
         raise ValueError(
             f"{what}: 'degraded_members' names {len(unknown)} library(ies) absent "
             f"from 'per_library_snapshots' ({', '.join(unknown)}) -- a capture-"
-            "failure marker must name a stored member (ADR-065 D8)"
+            "failure marker must name a stored member"
         )
 
 
