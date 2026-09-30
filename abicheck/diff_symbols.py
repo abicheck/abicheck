@@ -192,12 +192,12 @@ def _is_stripped_symbols_only(snap: AbiSnapshot) -> bool:
     """
     if not getattr(snap, "elf_only_mode", False):
         return False
-    if snap.types or snap.enums or snap.typedefs:
+    if snap.declarations.types or snap.declarations.enums or snap.declarations.typedefs:
         return False
     dwarf = getattr(snap, "dwarf", None)
     if dwarf is not None and (dwarf.structs or dwarf.enums):
         return False
-    return bool(snap.functions or snap.variables)
+    return bool(snap.declarations.functions or snap.declarations.variables)
 
 
 def _is_local_type_rtti(mangled: str) -> bool:
@@ -1079,8 +1079,8 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # (via ambiguity-safe TypeMap, not a naive bare-name dict — PR #608), the
     # old surface's scope-qualified owner classes, and per-class virtual
     # signatures (to skip inherited overrides). See ``virtual_method_addition``.
-    old_types = build_type_map(old.types)
-    new_types = build_type_map(new.types)
+    old_types = build_type_map(old.declarations.types)
+    new_types = build_type_map(new.declarations.types)
     old_owner_classes = {
         owner for f in old_map.values() if (owner := owner_class_of(f)) is not None
     }
@@ -1187,7 +1187,7 @@ def _converting_ctors_by_class(
     constructors. Keyed by param-type tuple.
     """
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         owner = owner_class_of(f) or _synthetic_ctor_scope(f.mangled) or f.name
         canonical = class_aliases.get(owner) or class_aliases.get(
             owner.rsplit("::", 1)[-1]
@@ -1258,7 +1258,7 @@ def _diff_ctor_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     # Ambiguity-safe, spelling-normalized matching (Codex review, PR #608
     # follow-up) — see _class_identity_aliases.
     aliases = _class_identity_aliases(
-        build_type_map(old.types), build_type_map(new.types)
+        build_type_map(old.declarations.types), build_type_map(new.declarations.types)
     )
     if not aliases:
         return []
@@ -1588,12 +1588,12 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     excl = stdlib_namespaces_excluded(old, new)
     old_types = build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)
     )
     new_types = build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)
     )
     changes.extend(_check_field_access_changes(old_types, new_types))
@@ -1606,10 +1606,14 @@ def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     excl = stdlib_namespaces_excluded(old, new)
     old_map = build_type_map(
-        t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+        t
+        for t in old.declarations.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
     )
     new_map = build_type_map(
-        t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+        t
+        for t in new.declarations.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
     )
 
     for t_old in old_map.values():
@@ -1903,7 +1907,10 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if not _both_header_aware(old, new):
         return []
     old_index, new_index = constant_index_pair(
-        old, new, old_constants=old.constants, new_constants=new.constants
+        old,
+        new,
+        old_constants=old.declarations.constants,
+        new_constants=new.declarations.constants,
     )
     return diff_constants(
         old_index,
@@ -1915,8 +1922,8 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 )
             )
         ),
-        old_constants=old.constants,
-        new_constants=new.constants,
+        old_constants=old.declarations.constants,
+        new_constants=new.declarations.constants,
     )
 
 

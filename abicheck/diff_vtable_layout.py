@@ -72,7 +72,7 @@ def _type_map(snap: AbiSnapshot) -> TypeMap[RecordType]:
     A bare-``name`` dict let two records sharing a leaf spelling
     (``ns1::Impl``/``ns2::Impl``) overwrite each other, pairing and base
     lookups then reading whichever was visited last."""
-    return build_type_map(snap.types)
+    return build_type_map(snap.declarations.types)
 
 
 def _is_polymorphic(
@@ -340,7 +340,10 @@ def _secondary_groups(
 @registry.detector(
     "vtable_layout",
     requires_support=lambda o, n: (
-        not o.elf_only_mode and not n.elf_only_mode and bool(o.types) and bool(n.types),
+        not o.elf_only_mode
+        and not n.elf_only_mode
+        and bool(o.declarations.types)
+        and bool(n.declarations.types),
         "missing DWARF/header type metadata (inheritance)",
     ),
 )

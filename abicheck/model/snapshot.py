@@ -23,9 +23,15 @@ belongs to ``extract``, persisting one to ``storage``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING
 
+from .declaration_store import (
+    Declarations,
+    attach_declarations as _attach_declarations,
+    install_transitional_declaration_fields,
+    reattach as _reattach,
+)
 from .declarations import Function, Variable
 from .entities import EnumType, RecordType
 from .extraction_contract import DependencyInfo, ExtractionContract
@@ -60,9 +66,12 @@ class AbiSnapshot:
 
     library: str  # e.g. "libfoo.so.1"
     version: str  # e.g. "1.2.3"
-    functions: list[Function] = field(default_factory=list)
-    variables: list[Variable] = field(default_factory=list)
-    types: list[RecordType] = field(default_factory=list)
+    # Builder inputs, not attributes (ADR-063 Phase 10): each fills this
+    # snapshot's ``semantic_ir.declarations`` store -- read declarations
+    # through ``snapshot.declarations`` (``model/declaration_store.py``).
+    functions: InitVar[list[Function] | None] = None
+    variables: InitVar[list[Variable] | None] = None
+    types: InitVar[list[RecordType] | None] = None
     elf: ElfMetadata | None = field(
         default=None
     )  # ELF dynamic/symbol metadata (Sprint 2)
@@ -98,13 +107,9 @@ class AbiSnapshot:
     # as ``kabi``/``python_api``. None when the binary could not be scanned
     # or predates this field; an ordinary, successfully-scanned non-NumPy
     # library carries a real surface with both flags False (CodeRabbit review).
-    enums: list[EnumType] = field(default_factory=list)
-    typedefs: dict[str, str] = field(
-        default_factory=dict
-    )  # alias -> underlying type name
-    constants: dict[str, str] = field(
-        default_factory=dict
-    )  # #define / constexpr name -> value string
+    enums: InitVar[list[EnumType] | None] = None  # builder inputs, as above
+    typedefs: InitVar[dict[str, str] | None] = None
+    constants: InitVar[dict[str, str] | None] = None
     elf_only_mode: bool = False  # True when dumped without headers (all functions are ELF_ONLY provenance)
     from_headers: bool = False  # True when the ABI surface was parsed from public headers (castxml/AST), as opposed to DWARF debug info or the symbol table. Drives the HEADER_AWARE evidence tier — DWARF-derived declarations populate the same functions/types lists but must NOT be mistaken for header-level evidence.
     # Which L2 header-AST backend produced this snapshot ("castxml" | "clang" |
@@ -619,53 +624,16 @@ class AbiSnapshot:
     # build, without touching the irrecoverable ambiguity of an old, untagged snapshot.
     dependency_scope: str | None = field(default=None, kw_only=True)
 
-    # Fully-qualified typedef alias -> underlying type name (schema v25,
-    # G31 Phase C). Additive twin of ``typedefs`` above, not a replacement:
-    # ``typedefs`` is keyed by *bare* (unqualified) name on both header
-    # backends, so two distinct member typedefs sharing a bare spelling in
-    # different classes/namespaces (e.g. two unrelated ``value_type``
-    # member aliases — an extremely common STL-container-shaped pattern)
-    # silently collide, and whichever declaration a backend visits last
-    # wins; the other's aliasing information is dropped from the snapshot
-    # entirely with no way to recover it downstream (see AGENTS.md's "Known
-    # gaps" entry for the full incident history). Since a qualified name is
-    # unique per declaration, this dict cannot suffer that collision — both
-    # header backends populate it using the same scope-joining they already
-    # use for every other declaration kind, so it carries no *new*
-    # collision-avoidance logic of its own, just a different key shape.
-    # ``typedefs`` itself is deliberately left untouched (same key, same
-    # values, same silent-overwrite behavior) so no existing consumer's
-    # behavior changes — this is a pure addition for a consumer able to use
-    # qualified identity, not a schema replacement. Empty for every
-    # snapshot produced by a DWARF-only dump (which never had per-class
-    # qualified typedef scoping in the first place) and for any snapshot
-    # predating this field. See ``type_reachability_spelling.
-    # _typedef_spelling_targets`` for the first consumer.
-    typedefs_qualified: dict[str, str] = field(default_factory=dict, kw_only=True)
-
-    # ADR-063 Phase 2's closing slice: ``EntityId`` sidecars for typedefs and
-    # constants (schema v31). Unlike ``RecordType``/``EnumType``/``Function``/
-    # ``Variable``, ``typedefs``/``typedefs_qualified``/``constants`` are plain
-    # ``dict[str, str]`` with no parsed declaration object to carry an
-    # ``entity_id`` on, so the identity both header-AST backends already resolve
-    # while walking their own intermediate representation had nowhere to go and
-    # was discarded. These are additive twins keyed exactly like their partner
-    # dict — ``typedef_entity_ids`` by the same qualified name as
-    # ``typedefs_qualified``, ``constant_entity_ids`` by the same qualified name
-    # as ``constants`` — so a consumer joins one against the other without a
-    # second key convention. Empty on a DWARF-only snapshot (which resolves no
-    # scope for either kind) and on one predating this field, same as
-    # ``typedefs_qualified``; ``diff_types._diff_typedefs``/
-    # ``diff_symbols._diff_constants`` read them with ``.get``, so absence
-    # degrades to today's identity-less ``Change`` rather than misreporting.
-    # A sidecar's keys must be renumbered exactly when its partner dict's are,
-    # which is why ``qualified_name_segments._LAMBDA_IDENTITY_FIELDS`` lists
-    # ``typedef_entity_ids`` (``typedefs_qualified`` is rewritten there) and
-    # deliberately does not list ``constant_entity_ids`` (``constants`` is
-    # excluded from that walk, its values being payload literals). Rewriting
-    # only one half of either pair would break the join it exists to support.
-    typedef_entity_ids: dict[str, EntityId] = field(default_factory=dict, kw_only=True)
-    constant_entity_ids: dict[str, EntityId] = field(default_factory=dict, kw_only=True)
+    # Builder inputs too (schema v25/v31 sidecars): see declaration_store.py.
+    typedefs_qualified: InitVar[dict[str, str] | None] = field(
+        default=None, kw_only=True
+    )
+    typedef_entity_ids: InitVar[dict[str, EntityId] | None] = field(
+        default=None, kw_only=True
+    )
+    constant_entity_ids: InitVar[dict[str, EntityId] | None] = field(
+        default=None, kw_only=True
+    )
 
     # ADR-063 Phase 5: Fact[str | None] sibling of ast_resolved_standard --
     # the one remaining case-(b) field outside the four declaration
@@ -677,12 +645,9 @@ class AbiSnapshot:
         default=None, kw_only=True
     )
 
-    # ADR-063 Phase 6 (schema v38) — the canonical, backend-independent IR
-    # these declarations were canonicalized into, keyed by ``OccurrenceId``
-    # (``model/semantic_ir.py`` owns the full rationale).
-    # Additive: the legacy ``functions``/``types``/... fields stay populated
-    # as before, one entry per occurrence (never a ``canonical_entities()``
-    # reduction). ``None`` predating it / for an un-narrowed backend.
+    # ADR-063 Phase 6/10: the snapshot's IR -- its declaration store plus,
+    # when a normalizer ran (``canonical``), the ``OccurrenceId``-keyed
+    # canonical facts. Never ``None`` after construction.
     semantic_ir: SemanticIR | None = field(default=None, kw_only=True)
     # Every fact BOTH header-AST backends resolved, disagreeing, on a hybrid
     # merge — keyed by ``semantic_ir_conflict_key``, absent key == none. Not
@@ -723,7 +688,8 @@ class AbiSnapshot:
         default=None, repr=False, compare=False
     )
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, *builder_inputs: object) -> None:
+        _attach_declarations(self, builder_inputs)
         self.ast_resolved_standard, self.ast_resolved_standard_fact = (
             bridge_legacy_and_fact(
                 self.ast_resolved_standard, self.ast_resolved_standard_fact, None, None
@@ -765,10 +731,36 @@ class AbiSnapshot:
         """
         if self._type_by_name is not None:
             return
+        d = self.declarations
         maps = build_snapshot_indexes(
-            self.functions, self.variables, self.types, f"{self.library}@{self.version}"
+            d.functions, d.variables, d.types, f"{self.library}@{self.version}"
         )
         self._func_by_mangled, self._var_by_mangled, self._type_by_name = maps
+
+    @property
+    def declarations(self) -> Declarations:
+        """This snapshot's declaration store (inside ``semantic_ir``)."""
+        ir = self.semantic_ir
+        store = ir.declarations if ir is not None else None
+        assert store is not None  # attached in __post_init__/__setattr__
+        return store
+
+    @property
+    def canonical_ir(self) -> SemanticIR | None:
+        """The canonical occurrences alone (no declaration store), or
+        ``None`` when no normalizer ran -- what ``semantic_ir`` was before
+        the IR took over the declarations."""
+        ir = self.semantic_ir
+        return ir.unattached() if ir is not None and ir.canonical else None
+
+    def __setattr__(self, name: str, value: object) -> None:
+        # A snapshot's IR always owns this snapshot's declarations: an IR a
+        # normalizer produced (no store yet) is attached on assignment, and
+        # ``None`` means "no canonical facts", never "no declarations".
+        current = self.__dict__.get("semantic_ir")
+        if name == "semantic_ir" and current is not None:
+            value = _reattach(current, value)
+        object.__setattr__(self, name, value)
 
     @property
     def function_map(self) -> dict[str, Function]:
@@ -798,3 +790,4 @@ class AbiSnapshot:
 
 
 install_lazy_graph_field(AbiSnapshot, "surface_graph")  # decoded on first read
+install_transitional_declaration_fields(AbiSnapshot)

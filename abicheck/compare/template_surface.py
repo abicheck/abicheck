@@ -130,7 +130,7 @@ __all__ = [
 
 def public_functions(snap: AbiSnapshot) -> list[Function]:
     """Return the subset of public functions in *snap*."""
-    return [f for f in snap.functions if in_public_surface(f)]
+    return [f for f in snap.declarations.functions if in_public_surface(f)]
 
 
 def reconciled_public_functions(
@@ -172,8 +172,8 @@ def _reconciled_public_functions(
     return _reconcile(
         public_functions(old),
         public_functions(new),
-        old_all=old.functions,
-        new_all=new.functions,
+        old_all=old.declarations.functions,
+        new_all=new.declarations.functions,
         key=lambda f: f.mangled or f.name,
         # Same second tier as the keyed variant below, and needed for the
         # same reason: a change can move the mangled key itself (an ABI-tag
@@ -220,8 +220,8 @@ def reconciled_public_function_maps(
     reconciled_old, reconciled_new = _reconcile(
         public_functions(old),
         public_functions(new),
-        old_all=old.functions,
-        new_all=new.functions,
+        old_all=old.declarations.functions,
+        new_all=new.declarations.functions,
         key=key,
         # The mangled key is exactly what a realistic change here moves, so
         # the declared name is the second tier -- the same "single peer or
@@ -248,7 +248,7 @@ def reconciled_public_function_maps(
 
 def public_variables(snap: AbiSnapshot) -> list[Variable]:
     """Return the subset of public variables in *snap*."""
-    return [v for v in snap.variables if in_public_surface(v)]
+    return [v for v in snap.declarations.variables if in_public_surface(v)]
 
 
 def reconciled_public_variables(
@@ -284,8 +284,8 @@ def _reconciled_public_variables(
     return _reconcile(
         public_variables(old),
         public_variables(new),
-        old_all=old.variables,
-        new_all=new.variables,
+        old_all=old.declarations.variables,
+        new_all=new.declarations.variables,
         key=lambda v: v.mangled or v.name,
         old_exported=exported_symbol_names(
             getattr(old, "elf", None), VARIABLE_SYMBOL_TYPES
@@ -355,8 +355,8 @@ def _reconciled_cpo_surfaces(
     cross_old_funcs, cross_new_vars = _reconcile(
         old_funcs,
         new_vars,
-        old_all=old.functions,
-        new_all=new.variables,
+        old_all=old.declarations.functions,
+        new_all=new.declarations.variables,
         key=identity,
         alias_key=identity,
         old_exported=exported_symbol_names(
@@ -369,8 +369,8 @@ def _reconciled_cpo_surfaces(
     cross_old_vars, cross_new_funcs = _reconcile(
         old_vars,
         new_funcs,
-        old_all=old.variables,
-        new_all=new.functions,
+        old_all=old.declarations.variables,
+        new_all=new.declarations.functions,
         key=identity,
         alias_key=identity,
         old_exported=exported_symbol_names(
@@ -484,7 +484,7 @@ def cpo_identity(
 
 def abi_visible_functions(snap: AbiSnapshot) -> list[Function]:
     """The functions in *snap* that participate in the binary contract."""
-    return [f for f in snap.functions if is_abi_visible(f)]
+    return [f for f in snap.declarations.functions if is_abi_visible(f)]
 
 
 _T = TypeVar("_T")
@@ -536,8 +536,8 @@ def reconciled_abi_visible_functions(
         _reconcile(
             abi_visible_functions(old),
             abi_visible_functions(new),
-            old_all=old.functions,
-            new_all=new.functions,
+            old_all=old.declarations.functions,
+            new_all=new.declarations.functions,
             key=lambda f: f.mangled or f.name,
             alias_key=alias_identity,
             old_exported=exported_symbol_names(

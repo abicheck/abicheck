@@ -567,10 +567,10 @@ def _typedef_side_index(
     ``SemanticIR`` with zero typedef occurrences at all would otherwise be
     trusted wholesale, silently blinding comparison to every typedef the
     snapshot's own flat collection still has real evidence for."""
-    if snapshot.semantic_ir is not None and semantic_ir_covers_kind(
-        snapshot.semantic_ir, EntityKind.TYPEDEF
+    if snapshot.canonical_ir is not None and semantic_ir_covers_kind(
+        snapshot.canonical_ir, EntityKind.TYPEDEF
     ):
-        return SemanticIRIndex(snapshot.semantic_ir)
+        return SemanticIRIndex(snapshot.canonical_ir)
     return SemanticIRIndex(legacy_typedef_ir(snapshot, typedefs))
 
 
@@ -612,9 +612,9 @@ def _bare_typedef_side_index(
     matching that side's flat ``typedefs`` convention rather than forcing
     a still-qualified IR down to leaf names that no longer align with it.
     """
-    if snapshot.semantic_ir is None:
+    if snapshot.canonical_ir is None:
         return SemanticIRIndex(legacy_typedef_ir(snapshot, typedefs))
-    ir_index = SemanticIRIndex(snapshot.semantic_ir)
+    ir_index = SemanticIRIndex(snapshot.canonical_ir)
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     covered_aliases: set[str] = set()
     ordinal_by_alias: dict[str, int] = {}

@@ -356,7 +356,8 @@ def directly_referenced_stdlib_type_spellings(
         snapshot
     )
     non_stdlib_enum_identities = frozenset(
-        _record_identity(en.name, en.qualified_name) for en in snapshot.enums
+        _record_identity(en.name, en.qualified_name)
+        for en in snapshot.declarations.enums
     )
     non_stdlib_identities = non_stdlib_record_identities | non_stdlib_enum_identities
     non_stdlib_spellings = _non_stdlib_signature_spellings(non_stdlib_identities)

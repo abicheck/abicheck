@@ -325,7 +325,7 @@ def legacy_typedef_ir(snapshot: AbiSnapshot, typedefs: dict[str, str]) -> Semant
     """
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for alias, underlying in typedefs.items():
-        sidecar = snapshot.typedef_entity_ids.get(alias)
+        sidecar = snapshot.declarations.typedef_entity_ids.get(alias)
         if sidecar is not None and render_display_name(sidecar) == alias:
             entity_id = sidecar
         else:
@@ -411,7 +411,7 @@ def legacy_constant_ir(snapshot: AbiSnapshot, constants: dict[str, str]) -> Sema
     """
     occurrences: dict[OccurrenceId, CanonicalEntity] = {}
     for qualified_name, value in constants.items():
-        sidecar = snapshot.constant_entity_ids.get(qualified_name)
+        sidecar = snapshot.declarations.constant_entity_ids.get(qualified_name)
         if sidecar is not None and render_display_name(sidecar) == qualified_name:
             entity_id = sidecar
         else:
@@ -540,7 +540,7 @@ def _assert_sidecar_identity_consistent(
     SemanticIR resolves *some* occurrence of `kind`; see this direction's
     own gate below for why a producer that resolves none at all is exempt.
     """
-    if not snapshot.semantic_ir:
+    if snapshot.canonical_ir is None:
         return
     # Only the *set* of entity ids of `kind` is needed here, never the
     # reduced winner per id, so this reads the occurrence keys directly
@@ -550,11 +550,11 @@ def _assert_sidecar_identity_consistent(
     # build twice per snapshot (~18% of a release scan's parse phase).
     # `dict.fromkeys` keeps the same first-occurrence order
     # `canonical_entities()` yields, so error messages are unchanged.
+    ir = snapshot.canonical_ir
+    assert ir is not None  # checked above
     by_rendered: dict[str, list[EntityId]] = {}
     for entity_id in dict.fromkeys(
-        occ.entity_id
-        for occ in snapshot.semantic_ir.occurrences
-        if occ.entity_id.kind is kind
+        occ.entity_id for occ in ir.occurrences if occ.entity_id.kind is kind
     ):
         by_rendered.setdefault(render_display_name_or_leaf(entity_id), []).append(
             entity_id
@@ -614,7 +614,7 @@ def assert_typedef_ir_consistent(snapshot: AbiSnapshot) -> None:
     _assert_sidecar_identity_consistent(
         snapshot,
         kind=EntityKind.TYPEDEF,
-        sidecar=snapshot.typedef_entity_ids,
+        sidecar=snapshot.declarations.typedef_entity_ids,
         family="typedef",
     )
 
@@ -626,7 +626,7 @@ def assert_constant_ir_consistent(snapshot: AbiSnapshot) -> None:
     _assert_sidecar_identity_consistent(
         snapshot,
         kind=EntityKind.CONSTANT,
-        sidecar=snapshot.constant_entity_ids,
+        sidecar=snapshot.declarations.constant_entity_ids,
         family="constant",
     )
 

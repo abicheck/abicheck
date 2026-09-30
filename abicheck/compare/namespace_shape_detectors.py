@@ -125,7 +125,7 @@ def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
     :func:`_func_index_items`."""
     demangled = _batch_demangle_public(snap)
     out: set[str] = set()
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         if not in_source_declaration_index(f):
             continue
         qname = _qualified_function_name(f.name, f.mangled, demangled)
@@ -142,7 +142,7 @@ def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
 
     mangled = [
         f.mangled
-        for f in snap.functions
+        for f in snap.declarations.functions
         if f.mangled.startswith("_Z") and in_source_declaration_index(f)
     ]
     return demangle_batch(mangled) if mangled else {}
@@ -191,7 +191,7 @@ def detect_std_reexport_removed(
 
     changes: list[Change] = []
     seen: set[str] = set()
-    for f in old.functions:
+    for f in old.declarations.functions:
         if not in_source_declaration_index(f):
             continue
         declared = _qualified_function_name(f.name, f.mangled, demangled)
@@ -267,13 +267,13 @@ def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, bool, str]]
 
     demangled = _batch_demangle_public(snap)
     items: list[tuple[str, bool, str]] = []
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         if not in_source_declaration_index(f):
             continue
         qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:
             items.append((qname, True, "function"))
-    for t in snap.types:
+    for t in snap.declarations.types:
         if t.name:
             items.append((t.name, t.origin == ScopeOrigin.PUBLIC_HEADER, "type"))
     return items

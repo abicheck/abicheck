@@ -117,7 +117,7 @@ def _demangled_scopes(snapshot: AbiSnapshot, needed: bool) -> dict[str, str]:
         return {}
     names = [
         str(getattr(d, "mangled", "") or "")
-        for d in chain(snapshot.functions, snapshot.variables)
+        for d in chain(snapshot.declarations.functions, snapshot.declarations.variables)
     ]
     return demangle_batch([n for n in names if n])
 
@@ -142,7 +142,10 @@ def stamp_ownership(snapshot: AbiSnapshot, request: OwnershipRequest) -> AbiSnap
         snapshot, bool(resolved.private_namespaces or resolved.dependency_names)
     )
     for decl in chain(
-        snapshot.functions, snapshot.variables, snapshot.types, snapshot.enums
+        snapshot.declarations.functions,
+        snapshot.declarations.variables,
+        snapshot.declarations.types,
+        snapshot.declarations.enums,
     ):
         site = DeclarationSite(
             path=_declaring_file(decl),

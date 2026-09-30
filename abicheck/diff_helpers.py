@@ -356,13 +356,16 @@ def typedef_diff_maps(
     their own map; falls back to the legacy bare maps otherwise.
     """
     if typedef_side_trusts_qualified(old) and typedef_side_trusts_qualified(new):
-        return old.typedefs_qualified, new.typedefs_qualified
-    return old.typedefs, new.typedefs
+        return old.declarations.typedefs_qualified, new.declarations.typedefs_qualified
+    return old.declarations.typedefs, new.declarations.typedefs
 
 
 def typedef_side_trusts_qualified(snapshot: AbiSnapshot) -> bool:
     """One side of `typedef_diff_maps`'s trust rule, split out (Codex review, PR #1078) for `compare.typedefs.typedef_index_pair` to reuse."""
-    return bool(snapshot.typedefs_qualified) or not snapshot.typedefs
+    return (
+        bool(snapshot.declarations.typedefs_qualified)
+        or not snapshot.declarations.typedefs
+    )
 
 
 def typedef_flat_map_is_dwarf_qualified(snapshot: AbiSnapshot) -> bool:
@@ -553,7 +556,7 @@ def record_canonical_names(snap: AbiSnapshot | None) -> dict[str, str]:
         return {}
     by_bare: dict[str, set[str | None]] = {}
     out: dict[str, str] = {}
-    for t in getattr(snap, "types", None) or ():
+    for t in snap.declarations.types:
         if t.qualified_name:
             by_bare.setdefault(t.name, set()).add(t.qualified_name)
             out[t.qualified_name] = t.qualified_name

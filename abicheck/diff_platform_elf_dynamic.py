@@ -63,7 +63,7 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(old)
     leaked = [
         f
-        for f in old.functions
+        for f in old.declarations.functions
         if (
             is_export_table_only_record(f)
             and is_abi_relevant_elf_symbol(

@@ -345,7 +345,7 @@ def _snapshot_export_ids(snap: AbiSnapshot) -> set[str]:
     they stay out of this set and survive scoping.
     """
     ids: set[str] = set()
-    for coll in (snap.functions, snap.variables):
+    for coll in (snap.declarations.functions, snap.declarations.variables):
         for s in coll:
             for attr in ("mangled", "name"):
                 val = getattr(s, attr, "")

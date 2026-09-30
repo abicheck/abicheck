@@ -133,13 +133,13 @@ def _add_tokens(tokens: set[str], spelling: object) -> None:
 def _seed_surface_tokens(snap: AbiSnapshot) -> set[str]:
     """Identifier tokens spelled directly by ABI-visible signatures and variables."""
     tokens: set[str] = set()
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         if not is_abi_visible(fn):
             continue
         _add_tokens(tokens, fn.return_type)
         for p in fn.params:
             _add_tokens(tokens, getattr(p, "type", ""))
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         if not is_abi_visible(var):
             continue
         _add_tokens(tokens, var.type)
@@ -187,8 +187,8 @@ def _expand_reachable_types(snap: AbiSnapshot, tokens: set[str]) -> None:
     # accepted limitation: a dumper that spells a type unqualified while
     # keying the record qualified will miss the roll-up, but the ordinary
     # per-typedef/per-field findings still report that change.
-    remaining_aliases = dict(snap.typedefs)
-    remaining_records = {rec.name: rec for rec in snap.types if rec.name}
+    remaining_aliases = dict(snap.declarations.typedefs)
+    remaining_records = {rec.name: rec for rec in snap.declarations.types if rec.name}
     changed = True
     while changed and (remaining_aliases or remaining_records):
         changed = False

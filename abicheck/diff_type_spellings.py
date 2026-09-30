@@ -143,10 +143,14 @@ def _match_record_fields(
     # in a name-keyed dict, so one class's fields were compared against the
     # other's. The emitted slot owner stays the bare name, as before.
     old_types = build_type_map(
-        t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+        t
+        for t in old.declarations.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
     )
     new_types = build_type_map(
-        t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
+        t
+        for t in new.declarations.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl)
     )
     for ot in old_types.values():
         nt = lookup_matched_type(old_types, new_types, ot)

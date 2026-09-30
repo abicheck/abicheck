@@ -188,9 +188,9 @@ def _has_type_evidence(snap: AbiSnapshot) -> bool:
     by :func:`_removals_are_unconfirmed` purely because the legacy sidecar
     wasn't populated.
     """
-    if snap.types or snap.enums or snap.typedefs:
+    if snap.declarations.types or snap.declarations.enums or snap.declarations.typedefs:
         return True
-    semantic_ir = snap.semantic_ir
+    semantic_ir = snap.canonical_ir
     if semantic_ir is not None and any(
         semantic_ir_covers_kind(semantic_ir, kind)
         for kind in (EntityKind.TYPE, EntityKind.ENUM, EntityKind.TYPEDEF)
@@ -226,7 +226,7 @@ def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     """
     new_stripped_of_types = (
         getattr(new, "elf_only_mode", False)
-        and bool(new.functions or new.variables)
+        and bool(new.declarations.functions or new.declarations.variables)
         and not _has_type_evidence(new)
         and _has_type_evidence(old)
     )
@@ -272,14 +272,14 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_map = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
     new_map = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
@@ -293,16 +293,16 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # class still resolves when _transitive_bases walks the hierarchy for
     # vtable_slot_is_override_reuse() -- mirrors diff_symbols._diff_functions'
     # own old_types/new_types for the identical virtual_method_addition() walk.
-    old_types = _build_type_map(t for t in old.types)
-    new_types = _build_type_map(t for t in new.types)
+    old_types = _build_type_map(t for t in old.declarations.types)
+    new_types = _build_type_map(t for t in new.declarations.types)
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
     vtable_facts_reliable = (
         old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
     )
     # ADR-063 6B: record layout is read from each side's SemanticIR.
     layout_indexes = (
-        record_layout_index(old.semantic_ir, old.types),
-        record_layout_index(new.semantic_ir, new.types),
+        record_layout_index(old.canonical_ir, old.declarations.types),
+        record_layout_index(new.canonical_ir, new.declarations.types),
     )
 
     # Tracked by object identity, not key membership: a legacy-schema-vs-fresh
@@ -1101,12 +1101,12 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # across old/new the way a plain ``{e.name: e}`` dict would.
     old_map = _build_type_map(
         e
-        for e in old.enums
+        for e in old.declarations.enums
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
     new_map = _build_type_map(
         e
-        for e in new.enums
+        for e in new.declarations.enums
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
     # A wholly-removed enum is stored in snap.enums, NOT snap.types, so the
@@ -1386,7 +1386,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_unions = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
@@ -1394,7 +1394,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
     new_unions = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced

@@ -300,7 +300,7 @@ def semantic_ir_to_document(
                 key=lambda item: identity_text(item[0], "semantic_ir_conflicts key"),
             )
         }
-    if ir is not None:
+    if ir is not None and ir.canonical:
         out["semantic_ir"] = {
             "version": IR_DOCUMENT_VERSION,
             "occurrences": [
@@ -430,8 +430,10 @@ def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
     onto the normalizer serializes exactly as it did before this field
     existed.
     """
+    ir = snap.semantic_ir
     encoded = semantic_ir_to_document(
-        snap.semantic_ir, snap.semantic_ir_conflicts or {}
+        ir if ir is not None and ir.canonical else None,
+        snap.semantic_ir_conflicts or {},
     )
     for key in ("semantic_ir", "semantic_ir_conflicts"):
         if key in encoded:

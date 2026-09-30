@@ -235,7 +235,7 @@ def _function_node_keys(snap: AbiSnapshot) -> list[str]:
     same strengthening, one corner over.
     """
     signatures: dict[str, set[str]] = {}
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         if not fn.mangled:
             signatures.setdefault(fn.name, set()).add(_declaration_signature(fn))
     # A fallback collides across the two identity *tiers* too, not only within
@@ -245,11 +245,11 @@ def _function_node_keys(snap: AbiSnapshot) -> list[str]:
     # `Secret` (Codex review, fresh evidence). Every recorded linker identity
     # is therefore reserved -- a name is only unambiguous if nothing else
     # already answers to it, whichever tier that something came from.
-    reserved = {fn.mangled for fn in snap.functions if fn.mangled}
-    reserved |= {var.mangled for var in snap.variables if var.mangled}
-    reserved |= {var.name for var in snap.variables if not var.mangled}
+    reserved = {fn.mangled for fn in snap.declarations.functions if fn.mangled}
+    reserved |= {var.mangled for var in snap.declarations.variables if var.mangled}
+    reserved |= {var.name for var in snap.declarations.variables if not var.mangled}
     keys: list[str] = []
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         if fn.mangled:
             keys.append(fn.mangled)
         elif len(signatures.get(fn.name, ())) > 1 or fn.name in reserved:
@@ -301,10 +301,12 @@ class _TypeIndex:
 
     def __init__(self, snap: AbiSnapshot, ids: SnapshotIdentities) -> None:
         self._record_ids = {
-            id(r): i.node_id for r, i in zip(snap.types, ids.records, strict=True)
+            id(r): i.node_id
+            for r, i in zip(snap.declarations.types, ids.records, strict=True)
         }
         self._enum_ids = {
-            id(e): i.node_id for e, i in zip(snap.enums, ids.enums, strict=True)
+            id(e): i.node_id
+            for e, i in zip(snap.declarations.enums, ids.enums, strict=True)
         }
         self.typedef_ids = {alias: i.node_id for alias, i in ids.typedefs.items()}
         scratch = PublicSurface()
@@ -325,11 +327,11 @@ class _TypeIndex:
         # index, for the same reason. Nothing widens: a *reference* spelled
         # `ns::Foo` already resolved through the tail, which
         # `_type_identifiers` derives on both sides.
-        for rec in snap.types:
+        for rec in snap.declarations.types:
             self._nodes_by_spelling.setdefault(_type_identity(rec), set()).add(
                 self.record_node(rec)
             )
-        for en in snap.enums:
+        for en in snap.declarations.enums:
             self._nodes_by_spelling.setdefault(_type_identity(en), set()).add(
                 self.enum_node(en)
             )
@@ -341,7 +343,7 @@ class _TypeIndex:
         # `Alias` reach a qualified `ns::Alias -> Secret`, so a private
         # `Secret` layout change the live evaluator proved out of contract
         # re-evaluated as `IN_CONTRACT` (Codex review, fresh evidence).
-        for alias in snap.typedefs:
+        for alias in snap.declarations.typedefs:
             self._nodes_by_spelling.setdefault(alias, set()).add(
                 self.typedef_ids[alias]
             )
@@ -383,13 +385,15 @@ class _TypeIndex:
         # ambiguity set *before* building the owner map, since the closure
         # walk resolves one spelling through both indexes; mirrored here so
         # the same bare name is refused on both sides.
-        keys = type_keys | {r.qualified_name for r in snap.types if r.qualified_name}
-        keys |= {e.qualified_name for e in snap.enums if e.qualified_name}
+        keys = type_keys | {
+            r.qualified_name for r in snap.declarations.types if r.qualified_name
+        }
+        keys |= {e.qualified_name for e in snap.declarations.enums if e.qualified_name}
         ambiguous = self.ambiguous_type_names | {
-            alias for alias in snap.typedefs if alias in keys
+            alias for alias in snap.declarations.typedefs if alias in keys
         }
         out: dict[str, set[str]] = {}
-        for rec in snap.types:
+        for rec in snap.declarations.types:
             node = self.record_node(rec)
             leaf_only = bool(rec.qualified_name) and rec.qualified_name != rec.name
             if not leaf_only and rec.name not in ambiguous:
@@ -465,7 +469,7 @@ def build_type_graph(
             nodes.add(name)
             edges.add((name, node))
 
-    for rec in snap.types:
+    for rec in snap.declarations.types:
         node = index.record_node(rec)
         canonical(node, _type_identity(rec))
         for fld in rec.fields:
@@ -474,12 +478,12 @@ def build_type_graph(
             link(node, index.resolve_type_string(base))
         _link_type_aliases(rec, node, nodes, edges)
 
-    for en in snap.enums:
+    for en in snap.declarations.enums:
         node = index.enum_node(en)
         canonical(node, _type_identity(en))
         _link_type_aliases(en, node, nodes, edges)
 
-    for alias, target in snap.typedefs.items():
+    for alias, target in snap.declarations.typedefs.items():
         node = index.typedef_ids[alias]
         canonical(node, alias)
         # `typedef struct Foo Foo;` is one I1 entity with its tag: the
@@ -488,7 +492,10 @@ def build_type_graph(
         link(node, index.resolve_type_string(target) - {node})
 
     for fn, key, ident in zip(
-        snap.functions, _function_node_keys(snap), ids.functions, strict=True
+        snap.declarations.functions,
+        _function_node_keys(snap),
+        ids.functions,
+        strict=True,
     ):
         node = ident.node_id
         canonical(node, key)
@@ -498,7 +505,7 @@ def build_type_graph(
         _link_owner_class(fn, node, index, link)
         _link_decl_aliases(fn.name, fn.mangled, key, node, nodes, edges)
 
-    for var, ident in zip(snap.variables, ids.variables, strict=True):
+    for var, ident in zip(snap.declarations.variables, ids.variables, strict=True):
         node = ident.node_id
         key = _canonical_decl_key(var.name, var.mangled)
         canonical(node, key)
@@ -654,10 +661,10 @@ def _public_header_declarations(
     """
     ids = ids if ids is not None else snapshot_identities(snap)
     out: list[str] = []
-    for fn, ident in zip(snap.functions, ids.functions, strict=True):
+    for fn, ident in zip(snap.declarations.functions, ids.functions, strict=True):
         if in_public_surface(fn):
             out.append(ident.node_id)
-    for var, vident in zip(snap.variables, ids.variables, strict=True):
+    for var, vident in zip(snap.declarations.variables, ids.variables, strict=True):
         if in_public_surface(var):
             out.append(vident.node_id)
     return out
@@ -684,7 +691,7 @@ def _export_table_declarations(
     """
     ids = ids if ids is not None else snapshot_identities(snap)
     out: list[str] = []
-    for fn, ident in zip(snap.functions, ids.functions, strict=True):
+    for fn, ident in zip(snap.declarations.functions, ids.functions, strict=True):
         # Rootness is decided by *linker* identity (what the export table
         # matched), while the node recorded is the declaration's own Phase 1
         # id -- the two differ for an unmangled overload, where every member
@@ -693,7 +700,7 @@ def _export_table_declarations(
         identity = _canonical_decl_key(fn.name, fn.mangled)
         if identity and identity in exports.root_identities:
             out.append(ident.node_id)
-    for var, vident in zip(snap.variables, ids.variables, strict=True):
+    for var, vident in zip(snap.declarations.variables, ids.variables, strict=True):
         identity = _canonical_decl_key(var.name, var.mangled)
         if identity and identity in exports.root_identities:
             out.append(vident.node_id)

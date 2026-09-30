@@ -182,11 +182,11 @@ def _declaration_spellings(
     pairs: Iterable[tuple[str, str, str]] = (
         *(
             (f.mangled, f.name, i.node_id)
-            for f, i in zip(snap.functions, ids.functions)
+            for f, i in zip(snap.declarations.functions, ids.functions)
         ),
         *(
             (v.mangled, v.name, i.node_id)
-            for v, i in zip(snap.variables, ids.variables)
+            for v, i in zip(snap.declarations.variables, ids.variables)
         ),
     )
     for mangled, name, node_id in pairs:

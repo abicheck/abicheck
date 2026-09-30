@@ -234,11 +234,11 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # decorate differently on ``name``/``mangled`` than on the export table.
     # Union both so this "already represented by the function model" guard
     # actually fires for either shape (Codex review, case83 investigation).
-    old_fn_names = {f.name for f in old.functions if f.name} | {
-        f.mangled for f in old.functions if f.mangled
+    old_fn_names = {f.name for f in old.declarations.functions if f.name} | {
+        f.mangled for f in old.declarations.functions if f.mangled
     }
-    new_fn_names = {f.name for f in new.functions if f.name} | {
-        f.mangled for f in new.functions if f.mangled
+    new_fn_names = {f.name for f in new.declarations.functions if f.name} | {
+        f.mangled for f in new.declarations.functions if f.mangled
     }
 
     removed_kind = (
@@ -588,11 +588,11 @@ def _diff_macho_exports(
     # See the matching comment in _diff_pe(): union both the demangled display
     # name and the link-time mangled symbol so this guard matches a real
     # Mach-O export string for either a plain-C or a name-mangled C++ symbol.
-    old_fn_names = {f.name for f in old.functions if f.name} | {
-        f.mangled for f in old.functions if f.mangled
+    old_fn_names = {f.name for f in old.declarations.functions if f.name} | {
+        f.mangled for f in old.declarations.functions if f.mangled
     }
-    new_fn_names = {f.name for f in new.functions if f.name} | {
-        f.mangled for f in new.functions if f.mangled
+    new_fn_names = {f.name for f in new.declarations.functions if f.name} | {
+        f.mangled for f in new.declarations.functions if f.mangled
     }
 
     removed_kind = (
@@ -1111,8 +1111,12 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # (Codex review, P2). `is_binary_exported` is also exactly what the
     # `(PUBLIC, ELF_ONLY)` tuple this replaced meant. See
     # model/surface_facts.py.
-    old_map = {f.mangled: f for f in old.functions if is_binary_exported(f)}
-    new_map = {f.mangled: f for f in new.functions if is_binary_exported(f)}
+    old_map = {
+        f.mangled: f for f in old.declarations.functions if is_binary_exported(f)
+    }
+    new_map = {
+        f.mangled: f for f in new.declarations.functions if is_binary_exported(f)
+    }
 
     removed = set(old_map.keys()) - set(new_map.keys())
     added = set(new_map.keys()) - set(old_map.keys())
@@ -1167,8 +1171,12 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # (Codex review, P2). `is_binary_exported` is also exactly what the
     # `(PUBLIC, ELF_ONLY)` tuple this replaced meant. See
     # model/surface_facts.py.
-    old_map = {f.mangled: f for f in old.functions if is_binary_exported(f)}
-    new_map = {f.mangled: f for f in new.functions if is_binary_exported(f)}
+    old_map = {
+        f.mangled: f for f in old.declarations.functions if is_binary_exported(f)
+    }
+    new_map = {
+        f.mangled: f for f in new.declarations.functions if is_binary_exported(f)
+    }
 
     removed = set(old_map.keys()) - set(new_map.keys())
     added = set(new_map.keys()) - set(old_map.keys())

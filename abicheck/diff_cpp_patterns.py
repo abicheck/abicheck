@@ -238,7 +238,7 @@ def detect_sycl_overload_set_removal(
     # either wrongly treat an unrelated ``mylib::queue&`` param as SYCL, or
     # miss a real SYCL removal, depending on insertion order.
     type_qualified_index: dict[str, set[str | None]] = defaultdict(set)
-    for t in (*old.types, *new.types):
+    for t in (*old.declarations.types, *new.declarations.types):
         type_qualified_index[t.name].add(t.qualified_name)
     # Group removed SYCL-overload candidates by the *qualified* callable
     # stem (full namespace path with template args stripped). Keying by
@@ -677,8 +677,8 @@ def detect_tag_type_renamed(
 
     old.index()
     new.index()
-    old_types = build_type_map(old.types)
-    new_types = build_type_map(new.types)
+    old_types = build_type_map(old.declarations.types)
+    new_types = build_type_map(new.declarations.types)
     removed_empties = _empty_records_only_in(old_types, new_types)
     added_empties = _empty_records_only_in(new_types, old_types)
     if not removed_empties or not added_empties:
@@ -1015,8 +1015,8 @@ def detect_inline_body_renamed_member(
     # Canonical record maps (ADR-063 2B): a bare-``name`` dict silently dropped
     # all but one of several same-leaf records, so a pimpl holder in another
     # namespace could vanish from the scan below.
-    old_types = build_type_map(old.types)
-    new_types = build_type_map(new.types)
+    old_types = build_type_map(old.declarations.types)
+    new_types = build_type_map(new.declarations.types)
 
     # Gather rename candidates from two complementary signals.
     rename_candidates = _collect_field_rename_candidates(changes_list, namespaces)
@@ -1026,7 +1026,7 @@ def detect_inline_body_renamed_member(
         return []
 
     return _emit_inline_body_findings(
-        rename_candidates, old_types, new_types, old.functions, namespaces
+        rename_candidates, old_types, new_types, old.declarations.functions, namespaces
     )
 
 

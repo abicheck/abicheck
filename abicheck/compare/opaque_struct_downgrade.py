@@ -148,7 +148,7 @@ def resolve_struct_change_entity_id(
     exact_found = False
     exact_ids: set[EntityId] = set()
     for snap in (old, new):
-        for t in snap.types:
+        for t in snap.declarations.types:
             if t.name == record_name or t.qualified_name == record_name:
                 exact_found = True
                 if t.entity_id is not None:
@@ -163,7 +163,7 @@ def resolve_struct_change_entity_id(
         return c
     bare_ids: set[EntityId] = set()
     for snap in (old, new):
-        for t in snap.types:
+        for t in snap.declarations.types:
             if t.name == bare and t.entity_id is not None:
                 bare_ids.add(t.entity_id)
     if len(bare_ids) == 1:

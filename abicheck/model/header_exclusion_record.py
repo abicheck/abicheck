@@ -335,10 +335,10 @@ def declared_header_paths(snapshot: AbiSnapshot | None) -> frozenset[str] | None
     headers = frozenset(
         str(d.source_header)
         for group in (
-            snapshot.functions,
-            snapshot.variables,
-            snapshot.types,
-            snapshot.enums,
+            snapshot.declarations.functions,
+            snapshot.declarations.variables,
+            snapshot.declarations.types,
+            snapshot.declarations.enums,
         )
         for d in group
         if getattr(d, "source_header", None)

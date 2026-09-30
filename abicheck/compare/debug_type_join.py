@@ -185,10 +185,10 @@ def join_debug_types(
     records: dict[str, list[tuple[str, RecordType]]] = {}
     enums: dict[str, list[tuple[str, EnumType]]] = {}
     left_ids: list[str] = []
-    for rec, ident in zip(snap.types, ids.records):
+    for rec, ident in zip(snap.declarations.types, ids.records):
         records.setdefault(header_type_key(rec), []).append((ident.node_id, rec))
         left_ids.append(ident.node_id)
-    for en, ident in zip(snap.enums, ids.enums):
+    for en, ident in zip(snap.declarations.enums, ids.enums):
         enums.setdefault(header_type_key(en), []).append((ident.node_id, en))
         left_ids.append(ident.node_id)
 

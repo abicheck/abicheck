@@ -333,12 +333,20 @@ def _strip_header_and_above_evidence(
 
     # A confirmed non-export -- the fact, not the conflated enum: a
     # declaration no binary-only view could ever have seen.
-    snap.functions = [f for f in snap.functions if not is_export_confirmed_absent(f)]
-    snap.variables = [v for v in snap.variables if not is_export_confirmed_absent(v)]
+    snap.functions = [
+        f for f in snap.declarations.functions if not is_export_confirmed_absent(f)
+    ]
+    snap.variables = [
+        v for v in snap.declarations.variables if not is_export_confirmed_absent(v)
+    ]
     exported = _exported_symbol_names(snap)
     if exported is not None:
-        snap.functions = [f for f in snap.functions if f.mangled in exported]
-        snap.variables = [v for v in snap.variables if v.mangled in exported]
+        snap.functions = [
+            f for f in snap.declarations.functions if f.mangled in exported
+        ]
+        snap.variables = [
+            v for v in snap.declarations.variables if v.mangled in exported
+        ]
     # Projecting to a binary-only view *discards* the header evidence; it
     # does not disprove it. So the two header-derived surface facts go back
     # to unknown rather than to a confirmed negative -- a projected
@@ -349,21 +357,21 @@ def _strip_header_and_above_evidence(
     discarded = headers_discarded_surface_facts(
         reason="header evidence discarded by evidence-depth projection"
     )
-    for f in snap.functions:
+    for f in snap.declarations.functions:
         f.visibility = Visibility.ELF_ONLY
         f.origin = ScopeOrigin.UNKNOWN
         for fact_name, fact in discarded.items():
             setattr(f, fact_name, fact)
-    for v in snap.variables:
+    for v in snap.declarations.variables:
         v.visibility = Visibility.ELF_ONLY
         v.origin = ScopeOrigin.UNKNOWN
         for fact_name, fact in discarded.items():
             setattr(v, fact_name, fact)
 
     if dwarf_sourced:
-        for t in snap.types:
+        for t in snap.declarations.types:
             t.origin = ScopeOrigin.UNKNOWN
-        for e in snap.enums:
+        for e in snap.declarations.enums:
             e.origin = ScopeOrigin.UNKNOWN
     else:
         snap.types = []
@@ -425,10 +433,10 @@ def _strip_header_and_above_evidence(
     snap.contract = None
 
     if not dwarf_sourced:
-        for f in snap.functions:
+        for f in snap.declarations.functions:
             f.return_type = "?"
             f.params = []
-        for v in snap.variables:
+        for v in snap.declarations.variables:
             v.type = "?"
             v.is_const = False
             v.value = None

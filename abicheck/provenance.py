@@ -705,7 +705,10 @@ def apply_provenance(
         compile_only_dir_segs=compile_only,
     )
     for decl in chain(
-        snapshot.functions, snapshot.variables, snapshot.types, snapshot.enums
+        snapshot.declarations.functions,
+        snapshot.declarations.variables,
+        snapshot.declarations.types,
+        snapshot.declarations.enums,
     ):
         tag(decl)
     return snapshot

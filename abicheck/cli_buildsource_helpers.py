@@ -410,8 +410,10 @@ def _exported_symbols_from_binary(binary: Path | None) -> list[str]:
         snap = run_dump(Path(binary), fmt)
     except Exception:  # noqa: BLE001 - best-effort; never fail collection on this
         return []
-    syms = {fn.mangled for fn in snap.functions if fn.mangled}
-    syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
+    syms = {fn.mangled for fn in snap.declarations.functions if fn.mangled}
+    syms |= {
+        v.mangled for v in snap.declarations.variables if getattr(v, "mangled", "")
+    }
     return sorted(syms)
 
 

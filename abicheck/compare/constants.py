@@ -766,10 +766,10 @@ def _constant_side_index(
     exactly; see that function's own docstring, including the
     :func:`~abicheck.model.semantic_ir_legacy_adapter.semantic_ir_covers_kind`
     gate (Codex review, PR #1078, nineteenth round)."""
-    if snapshot.semantic_ir is not None and semantic_ir_covers_kind(
-        snapshot.semantic_ir, EntityKind.CONSTANT
+    if snapshot.canonical_ir is not None and semantic_ir_covers_kind(
+        snapshot.canonical_ir, EntityKind.CONSTANT
     ):
-        return SemanticIRIndex(snapshot.semantic_ir)
+        return SemanticIRIndex(snapshot.canonical_ir)
     return SemanticIRIndex(legacy_constant_ir(snapshot, constants))
 
 

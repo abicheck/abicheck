@@ -116,8 +116,8 @@ def build_symbol_inventory(snapshot: AbiSnapshot) -> SymbolInventory:
     ``types``/``enums`` by ``name``.
     """
     return SymbolInventory(
-        functions=tuple(f.mangled for f in snapshot.functions),
-        variables=tuple(v.mangled for v in snapshot.variables),
-        types=tuple(t.name for t in snapshot.types),
-        enums=tuple(e.name for e in snapshot.enums),
+        functions=tuple(f.mangled for f in snapshot.declarations.functions),
+        variables=tuple(v.mangled for v in snapshot.declarations.variables),
+        types=tuple(t.name for t in snapshot.declarations.types),
+        enums=tuple(e.name for e in snapshot.declarations.enums),
     )

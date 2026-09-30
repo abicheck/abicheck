@@ -918,9 +918,9 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     # merges key on the source-level NAME, not a mangled linker symbol, so
     # they carry no such platform-specific decoration and need no change.
     # entity_id's "mangled" tag is re-spelled too (Codex review).
-    clang_functions = clang_snap.functions
-    clang_variables = clang_snap.variables
-    clang_semantic_ir = clang_snap.semantic_ir
+    clang_functions = clang_snap.declarations.functions
+    clang_variables = clang_snap.declarations.variables
+    clang_semantic_ir = clang_snap.canonical_ir
     if castxml_snap.platform == "macho":
         clang_functions = [
             replace(cf, mangled=nm, entity_id=with_mangled_name(cf.entity_id, nm))
@@ -947,13 +947,13 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     # WRONG clang record, and/or a genuinely clang-only record (that merely
     # shares its bare name with an unrelated castxml record) being dropped
     # instead of appended (Codex review, fresh evidence).
-    clang_types_by_key = {type_map_key(t): t for t in clang_snap.types}
-    clang_enums_by_key = {type_map_key(e): e for e in clang_snap.enums}
+    clang_types_by_key = {type_map_key(t): t for t in clang_snap.declarations.types}
+    clang_enums_by_key = {type_map_key(e): e for e in clang_snap.declarations.enums}
     clang_vars_by_mangled = {v.mangled: v for v in clang_variables}
 
     ctor_dtor_entity_id_rewrites: dict[EntityId, EntityId] = {}
     merged_functions = _merge_functions(
-        castxml_snap.functions,
+        castxml_snap.declarations.functions,
         clang_functions,
         provenance,
         ctor_dtor_entity_id_rewrites,
@@ -961,11 +961,13 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
 
     merged_types = [
         _merge_record_type(t, clang_types_by_key.get(type_map_key(t)), provenance)
-        for t in castxml_snap.types
+        for t in castxml_snap.declarations.types
     ]
-    castxml_type_keys = {type_map_key(t) for t in castxml_snap.types}
+    castxml_type_keys = {type_map_key(t) for t in castxml_snap.declarations.types}
     clang_only_types = [
-        t for t in clang_snap.types if type_map_key(t) not in castxml_type_keys
+        t
+        for t in clang_snap.declarations.types
+        if type_map_key(t) not in castxml_type_keys
     ]
     for t in clang_only_types:
         # A clang-only type's own deprecated value IS genuinely clang-
@@ -1012,11 +1014,13 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
 
     merged_enums = [
         _merge_enum_type(e, clang_enums_by_key.get(type_map_key(e)), provenance)
-        for e in castxml_snap.enums
+        for e in castxml_snap.declarations.enums
     ]
-    castxml_enum_keys = {type_map_key(e) for e in castxml_snap.enums}
+    castxml_enum_keys = {type_map_key(e) for e in castxml_snap.declarations.enums}
     clang_only_enums = [
-        e for e in clang_snap.enums if type_map_key(e) not in castxml_enum_keys
+        e
+        for e in clang_snap.declarations.enums
+        if type_map_key(e) not in castxml_enum_keys
     ]
     for e in clang_only_enums:
         # Qualified key -- same reasoning as clang_only_types above.
@@ -1027,15 +1031,15 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
 
     merged_variables = [
         _merge_variable(v, clang_vars_by_mangled.get(v.mangled), provenance)
-        for v in castxml_snap.variables
+        for v in castxml_snap.declarations.variables
     ]
     # "visibility" mirrors _merge_functions' identical stamp above -- which
     # backend contributed the declaration itself, consumed by
     # header_graph.build_header_only_graph() for its graph-node provenance
     # tag, not a per-field value merge.
-    for v in castxml_snap.variables:
+    for v in castxml_snap.declarations.variables:
         provenance[var_fact_key(v.mangled, "visibility")] = "castxml"
-    castxml_var_mangled = {v.mangled for v in castxml_snap.variables}
+    castxml_var_mangled = {v.mangled for v in castxml_snap.declarations.variables}
     clang_only_variables = [
         v for v in clang_variables if v.mangled not in castxml_var_mangled
     ]
@@ -1054,7 +1058,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     # its retired synthetic identity there while `merged_functions` already
     # carries the real one (Codex review, fresh evidence).
     castxml_semantic_ir = _rewrite_semantic_ir_entity_ids(
-        castxml_snap.semantic_ir, ctor_dtor_entity_id_rewrites
+        castxml_snap.canonical_ir, ctor_dtor_entity_id_rewrites
     )
     merged_ir, ir_conflicts = merge_semantic_ir(castxml_semantic_ir, clang_semantic_ir)
     # `merged.constants` deliberately stays castxml-only (see that field's
@@ -1067,10 +1071,10 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     merged_constant_entity_ids = {
         key: value
         for key, value in {
-            **clang_snap.constant_entity_ids,
-            **castxml_snap.constant_entity_ids,
+            **clang_snap.declarations.constant_entity_ids,
+            **castxml_snap.declarations.constant_entity_ids,
         }.items()
-        if key in castxml_snap.constants
+        if key in castxml_snap.declarations.constants
     }
     merged_ir, ir_conflicts = _drop_unmatched_constant_occurrences(
         merged_ir, ir_conflicts, set(merged_constant_entity_ids.values())
@@ -1100,14 +1104,14 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         # rare disagreement, matching "castxml remains the base" elsewhere
         # in this merge.
         typedefs_qualified={
-            **clang_snap.typedefs_qualified,
-            **castxml_snap.typedefs_qualified,
+            **clang_snap.declarations.typedefs_qualified,
+            **castxml_snap.declarations.typedefs_qualified,
         },
         # The `EntityId` sidecars (ADR-063 Phase 2) union the same way, in the
         # same direction, so they cannot desync from the dicts they annotate.
         typedef_entity_ids={
-            **clang_snap.typedef_entity_ids,
-            **castxml_snap.typedef_entity_ids,
+            **clang_snap.declarations.typedef_entity_ids,
+            **castxml_snap.declarations.typedef_entity_ids,
         },
         # `constants` itself (unlike `typedefs_qualified`) is NOT merged
         # above -- it stays castxml_snap's own, verbatim, same as every

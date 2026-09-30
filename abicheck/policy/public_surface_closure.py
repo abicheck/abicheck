@@ -268,7 +268,7 @@ def _seed_public_roots(
     """
     seed_types: set[str] = set()
     has_public = False
-    for fn in snap.functions:
+    for fn in snap.declarations.functions:
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
         _record_origin(surface, keys, getattr(fn, "origin", ScopeOrigin.UNKNOWN))
@@ -292,7 +292,7 @@ def _seed_public_roots(
             owner = owner_class_of(fn)
             if owner:
                 seed_types |= _type_identifiers(owner)
-    for var in snap.variables:
+    for var in snap.declarations.variables:
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys
         _record_origin(surface, keys, getattr(var, "origin", ScopeOrigin.UNKNOWN))
@@ -426,7 +426,7 @@ def _walk_type_closure(
         if name in surface.all_types:
             surface.public_types.add(name)
         # Follow typedef targets.
-        target = snap.typedefs.get(name)
+        target = snap.declarations.typedefs.get(name)
         if target:
             surface.public_typedefs.add(name)
             for ident in _referenced_identifiers(refs, refs.typedef_node_id(name)):
@@ -522,7 +522,7 @@ def _walk_exact_type_closure(
         if name in seen:
             continue
         seen.add(name)
-        target = snap.typedefs.get(name)
+        target = snap.declarations.typedefs.get(name)
         if target:
             # A typedef alias is a 1:1 mapping -- there is no ambiguity
             # concept for it the way a bare record/enum tail can collide, so
@@ -607,7 +607,7 @@ def _record_exact_identities(snap: AbiSnapshot) -> set[str]:
     tail alias (unchanged from ``surface.py``'s original -- see its own
     docstring, preserved in this migration's git history, for the full
     castxml/DWARF-convention rationale)."""
-    return {rec.qualified_name or rec.name for rec in snap.types}
+    return {rec.qualified_name or rec.name for rec in snap.declarations.types}
 
 
 def _record_nested_in_known_record(qname: str, record_identities: set[str]) -> bool:
@@ -684,7 +684,7 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     # rationale and the case20 regression it guards.
     seed_types |= {
         en.name
-        for en in snap.enums
+        for en in snap.declarations.enums
         if en.source_header and en.origin not in _DEMOTE_ORIGINS
     }
 
@@ -696,7 +696,7 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     record_identities = _record_exact_identities(snap)
     seed_types |= {
         rec.qualified_name or rec.name
-        for rec in snap.types
+        for rec in snap.declarations.types
         if _record_is_confirmed_public_seed(rec, record_identities)
     }
 

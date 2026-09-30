@@ -230,8 +230,8 @@ def reconcile_build_context(
     if not have_evidence:
         return changes, []
 
-    old_types = RecordLookup(old.types)
-    new_types = RecordLookup(new.types)
+    old_types = RecordLookup(old.declarations.types)
+    new_types = RecordLookup(new.declarations.types)
 
     kept: list[Change] = []
     reconciled: list[Change] = []

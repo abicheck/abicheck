@@ -67,12 +67,12 @@ def _diff_enum_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     excl = _exclude_stdlib_namespaces(old, new)
     old_map = _build_type_map(
         e
-        for e in old.enums
+        for e in old.declarations.enums
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
     new_map = _build_type_map(
         e
-        for e in new.enums
+        for e in new.declarations.enums
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
 
@@ -271,7 +271,7 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_map = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if not t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
@@ -279,7 +279,7 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
     new_map = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if not t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
@@ -366,14 +366,14 @@ def _diff_field_default_initializer(old: AbiSnapshot, new: AbiSnapshot) -> list[
     directly_referenced = _directly_referenced(old, new)
     old_map = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
     new_map = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
@@ -511,14 +511,14 @@ def _diff_field_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_map = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
     new_map = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
@@ -582,14 +582,14 @@ def _diff_type_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_map = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
     new_map = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
@@ -641,12 +641,12 @@ def _diff_enum_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     excl = _exclude_stdlib_namespaces(old, new)
     old_map = _build_type_map(
         e
-        for e in old.enums
+        for e in old.declarations.enums
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
     new_map = _build_type_map(
         e
-        for e in new.enums
+        for e in new.declarations.enums
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
 
@@ -690,7 +690,7 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     directly_referenced = _directly_referenced(old, new)
     old_map = _build_type_map(
         t
-        for t in old.types
+        for t in old.declarations.types
         if not t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
@@ -698,7 +698,7 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
     new_map = _build_type_map(
         t
-        for t in new.types
+        for t in new.declarations.types
         if not t.is_union
         and _is_abi_surface_type(
             t, exclude_stdlib=excl, directly_referenced=directly_referenced

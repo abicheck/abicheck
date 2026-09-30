@@ -447,7 +447,9 @@ def _lambda_identity_containers_and_strings(
     Deliberately does NOT look at ``semantic_ir_conflicts`` -- see
     :func:`_conflict_only_marker_strings` for why.
     """
-    containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
+    containers = [
+        _identity_container(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS
+    ]
     strings: list[str] = []
     for container in containers:
         _collect_strings(container, strings)
@@ -460,6 +462,40 @@ def _lambda_identity_containers_and_strings(
 def _has_any_marker(strings: _Iterable[str]) -> bool:
     markers = ("(lambda", "(unnamed ", "(anonymous ")
     return any(m in s for s in strings for m in markers)
+
+
+def _identity_container(snapshot: object, name: str) -> object:
+    """One :data:`_LAMBDA_IDENTITY_FIELDS` container: a declaration kind is
+    read from the snapshot's store, ``semantic_ir`` as its canonical
+    occurrences alone (the store is walked through its own kinds, never
+    twice), anything else as a plain attribute."""
+    if name == "semantic_ir":
+        return getattr(snapshot, "canonical_ir", None)
+    if name in _DECLARATION_KIND_NAMES:
+        return getattr(snapshot.declarations, name)  # type: ignore[attr-defined]
+    return getattr(snapshot, name)
+
+
+def _set_identity_container(snapshot: object, name: str, value: object) -> None:
+    if name in _DECLARATION_KIND_NAMES:
+        setattr(snapshot.declarations, name, value)  # type: ignore[attr-defined]
+    else:
+        setattr(snapshot, name, value)
+
+
+_DECLARATION_KIND_NAMES = frozenset(
+    {
+        "functions",
+        "variables",
+        "types",
+        "enums",
+        "typedefs",
+        "typedefs_qualified",
+        "constants",
+        "typedef_entity_ids",
+        "constant_entity_ids",
+    }
+)
 
 
 def _conflict_only_marker_strings(snapshot: object) -> list[str]:
@@ -713,7 +749,9 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     """
     if getattr(_defer_renumber, "active", False):
         return snapshot
-    containers = [getattr(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
+    containers = [
+        _identity_container(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS
+    ]
     all_strings: list[str] = []
     flagged: set[int] = set()
     for container in containers:
@@ -741,7 +779,7 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     # in-place text rewrite (see `model.semantic_ir.renumber_conflict_keys`'
     # own docstring for exactly why: it would corrupt the packed length
     # prefix), so this needs the old/new OccurrenceId pairing instead.
-    old_semantic_ir = getattr(snapshot, "semantic_ir", None)
+    old_semantic_ir = getattr(snapshot, "canonical_ir", None)
     old_occurrence_ids = (
         list(old_semantic_ir.occurrences) if old_semantic_ir is not None else None
     )
@@ -749,10 +787,10 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     for field_name, container in zip(_LAMBDA_IDENTITY_FIELDS, containers):
         new_container = _rewrite_marked_subtrees(container, _rewrite, flagged)
         if new_container is not container:
-            setattr(snapshot, field_name, new_container)
+            _set_identity_container(snapshot, field_name, new_container)
 
     conflicts = getattr(snapshot, "semantic_ir_conflicts", None)
-    new_semantic_ir = getattr(snapshot, "semantic_ir", None)
+    new_semantic_ir = getattr(snapshot, "canonical_ir", None)
     if old_occurrence_ids is not None and conflicts and new_semantic_ir is not None:
         # Local import: this module is otherwise import-free (its own
         # docstring) precisely so it stays cheaply importable from broad,

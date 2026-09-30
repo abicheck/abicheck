@@ -165,7 +165,9 @@ def _public_pointer_only(graph: SurfaceGraph, type_name: str) -> tuple[bool, boo
     index. A caller asking about several records builds the index once itself
     and calls :func:`_query_public_use`.
     """
-    return query_public_use(build_public_use_index(graph.snapshot.functions), type_name)
+    return query_public_use(
+        build_public_use_index(graph.snapshot.declarations.functions), type_name
+    )
 
 
 def _record_is_opaque_candidate(rec: RecordType) -> bool:
@@ -238,7 +240,11 @@ def _resolve_pointee(
     if exact is not None and exact.name == pointee:
         return exact, False
     short = pointee.rsplit("::", 1)[-1]
-    matches = [r for r in graph.snapshot.types if r.name.rsplit("::", 1)[-1] == short]
+    matches = [
+        r
+        for r in graph.snapshot.declarations.types
+        if r.name.rsplit("::", 1)[-1] == short
+    ]
     if len(matches) == 1:
         return matches[0], False
     return (None, True) if matches else (None, False)
@@ -246,7 +252,7 @@ def _resolve_pointee(
 
 def _recognise_handle(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     out: dict[str, IdiomTag] = {}
-    for alias, target in sorted(graph.snapshot.typedefs.items()):
+    for alias, target in sorted(graph.snapshot.declarations.typedefs.items()):
         t = target.strip()
         if not _is_pointer(t):
             continue
@@ -292,7 +298,7 @@ def _recognise_factory(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     ``buildsource/header_graph``/``compare.surface_graph``).
     """
     out: dict[str, IdiomTag] = {}
-    for fn in graph.snapshot.functions:
+    for fn in graph.snapshot.declarations.functions:
         if not in_public_surface(fn):
             continue
         if fn.return_pointer_depth < 1 and not _is_pointer(fn.return_type):
@@ -379,14 +385,14 @@ def _is_callback_type(type_str: str, typedefs: dict[str, str]) -> bool:
 
 def _recognise_callbacks(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     out: dict[str, IdiomTag] = {}
-    typedefs = graph.snapshot.typedefs
+    typedefs = graph.snapshot.declarations.typedefs
     # One answer per distinct spelling for this pass: a large C API repeats a
     # few hundred parameter spellings across tens of thousands of functions
     # (MKL: 215 across 27.5k), and each answer walks the typedef chain
     # through the lock-guarded ``strip_ptr`` memo. Local to the call, so it
     # can never outlive *typedefs* or answer for another snapshot.
     is_callback: dict[str, bool] = {}
-    for fn in graph.snapshot.functions:
+    for fn in graph.snapshot.declarations.functions:
         if not in_public_surface(fn):
             continue
         for p in fn.params:
@@ -572,7 +578,7 @@ def _is_itanium_dtor_symbol(entry: str) -> bool:
 def _detect_stl_by_value(graph: SurfaceGraph) -> list[AntiPattern]:
     """Collect PUBLIC_API_EXPOSES_STL_BY_VALUE findings for every public function."""
     found: list[AntiPattern] = []
-    for fn in graph.snapshot.functions:
+    for fn in graph.snapshot.declarations.functions:
         if not in_public_surface(fn):
             continue
         hits: list[str] = []
@@ -607,7 +613,7 @@ def _build_type_name_index(
     returning ns1::Base* never tags an unrelated ns2::Base that merely shares a
     short name (ADR-027 review). Unresolvable / ambiguous targets are dropped.
     """
-    all_type_names = {rec.name for rec in graph.snapshot.types}
+    all_type_names = {rec.name for rec in graph.snapshot.declarations.types}
     by_short: dict[str, list[str]] = {}
     for n in all_type_names:
         by_short.setdefault(n.rsplit("::", 1)[-1], []).append(n)
@@ -651,7 +657,7 @@ def _collect_base_targets(
     :func:`~abicheck.compare.fact_comparison.compare_facts` exists to gate.
     """
     base_targets: set[str] = set()
-    for rec in graph.snapshot.types:
+    for rec in graph.snapshot.declarations.types:
         if rec.origin in _NON_PUBLIC_ORIGINS:
             continue
         bases = resolved_fact_value(rec.bases_fact, [])
@@ -669,7 +675,7 @@ def _collect_factory_targets(
 ) -> set[str]:
     """Gather fully-qualified names of types returned by pointer from public functions."""
     factory_targets: set[str] = set()
-    for fn in graph.snapshot.functions:
+    for fn in graph.snapshot.declarations.functions:
         if not in_public_surface(fn):
             continue
         if fn.return_pointer_depth >= 1 or _is_pointer(fn.return_type):
@@ -698,7 +704,7 @@ def _detect_non_virtual_dtor(
     ``resolved_fact_value`` read for the same reason.
     """
     found: list[AntiPattern] = []
-    for rec in graph.snapshot.types:
+    for rec in graph.snapshot.declarations.types:
         vtable = resolved_fact_value(rec.vtable_fact, [])
         if not vtable:
             continue
@@ -758,10 +764,10 @@ def recognise_idioms(graph: SurfaceGraph) -> dict[str, list[IdiomTag]]:
     # snapshot with no opaque record never pays for it. Local to this call, so
     # it is released with the frame.
     index: PublicUseIndex | None = None
-    for rec in graph.snapshot.types:
+    for rec in graph.snapshot.declarations.types:
         if _record_is_opaque_candidate(rec):
             if index is None:
-                index = build_public_use_index(graph.snapshot.functions)
+                index = build_public_use_index(graph.snapshot.declarations.functions)
             add(rec.name, _opaque_tag(index, rec))
         add(rec.name, _recognise_pimpl(graph, rec))
 

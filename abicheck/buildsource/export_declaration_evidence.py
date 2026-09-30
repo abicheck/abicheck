@@ -118,7 +118,11 @@ class ExportDeclarationEvidence:
 def _public_header_files(snapshot: AbiSnapshot) -> set[str]:
     """Defining-header paths of every public-header declaration."""
     files: set[str] = set()
-    for decls in (snapshot.functions, snapshot.variables, snapshot.types):
+    for decls in (
+        snapshot.declarations.functions,
+        snapshot.declarations.variables,
+        snapshot.declarations.types,
+    ):
         for d in decls:
             if d.origin == ScopeOrigin.PUBLIC_HEADER and d.source_header:
                 files.add(d.source_header)
@@ -128,10 +132,10 @@ def _public_header_files(snapshot: AbiSnapshot) -> set[str]:
 def _owned_namespaces(snapshot: AbiSnapshot) -> frozenset[str]:
     owned: set[str] = set()
     for d in (
-        *snapshot.functions,
-        *snapshot.variables,
-        *snapshot.types,
-        *snapshot.enums,
+        *snapshot.declarations.functions,
+        *snapshot.declarations.variables,
+        *snapshot.declarations.types,
+        *snapshot.declarations.enums,
     ):
         if getattr(d, "origin", None) in (
             ScopeOrigin.SYSTEM_HEADER,

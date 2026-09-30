@@ -104,8 +104,8 @@ def surface_from_snapshot(
     declared: set[str] = set()
     # ADR-075 D7: the same contract relation the per-member check reads.
     owned = contract_relations(snapshot)
-    inline_symbols = inline_declared_symbols(snapshot.functions)
-    for i, fn in enumerate(snapshot.functions):
+    inline_symbols = inline_declared_symbols(snapshot.declarations.functions)
+    for i, fn in enumerate(snapshot.declarations.functions):
         if fn.origin == ScopeOrigin.PUBLIC_HEADER:
             declared.update(_candidate_symbols(fn))
         if _has_export_obligation(
@@ -119,7 +119,7 @@ def surface_from_snapshot(
                     source_location=fn.source_location,
                 )
             )
-    for i, var in enumerate(snapshot.variables):
+    for i, var in enumerate(snapshot.declarations.variables):
         if var.origin == ScopeOrigin.PUBLIC_HEADER:
             declared.update(_candidate_symbols(var))
         if _var_has_export_obligation(var) and not owned.variable_owes_no_export(i):
@@ -133,15 +133,23 @@ def surface_from_snapshot(
             )
     declaring_headers: set[str] = set()
     declarations: list[Function | Variable] = [
-        *snapshot.functions,
-        *snapshot.variables,
+        *snapshot.declarations.functions,
+        *snapshot.declarations.variables,
     ]
     for decl in declarations:
         if decl.origin == ScopeOrigin.PUBLIC_HEADER and decl.source_location:
             declaring_headers.add(decl.source_location.rsplit(":", 1)[0])
     type_names = sorted(
-        {t.name for t in snapshot.types if t.origin == ScopeOrigin.PUBLIC_HEADER}
-        | {e.name for e in snapshot.enums if e.origin == ScopeOrigin.PUBLIC_HEADER}
+        {
+            t.name
+            for t in snapshot.declarations.types
+            if t.origin == ScopeOrigin.PUBLIC_HEADER
+        }
+        | {
+            e.name
+            for e in snapshot.declarations.enums
+            if e.origin == ScopeOrigin.PUBLIC_HEADER
+        }
     )
     return ReleasePublicSurface(
         acquisition_key=acquisition_key,

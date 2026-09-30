@@ -223,6 +223,31 @@ def _drop_unobserved_odr_conflicts(d: dict[str, Any]) -> None:
         dwarf.pop("odr_conflicts_observed", None)
 
 
+#: Where each declaration kind sat among ``AbiSnapshot``'s fields before the
+#: kinds moved into ``semantic_ir.declarations`` (ADR-063 Phase 10): each is
+#: written right after the named key, so the encoded document -- and every
+#: digest over it -- is unchanged by the move.
+_DECLARATION_KEY_ANCHORS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("version", ("functions", "variables", "types")),
+    ("numpy_capi", ("enums", "typedefs", "constants")),
+    (
+        "dependency_scope",
+        ("typedefs_qualified", "typedef_entity_ids", "constant_entity_ids"),
+    ),
+)
+
+
+def _with_declarations(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
+    decls = snap.declarations
+    after = {anchor: kinds for anchor, kinds in _DECLARATION_KEY_ANCHORS}
+    out: dict[str, Any] = {}
+    for key, value in d.items():
+        out[key] = value
+        for kind in after.get(key, ()):
+            out[kind] = _encode_value(getattr(decls, kind))
+    return out
+
+
 def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     """Encode *snap* into its canonical, fully-detached dictionary form.
 
@@ -230,7 +255,9 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     clears a field on the caller's object, so serializing a snapshot another
     thread is concurrently reading is safe.
     """
-    d = _encode_dataclass_skipping(snap, _SNAPSHOT_SKIP_FIELDS)
+    d = _with_declarations(
+        _encode_dataclass_skipping(snap, _SNAPSHOT_SKIP_FIELDS), snap
+    )
     # Runtime-only provenance qualifier — never persisted.
     d.pop("from_headers_inferred", None)
     # Runtime-only source-read licence — never persisted, by design. Writing it

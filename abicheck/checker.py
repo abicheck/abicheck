@@ -710,8 +710,8 @@ def _compute_scope_confidence(
 
 def _old_public_symbol_count(old: AbiSnapshot) -> int | None:
     """Return the count of public-visibility symbols in *old*, or None if zero."""
-    count = sum(1 for f in old.functions if is_abi_visible(f)) + sum(
-        1 for v in old.variables if is_abi_visible(v)
+    count = sum(1 for f in old.declarations.functions if is_abi_visible(f)) + sum(
+        1 for v in old.declarations.variables if is_abi_visible(v)
     )
     return count if count > 0 else None
 

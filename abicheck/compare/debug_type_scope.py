@@ -44,8 +44,12 @@ def debug_layout_scope(old: AbiSnapshot, new: AbiSnapshot) -> DebugLayoutScope:
     """The debug struct/enum names ``_diff_dwarf`` compares for *old*/*new*."""
     old_named, new_named = _named_by_header(old), _named_by_header(new)
     return (
-        _scope(old_named, new_named, "record") if old.types or new.types else None,
-        _scope(old_named, new_named, "enum") if old.enums or new.enums else None,
+        _scope(old_named, new_named, "record")
+        if old.declarations.types or new.declarations.types
+        else None,
+        _scope(old_named, new_named, "enum")
+        if old.declarations.enums or new.declarations.enums
+        else None,
     )
 
 
@@ -56,7 +60,7 @@ def _named_by_header(snap: AbiSnapshot) -> dict[tuple[str, str], bool]:
     join = join_debug_types(snap)
     opaque = {
         ident.node_id
-        for rec, ident in zip(snap.types, join.identities.records)
+        for rec, ident in zip(snap.declarations.types, join.identities.records)
         if rec.is_opaque
     }
     named: dict[tuple[str, str], bool] = {}

@@ -142,6 +142,6 @@ def sync_snapshot_record_layout(snapshot: object) -> None:
     ir = getattr(snapshot, "semantic_ir", None)
     if ir is None:
         return
-    synced = with_record_layout(ir, getattr(snapshot, "types", ()) or ())
+    synced = with_record_layout(ir, snapshot.declarations.types)  # type: ignore[attr-defined]
     if synced is not ir:
         snapshot.semantic_ir = synced  # type: ignore[attr-defined]

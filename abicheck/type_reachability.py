@@ -160,7 +160,10 @@ def _merged_typedefs(snapshot: AbiSnapshot) -> dict[str, str]:
     ``dict(snapshot.typedefs)`` behavior -- purely additive, no consumer
     regression possible.
     """
-    return {**snapshot.typedefs, **snapshot.typedefs_qualified}
+    return {
+        **snapshot.declarations.typedefs,
+        **snapshot.declarations.typedefs_qualified,
+    }
 
 
 class _StdlibReferenceScan:
@@ -814,7 +817,7 @@ def _seed_scan_from_public_declarations(
     declarations). Set ``False`` there; the ordinary
     :func:`directly_referenced_stdlib_types` path is unaffected.
     """
-    for fn in snapshot.functions:
+    for fn in snapshot.declarations.functions:
         if stop_when_exhausted and scan.exhausted:
             break
         if not _is_public_non_stdlib_declaration(
@@ -830,7 +833,7 @@ def _seed_scan_from_public_declarations(
         if owner is not None and owner in non_stdlib_identities:
             scan.reach_record(snapshot_local_identity(owner))
 
-    for var in snapshot.variables:
+    for var in snapshot.declarations.variables:
         if stop_when_exhausted and scan.exhausted:
             break
         if not _is_public_non_stdlib_declaration(
@@ -987,7 +990,8 @@ def _run_stdlib_reference_scan(
     # collides with an unrelated enum is never treated as an unconditionally
     # trustworthy direct match -- see _spelling_index's own docstring.
     enum_identities = frozenset(
-        _record_identity(en.name, en.qualified_name) for en in snapshot.enums
+        _record_identity(en.name, en.qualified_name)
+        for en in snapshot.declarations.enums
     )
     scan = _StdlibReferenceScan(
         stdlib_identities,
