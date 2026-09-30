@@ -28,13 +28,33 @@ duplicate code).
 
 Imports nothing from either caller, so neither has to import the other's
 internals for this.
+
+**One dump per TU across every pass** (:func:`parse_clang_ast` +
+:func:`shared_ast_scope`). The six L5 graph passes (call, type, override,
+template, macro-range, callback) build the *same* argv for a TU
+(``call_graph._safe_clang_args_from_compile_unit``) and so used to run the
+same multi-GiB ``clang -ast-dump=json`` six times per TU, one full pass over
+the compile DB each -- measured on PVXS (34 TUs) as the dominant cost of a
+``--depth source`` dump. Inside a :func:`shared_ast_scope` naming every
+pass's parser, the first request for a ``(clang_bin, argv, cwd)`` key runs
+clang once, applies *every* registered parser to that one AST, and keeps only
+their (small) results plus the dump's own diagnostics; the AST itself is
+dropped immediately. Each later pass is answered from that record with the
+same diagnostics replayed, so what each pass observes -- result, diagnostics,
+and the exception its own ``except`` clause handles -- is what an independent
+dump of the same argv would have produced. Outside a scope, or for a parser
+the scope did not register, :func:`parse_clang_ast` dumps and parses directly.
 """
 
 from __future__ import annotations
 
 import json
 import subprocess  # noqa: S404 - AST extraction shells out to clang (never shell=True)
-from typing import Any
+import threading
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
 
 from .. import deadline
 from .._compiler_options import CLANG_GCC_HEADER_COMPAT_DEFINES
@@ -128,3 +148,162 @@ def run_clang_ast_dump(
         diagnostics.append(f"scan deadline exceeded before walking clang AST: {exc}")
         return None
     return ast
+
+
+T = TypeVar("T")
+
+#: A pure parser over one ``clang -ast-dump=json`` tree.
+AstParser = Callable[[dict[str, Any]], Any]
+
+
+class NoAst:
+    """Sentinel: the dump produced no usable AST (see *diagnostics*)."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return "NO_AST"
+
+
+NO_AST = NoAst()
+
+
+@dataclass
+class _DumpRecord:
+    """One TU's single dump: its diagnostics and every registered parser's outcome."""
+
+    done: threading.Event = field(default_factory=threading.Event)
+    diagnostics: list[str] = field(default_factory=list)
+    has_ast: bool = False
+    #: parser -> ("ok", result) | ("err", exception)
+    outcomes: dict[AstParser, tuple[str, Any]] = field(default_factory=dict)
+
+
+class _SharedAstRegistry:
+    """Process-wide, reference-counted memo of per-TU parse outcomes.
+
+    Module-level rather than a ``contextvar`` because the passes' workers run
+    on ``BudgetedExecutor`` threads, which do not inherit context. Scopes
+    nest and may overlap (two sides of a compare folding concurrently): the
+    registered parser set is their union, and records are dropped only when
+    the last scope closes. Sharing a record between overlapping scopes is
+    sound because the key is the complete dump input.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._depth = 0
+        self._parsers: dict[AstParser, int] = {}
+        self._records: dict[tuple[str, tuple[str, ...], str | None], _DumpRecord] = {}
+
+    def enter(self, parsers: Iterable[AstParser]) -> list[AstParser]:
+        added = list(dict.fromkeys(parsers))
+        with self._lock:
+            self._depth += 1
+            for p in added:
+                self._parsers[p] = self._parsers.get(p, 0) + 1
+        return added
+
+    def exit(self, added: list[AstParser]) -> None:
+        with self._lock:
+            self._depth -= 1
+            for p in added:
+                n = self._parsers[p] - 1
+                if n:
+                    self._parsers[p] = n
+                else:
+                    del self._parsers[p]
+            if self._depth == 0:
+                self._records.clear()
+
+    def lookup(
+        self, key: tuple[str, tuple[str, ...], str | None], parser: AstParser
+    ) -> tuple[_DumpRecord, bool] | None:
+        """``(record, owner)`` for *key*, or ``None`` when *parser* is not shared.
+
+        The first caller for a key becomes its *owner* and must fill it
+        (:meth:`fill`); every other caller waits on ``record.done``.
+        """
+        with self._lock:
+            if parser not in self._parsers:
+                return None
+            record = self._records.get(key)
+            if record is not None:
+                return record, False
+            record = _DumpRecord()
+            self._records[key] = record
+            return record, True
+
+    def registered(self) -> list[AstParser]:
+        with self._lock:
+            return list(self._parsers)
+
+
+_REGISTRY = _SharedAstRegistry()
+
+
+@contextmanager
+def shared_ast_scope(parsers: Iterable[AstParser]) -> Iterator[None]:
+    """Share one clang AST dump per TU among *parsers* for the scope's duration."""
+    added = _REGISTRY.enter(parsers)
+    try:
+        yield
+    finally:
+        _REGISTRY.exit(added)
+
+
+def _apply(parser: AstParser, ast: dict[str, Any]) -> tuple[str, Any]:
+    try:
+        return ("ok", parser(ast))
+    except Exception as exc:  # noqa: BLE001 - replayed to the pass that owns it
+        return ("err", exc)
+
+
+def parse_clang_ast(
+    clang_bin: str,
+    argv: list[str],
+    *,
+    cwd: str | None,
+    diagnostics: list[str],
+    parser: Callable[[dict[str, Any]], T],
+) -> T | NoAst:
+    """Dump the TU (once per scope) and return ``parser(ast)``.
+
+    Returns :data:`NO_AST` when the dump failed -- *diagnostics* then says
+    why, exactly as :func:`run_clang_ast_dump` records it. An exception the
+    parser raised is raised here, so the calling pass's own ``except`` clause
+    decides how to degrade, as it did when it parsed the AST itself.
+    """
+    key = (clang_bin, tuple(argv), cwd)
+    found = _REGISTRY.lookup(key, parser)
+    if found is None:
+        ast = run_clang_ast_dump(clang_bin, argv, cwd=cwd, diagnostics=diagnostics)
+        return NO_AST if ast is None else parser(ast)
+    record, owner = found
+    if owner:
+        try:
+            ast = run_clang_ast_dump(
+                clang_bin, argv, cwd=cwd, diagnostics=record.diagnostics
+            )
+            if ast is not None:
+                record.has_ast = True
+                for p in _REGISTRY.registered():
+                    record.outcomes[p] = _apply(p, ast)
+                del ast
+        finally:
+            record.done.set()
+    else:
+        record.done.wait()
+    diagnostics.extend(record.diagnostics)
+    if not record.has_ast:
+        return NO_AST
+    outcome = record.outcomes.get(parser)
+    if outcome is None:
+        # Registered after this TU was dumped (an overlapping scope): the
+        # record cannot answer it without the AST, so dump for it alone.
+        ast = run_clang_ast_dump(clang_bin, argv, cwd=cwd, diagnostics=[])
+        return NO_AST if ast is None else parser(ast)
+    status, value = outcome
+    if status == "err":
+        raise value
+    return value  # type: ignore[no-any-return]

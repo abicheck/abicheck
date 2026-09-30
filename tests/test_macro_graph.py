@@ -1027,8 +1027,10 @@ def test_extract_from_safe_args_degrades_on_malformed_line_value(monkeypatch) ->
             }
         ],
     }
+    import abicheck.buildsource.clang_ast_run as clang_ast_run
+
     monkeypatch.setattr(
-        macro_graph_mod, "run_clang_ast_dump", lambda *a, **k: malformed_ast
+        clang_ast_run, "run_clang_ast_dump", lambda *a, **k: malformed_ast
     )
     ranges = extractor._extract_from_safe_args(["--"])
     assert ranges == []

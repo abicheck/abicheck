@@ -323,7 +323,7 @@ from typing import TYPE_CHECKING, Any
 from .. import deadline
 from ..process_resources import BudgetedExecutor
 from . import call_graph
-from .clang_ast_run import run_clang_ast_dump
+from .clang_ast_run import NoAst, parse_clang_ast
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode, register_fact
 
 if TYPE_CHECKING:
@@ -993,11 +993,15 @@ class ClangCallbackGraphExtractor:
         if not self.available():
             diag.append(f"{self.clang_bin} not found in PATH")
             return []
-        ast = run_clang_ast_dump(self.clang_bin, argv, cwd=cwd, diagnostics=diag)
-        if ast is None:
-            return []
         try:
-            return parse_clang_ast_callbacks(ast)
+            result = parse_clang_ast(
+                self.clang_bin,
+                argv,
+                cwd=cwd,
+                diagnostics=diag,
+                parser=parse_clang_ast_callbacks,
+            )
+            return [] if isinstance(result, NoAst) else result
         except (ValueError, RecursionError) as exc:
             diag.append(f"could not parse clang AST JSON: {exc}")
             return []

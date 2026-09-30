@@ -136,7 +136,7 @@ from ..model.graph_facts import (
 from ..model.mangled_name import strip_macho_itanium_decoration
 from ..model.source_graph import function_decl_identity
 from ..process_resources import BudgetedExecutor
-from .clang_ast_run import run_clang_ast_dump
+from .clang_ast_run import NoAst, parse_clang_ast
 from .type_graph import EDGE_TYPE_INHERITS, parse_clang_ast_types
 
 if TYPE_CHECKING:
@@ -680,6 +680,21 @@ def augment_graph_with_overrides(
     return added
 
 
+def parse_clang_ast_override_facts(
+    ast: dict[str, Any],
+) -> tuple[list[OverrideEdge], set[str], set[str]]:
+    """The override pass's three facts from one AST, as one shareable parser.
+
+    Registered with :func:`clang_ast_run.shared_ast_scope` so the override
+    pass reads the same single per-TU dump as the other L5 graph passes.
+    """
+    return (
+        parse_clang_ast_overrides(ast),
+        set(parse_clang_ast_virtual_methods(ast)),
+        set(parse_clang_ast_virtual_destructor_owners(ast)),
+    )
+
+
 @dataclass
 class ClangOverrideGraphExtractor:
     """Shell out to ``clang`` to emit a TU's AST and parse its override edges.
@@ -734,15 +749,19 @@ class ClangOverrideGraphExtractor:
         if not self.available():
             diag.append(f"{self.clang_bin} not found in PATH")
             return []
-        ast = run_clang_ast_dump(self.clang_bin, argv, cwd=cwd, diagnostics=diag)
-        if ast is None:
-            return []
         try:
-            edges = parse_clang_ast_overrides(ast)
-            self.last_virtual_methods.update(parse_clang_ast_virtual_methods(ast))
-            self.last_virtual_destructor_owners.update(
-                parse_clang_ast_virtual_destructor_owners(ast)
+            result = parse_clang_ast(
+                self.clang_bin,
+                argv,
+                cwd=cwd,
+                diagnostics=diag,
+                parser=parse_clang_ast_override_facts,
             )
+            if isinstance(result, NoAst):
+                return []
+            edges, virtual_methods, virtual_destructor_owners = result
+            self.last_virtual_methods.update(virtual_methods)
+            self.last_virtual_destructor_owners.update(virtual_destructor_owners)
             return edges
         except (ValueError, RecursionError) as exc:
             diag.append(f"could not parse clang AST JSON: {exc}")

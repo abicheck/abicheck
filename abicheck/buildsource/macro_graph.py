@@ -204,7 +204,7 @@ from typing import TYPE_CHECKING, Any
 from .. import deadline
 from ..model.mangled_name import strip_macho_itanium_decoration
 from ..process_resources import BudgetedExecutor
-from .clang_ast_run import run_clang_ast_dump
+from .clang_ast_run import NoAst, parse_clang_ast
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
 from .preprocessor_facts import _DEFINE_RE
 from .type_graph import (
@@ -1020,11 +1020,15 @@ class ClangMacroGraphExtractor:
         if not self.available():
             diag.append(f"{self.clang_bin} not found in PATH")
             return []
-        ast = run_clang_ast_dump(self.clang_bin, argv, cwd=cwd, diagnostics=diag)
-        if ast is None:
-            return []
         try:
-            return parse_clang_ast_decl_ranges(ast)
+            result = parse_clang_ast(
+                self.clang_bin,
+                argv,
+                cwd=cwd,
+                diagnostics=diag,
+                parser=parse_clang_ast_decl_ranges,
+            )
+            return [] if isinstance(result, NoAst) else result
         except (TypeError, ValueError, RecursionError) as exc:
             # TypeError (CodeRabbit review, fresh evidence): _LocationCursor.
             # advance() calls int(loc["line"]) with no type check -- a

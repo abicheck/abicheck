@@ -930,6 +930,25 @@ def fold_include_graph(
     )
 
 
+def _shared_ast_parsers() -> tuple[Any, ...]:
+    """The parser each clang-backed L5 pass applies to a TU's AST dump."""
+    from .call_graph import parse_clang_ast_calls
+    from .callback_graph import parse_clang_ast_callbacks
+    from .macro_graph import parse_clang_ast_decl_ranges
+    from .override_graph import parse_clang_ast_override_facts
+    from .template_graph import parse_clang_ast_templates
+    from .type_graph import parse_clang_ast_types
+
+    return (
+        parse_clang_ast_calls,
+        parse_clang_ast_types,
+        parse_clang_ast_override_facts,
+        parse_clang_ast_templates,
+        parse_clang_ast_decl_ranges,
+        parse_clang_ast_callbacks,
+    )
+
+
 def fold_semantic_graphs(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
@@ -967,26 +986,65 @@ def fold_semantic_graphs(
     precedence and clang-binary resolution, and each degrades independently
     (a missing ``clang++`` or a per-TU parse failure never aborts a later
     pass — ADR-028 D3).
+
+    The six clang-backed passes run inside one
+    :func:`~abicheck.buildsource.clang_ast_run.shared_ast_scope`: they all
+    dump a TU with the identical argv, so the first pass's single dump per TU
+    is parsed for all six and the later passes are answered from it, rather
+    than each re-running ``clang -ast-dump=json`` over the whole compile DB.
     """
-    fold_call_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_type_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_override_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_virtual_dispatch_graph(graph)
-    fold_template_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_macro_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_callback_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
+    from .clang_ast_run import shared_ast_scope
+
+    with shared_ast_scope(_shared_ast_parsers()):
+        fold_call_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=scoped_units,
+        )
+        fold_type_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=scoped_units,
+        )
+        fold_override_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=scoped_units,
+        )
+        fold_virtual_dispatch_graph(graph)
+        fold_template_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=scoped_units,
+        )
+        fold_macro_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=scoped_units,
+        )
+        fold_callback_graph(
+            graph,
+            merged,
+            clang_bin,
+            extractors,
+            changed_paths,
+            scoped_units=scoped_units,
+        )
     fold_include_graph(
         graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )

@@ -922,7 +922,9 @@ def test_extract_from_build_unredacts_home_placeholder_in_cwd(monkeypatch) -> No
         captured["cwd"] = cwd
         return {"kind": "TranslationUnitDecl", "inner": []}
 
-    monkeypatch.setattr(og, "run_clang_ast_dump", fake_dump)
+    import abicheck.buildsource.clang_ast_run as clang_ast_run
+
+    monkeypatch.setattr(clang_ast_run, "run_clang_ast_dump", fake_dump)
     ClangOverrideGraphExtractor().extract_from_build(
         BuildEvidence(
             compile_units=[
