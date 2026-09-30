@@ -3943,9 +3943,14 @@ trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}" "${_COMPILE_C
 # staleness bug it was fixing. Fixed non-destructively instead: record
 # each path's (mtime, size) fingerprint before running, and only trust it
 # afterward if that fingerprint changed (or the path didn't exist before).
-# Python, not `stat -c`/`stat -f` (GNU vs. BSD/macOS spell this
-# differently and this script already leans on `_PY_BIN` for exactly this
-# class of portability need -- see `_report_query`'s own docstring).
+# GNU (`stat -c`) and BSD/macOS (`stat -f`) spell this differently, and a
+# stat that cannot report nanoseconds would miss a same-second, same-size
+# rewrite -- so a native answer is used only when it has exactly the
+# `<seconds>.<9 digits>:<size>` shape, and `_PY_BIN`'s `os.stat` answers
+# otherwise. The native path matters because this runs up to ten times per
+# invocation and an interpreter start costs ~30ms each; the two spellings
+# never mix within one run, since the first that validates on this host
+# answers every call. A missing path answers "" without spawning anything.
 _file_fingerprint() {
   # Empty output means "does not exist" -- a fingerprint that can never
   # equal a real file's, so "did not exist before, exists now" always
@@ -3958,6 +3963,15 @@ _file_fingerprint() {
   # the same meaning as abicheck's output path.
   if ! _is_path_already_qualified "$_fingerprint_path"; then
     _fingerprint_path="$PWD/$_fingerprint_path"
+  fi
+  [[ -e "$_fingerprint_path" ]] || return 0
+  local _native _shape='^[0-9]+\.[0-9]{9}:[0-9]+$'
+  _native="$(stat -c '%.9Y:%s' -- "$_fingerprint_path" 2>/dev/null)"
+  [[ "$_native" =~ $_shape ]] \
+    || _native="$(stat -f '%.9Fm:%z' "$_fingerprint_path" 2>/dev/null)"
+  if [[ "$_native" =~ $_shape ]]; then
+    printf '%s\n' "$_native"
+    return 0
   fi
   (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import os, sys
