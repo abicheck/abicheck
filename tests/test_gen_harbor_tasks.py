@@ -131,6 +131,23 @@ def _write_lf_text(path: Path, content: str) -> None:
 
 
 class TestGeneratorCheck:
+    @pytest.fixture(autouse=True)
+    def _private_tasks_dir(self, tmp_path, monkeypatch):
+        """Give every test in this class its own copy of the committed task
+        tree, and point both the generator and this module at it.
+
+        Several tests here mutate a generated file and restore it in a
+        ``finally``, and ``test_regeneration_is_idempotent`` rewrites the
+        whole tree via ``generate(check=False)``. Against the real, tracked
+        ``TASKS_DIR`` that is a race under ``pytest -n`` (the CI default):
+        a sibling worker reading the tree mid-rewrite saw a missing
+        ``task.toml``/``Dockerfile`` or spurious drift. Only this class
+        writes, so isolating it makes every reader elsewhere safe too."""
+        private = tmp_path / "tasks"
+        shutil.copytree(TASKS_DIR, private)
+        monkeypatch.setattr(gen, "TASKS_DIR", private)
+        monkeypatch.setattr(sys.modules[__name__], "TASKS_DIR", private)
+
     def test_check_passes_against_the_committed_tree(self):
         assert gen.generate(check=True) is True
 

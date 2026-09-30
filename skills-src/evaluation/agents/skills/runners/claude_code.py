@@ -66,7 +66,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -448,6 +450,56 @@ def strip_comments(text: str) -> str | None:
     return "".join(out)
 
 
+#: Where each run's files really live, under the `--out` root. The readable
+#: `<scenario>/<arm>/<rep>` path is a symlink into it.
+STAGE_DIRNAME = ".runs"
+
+
+def make_opaque_run_dir(out_root: Path, out_dir: Path) -> Path:
+    """Create the run's directory under a random name; link `out_dir` to it.
+
+    Everything the agent can observe -- its working directory (in its system
+    prompt), the recording shim's location (`which abicheck`), the calls-log
+    path in its environment -- lives inside this directory. Named after the
+    scenario and arm, as it used to be, those paths told the agent which
+    scenario it was in (`compatible-addition`, `consumer-unaffected-despite-
+    break`) and which arm (`skill`/`baseline`): the answer and the treatment.
+    A random name tells it neither. Graders and resume read through the
+    symlink, so nothing downstream needs to know.
+    """
+    stage_root = out_root / STAGE_DIRNAME
+    stage_root.mkdir(parents=True, exist_ok=True)
+    real = Path(tempfile.mkdtemp(prefix="r", dir=stage_root))
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    out_dir.symlink_to(real, target_is_directory=True)
+    return real
+
+
+def _remove_run_dir(out_dir: Path) -> None:
+    if out_dir.is_symlink():
+        target = out_dir.resolve()
+        out_dir.unlink()
+        if target.is_dir():
+            shutil.rmtree(target)
+    else:
+        shutil.rmtree(out_dir)
+
+
+def workspace_path_leak(work: Path) -> str | None:
+    """The workspace's own absolute path, if it names the tool or an answer.
+
+    `workspace_leaks` scans what is *inside* the workspace; this covers the
+    path itself, which the agent is told outright -- Claude Code puts its
+    working directory in the system prompt. Observed for real (2026-09-29): an
+    `--out` under a directory named after this repository put `abicheck` in
+    every baseline run's cwd, and the baseline's first command was `which
+    abicheck`. That run read as "the skill changes nothing".
+    """
+    resolved = str(work.resolve())
+    match = _LEAK.search(resolved)
+    return None if match is None else f"{resolved!r} contains {match.group(0)!r}"
+
+
 def workspace_leaks(work: Path) -> list[str]:
     """Places in this workspace that name the tool or state the answer.
 
@@ -793,7 +845,18 @@ def _run_once(
     timeout: int,
     model: str | None = None,
 ) -> dict:
+    # Resolved: every path handed to the agent must be the opaque one, never
+    # the readable symlink (see `make_opaque_run_dir`).
+    out_dir = out_dir.resolve()
     work = out_dir / "workspace"
+    path_leak = workspace_path_leak(work)
+    if path_leak is not None:
+        # Before anything is built: the path is in the agent's system prompt,
+        # so no run under it can be about the skill.
+        raise RuntimeError(
+            f"{scenario_id}: the workspace path names the tool or an answer "
+            f"({path_leak}); choose an --out directory whose path does not"
+        )
     work.mkdir(parents=True)
     _prepare_workspace(work, scenario, arm)
 
@@ -818,7 +881,7 @@ def _run_once(
     if real is None:  # checked again in main() before any model call
         raise RuntimeError("abicheck is not on PATH")
     env = {
-        **os.environ,
+        **child_environment(os.environ),
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "SKILL_EVAL_CALLS": str(out_dir / "calls.jsonl"),
         "SKILL_EVAL_REAL_ABICHECK": real,
@@ -889,6 +952,15 @@ def _run_once(
             f"`python -m abicheck`, which the recorder never saw, so its "
             f"evidence is missing rather than absent. Re-run on a host where "
             f"the PATH interposer applies."
+        )
+
+    if _shadowed_the_recorder(events, out_dir / "calls.jsonl"):
+        raise RuntimeError(
+            f"{scenario_id}/{arm}/{rep}: the agent ran `abicheck` but the "
+            f"recorder logged nothing, so something earlier on the agent's "
+            f"PATH resolved first (typically a shell profile or an inherited "
+            f"parent-session environment). Its evidence is missing rather "
+            f"than absent; fix the PATH and re-run."
         )
 
     visible = visible_native_skills(events)
@@ -981,6 +1053,83 @@ def module_entry_interpreters(events: list[dict]) -> list[str]:
                 # `-X`'s value and looks like any other word.
                 found.append(_interpreter_before(tokens, index))
     return found
+
+
+#: Variables that bind a `claude` process to the session that spawned it.
+#: When this runner is itself launched from inside Claude Code, the child
+#: inherits them, resumes as *that* session, and re-sources its SessionStart
+#: environment file -- which prepends whatever PATH entries the parent's hooks
+#: persisted, ahead of the recording shim. Observed for real: every
+#: `abicheck` call in a 2026-09-29 run resolved to the parent's dev venv and
+#: the calls log stayed empty, so both arms graded as "never ran a
+#: comparison". Each evaluated run must be its own fresh session.
+PARENT_SESSION_VARIABLES = frozenset(
+    {
+        "CLAUDECODE",
+        "CLAUDE_ENV_FILE",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_REMOTE_SESSION_ID",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_PID",
+        "CLAUDE_AFTER_LAST_COMPACT",
+    }
+)
+
+
+def child_environment(parent: Mapping[str, str]) -> dict[str, str]:
+    """`parent` minus everything that would make the child resume its session."""
+    return {k: v for k, v in parent.items() if k not in PARENT_SESSION_VARIABLES}
+
+
+_BARE_ABICHECK = re.compile(r"(?:^|[\s;&|(`])abicheck(?=\s|$|[;&|)`])")
+
+
+def _bash_command(block: object) -> str | None:
+    """`block`'s command when it is a `Bash` tool call, else `None`."""
+    if not isinstance(block, dict) or block.get("type") != "tool_use":
+        return None
+    if block.get("name") != "Bash":
+        return None
+    command = (block.get("input") or {}).get("command")
+    return command if isinstance(command, str) else None
+
+
+def _bash_commands(events: list[dict]) -> Iterator[str]:
+    """Every `Bash` tool call's `command` string, in order."""
+    for event in events:
+        if event.get("type") != "assistant":
+            continue
+        for block in (event.get("message") or {}).get("content") or []:
+            command = _bash_command(block)
+            if command is not None:
+                yield command
+
+
+def abicheck_command_count(events: list[dict]) -> int:
+    """How many `Bash` blocks invoke `abicheck` as a command word.
+
+    Read from each block's `command` alone, for the same reason as
+    `module_entry_interpreters`: a `Write` whose content mentions the tool is
+    not an invocation. A path component (`/opt/x/abicheck-venv`) or a longer
+    word (`abicheck_report`) does not match; `ls abicheck` does, which only
+    ever errs towards demanding a recording that the check below then finds.
+    """
+    return sum(
+        1 for command in _bash_commands(events) if _BARE_ABICHECK.search(command)
+    )
+
+
+def _shadowed_the_recorder(events: list[dict], calls: Path) -> bool:
+    """Whether the agent invoked `abicheck` yet nothing was recorded.
+
+    The PATH-order counterpart of `_bypassed_the_recorder`: that one catches
+    a spelling the shim does not wrap, this one catches the shim not being
+    the `abicheck` that resolved. Either way the recording is missing, not
+    empty, and grading it would score a real comparison as none.
+    """
+    if abicheck_command_count(events) == 0:
+        return False
+    return not (calls.is_file() and calls.read_text(encoding="utf-8").strip())
 
 
 def _bypassed_the_recorder(
@@ -1169,6 +1318,15 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    out_leak = workspace_path_leak(Path(args.out))
+    if out_leak is not None:
+        print(
+            f"--out {out_leak}: every workspace under it would put that name in "
+            "the agent's system prompt (its working directory). Use a neutral "
+            "path, e.g. /tmp/skill-eval-runs.",
+            file=sys.stderr,
+        )
+        return 1
     arms = [a for a in args.arms.split(",") if a]
     unknown = sorted(set(arms) - set(ARMS))
     if unknown:
@@ -1348,14 +1506,14 @@ def main(argv: list[str] | None = None) -> int:
                     index.append(recovered)
                     flush()
                     continue
-                if out_dir.exists():
+                if out_dir.exists() or out_dir.is_symlink():
                     # A repetition interrupted after `workspace/` was created
                     # but before `final.md` was written is unfinished, and
                     # `_run_once`'s own mkdir would raise on it forever —
                     # making that repetition unresumable without manual
                     # deletion. Nothing here is evidence yet, so clear it.
-                    shutil.rmtree(out_dir)
-                out_dir.mkdir(parents=True)
+                    _remove_run_dir(out_dir)
+                make_opaque_run_dir(out_root, out_dir)
                 print(f"run  {sid}/{arm}/{rep}", flush=True)
                 try:
                     record = _run_once(

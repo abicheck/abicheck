@@ -481,7 +481,7 @@
       "affects": [
         "check-abi-compatibility"
       ],
-      "digest": "sha256:32b7eecc04ab275ddd9ad06b4e3b2923d73e8b564cd8b17880bba98391e9982d",
+      "digest": "sha256:32e528826440d1d80fc17b57328b36c4de02fa697e6171f432d590e92da50702",
       "roots": [
         "skills-src/evaluation/agents/skills/grade_bundle.py",
         "skills-src/evaluation/agents/skills/graders",
@@ -522,7 +522,7 @@
       "roots": [
         ".agents/skills/check-abi-compatibility"
       ],
-      "tree": "sha256:3bd41f0f9950dff542453fbea45d0a9b6a573b7e0074d9c6ae62b1437303b251"
+      "tree": "sha256:8866a669966f31f1fe57ae4066699184f942738d253e92e5c42b56e924f8b2a3"
     }
   }
 }
