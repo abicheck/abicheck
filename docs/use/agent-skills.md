@@ -61,7 +61,10 @@ against eight. Without it, the agent named the right mechanism just as often,
 so the skill's measured value so far is evidence, not a better guess at the
 cause. That evidence costs about a third more per run in money and a sixth to a
 quarter more in time, and three scenarios built so that source and symbols
-cannot reveal the change did not separate the two on accuracy either.
+cannot reveal the change did not separate the two on accuracy either. On a
+smaller model the picture is different: Haiku 4.5 answered correctly 85-88%
+of the time with the skill against 58% without it, and each correct answer
+cost less.
 See [its pilot report](https://github.com/abicheck/abicheck/blob/main/skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md).
 
 **Portfolio status (2026-08-20):** the portfolio was reset from four

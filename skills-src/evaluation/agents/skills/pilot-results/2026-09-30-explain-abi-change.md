@@ -48,9 +48,53 @@ loaded library is found by asking the dynamic loader itself
 
 ## Result
 
-Three rounds, all on 2026-09-30.
+Four rounds, all on 2026-09-30. Round 4 is the one the published skill rests on.
 
-**Round 2 (current skill, 10 scenarios, 2 repetitions per arm).** Run after
+**Round 4 (all 13 scenarios, 2 repetitions, two models, four arms).** Adds
+a `no_tool` arm (no skill *and* no abicheck on `PATH`), a second, weaker
+model (`claude-haiku-4-5-20251001`), and a compact variant of the skill (750
+words against 1,725: the five steps with their commands, the mechanism
+table, and a three-field answer instead of a seven-field report). Graded
+after fixing a grader bug that marked any answer with a fenced code block
+ahead of its JSON envelope as `absent`, which had hit the skill arm hardest
+(10 of 26 Haiku skill-arm runs); earlier rounds' Sonnet numbers were
+unaffected.
+
+Sonnet 5.5 (26-29 runs per arm):
+
+|                            | full skill | compact | baseline | no tool |
+|----------------------------|-----------:|--------:|---------:|--------:|
+| correct answer             | 97% | 96% | 100% | 100% |
+| zero-tolerance failures    | 3%  | 0%  | 48%  | 100% |
+| mean wall time             | 29 s | 30 s | 24 s | 18 s |
+| mean cost per run          | $0.156 | $0.123 | $0.117 | $0.090 |
+| cost per correct answer    | $0.162 | $0.128 | $0.117 | $0.090 |
+
+Haiku 4.5 (26 runs per arm):
+
+|                            | full skill | compact | baseline | no tool |
+|----------------------------|-----------:|--------:|---------:|--------:|
+| correct answer             | 85% | 88% | 58% | 50% |
+| zero-tolerance failures    | 15% | 31% | 96% | 100% |
+| mean wall time             | 68 s | 64 s | 57 s | 75 s |
+| mean cost per run          | $0.153 | $0.152 | $0.120 | $0.126 |
+| cost per correct answer    | $0.180 | $0.171 | $0.207 | $0.253 |
+
+What this changes:
+
+- **On the weaker model the skill improves accuracy**: 85-88% against 58%
+  without it and 50% without the tool, and each correct answer costs less
+  than without the skill. On Sonnet it does not: Sonnet solved every
+  scenario even with no abicheck at all, faster and cheaper, so there the
+  skill buys evidence only.
+- **The compact variant replaced the full skill.** Same accuracy, no
+  zero-tolerance failures on Sonnet at 21% less cost per run, and the lowest
+  cost per correct answer on Haiku. Its one regression was Haiku reporting a
+  source-level decision for a binary break (most of its 8 zero-tolerance
+  failures); the published version adds one sentence on exactly that, and
+  was **not re-run** after the addition.
+
+, 10 scenarios, 2 repetitions per arm).** Run after
 the skill was renamed from `debug-abi-failure` and widened from "a program
 stopped working" to "a developer wants to understand an ABI change", which
 added `library_older_than_build` and two scenarios

@@ -82,7 +82,13 @@ that amendment below), with its own evaluation corpus and pilot.
 > change, did not separate the arms either (9/9 both; zero-tolerance 0/9 vs
 > 6/9); the baseline had abicheck on `PATH` and read DWARF itself. Runs now
 > also record time, tokens (including prompt-cache reads) and cost: the skill
-> arm costs roughly 27-37% more per run.
+> arm costs roughly 27-37% more per run. A fourth round (both models, a
+> no-tool arm, a compact 750-word variant) found the skill's value is
+> model-dependent: Haiku 4.5 answered correctly 85-88% of the time with it,
+> 58% without it and 50% without the tool; Sonnet was correct even with no
+> tool. The compact variant matched the full skill's accuracy at lower cost
+> and is now the published version (one sentence added after measurement,
+> not re-run).
 > Everything below this amendment that says `debug-abi-failure`, "runtime
 > failure", six causes, or eight scenarios describes the skill before the
 > rename.
