@@ -1897,6 +1897,40 @@ raise SystemExit(0 if classify_compare_operand(Path(sys.argv[1])) in {"directory
   _is_release_style_operand "$path"
 }
 
+# Whether EITHER operand routes compare through the release/package engine:
+# `_is_compare_release_operand OLD || _is_compare_release_operand NEW`, but
+# answered by one classifier process instead of two. The classifier's import
+# is most of each probe's cost, and this runs on every compare invocation.
+# Any probe failure (exit other than 0/3) falls back to the per-operand
+# helper, which keeps its own conservative fallback.
+_any_compare_release_operand() {
+  local _old="${1:-}" _new="${2:-}"
+  [[ -n "$_old" || -n "$_new" ]] || return 1
+  if [[ "${_PY_BIN_HAS_ABICHECK:-false}" == "true" && -n "${_PY_SAFE_DIR:-}" && -n "${_PY_BIN:-}" ]]; then
+    local _probe _probes=() _probe_rc=0
+    for _probe in "$_old" "$_new"; do
+      [[ -n "$_probe" ]] || continue
+      if ! _is_path_already_qualified "$_probe"; then
+        _probe="$PWD/$_probe"
+      fi
+      _probes+=("$_probe")
+    done
+    # shellcheck disable=SC2016  # the inline script is deliberately unexpanded.
+    (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+
+from abicheck.cli_resolve import classify_compare_operand
+
+release = any(classify_compare_operand(Path(p)) in {"directory", "package"} for p in sys.argv[1:])
+raise SystemExit(0 if release else 3)
+' "${_probes[@]}") || _probe_rc=$?
+    [[ "$_probe_rc" -eq 0 ]] && return 0
+    [[ "$_probe_rc" -eq 3 ]] && return 1
+  fi
+  _is_compare_release_operand "$_old" || _is_compare_release_operand "$_new"
+}
+
 # ---------------------------------------------------------------------------
 # Value-taking CLI options, derived from the INSTALLED abicheck (ADR-070 D3)
 # ---------------------------------------------------------------------------
@@ -2675,7 +2709,15 @@ fi
 # turns what would be one Python call per tokenizer invocation into one per
 # run. When it cannot be derived at all, `_require_cli_value_options_or_fail`
 # decides whether that is fatal -- it is, exactly when `extra-args` is set.
-_cli_value_options_init
+#
+# Skipped when `extra-args` is empty: the table's only consumers tokenize
+# `$INPUT_EXTRA_ARGS`, so with nothing to tokenize nothing ever reads it,
+# and the derivation (a full `abicheck.cli` import, the single most expensive
+# step of an ordinary run) would be paid for no decision. The lazy call in
+# `_extra_args_is_value_option` still covers any direct caller.
+if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
+  _cli_value_options_init
+fi
 _require_cli_value_options_or_fail
 
 # ---------------------------------------------------------------------------
@@ -3542,8 +3584,7 @@ elif [[ "$MODE" == "compare" ]]; then
     # The scalar compare CLI's bounded human default. Release/package fan-out
     # has no single review document, so it retains detailed Markdown.
     if [[ "$_NO_BASELINE" == "true" ]] \
-       || _is_compare_release_operand "${INPUT_OLD_LIBRARY:-}" \
-       || _is_compare_release_operand "${INPUT_NEW_LIBRARY:-}"; then
+       || _any_compare_release_operand "${INPUT_OLD_LIBRARY:-}" "${INPUT_NEW_LIBRARY:-}"; then
       FORMAT="markdown"
     else
       FORMAT="terminal"
