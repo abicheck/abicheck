@@ -17,6 +17,7 @@ compatibility **verdict** claim; this skill's outcome is a **configuration**
 | `grader.py` | Deterministic checks over the resulting `.github/workflows/*.yml` and the agent's final message. No model is called. |
 | `reference/<scenario>/` | Hand-written good workflows; the grader's positive oracle. |
 | `run_eval.py` | Two-arm runner: materializes each fixture as a fresh git repo (commits, tags, `origin` remote) outside this checkout, installs the skill into `.claude/skills/` for the `skill` arm only, runs `claude -p`, grades. |
+| `token_report.py` | Where a run's money goes: cache reads vs cache writes vs output, turns, which skill files the agent read, and cost per *successful* run. `--skill-dir` on `run_eval.py` A/Bs two versions of the skill. |
 | `results/` | Committed evidence from real runs — start with [`2026-09-30.md`](results/2026-09-30.md): across ten scenarios the skill arm had no critical failure in every run; without it, 1/30. |
 
 `tests/test_ci_setup_skill_eval.py` pins the grader's contract: every
