@@ -3991,10 +3991,10 @@ class TestPeHeaderScoping:
             patch("abicheck.pdb_utils.locate_pdb", return_value=None),
             patch("abicheck.dumper._dump_pe") as mock_dump,
         ):
-            result = _dump_pe(p, "1.0")
+            funcs = _dump_pe(p, "1.0").declarations.functions
 
         assert not mock_dump.called  # castxml path never taken
-        names = {f.name for f in (funcs := result.declarations.functions)}
+        names = {f.name for f in funcs}
         assert names == {"PublicApiFunc", "InternalPrivateFunc"}
         assert all(f.visibility == Visibility.PUBLIC for f in funcs)
 
