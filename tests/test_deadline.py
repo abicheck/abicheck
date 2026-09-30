@@ -473,49 +473,79 @@ def test_run_bounded_kills_tree_on_unexpected_communicate_error(monkeypatch) -> 
 # that gap for the plain CLI/CI path (no MCP-style outer watchdog there).
 
 
-def test_run_bounded_blocks_sigterm_across_spawn_and_registration(monkeypatch) -> None:
-    # Codex review (PR #591, round 6): an external SIGTERM landing in the gap
-    # between Popen() detaching the child and _register_pgroup() tracking its
-    # pgid would run install_sigterm_cleanup's handler with an empty
-    # registry, permanently orphaning the just-spawned group (the handler
-    # only kills what's *tracked*). SIGTERM must be blocked on this thread
-    # across that whole window, unblocked only once registration is done, so
-    # a SIGTERM that arrived mid-spawn is deferred until the handler can see
-    # the group.
-    #
-    # CodeRabbit review (PR #591, round 10): the restore must use SIG_SETMASK
-    # with the exact previous mask pthread_sigmask(SIG_BLOCK, ...) returned,
-    # not an unconditional SIG_UNBLOCK — the latter would incorrectly clear
-    # SIGTERM even if the calling thread already had it blocked for its own
-    # reasons before entering run_bounded(). The fake pthread_sigmask below
-    # returns a distinguishable sentinel "previous mask" on SIG_BLOCK and
-    # asserts the restore call receives that exact value back.
-    calls: list[str] = []
-    real_popen = subprocess.Popen
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="reads /proc/self/status"
+)
+@pytest.mark.parametrize("pre_blocked", [False, True])
+def test_run_bounded_child_starts_with_sigterm_deliverable(pre_blocked: bool) -> None:
+    # A signal mask survives fork+exec. The Popen()->_register_pgroup()
+    # window used to be protected by pthread_sigmask(SIG_BLOCK, {SIGTERM}),
+    # so every child started with SIGTERM blocked: _kill_process_tree's
+    # graceful SIGTERM never arrived and every timeout waited out the full
+    # grace period before SIGKILL. The oracle is the child's own kernel view
+    # of its blocked set (SigBlk), not anything run_bounded reports.
+    # pre_blocked: run_bounded must not *add* SIGTERM to the mask; a caller
+    # that blocked it deliberately still passes that on, unchanged.
+    script = (
+        "import signal\n"
+        "blk = next(l for l in open('/proc/self/status') if l.startswith('SigBlk:'))\n"
+        "print(int(blk.split()[1], 16) >> (signal.SIGTERM - 1) & 1)\n"
+    )
+    prev = signal.pthread_sigmask(
+        signal.SIG_BLOCK if pre_blocked else signal.SIG_UNBLOCK, {signal.SIGTERM}
+    )
+    try:
+        result = deadline.run_bounded(
+            [sys.executable, "-c", script], timeout=10, capture_output=True, text=True
+        )
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, prev)
+    assert result.stdout.strip() == ("1" if pre_blocked else "0"), result.stderr
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
+def test_run_bounded_timeout_terminates_with_sigterm_not_the_grace_kill() -> None:
+    # Behavioural consequence of the test above: a child with default SIGTERM
+    # handling dies from the SIGTERM itself (-15), promptly, rather than
+    # surviving it until the SIGKILL escalation (-9) after the grace wait.
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        deadline.run_bounded(
+            [sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.3
+        )
+    assert time.monotonic() - started < 4.0
+
+
+def test_sigterm_inside_registration_window_is_deferred_until_registered(
+    monkeypatch,
+) -> None:
+    # Codex review (PR #591, round 6): a SIGTERM landing between Popen()
+    # detaching the child and _register_pgroup() tracking it would run the
+    # cleanup handler against a registry without the new group, orphaning
+    # it. The handler, invoked on this thread inside that window (as Python
+    # would run it between bytecodes), must defer; the deferred call must
+    # replay on window exit and then see the group.
+    seen_at_kill: list[set[int]] = []
+    exits: list[int] = []
+
+    def _fake_killpg(pgid, sig):
+        with deadline._active_pgroups_lock:
+            seen_at_kill.append(set(deadline._active_pgroups))
+
     real_register = deadline._register_pgroup
-    sentinel_prev_mask = frozenset({signal.SIGUSR1})
+    registered: list[int] = []
 
-    def _tracking_popen(*a, **kw):
-        calls.append("popen")
-        return real_popen(*a, **kw)
+    def _register_after_signal(proc):
+        deadline._sigterm_cleanup_handler(signal.SIGTERM, None)  # mid-window
+        assert seen_at_kill == [], "handler ran before the group was tracked"
+        pgid = real_register(proc)
+        registered.append(pgid)
+        return pgid
 
-    def _tracking_register(proc):
-        calls.append("register")
-        return real_register(proc)
-
-    def _tracking_sigmask(how, mask):
-        if how == signal.SIG_BLOCK:
-            assert signal.SIGTERM in mask
-            calls.append("block")
-            return sentinel_prev_mask
-        assert how == signal.SIG_SETMASK
-        assert mask == sentinel_prev_mask
-        calls.append("setmask")
-        return mask
-
-    monkeypatch.setattr(subprocess, "Popen", _tracking_popen)
-    monkeypatch.setattr(deadline, "_register_pgroup", _tracking_register)
-    monkeypatch.setattr(signal, "pthread_sigmask", _tracking_sigmask)
+    monkeypatch.setattr(deadline, "_register_pgroup", _register_after_signal)
+    monkeypatch.setattr(os, "killpg", _fake_killpg)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: exits.append(sig))
+    monkeypatch.setattr(signal, "signal", lambda *a: None)
     with deadline._active_pgroups_lock:
         deadline._active_pgroups.clear()
 
@@ -523,14 +553,32 @@ def test_run_bounded_blocks_sigterm_across_spawn_and_registration(monkeypatch) -
         [sys.executable, "-c", "print('hi')"], timeout=5, capture_output=True, text=True
     )
 
-    assert calls == ["block", "popen", "register", "setmask"]
+    assert exits == [signal.SIGTERM]  # replayed exactly once
+    assert seen_at_kill and registered[0] in seen_at_kill[0]
+    assert deadline._registration_window_depth() == 0
+    assert deadline._deferred_sigterm is False
+
+
+def test_registration_window_replays_only_at_the_outermost_exit(monkeypatch) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(
+        deadline, "_sigterm_cleanup_handler", lambda signum, frame: calls.append(signum)
+    )
+    deadline._enter_registration_window()
+    deadline._enter_registration_window()
+    monkeypatch.setattr(deadline, "_deferred_sigterm", True)
+    deadline._exit_registration_window()
+    assert calls == []
+    deadline._exit_registration_window()
+    assert calls == [signal.SIGTERM]
+    assert deadline._deferred_sigterm is False
 
 
 def test_run_bounded_holds_registry_lock_across_spawn_and_registration(
     monkeypatch,
 ) -> None:
-    # Codex review (PR #591, round 7): pthread_sigmask alone only defers
-    # SIGTERM delivery on the thread that calls run_bounded(). The default
+    # Codex review (PR #591, round 7): the per-thread registration window
+    # alone only defers the handler on the thread that calls run_bounded(). The default
     # L4/L5 paths (source_replay, call_graph, type_graph) invoke run_bounded()
     # from ThreadPoolExecutor workers, but CPython always runs the installed
     # SIGTERM handler on the *main* thread regardless of which thread the
