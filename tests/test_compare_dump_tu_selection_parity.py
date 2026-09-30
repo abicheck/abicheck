@@ -74,18 +74,11 @@ _TU_RE = re.compile(r"scope=([\w-]+), (\d+)/(\d+) TUs parsed")
 
 
 def _dump_tu_counts(snapshot: Path) -> tuple[str, int, int]:
-    doc = json.loads(snapshot.read_text())
+    from abicheck.serialization import load_snapshot
 
-    def find(o):
-        if isinstance(o, dict):
-            if isinstance(o.get("build_source"), dict):
-                return o["build_source"]
-            for v in o.values():
-                if (r := find(v)) is not None:
-                    return r
-        return None
-
-    cov = (find(doc) or {}).get("source_abi", {}).get("coverage", {})
+    pack = load_snapshot(snapshot).build_source
+    assert pack is not None and pack.source_abi is not None
+    cov = pack.source_abi.coverage
     return (
         cov["replay_scope"],
         int(cov["compile_units_parsed"]),
@@ -158,7 +151,17 @@ def lab_tree(tmp_path: Path) -> tuple[Path, Path, Path]:
         ]
     )
     pack_io.write(BuildSourcePack(root=pack, build_evidence=ev))
-    git = ["git", "-C", str(root), "-c", "user.email=t@t", "-c", "user.name=t"]
+    git = [
+        "git",
+        "-C",
+        str(root),
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "user.name=t",
+        "-c",
+        "commit.gpgsign=false",
+    ]
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "add", "-A"], check=True)
     subprocess.run([*git, "commit", "-qm", "base"], check=True)
