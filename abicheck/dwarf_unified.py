@@ -65,6 +65,7 @@ from .dwarf_advanced import (
 )
 from .dwarf_metadata import DwarfMetadata, _process_cu_impl as _meta_process_cu
 from .dwarf_utils import dwarf_low_memory_mode, free_cu_die_cache, has_real_dwarf_info
+from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.progress import timed
 
 log = logging.getLogger(__name__)
@@ -133,7 +134,7 @@ def open_dwarf_session(so_path: Path) -> DwarfSession | None:
             f.close()
             return None
 
-        dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
+        dwarf = open_indexed_dwarf_info(elf)
         return DwarfSession(
             path=Path(so_path),
             _file=f,

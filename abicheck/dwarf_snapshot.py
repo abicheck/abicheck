@@ -66,6 +66,7 @@ from .extract.dwarf_scope import (
     record_scope_segment as _record_scope_segment,
     variable_entity_id as _dwarf_variable_entity_id,
 )
+from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
     AbiSnapshot,
@@ -359,7 +360,7 @@ class _DwarfSnapshotBuilder:
                 elf = ELFFile(f)  # type: ignore[no-untyped-call]
                 if not has_real_dwarf_info(elf):
                     return
-                self._walk_dwarf(elf.get_dwarf_info())  # type: ignore[no-untyped-call]
+                self._walk_dwarf(open_indexed_dwarf_info(elf))
 
         except (ELFError, OSError, ValueError) as exc:
             log.warning(
