@@ -25,7 +25,6 @@ the parent file's broader AST-shape/parsing coverage.
 
 from __future__ import annotations
 
-from abicheck.model.graph_facts import GraphNode
 from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.buildsource.template_graph import parse_clang_ast_templates
 from abicheck.buildsource.template_graph_fold import (
@@ -35,6 +34,7 @@ from abicheck.buildsource.template_graph_fold import (
     NODE_TEMPLATE_INSTANTIATION,
     augment_graph_with_templates,
 )
+from abicheck.model.graph_facts import GraphNode
 
 
 def test_function_templates_differing_only_in_template_parameter_list_stay_distinct() -> (

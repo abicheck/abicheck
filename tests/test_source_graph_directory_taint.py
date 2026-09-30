@@ -256,8 +256,8 @@ def test_add_node_normalizes_label_for_any_producer() -> None:
     # review, fresh evidence) so it covers every decl/type producer that
     # calls SourceGraphSummary.add_node -- not just the two that happened to
     # build GraphNodes directly in source_graph.py/type_graph.py.
-    from abicheck.model.graph_facts import GraphNode
     from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.model.graph_facts import GraphNode
 
     g = SourceGraphSummary()
     g.add_node(
@@ -723,8 +723,8 @@ def test_template_instantiation_node_loaded_from_persisted_pack_migrates_and_nor
     # migration (GraphNode.from_dict) and the label normalization
     # (ensure_facts_and_resolve), the same choke points every other decl/type kind
     # already routes through.
-    from abicheck.model.graph_facts import GraphNode
     from abicheck.buildsource.template_graph_fold import template_instantiation_node_id
+    from abicheck.model.graph_facts import GraphNode
 
     raw_label = "Wrapper<(lambda at /old/checkout/foo.cpp:2:20)>"
     node = GraphNode.from_dict(
@@ -766,8 +766,8 @@ def test_constructor_seeded_graph_normalizes_ids_and_endpoints() -> None:
     # fourteenth round) -- otherwise two checkout-equivalent nodes built this way get
     # different ids/graph ids and their labels misleadingly become identical (only the
     # label was normalized, not the id).
-    from abicheck.model.graph_facts import GraphEdge, GraphNode
     from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.model.graph_facts import GraphEdge, GraphNode
 
     old_id = "type://lambda at /old/checkout/lib.hpp:4:37"
     new_id = "type://lambda at /new/checkout/lib.hpp:4:37"
@@ -803,8 +803,8 @@ def test_add_node_and_add_edge_normalize_a_hand_built_id_directly() -> None:
     # itself (Codex review, fresh evidence, sixteenth round): otherwise two
     # checkout-equivalent graphs built this way still get different node ids and
     # graph ids.
-    from abicheck.model.graph_facts import GraphEdge, GraphNode
     from abicheck.buildsource.source_graph import SourceGraphSummary
+    from abicheck.model.graph_facts import GraphEdge, GraphNode
 
     old_id = "type://lambda at /old/checkout/lib.hpp:4:37"
     new_id = "type://lambda at /new/checkout/lib.hpp:4:37"
@@ -855,9 +855,9 @@ def test_constructor_seeded_entity_resolver_is_rebuilt_after_normalization() -> 
     # persisted resolver after migration (Codex review, fresh evidence, eighteenth
     # round) -- otherwise the resolver stays keyed by the pre-normalization id and
     # canonical_id_for() on the real (normalized) node id returns None.
-    from abicheck.model.graph_facts import GraphNode
     from abicheck.buildsource.source_graph import SourceGraphSummary
     from abicheck.model.entity_resolver import EntityResolver
+    from abicheck.model.graph_facts import GraphNode
 
     raw_id = "type://lambda at /old/checkout/lib.hpp:4:37"
     stale_resolver = EntityResolver(aliases={raw_id: "some-stale-canonical-id"})
@@ -879,8 +879,8 @@ def test_vtable_node_id_strips_checkout_directory_and_migrates() -> None:
     # fresh-build normalization and load-time migration, the same choke points every other
     # decl/type-derived kind already routes through (Codex review, fresh evidence,
     # nineteenth round).
-    from abicheck.model.graph_facts import GraphEdge, GraphNode
     from abicheck.buildsource.source_graph import _vtable_node_id
+    from abicheck.model.graph_facts import GraphEdge, GraphNode
 
     old = _vtable_node_id("lambda at /old/checkout/lib.hpp:4:37")
     new = _vtable_node_id("lambda at /new/checkout/lib.hpp:4:37")

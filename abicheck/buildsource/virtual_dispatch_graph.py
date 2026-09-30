@@ -133,8 +133,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..model.mangled_name import itanium_scope_components, msvc_scope_components
 from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
+from ..model.mangled_name import itanium_scope_components, msvc_scope_components
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary

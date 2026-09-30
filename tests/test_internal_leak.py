@@ -1888,12 +1888,12 @@ class TestTraversalPolicy:
         )
 
     def test_minimum_confidence_excludes_low_confidence_edges(self) -> None:
-        from abicheck.model.graph_facts import CONF_HIGH, CONF_REDUCED
         from abicheck.buildsource.source_graph import GraphEdge, SourceGraphSummary
         from abicheck.internal_leak import (
             TraversalPolicy,
             _consumer_compiled_reachability,
         )
+        from abicheck.model.graph_facts import CONF_HIGH, CONF_REDUCED
 
         graph = SourceGraphSummary(
             nodes=[

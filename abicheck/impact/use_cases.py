@@ -68,6 +68,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..errors import UseCaseManifestError
 from ..model.graph_facts import (
     CONF_HIGH,
     CONF_UNKNOWN,
@@ -76,7 +77,6 @@ from ..model.graph_facts import (
     GraphEdge,
     GraphNode,
 )
-from ..errors import UseCaseManifestError
 from ..model.yaml_strict import load_strict_yaml
 
 if TYPE_CHECKING:

@@ -786,9 +786,9 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         static library at all, so the pass correctly never ran there. This
         must read as complete, not unknown."""
         from abicheck.analysis_assurance import _graph_completeness
-        from abicheck.model.graph_facts import GraphNode
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
+        from abicheck.model.graph_facts import GraphNode
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -813,8 +813,8 @@ class TestGraphCompletenessConditionallyApplicableFamily:
     ) -> None:
         """Same repro through the full ``checker.compare()`` rollup, not just
         the unit-level ``_graph_completeness`` call."""
-        from abicheck.model.graph_facts import GraphNode
         from abicheck.buildsource.source_graph import SourceGraphSummary
+        from abicheck.model.graph_facts import GraphNode
 
         old, new = _header_pair()
         old.build_source = self._pack_with_graph(
@@ -847,9 +847,9 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         not over-correct into silencing a genuine shortfall for this
         family."""
         from abicheck.analysis_assurance import _graph_completeness
-        from abicheck.model.graph_facts import GraphNode
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
+        from abicheck.model.graph_facts import GraphNode
 
         old_pack = BuildSourcePack(
             root=tmp_path / "old",
@@ -875,8 +875,8 @@ class TestGraphCompletenessConditionallyApplicableFamily:
 
     def test_archive_graph_genuine_asymmetry_end_to_end(self, tmp_path: Path) -> None:
         """End-to-end companion to the genuine-asymmetry unit test above."""
-        from abicheck.model.graph_facts import GraphNode
         from abicheck.buildsource.source_graph import SourceGraphSummary
+        from abicheck.model.graph_facts import GraphNode
 
         old, new = _header_pair()
         old.build_source = self._pack_with_graph(

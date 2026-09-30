@@ -318,7 +318,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from . import call_graph
 from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -326,6 +325,7 @@ from ..model.graph_facts import (
     GraphNode,
     register_fact,
 )
+from . import call_graph
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary

@@ -50,11 +50,11 @@ from .buildsource.call_graph import (
     CALL_KIND_VIRTUAL,
     RESOLUTION_OVERAPPROX,
 )
-from .model.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .change_registry import unanimous_entity_for
 from .checker_types import Change
 from .impact.engine import assess_change
 from .model.change_catalog.kinds import ChangeKind
+from .model.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .policy.evidence_status import ReachabilityState
 
 if TYPE_CHECKING:

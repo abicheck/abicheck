@@ -52,8 +52,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from ..model.source_graph import _symbol_node_id
 from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
+from ..model.source_graph import _symbol_node_id
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary

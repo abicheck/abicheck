@@ -41,10 +41,10 @@ from abicheck.buildsource.callback_graph import (
     augment_graph_with_callback_registrations,
     parse_clang_ast_callbacks,
 )
-from abicheck.model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 from abicheck.buildsource.inline_graph_fold import fold_call_graph, fold_callback_graph
 from abicheck.buildsource.l5_ast_pass import run_l5_ast_pass
 from abicheck.buildsource.source_graph import SourceGraphSummary
+from abicheck.model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 
 # ── Part B fixtures: hand-built clang AST node shapes ───────────────────────
 
