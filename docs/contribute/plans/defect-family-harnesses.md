@@ -3,8 +3,8 @@
 **Status:** In progress. Landed: the family layer of the registry
 (`tests/regressions/families.py`, enforced by
 `tests/test_regressions_families.py`) and harnesses H1, H2, H3 and H5
-(`tests/test_family_f{1,2,3,5}_*.py`). Not landed yet: H4, H6, the H7 patch
-replay, and the merge-quiescence gate. Extends
+(`tests/test_family_f{1,2,3,5}_*.py`). Second round: H4, H6 and H7 landed too. Not landed: the merge-quiescence
+gate (a repository setting, not code). Extends
 [bug-class regression testing](bug-class-regression-testing.md) (its Phases
 0–9 and `tests/regressions/manifest*.py` stay as they are).
 
@@ -316,3 +316,32 @@ test named after that fix. That is the definition of "generalized".
     disk cache on separate roots, and a warm vs fresh run. Each cell asserts
     that the optimization actually engaged.
   - Three historical mutants are caught. No current bug was found.
+
+## Implementation record (second round)
+
+- **H4, heuristic registry** (`tests/test_family_f4_heuristics.py`). An AST
+  scan finds 205 name- or spelling-based decision sites. 12 have covered
+  cells (enum sentinel, `_tag`, experimental promotion, internal
+  namespaces). The other 193 are listed with a category, and each category
+  has a ceiling that may only shrink. 4 seeded mutants are caught.
+  - **Real bug:** the enum-sentinel rule is name-only, so an `E_MAX` member
+    that is neither last nor largest is demoted to
+    `enum_last_member_value_changed`.
+  - **Real bug:** a `detail::`/`impl::` record reached from an exported
+    signature is dropped out of contract, while `priv::` with the same
+    structure is BREAKING.
+- **H6, real-library corpus** (`tests/test_family_f6_corpus.py`,
+  `.github/workflows/real-library-corpus.yml`,
+  `skills-src/evaluation/validation/scripts/run_compat_corpus.py`).
+  - 11 conda-forge pairs, each with ground truth cited from
+    `data/manifest.json`, and a recorded baseline.
+  - The gate is offline-tested, including 3 mutants.
+  - **First real run:** 5 of 9 known-compatible pairs report BREAKING:
+    oneTBB 2 pairs, protobuf, zstd, libxml2. These are open for triage.
+- **H7, mutant replay** (`tests/test_family_f7_mutant_replay.py`,
+  `tests/regressions/mutants/`). 13 historical bugs are stored as source
+  patches, and 10 are killed by their harness. The 3 survivors are strict
+  xfails that expose two H5 gaps:
+  - the disk-cache cell never varies exactly one key input;
+  - `ABICHECK_MAX_THREADS=1` still takes the pooled release path, so the
+    sequential path is never compared.

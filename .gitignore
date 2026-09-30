@@ -34,5 +34,6 @@ site/
 # mutmut working directory and per-run receipt (the committed baseline,
 # mutation-baseline.json, is deliberately NOT ignored).
 mutants/
+!tests/regressions/mutants/
 mutation-receipt.json
 mutmut-results.txt

@@ -48,7 +48,7 @@ _REPO = Path(__file__).resolve().parent.parent
 OTHER_BUDGET = 22
 
 #: Families whose invariant a harness enforces; a new class there must attach.
-_HARNESSED = ("F1", "F2", "F3", "F5")
+_HARNESSED = ("F1", "F2", "F3", "F4", "F5")
 
 
 def test_every_bug_class_has_exactly_one_family() -> None:

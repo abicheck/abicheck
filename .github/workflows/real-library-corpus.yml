@@ -1,0 +1,70 @@
+name: Real-library compatibility corpus
+
+# H6 / defect family F6 (docs/contribute/plans/defect-family-harnesses.md):
+# compare real conda-forge release pairs with cited ground truth
+# (skills-src/evaluation/validation/data/compat_corpus.json) and gate on
+# "known-compatible => zero BREAKING/API_BREAK", "known-incompatible =>
+# a BREAKING finding", and non-breaking count drift against
+# data/compat_corpus_baseline.json (report-only while no baseline exists).
+# Needs network, so it is not a per-PR required check: weekly, on dispatch,
+# and on a pull request carrying the `real-corpus` label.
+
+on:
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+
+concurrency:
+  # A PR groups by PR number so a new push supersedes the stale run; a
+  # schedule/dispatch run groups by ref, never by the per-run run_id.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    name: Real-library corpus gate
+    # The PR's *current* label set, not github.event.label.name (populated
+    # only on the one `labeled` event), so later pushes to a labelled PR run.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'real-corpus')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: binutils zstd
+
+      - name: Install abicheck
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" zstandard
+
+      - name: Run corpus gate
+        env:
+          ABICHECK_MEMORY_TRACE: ${{ github.workspace }}/reports/corpus/memory-trace.jsonl
+        run: |
+          mkdir -p reports/corpus
+          python skills-src/evaluation/validation/scripts/run_compat_corpus.py \
+            --out-dir reports/corpus
+
+      - name: Upload corpus results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: real-library-corpus
+          path: reports/corpus/
+          if-no-files-found: warn

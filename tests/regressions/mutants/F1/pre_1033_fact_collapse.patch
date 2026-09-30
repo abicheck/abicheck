@@ -1,0 +1,11 @@
+--- a/abicheck/model/fact.py
++++ b/abicheck/model/fact.py
+@@ -203,6 +203,8 @@
+     after construction — build a fresh instance (or use
+     ``replace_with_fact_sync``) instead of assigning to it directly.
+     """
++    if explicit_fact is not None and explicit_fact.status is not FactStatus.PRESENT:
++        return normalized_default, Fact.present(normalized_default)
+     if explicit_fact is not None:
+         value = (
+             explicit_fact.value

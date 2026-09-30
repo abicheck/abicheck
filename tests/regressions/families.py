@@ -86,11 +86,8 @@ FAMILIES: dict[str, Family] = {
                 "No finding's severity rests only on a name, suffix or directory "
                 "heuristic without a structural fact confirming or vetoing it."
             ),
-            harness_tests=(),
-            planned_reason=(
-                "Heuristic registry + AST gate not built yet; covered today by "
-                "per-class seed tests and the FP-rate gate."
-            ),
+            harness_tests=("tests/test_family_f4_heuristics.py",),
+            planned_reason="",
         ),
         Family(
             key="F5",
@@ -108,11 +105,8 @@ FAMILIES: dict[str, Family] = {
                 "A known-compatible real release pair produces no BREAKING or "
                 "API_BREAK finding."
             ),
-            harness_tests=(),
-            planned_reason=(
-                "Needs network access to conda-forge; the scheduled lane over "
-                "skills-src/evaluation/validation is not wired yet."
-            ),
+            harness_tests=("tests/test_family_f6_corpus.py",),
+            planned_reason="",
         ),
         Family(
             key="F7",
@@ -124,6 +118,7 @@ FAMILIES: dict[str, Family] = {
             ),
             harness_tests=(
                 "tests/test_regressions_families.py",
+                "tests/test_family_f7_mutant_replay.py",
                 "tests/test_conftest_cache_isolation.py",
             ),
         ),

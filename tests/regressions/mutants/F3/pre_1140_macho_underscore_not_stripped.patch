@@ -1,0 +1,11 @@
+--- a/abicheck/model/graph_entity_identity.py
++++ b/abicheck/model/graph_entity_identity.py
+@@ -174,7 +174,7 @@
+     """``(canonical, decorated)`` -- the Mach-O decoration stripped when it is
+     provably a decoration, with the original spelling returned as the second
+     element (``""`` when nothing was stripped)."""
+-    stripped = strip_macho_itanium_decoration(linker_name)
++    stripped = linker_name
+     if stripped != linker_name:
+         return stripped, linker_name
+     # C linkage on Mach-O: the symbol is the plain name plus one leading

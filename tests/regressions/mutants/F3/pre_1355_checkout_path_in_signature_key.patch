@@ -1,0 +1,11 @@
+--- a/abicheck/model/graph_entity_identity.py
++++ b/abicheck/model/graph_entity_identity.py
+@@ -255,7 +255,7 @@
+     so a declaration walked by either producer resolves identically."""
+     # Checkout-stable first: a signature naming a lambda or unnamed type
+     # spells its declaring header's absolute path, which must not reach the key.
+-    stable = checkout_stable_spelling(type_spelling)
++    stable = type_spelling
+     return "sha256:" + hashlib.sha256(f"sig\x00{stable}".encode()).hexdigest()
+ 
+ 
