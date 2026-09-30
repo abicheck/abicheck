@@ -427,6 +427,7 @@ def test_shared_defaults_agree() -> None:
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="REAL DIVERGENCE: the native compare CLI (cli_compare_helpers, "
     "compare_no_baseline) and the release fan-out hard-code "
     "pattern_verdicts=True, while CompareRequest.pattern_verdicts / "
@@ -438,9 +439,9 @@ def test_pattern_verdicts_default_matches_cli(tmp_path: Path) -> None:
     ops = write_operands(tmp_path, "removal_and_addition")
     cli = run_cli(ops, AXES_BY_NAME["default"], tmp_path)
     req = CompareRequest(old=InputSpec(path=ops.old), new=InputSpec(path=ops.new))
-    assert (
-        cli.report["effective_config_fields"]["policy.pattern_verdicts"] == "True"
-    ) and req.pattern_verdicts is True
+    fields = cli.report.get("effective_config_fields") or {}
+    assert fields.get("policy.pattern_verdicts") == "True"
+    assert req.pattern_verdicts is True
 
 
 # ── the matrix ──────────────────────────────────────────────────────────
@@ -564,6 +565,7 @@ def test_known_divergence_still_diverges(
     request.applymarker(
         pytest.mark.xfail(
             strict=True,
+            raises=AssertionError,
             reason=f"REAL DIVERGENCE {key} ({route}): {KNOWN_DIVERGENCES[key][1]}",
         )
     )

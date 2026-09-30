@@ -107,6 +107,7 @@ from _family_f1_harness import (
     gap_stated,
     oracle_violations,
     outcome,
+    present_fact_count,
 )
 
 import abicheck.model.declarations as declarations_mod
@@ -122,6 +123,17 @@ from abicheck.model import Fact, FactStatus
 #: Sites the harness cannot ablate yet. Shrink-only: see
 #: ``test_uncovered_is_shrink_only``.
 UNCOVERED: dict[str, str] = {
+    "EnumType.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "Function.contract_attributes_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "Function.exception_spec_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "Function.hidden_friend_owner_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "Function.is_compiler_generated_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "Function.is_hidden_friend_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "Function.is_override_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "Function.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "RecordType.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "Variable.alignment_bits_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
+    "Variable.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
     "CanonicalEntity.canonical_spelling": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
     "CanonicalEntity.cv_qualification": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
     "CanonicalEntity.template_arguments": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
@@ -170,8 +182,7 @@ def _exercised_fact_sites() -> set[str]:
     hit = set()
     for old, new in CORPUS.values():
         for name, site in _FACT_SITES.items():
-            probe = Fact.failed("probe")
-            if ablate_fact(old, site, probe)[1] or ablate_fact(new, site, probe)[1]:
+            if present_fact_count(old, site) or present_fact_count(new, site):
                 hit.add(name)
     return hit
 
@@ -298,7 +309,7 @@ def test_fact_ablation_contract_exports_config() -> None:
 
 @pytest.mark.parametrize(("case", "site", "side"), sorted(KNOWN_VIOLATIONS))
 @pytest.mark.parametrize("status", _STATUSES)
-@pytest.mark.xfail(strict=True, reason=_KNOWN_BUG_REASON)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_KNOWN_BUG_REASON)
 def test_known_violation_header_origin_seed(
     case: str, site: str, side: str, status: str
 ) -> None:

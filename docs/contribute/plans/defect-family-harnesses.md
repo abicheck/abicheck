@@ -115,8 +115,10 @@ The oracles, checked on every combination:
 - `verdict_rank(ablated) >= verdict_rank(full)` in the "less certain" order.
   An ablation may lower confidence, but it never turns an established break
   into COMPATIBLE through silence, and it never invents one.
-- The set of BREAKING findings under ablation is a subset of the full set,
-  plus any findings explicitly marked `evidence_gap`.
+- The set of BREAKING findings under ablation is a subset of the full set.
+  No exception: an evidence gap is reported as lower confidence or a coverage
+  note, never as a new BREAKING finding. (`Change` has no `evidence_gap`
+  marker, and H1 does not introduce one.)
 - `assurance(ablated) <= assurance(full)`, and the report states the gap: a
   coverage failure, a `FAILED` fact or a `degraded` marker.
 

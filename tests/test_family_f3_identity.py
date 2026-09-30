@@ -102,7 +102,11 @@ _XFAIL_PE = {
 
 def _cell(values: tuple, reasons: dict, key: tuple) -> object:
     reason = reasons.get(key)
-    marks = [pytest.mark.xfail(strict=True, reason=reason)] if reason else []
+    marks = (
+        [pytest.mark.xfail(strict=True, raises=AssertionError, reason=reason)]
+        if reason
+        else []
+    )
     return pytest.param(
         *values, marks=marks, id="-".join(str(v).rsplit(":", 1)[-1] for v in values)
     )
@@ -174,7 +178,7 @@ def test_x86_pe_decoration_codec_joins_and_separates(decoder: str, scheme: str) 
     assert cat.pe_violations(decoder, scheme) == []
 
 
-@pytest.mark.xfail(strict=True, reason=_VECTORCALL_BUG)
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_VECTORCALL_BUG)
 def test_non_x86_pe_leading_underscore_is_part_of_the_name() -> None:
     assert cat.pe_x64_collisions() == []
 

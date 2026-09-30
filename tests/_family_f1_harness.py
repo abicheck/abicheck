@@ -45,13 +45,16 @@ from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.extract.export_table_read import finish_binary_snapshot
+from abicheck.extract.surface_fact_producers import header_ast_surface_facts
 from abicheck.model import (
     AbiSnapshot,
+    AccessLevel,
     EnumMember,
     EnumType,
     Fact,
     Function,
     Param,
+    ParamKind,
     RecordType,
     ScopeOrigin,
     TypeField,
@@ -148,8 +151,23 @@ def container_site_inventory() -> list[str]:
 # --------------------------------------------------------------------------
 
 
+#: What the real header-AST producer stamps on a declaration it parsed from
+#: a public header and found in the export table, so the full-evidence
+#: baseline carries these facts *present* -- ablating an already-unknown fact
+#: would test nothing (CodeRabbit review on PR #1428).
+_EXPORTED_DECL_FACTS: dict[str, Any] = header_ast_surface_facts(
+    exported=True, producer="castxml"
+)
+
+
 def _param(name: str, type_: str = "int") -> Param:
-    return Param(name=name, type=type_, is_va_list=False, is_restrict=False)
+    return Param(
+        name=name,
+        type=type_,
+        kind=ParamKind.VALUE,
+        is_va_list=False,
+        is_restrict=False,
+    )
 
 
 def _fn(
@@ -165,7 +183,8 @@ def _fn(
         is_explicit=False,
         deprecated=None,
         source_header="/inc/x.h",
-        **kw,
+        elf_binding_fact=Fact.present(SymbolBinding.GLOBAL),
+        **{**_EXPORTED_DECL_FACTS, **kw},
     )
 
 
@@ -175,8 +194,11 @@ def _var(name: str, type_: str = "int") -> Variable:
         mangled=f"_ZL{len(name)}{name}",
         type=type_,
         visibility=Visibility.PUBLIC,
+        access=AccessLevel.PUBLIC,
         source_header="/inc/x.h",
         deprecated=None,
+        elf_binding_fact=Fact.present(SymbolBinding.GLOBAL),
+        **_EXPORTED_DECL_FACTS,
     )
 
 
@@ -255,7 +277,7 @@ def _elf(snap_funcs: list[Function], snap_vars: list[Variable]) -> ElfMetadata:
     return ElfMetadata(
         soname="libx.so.1",
         symbols=syms,
-        dynamic_flags_fact=Fact.present(0),
+        dynamic_flags_fact=Fact.present(frozenset()),
         has_init_fact=Fact.present(False),
         has_fini_fact=Fact.present(False),
     )
@@ -292,18 +314,23 @@ class Side:
 
 def _snapshot(version: str, side: Side) -> AbiSnapshot:
     funcs, vars_ = list(side.functions), list(side.variables)
-    return AbiSnapshot(
-        library="libx.so.1",
-        version=version,
-        functions=funcs,
-        variables=vars_,
-        types=list(side.types),
-        enums=list(side.enums),
-        elf=_elf(funcs, vars_),
-        dwarf=_dwarf(list(side.types)),
-        from_headers=True,
-        platform="elf",
-        ast_resolved_standard_fact=Fact.present("c++17"),
+    # The builders' real shared tail stamps the export-read facts
+    # (binary_exported / elf_binding) from the ELF table, so the full-evidence
+    # baseline carries them present rather than unknown.
+    return finish_binary_snapshot(
+        AbiSnapshot(
+            library="libx.so.1",
+            version=version,
+            functions=funcs,
+            variables=vars_,
+            types=list(side.types),
+            enums=list(side.enums),
+            elf=_elf(funcs, vars_),
+            dwarf=_dwarf(list(side.types)),
+            from_headers=True,
+            platform="elf",
+            ast_resolved_standard_fact=Fact.present("c++17"),
+        )
     )
 
 
@@ -452,6 +479,39 @@ def ablate_fact(
     hits: list[int] = []
     out = _rewrite(snap, site[0], site[1], fact, hits)
     return out, len(hits)
+
+
+def present_fact_count(snap: AbiSnapshot, site: tuple[type, str]) -> int:
+    """Instances of ``site`` whose baseline ``Fact`` is present -- a site
+    whose facts are all unknown already cannot be ablated meaningfully."""
+    count = 0
+    seen: set[int] = set()
+
+    def walk(obj: Any) -> None:
+        nonlocal count
+        if isinstance(obj, list | tuple):
+            for x in obj:
+                walk(x)
+            return
+        if isinstance(obj, dict):
+            for x in obj.values():
+                walk(x)
+            return
+        if isinstance(obj, Fact) or not (
+            dataclasses.is_dataclass(obj) and not isinstance(obj, type)
+        ):
+            return
+        if id(obj) in seen:
+            return
+        seen.add(id(obj))
+        value = getattr(obj, site[1], None) if type(obj) is site[0] else None
+        if isinstance(value, Fact) and value.is_present:
+            count += 1
+        for f in dataclasses.fields(obj):
+            walk(getattr(obj, f.name))
+
+    walk(snap)
+    return count
 
 
 def _drop(field: str) -> Callable[[AbiSnapshot], AbiSnapshot | None]:
