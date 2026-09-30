@@ -539,3 +539,16 @@ class TestFactProducer:
         encode_fact_fields(d)
         vtable_fact = d["types"][0]["vtable_fact"]  # type: ignore[index]
         assert vtable_fact["producer"] == "pdb"
+
+
+def test_retire_bridge_fields_rejects_a_non_initvar_and_exposes_the_descriptor() -> (
+    None
+):
+    from abicheck.model.fact import RetiredBridgeField, retire_bridge_fields
+
+    assert isinstance(RecordType.__dict__["bases"], RetiredBridgeField)
+    assert isinstance(RecordType.bases, RetiredBridgeField)  # class access
+    with pytest.raises(TypeError, match="must be an InitVar"):
+        retire_bridge_fields(RecordType, {"name": ""})  # a stored field
+    with pytest.raises(TypeError, match="must be an InitVar"):
+        retire_bridge_fields(RecordType, {"no_such_field": None})
