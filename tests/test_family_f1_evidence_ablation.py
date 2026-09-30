@@ -136,6 +136,8 @@ UNCOVERED: dict[str, str] = {
     "Variable.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
     "CanonicalEntity.canonical_spelling": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
     "CanonicalEntity.cv_qualification": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
+    "CanonicalEntity.size_bits": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
+    "CanonicalEntity.alignment_bits": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
     "CanonicalEntity.template_arguments": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
     "MachoMetadata.rpaths_fact": "corpus is ELF-only; needs a Mach-O pair",
     "PeMetadata.delay_imports_fact": "corpus is ELF-only; needs a PE pair",

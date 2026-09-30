@@ -143,16 +143,13 @@ COVERAGE: dict[str, str] = {
     "abicheck.process_resources::pool::BudgetedExecutor.__init__->ThreadPoolExecutor": "release.threads",
     "abicheck.workflows.keyed_thread_pool::pool::run_keyed_in_threads->BudgetedExecutor": "release.threads",
     "abicheck.service_compare_pipeline::pool::resolve_compare_request->BudgetedExecutor": "binary.sides",
-    "abicheck.buildsource.call_graph::pool::ClangCallGraphExtractor.extract_from_build->BudgetedExecutor": _NEEDS_L5,
-    "abicheck.buildsource.callback_graph::pool::ClangCallbackGraphExtractor.extract_from_build->BudgetedExecutor": _NEEDS_L5,
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor": _NEEDS_L5,
-    "abicheck.buildsource.macro_graph::pool::ClangMacroGraphExtractor.extract_from_build->BudgetedExecutor": _NEEDS_L5,
-    "abicheck.buildsource.override_graph::pool::ClangOverrideGraphExtractor.extract_from_build->BudgetedExecutor": _NEEDS_L5,
-    "abicheck.buildsource.template_graph_extractor::pool::ClangTemplateGraphExtractor.extract_from_build->BudgetedExecutor": _NEEDS_L5,
-    "abicheck.buildsource.type_graph::pool::ClangTypeGraphExtractor.extract_from_build->BudgetedExecutor": _NEEDS_L5,
     "abicheck.buildsource.pattern_facts::pool::find_pattern_facts->ProcessPoolExecutor": "UNCOVERED: process pool for large L4 pattern scans (threshold-gated); build-source path only",
     "abicheck.dumper_manifest::pool::_run_tu_fragments->BudgetedExecutor": "UNCOVERED: per-TU pool of a --dump-manifest dump; needs a manifest + castxml",
-    "abicheck.parallel_probe::pool::run_parallel_probes->BudgetedExecutor": "UNCOVERED: environment-matrix probes (--probe-matrix); needs a probe matrix",
+    # The one pool behind the environment-matrix probes and, since #1425,
+    # every L5 clang graph pass (buildsource/l5_ast_pass.run_ast_passes) --
+    # it replaced the six per-extractor ``extract_from_build`` pools.
+    "abicheck.parallel_probe::pool::run_parallel_probes->BudgetedExecutor": "UNCOVERED: environment-matrix probes (--probe-matrix) and the shared L5 clang AST passes; needs a probe matrix or a compile database + clang",
     "abicheck.service_header_graph_attach::pool::prefetch_header_graph_ast->BudgetedExecutor": _NEEDS_L5,
 }
 
@@ -651,8 +648,8 @@ def test_mutant_stale_disk_cache_entry_is_caught(
 
     def stale(key: str, path: Path) -> Any:
         snap = real_lookup(key, path)
-        if snap is not None and snap.functions:
-            snap.functions = snap.functions[:-1]
+        if snap is not None and snap.declarations.functions:
+            snap.declarations.functions = snap.declarations.functions[:-1]
         return snap
 
     monkeypatch.setattr(snapshot_cache, "lookup_key", stale)

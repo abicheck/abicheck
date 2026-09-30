@@ -61,6 +61,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.declaration_store import DECLARATION_KINDS
 from abicheck.policy.contract_coverage_exit import coverage_exit_floor
 
 # --------------------------------------------------------------------------
@@ -469,6 +470,13 @@ def _rewrite(obj: Any, cls: type, fname: str, value: Any, hits: list[int]) -> An
     if type(obj) is cls:
         hits.append(1)
         updates[fname] = value
+    ir = updates.get("semantic_ir")
+    if isinstance(obj, AbiSnapshot) and ir is not None and ir.declarations is not None:
+        # ``replace`` forwards the snapshot's *current* declarations as
+        # builder inputs, which would win over the rewritten store the new
+        # IR carries -- so state the rewritten kinds explicitly.
+        for kind in DECLARATION_KINDS:
+            updates[kind] = getattr(ir.declarations, kind)
     return dataclasses.replace(obj, **updates) if updates else obj
 
 
@@ -543,11 +551,11 @@ def _unread_export_table(s: AbiSnapshot) -> AbiSnapshot | None:
         elf=ElfMetadata(),
         functions=[
             dataclasses.replace(f, binary_exported_fact=Fact.present(False))
-            for f in s.functions
+            for f in s.declarations.functions
         ],
         variables=[
             dataclasses.replace(v, binary_exported_fact=Fact.present(False))
-            for v in s.variables
+            for v in s.declarations.variables
         ],
     )
     return finish_binary_snapshot(s)

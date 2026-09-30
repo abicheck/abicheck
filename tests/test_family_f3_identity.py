@@ -368,14 +368,16 @@ def _dump(so: Path, headers: list[Path]):
 def _assert_same_identity(a, b) -> None:
     from abicheck.checker import Verdict, compare
 
-    ids_a = Counter(f.entity_id for f in a.functions)
-    ids_b = Counter(f.entity_id for f in b.functions)
+    ids_a = Counter(f.entity_id for f in a.declarations.functions)
+    ids_b = Counter(f.entity_id for f in b.declarations.functions)
     assert ids_a == ids_b
     # Negative control: overloads, same-leaf-other-namespace and the three
     # distinct lambda closures stay distinct entities.
     assert all(n == 1 for n in ids_b.values()), [k for k, n in ids_b.items() if n > 1]
-    assert sorted(t.name for t in a.types) == sorted(t.name for t in b.types)
-    assert sum("(lambda" in t.name for t in b.types) >= 2
+    assert sorted(t.name for t in a.declarations.types) == sorted(
+        t.name for t in b.declarations.types
+    )
+    assert sum("(lambda" in t.name for t in b.declarations.types) >= 2
     result = compare(a, b, cross_source_checks=False)
     assert result.changes == []
     assert result.verdict is Verdict.NO_CHANGE
@@ -428,8 +430,8 @@ def test_castxml_reversed_header_order_keeps_identity_and_refuses_explicitly(
 
     so, api, extra, base = castxml_base
     reordered = _dump(so, [extra, api])
-    ids_a = Counter(f.entity_id for f in base.functions)
-    ids_b = Counter(f.entity_id for f in reordered.functions)
+    ids_a = Counter(f.entity_id for f in base.declarations.functions)
+    ids_b = Counter(f.entity_id for f in reordered.declarations.functions)
     assert ids_a == ids_b
     assert all(n == 1 for n in ids_b.values())
     with pytest.raises(ProfileMismatchError, match="header_sequence"):
