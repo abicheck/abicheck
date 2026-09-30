@@ -28,6 +28,9 @@ from abicheck.model.extraction_contract import build_identity_of
 GENERATOR_SETS: list[tuple[tuple[str, str, str], ...]] = [
     (),
     (("generic", "", ""),),
+    (("generic", "Ninja", ""),),  # generic with a backend: still no build system
+    (("", "Ninja", ""),),
+    (("generic", "Ninja", ""), ("cmake", "Ninja", "")),
     (("cmake", "Ninja", "3.28"),),
     (("cmake", "Ninja", "3.30"),),  # version-only difference
     (("cmake", "Unix Makefiles", "3.28"),),

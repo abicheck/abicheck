@@ -145,16 +145,16 @@ def build_identity_of(snapshot: object) -> BuildIdentity | None:
     evidence = getattr(pack, "build_evidence", None) if pack is not None else None
     if evidence is None:
         return None
-    systems = sorted(
-        {
-            (
-                str(getattr(g, "kind", "") or "").strip().lower(),
-                str(getattr(g, "generator", "") or "").strip(),
-            )
-            for g in getattr(evidence, "generators", None) or ()
-        }
-        - {("", ""), ("generic", "")}
-    )
+    pairs = {
+        (
+            str(getattr(g, "kind", "") or "").strip().lower(),
+            str(getattr(g, "generator", "") or "").strip(),
+        )
+        for g in getattr(evidence, "generators", None) or ()
+    }
+    # A "generic" (or kind-less) entry names no build system, whatever
+    # backend string it carries.
+    systems = sorted(p for p in pairs if p[0] not in ("", "generic"))
     scope = getattr(evidence, "target_scope", None)
     roots = (
         None
