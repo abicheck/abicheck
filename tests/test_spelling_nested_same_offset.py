@@ -11,7 +11,9 @@ always a superset of the old one.
 
 from __future__ import annotations
 
+import inspect
 import re
+import sys
 
 import pytest
 from hypothesis import given, settings, strategies as st
@@ -149,8 +151,23 @@ def test_oracle_is_not_vacuous() -> None:
 
 
 def test_deep_nesting_does_not_recurse() -> None:
+    # Nesting deeper than the recursion limit is what proves the matcher is
+    # iterative. Lowering the limit (to this frame's own depth plus a margin)
+    # proves that at a depth of a few hundred instead of the default limit's
+    # 1000+, which the matcher's quadratic cost made a ~10s test.
+    depth = len(inspect.stack())
+    limit = depth + 150
+    old_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(limit)
+    try:
+        _assert_nesting_matches(limit + 100)
+    finally:
+        sys.setrecursionlimit(old_limit)
+
+
+def _assert_nesting_matches(levels: int) -> None:
     vocab, s = set(), "A"
-    for _ in range(1500):
+    for _ in range(levels):
         vocab.add(s)
         s = "A<" + s + ">"
     text = s

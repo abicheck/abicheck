@@ -142,6 +142,13 @@ CI's `pr` profile.
   `test_subprocess_bash_is_resolved.py` fails on a new clone, a new bare
   `"bash"` program, or a resolved call site with no `require_bash()`, anywhere
   under `tests/`.
+- `_yaml_fast.py` — `safe_load`, a drop-in for `yaml.safe_load` backed by
+  libyaml's `CSafeLoader` (~15x faster on the repository's workflows,
+  identical documents). **Use it instead of `yaml.safe_load` when a test reads
+  committed YAML** — many modules parse workflows at *collection* time, which
+  every xdist worker of every CI shard repeats. Not for tests of abicheck's
+  own YAML loading (`test_yaml_strict.py`). `test_yaml_fast_helper.py` pins
+  the equivalence against `yaml.safe_load` over every committed YAML file.
 - `schema_validation.py` — `validate_instance(instance, schema)`, a drop-in
   replacement for `jsonschema.validate` that checks the *schema* once per
   distinct schema content instead of on every call (which is what the library

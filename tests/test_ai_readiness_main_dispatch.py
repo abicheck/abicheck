@@ -206,3 +206,21 @@ def test_main_json_summary_agrees_with_the_exit_code_and_findings(
     assert [e["message"] for e in payload["errors"]] == ["a is broken"]
     assert [w["check"] for w in payload["warnings"]] == ["b"]
     assert [w["message"] for w in payload["warnings"]] == ["b is untidy"]
+
+
+def test_parallel_jobs_report_matches_serial(car, capsys) -> None:
+    """``--jobs`` only changes scheduling: the report is identical to serial,
+    over several real (cheap, pure) checks with different outcomes."""
+    selected = [
+        "claude-md-coverage",
+        "examples-ground-truth",
+        "script-inventory",
+        "test-ratio",
+    ]
+    argv = [a for n in selected for a in ("--only", n)]
+    rc_serial = car.main([*argv, "--json"])
+    serial = capsys.readouterr().out
+    rc_parallel = car.main([*argv, "--json", "--jobs", "3"])
+    parallel = capsys.readouterr().out
+    assert rc_serial == rc_parallel
+    assert serial == parallel

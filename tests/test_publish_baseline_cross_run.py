@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
 import yaml
 from _workflow_exec import bash_executable, require_bash
@@ -62,7 +63,7 @@ CROSS_RUN_DOWNLOAD = "Download pre-captured baseline-set (cross run)"
 
 @pytest.fixture(scope="module")
 def workflow() -> dict[str, Any]:
-    return yaml.safe_load(PUBLISH_BASELINE.read_text(encoding="utf-8"))
+    return _yaml_fast.safe_load(PUBLISH_BASELINE.read_text(encoding="utf-8"))
 
 
 def _steps(workflow: dict[str, Any], job: str) -> list[dict[str, Any]]:

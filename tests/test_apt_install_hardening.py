@@ -54,8 +54,8 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, require_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -370,7 +370,9 @@ class TestPackagesAreNotInterpolatedIntoTheShell:
         assert result.returncode == 1
 
     def test_action_yml_passes_packages_through_env(self) -> None:
-        action = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
+        action = _yaml_fast.safe_load(
+            (ACTION_DIR / "action.yml").read_text(encoding="utf-8")
+        )
         (step,) = action["runs"]["steps"]
         assert step["env"]["INPUT_PACKAGES"] == "${{ inputs.packages }}"
         assert "${{" not in step["run"]
@@ -662,7 +664,7 @@ class TestNoWorkflowGatesInstallOnUpdate:
     def _run_scripts() -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         for path in sorted(WORKFLOWS_DIR.glob("*.yml")):
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data = _yaml_fast.safe_load(path.read_text(encoding="utf-8"))
             for job in (data.get("jobs") or {}).values():
                 for step in job.get("steps") or []:
                     if isinstance(step, dict) and isinstance(step.get("run"), str):

@@ -38,8 +38,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 from _gha_expressions import render
 from _workflow_files import read_repo_text, workflow_paths
 
@@ -88,7 +88,7 @@ def _cancelling_workflows() -> list[tuple[str, str, list[str]]]:
     expression and the events that can produce a run in that group."""
     found = []
     for path in workflow_paths():
-        doc = yaml.safe_load(read_repo_text(path))
+        doc = _yaml_fast.safe_load(read_repo_text(path))
         concurrency = (doc or {}).get("concurrency")
         if not isinstance(concurrency, dict):
             continue

@@ -35,6 +35,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 from _workflow_exec import bash_executable, require_bash
 
@@ -239,7 +240,7 @@ def test_every_declared_input_reaches_run_sh() -> None:
     import yaml
 
     raw = (ACTION_DIR / "action.yml").read_text(encoding="utf-8")
-    document = yaml.safe_load(raw)
+    document = _yaml_fast.safe_load(raw)
     forwarded: set[str] = set()
     referenced = ""
     for step in document["runs"]["steps"]:
@@ -297,7 +298,9 @@ def test_the_input_wiring_scan_can_actually_fail() -> None:
     """
     import yaml
 
-    document = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
+    document = _yaml_fast.safe_load(
+        (ACTION_DIR / "action.yml").read_text(encoding="utf-8")
+    )
     referenced = "".join(
         yaml.safe_dump({k: step.get(k) for k in ("if", "env", "run", "with", "uses")})
         for step in document["runs"]["steps"]

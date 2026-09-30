@@ -1884,9 +1884,23 @@ _is_compare_release_operand() {
 import sys
 from pathlib import Path
 
-from abicheck.cli_resolve import classify_compare_operand
 
-raise SystemExit(0 if classify_compare_operand(Path(sys.argv[1])) in {"directory", "package"} else 3)
+def is_release(path):
+    # For a non-directory, "directory or package" is exactly
+    # `is_package` -- the same function classify_compare_operand
+    # consults -- and `abicheck.package` imports in a fraction of the
+    # time `abicheck.cli_resolve` does. Only a directory needs the full
+    # classifier (single- vs multi-artifact ProjectSnapshot package).
+    if path.is_dir():
+        from abicheck.cli_resolve import classify_compare_operand
+
+        return classify_compare_operand(path) in {"directory", "package"}
+    from abicheck.package import is_package
+
+    return is_package(path)
+
+
+raise SystemExit(0 if any(is_release(Path(p)) for p in sys.argv[1:]) else 3)
 ' "$_probe_path") || _probe_rc=$?
     [[ "$_probe_rc" -eq 0 ]] && return 0
     [[ "$_probe_rc" -eq 3 ]] && return 1
@@ -1895,6 +1909,53 @@ raise SystemExit(0 if classify_compare_operand(Path(sys.argv[1])) in {"directory
   # scalar terminal projection.  This fallback is intentionally conservative;
   # normal Action execution always has the installed classifier above.
   _is_release_style_operand "$path"
+}
+
+# Whether EITHER operand routes compare through the release/package engine:
+# `_is_compare_release_operand OLD || _is_compare_release_operand NEW`, but
+# answered by one classifier process instead of two. The classifier's import
+# is most of each probe's cost, and this runs on every compare invocation.
+# Any probe failure (exit other than 0/3) falls back to the per-operand
+# helper, which keeps its own conservative fallback.
+_any_compare_release_operand() {
+  local _old="${1:-}" _new="${2:-}"
+  [[ -n "$_old" || -n "$_new" ]] || return 1
+  if [[ "${_PY_BIN_HAS_ABICHECK:-false}" == "true" && -n "${_PY_SAFE_DIR:-}" && -n "${_PY_BIN:-}" ]]; then
+    local _probe _probes=() _probe_rc=0
+    for _probe in "$_old" "$_new"; do
+      [[ -n "$_probe" ]] || continue
+      if ! _is_path_already_qualified "$_probe"; then
+        _probe="$PWD/$_probe"
+      fi
+      _probes+=("$_probe")
+    done
+    # shellcheck disable=SC2016  # the inline script is deliberately unexpanded.
+    (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+
+
+def is_release(path):
+    # For a non-directory, "directory or package" is exactly
+    # `is_package` -- the same function classify_compare_operand
+    # consults -- and `abicheck.package` imports in a fraction of the
+    # time `abicheck.cli_resolve` does. Only a directory needs the full
+    # classifier (single- vs multi-artifact ProjectSnapshot package).
+    if path.is_dir():
+        from abicheck.cli_resolve import classify_compare_operand
+
+        return classify_compare_operand(path) in {"directory", "package"}
+    from abicheck.package import is_package
+
+    return is_package(path)
+
+
+raise SystemExit(0 if any(is_release(Path(p)) for p in sys.argv[1:]) else 3)
+' "${_probes[@]}") || _probe_rc=$?
+    [[ "$_probe_rc" -eq 0 ]] && return 0
+    [[ "$_probe_rc" -eq 3 ]] && return 1
+  fi
+  _is_compare_release_operand "$_old" || _is_compare_release_operand "$_new"
 }
 
 # ---------------------------------------------------------------------------
@@ -2675,7 +2736,15 @@ fi
 # turns what would be one Python call per tokenizer invocation into one per
 # run. When it cannot be derived at all, `_require_cli_value_options_or_fail`
 # decides whether that is fatal -- it is, exactly when `extra-args` is set.
-_cli_value_options_init
+#
+# Skipped when `extra-args` is empty: the table's only consumers tokenize
+# `$INPUT_EXTRA_ARGS`, so with nothing to tokenize nothing ever reads it,
+# and the derivation (a full `abicheck.cli` import, the single most expensive
+# step of an ordinary run) would be paid for no decision. The lazy call in
+# `_extra_args_is_value_option` still covers any direct caller.
+if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
+  _cli_value_options_init
+fi
 _require_cli_value_options_or_fail
 
 # ---------------------------------------------------------------------------
@@ -3542,8 +3611,7 @@ elif [[ "$MODE" == "compare" ]]; then
     # The scalar compare CLI's bounded human default. Release/package fan-out
     # has no single review document, so it retains detailed Markdown.
     if [[ "$_NO_BASELINE" == "true" ]] \
-       || _is_compare_release_operand "${INPUT_OLD_LIBRARY:-}" \
-       || _is_compare_release_operand "${INPUT_NEW_LIBRARY:-}"; then
+       || _any_compare_release_operand "${INPUT_OLD_LIBRARY:-}" "${INPUT_NEW_LIBRARY:-}"; then
       FORMAT="markdown"
     else
       FORMAT="terminal"
@@ -3875,9 +3943,14 @@ trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}" "${_COMPILE_C
 # staleness bug it was fixing. Fixed non-destructively instead: record
 # each path's (mtime, size) fingerprint before running, and only trust it
 # afterward if that fingerprint changed (or the path didn't exist before).
-# Python, not `stat -c`/`stat -f` (GNU vs. BSD/macOS spell this
-# differently and this script already leans on `_PY_BIN` for exactly this
-# class of portability need -- see `_report_query`'s own docstring).
+# GNU (`stat -c`) and BSD/macOS (`stat -f`) spell this differently, and a
+# stat that cannot report nanoseconds would miss a same-second, same-size
+# rewrite -- so a native answer is used only when it has exactly the
+# `<seconds>.<9 digits>:<size>` shape, and `_PY_BIN`'s `os.stat` answers
+# otherwise. The native path matters because this runs up to ten times per
+# invocation and an interpreter start costs ~30ms each; the two spellings
+# never mix within one run, since the first that validates on this host
+# answers every call. A missing path answers "" without spawning anything.
 _file_fingerprint() {
   # Empty output means "does not exist" -- a fingerprint that can never
   # equal a real file's, so "did not exist before, exists now" always
@@ -3890,6 +3963,15 @@ _file_fingerprint() {
   # the same meaning as abicheck's output path.
   if ! _is_path_already_qualified "$_fingerprint_path"; then
     _fingerprint_path="$PWD/$_fingerprint_path"
+  fi
+  [[ -e "$_fingerprint_path" ]] || return 0
+  local _native _shape='^[0-9]+\.[0-9]{9}:[0-9]+$'
+  _native="$(stat -c '%.9Y:%s' -- "$_fingerprint_path" 2>/dev/null)"
+  [[ "$_native" =~ $_shape ]] \
+    || _native="$(stat -f '%.9Fm:%z' "$_fingerprint_path" 2>/dev/null)"
+  if [[ "$_native" =~ $_shape ]]; then
+    printf '%s\n' "$_native"
+    return 0
   fi
   (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import os, sys

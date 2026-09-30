@@ -41,7 +41,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-import yaml
+import _yaml_fast
 
 from tests._gha_expr import eval_gha_expression
 
@@ -52,7 +52,7 @@ class CompositeActionError(ValueError):
 
 def load_action(action_dir: Path) -> dict[str, Any]:
     """Parse ``<action_dir>/action.yml``."""
-    return yaml.safe_load((action_dir / "action.yml").read_text(encoding="utf-8"))
+    return _yaml_fast.safe_load((action_dir / "action.yml").read_text(encoding="utf-8"))
 
 
 def declared_inputs(action: dict[str, Any]) -> dict[str, str]:

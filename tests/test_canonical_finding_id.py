@@ -26,8 +26,8 @@ from __future__ import annotations
 
 import json
 
+import _yaml_fast
 import pytest
-import yaml
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change, DiffResult
@@ -91,7 +91,7 @@ class TestReportCanonicalFindingId:
         assert "\x1f" not in canonical
         # And it must actually survive a real YAML round trip, not merely
         # avoid the one known-bad byte.
-        yaml.safe_load(f"finding_id: {canonical}\n")
+        _yaml_fast.safe_load(f"finding_id: {canonical}\n")
 
     def test_differs_for_a_genuinely_different_symbol(self):
         a = _func_removed(

@@ -35,7 +35,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
+import _yaml_fast
 from _workflow_exec import run_step
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +45,7 @@ CHECK_TARGET_ACTION = _REPO_ROOT / "actions" / "check-target" / "action.yml"
 
 def _load(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return _yaml_fast.safe_load(fh)
 
 
 def _overlay_step() -> dict[str, Any]:
@@ -96,4 +96,4 @@ def _written_overlay(result: Any) -> Any:
     proves the two agree.
     """
     config_path = Path(result.outputs["config-path"])
-    return yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    return _yaml_fast.safe_load(config_path.read_text(encoding="utf-8"))

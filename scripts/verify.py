@@ -317,7 +317,7 @@ STEPS: tuple[Step, ...] = (
     ),
     Step(
         "ai-readiness",
-        _pyscript("scripts/check_ai_readiness.py"),
+        _pyscript("scripts/check_ai_readiness.py", "--jobs", "0"),
         frozenset({PR, FULL}),
         description="Structural readiness gate (file size, ChangeKind partition, import cycles, mypy drift, ...)",
     ),

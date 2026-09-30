@@ -25,14 +25,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
+import _yaml_fast
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "realworld-validation.yml"
 
 
 def _load() -> dict:
-    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    return _yaml_fast.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
 
 def _pr_paths() -> list[str]:

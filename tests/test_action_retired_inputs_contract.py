@@ -47,8 +47,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, require_bash
 
 # The one registry saying which declared inputs the "Run abicheck" step
@@ -82,7 +82,7 @@ def _retired_inputs() -> dict[str, dict]:
     a list in this file would be one more hand-maintained copy to drift, and
     the drift is precisely what this module exists to catch.
     """
-    document = yaml.safe_load(ACTION_YML.read_text(encoding="utf-8"))
+    document = _yaml_fast.safe_load(ACTION_YML.read_text(encoding="utf-8"))
     return {
         name: spec
         for name, spec in (document.get("inputs") or {}).items()
@@ -420,7 +420,7 @@ def test_every_declared_input_the_validator_rejects_outright_is_declared_retired
     advertises a capability the product refuses to run -- the documentation
     drift this contract is meant to make impossible.
     """
-    document = yaml.safe_load(ACTION_YML.read_text(encoding="utf-8"))
+    document = _yaml_fast.safe_load(ACTION_YML.read_text(encoding="utf-8"))
     declared = document.get("inputs") or {}
     validator = VALIDATE_SH.read_text(encoding="utf-8")
 

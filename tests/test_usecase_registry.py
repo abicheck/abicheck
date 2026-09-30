@@ -30,8 +30,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 
 _REPO = Path(__file__).parent.parent
 _REGISTRY = _REPO / "docs" / "contribute" / "usecase-registry.yaml"
@@ -49,7 +49,7 @@ _GAP_RE = re.compile(r"^G[0-9]+$")
 
 
 def _load() -> list[dict]:
-    data = yaml.safe_load(_REGISTRY.read_text(encoding="utf-8"))
+    data = _yaml_fast.safe_load(_REGISTRY.read_text(encoding="utf-8"))
     assert isinstance(data, dict) and "use_cases" in data, (
         "registry must have use_cases"
     )
