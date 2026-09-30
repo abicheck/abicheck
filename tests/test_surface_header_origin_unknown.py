@@ -35,6 +35,7 @@ from abicheck.model import (
     Function,
     RecordType,
     ScopeOrigin,
+    TypeField,
 )
 from abicheck.surface import (
     REASON_HEADER_ORIGIN_UNKNOWN,
@@ -241,3 +242,70 @@ def test_the_demotion_is_stated_as_scope_note_and_coverage_warning() -> None:
     )
     assert SCOPE_NOTE_HEADER_ORIGIN_UNKNOWN not in clean
     assert scope_note_coverage_warnings(clean) == []
+
+
+def _nested_pair(outer_header_fact: Fact[Any] | None) -> AbiSnapshot:
+    """``ns::Handle`` (the seed) holds a pointer to ``ns::Handle::Impl``,
+    whose only route into the surface is through that seed: nested in a
+    known record, it is never seeded on its own header origin."""
+    outer = _record(
+        source_header=None if outer_header_fact is not None else "/inc/api.h",
+        source_header_fact=outer_header_fact,
+        fields=[TypeField(name="impl", type="ns::Handle::Impl *", offset_bits=0)],
+    )
+    inner = RecordType(
+        name="ns::Handle::Impl",
+        kind="struct",
+        size_bits=32,
+        qualified_name="ns::Handle::Impl",
+        source_header="/inc/api.h",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    return _snap(types=[outer, inner])
+
+
+def _inner_change() -> Change:
+    return Change(
+        kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="ns::Handle::Impl", description=""
+    )
+
+
+@pytest.mark.parametrize("status", sorted(_STATED_UNKNOWN))
+def test_unknown_origin_reaches_types_only_the_blocked_seed_reaches(
+    status: str,
+) -> None:
+    """A type reachable only through a blocked seed inherits its undecided
+    state: its finding is kept or labelled, never a quiet exclusion."""
+    surf = compute_public_surface(_nested_pair(_STATED_UNKNOWN[status]()))
+    in_surface, reason = classify_change_surface(_inner_change(), surf, surf)
+    assert in_surface or reason == REASON_HEADER_ORIGIN_UNKNOWN, (status, reason)
+
+
+def test_nested_type_of_a_read_seed_is_public_and_not_relabelled() -> None:
+    """Controls: with the seed's origin read, the nested type is simply in
+    the surface, and nothing is marked unknown."""
+    surf = compute_public_surface(_nested_pair(None))
+    assert classify_change_surface(_inner_change(), surf, surf) == (True, None)
+    assert not surf.header_origin_unknown_types
+
+
+def test_unreached_type_keeps_its_confirmed_exclusion() -> None:
+    """The extension follows the closure only: a record no blocked seed
+    reaches keeps ``non-public-type``."""
+    snap = _nested_pair(Fact.failed("parse error"))
+    snap.types.append(
+        RecordType(
+            name="detail::Other",
+            kind="struct",
+            size_bits=32,
+            qualified_name="detail::Other",
+        )
+    )
+    surf = compute_public_surface(snap)
+    change = Change(
+        kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="detail::Other", description=""
+    )
+    assert "detail::Other" not in surf.header_origin_unknown_types
+    assert (
+        classify_change_surface(change, surf, surf)[1] != REASON_HEADER_ORIGIN_UNKNOWN
+    )

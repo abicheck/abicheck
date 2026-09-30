@@ -1106,8 +1106,10 @@ def _demote_by_reachability(
         return True, None
     # A demotion resting on an unread header origin is labelled first: it
     # outranks the provenance reasons below, which assume the origin was read.
-    if known & (
-        surf_old.header_origin_unknown_types | surf_new.header_origin_unknown_types
+    if any(
+        c in surf_old.header_origin_unknown_types
+        or c in surf_new.header_origin_unknown_types
+        for c in known
     ):
         return False, REASON_HEADER_ORIGIN_UNKNOWN
     # Reachability demotion. If provenance was available for the snapshot but
