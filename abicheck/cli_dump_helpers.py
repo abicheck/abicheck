@@ -762,7 +762,7 @@ def render_dump_dry_run(
     ``compile_db_matched`` (external review): the *real* result of loading
     ``-p``/``--compile-db`` and checking it against the resolved headers --
     ``cli.dump_cmd`` computes this the same way the real run does
-    (``cli_helpers_compare._resolve_build_context_flags``, the same JSON
+    (``workflows.artifact.compile_db_match.match_compile_db``, the same JSON
     load + path match the real run performs before castxml even runs) and
     passes the outcome in, rather than this function loading it itself.
     Loading and matching a compile database is cheap, deterministic,

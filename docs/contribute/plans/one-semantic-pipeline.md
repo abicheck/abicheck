@@ -17266,6 +17266,17 @@ not new design.
   fallback (`docs/contribute/known-gaps.md`, "ADR-063 Phase 1"). Retiring the
   legacy path therefore means moving the union fallback into the fold for
   *every* caller -- a typed-API behavior change, not a deletion.
+- **Phase 1 legacy `-p` match, closed (2026-09-30).** The two matchers stay
+  distinct (the union fallback is the legacy match's own semantics, and
+  moving it into the P0.3 fold would change every typed-API caller), but the
+  legacy one no longer lives in the CLI: `workflows/artifact/compile_db_match.py`
+  (`match_compile_db`/`try_match_compile_db`) is its single owner, and
+  `execute_dump_request` runs it itself from `DumpExecutionOptions(
+  compile_db=..., compile_db_filter=...)`, emitting the "Build context" note
+  through its own `notify`. `cli_helpers_compare._resolve_build_context_flags`,
+  `dry_run_compile_db_matched` and `dump_build_context_preview.
+  dry_run_build_context_preview` are deleted; the dry run and the real run
+  now call the same function, so they cannot disagree about a match.
 - Phase 1: `cli_dump_helpers.render_dump_dry_run()`'s independent
   resolution logic; the legacy `-p`/`--compile-db` auto-match's standalone
   code path once the fold fully subsumes it (already partly done per

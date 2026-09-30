@@ -5399,6 +5399,19 @@ looked like the obvious fix and wasn't.
   corpus to also parametrize over castxml is real, still-open follow-on
   work this phase did not attempt.
 
+  **Update (2026-09-30): closed.** The legacy match now has one owner in
+  the typed pipeline, `workflows/artifact/compile_db_match.py`, and
+  `execute_dump_request` runs it itself from `DumpExecutionOptions.
+  compile_db`/`compile_db_filter`. The CLI no longer computes tokens and
+  threads them through: `_resolve_build_context_flags`,
+  `dry_run_compile_db_matched` and `dry_run_build_context_preview` are
+  deleted, and the pass-throughs described below are renamed
+  (`legacy_compile_db_tokens` -> `compile_db_tokens`,
+  `_fold_legacy_compile_db_tokens` -> `_fold_compile_db_tokens`). The union
+  fallback remains the legacy match's own semantics and was deliberately not
+  moved into the P0.3 fold (that would change every typed-API caller). The
+  history below is kept as written.
+
   **Update (2026-08-29): the legacy-match threading half of blocker 2 is now
   closed; routing `perform_elf_dump` itself through `execute_dump_request`
   is still open.** This session re-read the exact mechanism the entry above

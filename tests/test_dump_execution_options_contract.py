@@ -19,7 +19,7 @@ what a real run would pass to ``execute_dump_request`` instead of that value
 only ever existing at the executor's own call boundary.
 
 Companion to ``tests/test_legacy_compile_db_typed_threading.py`` (which pins
-the *typed-pipeline* behavior of threading ``legacy_compile_db_tokens``
+the *typed-pipeline* behavior of threading ``compile_db_tokens``
 through an explicit ``options=`` argument -- unaffected by this slice) and
 ``tests/test_dump_request_from_cli.py`` (which pins that the real CLI run
 reads its execution plan off the resolved request, not a parallel local).
@@ -159,43 +159,13 @@ class TestExecuteDumpRequestDefaultsToResolvedExecutionOptions:
         assert seen["allow_build_query"] is None
 
 
-class TestDryRunBuildContextPreview:
-    """``frontends.cli.dump_build_context_preview.dry_run_build_context_preview``
-    -- the silent/non-raising sibling of ``_resolve_build_context_flags``
-    that also returns the derived flags, used only for ``dump --dry-run``'s
-    ``execution_options`` preview."""
+class TestCompileDbMatch:
+    """``workflows.artifact.compile_db_match`` -- the single owner of the
+    legacy ``-p``/``--build-info`` compile-database match, shared by the
+    real run (``execute_dump_request``) and ``dump --dry-run``."""
 
-    def test_none_when_no_compile_db_given(self) -> None:
-        from abicheck.frontends.cli.dump_build_context_preview import (
-            dry_run_build_context_preview,
-        )
-
-        assert dry_run_build_context_preview(None, (), None) is None
-
-    def test_malformed_compile_db_folds_to_empty_rather_than_raising(
-        self, tmp_path: Path
-    ) -> None:
-        from abicheck.frontends.cli.dump_build_context_preview import (
-            dry_run_build_context_preview,
-        )
-
-        bad_db = tmp_path / "compile_commands.json"
-        bad_db.write_text("not json{{{", encoding="utf-8")
-        assert dry_run_build_context_preview(bad_db, (), None) == ([], False)
-
-    def test_matches_real_resolver_for_a_flagless_but_matched_entry(
-        self, tmp_path: Path
-    ) -> None:
-        """A real compile-DB entry with no ABI-relevant flags still counts
-        as ``matched`` -- mirrors ``_resolve_build_context_flags``'s own
-        documented "matched, flagless" case, without needing g++/castxml:
-        loading and matching a compile database is pure JSON/path
-        resolution, no compiler invocation."""
-        from abicheck.cli_helpers_compare import _resolve_build_context_flags
-        from abicheck.frontends.cli.dump_build_context_preview import (
-            dry_run_build_context_preview,
-        )
-
+    @staticmethod
+    def _db(tmp_path: Path, args: list[str]) -> Path:
         src = tmp_path / "a.cpp"
         src.write_text("int f() { return 1; }\n", encoding="utf-8")
         compile_db = tmp_path / "compile_commands.json"
@@ -204,17 +174,69 @@ class TestDryRunBuildContextPreview:
                 [
                     {
                         "directory": str(tmp_path),
-                        "arguments": ["c++", "-c", str(src), "-o", "a.o"],
+                        "arguments": [*args, "-c", str(src), "-o", "a.o"],
                         "file": str(src),
                     }
                 ]
             ),
             encoding="utf-8",
         )
-        preview = dry_run_build_context_preview(compile_db, (), None)
-        real_flags, real_matched = _resolve_build_context_flags(compile_db, (), None)
-        assert preview == (real_flags, real_matched)
-        assert preview == ([], True)
+        return compile_db
+
+    def test_none_when_no_compile_db_given(self) -> None:
+        from abicheck.workflows.artifact.compile_db_match import try_match_compile_db
+
+        assert try_match_compile_db(None, (), None) is None
+
+    @pytest.mark.parametrize("content", ["not json{{{", "{}", "[1, 2]"])
+    def test_malformed_compile_db_folds_to_unmatched_rather_than_raising(
+        self, tmp_path: Path, content: str
+    ) -> None:
+        from abicheck.workflows.artifact.compile_db_match import (
+            CompileDbMatch,
+            try_match_compile_db,
+        )
+
+        bad_db = tmp_path / "compile_commands.json"
+        bad_db.write_text(content, encoding="utf-8")
+        assert try_match_compile_db(bad_db, (), None) == CompileDbMatch()
+
+    def test_missing_compile_db_raises_from_the_strict_form(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.errors import AbicheckError
+        from abicheck.workflows.artifact.compile_db_match import match_compile_db
+
+        with pytest.raises((AbicheckError, OSError)):
+            match_compile_db(tmp_path / "missing.json", (), None)
+
+    @pytest.mark.parametrize(
+        ("args", "expect_token"),
+        [
+            (["c++"], None),
+            (["c++", "-DFOO=1"], "-DFOO=1"),
+            (["g++", "-std=c++17", "-DWIDE=1", "-fPIC"], "-DWIDE=1"),
+        ],
+    )
+    def test_matched_entry_counts_as_matched_with_or_without_flags(
+        self, tmp_path: Path, args: list[str], expect_token: str | None
+    ) -> None:
+        """A real entry matches even when it carries no ABI-relevant flag;
+        the strict and the silent form agree on every such input."""
+        from abicheck.workflows.artifact.compile_db_match import (
+            match_compile_db,
+            try_match_compile_db,
+        )
+
+        compile_db = self._db(tmp_path, args)
+        strict = match_compile_db(compile_db, (), None)
+        assert strict == try_match_compile_db(compile_db, (), None)
+        assert strict.matched
+        assert strict.entry_count == 1
+        if expect_token is None:
+            assert strict.tokens == ()
+        else:
+            assert expect_token in strict.tokens
 
 
 class TestExecutionOptionsDryRunSection:
@@ -236,6 +258,10 @@ class TestExecutionOptionsDryRunSection:
         add_execution_options_dry_run_section(result, resolved)
         assert "Execution options" not in result.sections
 
+    @staticmethod
+    def _flagged_db(tmp_path: Path) -> Path:
+        return TestCompileDbMatch._db(tmp_path, ["c++", "-DFOO=1"])
+
     def test_shown_when_execution_options_resolved(self, tmp_path: Path) -> None:
         import dataclasses
 
@@ -251,8 +277,7 @@ class TestExecutionOptionsDryRunSection:
             execution_options=DumpExecutionOptions(
                 build_config=tmp_path / ".abicheck.yml",
                 allow_build_query=True,
-                legacy_compile_db_tokens=("-DFOO=1",),
-                legacy_compile_db_matched=True,
+                compile_db=self._flagged_db(tmp_path),
                 seed_collect_mode="off",
                 source_frontend_from_folded_context=True,
             ),
@@ -310,4 +335,5 @@ def test_dump_dry_run_cli_reports_execution_options(
     assert "allow build query: True" in result.output
     assert "source frontend from folded context: True" in result.output
     if has_compile_db:
-        assert "legacy compile-db flags:" in result.output
+        assert "compile-db flags:" in result.output
+        assert "(matched)" in result.output

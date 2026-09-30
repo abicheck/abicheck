@@ -36,7 +36,7 @@ the typed pipeline (``execute_dump_request`` and everything it feeds --
 ``run_dump_request``, ``compare``'s implicit dump, ``scan``'s candidate) had
 no way to see it at all.
 
-``execute_dump_request``'s new ``legacy_compile_db_tokens`` parameter closes
+``execute_dump_request``'s new ``compile_db_tokens`` parameter closes
 that gap for any caller willing to compute the legacy match's own flags
 (exactly as ``dump_cmd`` already does, via ``_resolve_build_context_flags``)
 and pass them through -- proven here end to end against a real compile
@@ -46,7 +46,7 @@ this parameter yet (it still executes through ``perform_elf_dump``, not
 ``execute_dump_request`` -- see the known-gaps entry for what still needs
 routing), so this file additionally pins that the parameter is a true no-op
 by default: the *same* typed request, run without
-``legacy_compile_db_tokens``, must NOT see the union-fallback evidence,
+``compile_db_tokens``, must NOT see the union-fallback evidence,
 proving the new capability is opt-in and additive rather than a silent
 default-on behavior change.
 """
@@ -208,7 +208,7 @@ class TestTypedApiThreadsTheLegacyMatch:
     ) -> None:
         """Proves the gap this slice closes actually existed, and that the
         new parameter is genuinely opt-in rather than vacuously already
-        equal: with no `legacy_compile_db_tokens` passed (the pre-existing,
+        equal: with no `compile_db_tokens` passed (the pre-existing,
         still-default behavior for every caller today), the typed path's
         own P0.3 fold fails closed on this header (no `#include` evidence)
         and the union-fallback flags never reach the parse at all."""
@@ -229,7 +229,7 @@ class TestTypedApiThreadsTheLegacyMatch:
         assert fields, result.snapshot.declarations.types
         assert "b" not in fields, (
             "typed path unexpectedly saw the -DWIDE=1 define with no "
-            "legacy_compile_db_tokens threaded -- either the fold now "
+            "compile_db_tokens threaded -- either the fold now "
             "matches this shape (fixture assumption stale) or the new "
             "parameter default changed behavior for existing callers"
         )
@@ -237,36 +237,28 @@ class TestTypedApiThreadsTheLegacyMatch:
     def test_with_legacy_tokens_the_typed_path_agrees_with_the_real_cli_run(
         self, tmp_path: Path
     ) -> None:
-        """The actual proof: the legacy match's flags, computed exactly the
-        way `dump_cmd` computes them today
-        (`cli_helpers_compare._resolve_build_context_flags`), threaded
-        through `execute_dump_request(..., options=DumpExecutionOptions(
-        legacy_compile_db_tokens=...))`,
-        make the typed path resolve the identical header-AST evidence the
-        real CLI run already does."""
-        from abicheck.cli_helpers_compare import _resolve_build_context_flags
+        """The actual proof: the legacy match, now owned by
+        `workflows.artifact.compile_db_match.match_compile_db` and run by
+        `execute_dump_request` itself from `DumpExecutionOptions(
+        compile_db=...)`, makes the typed path resolve the header-AST
+        evidence the compile database implies."""
         from abicheck.service_dump_pipeline import (
             DumpExecutionOptions,
             execute_dump_request,
             resolve_dump_request,
         )
+        from abicheck.workflows.artifact.compile_db_match import match_compile_db
 
         so_path, header, compile_db = _project(tmp_path)
 
-        # The CLI's own real-execution branch computes exactly this, from
-        # exactly this input, before folding it into `effective_gcc_options`
-        # -- see `cli.py`'s `dump_cmd` (`_resolve_build_context_flags(
-        # effective_compile_db, headers, compile_db_filter)`).
-        legacy_flags, matched = _resolve_build_context_flags(
-            compile_db, (header,), None
-        )
-        assert matched, "the legacy union-fallback match itself did not fire"
-        assert legacy_flags, "the legacy match derived no flags to thread"
+        match = match_compile_db(compile_db, (header,), None)
+        assert match.matched, "the legacy union-fallback match itself did not fire"
+        assert match.tokens, "the legacy match derived no flags to thread"
 
         request = self._request(so_path, header, compile_db)
         result = execute_dump_request(
             resolve_dump_request(request),
-            options=DumpExecutionOptions(legacy_compile_db_tokens=tuple(legacy_flags)),
+            options=DumpExecutionOptions(compile_db=compile_db),
         )
         fields = [
             f.name
@@ -276,7 +268,7 @@ class TestTypedApiThreadsTheLegacyMatch:
         ]
         assert fields, result.snapshot.declarations.types
         assert "b" in fields, (
-            "typed path with legacy_compile_db_tokens threaded still did "
+            "typed path with compile_db_tokens threaded still did "
             "not see -DWIDE=1 -- the merge into the resolved CompileContext "
             "is not reaching the real service.resolve_input() parse"
         )
@@ -285,7 +277,7 @@ class TestTypedApiThreadsTheLegacyMatch:
         """Precedence pin (mirrors `perform_elf_dump`'s own "legacy-match
         overlap" fix): when the P0.3 fold DOES independently match a header
         (a real `#include`), its own result must win outright -- passing
-        `legacy_compile_db_tokens` must not additionally stack a duplicate
+        `compile_db_tokens` must not additionally stack a duplicate
         `-D` on top of it."""
         from abicheck.service import DumpRequest, InputSpec
         from abicheck.service_dump_pipeline import (
@@ -352,16 +344,17 @@ class TestTypedApiThreadsTheLegacyMatch:
         baseline_flags = _rendered(baseline.effective_compile_context)
         assert baseline_flags.count("-DFOO=1") == 1, baseline_flags
 
-        # Threading the identical legacy-derived flags must not double them
-        # up on top of the fold's own result.
+        # Running the legacy match over the same database (which derives the
+        # identical `-DFOO=1`) must not double it up on top of the fold's
+        # own result.
         stacked = execute_dump_request(
             resolve_dump_request(request),
-            options=DumpExecutionOptions(legacy_compile_db_tokens=("-DFOO=1",)),
+            options=DumpExecutionOptions(compile_db=compile_db),
         )
         assert stacked.effective_compile_context is not None
         stacked_flags = _rendered(stacked.effective_compile_context)
         assert stacked_flags.count("-DFOO=1") == 1, (
-            "legacy_compile_db_tokens was folded in even though the P0.3 "
+            "compile_db_tokens was folded in even though the P0.3 "
             "fold already applied -- precedence regression"
         )
         assert stacked_flags == baseline_flags

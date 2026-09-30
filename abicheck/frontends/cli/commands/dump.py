@@ -44,7 +44,6 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
     _merge_gcc_options as _merge_gcc_options,
     _merge_redundant_changes as _merge_redundant_changes,
     _provenance_timestamp as _provenance_timestamp,
-    _resolve_build_context_flags as _resolve_build_context_flags,
     _version_sort_key as _version_sort_key,
     _warn_ignored_flags as _warn_ignored_flags,
 )
@@ -588,10 +587,9 @@ def dump_cmd(
     #
     # CLI cleanup phase two, PR C: the real ELF run now executes through
     # `execute_dump_request` too, given the legacy `-p`/`--compile-db`
-    # auto-match's own derived flags (`_resolve_build_context_flags`,
-    # computed below, strictly after `_resolved` here) as an explicit
-    # pass-through (ADR-063 Phase 1's `legacy_compile_db_tokens`/
-    # `legacy_compile_db_matched` parameters) -- see the real-run call site
+    # auto-match, now matched by the pipeline itself from the compile
+    # database path (ADR-063 Phase 10: `DumpExecutionOptions.compile_db`,
+    # `workflows.artifact.compile_db_match`) -- see the real-run call site
     # below, and `docs/contribute/known-gaps.md`'s "PR C" entry for the
     # precise mechanism this closes. PE/Mach-O now executes through the
     # identical `execute_dump_request` pipeline too (ADR-063 Phase 1's own
@@ -645,26 +643,23 @@ def dump_cmd(
     # ADR-063 Track T4: attach a dry-run-safe *preview* of the execution
     # options onto the resolved request, so `--dry-run` can render what the
     # real run below would pass to `execute_dump_request` -- see
-    # `dry_run_build_context_preview`'s own docstring for the one accepted
-    # imprecision vs. the real run's `_resolve_build_context_flags`.
+    # `try_match_compile_db`'s own docstring for the one accepted
+    # imprecision vs. the real run's `match_compile_db`.
     from ....service_dump_pipeline import DumpExecutionOptions
+    from ....workflows.artifact.compile_db_match import try_match_compile_db
     from ..dump_build_context_preview import (
         add_execution_options_dry_run_section,
         add_ownership_dry_run_section,
-        dry_run_build_context_preview,
     )
 
-    _preview_flags, _preview_matched = dry_run_build_context_preview(
-        compile_db_path, headers, compile_db_filter
-    ) or ([], False)
     _resolved = dataclasses.replace(
         _resolved,
         execution_options=DumpExecutionOptions(
             build_config=config_path,
             build_config_explicit=_project.explicit,
             allow_build_query=True,
-            legacy_compile_db_tokens=tuple(_preview_flags),
-            legacy_compile_db_matched=_preview_matched,
+            compile_db=compile_db_path,
+            compile_db_filter=compile_db_filter,
             seed_collect_mode=_resolved.collect_mode,
             source_frontend_from_folded_context=True,
             # `_resolved_changed_paths` (ADR-068 Phase 2c): the changed-path
@@ -680,15 +675,10 @@ def dump_cmd(
         from ....cli_buildsource_helpers import _is_inputs_pack_dir
         from ....cli_dump_dry_run_build_query import add_build_query_dry_run_section
         from ....cli_dump_helpers import render_dump_dry_run
-        from ....cli_helpers_compare import dry_run_compile_db_matched
         from ....workflows.extraction import is_pack_dir
 
-        _dry_matched = dry_run_compile_db_matched(
-            compile_db_path,
-            None,
-            headers,
-            compile_db_filter,
-        )
+        _dry_match = try_match_compile_db(compile_db_path, headers, compile_db_filter)
+        _dry_matched = None if _dry_match is None else _dry_match.matched
         _dry_result = render_dump_dry_run(
             _resolved,
             output=output,
@@ -820,16 +810,8 @@ def dump_cmd(
 
     effective_compile_db = compile_db_path
 
-    # Resolved before the PE/Mach-O dispatch (Codex review): both binary-format
-    # branches need the same --build-info -> castxml/clang flags and matched
-    # signal -- the ELF path used to compute these only after the PE/Mach-O
-    # early return, so a compile database's flags were silently dropped for
-    # PE/Mach-O input (parsed_with_build_context was never stamped either).
-    build_context_flags, compile_db_matched = _resolve_build_context_flags(
-        effective_compile_db,
-        headers,
-        compile_db_filter,
-    )
+    # The compile database is matched by the pipeline itself, for either
+    # binary format (ADR-063 Phase 10); see `DumpExecutionOptions.compile_db`.
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
@@ -905,8 +887,8 @@ def dump_cmd(
             build_config=config_path,
             build_config_explicit=_project.explicit,
             allow_build_query=True,
-            legacy_compile_db_tokens=tuple(build_context_flags),
-            legacy_compile_db_matched=compile_db_matched,
+            compile_db=effective_compile_db,
+            compile_db_filter=compile_db_filter,
             # Codex review, two real regressions on the original ELF
             # migration: `perform_elf_dump` always forwarded its own
             # resolved collect mode to the L2 seed (running a zero-config

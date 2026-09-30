@@ -78,6 +78,7 @@ if TYPE_CHECKING:
     from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
+    from .workflows.artifact.compile_db_match import CompileDbMatch
     from .workflows.contracts import DumpRequest
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
@@ -377,6 +378,24 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     )
 
 
+def _announce_compile_db_match(
+    notify: Callable[[str], None] | None, path: Path, match: CompileDbMatch
+) -> None:
+    """The progress note the CLI printed for a compile database that derived
+    flags, now emitted through the pipeline's own *notify*."""
+    if notify is None or not match.tokens:
+        return
+    notify(
+        f"Build context: {match.entry_count} entries from {path}, "
+        f"{len(match.tokens)} flags derived"
+    )
+    if match.has_conflicts:
+        notify(
+            "Warning: conflicting flags detected in compile database; "
+            "using first-match values. See --verbose for details."
+        )
+
+
 def execute_dump_request(
     resolved: ResolvedDumpRequest,
     *,
@@ -415,6 +434,10 @@ def execute_dump_request(
     """
     from .dependency_info import populate_side_dependency_info
     from .evidence_depth import depth_rank, gated_source_label
+    from .workflows.artifact.compile_db_match import (
+        CompileDbMatch as _CompileDbMatch,
+        match_compile_db,
+    )
 
     if options is None:
         options = resolved.execution_options or DumpExecutionOptions()
@@ -447,6 +470,14 @@ def execute_dump_request(
             resolved_execution_context=outcome.resolved_execution_context,
         )
 
+    # ADR-063 Phase 10: the `-p`/`--compile-db` match is the pipeline's own,
+    # not a set of tokens a front end pre-derived (see compile_db_match).
+    compile_db = _CompileDbMatch()
+    if options.compile_db is not None:
+        compile_db = match_compile_db(
+            options.compile_db, side.headers, options.compile_db_filter
+        )
+        _announce_compile_db_match(notify, options.compile_db, compile_db)
     resolution = _resolve_side_snapshot_impl(
         side,
         resolved.evidence,
@@ -480,8 +511,8 @@ def execute_dump_request(
         build_compile_db=options.build_compile_db,
         changed_paths=options.changed_paths,
         allow_build_query=options.allow_build_query,
-        legacy_compile_db_tokens=options.legacy_compile_db_tokens,
-        legacy_compile_db_matched=options.legacy_compile_db_matched,
+        compile_db_tokens=compile_db.tokens,
+        compile_db_matched=compile_db.matched,
         seed_collect_mode=options.seed_collect_mode,
         source_frontend_from_folded_context=options.source_frontend_from_folded_context,
     )

@@ -106,7 +106,7 @@ class TestExtractExplicitStdValue:
         what would have been the `gcc_options` string's own content into
         `gcc_option_tokens` itself (ADR-063 Phase 1's legacy compile-db
         token fold, `workflows/artifact/resolve.py`'s
-        `_fold_legacy_compile_db_tokens`, does exactly this) -- the old
+        `_fold_compile_db_tokens`, does exactly this) -- the old
         `_combined_option_tokens`-plus-first-match implementation depended
         on the two fields staying separate to get this right; a caller that
         has already collapsed them into one ordered tuple broke that
