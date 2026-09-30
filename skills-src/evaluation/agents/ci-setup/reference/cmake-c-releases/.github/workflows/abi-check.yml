@@ -1,0 +1,25 @@
+name: ABI check
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: abi-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  abi-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - run: cmake --build build -j
+      - uses: abicheck/abicheck@v0.6.0
+        with:
+          abi-baseline: latest-release
+          new-library: build/libgeom.so
+          new-header: include/
+          lang: c
+          fail-on-breaking: ${{ !contains(github.event.pull_request.labels.*.name, 'abi-break-approved') }}

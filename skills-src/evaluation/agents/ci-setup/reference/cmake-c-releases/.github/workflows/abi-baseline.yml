@@ -1,0 +1,35 @@
+name: ABI baseline
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to attach a snapshot to
+        required: true
+permissions:
+  contents: read
+jobs:
+  dump:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          ref: ${{ env.TAG }}
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - run: cmake --build build -j
+      - uses: abicheck/abicheck@v0.6.0
+        with:
+          mode: dump
+          new-library: build/libgeom.so
+          header: include/
+          lang: c
+          new-version: ${{ env.TAG }}
+          output-file: libgeom.abicheck.json
+      - run: gh release upload "$TAG" libgeom.abicheck.json --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

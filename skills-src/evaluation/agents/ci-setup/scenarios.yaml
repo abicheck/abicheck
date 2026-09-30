@@ -1,0 +1,189 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Scenario corpus for the `set-up-abi-compatibility-ci` skill evaluation.
+#
+# Each scenario is a small GitHub-shaped repository (fixtures/<fixture>/) plus
+# the request a maintainer would type. The runner materializes the fixture
+# into a fresh git repository outside this checkout (commits, the listed tags,
+# a github.com `origin` remote), runs the agent on `prompt`, and the grader
+# scores the workflow files the agent left behind with `checks`.
+#
+# Check vocabulary lives in grader.py (CHECKS). `common_checks` apply to every
+# scenario; a scenario adds its own with parameters. Checks listed in
+# `critical` are the zero-tolerance set: a run that fails any of them produced
+# a workflow that is unsafe, checks nothing meaningful, or cannot run.
+
+schema_version: 1
+
+common_checks:
+  - yaml_valid
+  - abicheck_workflow_on_pr
+  - pinned_abicheck
+  - no_pull_request_target
+  - permissions_declared
+  - contents_write_not_on_pr
+  - no_retired_inputs
+  - no_continue_on_error
+  - not_self_compare
+  - debug_info
+  - toolchain_via_action
+  - pins_are_commits
+
+critical:
+  - yaml_valid
+  - abicheck_workflow_on_pr
+  - pinned_abicheck
+  - no_pull_request_target
+  - no_retired_inputs
+  - no_continue_on_error
+  - not_self_compare
+  - lang
+  - headers_public
+  - covers_libs
+  - baseline_release
+  - baseline_without_releases
+  - no_ambiguous_latest_release
+  - single_abi_workflow
+  - baseline_meaningful
+  - shared_build
+  - toolchain_via_action
+  - pins_are_commits
+  - runtime_floors_declared
+  - runner_pinned
+  - source_depth_complete
+  - baseline_has_source_evidence
+  - cross_toolchain
+  - library_path_plausible
+
+# Annotated-tag *object* SHAs (the `refs/tags/<tag>` line of `git ls-remote`
+# when a `^{}` line also exists). A `uses:` pinned to one does not resolve;
+# the commit is the `^{}` line. Recorded from `git ls-remote` on 2026-09-30.
+tag_object_shas:
+  2ff668d3907e9368b51ea6240768c1bb3f36f8db: abicheck/abicheck v0.6.0 (commit a1f78b640ba29960251f7043c17ae98a647ee135)
+  9f698171ed81b15d1823a05fc7211befd50c8ae0: actions/checkout v6.0.3 (commit df4cb1c069e1874edd31b4311f1884172cec0e10)
+
+scenarios:
+  - id: cmake-c-releases
+    fixture: cmake-c-releases
+    tags: [v1.0.0, v1.1.0]
+    prompt: >-
+      We have this GitHub repository. Please add ABI compatibility checking
+      with abicheck to our GitHub Actions so pull requests that break the
+      library get caught.
+    checks:
+      lang: {expect: c}
+      headers_public: {}
+      covers_libs: {libs: [geom]}
+      baseline_release: {}
+      release_bootstrap: {}
+
+  - id: cmake-cpp-no-releases
+    fixture: cmake-cpp-no-releases
+    tags: []
+    prompt: Set up ABI compatibility checks for our library in GitHub Actions.
+    checks:
+      lang: {expect: c++}
+      headers_public: {}
+      covers_libs: {libs: [tinyjson]}
+      baseline_without_releases: {}
+      shared_build: {}
+
+  - id: make-two-libs
+    fixture: make-two-libs
+    tags: [v1.0, v2.0]
+    prompt: >-
+      Нужно включить проверку ABI через abicheck в GitHub Actions для этого
+      репозитория.
+    checks:
+      lang: {expect: c}
+      headers_public: {}
+      covers_libs: {libs: [alpha, beta]}
+      no_ambiguous_latest_release: {libs: 2}
+
+  - id: cmake-cpp-broken-check
+    fixture: cmake-cpp-broken-check
+    tags: [v2.2.0, v2.3.0, v2.4.0]
+    prompt: >-
+      Our ABI check in CI never seems to fail. Can you fix our abicheck setup
+      so it actually protects us?
+    checks:
+      lang: {expect: c++}
+      headers_public: {}
+      covers_libs: {libs: [codec]}
+      single_abi_workflow: {}
+      baseline_meaningful: {placeholder: abi/baseline.json}
+      report_mentions:
+        patterns: ["continue-on-error", "(mode: ?scan|retired|scan)"]
+
+  - id: meson-c-forks
+    fixture: meson-c-forks
+    tags: [v2.9.0, v3.0.0, v3.0.1]
+    prompt: >-
+      Integrate abicheck into our CI on GitHub so contributors find out when
+      their pull request breaks the ABI.
+    checks:
+      lang: {expect: c}
+      headers_public: {}
+      covers_libs: {libs: [ring]}
+      baseline_release: {}
+      release_bootstrap: {}
+      report_mentions:
+        patterns: ["fork"]
+
+  # ------------------------------------------------ depth / toolchain / floors
+  - id: cmake-c-rhel8-floor
+    fixture: cmake-c-rhel8-floor
+    tags: [v4.1.0, v4.2.0]
+    prompt: Add abicheck ABI checks to our GitHub Actions.
+    checks:
+      lang: {expect: c}
+      headers_public: {}
+      covers_libs: {libs: [zpack]}
+      baseline_release: {}
+      release_bootstrap: {}
+      runtime_floors_declared: {floors: {GLIBC: "2.28"}}
+      runner_pinned: {}
+
+  - id: cmake-cpp-inline-heavy
+    fixture: cmake-cpp-inline-heavy
+    tags: [v1.7.0, v1.8.0]
+    prompt: >-
+      Set up abicheck in our CI so we stop shipping breaking changes to our
+      users.
+    checks:
+      lang: {expect: c++}
+      headers_public: {}
+      covers_libs: {libs: [vecmath]}
+      source_depth_complete: {}
+      baseline_has_source_evidence: {}
+
+  - id: autotools-c
+    fixture: autotools-c
+    tags: [v2.0.0, v2.1.0]
+    prompt: Please wire abicheck into GitHub Actions for this project.
+    checks:
+      lang: {expect: c}
+      headers_public: {}
+      covers_libs: {libs: [token]}
+      library_path_plausible: {hint: "\\.libs/|DESTDIR|make install|--prefix"}
+
+  - id: bazel-cpp
+    fixture: bazel-cpp
+    tags: [v0.8.0, v0.9.0]
+    prompt: Настрой проверку совместимости ABI с abicheck в GitHub Actions.
+    checks:
+      lang: {expect: c++}
+      headers_public: {}
+      covers_libs: {libs: [kv]}
+      library_path_plausible: {hint: "bazel-bin/"}
+
+  - id: cross-aarch64
+    fixture: cross-aarch64
+    tags: [v3.2.0, v3.3.0]
+    prompt: Add an ABI compatibility gate with abicheck to our CI.
+    checks:
+      lang: {expect: c}
+      headers_public: {}
+      covers_libs: {libs: [sensor]}
+      cross_toolchain: {}

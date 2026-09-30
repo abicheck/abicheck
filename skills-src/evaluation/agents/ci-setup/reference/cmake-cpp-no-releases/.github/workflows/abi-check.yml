@@ -1,0 +1,27 @@
+name: ABI check
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  abi-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: new
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: old
+      - run: cmake -S old -B old/build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_SHARED_LIBS=ON && cmake --build old/build -j
+      - run: cmake -S new -B new/build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_SHARED_LIBS=ON && cmake --build new/build -j
+      - uses: abicheck/abicheck@v0.6.0
+        with:
+          old-library: old/build/libtinyjson.so
+          new-library: new/build/libtinyjson.so
+          old-header: old/include
+          new-header: new/include

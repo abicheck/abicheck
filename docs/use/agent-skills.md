@@ -12,8 +12,8 @@ generated: false
 
 # Agent Skills
 
-abicheck publishes one [Agent Skill](https://agentskills.io) — a portable,
-triggerable package of native-compatibility expertise that a coding agent
+abicheck publishes three [Agent Skills](https://agentskills.io) — portable,
+triggerable packages of native-compatibility expertise that a coding agent
 (Claude Code, GitHub Copilot, OpenAI Codex, Cursor, Gemini CLI) loads when a
 user asks a compatibility question in their own words.
 
@@ -90,6 +90,7 @@ still-unrun behavioral evaluation. The same status is also kept in `skills-src/C
 |---|---|---|
 | [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/skills-src/check-abi-compatibility/SKILL.md) | **Preview** (`npx skills add abicheck/abicheck`) | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
 | [`explain-abi-change`](https://github.com/abicheck/abicheck/blob/main/skills-src/explain-abi-change/SKILL.md) | **Preview** (same install) | "What changed in this library, and why does my program behave like this?" — starts from what the developer observed (`undefined symbol`, `version ... not found`, a crash or wrong results after an update, a plugin that stops loading, or just a library bump with different symbols), finds which library copy is really used, compares it with the one the program was built against, and names the mechanism and what to do. Also says when the change is harmless or not ABI-related. |
+| [`set-up-abi-compatibility-ci`](https://github.com/abicheck/abicheck/blob/main/skills-src/set-up-abi-compatibility-ci/SKILL.md) | **Preview** (`npx skills add abicheck/abicheck`) | "Set up ABI compatibility checks for our library in GitHub Actions." — inspects the repository (build system, shared libraries, public headers, language, release process), picks a baseline strategy (release snapshot, merge-base build, or committed snapshot), and writes a pinned, least-privilege workflow with a staged rollout and a setup report. Also repairs an existing check that never fails. Evaluation: [`skills-src/evaluation/agents/ci-setup/`](https://github.com/abicheck/abicheck/tree/main/skills-src/evaluation/agents/ci-setup). |
 
 ## Installing it
 
