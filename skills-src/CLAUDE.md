@@ -31,6 +31,14 @@ Generated output, per skill, per target tree:
   references/shared/<fragment>.md    # copied, not symlinked
 ```
 
+## User-facing docs
+
+What the skills do and how to install them: `docs/use/agent-skills.md`.
+How a downstream library repository enables them for all of its
+contributors' agents (commit the installed skills, provide the CLI, describe
+headers/build/baseline in `AGENTS.md`): `docs/use/agent-skills-in-your-repo.md`.
+Keep both in sync when a skill is added, renamed, or retired.
+
 ## The three layers (ADR-058)
 
 - **Layer A — `SKILL.md`.** The only layer whose `name`/`description`

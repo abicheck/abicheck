@@ -109,7 +109,7 @@ needs:
 **Automating through Python or an agent?**
 
 - [Python API](use/python-api.md) — typed requests, and a CLI/Python parity table.
-- [Agent Skills](use/agent-skills.md) — four portable, triggerable skills a coding agent (Claude Code, Copilot, Codex, Cursor, Gemini CLI) loads to answer a compatibility question in the user's own words, no MCP server required.
+- [Agent Skills](use/agent-skills.md) — three portable, triggerable skills (preview) a coding agent (Claude Code, Copilot, Codex, Cursor, Gemini CLI) loads to answer a compatibility question in the user's own words, no MCP server required. To enable them for everyone working in your repository, see [Enabling skills in your repository](use/agent-skills-in-your-repo.md).
 
 **Migrating from another tool?**
 
