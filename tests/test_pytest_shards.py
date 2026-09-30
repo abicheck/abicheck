@@ -212,3 +212,10 @@ def test_the_option_really_deselects_through_pytest(tmp_path: Path) -> None:
     parts = [collected(f"--shard={k}/2") for k in (1, 2)]
     assert whole and parts[0] and parts[1]
     assert parts[0] | parts[1] == whole and not parts[0] & parts[1]
+
+
+def test_the_committed_weights_file_loads_and_is_nonnegative() -> None:
+    weights = load_weights()
+    assert len(weights) > 100, "tests/shard_weights.json is missing or nearly empty"
+    assert all(v >= 0 for v in weights.values())
+    assert all(k.startswith("tests/") and k.endswith(".py") for k in weights)
