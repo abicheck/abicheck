@@ -101,7 +101,9 @@ When every "removed" symbol is one the used library never had yet — the
 used copy is an *older* release than the build's — compare in the other
 direction too. If the used-to-built-against comparison shows only additions,
 the library did not remove anything; the program was built against a newer
-release than the one it runs on.
+release than the one it runs on. The reverse comparison is evidence for the
+mechanism only: the change you report is still the one from the
+built-against library to the used one, which removes what the program needs.
 
 When the two copies come from the same source but different builds, check
 the build flags too. `-D_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-std`

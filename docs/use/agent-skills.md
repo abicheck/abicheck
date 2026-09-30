@@ -55,10 +55,11 @@ methodology and caveats are in
 wants to understand what changed between a program and the shared libraries
 it uses, whether something fails or not. It was evaluated on 10 scenarios in
 the same way.
-With the skill, the agent always backed its diagnosis with a real comparison
-and graded severity correctly (18 of 18 runs, against 16 of 18). Without it,
-the agent named the right cause just as often, so the skill's measured value
-so far is evidence and correct severity, not a better guess at the cause.
+With the skill, the agent backed every answer with a real comparison (20 of
+20 runs, against 14 of 20 without it), and had one zero-tolerance failure
+against eight. Without it, the agent named the right mechanism just as often,
+so the skill's measured value so far is evidence, not a better guess at the
+cause.
 See [its pilot report](https://github.com/abicheck/abicheck/blob/main/skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md).
 
 **Portfolio status (2026-08-20):** the portfolio was reset from four

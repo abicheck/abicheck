@@ -62,6 +62,26 @@ A **second skill, `explain-abi-change`**, was admitted on 2026-09-30 (see
 that amendment below), with its own evaluation corpus and pilot.
 **Decision maker:** (pending — recorded per repository convention)
 
+> **Amendment (2026-09-30, later the same day — renamed to
+> `explain-abi-change` and widened — user-requested).**
+>
+> Before release the skill was renamed from `debug-abi-failure` and its
+> intent widened: not only "a program stopped working", but a developer
+> working out what changed between a program and the libraries it uses,
+> failing or not (Product positioning phrasing 10). The closed vocabulary
+> gains `library_older_than_build`, told apart from `symbol_removed` by
+> comparing in the reverse direction, and the corpus gains two scenarios
+> (a program built against a newer release than it runs on, and an
+> additions-only update where nothing fails). Re-run pilot, 10 scenarios,
+> 20 runs per arm: correct answer 19/20 with the skill vs 20/20 without;
+> ran a comparison 20/20 vs 14/20; zero-tolerance failures 1/20 vs 8/20.
+> The one skill-arm miss named the right mechanism but emitted two claim
+> blocks; the skill's wording was fixed and that scenario re-run 3/3. The
+> finding is unchanged: the skill adds evidence, not diagnostic accuracy.
+> Everything below this amendment that says `debug-abi-failure`, "runtime
+> failure", six causes, or eight scenarios describes the skill before the
+> rename.
+
 > **Amendment (2026-09-30, second skill — `explain-abi-change` —
 > user-requested).**
 >
