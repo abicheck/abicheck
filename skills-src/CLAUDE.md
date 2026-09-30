@@ -104,6 +104,7 @@ implied is reset → rewrite → evaluate → publish, and this is step two.
 | Skill | Status | Meaning |
 |---|---|---|
 | `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The sole published skill. The 2026-09-29 pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
+| `set-up-abi-compatibility-ci` | **Preview — second candidate, admitted by ADR-058's 2026-09-30 amendment.** | Onboards a GitHub repository onto abicheck via GitHub Actions: repository inventory → baseline strategy → gate/rollout → workflow files → validation → setup report. Evaluated by its own static-grading A/B harness, `skills-src/evaluation/agents/ci-setup/` (results in `results/`); same caveats: one model, corpus written with the skill. |
 
 **What "PR 2" integrated, over the bare rename the reset amendment left in
 place:**
@@ -168,7 +169,7 @@ scope. See the ADR amendment for the full accounting of what was deferred.
 
 **What this means in practice:**
 
-- Don't add a second published skill. Rebuilding
+- Don't add a third published skill. Rebuilding
   `native-release-compatibility` (or anything else) as a public skill needs
   its own pass through ADR-058's five-criteria admission bar, informed by
   whatever this one candidate's evaluation actually finds — not a

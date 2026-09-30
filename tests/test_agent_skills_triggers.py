@@ -61,7 +61,7 @@ _STOPWORDS = frozenset(
 
 
 def _adr_prompts() -> list[str]:
-    """The seven canonical prompts, parsed from ADR-058's own section.
+    """The eight canonical prompts, parsed from ADR-058's own section.
 
     Deliberately narrow: only the numbered, quoted lines of the Product
     positioning list, so the parse cannot drift into surrounding prose.
@@ -101,7 +101,7 @@ def test_corpus_prompts_match_adr_058_verbatim():
     these strings. An ADR wording change that is not mirrored into the corpus
     must fail here rather than leave the corpus quietly stale."""
     adr = _adr_prompts()
-    assert len(adr) == 7, f"expected seven canonical prompts, parsed {len(adr)}"
+    assert len(adr) == 8, f"expected eight canonical prompts, parsed {len(adr)}"
     corpus = [entry["prompt"] for entry in POSITIVE]
     assert corpus == adr
 

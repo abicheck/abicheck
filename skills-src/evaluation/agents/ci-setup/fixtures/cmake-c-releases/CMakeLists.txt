@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(geom VERSION 1.1.0 LANGUAGES C)
+add_library(geom SHARED src/geom.c src/internal.c)
+target_include_directories(geom PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> PRIVATE src)
+set_target_properties(geom PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 1)
+install(TARGETS geom LIBRARY DESTINATION lib)
+install(DIRECTORY include/ DESTINATION include)
