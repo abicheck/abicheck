@@ -273,3 +273,20 @@ def test_failed_unit_names_follow_the_extractor_diagnostic_contract():
     assert len(named) == FAILED_TU_NAME_LIMIT
     assert named == [u.source for u in units[:FAILED_TU_NAME_LIMIT]]
     assert failed_unit_names(units, []) == []
+
+
+def test_failed_unit_names_name_a_shared_source_once():
+    from types import SimpleNamespace
+
+    from abicheck.buildsource.inline import FAILED_TU_NAME_LIMIT, failed_unit_names
+
+    # Two compile actions of one source (e.g. PIC + non-PIC) share a prefix.
+    dup = [SimpleNamespace(source="src/x.cc", id=f"cu://x#{i}") for i in range(3)]
+    others = [
+        SimpleNamespace(source=f"src/o{i}.cc", id=f"cu://o{i}") for i in range(25)
+    ]
+    diags = ["src/x.cc: boom"] + [f"src/o{i}.cc: e" for i in range(25)]
+    named = failed_unit_names([*dup, *others], diags)
+    assert named.count("src/x.cc") == 1
+    assert len(named) == len(set(named)) == FAILED_TU_NAME_LIMIT
+    assert named[:2] == ["src/x.cc", "src/o0.cc"]

@@ -1123,7 +1123,9 @@ def failed_unit_names(units: list[Any], diagnostics: list[str]) -> list[str]:
     diagnostic per failed TU; naming them lets a fail-closed coverage consumer
     ("only 17/19 selected TUs parsed") say *which* TUs, not only how many.
     """
-    names = [u.source or u.id for u in units]
+    # Deduplicated: several compile actions can share one source, and the
+    # diagnostic prefix cannot tell them apart -- name the source once.
+    names = list(dict.fromkeys(u.source or u.id for u in units))
     failed = [n for n in names if any(d.startswith(f"{n}: ") for d in diagnostics)]
     return failed[:FAILED_TU_NAME_LIMIT]
 
