@@ -479,7 +479,8 @@
   "shared": {
     "harness": {
       "affects": [
-        "check-abi-compatibility"
+        "check-abi-compatibility",
+        "set-up-abi-compatibility-ci"
       ],
       "digest": "sha256:32e528826440d1d80fc17b57328b36c4de02fa697e6171f432d590e92da50702",
       "roots": [
@@ -492,9 +493,10 @@
     },
     "trigger_corpus": {
       "affects": [
-        "check-abi-compatibility"
+        "check-abi-compatibility",
+        "set-up-abi-compatibility-ci"
       ],
-      "digest": "sha256:f004b71312cb6cc223c82138eb2fab0aaf892b589a981cae684a6711c4fea722",
+      "digest": "sha256:5d7a7eeb711058bc60f9044da1f0d9a82aaeb4bab48fb0d494cd20d4f851e2a8",
       "prompt_ids": [
         "positive-0",
         "positive-1",
@@ -503,6 +505,7 @@
         "positive-4",
         "positive-5",
         "positive-6",
+        "positive-7",
         "negative-0",
         "negative-1",
         "negative-2",
@@ -523,6 +526,15 @@
         ".agents/skills/check-abi-compatibility"
       ],
       "tree": "sha256:8866a669966f31f1fe57ae4066699184f942738d253e92e5c42b56e924f8b2a3"
+    },
+    "set-up-abi-compatibility-ci": {
+      "affects": [
+        "set-up-abi-compatibility-ci"
+      ],
+      "roots": [
+        ".agents/skills/set-up-abi-compatibility-ci"
+      ],
+      "tree": "sha256:9be737680f4c89a683e9e5551424714ae6fe41a0beb0586d7bbcaa116718e786"
     }
   }
 }
