@@ -1204,3 +1204,37 @@ class TestAnyCompareReleaseOperand:
         assert not disagreements, disagreements
         # Vacuity guard: the domain must exercise both answers.
         assert {r[1] for r in rows} == {"0", "1"}, rows
+
+    @pytest.mark.parametrize(
+        "template",
+        [
+            "$(touch {canary})",
+            "`touch {canary}`",
+            "x'; touch {canary}; '",
+            'x"; touch {canary}; "',
+            "x\nimport os; os.system('touch {canary}')",
+        ],
+    )
+    def test_a_hostile_operand_path_is_never_evaluated(
+        self, tmp_path: Path, template: str
+    ) -> None:
+        """Operand paths reach the classifier as argv, never as code: no
+        spelling may execute in the shell or in the inline Python probe."""
+        require_bash()
+        canary = tmp_path / "pwned.canary"
+        payload = template.format(canary=canary)
+        script = (
+            _helpers_region()
+            + _cli_introspection_prelude()
+            + f"\n_any_compare_release_operand {shlex.quote(payload)} {shlex.quote(payload)} || true\n"
+        )
+        script_path = tmp_path / "harness.sh"
+        script_path.write_text(script, encoding="utf-8", newline="\n")
+        subprocess.run(
+            [bash_executable(), str(script_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=tmp_path,
+        )
+        assert not canary.exists(), f"operand {payload!r} was evaluated"
