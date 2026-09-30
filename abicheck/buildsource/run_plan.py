@@ -140,6 +140,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .build_output import BuildOutput
+from .build_output_profile import build_system_cell_fields
 from .check_report import build_check_id
 from .project_targets import (
     DEFAULT_PROFILE_RUNNER_LABEL,
@@ -323,6 +324,9 @@ class RunPlanCheck:
     #: G41 Phase 2: same entry's ``generated_header_roots`` (codegen root,
     #: S10-validated), newline-joined; no ``.abicheck.yml`` counterpart.
     generated_header_roots: str = ""
+    #: WS-A: this profile's build-output.json ``profile.build_system`` name/generator.
+    build_system: str = ""
+    build_generator: str = ""
     #: ``target_kind: app-consumer`` only.
     consumer_binary_pattern: str = ""
     #: ``target_kind: plugin-contract`` only.
@@ -439,6 +443,9 @@ class RunPlanCheck:
                 d["consumer_binary_pattern"] = self.consumer_binary_pattern
             if self.contract_file:
                 d["contract_file"] = self.contract_file
+        for key in ("build_system", "build_generator"):
+            if getattr(self, key):
+                d[key] = getattr(self, key)
         if self.compile_gcc_path:
             d["compile_gcc_path"] = self.compile_gcc_path
         if self.compile_gcc_options:
@@ -493,6 +500,8 @@ class RunPlanCheck:
             header=_opt_str(d.get("header")),
             public_header_roots=_opt_str(d.get("public_header_roots")),
             generated_header_roots=_opt_str(d.get("generated_header_roots")),
+            build_system=_opt_str(d.get("build_system")),
+            build_generator=_opt_str(d.get("build_generator")),
             consumer_binary_pattern=_opt_str(d.get("consumer_binary_pattern")),
             contract_file=_opt_str(d.get("contract_file")),
             bundle_members=[
@@ -809,6 +818,8 @@ def _generate_target_checks(
                     generated_header_roots=_newline_join_headers(
                         bo_target.generated_header_roots
                     ),
+                    build_system=build_system_cell_fields(bo.profile)[0],
+                    build_generator=build_system_cell_fields(bo.profile)[1],
                     consumer_binary_pattern=(
                         target.consumer_binary_pattern
                         if target.kind != TARGET_KIND_LIBRARY

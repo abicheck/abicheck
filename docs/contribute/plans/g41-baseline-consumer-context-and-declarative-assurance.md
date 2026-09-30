@@ -27,9 +27,14 @@ generated: false
    `publish-baseline.yml`/`update-main-baseline.yml`/`actions/baseline`
    artifact naming widened to the profile id so a per-profile (e.g.
    `clang18-cmake`) accepted baseline exists.
-2. Carry `profile.build_system` from `build-output.json` into run-plan cells
-   (`RunPlanCheck`) and the report, so a cell's findings are attributed to
-   its own profile (lab gap `producer-attribution-through-project-path`).
+2. ~~Carry `profile.build_system` into run-plan cells and the report~~ —
+   **landed (WS-A slice 2, 2026-09-30)** for `kind: target` cells:
+   `RunPlanCheck.build_system`/`build_generator`, `check-target`
+   `build-system`/`build-generator` inputs, report envelope
+   `profile_build_system` (schema 5.10). Still open: bundle cells, and the
+   lab's `clang_profile_not_a_contract_profile` failure itself, which needs
+   item 1 (a baseline published for the Clang profile) rather than
+   attribution alone.
 3. Stamp build identity when evidence is used only for compile flags and not
    embedded (today the axis sees only embedded L3 evidence), and surface it
    in the report's effective-config digest.

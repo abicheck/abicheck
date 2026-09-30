@@ -145,6 +145,17 @@ inputs:
       pre-G42, unqualified check_id shape.
     required: false
     default: ''
+  build-system:
+    description: >
+      This cell's build-output.json profile.build_system.name (e.g. cmake,
+      bazel, make), recorded in the report as profile_build_system. Omit when
+      the profile declares none (unrecorded).
+    required: false
+    default: ''
+  build-generator:
+    description: "This cell's profile.build_system.generator (e.g. Ninja); empty when the build system has none."
+    required: false
+    default: ''
   gate-mode:
     description: "'local' (default), 'deferred', or 'advisory' (ADR-047 §7)."
     required: false
@@ -1892,6 +1903,8 @@ runs:
         INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
         INPUT_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
         INPUT_EXPLICIT_ID: ${{ inputs.explicit-id }}
+        INPUT_BUILD_SYSTEM: ${{ inputs.build-system }}
+        INPUT_BUILD_GENERATOR: ${{ inputs.build-generator }}
         INPUT_GATE_MODE: ${{ inputs.gate-mode }}
         INPUT_PROJECT: ${{ inputs.project }}
         INPUT_HEAD_SHA: ${{ inputs.head-sha }}

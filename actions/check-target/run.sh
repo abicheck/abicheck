@@ -20,6 +20,9 @@ REQUESTED_DEPTH="${INPUT_REQUESTED_DEPTH:?}"
 # project declared one -- folded into check_id's "~<explicit_id>" tail.
 # Empty (the default) is the pre-G42, unqualified check_id shape.
 EXPLICIT_ID="${INPUT_EXPLICIT_ID:-}"
+# WS-A: the cell's profile.build_system, stamped into the envelope.
+BUILD_SYSTEM="${INPUT_BUILD_SYSTEM:-}"
+BUILD_GENERATOR="${INPUT_BUILD_GENERATOR:-}"
 GATE_MODE="${INPUT_GATE_MODE:-local}"
 PROJECT="${INPUT_PROJECT:-}"
 HEAD_SHA="${INPUT_HEAD_SHA:-}"
@@ -158,6 +161,8 @@ ENVELOPE_ARGS=(
   --baseline-channel "$BASELINE_CHANNEL"
   --requested-depth "$REQUESTED_DEPTH"
   --explicit-id "$EXPLICIT_ID"
+  --build-system "$BUILD_SYSTEM"
+  --build-generator "$BUILD_GENERATOR"
   --gate-mode "$GATE_MODE"
   --project "$PROJECT"
   --head-sha "$HEAD_SHA"

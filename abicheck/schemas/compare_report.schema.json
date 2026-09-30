@@ -337,6 +337,16 @@
       "type": "string",
       "description": "Schema 2.12 (ADR-047 \u00a77). The build/environment profile identifier this check ran under, e.g. \"linux-x86_64-gcc13-release\". Reserved for G30 P1; not yet populated."
     },
+    "profile_build_system": {
+      "type": "object",
+      "description": "Schema 5.10 (WS-A). check-target envelope only: the build system (and generator/backend, empty when it has none) that produced the build-output.json profile this check cell ran under, from that document's profile.build_system. Absent when the profile declared none (unrecorded).",
+      "required": ["name", "generator"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "generator": {"type": "string"}
+      }
+    },
     "requested_depth": {
       "type": "string",
       "description": "Schema 2.12 (ADR-047 \u00a77). The evidence depth the caller asked for. Reserved for G30 P1; not yet populated.",

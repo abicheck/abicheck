@@ -1054,7 +1054,11 @@ _ARTIFACT_NAMES = frozenset(
 #:        declared ``modified``, which made every such finding read as a
 #:        modification even when identical on both sides
 #:        (``report/change_operation.operation_for_change``).
-REPORT_SCHEMA_VERSION = "5.9"
+#: 5.10 -- additive: optional top-level ``profile_build_system``
+#:        (``{name, generator}``) on a check-target envelope -- the
+#:        build-output.json ``profile.build_system`` of the profile the cell
+#:        ran under (WS-A per-profile attribution). Absent = unrecorded.
+REPORT_SCHEMA_VERSION = "5.10"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the
