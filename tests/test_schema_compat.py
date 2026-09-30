@@ -150,9 +150,9 @@ class TestReserialization:
         snap = snapshot_from_dict(d)
         reserialized = snapshot_to_dict(snap)
         snap2 = snapshot_from_dict(reserialized)
-        assert len(snap2.declarations.functions) == len(snap.functions)
-        assert len(snap2.declarations.types) == len(snap.types)
-        assert len(snap2.declarations.enums) == len(snap.enums)
+        assert len(snap2.declarations.functions) == len(snap.declarations.functions)
+        assert len(snap2.declarations.types) == len(snap.declarations.types)
+        assert len(snap2.declarations.enums) == len(snap.declarations.enums)
         assert snap2.library == snap.library
         assert snap2.version == snap.version
 

@@ -29,8 +29,8 @@ from typing import TYPE_CHECKING
 from .declaration_store import (
     Declarations,
     attach_declarations as _attach_declarations,
-    install_transitional_declaration_fields,
-    reattach as _reattach,
+    guard_assignment as _guard_assignment,
+    install_removed_declaration_fields,
 )
 from .declarations import Function, Variable
 from .entities import EnumType, RecordType
@@ -763,10 +763,7 @@ class AbiSnapshot:
         # A snapshot's IR always owns this snapshot's declarations: an IR a
         # normalizer produced (no store yet) is attached on assignment, and
         # ``None`` means "no canonical facts", never "no declarations".
-        current = self.__dict__.get("semantic_ir")
-        if name == "semantic_ir" and current is not None:
-            value = _reattach(current, value)
-        object.__setattr__(self, name, value)
+        object.__setattr__(self, name, _guard_assignment(self, name, value))
 
     @property
     def function_map(self) -> dict[str, Function]:
@@ -796,4 +793,6 @@ class AbiSnapshot:
 
 
 install_lazy_graph_field(AbiSnapshot, "surface_graph")  # decoded on first read
-install_transitional_declaration_fields(AbiSnapshot)
+
+
+install_removed_declaration_fields(AbiSnapshot)

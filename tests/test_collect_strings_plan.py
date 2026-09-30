@@ -23,6 +23,7 @@ from abicheck.qualified_name_segments_walk import (
     _legacy_sibling_is_payload_excluded,
 )
 from abicheck.storage.closure_identity import _LAMBDA_IDENTITY_FIELDS
+from tests.snapshot_fields import field_of
 from tests.test_property_based import snapshot_st
 
 
@@ -127,5 +128,5 @@ def test_edge_cases_match_the_reference() -> None:
 @given(snap=snapshot_st())
 def test_generated_snapshots_match_the_reference(snap: AbiSnapshot) -> None:
     for name in _LAMBDA_IDENTITY_FIELDS:
-        got, want = _both(getattr(snap, name))
+        got, want = _both(field_of(snap, name))
         assert got == want, name

@@ -447,9 +447,7 @@ def _lambda_identity_containers_and_strings(
     Deliberately does NOT look at ``semantic_ir_conflicts`` -- see
     :func:`_conflict_only_marker_strings` for why.
     """
-    containers = [
-        _identity_container(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS
-    ]
+    containers = [_container_of(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
     strings: list[str] = []
     for container in containers:
         _collect_strings(container, strings)
@@ -464,7 +462,7 @@ def _has_any_marker(strings: _Iterable[str]) -> bool:
     return any(m in s for s in strings for m in markers)
 
 
-def _identity_container(snapshot: object, name: str) -> object:
+def _container_of(snapshot: object, name: str) -> object:
     """One :data:`_LAMBDA_IDENTITY_FIELDS` container: a declaration kind is
     read from the snapshot's store, ``semantic_ir`` as its canonical
     occurrences alone (the store is walked through its own kinds, never
@@ -749,9 +747,7 @@ def renumber_anonymous_closure_identities(snapshot: _SnapshotT) -> _SnapshotT:
     """
     if getattr(_defer_renumber, "active", False):
         return snapshot
-    containers = [
-        _identity_container(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS
-    ]
+    containers = [_container_of(snapshot, name) for name in _LAMBDA_IDENTITY_FIELDS]
     all_strings: list[str] = []
     flagged: set[int] = set()
     for container in containers:

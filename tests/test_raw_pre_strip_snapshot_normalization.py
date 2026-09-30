@@ -173,11 +173,11 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
 
         assert (
             legacy_baseline.declarations.types[0].qualified_name
-            == fresh.types[0].qualified_name
+            == fresh.declarations.types[0].qualified_name
         )
         assert (
             legacy_baseline.declarations.functions[0].mangled
-            == fresh.functions[0].mangled
+            == fresh.declarations.functions[0].mangled
         )
 
         result = compare(legacy_baseline, fresh)
@@ -223,7 +223,7 @@ class TestRawPreStripBaselinesAreNormalizedOnLoad:
         normalize_anonymous_type_spellings_on_load(fresh)
         renumber_anonymous_closure_identities(fresh)
 
-        assert legacy_baseline.declarations.types[0].name == fresh.types[0].name
+        assert legacy_baseline.declarations.types[0].name == fresh.declarations.types[0].name
 
         result = compare(legacy_baseline, fresh)
         noisy_kinds = {ChangeKind.TYPE_REMOVED, ChangeKind.TYPE_ADDED}

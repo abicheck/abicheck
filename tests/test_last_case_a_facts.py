@@ -45,6 +45,7 @@ from abicheck.model import (
 from abicheck.model.fact_registry import FACT_REGISTRY, KNOWN_UNCONVERTED_ELIGIBLE_FACTS
 from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
 from abicheck.storage.fact_codec import _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS
+from tests.snapshot_fields import field_of
 
 _LEGACY = _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS - 1
 
@@ -286,7 +287,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         d = _minimal_dict(
             schema_version=_PRE_CASE_A, from_headers=False, **{collection: [raw]}
         )
-        obj = getattr(snapshot_from_dict(d), collection)[0]
+        obj = field_of(snapshot_from_dict(d), collection)[0]
         assert getattr(obj, f"{field}_fact").status is FactStatus.NOT_COLLECTED
 
     def test_param_is_restrict_too(self) -> None:
@@ -507,7 +508,7 @@ class TestNonHeaderLegacySnapshotsClaimNothing:
         snap = snapshot_from_dict(d)
         assert snap.from_headers is True
         assert snap.from_headers_inferred is True
-        obj = getattr(snap, collection)[0]
+        obj = field_of(snap, collection)[0]
         assert getattr(obj, f"{field}_fact").status is FactStatus.NOT_COLLECTED
 
     def test_a_header_snapshot_is_unaffected(self) -> None:
@@ -753,7 +754,7 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
 
     @staticmethod
     def _loaded(snap: AbiSnapshot, owner: str, collection: str) -> object:
-        obj = getattr(snap, collection)[0]
+        obj = field_of(snap, collection)[0]
         if owner == "TypeField":
             return obj.fields[0]
         if owner == "Param":

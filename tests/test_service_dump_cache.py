@@ -478,7 +478,7 @@ class TestCachedRunDump:
         snap2 = cached_run_dump(fake_run_dump, binary, "elf", [], [], "1.0", "c++")
 
         assert len(calls) == 1
-        assert snap1.declarations.functions[0].name == snap2.functions[0].name == "foo"
+        assert snap1.declarations.functions[0].name == snap2.declarations.functions[0].name == "foo"
 
     def test_bumped_cache_version_invalidates_pre_dependency_scope_entries(
         self, tmp_path, monkeypatch
@@ -861,7 +861,7 @@ class TestCachedRunDumpManifest:
         )
         assert len(calls) == 1
         assert calls[0] is manifest
-        assert snap1.declarations.functions[0].name == snap2.functions[0].name == "foo"
+        assert snap1.declarations.functions[0].name == snap2.declarations.functions[0].name == "foo"
 
     def test_forced_include_content_edit_invalidates_manifest_cache(self, tmp_path):
         binary = tmp_path / "lib.so"

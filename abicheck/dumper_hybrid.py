@@ -918,7 +918,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     # merges key on the source-level NAME, not a mangled linker symbol, so
     # they carry no such platform-specific decoration and need no change.
     # entity_id's "mangled" tag is re-spelled too (Codex review).
-    clang_functions = clang_snap.declarations.functions
+    clang_functions = (clang_decls := clang_snap.declarations).functions
     clang_variables = clang_snap.declarations.variables
     clang_semantic_ir = clang_snap.canonical_ir
     if castxml_snap.platform == "macho":
@@ -965,9 +965,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     ]
     castxml_type_keys = {type_map_key(t) for t in castxml_snap.declarations.types}
     clang_only_types = [
-        t
-        for t in clang_snap.declarations.types
-        if type_map_key(t) not in castxml_type_keys
+        t for t in clang_decls.types if type_map_key(t) not in castxml_type_keys
     ]
     for t in clang_only_types:
         # A clang-only type's own deprecated value IS genuinely clang-
@@ -1018,9 +1016,7 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
     ]
     castxml_enum_keys = {type_map_key(e) for e in castxml_snap.declarations.enums}
     clang_only_enums = [
-        e
-        for e in clang_snap.declarations.enums
-        if type_map_key(e) not in castxml_enum_keys
+        e for e in clang_decls.enums if type_map_key(e) not in castxml_enum_keys
     ]
     for e in clang_only_enums:
         # Qualified key -- same reasoning as clang_only_types above.

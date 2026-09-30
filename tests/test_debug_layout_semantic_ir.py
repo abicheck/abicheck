@@ -170,8 +170,8 @@ class TestBuildSymbolOnlySnapshotBtfCtf:
         -- only ``semantic_ir`` gains occurrences."""
         meta = DwarfMetadata(structs={"widget": _struct("widget")}, has_dwarf=True)
         snap = self._snap(meta, "btf")
-        assert snap.types == []
-        assert snap.enums == []
+        assert snap.declarations.types == []
+        assert snap.declarations.enums == []
 
     def test_real_dwarf_format_is_unaffected(self) -> None:
         """Negative control: ``resolved_debug_format="dwarf"`` must never

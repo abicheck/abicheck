@@ -188,12 +188,12 @@ class TestSnapshotRenumbering:
         renumber_anonymous_closure_identities(old)
         renumber_anonymous_closure_identities(new)
 
-        assert old.declarations.types[0].qualified_name == new.types[0].qualified_name
-        assert old.declarations.types[1].qualified_name == new.types[1].qualified_name
-        assert old.declarations.functions[0].mangled == new.functions[0].mangled
+        assert old.declarations.types[0].qualified_name == new.declarations.types[0].qualified_name
+        assert old.declarations.types[1].qualified_name == new.declarations.types[1].qualified_name
+        assert old.declarations.functions[0].mangled == new.declarations.functions[0].mangled
         assert (
             old.declarations.functions[0].params[0].type
-            == new.functions[0].params[0].type
+            == new.declarations.functions[0].params[0].type
         )
 
     def test_without_renumbering_the_line_shift_is_visible(self) -> None:
@@ -201,8 +201,8 @@ class TestSnapshotRenumbering:
         # the fix, so the assertions above are testing something real.
         old = self._snapshot("2021.13.0", 522, 520)
         new = self._snapshot("2022.3.0", 539, 528)
-        assert old.declarations.types[0].qualified_name != new.types[0].qualified_name
-        assert old.declarations.functions[0].mangled != new.functions[0].mangled
+        assert old.declarations.types[0].qualified_name != new.declarations.types[0].qualified_name
+        assert old.declarations.functions[0].mangled != new.declarations.functions[0].mangled
 
     def test_compare_reports_no_findings_for_pure_line_drift(self) -> None:
         """End-to-end: renumbering both sides before compare() eliminates the
@@ -332,11 +332,11 @@ class TestLegacyPersistedSnapshotsAreRenumberedOnLoad:
 
         assert (
             legacy_baseline.declarations.types[0].qualified_name
-            == fresh.types[0].qualified_name
+            == fresh.declarations.types[0].qualified_name
         )
         assert (
             legacy_baseline.declarations.functions[0].mangled
-            == fresh.functions[0].mangled
+            == fresh.declarations.functions[0].mangled
         )
 
         result = compare(legacy_baseline, fresh)

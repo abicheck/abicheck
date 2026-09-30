@@ -83,7 +83,7 @@ def test_distinct_members_round_trip(tmp_path) -> None:
     back = _read(tmp_path / "b.zip")
     assert set(back.per_library_snapshots) == set(per)
     for name, snap in per.items():
-        assert [f.name for f in back.per_library_snapshots[name].functions] == [
+        assert [f.name for f in back.per_library_snapshots[name].declarations.functions] == [
             f.name for f in snap.declarations.functions
         ]
 
@@ -292,5 +292,5 @@ def test_duplicate_blob_members_stay_independently_mutable(tmp_path) -> None:
     back = _read(tmp_path / "b.zip")
     a, b = back.per_library_snapshots["a.so"], back.per_library_snapshots["b.so"]
     assert a is not b
-    a.functions.clear()
-    assert b.functions, "mutating one member must not affect the other"
+    a.declarations.functions.clear()
+    assert b.declarations.functions, "mutating one member must not affect the other"

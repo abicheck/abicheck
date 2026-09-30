@@ -613,7 +613,7 @@ int Derived::f(int z) { return z + a0; }
         json_path.write_text(snapshot_to_json(snap), encoding="utf-8")
         loaded = load_snapshot(json_path)
         assert loaded.library == snap.library
-        assert len(loaded.declarations.functions) == len(snap.functions)
+        assert len(loaded.declarations.functions) == len(snap.declarations.functions)
 
 
 # ── Dumper fallback chain tests ─────────────────────────────────────────────

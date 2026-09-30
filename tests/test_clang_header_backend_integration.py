@@ -1552,7 +1552,7 @@ def test_streaming_pruner_produces_an_equivalent_public_model(
     # see ``test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast``
     # for the direct, lower-level proof that pruning genuinely engages on
     # this exact repro's raw clang AST.
-    assert len(pruned.declarations.functions) <= len(baseline.functions)
+    assert len(pruned.declarations.functions) <= len(baseline.declarations.functions)
 
 
 def test_streaming_pruner_reports_a_nonzero_prune_count_on_the_raw_ast(

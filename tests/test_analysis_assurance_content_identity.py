@@ -240,15 +240,15 @@ def test_any_persisted_difference_defeats_content_identity(mutate: str) -> None:
     assert same_persisted_content(a, b), "fixture must start out identical"
 
     if mutate == "entity_id":
-        assert b.functions, "fixture must carry a function to perturb"
-        b.functions[0].entity_id = EntityId(
+        assert b.declarations.functions, "fixture must carry a function to perturb"
+        b.declarations.functions[0].entity_id = EntityId(
             scope=(), kind=EntityKind.FUNCTION, leaf_name="perturbed"
         )
     elif mutate == "library":
         b.library = f"{b.library}-other"
     else:
-        assert b.functions, "fixture must carry a function to perturb"
-        b.functions[0].return_type = f"{b.functions[0].return_type} const"
+        assert b.declarations.functions, "fixture must carry a function to perturb"
+        b.declarations.functions[0].return_type = f"{b.declarations.functions[0].return_type} const"
 
     assert not same_persisted_content(a, b)
     assert _status(a, b)[0] == "degraded"
@@ -268,8 +268,8 @@ def test_content_identity_fails_closed_on_an_unencodable_snapshot() -> None:
     a = _load("v4.json", schema_version=25, from_headers=True)
     b = _load("v4.json", schema_version=25, from_headers=True)
     assert same_persisted_content(a, b)
-    assert b.functions, "fixture must carry a function to perturb"
-    b.functions[0].return_type = _Unencodable()  # type: ignore[assignment]
+    assert b.declarations.functions, "fixture must carry a function to perturb"
+    b.declarations.functions[0].return_type = _Unencodable()  # type: ignore[assignment]
     with pytest.raises(TypeError):
         snapshot_content_digest(b)
     assert same_persisted_content(a, b) is False

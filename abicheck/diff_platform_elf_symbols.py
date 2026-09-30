@@ -49,11 +49,7 @@ def _is_const_unbounded_string_object(snap: AbiSnapshot, sym_name: str) -> bool:
     var = snap.variable_map.get(sym_name)
     if var is None:
         var = next(
-            (
-                candidate
-                for candidate in snap.declarations.variables
-                if candidate.name == sym_name
-            ),
+            (c for c in snap.declarations.variables if c.name == sym_name),
             None,
         )
     if var is None:

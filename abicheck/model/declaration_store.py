@@ -31,6 +31,8 @@ frozen as a binding, and the canonical per-occurrence facts
 
 from __future__ import annotations
 
+import dataclasses
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -145,25 +147,44 @@ def reattach(current: Any, value: Any) -> Any:
     return value
 
 
-class _TransitionalDeclarationField:
-    """Runtime-only read/write path from ``snapshot.<kind>`` to the store,
-    kept while the test suite migrates to ``snapshot.declarations``
-    (ADR-063 Phase 10, stage 3). The package itself no longer uses it --
-    mypy rejects ``snapshot.functions`` there -- and it is deleted in
-    stage 4."""
+def guard_assignment(snapshot: Any, name: str, value: Any) -> Any:
+    """``AbiSnapshot.__setattr__``'s rule. A declaration kind is not a
+    snapshot attribute (ADR-063 Phase 10): assigning one would silently
+    create a stray instance attribute nothing reads, so it is refused.
+    Assigning ``semantic_ir`` keeps the snapshot's store attached."""
+    if name in DECLARATION_KINDS:
+        raise AttributeError(
+            f"AbiSnapshot.{name} was removed (ADR-063 Phase 10); "
+            f"assign snapshot.declarations.{name} instead"
+        )
+    current = snapshot.__dict__.get("semantic_ir")
+    if name == "semantic_ir" and current is not None:
+        return reattach(current, value)
+    return value
+
+
+_REPLACE_CODE = dataclasses._replace.__code__  # type: ignore[attr-defined]
+
+
+class _RemovedDeclarationField:
+    """What ``AbiSnapshot.<kind>`` is after ADR-063 Phase 10: the builder
+    InitVar's class-level default, which ``dataclasses.replace`` reads off
+    the instance (and gets ``None``, so the replaced snapshot keeps its
+    store). Every other read raises, rather than answering ``None`` for a
+    field that no longer exists."""
 
     def __init__(self, kind: str) -> None:
         self._kind = kind
 
     def __get__(self, obj: Any, objtype: type | None = None) -> Any:
-        if obj is None:
-            return None  # the InitVar's own default, which replace() reads
-        return getattr(obj.declarations, self._kind)
+        if obj is None or sys._getframe(1).f_code is _REPLACE_CODE:
+            return None
+        raise AttributeError(
+            f"AbiSnapshot.{self._kind} was removed (ADR-063 Phase 10); "
+            f"read snapshot.declarations.{self._kind} instead"
+        )
 
-    def __set__(self, obj: Any, value: Any) -> None:
-        setattr(obj.declarations, self._kind, value)
 
-
-def install_transitional_declaration_fields(cls: type) -> None:
+def install_removed_declaration_fields(cls: type) -> None:
     for kind in DECLARATION_KINDS:
-        setattr(cls, kind, _TransitionalDeclarationField(kind))
+        setattr(cls, kind, _RemovedDeclarationField(kind))

@@ -18,6 +18,7 @@ from abicheck.model.fact import Fact
 from abicheck.model.ownership_rules import DependencyRoots, OwnershipRules
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 from abicheck.storage.snapshot_schema_versions import SCHEMA_VERSION
+from tests.snapshot_fields import field_of
 
 _TARGET = EntityOwnership("target", "public", "target_root:include")
 _DEP = EntityOwnership("dependency:fmt", "external", "dependency:fmt:third/fmt")
@@ -72,8 +73,8 @@ def test_scope_and_every_decision_round_trip() -> None:
     assert back.extraction_scope is not None
     assert back.extraction_scope.fingerprint == snap.extraction_scope.fingerprint
     for kind in ("functions", "variables", "types", "enums"):
-        expected = [ownership_of(d) for d in getattr(snap, kind)]
-        assert [ownership_of(d) for d in getattr(back, kind)] == expected, kind
+        expected = [ownership_of(d) for d in field_of(snap, kind)]
+        assert [ownership_of(d) for d in field_of(back, kind)] == expected, kind
 
 
 def test_unclassified_declaration_stays_unknown_after_round_trip() -> None:

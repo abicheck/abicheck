@@ -272,7 +272,7 @@ class TestSurfaceEvidenceAsymmetry:
         """
         old = _snapshot(["c_func"], evidence=evidence_on_old)
         new = _snapshot(["_Z6c_funcv"], evidence=not evidence_on_old)
-        old.declarations.functions[0].name = new.functions[0].name = "c_func"
+        old.declarations.functions[0].name = new.declarations.functions[0].name = "c_func"
         old.declarations.functions[0].is_extern_c = True
         new.declarations.functions[0].is_extern_c = False
         kinds = {c.kind for c in compare(old, new).changes}
@@ -508,7 +508,7 @@ class TestListShapedSurfaceDetectors:
         old = _snapshot(names, evidence=evidence_on_old, variables=True)
         new = _snapshot(names, evidence=not evidence_on_old, variables=True)
         for i, (v_old, v_new) in enumerate(
-            zip(old.declarations.variables, new.variables)
+            zip(old.declarations.variables, new.declarations.variables)
         ):
             v_old.value = old_value + i
             v_new.value = old_value + i + 1
@@ -526,7 +526,7 @@ class TestListShapedSurfaceDetectors:
     ) -> None:
         old = _snapshot(names, evidence=evidence_on_old, variables=True)
         new = _snapshot(names, evidence=not evidence_on_old, variables=True)
-        for v_old, v_new in zip(old.declarations.variables, new.variables):
+        for v_old, v_new in zip(old.declarations.variables, new.declarations.variables):
             v_old.value = v_new.value = 7
         assert _diff_var_values(old, new) == []
 

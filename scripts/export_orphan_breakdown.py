@@ -188,7 +188,7 @@ def breakdown(snapshot: Path, lib: Path | None, samples: int) -> dict[str, objec
     exported_structors = {k for s in table if (k := _structor_key(s))}
     declared_structors = {
         k
-        for f in (*snap.functions, *snap.variables)
+        for f in (*snap.declarations.functions, *snap.declarations.variables)
         if (k := _structor_key(f.mangled or ""))
     }
 
@@ -197,8 +197,8 @@ def breakdown(snapshot: Path, lib: Path | None, samples: int) -> dict[str, objec
     decl_samples: dict[str, list[str]] = {}
     seen: set[str] = set()
     for fn, ident in (
-        *zip(snap.functions, ids.functions),
-        *zip(snap.variables, ids.variables),
+        *zip(snap.declarations.functions, ids.functions),
+        *zip(snap.declarations.variables, ids.variables),
     ):
         node = ident.node_id
         if node in seen:

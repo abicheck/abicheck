@@ -128,6 +128,7 @@ from abicheck.policy.depth_projection import (
     project_snapshot_to_depth,
 )
 from abicheck.serialization import save_snapshot
+from tests.snapshot_fields import field_of
 
 
 def _headers_only_pair(*, dwarf: bool) -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -232,7 +233,7 @@ class TestBinaryDepthNoDwarf:
     def test_snapshot_level_facts_cleared(self, attr: str, expected: object) -> None:
         old, _ = _headers_only_pair(dwarf=False)
         projected = project_snapshot_to_depth(old, "binary")
-        assert getattr(projected, attr) == expected
+        assert field_of(projected, attr) == expected
 
     def test_function_and_variable_signatures_cleared(self) -> None:
         old, _ = _headers_only_pair(dwarf=False)
@@ -890,7 +891,7 @@ class TestProjectPairToDepthJointFloor:
         assert old.declarations.functions[0].return_type == "?"
         assert new.declarations.functions[0].params == []
         assert new.declarations.functions[0].return_type == "?"
-        assert old.declarations.types == new.types == []
+        assert old.declarations.types == new.declarations.types == []
 
     def test_typedef_and_constant_identity_sidecars_cleared_symmetrically(
         self,

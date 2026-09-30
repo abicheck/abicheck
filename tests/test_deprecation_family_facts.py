@@ -45,6 +45,7 @@ from abicheck.storage.fact_codec import (
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
 )
+from tests.snapshot_fields import field_of
 
 _LEGACY = _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS - 1
 
@@ -106,7 +107,7 @@ _OWNERS: tuple[tuple[str, str, dict], ...] = (
 
 
 def _only(snap: AbiSnapshot, collection: str) -> object:
-    return getattr(snap, collection)[0]
+    return field_of(snap, collection)[0]
 
 
 class TestDeprecatedFamilyRoundTrip:

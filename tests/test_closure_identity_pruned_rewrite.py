@@ -36,6 +36,7 @@ from abicheck.qualified_name_segments_walk import (
 )
 from abicheck.storage import closure_identity
 from abicheck.storage.closure_identity import renumber_anonymous_closure_identities
+from tests.snapshot_fields import field_of
 
 
 def _closure(kind: str, header: str, line: int, col: int) -> str:
@@ -136,7 +137,7 @@ def test_pruned_rewrite_matches_full_walk(snap: AbiSnapshot) -> None:
         closure_identity._rewrite_marked_subtrees = original  # type: ignore[assignment]
     renumber_anonymous_closure_identities(snap)
     for field in closure_identity._LAMBDA_IDENTITY_FIELDS:
-        assert repr(getattr(snap, field, None)) == repr(getattr(oracle, field, None)), (
+        assert repr(field_of(snap, field, None)) == repr(field_of(oracle, field, None)), (
             field
         )
 
@@ -197,7 +198,7 @@ def test_collect_and_flag_matches_oracles_on_snapshot_dataclasses(
     ``collect_and_flag`` expands inline rather than recursing into (the
     generic-container property above never reaches that path)."""
     for field in closure_identity._LAMBDA_IDENTITY_FIELDS:
-        value = getattr(snap, field)
+        value = field_of(snap, field)
         seen: list[str] = []
 
         def record(text: str) -> str:

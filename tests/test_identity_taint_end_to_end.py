@@ -215,8 +215,8 @@ def _assert_exercises_closure_taint(snap: object) -> None:
     from the snapshot -- this only accepts the literal ``(lambda`` marker
     text, never a bare template-name substring (Codex review, PR #898).
     Fails loudly, not silently, if the fixture stops producing one."""
-    functions = snap.functions  # type: ignore[attr-defined]
-    types = snap.types  # type: ignore[attr-defined]
+    functions = snap.declarations.functions  # type: ignore[attr-defined]
+    types = snap.declarations.types  # type: ignore[attr-defined]
     candidates = {
         t
         for f in functions
@@ -326,9 +326,9 @@ class TestSymlinkedCheckoutRootIsANoOp:
         # Prove the canonicalization claim above rather than merely assert
         # it: both sides record the REAL (non-symlinked) path, confirming
         # clang resolved the symlink before abicheck's model ever saw it.
-        add_direct = next(f for f in snap_direct.functions if f.name.endswith("add"))
+        add_direct = next(f for f in snap_direct.declarations.functions if f.name.endswith("add"))
         add_via_symlink = next(
-            f for f in snap_via_symlink.functions if f.name.endswith("add")
+            f for f in snap_via_symlink.declarations.functions if f.name.endswith("add")
         )
         assert add_direct.source_header == add_via_symlink.source_header
         assert str(real_root) in (add_direct.source_header or "")
@@ -512,7 +512,7 @@ namespace lib { int touch() { return run_one() + run_two(); } }
                 if p.type and "(lambda" in p.type
             }
 
-        lambda_spellings = _lambda_param_spellings(snap.functions)
+        lambda_spellings = _lambda_param_spellings(snap.declarations.functions)
         assert len(lambda_spellings) >= 2, (
             "expected two distinct call_with<lambda> canonical parameter "
             f"identities, got: {lambda_spellings}"
@@ -527,7 +527,7 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         so2, header2 = _build(relocated_root, header_text, source_text)
         snap2 = _dump(so2, header2)
 
-        relocated_lambda_spellings = _lambda_param_spellings(snap2.functions)
+        relocated_lambda_spellings = _lambda_param_spellings(snap2.declarations.functions)
         assert len(relocated_lambda_spellings) >= 2
 
         result = compare(snap, snap2, cross_source_checks=False)
@@ -555,7 +555,7 @@ long touch_detail(detail::Outer::Inner x) { return x.c; }
         so, header = _build(root, header_text, source_text)
         snap = _dump(so, header)
 
-        inner_types = [t for t in snap.types if t.name == "Inner"]
+        inner_types = [t for t in snap.declarations.types if t.name == "Inner"]
         qualified = {t.qualified_name for t in inner_types if t.qualified_name}
         assert len(qualified) >= 2, (
             f"expected api::Outer::Inner and detail::Outer::Inner to stay "
@@ -581,7 +581,7 @@ long touch_detail(detail::Outer::Inner x) { return x.c; }
         so2, header2 = _build(relocated_root, header_text, source_text)
         snap2 = _dump(so2, header2)
 
-        inner_types2 = [t for t in snap2.types if t.name == "Inner"]
+        inner_types2 = [t for t in snap2.declarations.types if t.name == "Inner"]
         qualified2 = {t.qualified_name for t in inner_types2 if t.qualified_name}
         assert len(qualified2) >= 2
 
@@ -646,8 +646,8 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         snap_a = _dump(so_a, header_a)
         snap_b = _dump(so_b, header_b)
 
-        assert len(_lambda_param_spellings(snap_a.functions)) >= 2
-        assert len(_lambda_param_spellings(snap_b.functions)) >= 2
+        assert len(_lambda_param_spellings(snap_a.declarations.functions)) >= 2
+        assert len(_lambda_param_spellings(snap_b.declarations.functions)) >= 2
 
         result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
@@ -713,8 +713,8 @@ namespace lib { int touch() { return run_one() + run_two(); } }
         snap_a = _dump(so_a, header_a)
         snap_b = _dump(so_b, header_b)
 
-        spellings_a = _lambda_param_spellings(snap_a.functions)
-        spellings_b = _lambda_param_spellings(snap_b.functions)
+        spellings_a = _lambda_param_spellings(snap_a.declarations.functions)
+        spellings_b = _lambda_param_spellings(snap_b.declarations.functions)
         assert len(spellings_a) >= 2
         assert len(spellings_b) >= 2
 
@@ -781,8 +781,8 @@ int touch() { return run_one() + run_two(); }
         snap_a = _dump(so_a, header_a)
         snap_b = _dump(so_b, header_b)
 
-        assert len(_lambda_param_spellings(snap_a.functions)) >= 2
-        assert len(_lambda_param_spellings(snap_b.functions)) >= 2
+        assert len(_lambda_param_spellings(snap_a.declarations.functions)) >= 2
+        assert len(_lambda_param_spellings(snap_b.declarations.functions)) >= 2
 
         result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
@@ -829,8 +829,8 @@ long touch_detail(detail::Outer::Inner x) { return x.c; }
         snap_a = _dump(so_a, header_a)
         snap_b = _dump(so_b, header_b)
 
-        assert len(_inner_qualified(snap_a.types)) >= 2
-        assert len(_inner_qualified(snap_b.types)) >= 2
+        assert len(_inner_qualified(snap_a.declarations.types)) >= 2
+        assert len(_inner_qualified(snap_b.declarations.types)) >= 2
 
         result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
@@ -874,8 +874,8 @@ long touch_detail(detail::Outer::Inner x) { return x.c; }
         snap_a = _dump(so_a, header_a)
         snap_b = _dump(so_b, header_b)
 
-        assert len(_inner_qualified(snap_a.types)) >= 2
-        assert len(_inner_qualified(snap_b.types)) >= 2
+        assert len(_inner_qualified(snap_a.declarations.types)) >= 2
+        assert len(_inner_qualified(snap_b.declarations.types)) >= 2
 
         result = compare(snap_a, snap_b, cross_source_checks=False)
         assert result.verdict is Verdict.NO_CHANGE
@@ -1011,7 +1011,7 @@ class TestFindingIdentityIsCheckoutPathInvariant:
             root.mkdir(parents=True)
             so, header = _build(root, header_text, _SOURCE)
             snap = _dump(so, header)
-            for f in snap.functions:  # type: ignore[attr-defined]
+            for f in snap.declarations.functions:  # type: ignore[attr-defined]
                 for p in f.params:
                     if p.type and "(lambda" in p.type:
                         return p.type

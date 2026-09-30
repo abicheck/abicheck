@@ -1217,12 +1217,9 @@ def scope_snapshot_excluding_dependencies(
     # Prepared once, memoized per distinct header -- this asks per declaration,
     # twice over. `extract.dependency_header_roots` owns the cost that hoists.
     _is_dep = scoping_header_predicate(header_roots, snap.excluded_header_patterns)
-    kept_functions = [
-        f for f in snap.declarations.functions if not _is_dep(f.source_header)
-    ]
-    kept_variables = [
-        v for v in snap.declarations.variables if not _is_dep(v.source_header)
-    ]
+    decls = snap.declarations
+    kept_functions = [f for f in decls.functions if not _is_dep(f.source_header)]
+    kept_variables = [v for v in decls.variables if not _is_dep(v.source_header)]
     kept_types = [t for t in snap.declarations.types if not _is_dep(t.source_header)]
     kept_enums = [e for e in snap.declarations.enums if not _is_dep(e.source_header)]
 
@@ -1306,9 +1303,7 @@ def scope_snapshot_excluding_dependencies(
         if header_parse_excluded(snap)
         else kept_identifiers
     )
-    excluded_functions = [
-        f for f in snap.declarations.functions if _is_dep(f.source_header)
-    ]
+    excluded_functions = [f for f in decls.functions if _is_dep(f.source_header)]
     # A kept function's own header-AST spelling can be exactly this same
     # ambiguous shape too -- a kept `extern "C" foo` genuinely has mangled ==
     # name == "foo", and an unrelated excluded C++ dependency function can

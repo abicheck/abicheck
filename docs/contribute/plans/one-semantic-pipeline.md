@@ -17175,6 +17175,22 @@ not new design.
 
 **Checklist (one row per phase, each a real PR removing code):**
 
+- **Declaration fields (closed, 2026-09-30).** `AbiSnapshot.functions`/
+  `variables`/`types`/`enums`/`typedefs`/`typedefs_qualified`/`constants`/
+  `typedef_entity_ids`/`constant_entity_ids` are no longer snapshot fields.
+  The snapshot's `SemanticIR` owns an ordered declaration store
+  (`model/declaration_store.py`'s `Declarations`, read as
+  `snapshot.declarations.<kind>`); the constructor keeps the nine names
+  only as builder `InitVar`s. `snapshot.canonical_ir` is the old
+  `semantic_ir` meaning (canonical occurrences, or `None` when no
+  normalizer ran). Reading a removed name raises `AttributeError` naming
+  its replacement (only `dataclasses.replace` still sees the InitVar
+  default), and assigning one raises too, so a stale caller cannot
+  silently get `None` or create a stray attribute. mypy enforces the
+  package side statically. The document format is unchanged: the
+  declarations serialize under their historical keys, in their historical
+  order.
+
 - Phase 0: the *domain-side* `AbiSnapshot.clang_*_facts_reliable` boolean
   attributes are removed once every consumer reads the `Fact[...]` field
   instead. **Not removed, ever, per Phase 0's own corrected design**: the

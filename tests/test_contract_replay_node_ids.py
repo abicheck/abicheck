@@ -69,6 +69,7 @@ from abicheck.model import (
 )
 from abicheck.model.graph_entity_identity import snapshot_identities
 from abicheck.serialization import load_snapshot
+from tests.snapshot_fields import field_of
 
 FIXTURE = Path(__file__).parent / "fixtures" / "contract_context_v1"
 MODES = ("public", "exports")
@@ -140,7 +141,7 @@ def _snapshot(combo: tuple[int, ...]) -> AbiSnapshot:
             alias, target = value
             snap.declarations.typedefs[alias] = target
         else:
-            getattr(snap, bucket).append(value)
+            field_of(snap, bucket).append(value)
     return snap
 
 

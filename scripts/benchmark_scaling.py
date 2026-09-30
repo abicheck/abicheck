@@ -1267,7 +1267,7 @@ def _run_severity(prepared: list[Change]) -> int:
 def _run_serialize(prepared: AbiSnapshot) -> int:
     """Time a serialize → load round-trip; return the snapshot's function count."""
     loaded = snapshot_from_dict(json.loads(snapshot_to_json(prepared)))
-    return len(loaded.functions)
+    return len(loaded.declarations.functions)
 
 
 @dataclass

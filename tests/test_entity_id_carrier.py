@@ -81,6 +81,7 @@ from abicheck.model.identity import (
     entity_id_for_variable,
 )
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from tests.snapshot_fields import field_of
 
 _ABICHECK_ROOT = Path(__file__).resolve().parent.parent / "abicheck"
 
@@ -306,7 +307,7 @@ class TestSidecarFieldShape:
         # The whole point of the sidecar shape: a consumer joins it against
         # the dict it annotates by key, with no second key convention.
         snap = _snapshot_with_sidecars()
-        assert set(getattr(snap, field_name)) == set(getattr(snap, partner))
+        assert set(field_of(snap, field_name)) == set(field_of(snap, partner))
 
 
 def _snapshot_with_sidecars() -> AbiSnapshot:
@@ -334,8 +335,8 @@ class TestSidecarIsPersisted:
         reloaded = snapshot_from_dict(
             json.loads(json.dumps(snapshot_to_dict(original)))
         )
-        assert reloaded.declarations.typedef_entity_ids == original.typedef_entity_ids
-        assert reloaded.declarations.constant_entity_ids == original.constant_entity_ids
+        assert reloaded.declarations.typedef_entity_ids == original.declarations.typedef_entity_ids
+        assert reloaded.declarations.constant_entity_ids == original.declarations.constant_entity_ids
 
     def test_scope_kind_survives_rather_than_a_rendered_string(self) -> None:
         # The same counterexample the declaration carrier's own round-trip
@@ -443,14 +444,14 @@ class TestCarrierIsPersisted:
         )
         assert (
             reloaded.declarations.functions[0].entity_id
-            == original.functions[0].entity_id
+            == original.declarations.functions[0].entity_id
         )
         assert (
             reloaded.declarations.variables[0].entity_id
-            == original.variables[0].entity_id
+            == original.declarations.variables[0].entity_id
         )
-        assert reloaded.declarations.types[0].entity_id == original.types[0].entity_id
-        assert reloaded.declarations.enums[0].entity_id == original.enums[0].entity_id
+        assert reloaded.declarations.types[0].entity_id == original.declarations.types[0].entity_id
+        assert reloaded.declarations.enums[0].entity_id == original.declarations.enums[0].entity_id
 
     def test_record_nested_in_record_survives_the_round_trip(self) -> None:
         # The exact counterexample the wire-schema-v2 Design section's own
@@ -472,7 +473,7 @@ class TestCarrierIsPersisted:
             ],
         )
         reloaded = snapshot_from_dict(json.loads(json.dumps(snapshot_to_dict(snap))))
-        assert reloaded.declarations.types[0].entity_id == snap.types[0].entity_id
+        assert reloaded.declarations.types[0].entity_id == snap.declarations.types[0].entity_id
         assert reloaded.declarations.types[0].entity_id != entity_id_for_type(
             (Namespace("ns"),), "A"
         )

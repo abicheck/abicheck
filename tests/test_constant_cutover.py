@@ -1025,7 +1025,7 @@ class TestThroughCompare:
             old,
             new,
             old_constants=old.declarations.constants,
-            new_constants=new.constants,
+            new_constants=new.declarations.constants,
         )
         (change,) = _run(old_index, new_index)
         assert change.kind is ChangeKind.CONSTANT_REMOVED
