@@ -35,6 +35,7 @@ from .virtual_dispatch_graph import augment_graph_with_virtual_dispatch
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
+    from .l5_ast_run import L5AstRun
 
 
 #: ADR-046 D3: the per-(kind, role) coverage matrix. ``type_graph.py``'s
@@ -162,10 +163,8 @@ def _scope_narrowed_target(
 def fold_call_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
-    clang_bin: str,
+    run: L5AstRun,
     extractors: list[ExtractorRecord] | None,
-    changed_paths: tuple[str, ...] = (),
-    scoped_units: list[Any] | None = None,
 ) -> None:
     """Best-effort Clang call-graph augmentation of *graph* (ADR-031 D4).
 
@@ -174,24 +173,10 @@ def fold_call_graph(
     leaves the graph without call edges — it never raises (ADR-028 D3 authority
     rule: source evidence never aborts collection).
 
-    Scope selection, in precedence order:
-
-    - *changed_paths* (a PR/``--since`` scan) → the changed compile units only —
-      parsing every TU of a large compile DB would defeat the targeted PR cost
-      model (ADR-035 D7 / Codex review). A changed *header* still fans out to all
-      TUs (we cannot tell which it affects without an include graph).
-    - *scoped_units* (an **unseeded** run) → the exact compile-unit set the L4
-      replay used (``headers-only``). Without this the unseeded call-graph pass
-      re-parsed the *whole* compile DB even though L4 was scoped to one TU — the
-      Gap-1 asymmetry: the pass scaled with the whole tree while its reported
-      L4 coverage stayed at a
-      fraction. Aligning the two makes the L5 call-graph consistent with the L4
-      surface (no phantom edges from TUs L4 never examined) and removes the
-      seedless ``--depth source`` cost blow-up.
-    - neither → the broad pass over all TUs (the ``full``/``s6`` contract).
+    Reads *run* -- the one scoped L5 AST pass (``l5_ast_pass.run_l5_ast_pass``,
+    which documents the scope precedence) shared by every clang-backed fold.
     """
     from .call_graph import (
-        ClangCallGraphExtractor,
         augment_graph_with_calls,
         extractor_pass_fully_covered,
         narrowed_pass_confirmed,
@@ -199,30 +184,19 @@ def fold_call_graph(
     )
 
     rows = extractors if extractors is not None else []
-    # The L4 extractor's clang_bin may be a plain "clang"; the call extractor
-    # needs a C++ driver, so prefer clang++ unless the user pinned a specific one.
-    extractor = ClangCallGraphExtractor(
-        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
-    )
-    if not extractor.available():
+    if not run.clang_available:
         rows.append(
             ExtractorRecord(
                 name="call_graph:clang",
                 status="failed",
-                detail=f"{extractor.clang_bin} not found; graph has no call edges",
+                detail=f"{run.clang_bin} not found; graph has no call edges",
             )
         )
         return
-    # Scope to the changed TUs for a focused PR scan; parse all when unseeded.
-    # A changed *header* fans out to all TUs — it has no compile unit of its own,
-    # and (like the L4 selector without an include graph) we cannot tell which TUs
-    # it affects, so restricting to ``cu.source`` matches would drop every unit and
-    # silently skip header-only API changes (Codex review). Source-only changes
-    # stay narrowed to the matching TUs.
-    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
-        merged, changed_paths, scoped_units
-    )
-    edges = extractor.extract_from_build(target)
+    target, scoped_note, narrowed = run.target, run.scoped_note, run.narrowed
+    scope_key = run.scope_key
+    extractor = run.outcomes["call_graph"]
+    edges = extractor.result
     # The project's own compile-unit sources — used to mark call-graph decls
     # ``defined_in_project`` from source-location provenance, so the cross-checks
     # can flag a public→impl-helper dependency the built-in call graph produced
@@ -266,10 +240,8 @@ def fold_call_graph(
 def fold_type_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
-    clang_bin: str,
+    run: L5AstRun,
     extractors: list[ExtractorRecord] | None,
-    changed_paths: tuple[str, ...] = (),
-    scoped_units: list[Any] | None = None,
 ) -> None:
     """Best-effort Clang type/reference-graph augmentation of *graph* (ADR-041 P0).
 
@@ -288,25 +260,22 @@ def fold_type_graph(
         narrowed_pass_confirmed,
         project_source_files,
     )
-    from .type_graph import ClangTypeGraphExtractor, augment_graph_with_types
+    from .type_graph import augment_graph_with_types
 
     rows = extractors if extractors is not None else []
-    extractor = ClangTypeGraphExtractor(
-        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
-    )
-    if not extractor.available():
+    if not run.clang_available:
         rows.append(
             ExtractorRecord(
                 name="type_graph:clang",
                 status="failed",
-                detail=f"{extractor.clang_bin} not found; graph has no type edges",
+                detail=f"{run.clang_bin} not found; graph has no type edges",
             )
         )
         return
-    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
-        merged, changed_paths, scoped_units
-    )
-    edges = extractor.extract_from_build(target)
+    target, scoped_note, narrowed = run.target, run.scoped_note, run.narrowed
+    scope_key = run.scope_key
+    extractor = run.outcomes["type_graph"]
+    edges = extractor.result
     project_files = project_source_files(merged)
     added = augment_graph_with_types(graph, edges, project_files or None)
     # Recorded regardless of `added` — mirrors fold_call_graph's coverage gate.
@@ -344,10 +313,8 @@ def fold_type_graph(
 def fold_override_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
-    clang_bin: str,
+    run: L5AstRun,
     extractors: list[ExtractorRecord] | None,
-    changed_paths: tuple[str, ...] = (),
-    scoped_units: list[Any] | None = None,
 ) -> None:
     """Best-effort Clang virtual-dispatch/class-hierarchy augmentation of
     *graph* (ADR-041 P2 item 1).
@@ -361,28 +328,22 @@ def fold_override_graph(
     (``with_call_graph``), same as the other Clang passes.
     """
     from .call_graph import extractor_pass_fully_covered, narrowed_pass_confirmed
-    from .override_graph import (
-        ClangOverrideGraphExtractor,
-        augment_graph_with_overrides,
-    )
+    from .override_graph import augment_graph_with_overrides
 
     rows = extractors if extractors is not None else []
-    extractor = ClangOverrideGraphExtractor(
-        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
-    )
-    if not extractor.available():
+    if not run.clang_available:
         rows.append(
             ExtractorRecord(
                 name="override_graph:clang",
                 status="failed",
-                detail=f"{extractor.clang_bin} not found; graph has no override edges",
+                detail=f"{run.clang_bin} not found; graph has no override edges",
             )
         )
         return
-    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
-        merged, changed_paths, scoped_units
-    )
-    edges = extractor.extract_from_build(target)
+    target, scoped_note, narrowed = run.target, run.scoped_note, run.narrowed
+    scope_key = run.scope_key
+    extractor = run.outcomes["override_graph"]
+    edges, virtual_methods, virtual_destructor_owners = extractor.result
     # `virtual_methods` closes a real gap (Codex review, fresh evidence):
     # a virtual method with no override anywhere in the scanned codebase
     # never appears as either endpoint of an OverrideEdge at all, so
@@ -393,8 +354,8 @@ def fold_override_graph(
     added = augment_graph_with_overrides(
         graph,
         edges,
-        virtual_methods=frozenset(extractor.last_virtual_methods),
-        virtual_destructor_owners=frozenset(extractor.last_virtual_destructor_owners),
+        virtual_methods=frozenset(virtual_methods),
+        virtual_destructor_owners=frozenset(virtual_destructor_owners),
     )
     # Recorded regardless of `added` — mirrors fold_call_graph/fold_type_graph's
     # coverage gate. project_source_files() isn't consulted here: unlike a call
@@ -547,10 +508,8 @@ def fold_virtual_dispatch_graph(
 def fold_template_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
-    clang_bin: str,
+    run: L5AstRun,
     extractors: list[ExtractorRecord] | None,
-    changed_paths: tuple[str, ...] = (),
-    scoped_units: list[Any] | None = None,
 ) -> None:
     """Best-effort Clang template-instantiation augmentation of *graph*
     (G29 Phase 5 item 1).
@@ -564,7 +523,6 @@ def fold_template_graph(
     runs the call/type graph (``with_call_graph``), sharing the same
     scoping decision and clang-availability diagnostic story.
     """
-    from . import template_graph
     from .call_graph import (
         extractor_pass_fully_covered,
         narrowed_pass_confirmed,
@@ -572,37 +530,20 @@ def fold_template_graph(
     )
     from .template_graph_fold import augment_graph_with_templates
 
-    # Deliberately `template_graph.ClangTemplateGraphExtractor` (through the
-    # module, not a direct `from .template_graph_extractor import ...`) --
-    # this is what makes `monkeypatch.setattr(template_graph,
-    # "ClangTemplateGraphExtractor", ...)` still redirect this call site, the
-    # exact compatibility guarantee `template_graph_extractor.py`'s own
-    # module docstring documents (Codex review, fresh evidence: an earlier
-    # revision imported the class directly from the new module here, which
-    # silently broke that guarantee for this one caller since a monkeypatch
-    # on `template_graph`'s own attribute no longer had anywhere to be read
-    # from). `template_graph`'s lazy `__getattr__` shim returns `Any`, so
-    # this attribute access itself is untyped -- annotated explicitly here
-    # rather than fixed by bypassing the shim.
-    ClangTemplateGraphExtractor: type[Any] = template_graph.ClangTemplateGraphExtractor
-
     rows = extractors if extractors is not None else []
-    extractor = ClangTemplateGraphExtractor(
-        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
-    )
-    if not extractor.available():
+    if not run.clang_available:
         rows.append(
             ExtractorRecord(
                 name="template_graph:clang",
                 status="failed",
-                detail=f"{extractor.clang_bin} not found; graph has no template edges",
+                detail=f"{run.clang_bin} not found; graph has no template edges",
             )
         )
         return
-    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
-        merged, changed_paths, scoped_units
-    )
-    instantiations = extractor.extract_from_build(target)
+    target, scoped_note, narrowed = run.target, run.scoped_note, run.narrowed
+    scope_key = run.scope_key
+    extractor = run.outcomes["template_graph"]
+    instantiations = extractor.result
     project_files = project_source_files(merged)
     added = augment_graph_with_templates(graph, instantiations, project_files or None)
     if extractor_pass_fully_covered(target, extractor, narrowed):
@@ -634,10 +575,8 @@ def fold_template_graph(
 def fold_macro_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
-    clang_bin: str,
+    run: L5AstRun,
     extractors: list[ExtractorRecord] | None,
-    changed_paths: tuple[str, ...] = (),
-    scoped_units: list[Any] | None = None,
 ) -> None:
     """Best-effort Clang macro/config-dependency augmentation of *graph*
     (G29 Phase 5 item 2).
@@ -662,27 +601,23 @@ def fold_macro_graph(
         narrowed_pass_confirmed,
     )
     from .macro_graph import (
-        ClangMacroGraphExtractor,
         augment_graph_with_macro_dependencies,
     )
 
     rows = extractors if extractors is not None else []
-    extractor = ClangMacroGraphExtractor(
-        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
-    )
-    if not extractor.available():
+    if not run.clang_available:
         rows.append(
             ExtractorRecord(
                 name="macro_graph:clang",
                 status="failed",
-                detail=f"{extractor.clang_bin} not found; graph has no macro edges",
+                detail=f"{run.clang_bin} not found; graph has no macro edges",
             )
         )
         return
-    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
-        merged, changed_paths, scoped_units
-    )
-    decl_ranges = extractor.extract_from_build(target)
+    target, scoped_note, narrowed = run.target, run.scoped_note, run.narrowed
+    scope_key = run.scope_key
+    extractor = run.outcomes["macro_graph"]
+    decl_ranges = extractor.result
 
     def _read_source(path: str) -> str | None:
         return Path(path).read_text(encoding="utf-8")
@@ -727,10 +662,8 @@ def fold_macro_graph(
 def fold_callback_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
-    clang_bin: str,
+    run: L5AstRun,
     extractors: list[ExtractorRecord] | None,
-    changed_paths: tuple[str, ...] = (),
-    scoped_units: list[Any] | None = None,
 ) -> None:
     """Best-effort Clang callback/function-pointer augmentation of *graph*
     (G29 Phase 5 item 4).
@@ -755,28 +688,24 @@ def fold_callback_graph(
     """
     from .call_graph import extractor_pass_fully_covered, narrowed_pass_confirmed
     from .callback_graph import (
-        ClangCallbackGraphExtractor,
         augment_graph_with_callback_invocations,
         augment_graph_with_callback_registrations,
     )
 
     rows = extractors if extractors is not None else []
-    extractor = ClangCallbackGraphExtractor(
-        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
-    )
-    if not extractor.available():
+    if not run.clang_available:
         rows.append(
             ExtractorRecord(
                 name="callback_graph:clang",
                 status="failed",
-                detail=f"{extractor.clang_bin} not found; graph has no callback edges",
+                detail=f"{run.clang_bin} not found; graph has no callback edges",
             )
         )
         return
-    target, scoped_note, narrowed, scope_key = _scope_narrowed_target(
-        merged, changed_paths, scoped_units
-    )
-    callback_edges = extractor.extract_from_build(target)
+    target, scoped_note, narrowed = run.target, run.scoped_note, run.narrowed
+    scope_key = run.scope_key
+    extractor = run.outcomes["callback_graph"]
+    callback_edges = extractor.result
     registration_result = augment_graph_with_callback_registrations(
         graph, callback_edges
     )
@@ -927,68 +856,6 @@ def fold_include_graph(
                 f"unit(s){scoped_note}"
             ),
         )
-    )
-
-
-def fold_semantic_graphs(
-    graph: SourceGraphSummary,
-    merged: BuildEvidence,
-    clang_bin: str,
-    extractors: list[ExtractorRecord] | None,
-    changed_paths: tuple[str, ...] = (),
-    scoped_units: list[Any] | None = None,
-) -> None:
-    """Run every Clang-derived L5 graph pass over *graph* in one call:
-    :func:`fold_call_graph`, :func:`fold_type_graph`,
-    :func:`fold_override_graph` (ADR-041 P2 item 1),
-    :func:`fold_virtual_dispatch_graph` (G29 Phase 5 item 3),
-    :func:`fold_template_graph` (G29 Phase 5 item 1),
-    :func:`fold_macro_graph` (G29 Phase 5 item 2),
-    :func:`fold_callback_graph` (G29 Phase 5 item 4), then
-    :func:`fold_include_graph` — the exact sequence ``inline._build_inline_graph``
-    ran inline before this wrapper existed, kept together here (rather than
-    one call site per pass in ``inline.py``, which sits at its own
-    line-count cap) so a future pass adds one call here instead of
-    growing that file too. ``fold_macro_graph`` sits right after
-    ``fold_template_graph`` — both are Clang-backed passes needing the same
-    scoping decision, and both close over one of G29 Phase 5's originally
-    open graph families. ``fold_virtual_dispatch_graph`` sits right after
-    ``fold_override_graph`` and takes no clang/scoping arguments of its own
-    (see its own docstring) — it is a pure transformation over the call/type/
-    override graph state the three preceding passes just folded, so it must
-    run after all three, not merely "somewhere in this sequence".
-    ``fold_callback_graph`` sits after ``fold_macro_graph`` for the identical
-    reason ``fold_virtual_dispatch_graph`` sits after ``fold_override_graph``:
-    its own internal Part A join reads ``call_graph.py``'s already-folded
-    function-pointer-kind ``DECL_CALLS_DECL`` edges, so ``fold_call_graph``
-    must have already run — any position after it works, and grouping it with
-    the other G29 Phase 5 passes keeps this family together. Each
-    clang-backed pass shares the same *changed_paths*/*scoped_units* scoping
-    precedence and clang-binary resolution, and each degrades independently
-    (a missing ``clang++`` or a per-TU parse failure never aborts a later
-    pass — ADR-028 D3).
-    """
-    fold_call_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_type_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_override_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_virtual_dispatch_graph(graph)
-    fold_template_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_macro_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_callback_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
-    )
-    fold_include_graph(
-        graph, merged, clang_bin, extractors, changed_paths, scoped_units=scoped_units
     )
 
 

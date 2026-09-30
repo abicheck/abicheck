@@ -32,7 +32,6 @@ import pytest
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.buildsource.template_graph import (
-    ClangTemplateGraphExtractor,
     TemplateArgUse,
     TemplateInstantiation,
     parse_clang_ast_templates,
@@ -1757,16 +1756,13 @@ def test_namespace_scoped_explicit_instantiation_detached_outside_namespace_stil
 # ── cross-TU extraction merge ────────────────────────────────────────────────
 
 
-def test_extract_from_build_merges_richer_data_across_tus_instead_of_dropping_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_merge_template_instantiations_merges_richer_data_across_tus() -> None:
     """Two TUs instantiating the identical ``(kind, template_qname, label)``
     must merge -- not have the second TU's data silently dropped (Codex
     review, mirrors ``type_graph.py``'s own cross-TU ``_merge_type_edges``):
     one TU resolves an argument's ``target_qname``, another TU reaches an
     extra instantiated member the first TU's translation unit never used."""
-    extractor = ClangTemplateGraphExtractor(clang_bin="clang++")
-    monkeypatch.setattr(extractor, "available", lambda: True)
+    from abicheck.buildsource.template_graph import merge_template_instantiations
 
     per_unit = {
         "a.cpp": [
@@ -1794,18 +1790,7 @@ def test_extract_from_build_merges_richer_data_across_tus_instead_of_dropping_it
             )
         ],
     }
-    monkeypatch.setattr(
-        extractor,
-        "_extract_from_compile_unit",
-        lambda cu, *, diagnostics=None: per_unit[cu.source],
-    )
-    build = BuildEvidence(
-        compile_units=[
-            CompileUnit(id="cu://a", source="a.cpp"),
-            CompileUnit(id="cu://b", source="b.cpp"),
-        ]
-    )
-    out = extractor.extract_from_build(build)
+    out = merge_template_instantiations([per_unit["a.cpp"], per_unit["b.cpp"]])
     assert len(out) == 1
     merged = out[0]
     # The unresolved-in-a.cpp argument is filled in from b.cpp, not dropped.
@@ -1819,6 +1804,74 @@ def test_extract_from_build_merges_richer_data_across_tus_instead_of_dropping_it
     )
     # a.cpp's non-empty file wins over b.cpp's empty one.
     assert merged.file == "a.cpp"
+
+
+def test_merge_template_instantiations_keys_function_overloads_by_symbol() -> None:
+    """Two overloads of one function template instantiated with identical
+    template arguments share a label (arity is not a template argument), so
+    a function-kind instantiation is keyed by its mangled name; a class
+    template (no overloads) keeps the label key."""
+    from abicheck.buildsource.template_graph import merge_template_instantiations
+
+    def _fn(sym: str) -> TemplateInstantiation:
+        return TemplateInstantiation(
+            kind="function",
+            template_qname="api::f",
+            label="f<int>",
+            args=(TemplateArgUse("int", None),),
+            emitted_symbols=(sym,),
+            file="a.cpp",
+        )
+
+    one, two = _fn("_ZN3api1fIiEEvT_"), _fn("_ZN3api1fIiEEvT_S1_")
+    out = merge_template_instantiations([[one], [two, one]])
+    assert [i.emitted_symbols for i in out] == [
+        one.emitted_symbols,
+        two.emitted_symbols,
+    ]
+    rec_a = TemplateInstantiation(
+        kind="record",
+        template_qname="W",
+        label="W<int>",
+        args=(TemplateArgUse("int", None),),
+        emitted_symbols=("_ZN1WIiE3getEv",),
+        file="a.cpp",
+    )
+    rec_b = TemplateInstantiation(
+        kind="record",
+        template_qname="W",
+        label="W<int>",
+        args=(TemplateArgUse("int", None),),
+        emitted_symbols=("_ZN1WIiE3setEi",),
+        file="b.cpp",
+    )
+    assert len(merge_template_instantiations([[rec_a], [rec_b]])) == 1
+
+
+def test_run_ast_passes_merges_template_instantiations_across_tus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import abicheck.buildsource.l5_ast_pass as l5
+
+    inst = TemplateInstantiation(
+        kind="record",
+        template_qname="W",
+        label="W<int>",
+        args=(TemplateArgUse("int", None),),
+        emitted_symbols=("_ZN1WIiE3getEv",),
+        file="a.cpp",
+    )
+    monkeypatch.setattr(l5, "run_clang_ast_dump", lambda *_a, **_k: {})
+    real = next(p for p in l5.L5_AST_PASSES if p.name == "template_graph")
+    fake_pass = l5.AstPass(real.name, lambda _ast, _cu: [inst], real.merge)
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp"),
+            CompileUnit(id="cu://b", source="b.cpp"),
+        ]
+    )
+    out = l5.run_ast_passes(build, "clang++", passes=[fake_pass])
+    assert out["template_graph"].result == [inst]
 
 
 # ── real-toolchain regression (integration marker: needs clang) ─────────────
@@ -1849,8 +1902,24 @@ def test_real_clang_class_and_function_template_instantiations(tmp_path) -> None
         "template <typename T> T identity(T x) { return x; }\n"
         "int use() { return identity(3); }\n"
     )
-    extractor = ClangTemplateGraphExtractor(clang_bin=clang_bin)
-    assert extractor.available()
+    from abicheck.buildsource.l5_ast_pass import L5_AST_PASSES, run_ast_passes
+
+    template_pass = [p for p in L5_AST_PASSES if p.name == "template_graph"]
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(
+                id="cu://t",
+                source=str(src),
+                directory=str(tmp_path),
+                language="CXX",
+                standard="c++17",
+            )
+        ]
+    )
+    outcome = run_ast_passes(build, clang_bin, passes=template_pass)
+    assert outcome["template_graph"].diagnostics == []
+    via_pass = {i.label for i in outcome["template_graph"].result}
+    assert {"Wrapper<int>", "Wrapper<internal::Detail>", "identity<int>"} <= via_pass
     result = subprocess.run(
         [
             clang_bin,

@@ -78,17 +78,7 @@ from ..buildsource.inline import (
     load_build_config,
     sniff_build_info_format,
 )
-from ..buildsource.inline_graph_fold import (
-    fold_archive_graph,
-    fold_call_graph,
-    fold_callback_graph,
-    fold_include_graph,
-    fold_macro_graph,
-    fold_override_graph,
-    fold_template_graph,
-    fold_type_graph,
-    fold_virtual_dispatch_graph,
-)
+from ..buildsource.inline_graph_fold import fold_archive_graph
 from ..buildsource.inputs_pack import (
     _load_build_evidence,
     ingest_inputs_pack,
@@ -98,6 +88,7 @@ from ..buildsource.inputs_pack import (
 )
 from ..buildsource.inputs_validate import validate_inputs_pack
 from ..buildsource.l2_seed import seed_includes_and_fold_compile_context
+from ..buildsource.l5_ast_pass import fold_semantic_graphs
 from ..buildsource.pack_io import (
     content_hash as pack_content_hash,
     to_ref as pack_to_ref,
@@ -220,14 +211,7 @@ __all__ = [
     "extract_compiler_record",
     "extract_numpy_capi_surface",
     "fold_archive_graph",
-    "fold_call_graph",
-    "fold_callback_graph",
-    "fold_include_graph",
-    "fold_macro_graph",
-    "fold_override_graph",
-    "fold_template_graph",
-    "fold_type_graph",
-    "fold_virtual_dispatch_graph",
+    "fold_semantic_graphs",
     "has_explicit_std",
     "import_abicc_perl_dump",
     "include_operand_dirs",

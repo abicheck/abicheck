@@ -29,7 +29,6 @@ import pytest
 
 from abicheck.buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, GraphNode
 from abicheck.buildsource.macro_graph import (
-    ClangMacroGraphExtractor,
     ConditionalRegion,
     DeclRange,
     _macro_definition_lines,
@@ -926,17 +925,23 @@ def test_augment_result_complete_when_clean() -> None:
     assert result.complete is True
 
 
-# ── ClangMacroGraphExtractor availability degrade ────────────────────────
+# ── shared L5 AST pass (macro family): per-TU resolution, merge, degrade ──
 
 
-def test_extract_from_compile_unit_resolves_relative_file_against_own_cwd(
+def _macro_pass():
+    from abicheck.buildsource.l5_ast_pass import L5_AST_PASSES
+
+    return [p for p in L5_AST_PASSES if p.name == "macro_graph"]
+
+
+def test_parse_tu_decl_ranges_resolves_relative_file_against_own_cwd(
     monkeypatch, tmp_path
 ) -> None:
     """Codex review, PR #708: clang echoes a relative source path (an
     out-of-source build's ``directory`` + relative ``source``) back into the
     AST dump's ``file`` fields exactly as given on the command line -- it
     never resolves that against the compile unit's own ``directory`` itself.
-    ``_extract_from_compile_unit`` must resolve a relative ``DeclRange.file``
+    ``parse_tu_decl_ranges`` must resolve a relative ``DeclRange.file``
     against the compile unit's *own* replayed cwd, not the process cwd.
 
     Uses a real, OS-native ``tmp_path`` (rather than a hand-rolled POSIX-style
@@ -946,22 +951,15 @@ def test_extract_from_compile_unit_resolves_relative_file_against_own_cwd(
     itself correctly uses, since a real join must produce a path the host OS
     can actually open) produce backslash separators instead."""
     import abicheck.buildsource.call_graph as call_graph_mod
+    import abicheck.buildsource.macro_graph as macro_graph_mod
     from abicheck.buildsource.build_evidence import CompileUnit
 
     out_dir = tmp_path / "build" / "out"
-    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
-    monkeypatch.setattr(
-        call_graph_mod,
-        "_safe_clang_args_from_compile_unit",
-        lambda cu: ["--", cu.source],
-    )
     monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: str(out_dir))
     monkeypatch.setattr(
-        extractor,
-        "_extract_from_safe_args",
-        lambda argv, cwd=None, *, diagnostics=None: [
-            DeclRange("f", os.path.join("..", "src", "a.h"), 3, 3)
-        ],
+        macro_graph_mod,
+        "parse_clang_ast_decl_ranges",
+        lambda ast: [DeclRange("f", os.path.join("..", "src", "a.h"), 3, 3)],
     )
     cu = CompileUnit(
         id="cu://a",
@@ -969,49 +967,43 @@ def test_extract_from_compile_unit_resolves_relative_file_against_own_cwd(
         input_files=[os.path.join("..", "src", "a.cpp")],
         directory=str(out_dir),
     )
-    ranges = extractor._extract_from_compile_unit(cu)
+    ranges = macro_graph_mod.parse_tu_decl_ranges({}, cu)
     expected_file = os.path.normpath(str(tmp_path / "build" / "src" / "a.h"))
     assert ranges == [DeclRange("f", expected_file, 3, 3)]
 
 
-def test_extract_from_compile_unit_leaves_absolute_file_untouched(
+def test_parse_tu_decl_ranges_leaves_absolute_file_untouched(
     monkeypatch, tmp_path
 ) -> None:
     import abicheck.buildsource.call_graph as call_graph_mod
+    import abicheck.buildsource.macro_graph as macro_graph_mod
     from abicheck.buildsource.build_evidence import CompileUnit
 
     out_dir = tmp_path / "build" / "out"
     abs_file = str(tmp_path / "abs" / "a.h")
-    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
-    monkeypatch.setattr(
-        call_graph_mod,
-        "_safe_clang_args_from_compile_unit",
-        lambda cu: ["--", cu.source],
-    )
     monkeypatch.setattr(call_graph_mod, "_replay_cwd", lambda cu: str(out_dir))
     monkeypatch.setattr(
-        extractor,
-        "_extract_from_safe_args",
-        lambda argv, cwd=None, *, diagnostics=None: [DeclRange("f", abs_file, 3, 3)],
+        macro_graph_mod,
+        "parse_clang_ast_decl_ranges",
+        lambda ast: [DeclRange("f", abs_file, 3, 3)],
     )
     cu = CompileUnit(
         id="cu://a", source="a.cpp", input_files=["a.cpp"], directory=str(out_dir)
     )
-    ranges = extractor._extract_from_compile_unit(cu)
+    ranges = macro_graph_mod.parse_tu_decl_ranges({}, cu)
     assert ranges == [DeclRange("f", abs_file, 3, 3)]
 
 
-def test_extract_from_safe_args_degrades_on_malformed_line_value(monkeypatch) -> None:
+def test_run_ast_passes_degrades_on_malformed_line_value(monkeypatch) -> None:
     """CodeRabbit review, fresh evidence: ``_LocationCursor.advance()`` calls
     ``int(loc["line"])`` with no type check -- a malformed ``line`` value
     (``null``, a list, ...) in adversarial or corrupted AST JSON raised an
     uncaught ``TypeError``, aborting extraction for the whole build instead
     of degrading to a diagnostic like every other malformed-input case this
-    extractor handles."""
-    import abicheck.buildsource.macro_graph as macro_graph_mod
+    pass handles."""
+    import abicheck.buildsource.l5_ast_pass as l5
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
-    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
-    monkeypatch.setattr(extractor, "available", lambda: True)
     malformed_ast = {
         "kind": "TranslationUnitDecl",
         "inner": [
@@ -1027,72 +1019,72 @@ def test_extract_from_safe_args_degrades_on_malformed_line_value(monkeypatch) ->
             }
         ],
     }
-    monkeypatch.setattr(
-        macro_graph_mod, "run_clang_ast_dump", lambda *a, **k: malformed_ast
+    monkeypatch.setattr(l5, "run_clang_ast_dump", lambda *a, **k: malformed_ast)
+    build = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://a", source="a.c", input_files=["a.c"])]
     )
-    ranges = extractor._extract_from_safe_args(["--"])
-    assert ranges == []
-    assert any("could not parse clang AST JSON" in d for d in extractor.diagnostics)
+    outcome = l5.run_ast_passes(build, "clang++", passes=_macro_pass())["macro_graph"]
+    assert outcome.result == []
+    assert any("could not parse clang AST JSON" in d for d in outcome.diagnostics)
 
 
-def test_extract_from_build_keeps_distinct_spans_for_same_identity(monkeypatch) -> None:
+def test_merge_decl_ranges_keeps_distinct_spans_for_same_identity() -> None:
     """Codex review, PR #708: a forward declaration and its own later
     definition share ``(identity, file)`` but have distinct spans -- the
     definition's span (which may carry the real macro guard/reference) must
     survive even though the forward declaration is also seen."""
-    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.macro_graph import merge_decl_ranges
 
-    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
-    monkeypatch.setattr(extractor, "available", lambda: True)
     forward = DeclRange("Widget", "t.h", 2, 2)
     definition = DeclRange("Widget", "t.h", 10, 14)
-    per_unit = {"cu://a": [forward], "cu://b": [definition]}
-    monkeypatch.setattr(
-        extractor,
-        "_extract_from_compile_unit",
-        lambda cu, *, diagnostics=None: per_unit[cu.id],
-    )
-    build = BuildEvidence(
-        compile_units=[
-            CompileUnit(id="cu://a", source="a.cpp", input_files=["a.cpp"]),
-            CompileUnit(id="cu://b", source="b.cpp", input_files=["b.cpp"]),
-        ]
-    )
-    ranges = extractor.extract_from_build(build)
+    ranges = merge_decl_ranges([[forward], [definition]])
     assert forward in ranges
     assert definition in ranges
 
 
-def test_extract_from_build_dedups_exact_duplicate_span(monkeypatch) -> None:
+def test_merge_decl_ranges_dedups_exact_duplicate_span() -> None:
+    from abicheck.buildsource.macro_graph import merge_decl_ranges
+
+    same = DeclRange("Widget", "t.h", 2, 2)
+    assert merge_decl_ranges([[same], [same]]) == [same]
+
+
+def test_run_ast_passes_dedups_exact_duplicate_span_across_units(
+    monkeypatch,
+) -> None:
+    import abicheck.buildsource.l5_ast_pass as l5
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
-    extractor = ClangMacroGraphExtractor(clang_bin="clang++")
-    monkeypatch.setattr(extractor, "available", lambda: True)
     same = DeclRange("Widget", "t.h", 2, 2)
-    monkeypatch.setattr(
-        extractor, "_extract_from_compile_unit", lambda cu, *, diagnostics=None: [same]
-    )
+    monkeypatch.setattr(l5, "run_clang_ast_dump", lambda *a, **k: {})
+    real = _macro_pass()[0]
+    fake_pass = l5.AstPass(real.name, lambda _ast, _cu: [same], real.merge)
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://a", source="a.cpp", input_files=["a.cpp"]),
             CompileUnit(id="cu://b", source="b.cpp", input_files=["b.cpp"]),
         ]
     )
-    ranges = extractor.extract_from_build(build)
-    assert ranges == [same]
+    outcome = l5.run_ast_passes(build, "clang++", passes=[fake_pass])
+    assert outcome["macro_graph"].result == [same]
 
 
 def test_extractor_unavailable_records_diagnostic() -> None:
-    extractor = ClangMacroGraphExtractor(clang_bin="definitely-not-a-real-clang-binary")
-    assert extractor.available() is False
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.inline_graph_fold import fold_macro_graph
+    from abicheck.buildsource.l5_ast_pass import run_l5_ast_pass
 
     build = BuildEvidence(
         compile_units=[CompileUnit(id="cu://a", source="a.cpp", input_files=["a.cpp"])]
     )
-    ranges = extractor.extract_from_build(build)
-    assert ranges == []
-    assert extractor.diagnostics
+    run = run_l5_ast_pass(build, "definitely-not-a-real-clang-binary")
+    assert run.clang_available is False
+    graph = SourceGraphSummary()
+    rows: list = []
+    fold_macro_graph(graph, build, run, rows)
+    assert graph.edges == []
+    assert [r.status for r in rows] == ["failed"]
+    assert rows[0].detail
 
 
 # ── integration: real clang (only when available) ───────────────────────
@@ -1134,7 +1126,7 @@ def test_parse_real_clang_ast_decl_ranges_end_to_end(tmp_path) -> None:
     ranges = parse_clang_ast_decl_ranges(ast)
     # clang's C++ mode also emits an implicit injected-class-name CXXRecordDecl
     # alongside the real definition (same identity, a narrower range) — a real
-    # production run dedups via ClangMacroGraphExtractor (first-seen wins, and
+    # production run dedups via macro_graph.merge_decl_ranges (first-seen wins, and
     # the real definition is always visited before the implicit one); this
     # pure-parser call intentionally doesn't dedup, so check "any" instead of
     # a single dict entry.

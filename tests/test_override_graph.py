@@ -26,7 +26,6 @@ from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.override_graph import (
     RESOLUTION_OVERRIDE_CONFIRMED,
     RESOLUTION_OVERRIDE_SIGNATURE_MATCH,
-    ClangOverrideGraphExtractor,
     OverrideEdge,
     _strip_exception_spec,
     augment_graph_with_overrides,
@@ -886,23 +885,30 @@ def test_virtual_destructor_owners_mints_no_node_for_an_unknown_class() -> None:
     assert graph.nodes == []
 
 
-# ── ClangOverrideGraphExtractor: graceful degrade ────────────────────────
+# ── shared L5 AST pass (override family): graceful degrade ───────────────
+
+
+def _override_pass():
+    from abicheck.buildsource.l5_ast_pass import L5_AST_PASSES
+
+    return [p for p in L5_AST_PASSES if p.name == "override_graph"]
 
 
 def test_extractor_missing_clang_returns_empty() -> None:
-    ext = ClangOverrideGraphExtractor(clang_bin="definitely-not-a-real-clang-xyz")
-    assert ext.available() is False
-    assert ext._extract_from_safe_args(["--", "foo.cpp"]) == []
-    assert (
-        ext.extract_from_build(
-            BuildEvidence(compile_units=[CompileUnit(id="cu://x", source="x.cpp")])
-        )
-        == []
-    )
-    assert ext.diagnostics
+    from abicheck.buildsource.inline_graph_fold import fold_override_graph
+    from abicheck.buildsource.l5_ast_pass import run_l5_ast_pass
+
+    build = BuildEvidence(compile_units=[CompileUnit(id="cu://x", source="x.cpp")])
+    run = run_l5_ast_pass(build, "definitely-not-a-real-clang-xyz")
+    assert run.clang_available is False
+    graph = SourceGraphSummary()
+    rows: list = []
+    fold_override_graph(graph, build, run, rows)
+    assert graph.edges == []
+    assert [r.status for r in rows] == ["failed"]
 
 
-def test_extract_from_build_unredacts_home_placeholder_in_cwd(monkeypatch) -> None:
+def test_run_ast_passes_unredacts_home_placeholder_in_cwd(monkeypatch) -> None:
     """Override extraction must replay the redacted compile-db cwd as a path.
 
     ``BuildEvidence`` redacts home prefixes to ``~``; subprocess does not
@@ -911,19 +917,18 @@ def test_extract_from_build_unredacts_home_placeholder_in_cwd(monkeypatch) -> No
     """
     import os
 
-    import abicheck.buildsource.override_graph as og
+    import abicheck.buildsource.l5_ast_pass as l5
 
     home = os.path.expanduser("~")
     captured: dict[str, object] = {}
-    monkeypatch.setattr(og.shutil, "which", lambda _b: "/usr/bin/clang++")
 
     def fake_dump(clang_bin, argv, *, cwd, diagnostics):
         captured["argv"] = argv
         captured["cwd"] = cwd
         return {"kind": "TranslationUnitDecl", "inner": []}
 
-    monkeypatch.setattr(og, "run_clang_ast_dump", fake_dump)
-    ClangOverrideGraphExtractor().extract_from_build(
+    monkeypatch.setattr(l5, "run_clang_ast_dump", fake_dump)
+    l5.run_ast_passes(
         BuildEvidence(
             compile_units=[
                 CompileUnit(
@@ -935,16 +940,17 @@ def test_extract_from_build_unredacts_home_placeholder_in_cwd(monkeypatch) -> No
                     standard="c++17",
                 )
             ]
-        )
+        ),
+        "clang++",
+        passes=_override_pass(),
     )
 
     assert captured["argv"][-2:] == ["--", f"{home}/AppData/Local/Temp/t.cpp"]
     assert captured["cwd"] == f"{home}/AppData/Local/Temp"
 
 
-def test_extract_from_build_dedupes_across_compile_units(monkeypatch) -> None:
-    ext = ClangOverrideGraphExtractor(clang_bin="clang++")
-    monkeypatch.setattr(ext, "available", lambda: True)
+def test_merge_override_facts_dedupes_across_compile_units() -> None:
+    from abicheck.buildsource.override_graph import merge_override_facts
 
     edge = OverrideEdge(
         "_ZNK7Derived3runEi",
@@ -952,16 +958,39 @@ def test_extract_from_build_dedupes_across_compile_units(monkeypatch) -> None:
         CONF_HIGH,
         RESOLUTION_OVERRIDE_CONFIRMED,
     )
+    edges, virtual_methods, dtor_owners = merge_override_facts(
+        [
+            ([edge], frozenset({"_ZNK4Base3runEi"}), frozenset({"Base"})),
+            ([edge], frozenset({"_ZNK7Derived3runEi"}), frozenset()),
+        ]
+    )
+    assert edges == [edge]
+    assert virtual_methods == {"_ZNK4Base3runEi", "_ZNK7Derived3runEi"}
+    assert dtor_owners == {"Base"}
 
-    def _fake_extract(cu: CompileUnit, *, diagnostics=None) -> list[OverrideEdge]:
-        return [edge]
 
-    monkeypatch.setattr(ext, "_extract_from_compile_unit", _fake_extract)
+def test_run_ast_passes_dedupes_override_edges_across_compile_units(
+    monkeypatch,
+) -> None:
+    import abicheck.buildsource.l5_ast_pass as l5
+
+    edge = OverrideEdge(
+        "_ZNK7Derived3runEi",
+        "_ZNK4Base3runEi",
+        CONF_HIGH,
+        RESOLUTION_OVERRIDE_CONFIRMED,
+    )
+    monkeypatch.setattr(l5, "run_clang_ast_dump", lambda *_a, **_k: {})
+    real = _override_pass()[0]
+    fake_pass = l5.AstPass(
+        real.name, lambda _ast, _cu: ([edge], frozenset(), frozenset()), real.merge
+    )
     build = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://a", source="a.cpp"),
             CompileUnit(id="cu://b", source="b.cpp"),
         ]
     )
-    edges = ext.extract_from_build(build)
+    outcome = l5.run_ast_passes(build, "clang++", passes=[fake_pass])
+    edges, _virtual, _owners = outcome["override_graph"].result
     assert edges == [edge]
