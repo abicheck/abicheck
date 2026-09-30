@@ -114,10 +114,10 @@ this build: `name` is the build system (`cmake`, `bazel`, `make`, `msbuild`,
 ...), `generator` its backend where one exists (CMake's `Ninja` / `Unix
 Makefiles`), empty otherwise. Absent means *unrecorded*, never "no build
 system". The validator rejects a present-but-malformed value (not an object,
-empty/non-string `name`, non-string `generator`) rather than dropping it, and
+explicit `null`, empty/non-string `name`, non-string `generator`) rather than dropping it, and
 reports a target whose `evidence.attribution_path` build evidence names a
 different build system (`BuildEvidence.generators[].kind`; a `generic` or
-generator-less evidence file never conflicts).
+generator-less evidence file never conflicts). When both the declaration and the evidence name a backend for that build system, they must match too.
 
 The same identity is what the comparability gate reads off a snapshot's
 embedded L3 build evidence: two snapshots built by different build systems,

@@ -136,9 +136,9 @@ def build_system_issues(
     """
     with manifest_path.open(encoding="utf-8") as fh:
         raw_profile = json.load(fh).get("profile")
-    raw = raw_profile.get("build_system") if isinstance(raw_profile, dict) else None
-    if raw is None:
-        return []
+    if not isinstance(raw_profile, dict) or "build_system" not in raw_profile:
+        return []  # absent: unrecorded. An explicit null is malformed.
+    raw = raw_profile["build_system"]
     if not isinstance(raw, dict):
         return ["profile.build_system must be an object {name, generator}."]
     declared = build_output.profile.build_system
@@ -166,5 +166,19 @@ def build_system_issues(
                 f"{declared.name!r} disagrees with the build evidence at "
                 f"{t.evidence.attribution_path!r}, which names "
                 f"{', '.join(sorted(kinds))}."
+            )
+            continue
+        declared_backend = declared.generator.strip()
+        backends = {
+            g.generator.strip()
+            for g in evidence.generators
+            if g.kind.lower() == declared.name.lower() and g.generator.strip()
+        }
+        if declared_backend and backends and declared_backend not in backends:
+            issues.append(
+                f"target {t.id!r}: profile.build_system.generator "
+                f"{declared.generator!r} disagrees with the build evidence at "
+                f"{t.evidence.attribution_path!r}, which names "
+                f"{', '.join(sorted(backends))}."
             )
     return issues

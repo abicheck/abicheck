@@ -3,7 +3,8 @@
 - `build-output.json` accepts an optional `profile.build_system: {name, generator}`
   (e.g. `{"name": "cmake", "generator": "Ninja"}`); the validator rejects a
   malformed value and flags one that disagrees with a target's attribution
-  build evidence.
+  build evidence (build system, and the generator/backend for that build
+  system when both record one). An explicit `null` is rejected as malformed.
 
 ### Changed
 

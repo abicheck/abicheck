@@ -118,3 +118,80 @@ def test_build_system_must_agree_with_attribution_evidence(
         if "disagrees with the build evidence" in e
     ]
     assert (not mismatches) is agrees, mismatches
+
+
+@pytest.mark.parametrize(
+    ("declared_gen", "evidence", "agrees"),
+    [
+        ("Ninja", [("cmake", "Ninja")], True),
+        ("Ninja", [("cmake", "Unix Makefiles")], False),
+        ("Ninja", [("cmake", "")], True),  # evidence records no backend
+        ("", [("cmake", "Unix Makefiles")], True),  # declaration names none
+        ("Ninja", [("cmake", "Unix Makefiles"), ("cmake", "Ninja")], True),
+        (
+            "Ninja",
+            [("cmake", "Unix Makefiles"), ("ninja", "Ninja")],
+            False,
+        ),  # other kind's backend does not count
+    ],
+)
+def test_build_system_generator_must_agree_with_evidence_backend(
+    tmp_path, declared_gen, evidence, agrees
+):
+    ev = BuildEvidence(generators=[Generator(kind=k, generator=g) for k, g in evidence])
+    root = _write(
+        tmp_path / "o",
+        {"id": "p", "build_system": {"name": "cmake", "generator": declared_gen}},
+        attribution=ev,
+    )
+    mismatches = [
+        e for e in validate_build_output(root).errors if "build_system.generator" in e
+    ]
+    assert (not mismatches) is agrees, mismatches
+
+
+def _doc(root: Path, targets: list) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    doc = {
+        "schema": BUILD_OUTPUT_SCHEMA,
+        "profile": {"id": "p", "build_system": {"name": "cmake"}},
+        "targets": targets,
+    }
+    (root / "build-output.json").write_text(json.dumps(doc))
+    return root
+
+
+def _ev(attribution_path: str) -> dict:
+    return {
+        "id": "libx",
+        "evidence": {
+            "kind": "source-facts",
+            "path": "evidence/pack",
+            "projection": "inferred",
+            "attribution_path": attribution_path,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("targets", "setup"),
+    [
+        ([{"id": "libx"}], None),  # no evidence at all
+        ([_ev("../escape.json")], None),  # escapes the root
+        ([_ev("evidence/missing.json")], None),  # unreadable
+        ([_ev("evidence/bad.json")], "not json"),  # malformed JSON
+        ([_ev("evidence/bad.json")], "[1, 2]"),  # not an object
+    ],
+)
+def test_unusable_attribution_evidence_is_not_a_build_system_conflict(
+    tmp_path, targets, setup
+):
+    """Those are the attribution check's own findings; the build-system
+    check must neither crash nor invent a disagreement from them."""
+    root = tmp_path / "o"
+    if setup is not None:
+        (root / "evidence").mkdir(parents=True)
+        (root / "evidence" / "bad.json").write_text(setup)
+    _doc(root, targets)
+    errors = validate_build_output(root).errors
+    assert not [e for e in errors if "profile.build_system" in e], errors
