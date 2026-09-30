@@ -52,6 +52,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 WEIGHTS_FILE = Path(__file__).with_name("shard_weights.json")
+_MIN_SECONDS_PER_TEST = 1e-3
 
 
 def parse_shard(spec: str) -> tuple[int, int]:
@@ -109,7 +110,12 @@ def file_weights(
     per_test = [
         recorded[p] / counts[p] for p in counts if p in recorded and recorded[p] > 0
     ]
-    fallback = statistics.median(per_test) if per_test else 1.0
+    # Floored: a near-zero recorded file (or float underflow dividing one)
+    # must not give every unrecorded file weight 0, which would stack them
+    # all on whichever shard happens to be lightest.
+    fallback = (
+        max(statistics.median(per_test), _MIN_SECONDS_PER_TEST) if per_test else 1.0
+    )
     return {
         path: recorded.get(path, count * fallback) for path, count in counts.items()
     }

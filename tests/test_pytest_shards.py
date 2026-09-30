@@ -140,6 +140,12 @@ def test_unrecorded_files_fall_back_to_a_count_based_estimate(
             assert weight > 0
 
 
+def test_an_underflowing_recorded_weight_still_gives_new_files_a_positive_one() -> None:
+    ids = ["tests/test_a.py::t0", "tests/test_a.py::t1", "tests/test_b.py::t0"]
+    weights = file_weights(ids, {"tests/test_a.py": 5e-324})
+    assert weights["tests/test_b.py"] > 0
+
+
 def test_heavy_files_are_spread_rather_than_stacked() -> None:
     """The reason weights exist: two slow files and many fast ones must not
     land the two slow files on one shard just because they hold few tests."""
