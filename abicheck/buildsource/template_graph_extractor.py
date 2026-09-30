@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING
 
 from .. import deadline
 from ..process_resources import BudgetedExecutor
-from .clang_ast_run import NoAst, parse_clang_ast
+from .clang_ast_run import parse_clang_ast
 from .template_graph import (
     _FUNCTION_KIND,
     TemplateInstantiation,
@@ -84,14 +84,9 @@ class ClangTemplateGraphExtractor:
             diag.append(f"{self.clang_bin} not found in PATH")
             return []
         try:
-            result = parse_clang_ast(
-                self.clang_bin,
-                argv,
-                cwd=cwd,
-                diagnostics=diag,
-                parser=parse_clang_ast_templates,
+            return parse_clang_ast(
+                self.clang_bin, argv, cwd, diag, parse_clang_ast_templates, []
             )
-            return [] if isinstance(result, NoAst) else result
         except (ValueError, RecursionError) as exc:
             diag.append(f"could not parse clang AST JSON: {exc}")
             return []

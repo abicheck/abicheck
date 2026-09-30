@@ -23,7 +23,7 @@ compiler front end over the same TUs**:
 | L5 call-graph pass — **a second** `clang -ast-dump=json` per TU | 343s |
 | L5 type/override/template/macro/callback passes — **four more full dumps** per TU each... | > 15 min (run was killed at 30 min) |
 
-The six clang-backed L5 passes (`inline_graph_fold.fold_semantic_graphs`)
+The six clang-backed L5 passes (`l5_shared_ast.fold_semantic_graphs`)
 built the *identical* argv for a TU (`call_graph._safe_clang_args_from_compile_unit`)
 and ran the identical bounded dump (`clang_ast_run.run_clang_ast_dump`); they
 differed only in which **pure** parser they applied to the resulting tree.

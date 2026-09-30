@@ -16,11 +16,12 @@ import threading
 from typing import Any
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
+from hypothesis import given, settings, strategies as st
 
 import abicheck.buildsource.clang_ast_run as car
-from abicheck.buildsource.clang_ast_run import NoAst, parse_clang_ast, shared_ast_scope
+from abicheck.buildsource.clang_ast_run import parse_clang_ast, shared_ast_scope
+
+_NO = object()
 
 
 def _ast_for(argv: list[str], cwd: str | None) -> dict[str, Any]:
@@ -81,10 +82,10 @@ def _direct(parser, argv, cwd, failing):
 def _observe(parser, argv, cwd):
     diags: list[str] = []
     try:
-        r = parse_clang_ast("clang++", argv, cwd=cwd, diagnostics=diags, parser=parser)
+        r = parse_clang_ast("clang++", argv, cwd, diags, parser, _NO)
     except ValueError as exc:
         return ("err", str(exc)), diags
-    return (("noast", None) if isinstance(r, NoAst) else ("ok", r)), diags
+    return (("noast", None) if r is _NO else ("ok", r)), diags
 
 
 _units = st.lists(
@@ -195,7 +196,7 @@ def test_concurrent_requests_for_one_input_dump_once(monkeypatch) -> None:
             t.join(10)
     assert len(fake.calls) == 1
     assert len(results) == len(PARSERS) * 4
-    for (outcome, diags) in results:
+    for outcome, diags in results:
         assert diags == ["dumped a.cpp"]
         assert outcome[0] in {"ok", "err"}
 
@@ -203,7 +204,7 @@ def test_concurrent_requests_for_one_input_dump_once(monkeypatch) -> None:
 @pytest.mark.parametrize("n_units", [1, 3, 7])
 def test_fold_semantic_graphs_dumps_each_tu_once(monkeypatch, n_units) -> None:
     """End to end: the six clang-backed passes share one dump per TU."""
-    from abicheck.buildsource import inline_graph_fold
+    from abicheck.buildsource import l5_shared_ast
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.buildsource.source_graph import SourceGraphSummary
 
@@ -217,7 +218,7 @@ def test_fold_semantic_graphs_dumps_each_tu_once(monkeypatch, n_units) -> None:
 
     monkeypatch.setattr(car, "run_clang_ast_dump", fake)
     monkeypatch.setattr("shutil.which", lambda _b: "/usr/bin/clang++")
-    monkeypatch.setattr(inline_graph_fold, "fold_include_graph", lambda *a, **k: None)
+    monkeypatch.setattr(l5_shared_ast, "fold_include_graph", lambda *a, **k: None)
     merged = BuildEvidence(
         compile_units=[
             CompileUnit(
@@ -231,7 +232,7 @@ def test_fold_semantic_graphs_dumps_each_tu_once(monkeypatch, n_units) -> None:
             for i in range(n_units)
         ]
     )
-    inline_graph_fold.fold_semantic_graphs(
+    l5_shared_ast.fold_semantic_graphs(
         SourceGraphSummary(), merged, "clang++", extractors=[]
     )
     assert len(dumps) == n_units

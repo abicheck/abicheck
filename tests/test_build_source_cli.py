@@ -630,7 +630,7 @@ def test_collect_source_graph_folds_template_graph_pass(tmp_path):
 @pytest.mark.integration
 def test_collect_source_graph_folds_override_and_macro_graph_passes(tmp_path):
     """A third round of the same gap (Codex review, fresh evidence): this
-    collect path had fallen behind ``inline_graph_fold.fold_semantic_graphs``
+    collect path had fallen behind ``l5_shared_ast.fold_semantic_graphs``
     a third time -- override/virtual-dispatch/macro folding were still
     missing here, so an otherwise-equivalent collected pack silently carried
     no ``METHOD_POSSIBLE_OVERRIDE``/``VIRTUAL_CALL_MAY_DISPATCH_TO``/

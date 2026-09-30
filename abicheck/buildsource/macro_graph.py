@@ -204,7 +204,7 @@ from typing import TYPE_CHECKING, Any
 from .. import deadline
 from ..model.mangled_name import strip_macho_itanium_decoration
 from ..process_resources import BudgetedExecutor
-from .clang_ast_run import NoAst, parse_clang_ast
+from .clang_ast_run import parse_clang_ast
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
 from .preprocessor_facts import _DEFINE_RE
 from .type_graph import (
@@ -995,7 +995,7 @@ class ClangMacroGraphExtractor:
     :class:`~abicheck.buildsource.type_graph.ClangTypeGraphExtractor`) rather
     than a fresh copy — this is a fourth independent
     ``clang -ast-dump=json`` pass per TU alongside the call/type/template
-    graph passes ``inline_graph_fold.fold_semantic_graphs`` already runs; no
+    graph passes ``l5_shared_ast.fold_semantic_graphs`` already runs; no
     per-TU AST-JSON cache is shared across them today (confirmed: each pass's
     own ``extract_from_build`` re-invokes clang independently), a pre-existing
     inefficiency this module does not attempt to fix.
@@ -1021,14 +1021,9 @@ class ClangMacroGraphExtractor:
             diag.append(f"{self.clang_bin} not found in PATH")
             return []
         try:
-            result = parse_clang_ast(
-                self.clang_bin,
-                argv,
-                cwd=cwd,
-                diagnostics=diag,
-                parser=parse_clang_ast_decl_ranges,
+            return parse_clang_ast(
+                self.clang_bin, argv, cwd, diag, parse_clang_ast_decl_ranges, []
             )
-            return [] if isinstance(result, NoAst) else result
         except (TypeError, ValueError, RecursionError) as exc:
             # TypeError (CodeRabbit review, fresh evidence): _LocationCursor.
             # advance() calls int(loc["line"]) with no type check -- a

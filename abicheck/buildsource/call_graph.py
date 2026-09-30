@@ -63,7 +63,7 @@ from .call_decl_record import (
     _OVERRIDE_MARKER_KINDS,
     _compact_decl_record,
 )
-from .clang_ast_run import NoAst, parse_clang_ast
+from .clang_ast_run import parse_clang_ast
 from .source_graph_build import project_source_files
 from .source_graph_build_source_abi import _file_in_project
 
@@ -1208,14 +1208,9 @@ class ClangCallGraphExtractor:
             diag.append(f"{self.clang_bin} not found in PATH")
             return []
         try:
-            result = parse_clang_ast(
-                self.clang_bin,
-                argv,
-                cwd=cwd,
-                diagnostics=diag,
-                parser=parse_clang_ast_calls,
+            return parse_clang_ast(
+                self.clang_bin, argv, cwd, diag, parse_clang_ast_calls, []
             )
-            return [] if isinstance(result, NoAst) else result
         except (ValueError, RecursionError) as exc:
             diag.append(f"could not parse clang AST JSON: {exc}")
             return []

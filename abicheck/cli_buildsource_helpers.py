@@ -482,7 +482,7 @@ def _collect_source_graph(
         fold_template_graph(graph, merged, clang_bin, extractors, changed_paths)
         # ADR-041 P2 item 1 / G29 Phase 5 items 2/3 (Codex review, fresh
         # evidence): this collect path had fallen behind
-        # `inline_graph_fold.fold_semantic_graphs`'s own list a third time --
+        # `l5_shared_ast.fold_semantic_graphs`'s own list a third time --
         # override/virtual-dispatch/macro folding were still missing here,
         # so an otherwise-equivalent collected pack silently carried no
         # METHOD_POSSIBLE_OVERRIDE/VIRTUAL_CALL_MAY_DISPATCH_TO/
@@ -498,7 +498,7 @@ def _collect_source_graph(
         fold_macro_graph(graph, merged, clang_bin, extractors, changed_paths)
         # G29 Phase 5 item 4: mirrors the same recurring gap this collect
         # path's own comments above already document (this out-of-band path
-        # falling behind `inline_graph_fold.fold_semantic_graphs`'s own call
+        # falling behind `l5_shared_ast.fold_semantic_graphs`'s own call
         # list) -- fold this in the same commit that adds
         # `fold_callback_graph` rather than a fourth follow-up fix.
         fold_callback_graph(graph, merged, clang_bin, extractors, changed_paths)

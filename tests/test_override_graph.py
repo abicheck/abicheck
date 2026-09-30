@@ -26,13 +26,13 @@ from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 from abicheck.buildsource.override_graph import (
     RESOLUTION_OVERRIDE_CONFIRMED,
     RESOLUTION_OVERRIDE_SIGNATURE_MATCH,
-    ClangOverrideGraphExtractor,
     OverrideEdge,
     _strip_exception_spec,
     augment_graph_with_overrides,
     parse_clang_ast_overrides,
     parse_clang_ast_virtual_destructor_owners,
 )
+from abicheck.buildsource.override_graph_extractor import ClangOverrideGraphExtractor
 from abicheck.buildsource.source_graph import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -911,7 +911,7 @@ def test_extract_from_build_unredacts_home_placeholder_in_cwd(monkeypatch) -> No
     """
     import os
 
-    import abicheck.buildsource.override_graph as og
+    import abicheck.buildsource.override_graph_extractor as og
 
     home = os.path.expanduser("~")
     captured: dict[str, object] = {}

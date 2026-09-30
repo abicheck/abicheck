@@ -779,7 +779,7 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
         call_graph,
         callback_graph,
         macro_graph,
-        override_graph,
+        override_graph_extractor,
         template_graph,
         type_graph,
     )
@@ -821,7 +821,7 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
     monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeNoEdgeExtractor)
     monkeypatch.setattr(macro_graph, "ClangMacroGraphExtractor", _FakeMacroExtractor)
     monkeypatch.setattr(
-        override_graph, "ClangOverrideGraphExtractor", _FakeNoEdgeExtractor
+        override_graph_extractor, "ClangOverrideGraphExtractor", _FakeNoEdgeExtractor
     )
     # Patched on `template_graph` itself (not `template_graph_extractor`,
     # where the class actually lives) -- this is the historical monkeypatch

@@ -151,21 +151,10 @@ def run_clang_ast_dump(
 
 
 T = TypeVar("T")
+D = TypeVar("D")
 
 #: A pure parser over one ``clang -ast-dump=json`` tree.
 AstParser = Callable[[dict[str, Any]], Any]
-
-
-class NoAst:
-    """Sentinel: the dump produced no usable AST (see *diagnostics*)."""
-
-    __slots__ = ()
-
-    def __repr__(self) -> str:
-        return "NO_AST"
-
-
-NO_AST = NoAst()
 
 
 @dataclass
@@ -262,15 +251,15 @@ def _apply(parser: AstParser, ast: dict[str, Any]) -> tuple[str, Any]:
 def parse_clang_ast(
     clang_bin: str,
     argv: list[str],
-    *,
     cwd: str | None,
     diagnostics: list[str],
     parser: Callable[[dict[str, Any]], T],
-) -> T | NoAst:
+    no_ast: D,
+) -> T | D:
     """Dump the TU (once per scope) and return ``parser(ast)``.
 
-    Returns :data:`NO_AST` when the dump failed -- *diagnostics* then says
-    why, exactly as :func:`run_clang_ast_dump` records it. An exception the
+    Returns *no_ast* when the dump failed -- *diagnostics* then says why,
+    exactly as :func:`run_clang_ast_dump` records it. An exception the
     parser raised is raised here, so the calling pass's own ``except`` clause
     decides how to degrade, as it did when it parsed the AST itself.
     """
@@ -278,7 +267,7 @@ def parse_clang_ast(
     found = _REGISTRY.lookup(key, parser)
     if found is None:
         ast = run_clang_ast_dump(clang_bin, argv, cwd=cwd, diagnostics=diagnostics)
-        return NO_AST if ast is None else parser(ast)
+        return no_ast if ast is None else parser(ast)
     record, owner = found
     if owner:
         try:
@@ -296,13 +285,13 @@ def parse_clang_ast(
         record.done.wait()
     diagnostics.extend(record.diagnostics)
     if not record.has_ast:
-        return NO_AST
+        return no_ast
     outcome = record.outcomes.get(parser)
     if outcome is None:
         # Registered after this TU was dumped (an overlapping scope): the
         # record cannot answer it without the AST, so dump for it alone.
         ast = run_clang_ast_dump(clang_bin, argv, cwd=cwd, diagnostics=[])
-        return NO_AST if ast is None else parser(ast)
+        return no_ast if ast is None else parser(ast)
     status, value = outcome
     if status == "err":
         raise value

@@ -73,7 +73,7 @@ from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 from ..model.mangled_name import strip_macho_itanium_decoration
 from ..model.source_graph import function_decl_identity
 from ..process_resources import BudgetedExecutor
-from .clang_ast_run import NoAst, parse_clang_ast
+from .clang_ast_run import parse_clang_ast
 from .graph_facts import register_fact
 
 if TYPE_CHECKING:
@@ -1915,14 +1915,9 @@ class ClangTypeGraphExtractor:
             diag.append(f"{self.clang_bin} not found in PATH")
             return []
         try:
-            result = parse_clang_ast(
-                self.clang_bin,
-                argv,
-                cwd=cwd,
-                diagnostics=diag,
-                parser=parse_clang_ast_types,
+            return parse_clang_ast(
+                self.clang_bin, argv, cwd, diag, parse_clang_ast_types, []
             )
-            return [] if isinstance(result, NoAst) else result
         except (ValueError, RecursionError) as exc:
             diag.append(f"could not parse clang AST JSON: {exc}")
             return []
