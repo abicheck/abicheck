@@ -373,7 +373,11 @@ def _specialization_scope_key(node: dict[str, Any]) -> str:
 #: Matches clang's location-bearing anonymous/lambda type spellings, e.g.
 #: ``"(unnamed enum at t.hpp:1:1)"`` or ``"S::(lambda at t.hpp:2:38)"`` --
 #: group 2 (the tag kind, absent for "lambda") is the only part kept.
-_ANON_TYPE_LOCATION_RE = re.compile(r"\((unnamed (\w+)|lambda) at [^)]*\)")
+#: The path is matched non-greedily up to the trailing ``:<line>:<col>)``
+#: rather than with ``[^)]*``, so a checkout path containing a literal ``)``
+#: (``C:\\release (old)\\x.h``) is still stripped -- same rule as
+#: ``name_classification._ANON_TYPE_LOCATION_RE``.
+_ANON_TYPE_LOCATION_RE = re.compile(r"\((unnamed (\w+)|lambda) at .*?:\d+:\d+\)")
 
 
 def _normalize_qual_type(qual_type: str) -> str:

@@ -278,6 +278,35 @@ def _silence_progress_lines(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _pin_host_memory_probe(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Make ``process_resources.available_mem_gib`` report "not probeable".
+
+    Same hazard class as ``_silence_progress_lines`` above, from a different
+    source: the live ``MemAvailable``/cgroup reading depends on whatever else
+    the host is doing, and under ``pytest -n N`` that includes the other
+    workers. When it dipped, the release fan-out
+    (``workflows.release_jobs.plan_release_workers``) clamped its pool and
+    printed a correct ``Note: parallel release workers reduced ...`` line to
+    stderr -- which ``CliRunner`` folds into ``result.output``, so release
+    tests parsing that as JSON failed on whichever worker ran them while
+    memory was short. ``None`` is the documented "cannot probe" answer
+    (non-Linux / sandbox): every memory clamp is skipped, so a unit test's
+    result no longer depends on host load.
+
+    Tests of memory sizing keep patching the probe themselves (their
+    ``monkeypatch.setattr`` runs after this one and wins); a test of the real
+    probe opts out with ``@pytest.mark.host_memory_probe``.
+    """
+    if request.node.get_closest_marker("host_memory_probe") is not None:
+        return
+    from abicheck import process_resources
+
+    monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ast_memo() -> Iterator[None]:
     """Clear the in-process clang-AST memo slot (``dumper_cache._ast_memo_slot``,
     G31 Phase C AST reuse) before and after every test.

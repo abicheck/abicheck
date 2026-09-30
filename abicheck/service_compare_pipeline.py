@@ -628,28 +628,18 @@ def classify_compare_pair(
             if request.public_surface_allowlist is not None
             else None
         ),
-        # Codex review, second look (PR #1154 follow-up: "Obtain ADR approval
-        # before forcing verdict modulation"): a prior fix here forced
-        # `pattern_verdicts=True` unconditionally, citing ADR-068 D4's
-        # "no legitimate off position" principle -- but ADR-068 is
-        # "Proposed -- not implemented", not an accepted decision, and the
-        # ADR that *is* accepted (ADR-027) explicitly defers flipping
-        # `--pattern-verdicts` to default-on until a release cycle's worth
-        # of FP-rate and parity validation. The native single-pair CLI
-        # (cli_compare_helpers.py) and the release fan-out's own
-        # `_compare_one_library` (cli_compare_release_pairwise.py) each
-        # made their own, separately-committed decision to hardcode
-        # `pattern_verdicts=True` at their own call sites -- that predates
-        # this fix and is out of scope for it -- but this shared Tier-2
-        # chokepoint (the typed API's `service.run_compare`, and the
-        # stored-BundleFacts drivers that call it) forwards the request's
-        # own field again, so a bare `CompareRequest()`/`run_compare()` call
-        # keeps the accepted opt-in default instead of a silent, un-reviewed
-        # flip. `surface_metrics` and `reconcile_build_context` are no longer
-        # parameters of that Tier-2 verb at all (one-comparison-product.md
-        # Phase 5 / §4.1's AUTO rows): `compare_snapshots` forces both on for
-        # every caller, so `CompareRequest` carries neither field any more --
-        # front-end parity with the CLI, where the two flags are gone too.
+        # Forwards the request's own field: a bare `CompareRequest()`/
+        # `run_compare()` keeps ADR-027's accepted opt-in default (its
+        # default-on flip is deferred pending release-cycle FP-rate/parity
+        # validation). The native CLI and the release fan-out's
+        # `_run_compare_pair` pass `True` at their own call sites; that
+        # front-end divergence is pinned by the F2 route-parity harness's
+        # strict xfail, and closing it is a default change needing an
+        # ADR-027 amendment (ADR-068 D4, now accepted, calls modulation
+        # automatic), not an edit here. A prior fix forcing it on here was
+        # reverted for exactly that reason (PR #1154 follow-up).
+        # `surface_metrics`/`reconcile_build_context` are not request fields:
+        # `compare_snapshots` forces both on for every caller.
         pattern_verdicts=request.pattern_verdicts,
         collapse_versioned_symbols=request.collapse_versioned_symbols,
         env_matrix=env_matrix,
@@ -717,9 +707,14 @@ def classify_compare_pair(
         result.requested_depth = context.requested_depth
     elif normalized_request_depth is not None:
         result.requested_depth = normalized_request_depth
-    from .workflows.analysis_assurance_attach import attach_analysis_assurance
+    # Depths and suppression audit: report fields every pairwise route owes
+    # (F2 route parity), once set by the native CLI alone.
+    from .workflows import analysis_assurance_attach as assurance_attach
+    from .workflows.suppression_audit_attach import attach_suppression_audit
 
-    attach_analysis_assurance(result, old, new)
+    assurance_attach.attach_analysis_assurance(result, old, new)
+    assurance_attach.attach_evidence_depths(result, old, new)
+    attach_suppression_audit(result, suppression)
     # ADR-064/PR G2: resolve severity into the same `GateOptions` the
     # release fan-out uses, then the canonical decision. No manual
     # exit-code-scheme selector to pass any more -- the algorithm is purely
@@ -742,7 +737,13 @@ def classify_compare_pair(
     # workflows.compare_gate_receipt's own docstring for the full account.
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
-    install_resolved_gate_receipt(result, evaluation_config, gate)
+    install_resolved_gate_receipt(
+        result,
+        evaluation_config,
+        gate,
+        packs_forwarded=bool(request.pack_policy_overrides)
+        or request.pack_internal_namespaces is not None,
+    )
     if context is not None:
         context = context.for_classification(evaluation_config, result.requested_depth)
 

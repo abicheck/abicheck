@@ -140,6 +140,9 @@ def resolve_request_evaluation_config(
     which could digest a different file than the one that scored the
     findings if it changed between the two reads -- Codex review).
     """
+    packs_forwarded = bool(request.pack_policy_overrides) or (
+        request.pack_internal_namespaces is not None
+    )
     from ..compatibility_evaluation_frontend import (
         SuppressionSource,
         compatibility_config_from_compare_request,
@@ -151,7 +154,7 @@ def resolve_request_evaluation_config(
         suppression=SuppressionSource.from_loaded(suppression, path=request.suppress),
         project=_project_inputs_for_request(request),
     )
-    if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
+    if packs_forwarded:
         config = _with_pack_forwarded_provenance(config, request)
     return config
 
@@ -160,6 +163,8 @@ def install_resolved_gate_receipt(
     result: Any,
     config: CompatibilityEvaluationConfig,
     gate: GateOptions,
+    *,
+    packs_forwarded: bool = False,
 ) -> None:
     """Install the resolved *config* and *gate* onto *result* in place.
 
@@ -173,16 +178,21 @@ def install_resolved_gate_receipt(
     *config* is :func:`resolve_request_evaluation_config`'s answer for this
     comparison -- read here, never re-resolved (sub-phase 4B).
 
-    Always stamps ``result.evaluation_config`` (a request with no
-    ``--contract`` equivalent never builds a ``PersistedContractContext``,
-    so ``effective_config_digest``'s rich tier would otherwise be silently
-    unreachable for it even though *config* is a real, fully-resolved
-    ``CompatibilityEvaluationConfig`` -- same reasoning as
-    ``record_resolved_config``'s own leading comment); additionally merges
-    the gate into ``result.contract_context`` when one exists.
+    Stamps ``result.evaluation_config`` exactly when the native CLI's
+    ``resolve_and_apply`` records one: under contract evaluation, or when a
+    pack contributed (*packs_forwarded*; a pack-only run never builds a
+    ``PersistedContractContext``, so without the stamp
+    ``effective_config_digest``'s rich tier would be unreachable for it).
+    A plain request stays on the digest's documented *baseline* tier -- an
+    earlier revision stamped unconditionally, so the typed API and every
+    release member reported a different tier and digest than the native CLI
+    for the same configuration (F2 route-parity harness). Additionally
+    merges the gate into ``result.contract_context`` when one exists.
     """
     from ..compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
 
+    if getattr(result, "contract_context", None) is None and not packs_forwarded:
+        return
     result.evaluation_config = config
 
     # `DiffResult.contract_context` is deliberately typed `object | None`

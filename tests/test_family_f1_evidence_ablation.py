@@ -76,7 +76,8 @@ unknown ``Fact`` into a confirmed default, and the pre-#1384 reading of an
 unknown export fact as confirmed-absent, are patched back in; the oracles
 must report them.
 
-**Real finding** (``KNOWN_VIOLATIONS``, each also an ``xfail(strict=True)``):
+**Real finding, fixed** (formerly ``KNOWN_VIOLATIONS``; now the regular
+tests over ``HEADER_ORIGIN_SEED_CELLS``):
 the public-surface closure seeds header-origin enums and records from the
 legacy ``source_header`` string (``policy/public_surface_closure.py``,
 ``en.source_header`` / ``_record_is_confirmed_public_seed``, which also
@@ -160,20 +161,20 @@ UNCOVERED: dict[str, str] = {
 }
 
 #: The real current violations this harness found (see module docstring).
-#: ``(case, site, side)``; every status in ``UNKNOWN_FACTS`` reproduces them.
-KNOWN_VIOLATIONS: frozenset[tuple[str, str, str]] = frozenset(
-    {
-        ("enum_value_changed", "EnumType.source_header_fact", "both"),
-        ("header_record_changed", "RecordType.source_header_fact", "both"),
-        ("header_record_changed", "RecordType.qualified_name_fact", "both"),
-    }
-)
-_KNOWN_BUG_REASON = (
-    "F1 real bug: public_surface_closure seeds header-origin enums/records from the "
-    "legacy source_header / qualified_name strings; an unknown source_header_fact "
-    "(or, for records, qualified_name_fact) on both sides reads as 'not from a "
-    "header' / 'unnamed', the type becomes non-public-type and a real break is "
-    "scoped out to NO_CHANGE with no stated gap"
+#: ``(case, site, side)``. Empty since the header-origin seeding fix; the
+#: cells it used to hold are pinned as regular tests by
+#: ``HEADER_ORIGIN_SEED_CELLS`` below.
+KNOWN_VIOLATIONS: frozenset[tuple[str, str, str]] = frozenset()
+
+#: Formerly-known violations: public_surface_closure seeded header-origin
+#: enums/records from the legacy source_header / qualified_name strings, so an
+#: unknown source_header_fact (or, for records, qualified_name_fact) on both
+#: sides demoted the type to non-public-type and scoped a real break out to
+#: NO_CHANGE with no stated gap.
+HEADER_ORIGIN_SEED_CELLS: tuple[tuple[str, str, str], ...] = (
+    ("enum_value_changed", "EnumType.source_header_fact", "both"),
+    ("header_record_changed", "RecordType.qualified_name_fact", "both"),
+    ("header_record_changed", "RecordType.source_header_fact", "both"),
 )
 
 _FACT_SITES = fact_site_inventory()
@@ -309,24 +310,16 @@ def test_fact_ablation_contract_exports_config() -> None:
     assert found == set()
 
 
-@pytest.mark.parametrize(("case", "site", "side"), sorted(KNOWN_VIOLATIONS))
+@pytest.mark.parametrize(("case", "site", "side"), HEADER_ORIGIN_SEED_CELLS)
 @pytest.mark.parametrize("status", _STATUSES)
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_KNOWN_BUG_REASON)
-def test_known_violation_header_origin_seed(
+def test_header_origin_seed_unknown_fact_keeps_break(
     case: str, site: str, side: str, status: str
 ) -> None:
     assert _fact_cell(case, site, status, side) == []
 
 
-@pytest.mark.parametrize(("case", "site", "side"), sorted(KNOWN_VIOLATIONS))
-def test_known_violations_still_reproduce_exactly(
-    case: str, site: str, side: str
-) -> None:
-    # Pins the diagnosis, so the xfail cannot pass for an unrelated reason.
-    for status in _STATUSES:
-        assert _fact_cell(case, site, status, side) == [
-            "(a) silent clean: BREAKING -> NO_CHANGE with no stated gap"
-        ]
+def test_no_known_violations_remain() -> None:
+    assert KNOWN_VIOLATIONS == frozenset()
 
 
 # --------------------------------------------------------------------------

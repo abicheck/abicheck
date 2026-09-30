@@ -90,7 +90,6 @@ from .frontends.cli.compare_report import (
     # unchanged -- a bare name is looked up in the *calling* module's
     # globals at call time, not in the module that defined it.
     _apply_scoped_gating as _apply_scoped_gating,
-    _attach_suppression_audit as _attach_suppression_audit,
     _reject_flags_unsupported_for_set_inputs,
     _render_compare_report as _render_compare_report,
 )
@@ -944,7 +943,7 @@ def _report_compare_result(
     # any --depth (Codex review, PR #1020, second round).
     from functools import partial
 
-    from .cli_dump_helpers import evidence_depth_label
+    from .workflows.analysis_assurance_attach import attach_evidence_depths
     from .workflows.gate import compute_analysis_assurance, same_persisted_content
 
     old_pack = old.build_source
@@ -964,8 +963,7 @@ def _report_compare_result(
     # `result` now, instead of `_fold_evidence_depth_into_json` re-parsing
     # this function's own already-rendered JSON text afterwards to splice
     # them in (see that field's own docstring in checker_types.py).
-    result.old_evidence_depth = evidence_depth_label(old, old_pack)
-    result.new_evidence_depth = evidence_depth_label(new, new_pack)
+    attach_evidence_depths(result, old, new)
 
     # Plan slice 7o: unconditional. The pattern-modulation ledger used to be
     # gated on `--view patterns`; ADR-067's record-before-disposing rule makes
@@ -1029,8 +1027,9 @@ def _report_compare_result(
     # fact from the canonical result. The flag survives only as a rendering
     # choice (the markdown "## Suppression Audit" section, gated below in
     # _render_compare_report); JSON/SARIF/JUnit/HTML carry the field either way.
-    if suppression is not None:
-        _attach_suppression_audit(result, suppression)
+    from .workflows.suppression_audit_attach import attach_suppression_audit
+
+    attach_suppression_audit(result, suppression)
 
     _attach_use_case_impact(result, old, new, use_cases_manifest)
 

@@ -299,9 +299,21 @@ def _run_compare_pair(
         env_matrix=env_matrix,
         exclude_headers=exclude_headers,
     )
-    record_release_resolved_config(
-        result.diff, getattr(pack_application, "resolved_config", None)
-    )
+    # The rich-tier config is recorded under exactly the condition the
+    # single-pair CLI (`resolve_and_apply`) and the typed API
+    # (`install_resolved_gate_receipt`) record one: a contract evaluation, or
+    # a pack that contributed. A plain member run stays on the documented
+    # baseline tier -- stamping the no-pack application's always-resolved
+    # config here made every release member report a different
+    # `effective_config_digest` than the identical single-pair `compare`
+    # (F2 route parity). A `.abicheck.yml` override still reaches the
+    # baseline tier's `policy.overrides`, read off the scoring policy file.
+    resolved_config = getattr(pack_application, "resolved_config", None)
+    if not contract_evaluation and (
+        pack_application is None or pack_application.is_empty()
+    ):
+        resolved_config = None
+    record_release_resolved_config(result.diff, resolved_config)
     return result
 
 

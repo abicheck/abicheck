@@ -114,7 +114,14 @@ def test_one_resolution_read_by_every_consumer(tmp_path, monkeypatch, name):
 
     assert len(calls) == 1, f"{name}: resolved {len(calls)} times"
     context_config = result.resolved_execution_context.evaluation_config
-    assert context_config is result.diff.evaluation_config
+    # F2 route parity: the diff carries the config only under contract
+    # evaluation or forwarded packs; otherwise it stays on the baseline tier.
+    stamped = (
+        result.diff.contract_context is not None
+        or bool(request.pack_policy_overrides)
+        or request.pack_internal_namespaces is not None
+    )
+    assert result.diff.evaluation_config is (context_config if stamped else None)
 
     # Independent oracle: the public resolver over the same loaded inputs
     # (pack folding reproduced through the same public helper the CLI uses).
@@ -179,7 +186,8 @@ def test_a_hand_built_pair_without_context_gets_none(tmp_path):
     )
     result = classify_compare_pair(request, pair)
     assert result.resolved_execution_context is None
-    assert result.diff.evaluation_config is not None
+    # A plain request stays on the baseline digest tier (F2 route parity).
+    assert result.diff.evaluation_config is None
 
 
 def test_returned_context_reports_the_depth_classification_used(tmp_path):

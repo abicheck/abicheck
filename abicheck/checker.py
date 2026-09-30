@@ -705,6 +705,7 @@ def _compute_scope_confidence(
         scope_enabled=scope_to_public_surface,
         surf_old=pp_ctx.surf_old,
         surf_new=pp_ctx.surf_new,
+        demoted=pp_ctx.out_of_surface,
     )
 
 
@@ -1264,6 +1265,9 @@ def compare(
     scope_confidence, scope_notes = _compute_scope_confidence(
         old if old is not None else new, new, scope_to_public_surface, pp_ctx
     )
+    from .surface import scope_note_coverage_warnings
+
+    coverage_warnings = [*coverage_warnings, *scope_note_coverage_warnings(scope_notes)]
 
     # A POST manifest allowlist scopes the comparison just as much as header
     # scoping does — it moves non-committed findings to `out_of_surface`. Mark

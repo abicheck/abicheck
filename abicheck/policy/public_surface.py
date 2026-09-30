@@ -86,6 +86,15 @@ class PublicSurface:
     # which typedef entries to keep; unrelated to classification/demotion, so it
     # has no analogue in the per-finding scoping this dataclass otherwise serves.
     public_typedefs: set[str] = field(default_factory=set)
+    # Type names (bare and qualified) whose header origin was *not read*
+    # (``source_header_fact`` -- or, for a record, ``qualified_name_fact`` --
+    # not collected/unsupported/failed) and which would otherwise have been
+    # seeded on header origin alone. They are not seeded (an unknown header
+    # string is indistinguishable from "not header-declared"), but a finding
+    # demoted through one of them is labelled ``header-origin-unknown``
+    # rather than ``non-public-type``, and the run carries a scope note plus
+    # coverage warning, so the demotion is never a silent clean.
+    header_origin_unknown_types: set[str] = field(default_factory=set)
     resolvable: bool = False
     # Origin (ADR-024 D1 / ADR-015 v6) keyed by every symbol key and type
     # name. Only populated when the snapshot was dumped with a public-header

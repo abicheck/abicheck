@@ -592,6 +592,10 @@ def test_strict_oracle_sees_the_known_divergences(tmp_path: Path) -> None:
     unstripped oracle must report them, so the table is not decorative."""
     outs = _run_all("removal_and_addition", AXES_BY_NAME["default"], tmp_path)
     strict = parity_violations(outs["cli"], outs["api"], strip_known=False)
+    if not KNOWN_DIVERGENCES:
+        # Nothing is stripped, so the strict oracle is the enforcing one.
+        assert strict == []
+        return
     assert strict and all(
         any(f"[{k!r}]" in line for k in KNOWN_DIVERGENCES) for line in strict
     )

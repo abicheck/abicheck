@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..model import AbiSnapshot
 
-__all__ = ["attach_analysis_assurance"]
+__all__ = ["attach_analysis_assurance", "attach_evidence_depths"]
 
 
 def attach_analysis_assurance(
@@ -64,3 +64,24 @@ def attach_analysis_assurance(
             partial(same_persisted_content, old, new) if old is not None else None
         ),
     )
+
+
+def attach_evidence_depths(
+    result: DiffResult, old: AbiSnapshot, new: AbiSnapshot
+) -> None:
+    """Stamp ``old_evidence_depth``/``new_evidence_depth`` onto *result*.
+
+    The evidence depth each side *actually* carries (the gate's
+    :func:`~abicheck.evidence_depth.reported_depth_label` rule), read off the
+    snapshots' own -- already depth-capped -- ``build_source`` packs.
+
+    Owned here rather than by a front end: the native ``compare`` CLI used to
+    be the only route that set these two report fields, so a typed-API
+    (``run_compare_request``) report and every release member's report
+    carried ``null`` for the identical comparison (F2 route-parity harness).
+    Both pairwise Tier-2 paths now call this one function.
+    """
+    from ..evidence_depth import reported_depth_label
+
+    result.old_evidence_depth = reported_depth_label(old, old.build_source)
+    result.new_evidence_depth = reported_depth_label(new, new.build_source)

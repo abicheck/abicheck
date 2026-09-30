@@ -73,40 +73,15 @@ ROUTE_SPECIFIC_PATHS: dict[tuple[str, ...], str] = {
 #: Divergences between routes the harness found that are *not* justified as
 #: route-specific. ``key -> (routes that differ from the CLI, explanation)``.
 #: Each is asserted to still diverge by an xfail(strict) cell.
-KNOWN_DIVERGENCES: dict[str, tuple[frozenset[str], str]] = {
-    "old_evidence_depth": (
-        frozenset({"api", "release"}),
-        "set only by the native single-pair CLI "
-        "(cli_compare_helpers: result.old_evidence_depth = evidence_depth_label"
-        "(...)); run_compare_request and the release fan-out's per-member "
-        "service.run_compare never set it, so their reports carry null where "
-        "the CLI carries e.g. 'headers'",
-    ),
-    "new_evidence_depth": (
-        frozenset({"api", "release"}),
-        "same as old_evidence_depth",
-    ),
-    "effective_config_fields": (
-        frozenset({"api", "release"}),
-        "a plain CLI compare reports the 'baseline' tier; run_compare_request "
-        "(and hence every release member) stamps a resolved "
-        "CompatibilityEvaluationConfig and reports the 'contract' tier with "
-        "extra contract.*/packs/assurance.* keys, for the same request",
-    ),
-    "suppression_audit": (
-        frozenset({"api", "release"}),
-        "computed and attached only by the native single-pair CLI's fold "
-        "(cli_compare_fold); a typed-API report and a release member's "
-        "complete report render the same suppression file with no "
-        "suppression_audit block at all (stale / high-risk rules invisible)",
-    ),
-    "effective_config_digest": (
-        frozenset({"api", "release"}),
-        "hash of effective_config_fields, so it diverges with it: the digest "
-        "meant to answer 'did the resolved configuration change' differs "
-        "for an identical configuration depending on the front end",
-    ),
-}
+#: Empty since the four entries this harness first found were fixed at their
+#: owner: ``old_evidence_depth``/``new_evidence_depth`` and
+#: ``suppression_audit`` moved from the native CLI into the shared Tier-2
+#: pipeline (``workflows.analysis_assurance_attach.attach_evidence_depths``,
+#: ``workflows.suppression_audit_attach``), and ``effective_config_fields``/
+#: ``effective_config_digest`` agree because the typed API now resolves a
+#: ``CompatibilityEvaluationConfig`` exactly when the CLI does (contract or
+#: pack), leaving a plain run on the documented baseline tier.
+KNOWN_DIVERGENCES: dict[str, tuple[frozenset[str], str]] = {}
 
 
 # ── operand corpus ───────────────────────────────────────────────────────

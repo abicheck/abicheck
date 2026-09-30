@@ -28,6 +28,60 @@ from .bug_class_schema import BugClass, KnownGap
 
 CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
+        id="config.front_end_default_divergence",
+        invariant=(
+            "An option offered by more than one front end carries the same "
+            "default in each, so a caller that states nothing gets the same "
+            "behavior whichever front end it used."
+        ),
+        fixed_by=(1258,),
+        seed_tests=(
+            "tests/test_front_end_default_parity.py",
+            # F2 route parity (PR #TBD): whole-report CLI vs typed API vs
+            # release member, plus a strict xfail on the one default still
+            # divergent (`pattern_verdicts`, below).
+            "tests/test_family_f2_route_parity.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "`pattern_verdicts` still diverges: the native compare CLI "
+                    "and the release fan-out pass True, while CompareRequest/"
+                    "service.run_compare (and compare_snapshots/checker."
+                    "compare/no_baseline_compare) default False. ADR-027 keeps "
+                    "the default-on flip deferred pending release-cycle "
+                    "FP-rate/parity validation, while ADR-068 D4 (accepted) "
+                    "calls modulation automatic; reconciling them is an ADR-027 "
+                    "amendment plus a typed-API default change (and every "
+                    "typed-API effective_config_digest's policy.pattern_verdicts "
+                    "field), not a parity fix. Pinned by "
+                    "test_pattern_verdicts_default_matches_cli's strict xfail."
+                ),
+                reference="PR #TBD (fix/family-findings-b)",
+            ),
+            KnownGap(
+                description=(
+                    "The *typed surfaces* are now derived, not listed: the "
+                    "sweep walks abicheck.service.__all__ plus the InputSpec "
+                    "field/of and run_dump's synthetic signature, so a new or "
+                    "renamed public entry point carrying the option is covered "
+                    "the moment it exists. That half was a real gap and it bit "
+                    "immediately -- the first revision listed three surfaces "
+                    "and review found resolve_input and run_compare still "
+                    "defaulting the other way, run_compare writing its value "
+                    "into both InputSpecs and so overriding the field default "
+                    "the test did check. What remains hand-maintained is "
+                    "SHARED_OPTIONS, the list of *options* reachable from more "
+                    "than one front end (one entry today). Deriving that too "
+                    "means matching Click dests against typed parameter names "
+                    "across every command, which would also sweep in "
+                    "coincidental name collisions; left listed deliberately."
+                ),
+                reference="PR #1258",
+            ),
+        ),
+    ),
+    BugClass(
         id="config.option_dropped_at_a_dispatch_branch",
         invariant=(
             "An option the front end accepts reaches every dispatch branch "

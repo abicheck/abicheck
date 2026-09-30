@@ -25,6 +25,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from abicheck.extract.export_symbol_identity import (
     itanium_export_function,
     itanium_export_variable,
@@ -143,10 +145,18 @@ class TestExportSymbolIdentityHelpers:
         assert fn.entity_id.leaf_name == "f"
         assert fn.name == "f@@8"  # raw evidence preserved
 
-    def test_msvc_export_function_vectorcall_x86_32_with_underscore(self) -> None:
-        fn = msvc_export_function("_f@@8", is_x86_32=True)
-        assert fn.entity_id is not None
-        assert fn.entity_id.leaf_name == "f"
+    @pytest.mark.parametrize("is_x86_32", [True, False])
+    def test_msvc_export_function_vectorcall_keeps_leading_underscore(
+        self, is_x86_32: bool
+    ) -> None:
+        # MSVC's __vectorcall decoration is "name@@N" with no prefix on any
+        # machine: "_f@@8" is function "_f", distinct from "f@@8".
+        under = msvc_export_function("_f@@8", is_x86_32=is_x86_32)
+        plain = msvc_export_function("f@@8", is_x86_32=is_x86_32)
+        assert under.entity_id is not None and plain.entity_id is not None
+        assert under.entity_id.leaf_name == "_f"
+        assert plain.entity_id.leaf_name == "f"
+        assert under.entity_id != plain.entity_id
 
     def test_two_distinct_exports_never_collide(self) -> None:
         ids = {
