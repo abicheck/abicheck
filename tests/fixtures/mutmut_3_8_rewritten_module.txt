@@ -1,0 +1,135 @@
+import re
+_pattern_cache = {}
+
+
+from mutmut.mutation.trampoline import wrap_in_trampoline as _mutmut_mutated, MutantDict
+mutants_x__cached_bare_re__mutmut: MutantDict = {}  # type: ignore
+
+
+@_mutmut_mutated(mutants_x__cached_bare_re__mutmut)
+def _cached_bare_re(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"\b" + re.escape(name) + r"\b")
+    return hit
+
+
+def x__cached_bare_re__mutmut_orig(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"\b" + re.escape(name) + r"\b")
+    return hit
+
+
+def x__cached_bare_re__mutmut_1(name):
+    hit = None
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"\b" + re.escape(name) + r"\b")
+    return hit
+
+
+def x__cached_bare_re__mutmut_2(name):
+    hit = _pattern_cache.get(None)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"\b" + re.escape(name) + r"\b")
+    return hit
+
+
+def x__cached_bare_re__mutmut_3(name):
+    hit = _pattern_cache.get(name)
+    if hit is not None:
+        hit = _pattern_cache[name] = re.compile(r"\b" + re.escape(name) + r"\b")
+    return hit
+
+
+def x__cached_bare_re__mutmut_4(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = None
+    return hit
+
+
+def x__cached_bare_re__mutmut_5(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(None)
+    return hit
+
+
+def x__cached_bare_re__mutmut_6(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"\b" + re.escape(name) - r"\b")
+    return hit
+
+
+def x__cached_bare_re__mutmut_7(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"\b" - re.escape(name) + r"\b")
+    return hit
+
+
+def x__cached_bare_re__mutmut_8(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"XX\bXX" + re.escape(name) + r"\b")
+    return hit
+
+
+def x__cached_bare_re__mutmut_9(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"\b" + re.escape(None) + r"\b")
+    return hit
+
+
+def x__cached_bare_re__mutmut_10(name):
+    hit = _pattern_cache.get(name)
+    if hit is None:
+        hit = _pattern_cache[name] = re.compile(r"\b" + re.escape(name) + r"XX\bXX")
+    return hit
+
+mutants_x__cached_bare_re__mutmut['_mutmut_orig'] = x__cached_bare_re__mutmut_orig # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_1'] = x__cached_bare_re__mutmut_1 # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_2'] = x__cached_bare_re__mutmut_2 # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_3'] = x__cached_bare_re__mutmut_3 # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_4'] = x__cached_bare_re__mutmut_4 # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_5'] = x__cached_bare_re__mutmut_5 # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_6'] = x__cached_bare_re__mutmut_6 # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_7'] = x__cached_bare_re__mutmut_7 # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_8'] = x__cached_bare_re__mutmut_8 # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_9'] = x__cached_bare_re__mutmut_9 # type: ignore # mutmut generated
+mutants_x__cached_bare_re__mutmut['x__cached_bare_re__mutmut_10'] = x__cached_bare_re__mutmut_10 # type: ignore # mutmut generated
+mutants_xǁMatcherǁmatches__mutmut: MutantDict = {}  # type: ignore
+
+
+class Matcher:
+    @_mutmut_mutated(mutants_xǁMatcherǁmatches__mutmut)
+    def matches(self, text):
+        return re.search("_tag$", text) is not None
+    def xǁMatcherǁmatches__mutmut_orig(self, text):
+        return re.search("_tag$", text) is not None
+    def xǁMatcherǁmatches__mutmut_1(self, text):
+        return re.search(None, text) is not None
+    def xǁMatcherǁmatches__mutmut_2(self, text):
+        return re.search("_tag$", None) is not None
+    def xǁMatcherǁmatches__mutmut_3(self, text):
+        return re.search(text) is not None
+    def xǁMatcherǁmatches__mutmut_4(self, text):
+        return re.search("_tag$", ) is not None
+    def xǁMatcherǁmatches__mutmut_5(self, text):
+        return re.search("XX_tag$XX", text) is not None
+    def xǁMatcherǁmatches__mutmut_6(self, text):
+        return re.search("_TAG$", text) is not None
+    def xǁMatcherǁmatches__mutmut_7(self, text):
+        return re.search("_tag$", text) is None
+
+mutants_xǁMatcherǁmatches__mutmut['_mutmut_orig'] = Matcher.xǁMatcherǁmatches__mutmut_orig # type: ignore # mutmut generated
+mutants_xǁMatcherǁmatches__mutmut['xǁMatcherǁmatches__mutmut_1'] = Matcher.xǁMatcherǁmatches__mutmut_1 # type: ignore # mutmut generated
+mutants_xǁMatcherǁmatches__mutmut['xǁMatcherǁmatches__mutmut_2'] = Matcher.xǁMatcherǁmatches__mutmut_2 # type: ignore # mutmut generated
+mutants_xǁMatcherǁmatches__mutmut['xǁMatcherǁmatches__mutmut_3'] = Matcher.xǁMatcherǁmatches__mutmut_3 # type: ignore # mutmut generated
+mutants_xǁMatcherǁmatches__mutmut['xǁMatcherǁmatches__mutmut_4'] = Matcher.xǁMatcherǁmatches__mutmut_4 # type: ignore # mutmut generated
+mutants_xǁMatcherǁmatches__mutmut['xǁMatcherǁmatches__mutmut_5'] = Matcher.xǁMatcherǁmatches__mutmut_5 # type: ignore # mutmut generated
+mutants_xǁMatcherǁmatches__mutmut['xǁMatcherǁmatches__mutmut_6'] = Matcher.xǁMatcherǁmatches__mutmut_6 # type: ignore # mutmut generated
+mutants_xǁMatcherǁmatches__mutmut['xǁMatcherǁmatches__mutmut_7'] = Matcher.xǁMatcherǁmatches__mutmut_7 # type: ignore # mutmut generated

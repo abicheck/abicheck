@@ -1,0 +1,11 @@
+--- a/abicheck/snapshot_cache.py
++++ b/abicheck/snapshot_cache.py
+@@ -428,7 +428,7 @@
+     try:
+         with open(binary_path, "rb") as f:
+             for chunk in iter(lambda: f.read(65536), b""):
+-                h.update(chunk)
++                pass
+     except OSError:
+         return ""  # uncacheable
+     # Hash contents, not only mtimes: restored timestamps must not resurrect a

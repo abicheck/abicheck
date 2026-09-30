@@ -1,0 +1,11 @@
+--- a/abicheck/workflows/contracts.py
++++ b/abicheck/workflows/contracts.py
+@@ -125,7 +125,7 @@
+     policy: str = "strict_abi"
+     policy_file_path: Path | None = None
+     suppress: Path | None = None
+-    scope_public: bool = True
++    scope_public: bool = False
+     force_public_symbols: frozenset[str] | None = None
+     # `compare --post-manifest`: the committed `pp_*`/ufunc-loop surface of a POST
+     # manifest. When set, the comparison is scoped to this set — export findings

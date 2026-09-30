@@ -1,0 +1,10 @@
+--- a/abicheck/snapshot_cache.py
++++ b/abicheck/snapshot_cache.py
+@@ -480,7 +480,6 @@
+         except OSError:
+             h.update(b"MISSING")
+     # Compiler params
+-    h.update(version.encode())
+     h.update(lang.encode())
+     h.update(extra.encode())
+     h.update(_SNAPSHOT_CACHE_VERSION.encode())

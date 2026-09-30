@@ -1,0 +1,11 @@
+--- a/abicheck/cli_compare_release_pairwise.py
++++ b/abicheck/cli_compare_release_pairwise.py
+@@ -275,7 +275,7 @@
+         new_version=new_version,
+         lang=lang,
+         lang_explicit=lang_explicit,
+-        suppress=suppress,
++        suppress=None,
+         policy=policy,
+         contract_evaluation=contract_evaluation,
+         contract_mode=contract_mode,

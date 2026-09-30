@@ -1,0 +1,11 @@
+--- a/abicheck/model/special_member_identity.py
++++ b/abicheck/model/special_member_identity.py
+@@ -83,7 +83,7 @@
+     "special_member_variant_aliases",
+ ]
+ 
+-_CTOR_VARIANTS = ("C1", "C2", "C3")
++_CTOR_VARIANTS = ("C1", "C2")
+ _DTOR_VARIANTS = ("D1", "D0", "D2")
+ _COMPLETE = {"C": "C1", "D": "D1"}
+ _CTOR = "{ctor}"
