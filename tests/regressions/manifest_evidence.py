@@ -825,7 +825,13 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "`ambiguous` whenever the collapse is not one-to-one."
         ),
         fixed_by=(1367,),
-        seed_tests=("tests/test_export_join_pe_decoration.py",),
+        seed_tests=(
+            "tests/test_export_join_pe_decoration.py",
+            # every PE decoder (vectorcall included) keeps a leading "_" that
+            # is part of the name: "_f@@8" is "_f", never "f"
+            "tests/test_family_f3_identity.py",
+            "tests/test_export_symbol_identity.py",
+        ),
         axes={
             "machine": ("i386", "amd64", "arm64", "unknown"),
             "convention": ("cdecl", "stdcall", "fastcall", "vectorcall", "none"),
@@ -854,6 +860,23 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_header_parse_coverage.py",
             "tests/test_release_member_export_read.py",
             "tests/test_l5_producer_coverage.py",
+            # header-origin seeding of the public surface
+            "tests/test_surface_header_origin_unknown.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A header-origin fact carried as a bare not_collected() "
+                    "(the backfill for a legacy None with no fact statement) "
+                    "keeps the confirmed 'no header' reading: no producer "
+                    "records PRESENT(None), so the two cannot be told apart "
+                    "and only a *stated* unknown is labelled "
+                    "header-origin-unknown."
+                ),
+                reference="F1 evidence-ablation harness",
+                canary_test="tests/test_surface_header_origin_unknown.py",
+            ),
         ),
         public_surfaces=("cli",),
         axes={

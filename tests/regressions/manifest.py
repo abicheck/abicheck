@@ -283,6 +283,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_lambda_identity_ordinal.py",
             "tests/test_identity_taint_end_to_end.py",
             "tests/test_source_graph_directory_taint.py",
+            "tests/test_family_f3_identity.py",
         ),
         axes={"frontend": ("clang", "castxml")},
         known_gaps=(
