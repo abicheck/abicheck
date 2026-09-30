@@ -80,3 +80,49 @@ def test_a_real_commit_succeeds_under_a_broken_global_signer(tmp_path: Path) -> 
     repo2.mkdir()
     failed = _commit(repo2, dict(bare, GIT_CONFIG_GLOBAL=str(config)))
     assert failed.returncode != 0
+
+
+def _git_env(pairs: list[tuple[str, str]]) -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG_")}
+    env["GIT_CONFIG_COUNT"] = str(len(pairs))
+    for i, (key, value) in enumerate(pairs):
+        env[f"GIT_CONFIG_KEY_{i}"] = key
+        env[f"GIT_CONFIG_VALUE_{i}"] = value
+    return env
+
+
+@pytest.mark.parametrize(
+    "existing",
+    [
+        [],
+        [("commit.gpgsign", "true")],
+        [("commit.gpgsign", "false")],
+        [("commit.gpgsign", "false"), ("tag.gpgsign", "true")],
+        [("user.name", "x"), ("commit.gpgsign", "true"), ("tag.gpgsign", "true")],
+        [
+            ("commit.gpgsign", "false"),
+            ("tag.gpgsign", "false"),
+            ("commit.gpgsign", "true"),
+        ],
+    ],
+)
+def test_existing_overrides_can_never_leave_signing_on(
+    monkeypatch: pytest.MonkeyPatch, existing: list[tuple[str, str]]
+) -> None:
+    """Oracle: git itself, reading the environment the helper leaves behind."""
+    import conftest
+
+    for key in [k for k in os.environ if k.startswith("GIT_CONFIG_")]:
+        monkeypatch.delenv(key)
+    for key, value in _git_env(existing).items():
+        if key.startswith("GIT_CONFIG_"):
+            monkeypatch.setenv(key, value)
+    conftest._make_git_hermetic()
+    for scope in ("commit", "tag"):
+        out = subprocess.run(
+            ["git", "config", f"{scope}.gpgsign"], capture_output=True, text=True
+        )
+        assert out.stdout.strip() == "false", (existing, scope)
+    count = os.environ["GIT_CONFIG_COUNT"]
+    conftest._make_git_hermetic()  # idempotent once in force
+    assert os.environ["GIT_CONFIG_COUNT"] == count

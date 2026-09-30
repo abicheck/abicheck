@@ -170,6 +170,33 @@ def test_durations_fold_into_per_file_seconds() -> None:
     }
 
 
+@pytest.mark.parametrize("spec", ["a/b", "/3", "1/", "x"])
+def test_a_malformed_shard_explains_the_expected_form(spec: str) -> None:
+    with pytest.raises(ValueError, match="K/N"):
+        parse_shard(spec)
+
+
+def test_non_numeric_and_boolean_weights_are_ignored(tmp_path: Path) -> None:
+    import json
+
+    doc = tmp_path / "w.json"
+    doc.write_text(
+        json.dumps(
+            {
+                "files": {
+                    "tests/a.py": True,
+                    "tests/b.py": False,
+                    "tests/c.py": "3",
+                    "tests/d.py": -1,
+                    "tests/e.py": 2.5,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert load_weights(doc) == {"tests/e.py": 2.5}
+
+
 def test_an_unreadable_weights_file_means_count_only_balancing(tmp_path: Path) -> None:
     bad = tmp_path / "w.json"
     bad.write_text("not json", encoding="utf-8")
@@ -177,7 +204,9 @@ def test_an_unreadable_weights_file_means_count_only_balancing(tmp_path: Path) -
     assert load_weights(tmp_path / "missing.json") == {}
 
 
-@pytest.mark.parametrize("spec", ["", "1", "0/3", "4/3", "1/0", "a/b", "-1/2"])
+@pytest.mark.parametrize(
+    "spec", ["", "1", "0/3", "4/3", "1/0", "a/b", "-1/2", "/3", "1/", "1.5/3"]
+)
 def test_invalid_specs_are_rejected(spec: str) -> None:
     with pytest.raises(ValueError):
         parse_shard(spec)

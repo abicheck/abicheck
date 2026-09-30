@@ -100,3 +100,18 @@ def test_the_real_work_area_prepares_its_cache_root(tmp_path: Path) -> None:
     area = harness._ScenarioArea(tmp_path / "area", install_spy=False)
     assert (area.cache_root / harness.CACHE_ROOT_MARKER).is_file()
     harness._reset_cache(area.cache_root)
+
+
+def test_a_deletion_failure_is_raised_not_swallowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A partially cleared root would silently turn a cold measurement warm."""
+    root = harness.prepare_cache_root(tmp_path / "cache")
+    _populate(root)
+
+    def refuse(path, *args, **kwargs):
+        raise PermissionError(f"cannot remove {path}")
+
+    monkeypatch.setattr(harness.shutil, "rmtree", refuse)
+    with pytest.raises(PermissionError):
+        harness._reset_cache(root)

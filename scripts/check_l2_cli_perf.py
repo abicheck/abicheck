@@ -845,7 +845,9 @@ def _reset_cache(cache_root: Path) -> None:
         if child.name == CACHE_ROOT_MARKER:
             continue
         if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child, ignore_errors=True)
+            # Fail loudly: a partially cleared cache would silently turn a
+            # "cold" measurement warm.
+            shutil.rmtree(child)
         else:
             child.unlink(missing_ok=True)
 

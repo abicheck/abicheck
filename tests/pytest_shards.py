@@ -60,7 +60,12 @@ def parse_shard(spec: str) -> tuple[int, int]:
     index_text, sep, total_text = spec.partition("/")
     if not sep:
         raise ValueError(f"--shard must be K/N, got {spec!r}")
-    index, total = int(index_text), int(total_text)
+    try:
+        index, total = int(index_text), int(total_text)
+    except ValueError:
+        raise ValueError(
+            f"--shard must be K/N with integers 1 <= K <= N (e.g. 2/3), got {spec!r}"
+        ) from None
     if total < 1 or not 1 <= index <= total:
         raise ValueError(f"--shard {spec!r}: need 1 <= K <= N")
     return index, total
@@ -94,7 +99,7 @@ def load_weights(path: Path = WEIGHTS_FILE) -> dict[str, float]:
     return {
         str(k): float(v)
         for k, v in files.items()
-        if isinstance(v, int | float) and v >= 0
+        if isinstance(v, int | float) and not isinstance(v, bool) and v >= 0
     }
 
 

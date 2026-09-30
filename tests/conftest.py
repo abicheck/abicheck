@@ -619,7 +619,28 @@ def _keep_mutmut_stats_out_of_child_processes() -> None:
 _HERMETIC_GIT_CONFIG = (("commit.gpgsign", "false"), ("tag.gpgsign", "false"))
 
 
+def _effective_git_env_config() -> dict[str, str]:
+    """What the `GIT_CONFIG_*` environment currently forces, key -> value.
+
+    A later index wins, matching git's own precedence among those entries.
+    """
+    effective: dict[str, str] = {}
+    for i in range(int(os.environ.get("GIT_CONFIG_COUNT", "0") or 0)):
+        key = os.environ.get(f"GIT_CONFIG_KEY_{i}")
+        if key is not None:
+            effective[key.lower()] = os.environ.get(f"GIT_CONFIG_VALUE_{i}", "")
+    return effective
+
+
 def _make_git_hermetic() -> None:
+    """Force `_HERMETIC_GIT_CONFIG` via `GIT_CONFIG_*`, appended last so it
+    wins over any existing entry. Idempotent: a process that already forces
+    every pair (an xdist worker inheriting the controller's environment) is
+    left alone rather than growing the list again. An existing entry forcing a
+    *different* value (e.g. `commit.gpgsign=true`) does not count."""
+    effective = _effective_git_env_config()
+    if all(effective.get(key) == value for key, value in _HERMETIC_GIT_CONFIG):
+        return
     start = int(os.environ.get("GIT_CONFIG_COUNT", "0") or 0)
     for offset, (key, value) in enumerate(_HERMETIC_GIT_CONFIG):
         os.environ[f"GIT_CONFIG_KEY_{start + offset}"] = key
@@ -629,11 +650,7 @@ def _make_git_hermetic() -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     _keep_mutmut_stats_out_of_child_processes()
-    if not any(
-        os.environ.get(f"GIT_CONFIG_KEY_{i}") == "commit.gpgsign"
-        for i in range(int(os.environ.get("GIT_CONFIG_COUNT", "0") or 0))
-    ):
-        _make_git_hermetic()
+    _make_git_hermetic()
     _materialize_generated_skill_trees()
     config.addinivalue_line(
         "markers",
