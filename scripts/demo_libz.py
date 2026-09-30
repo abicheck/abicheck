@@ -75,7 +75,7 @@ def main() -> None:
         removed = [
             f.name for f in snap_v2.declarations.functions if f.name == "gzgetc_"
         ]
-        snap_v2.functions = [
+        snap_v2.declarations.functions = [
             f for f in snap_v2.declarations.functions if f.name != "gzgetc_"
         ]
 

@@ -555,7 +555,7 @@ def _public_std_string_typedef_alias_layout_changed() -> tuple[
     # Closes the last piece of the typedef-aliased-stdlib-type gap: a public
     # function spelled with the real DWARF backend's bare signature form
     # ("string") for a std::string parameter, resolved through
-    # snapshot.typedefs["std::string"] -> the real
+    # snapshot.declarations.typedefs["std::string"] -> the real
     # std::__cxx11::basic_string<...> RecordType (empirically verified
     # against a real DWARF-dumped std::string parameter). Before this, the
     # alias was never connected back to the RecordType that owns the real
@@ -926,7 +926,7 @@ def _overaligned_first_vptr_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
 def _overaligned_pure_virtual_stays_breaking() -> tuple[AbiSnapshot, AbiSnapshot]:
     # The sibling of the case above, and the one it does not cover: a *pure*
     # virtual has no out-of-line definition, so `dwarf_snapshot` drops its
-    # declaration-only DIE from `snapshot.functions` while still counting it
+    # declaration-only DIE from `snapshot.declarations.functions` while still counting it
     # as a vtable child of the class. Both owned-signature sets therefore read
     # empty, and `alignas` keeps the size from moving, so the size backstop
     # suppressed a class gaining its first vptr *and* becoming abstract

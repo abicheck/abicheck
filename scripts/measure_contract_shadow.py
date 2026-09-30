@@ -156,7 +156,7 @@ UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
 }
 #: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 -> 31 -> 30. The +2 to 31 was
 #: `overaligned_pure_virtual_stays_breaking`, an FN sentinel for a pure
-#: virtual whose declaration-only DIE never reaches `snapshot.functions`, so
+#: virtual whose declaration-only DIE never reaches `snapshot.declarations.functions`, so
 #: the owned-signature check cannot see it; the guard answered from
 #: `vptr_offset_bits` instead. That witness turned out to be circular -- both
 #: producers derive it as `0 if vtable else None`, so reading it made the
