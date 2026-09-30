@@ -34,7 +34,9 @@ cadence is the only mitigation today.
 
 from __future__ import annotations
 
+import importlib.util
 import re
+import sys
 from pathlib import Path
 
 import click
@@ -47,26 +49,21 @@ from abicheck.cli import main as cli_main
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "skills-src"
 
+_spec = importlib.util.spec_from_file_location(
+    "gen_agent_skills_drift", REPO / "scripts" / "gen_agent_skills.py"
+)
+assert _spec is not None and _spec.loader is not None
+_gen = importlib.util.module_from_spec(_spec)
+sys.modules.setdefault("gen_agent_skills_drift", _gen)
+_spec.loader.exec_module(_gen)
+
 #: The files the generator actually publishes into an installed skill — each
 #: skill's `SKILL.md`, its own `references/`, and the shared fragments. This
 #: gate protects what ships to an agent, so `skills-src/CLAUDE.md` (the
 #: contributor contract, never published) is deliberately out of scope: it
 #: discusses repository internals like `latest_release` that are not report
 #: fields, and scanning it would generate false positives indefinitely.
-#: Published roots are exactly what `gen_agent_skills.py` reads: each
-#: `skills-src/<name>/` carrying a `SKILL.md`, plus `shared/`. Anything else
-#: under `skills-src/` (`evaluation/`'s corpora and reports) never ships.
-_PUBLISHED_ROOTS = {
-    child.name
-    for child in SRC.iterdir()
-    if child.is_dir() and (child / "SKILL.md").is_file()
-} | {"shared"}
-SKILL_FILES = sorted(
-    path
-    for path in SRC.rglob("*.md")
-    if path.parent != SRC  # skills-src/CLAUDE.md and any future sibling doc
-    and path.relative_to(SRC).parts[0] in _PUBLISHED_ROOTS
-)
+SKILL_FILES = _gen.published_source_files(SRC)
 
 _INLINE_RE = re.compile(r"`([^`\n]+)`")
 _LONG_OPT_RE = re.compile(r"^--[a-z][a-z0-9-]*$")
