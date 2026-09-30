@@ -105,7 +105,7 @@ implied is reset → rewrite → evaluate → publish, and this is step two.
 |---|---|---|
 | `check-abi-compatibility` (formerly `review-native-library-change`, formerly `native-binary-compatibility-review`) | **Preview — installable with `npx skills add abicheck/abicheck`; single-agent pilot evidence only.** | The first published skill. The 2026-09-29 pilot (`skills-src/evaluation/agents/skills/pilot-results/2026-09-29.md`) measured lift over the no-skill baseline on the 14-scenario corpus with one model (30/30 vs 22/28 correct verdicts; 7% vs 68% zero-tolerance failures), but v2 was revised against that same corpus, so it is not a held-out result. Cite it only with that caveat; cross-agent validation (below) is still open. |
 | `explain-abi-change` | **Preview — same install; single-agent pilot evidence only.** | Admitted by ADR-058's 2026-09-30 amendment (all five admission criteria, stated there). For a developer working out what changed between a program and the shared libraries it uses — a failure or just a library update — worked back to one of seven named mechanisms. Renamed from `debug-abi-failure` before release, when the framing widened from "a program stopped working" to "a developer wants to understand an ABI change". Evaluated on 10 scenarios (`skills-src/evaluation/agents/skills/scenarios.yaml`, `explain-*`); results in `skills-src/evaluation/agents/skills/pilot-results/2026-09-30-explain-abi-change.md`. |
-| `set-up-abi-compatibility-ci` | **Preview — second candidate, admitted by ADR-058's 2026-09-30 amendment.** | Onboards a GitHub repository onto abicheck via GitHub Actions: repository inventory → baseline strategy → gate/rollout → workflow files → validation → setup report. Evaluated by its own static-grading A/B harness, `skills-src/evaluation/agents/ci-setup/` (results in `results/`); same caveats: one model, corpus written with the skill. |
+| `set-up-abi-compatibility-ci` | **Preview — admitted by its own ADR-058 2026-09-30 amendment ("CI onboarding candidate").** | Onboards a GitHub repository onto abicheck via GitHub Actions: repository inventory → baseline strategy → gate/rollout → workflow files → validation → setup report. Evaluated by its own static-grading A/B harness, `skills-src/evaluation/agents/ci-setup/` (results in `results/`); same caveats: one model, corpus written with the skill. |
 
 **What "PR 2" integrated, over the bare rename the reset amendment left in
 place:**
@@ -174,7 +174,7 @@ scope. See the ADR amendment for the full accounting of what was deferred.
   stating the five admission criteria and an evaluation corpus of its own,
   the way `explain-abi-change` was added (2026-09-30). Rebuilding
   `native-release-compatibility` from git history is not a shortcut.
-- Don't cite either skill as validated in any user-facing claim; each has
+- Don't cite any skill as validated in any user-facing claim; each has
   single-agent pilot evidence only, with the caveats its pilot report states.
 - This reset does not reopen ADR-058's five-criteria admission bar for a
   *new* skill on its own — see "Adding a public skill" below, unchanged.
