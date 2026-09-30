@@ -144,8 +144,7 @@ def _graphs_attached(
 
     def _recording(*args: object, **kwargs: object) -> object:
         snap = real_attach(*args, **kwargs)
-        pack = getattr(snap, "build_source", None)
-        graph = getattr(pack, "source_graph", None) if pack is not None else None
+        graph = getattr(snap, "surface_graph", None)
         if graph is not None:
             ids = tuple(sorted(node.id for node in graph.nodes))
             # A library is attached once per side; keep the richer of the two
@@ -251,8 +250,7 @@ def test_warm_snapshot_cache_hit_keeps_the_header_graph(
     def _recording_lookup(*args: object, **kwargs: object) -> object:
         snap = real_lookup(*args, **kwargs)
         if snap is not None:
-            pack = getattr(snap, "build_source", None)
-            graph = getattr(pack, "source_graph", None) if pack is not None else None
+            graph = getattr(snap, "surface_graph", None)
             hits.append(tuple(sorted(n.id for n in graph.nodes)) if graph else ())
         return snap
 

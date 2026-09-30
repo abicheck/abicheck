@@ -148,13 +148,6 @@ def _attach_header_graph(
         build_header_only_graph,
     )
     from .buildsource.include_graph import augment_graph_with_includes
-    from .buildsource.model import (
-        CoverageStatus,
-        DataLayer,
-        LayerConfidence,
-        LayerCoverage,
-    )
-    from .buildsource.pack import BuildSourcePack
     from .dumper import _resolve_clang_bin
     from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
 
@@ -265,57 +258,24 @@ def _attach_header_graph(
             graph.extractor_passes[HEADER_INCLUDE_GRAPH_PASS] = True
         graph.finalize()
     memory_trace.mark("dump.header_graph.include_pass:done")
-    pack = BuildSourcePack(root=Path(""), source_graph=graph)
-    # Populate the manifest coverage row the normal collect/embed path always
-    # sets (inline.build_inline_coverage's L5 row) — otherwise the pack's
-    # default empty ``coverage`` reads as "L5 not collected" to
-    # cli_buildsource_helpers._layer_presence/_optional_coverage even though
-    # source_graph is populated, making coverage/asymmetry reporting
-    # misleading (Codex review). L3/L4 stay honestly NOT_COLLECTED — neither
-    # a build nor an L4 source-ABI replay ran in a header-only world.
-    pack.manifest.coverage = [
-        LayerCoverage(
-            layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
-        ),
-        LayerCoverage(
-            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED
-        ),
-        LayerCoverage(
-            layer=DataLayer.L5_SOURCE_GRAPH.value,
-            status=CoverageStatus.PRESENT if graph.edges else CoverageStatus.PARTIAL,
-            confidence=LayerConfidence.REDUCED
-            if graph.edges
-            else LayerConfidence.UNKNOWN,
-        ),
-    ]
-    snap.build_source = pack
-    # ADR-063 Phase 3 (D5): one shared SourceGraphSummary instance for both
-    # the L5 builder above (`graph`, already `pack.source_graph`) and the
-    # public-surface evidence graph -- never two independently-constructed
-    # summary objects that happen to agree, which is exactly the drift this
-    # phase's shared-assembly design exists to rule out. `snap.surface_graph`
-    # is the same object `pack.source_graph` already holds; the codec (
-    # `storage/surface_graph_codec.py`) relies on that identity to dedup the
-    # embedded copy on encode and restore it on decode.
+    # ADR-063 Phase 3/10: the header graph lives on `surface_graph` alone.
+    # This used to also synthesize `snap.build_source = BuildSourcePack(
+    # root=Path(""), source_graph=graph)` (with L3/L4 not-collected and an L5
+    # row) so legacy `build_source.source_graph` readers saw it; every such
+    # reader now goes through `evidence_depth.resolve_l5_source_graph`, and
+    # the coverage rows that pack's manifest carried are derived on read by
+    # `evidence_depth.header_graph_coverage`. A real `--sources`/
+    # `--build-info` embed later adopts this graph into its own pack
+    # (`buildsource/embed.py`'s backfill).
     #
     # Deliberately NOT populated with compare/surface_graph.py's own
     # declaration/type/header/symbol facts here: `_attach_header_graph` runs
     # unconditionally on essentially every real dump (G31 Phase A). Paying
     # `build_public_surface_facts`'s per-declaration walk on every dump
     # regressed the header-graph attach-cost perf gate by 47-96% at
-    # realistic sizes (caught by CI on this phase's own PR). An earlier
-    # revision of ADR-063 Phase 3 D5's traversal migration deferred that
-    # populate step to a later enrichment call instead, keyed off this same
-    # graph object -- but a further review round found the graph's own
-    # cross-producer evidence-merge precedence could let a stale or
-    # adversarial persisted fact outrank a fresh recomputation, so the final
-    # design (`policy.public_surface_closure.py`'s
-    # `_resolve_public_surface_from_snapshot`) does not read or enrich this
-    # graph at all: it calls `compare/surface_graph.py`'s
-    # `referenced_identifiers_by_node()`, a pure function of the snapshot's
-    # own current declarations, computed fresh on every public/export-domain
-    # surface query (Codex review, PR #979) -- see that module's own
-    # docstring for the full security history.
+    # realistic sizes, and `policy.public_surface_closure` does not read this
+    # graph at all (it recomputes references from the snapshot's own current
+    # declarations; Codex review, PR #979).
     snap.surface_graph = graph
     return snap
 

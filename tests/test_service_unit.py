@@ -31,6 +31,7 @@ from abicheck.service import (
     run_dump,
     sniff_text_format,
 )
+from tests._header_graph_coverage import coverage_for as _coverage_for
 
 # ── detect_binary_format() ──────────────────────────────────────────────────
 
@@ -4156,7 +4157,7 @@ class TestRunDumpHeaderGraph:
         snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
         with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe", [Path("api.h")], [], "1.0", "c++")
-        assert result.build_source is not None
+        assert result.surface_graph is not None
 
     def test_noop_when_no_headers_parsed(self, tmp_path):
         p = tmp_path / "lib.dll"
@@ -4189,9 +4190,8 @@ class TestRunDumpHeaderGraph:
         # The resolved (existing, expanded) header must reach the clang pass —
         # not the raw, unexpanded argument (Codex review).
         assert mock_ast.call_args.args[0] == [header]
-        assert result.build_source is not None
-        assert result.build_source.source_graph is not None
-        node_ids = {n.id for n in result.build_source.source_graph.nodes}
+        assert result.surface_graph is not None
+        node_ids = {n.id for n in result.surface_graph.nodes}
         assert "decl://_Z1fv" in node_ids
         # The manifest coverage row must be populated too (Codex review) — an
         # empty default manifest would read as "L5 not collected" to
@@ -4199,10 +4199,10 @@ class TestRunDumpHeaderGraph:
         # though source_graph is populated.
         from abicheck.buildsource.model import CoverageStatus, DataLayer
 
-        l5 = result.build_source.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
+        l5 = _coverage_for(result, DataLayer.L5_SOURCE_GRAPH)
         assert l5 is not None
         assert l5.status == CoverageStatus.PARTIAL  # no edges in this empty AST
-        l3 = result.build_source.manifest.coverage_for(DataLayer.L3_BUILD)
+        l3 = _coverage_for(result, DataLayer.L3_BUILD)
         assert l3 is not None
         assert l3.status == CoverageStatus.NOT_COLLECTED
 
@@ -4256,9 +4256,8 @@ class TestRunDumpHeaderGraph:
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
         mock_ast.assert_called_once()
         # Never aborts the dump (ADR-028 D3); the graph is embedded but inert.
-        assert result.build_source is not None
-        assert result.build_source.source_graph is not None
-        assert result.build_source.source_graph.edges == []
+        assert result.surface_graph is not None
+        assert result.surface_graph.edges == []
 
     def test_expands_header_directory_before_clang_pass(self, tmp_path):
         # Codex review: a `headers` entry may be a directory (a supported
@@ -4284,8 +4283,7 @@ class TestRunDumpHeaderGraph:
             result = run_dump(p, "pe", [hdr_dir], [], "1.0", "c++")
         mock_ast.assert_called_once()
         assert mock_ast.call_args.args[0] == [header]
-        assert result.build_source is not None
-        assert result.build_source.source_graph is not None
+        assert result.surface_graph is not None
 
     def test_header_graph_includes_folds_include_edges(self, tmp_path):
         p = tmp_path / "lib.dll"
@@ -4325,7 +4323,7 @@ class TestRunDumpHeaderGraph:
                 "1.0",
                 "c++",
             )
-        graph = result.build_source.source_graph
+        graph = result.surface_graph
         pub_id = f"header://{pub}"
         assert any(
             e.kind == "COMPILE_UNIT_INCLUDES_FILE" and e.src == pub_id
@@ -4371,7 +4369,7 @@ class TestRunDumpHeaderGraph:
                 "1.0",
                 "c++",
             )
-        graph = result.build_source.source_graph
+        graph = result.surface_graph
         assert not any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges)
         assert graph.extractor_passes.get("header_include_graph") is True
         assert graph.coverage["include_edges"]["collected"] is True
@@ -4431,7 +4429,7 @@ class TestRunDumpHeaderGraph:
                 "1.0",
                 "c++",
             )
-        graph = result.build_source.source_graph
+        graph = result.surface_graph
         good_id = f"header://{good}"
         assert any(
             e.kind == "COMPILE_UNIT_INCLUDES_FILE" and e.src == good_id
@@ -4455,7 +4453,7 @@ class TestRunDumpHeaderGraph:
         # include-edge content check).
         with patch("abicheck.service_dump_native._dump_pe", return_value=snap):
             result = run_dump(p, "pe", [header], [], "1.0", "c++")
-        assert result.build_source is not None
+        assert result.surface_graph is not None
 
 
 class TestRunDumpHeaderGraphSkippedForDwarfOnly:

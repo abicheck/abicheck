@@ -77,11 +77,18 @@ def _library_source_graph(
     about what is exported. It must describe the same library as *lib* — at
     all three call sites it is the snapshot of that exact path.
     """
+    from .evidence_depth import resolve_l5_source_graph
+    from .model import AbiSnapshot
+
     for candidate in (snapshot, lib):
-        build_source = getattr(candidate, "build_source", None)
-        if build_source is None:
-            continue
-        graph: SourceGraphSummary | None = getattr(build_source, "source_graph", None)
+        graph: SourceGraphSummary | None
+        if isinstance(candidate, AbiSnapshot):
+            # ADR-063 Phase 10: a header-only snapshot's graph lives on
+            # `surface_graph`, not a synthesized pack.
+            graph = resolve_l5_source_graph(candidate, candidate.build_source)
+        else:
+            build_source = getattr(candidate, "build_source", None)
+            graph = getattr(build_source, "source_graph", None)
         if graph is not None and graph.nodes:
             return graph
     return None

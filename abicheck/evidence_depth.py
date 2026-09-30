@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING
 from .model.evidence_depth_levels import USER_DEPTHS
 
 if TYPE_CHECKING:
+    from .buildsource.model import LayerCoverage
     from .buildsource.pack import BuildSourcePack
     from .model import AbiSnapshot
     from .model.source_graph import SourceGraphSummary
@@ -104,8 +105,13 @@ def resolve_l5_source_graph(
     fallback rule can't independently drift per call site the way it did
     across three earlier review rounds on this migration.
 
-    Prefers *pack*'s own ``source_graph``, falling back to
-    ``AbiSnapshot.surface_graph`` only when ALL of:
+    Prefers *pack*'s own ``source_graph``. With no pack at all (neither
+    *pack* nor ``snap.build_source`` -- a plain header-only dump, which no
+    longer carries a synthesized pack), the header graph on
+    ``AbiSnapshot.surface_graph`` *is* the snapshot's L5 evidence; depth
+    projection below ``source`` clears it, so a projected snapshot cannot
+    resurrect L5 this way. With a pack, falls back to ``surface_graph`` only
+    when ALL of:
 
     - *pack* is the snapshot's own embedded ``build_source`` (never an
       unrelated out-of-band ``--old/new-build-info``/``--old/new-sources``
@@ -141,23 +147,83 @@ def resolve_l5_source_graph(
     """
     if pack is not None and pack.source_graph is not None:
         return pack.source_graph
+    if pack is None:
+        # No pack at all: a plain header-only dump carries its header graph
+        # on `surface_graph` alone (ADR-063 Phase 10 -- no synthesized pack).
+        # A caller that passed None while an embedded pack exists asked for
+        # out-of-band evidence only, and gets none.
+        return embedded_header_graph(snap) if snap.build_source is None else None
     if (
-        pack is not None
-        and pack is snap.build_source
+        pack is snap.build_source
         and pack.manifest.coverage_for("L5_source_graph") is None
     ):
-        from .model.source_graph import SourceGraphSummary as _SourceGraphSummary
-
-        if isinstance(snap.surface_graph, _SourceGraphSummary):
-            return snap.surface_graph
+        return embedded_header_graph(snap)
     return None
+
+
+def embedded_header_graph(snap: AbiSnapshot) -> SourceGraphSummary | None:
+    """*snap*'s always-on header graph (``surface_graph``), when it is a real
+    ``SourceGraphSummary`` (see :func:`resolve_l5_source_graph`'s last
+    condition for why a merely structural one is treated as absent)."""
+    from .model.source_graph import SourceGraphSummary as _SourceGraphSummary
+
+    graph = snap.surface_graph
+    return graph if isinstance(graph, _SourceGraphSummary) else None
+
+
+def embedded_evidence_pack(snap: AbiSnapshot) -> BuildSourcePack | None:
+    """*snap*'s embedded pack, or -- for a header-only dump, which carries no
+    pack since ADR-063 Phase 10 -- a pack standing in for its header graph,
+    for the callers that fold packs together (``buildsource merge``,
+    ``embed_inputs_pack``) and so need the graph in pack form. A fresh object
+    each call; never attached back to *snap*."""
+    if snap.build_source is not None:
+        return snap.build_source
+    graph = embedded_header_graph(snap)
+    if graph is None:
+        return None
+    from pathlib import Path
+
+    from .buildsource.pack import BuildSourcePack as _BuildSourcePack
+
+    pack = _BuildSourcePack(root=Path(""), source_graph=graph)
+    pack.manifest.coverage = header_graph_coverage(graph)
+    return pack
+
+
+def header_graph_coverage(graph: SourceGraphSummary) -> list[LayerCoverage]:
+    """The L3/L4/L5 coverage rows a header-only graph stands for: L3/L4
+    honestly not collected (no build or source-ABI replay ran), L5 present at
+    reduced confidence when the graph has edges, partial otherwise. Formerly
+    stamped on a pack synthesized for every header-only dump; now derived on
+    read wherever that pack's manifest used to be consulted."""
+    from .buildsource.model import (
+        CoverageStatus,
+        DataLayer,
+        LayerConfidence,
+        LayerCoverage,
+    )
+
+    return [
+        LayerCoverage(
+            layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED
+        ),
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value,
+            status=CoverageStatus.PRESENT if graph.edges else CoverageStatus.PARTIAL,
+            confidence=LayerConfidence.REDUCED
+            if graph.edges
+            else LayerConfidence.UNKNOWN,
+        ),
+    ]
 
 
 def _l5_payload_empty(snap: AbiSnapshot, pack: BuildSourcePack | None) -> bool:
     """:func:`layer_payload_empty`'s ``"L5"`` case, via
     :func:`resolve_l5_source_graph` (ADR-063 Phase 10)."""
-    if pack is None:
-        return True
     graph = resolve_l5_source_graph(snap, pack)
     return graph is None or not graph.nodes
 
@@ -192,9 +258,9 @@ def depth_label_for(snap: AbiSnapshot, pack: BuildSourcePack | None) -> str:
     --build-info/a compile database" as a valid way to satisfy ``--depth
     build`` (Codex review).
     """
-    if pack is not None and (
-        not layer_payload_empty(pack, "L4") or not _l5_payload_empty(snap, pack)
-    ):
+    if (
+        pack is not None and not layer_payload_empty(pack, "L4")
+    ) or not _l5_payload_empty(snap, pack):
         return "source"
     if pack is not None and not layer_payload_empty(pack, "L3"):
         return "build"

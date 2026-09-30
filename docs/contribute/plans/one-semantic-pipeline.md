@@ -17497,37 +17497,32 @@ not new design.
   `resolve_l5_source_graph` has a direct test pinning the non-concrete
   rejection.
 
-  **The in-memory alias-assignment deletion is NOT done, and is being left
-  open rather than forced through unverified.** The one place that builds
-  the alias — `service_header_graph_attach.py`'s `_attach_header_graph` —
-  threads one shared `SourceGraphSummary` instance into
-  `AbiSnapshot.surface_graph` *and* a synthesized `snap.build_source`
-  (`BuildSourcePack(root=Path(""), source_graph=graph)`) for the
-  always-on, header-only (L2) graph case, purely so a legacy
-  `build_source.source_graph` reader still sees it even when no
-  `--sources`/`--build-info` ran. A real audit for this row (not limited to
-  the five named readers) found this synthesized pack has further
-  production readers this checklist never named: coverage reporting
-  (`evidence_report.optional_coverage`/`layer_presence`,
-  `evidence_report.detect_coverage_asymmetry`), `cli_buildsource.py`'s own
-  `_layer_payload_empty`/`build_source_already_satisfies`, and
-  `buildsource/embed.py`'s own `--sources`/`--build-info` backfill logic
-  (`existing = snap.build_source; ... existing.source_graph is not None`)
-  — every one of them would silently regress (reporting `NOT_COLLECTED`
-  L5 coverage for a plain header-only dump, or skipping the header-only
-  graph backfill entirely) if `_attach_header_graph` stopped populating
-  `snap.build_source` for this case. None of those call sites were part of
-  this row's five-reader scope, and auditing and migrating them too is a
-  materially larger, separately-scoped change than this row's own text
-  anticipated ("the one piece this row can actually remove" undersold the
-  blast radius). Per this file's own root-`AGENTS.md`-inherited
-  decision-making principles ("if a genuinely general fix isn't feasible
-  in one pass, say so explicitly and record the gap"), that deletion is
-  left as an explicitly named, separately-scoped follow-up rather than
-  performed against an incomplete audit. Until it lands, `git grep -n
-  "surface_graph = graph"` inside `service_header_graph_attach.py` still
-  finds the alias-construction site outside history — expected, and
-  tracked here rather than silently left implied-closed.
+  **The in-memory alias-assignment deletion: closed (2026-09-30).** The
+  earlier text of this paragraph left it open because the synthesized pack
+  `_attach_header_graph` built for every header-only dump
+  (`BuildSourcePack(root=Path(""), source_graph=graph)` with L3/L4
+  not-collected and an L5 row) had readers this row never named. All of them
+  now read the header graph without that pack:
+  `evidence_depth.resolve_l5_source_graph` treats a snapshot with no pack at
+  all as carrying its L5 evidence on `surface_graph`; the coverage rows that
+  pack's manifest held are derived on read (`evidence_depth.
+  header_graph_coverage`, used by `evidence_report.optional_coverage`/
+  `layer_presence` and so `detect_coverage_asymmetry`); the compare pipeline
+  engages on a header graph as it did on the pack (`prepare_embedded_build_
+  source`, `diff_embedded_build_source`); `buildsource/embed.py`'s backfill
+  adopts the graph from `surface_graph`; `buildsource merge` and
+  `embed_inputs_pack` fold a header-only input through `evidence_depth.
+  embedded_evidence_pack`; `appcompat_consumer_impact` and
+  `post_processing_reachability` use the resolver. The one semantic hazard --
+  a pack-less `surface_graph` resurrecting L5 for a comparison projected
+  below `source` -- is closed at the projection: `project_snapshot_to_depth`
+  drops `surface_graph` below `source` whenever no pack survives (no L2
+  consumer reads it; the public-surface closure deliberately does not).
+  `tests/test_header_graph_without_pack.py` states the equivalence
+  differentially: the retired shape (which stored documents still decode to)
+  and the new one answer every L5 question alike across graph shapes and
+  every depth rung. `git grep -n "surface_graph = graph"` still finds the
+  one assignment, now the graph's only home.
 
   **"Delete the legacy-document aliasing fallback in `snapshot_from_dict()`"
   is no longer this row's to do — that fallback was itself retracted

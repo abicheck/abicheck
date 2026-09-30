@@ -430,29 +430,6 @@ class TestDepthLadderMonotonicity:
         assert result.verdict == checker.Verdict.NO_CHANGE
 
 
-class TestSurfaceGraphIsAHeaderFact:
-    """``surface_graph`` is an L2 (header-only) fact -- ``_attach_header_graph``'s
-    own docstring -- not an L4/L5 one; an earlier version of this module gated
-    it to ``source`` on the wrong assumption (review-caught, same PR)."""
-
-    def _snap_with_graph(self) -> AbiSnapshot:
-        graph = SourceGraphSummary()
-        return AbiSnapshot(
-            library="lib", version="1", from_headers=True, surface_graph=graph
-        )
-
-    def test_cleared_below_headers(self) -> None:
-        snap = self._snap_with_graph()
-        projected = project_snapshot_to_depth(snap, "binary")
-        assert projected.surface_graph is None
-
-    @pytest.mark.parametrize("depth", ["headers", "build", "source"])
-    def test_kept_at_or_above_headers(self, depth: str) -> None:
-        snap = self._snap_with_graph()
-        projected = project_snapshot_to_depth(snap, depth)
-        assert projected.surface_graph is not None
-
-
 def _invoke(*args: str) -> tuple[int, str]:
     result = CliRunner().invoke(main, list(args))
     return result.exit_code, result.output

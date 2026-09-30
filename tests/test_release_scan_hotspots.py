@@ -382,7 +382,7 @@ class TestHeaderGraphAstFailureIsNotSilent:
                 public_headers=None,
                 public_header_dirs=None,
             )
-        graph = out.build_source.source_graph
+        graph = out.surface_graph
         assert graph.degraded_passes.get(HEADER_CALL_GRAPH_PASS) is True
         assert not graph.extractor_passes.get(HEADER_CALL_GRAPH_PASS)
         # The first line of the error is logged, or the exception type when
