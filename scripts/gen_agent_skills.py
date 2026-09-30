@@ -79,6 +79,13 @@ OUTPUT_ROOTS: tuple[Path, ...] = (
     REPO_DIR / ".gemini" / "skills",
 )
 
+#: The one **committed** publication tree. `npx skills add abicheck/abicheck`
+#: (the Vercel `skills` CLI) installs from a repository's own checkout and
+#: looks in `skills/` first, so an installable copy has to be in git; the
+#: three agent trees above stay build output. `--check` diffs this tree
+#: against a fresh render, so it cannot drift from `skills-src/`.
+PUBLISHED_ROOT: Path = REPO_DIR / "skills"
+
 #: Where a cited `shared/` fragment lands inside a generated skill, relative
 #: to the skill's own root.
 SHARED_SUBDIR = "references/shared"
@@ -1201,8 +1208,8 @@ def main(argv: list[str] | None = None) -> int:
         "--check",
         action="store_true",
         help=(
-            "verify skills-src/ renders cleanly and self-consistently "
-            "instead of writing the (no longer committed) output trees"
+            "verify skills-src/ renders cleanly and self-consistently, and "
+            "that the committed skills/ tree matches it, instead of writing"
         ),
     )
     args = parser.parse_args(argv)
@@ -1215,6 +1222,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         problems = check_generation_consistency(rendered)
+        problems += [
+            f"{p} — run `python scripts/gen_agent_skills.py` and commit skills/"
+            for p in check_trees(rendered, roots=(PUBLISHED_ROOT,))
+        ]
         if problems:
             print("skills-src/ generation is not self-consistent:", file=sys.stderr)
             for problem in problems:
@@ -1226,10 +1237,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    write_trees(rendered)
+    write_trees(rendered, roots=(*OUTPUT_ROOTS, PUBLISHED_ROOT))
     print(
         f"wrote {len(rendered)} files to "
-        + ", ".join(r.relative_to(REPO_DIR).as_posix() for r in OUTPUT_ROOTS)
+        + ", ".join(
+            r.relative_to(REPO_DIR).as_posix() for r in (*OUTPUT_ROOTS, PUBLISHED_ROOT)
+        )
     )
     return 0
 

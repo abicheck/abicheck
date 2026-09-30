@@ -17,7 +17,9 @@ with the bad-run corpus that exercises them — enough to produce a transcript
 *and* score it. Phase 3 landed a full 12-scenario corpus and a real 48-run
 pilot against it — see `pilot-results/README.md` for the numbers and, just as
 important, the harness confound (`--max-turns`) that limits how much weight
-they can bear today. **Still missing: the judged dimensions (4 and 5), the
+they can bear today. A second pilot (2026-09-29, `pilot-results/2026-09-29.md`)
+fixed three harness leaks that invalidated earlier numbers — see that file —
+and is the current evidence. **Still missing: the judged dimensions (4 and 5), the
 trigger corpus runner, and any committed evidence.**
 
 **`harbor/` is now the canonical evaluation surface** (ADR-058's
