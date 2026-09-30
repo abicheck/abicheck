@@ -128,8 +128,8 @@
 # merged) — never at a same-PR branch commit.
 
 schema_version: 2
-as_of_commit: 2f5ef696
-as_of_date: "2026-09-05"
+as_of_commit: e5fa2263
+as_of_date: "2026-09-30"
 
 concepts:
   facts:
