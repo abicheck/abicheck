@@ -199,13 +199,25 @@ class TestBuildConfigReachesTheDocumentedPublishers:
             and step["uses"].endswith("actions/baseline")
         ]
         assert forwarded, f"{workflow} no longer invokes actions/baseline"
+        # G41 Phase 1: build-config reaches actions/baseline through the
+        # "Resolve baseline extraction context" step, which folds the
+        # profile's compile overlay into it (or passes it through unchanged).
+        steps_by_id = {
+            step.get("id"): step
+            for job in document["jobs"].values()
+            for step in job.get("steps", [])
+            if step.get("id")
+        }
         for step in forwarded:
             assert step.get("with", {}).get("build-config") == (
-                "${{ inputs.build-config }}"
+                "${{ steps.context.outputs.build-config }}"
             ), (
                 f"{workflow} declares build-config but does not pass it to "
                 "actions/baseline"
             )
+            assert steps_by_id["context"]["env"]["BUILD_CONFIG"] == (
+                "${{ inputs.build-config }}"
+            ), f"{workflow}'s context step does not read the build-config input"
 
 
 class TestValidationInputRejected:
