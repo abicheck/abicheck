@@ -182,8 +182,14 @@ class TestReleaseFanOutStampsResolvedConfig:
         from abicheck.pack_application import PackApplication
 
         config = _minimal_evaluation_config()
+        # A pack that contributed (here: internal namespaces) is what makes
+        # the rich tier apply; see the no-pack case below.
         diff = self._run_compare_pair_with(
-            PackApplication(policy_overrides={}, resolved_config=config),
+            PackApplication(
+                policy_overrides={},
+                internal_namespaces=("detail",),
+                resolved_config=config,
+            ),
             tmp_path,
         )
         assert diff.evaluation_config is config
@@ -297,7 +303,7 @@ class TestReleaseNoPackStillResolvesProjectBackedConfig:
             config.provenance["policy.overrides"].layer is SelectorLayer.PROJECT_CONFIG
         )
 
-    def test_no_pack_release_stamps_the_per_library_diff_result(
+    def test_no_pack_release_member_stays_on_the_baseline_tier(
         self, tmp_path: Path
     ) -> None:
         """End to end through `_run_compare_pair`, the way a real release
@@ -325,10 +331,14 @@ class TestReleaseNoPackStillResolvesProjectBackedConfig:
         diff = TestReleaseFanOutStampsResolvedConfig()._run_compare_pair_with(
             application, tmp_path
         )
-        assert diff.evaluation_config is not None
-        assert diff.evaluation_config.policy.overrides["func_removed"].name == (
-            "COMPATIBLE"
-        )
+        # F2 route parity: a plain (no --pack, no --contract) member stays on
+        # the baseline digest tier, exactly like the identical single-pair
+        # `compare` and typed-API run; the project override still reaches
+        # that tier through the scoring policy file (end to end:
+        # test_cli_compare_release_policy_provenance.py's per-library
+        # receipt test), and the release-level resolution above keeps it.
+        assert diff.evaluation_config is None
+        assert application.resolved_config is not None
 
 
 class TestReleaseFanOutMergesContractContext:
