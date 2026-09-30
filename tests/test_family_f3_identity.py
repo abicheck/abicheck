@@ -54,6 +54,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
+from _mutmut_names import canonical_def_name
 
 from tests import _family_f3_catalogue as cat
 
@@ -501,8 +502,13 @@ def _enumerate_identity_functions() -> set[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         module = ".".join(path.relative_to(REPO).with_suffix("").parts)
         for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and _IDENTITY_NAME_RE.match(node.name):
-                found.add(f"{module}:{node.name}")
+            name = (
+                canonical_def_name(node.name)
+                if isinstance(node, ast.FunctionDef)
+                else None
+            )
+            if name is not None and _IDENTITY_NAME_RE.match(name):
+                found.add(f"{module}:{name}")
     return found
 
 
