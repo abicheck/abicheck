@@ -1,8 +1,7 @@
 """Coverage-focused unit tests for :mod:`abicheck.cli_helpers_compare`.
 
-Exercises the compile-db → castxml flag resolver (``_resolve_build_context_flags``),
-the severity resolver (``_resolve_severity``), and project-config discovery
-(``discover_project_config``) with real inputs and meaningful assertions.
+Exercises the compile-db → castxml flag resolver (``_resolve_build_context_flags``)
+and project-config discovery (``discover_project_config``) with real inputs and meaningful assertions.
 """
 
 from __future__ import annotations
@@ -18,7 +17,6 @@ from abicheck.checker_types import Change, DiffResult
 from abicheck.cli_helpers_compare import (
     _pair_wide_dialect_override,
     _resolve_build_context_flags,
-    _resolve_severity,
     dry_run_compile_db_matched,
     fold_l0_hard_removals,
     load_required_symbols,
@@ -266,27 +264,6 @@ def test_dry_run_compile_db_matched_false_for_malformed_json(tmp_path):
     db = tmp_path / "compile_commands.json"
     db.write_text("{ this is not json", encoding="utf-8")
     assert dry_run_compile_db_matched(db, None, (), None) is False
-
-
-def test_resolve_severity_not_explicit_when_all_none():
-    """When no severity input is given, explicitly_set is False."""
-    config, explicitly_set = _resolve_severity(None, None, None, None, None)
-    assert explicitly_set is False
-    assert config is not None
-
-
-def test_resolve_severity_explicit_from_preset():
-    """A preset marks severity as explicitly set."""
-    config, explicitly_set = _resolve_severity("strict", None, None, None, None)
-    assert explicitly_set is True
-    assert config is not None
-
-
-def test_resolve_severity_explicit_from_single_category():
-    """A single per-category override alone marks severity as explicitly set."""
-    config, explicitly_set = _resolve_severity(None, "error", None, None, None)
-    assert explicitly_set is True
-    assert config is not None
 
 
 def test_discover_project_config_finds_in_start_dir(tmp_path):

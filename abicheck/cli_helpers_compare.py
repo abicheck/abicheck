@@ -431,36 +431,6 @@ def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
         raise click.ClickException(str(exc)) from exc
 
 
-def _resolve_severity(
-    preset: str | None,
-    abi_breaking: str | None,
-    potential_breaking: str | None,
-    quality_issues: str | None,
-    addition: str | None,
-) -> tuple[SeverityConfig, bool]:
-    """Resolve severity configuration and return (config, explicitly_set)."""
-    from .workflows.gate import resolve_severity_config
-
-    explicitly_set = any(
-        v is not None
-        for v in (
-            preset,
-            abi_breaking,
-            potential_breaking,
-            quality_issues,
-            addition,
-        )
-    )
-    config = resolve_severity_config(
-        preset=preset,
-        abi_breaking=abi_breaking,
-        potential_breaking=potential_breaking,
-        quality_issues=quality_issues,
-        addition=addition,
-    )
-    return config, explicitly_set
-
-
 # ── ADR-037 D4: CLI ↔ config precedence resolver ─────────────────────────────
 
 
