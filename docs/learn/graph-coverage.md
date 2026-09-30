@@ -4,7 +4,7 @@ audience:
   - library-maintainer
 level: advanced
 depends_on:
-  - abicheck/buildsource/graph_facts.py
+  - abicheck/model/graph_facts.py
 lifecycle: active
 generated: false
 ---

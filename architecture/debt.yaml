@@ -156,17 +156,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/buildsource/graph_facts.py",
-      "baseline_lines": 1123,
-      "target": "extract/build-or-source",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_extraction_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/buildsource/graph_reconcile.py",
       "baseline_lines": 911,
       "target": "extract/build-or-source",

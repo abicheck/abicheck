@@ -19,8 +19,8 @@ ADR-061 Phase 5 item 2's follow-up, keeping this leaf-normalization half
 separate to stay under the new-file 800-line production cap). Every caller
 in ``graph_facts.py`` that normalizes a node/edge id or attrs value —
 ``GraphNode``/``GraphEdge.from_dict``, ``ensure_facts_and_resolve`` —
-imports these functions from here; ``buildsource/graph_facts.py`` (the flat
-compat facade) re-exports them transitively.
+imports these functions from here. (The flat ``buildsource/graph_facts.py``
+compat facade was deleted in ADR-063 Phase 10; import from ``model``.)
 """
 
 from __future__ import annotations

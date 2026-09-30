@@ -786,7 +786,7 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         static library at all, so the pass correctly never ran there. This
         must read as complete, not unknown."""
         from abicheck.analysis_assurance import _graph_completeness
-        from abicheck.buildsource.graph_facts import GraphNode
+        from abicheck.model.graph_facts import GraphNode
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
 
@@ -813,7 +813,7 @@ class TestGraphCompletenessConditionallyApplicableFamily:
     ) -> None:
         """Same repro through the full ``checker.compare()`` rollup, not just
         the unit-level ``_graph_completeness`` call."""
-        from abicheck.buildsource.graph_facts import GraphNode
+        from abicheck.model.graph_facts import GraphNode
         from abicheck.buildsource.source_graph import SourceGraphSummary
 
         old, new = _header_pair()
@@ -847,7 +847,7 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         not over-correct into silencing a genuine shortfall for this
         family."""
         from abicheck.analysis_assurance import _graph_completeness
-        from abicheck.buildsource.graph_facts import GraphNode
+        from abicheck.model.graph_facts import GraphNode
         from abicheck.buildsource.pack import BuildSourcePack
         from abicheck.buildsource.source_graph import SourceGraphSummary
 
@@ -875,7 +875,7 @@ class TestGraphCompletenessConditionallyApplicableFamily:
 
     def test_archive_graph_genuine_asymmetry_end_to_end(self, tmp_path: Path) -> None:
         """End-to-end companion to the genuine-asymmetry unit test above."""
-        from abicheck.buildsource.graph_facts import GraphNode
+        from abicheck.model.graph_facts import GraphNode
         from abicheck.buildsource.source_graph import SourceGraphSummary
 
         old, new = _header_pair()

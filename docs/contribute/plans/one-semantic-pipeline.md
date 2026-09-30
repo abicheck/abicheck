@@ -17276,6 +17276,9 @@ not new design.
   full account and `tests/test_opaque_identity_tiers.py`'s
   `TestDowngradeOpaqueStructChangesIdentityTiers`/
   `TestOpaqueTypeIndexBuildProperties` for the tests.
+- **Phase 3, `buildsource/graph_facts.py` facade (closed, 2026-09-30).** The
+  re-export facade is deleted; its 22 importers (10 production, 12 test)
+  import `abicheck.model.graph_facts`/`graph_identity` directly.
 - Phase 3: `surface.py`'s pre-graph traversal implementation and
   `export_surface.py`'s independent closure walk, once
   `PublicSurfaceQuery.resolve` is the only path either one calls; the

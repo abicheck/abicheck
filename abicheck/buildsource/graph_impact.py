@@ -42,7 +42,7 @@ from .call_graph import (
     CALL_KIND_VIRTUAL,
     RESOLUTION_OVERAPPROX,
 )
-from .graph_facts import CONF_HIGH
+from ..model.graph_facts import CONF_HIGH
 
 if TYPE_CHECKING:
     from ..model.graph_facts import GraphEdge, GraphNode

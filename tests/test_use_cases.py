@@ -1002,7 +1002,7 @@ def test_join_never_flips_an_unproven_node_to_consumer_compiled() -> None:
     the use-case placeholder registration must never outrank real
     reachability-provenance evidence and let a later call-graph traversal
     wrongly walk through an unproven body (Codex review, fresh evidence)."""
-    from abicheck.buildsource.graph_facts import CONF_REDUCED
+    from abicheck.model.graph_facts import CONF_REDUCED
     from abicheck.buildsource.source_graph import is_consumer_compiled_node
 
     library = SourceGraphSummary()
@@ -1041,7 +1041,7 @@ def test_join_never_flips_a_tied_unknown_confidence_node_either() -> None:
     ("declared_use_case" < "kythe") would let it win provenance anyway.
     join_use_case_graph's provenance/confidence restoration must close
     this regardless of the tiebreak outcome."""
-    from abicheck.buildsource.graph_facts import CONF_UNKNOWN
+    from abicheck.model.graph_facts import CONF_UNKNOWN
     from abicheck.buildsource.source_graph import is_consumer_compiled_node
 
     library = SourceGraphSummary()

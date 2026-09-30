@@ -23,8 +23,8 @@ vocabulary sets below (``CONSUMER_*``, ``USE_CASE_*``, ``TEMPLATE_*``,
 ``LINK_PROVENANCE_*``) union into ``source_graph.NODE_KINDS``/``EDGE_KINDS``;
 each family's own producer module re-exports its pair. ``graph_facts.py``
 re-exports ``CONF_HIGH``/``CONF_REDUCED``/``CONF_UNKNOWN`` from here for
-backward compatibility, and ``buildsource/graph_facts.py`` (the flat
-compat facade) re-exports everything transitively.
+backward compatibility. (The flat ``buildsource/graph_facts.py`` compat
+facade was deleted in ADR-063 Phase 10.)
 """
 
 from __future__ import annotations

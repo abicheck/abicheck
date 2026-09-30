@@ -68,7 +68,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..buildsource.graph_facts import (
+from ..model.graph_facts import (
     CONF_HIGH,
     CONF_UNKNOWN,
     USE_CASE_EDGE_KINDS as USE_CASE_EDGE_KINDS,
@@ -83,7 +83,7 @@ if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
 
 # USE_CASE_NODE_KINDS/USE_CASE_EDGE_KINDS are re-exported (imported above)
-# from buildsource.graph_facts, the leaf that owns the whole graph vocabulary
+# from model.graph_facts, the leaf that owns the whole graph vocabulary
 # — see the comment there for why they live in a leaf rather than beside this
 # producer.
 
@@ -545,7 +545,7 @@ def join_use_case_graph(
 
     Mirrors :func:`abicheck.impact.consumer_graph.join_consumer_graph`
     exactly, including the reasoning: a shallow re-registration of the
-    library graph's own :class:`~abicheck.buildsource.graph_facts.GraphNode`
+    library graph's own :class:`~abicheck.model.graph_facts.GraphNode`
     objects would work today (nothing here mutates a node's `attrs`
     directly), but ``SourceGraphSummary.add_node`` merges into the *stored*
     object in place (ADR-046 D2) — the library graph is read off an
@@ -614,7 +614,7 @@ def join_use_case_graph(
     fixed, since both recompute ``provenance``/``confidence`` fresh from the
     unchanged ``facts`` list. Closing that residual gap for real needs a
     change to the shared merge precedence itself (a way to mark a
-    :class:`~abicheck.buildsource.graph_facts.GraphFact` as never eligible
+    :class:`~abicheck.model.graph_facts.GraphFact` as never eligible
     to win the "top" pick in ``graph_facts._precedence_key``/
     ``ensure_facts_and_resolve``) — every graph producer in the codebase
     shares that one precedence function, so this is a scoped design

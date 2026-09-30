@@ -50,7 +50,7 @@ from .buildsource.call_graph import (
     CALL_KIND_VIRTUAL,
     RESOLUTION_OVERAPPROX,
 )
-from .buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
+from .model.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .change_registry import unanimous_entity_for
 from .checker_types import Change
 from .impact.engine import assess_change

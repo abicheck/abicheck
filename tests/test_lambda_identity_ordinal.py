@@ -44,7 +44,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.buildsource.graph_facts import GraphEdge, GraphNode
+from abicheck.model.graph_facts import GraphEdge, GraphNode
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.checker import compare

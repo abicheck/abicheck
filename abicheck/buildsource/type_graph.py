@@ -67,7 +67,7 @@ from typing import TYPE_CHECKING, Any
 from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 from ..model.mangled_name import strip_macho_itanium_decoration
 from ..model.source_graph import function_decl_identity
-from .graph_facts import register_fact
+from ..model.graph_facts import register_fact
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary

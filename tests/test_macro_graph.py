@@ -27,7 +27,7 @@ import shutil
 
 import pytest
 
-from abicheck.buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, GraphNode
+from abicheck.model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphNode
 from abicheck.buildsource.macro_graph import (
     ConditionalRegion,
     DeclRange,

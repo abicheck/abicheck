@@ -24,12 +24,7 @@ guard."""
 
 from __future__ import annotations
 
-from abicheck.buildsource.graph_facts import (
-    CONF_HIGH,
-    CONF_REDUCED,
-    GraphEdge,
-    GraphNode,
-)
+from abicheck.model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 from abicheck.buildsource.inline_graph_fold import fold_virtual_dispatch_graph
 from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.buildsource.virtual_dispatch_graph import (

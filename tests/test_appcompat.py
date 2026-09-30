@@ -3017,7 +3017,7 @@ class TestMergeConsumerImpactPaths:
         affected_public_roots[0] would mislabel a differently-rooted
         alternative as though it started at the primary's own root."""
         from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
-        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.model.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         primary_edge = GraphEdge(src="entry_A", dst="foo", kind="DECL_CALLS_DECL")
@@ -3075,7 +3075,7 @@ class TestMergeConsumerImpactPaths:
         conflation _merge_consumer_impact_paths must not make, since
         distinct nodes commonly share a label for C++ overloads)."""
         from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
-        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.model.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         edge_a = GraphEdge(src="a", dst="foo", kind="DECL_CALLS_DECL")
@@ -3105,7 +3105,7 @@ class TestMergeConsumerImpactPaths:
         JSON/SARIF as though it started at the primary's own entry, when
         it actually starts at (and explains) an entirely different one."""
         from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
-        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.model.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         edge_a = GraphEdge(src="a", dst="foo", kind="DECL_CALLS_DECL")
@@ -3140,7 +3140,7 @@ class TestMergeConsumerImpactPaths:
         and would serialize it as though it shared the primary's own
         start."""
         from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
-        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.model.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         primary_edge = GraphEdge(src="entry_A", dst="foo", kind="DECL_CALLS_DECL")
@@ -3171,7 +3171,7 @@ class TestMergeConsumerImpactPaths:
         non-primary match must NOT be folded in as a same-rooted
         alternative just because the labels collide."""
         from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
-        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.model.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         primary_edge = GraphEdge(src="entry_A", dst="foo", kind="DECL_CALLS_DECL")
@@ -3204,7 +3204,7 @@ class TestMergeConsumerImpactPaths:
         entry -- and that third-rooted path must not be smuggled in as
         though it shared the primary's root."""
         from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
-        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.model.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         primary_edge = GraphEdge(src="entry_A", dst="foo", kind="DECL_CALLS_DECL")
@@ -3249,7 +3249,7 @@ class TestMergeConsumerImpactPaths:
         from entry A' followed by a chain that actually starts at and
         explains B."""
         from abicheck.appcompat_consumer_impact import _merge_consumer_impact_paths
-        from abicheck.buildsource.graph_facts import GraphEdge
+        from abicheck.model.graph_facts import GraphEdge
         from abicheck.impact.consumer_graph import ConsumerImpactPath
 
         direct_first = ConsumerImpactPath(

@@ -62,7 +62,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from .graph_facts import (
+from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
     GraphEdge,

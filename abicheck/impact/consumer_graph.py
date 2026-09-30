@@ -48,7 +48,7 @@ import copy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
-from ..buildsource.graph_facts import (
+from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
     CONSUMER_EDGE_KINDS as CONSUMER_EDGE_KINDS,
@@ -90,7 +90,7 @@ class ConsumerRequirements(Protocol):
 
 
 # CONSUMER_NODE_KINDS/CONSUMER_EDGE_KINDS are re-exported (imported above)
-# from buildsource.graph_facts, the leaf that owns the whole graph vocabulary
+# from model.graph_facts, the leaf that owns the whole graph vocabulary
 # and that source_graph.NODE_KINDS/EDGE_KINDS union them in from — see the
 # comment there for why they live in a leaf rather than beside the producer.
 

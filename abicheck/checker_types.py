@@ -253,7 +253,7 @@ class Change:
     impact_discarded_path_count: int = 0
     # ADR-052's "stable occurrence_id" follow-up (G29 Phase 3), now buildable
     # on top of ADR-046 D1's occurrence_id half: a hash over the primary
-    # proof path's edges' own GraphEdge.occurrences (buildsource.graph_facts.
+    # proof path's edges' own GraphEdge.occurrences (model.graph_facts.
     # edge_occurrence_id), independent of description text — distinct from
     # finding_id (which deliberately still includes description, see that
     # function's docstring) and from root_cause_id (which needs full-result

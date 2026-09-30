@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Callback/function-pointer graph augmentation (G29 Phase 5 item 4, G29.6's
-fourth open graph family: :data:`~abicheck.buildsource.graph_facts.
+fourth open graph family: :data:`~abicheck.model.graph_facts.
 CALLBACK_EDGE_KINDS`). Closes the "plugin/event-loop/C-API callback" blind
 spot the review calls out: a public registration function that stashes a
 private handler's address into a slot which is later invoked indirectly, so
@@ -238,7 +238,7 @@ it directly as an edge is never rejected — the same "registered vocabulary,
 satisfied a different way" pattern item 3 used for ``DECL_OVERRIDES_DECL``,
 just for the opposite reason: unmet, not redundant), but the *real* data is
 populated by this module as a ``function_pointer_signature`` **node-level**
-fact (via :func:`~abicheck.buildsource.graph_facts.register_fact`) on the
+fact (via :func:`~abicheck.model.graph_facts.register_fact`) on the
 callback slot's own ``source_decl`` node, stamped alongside a
 ``DECL_REGISTERS_CALLBACK``/``DECL_TAKES_ADDRESS_OF`` join in
 :func:`augment_graph_with_callback_registrations` — the raw
@@ -319,7 +319,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from . import call_graph
-from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode, register_fact
+from ..model.graph_facts import (
+    CONF_HIGH,
+    CONF_REDUCED,
+    GraphEdge,
+    GraphNode,
+    register_fact,
+)
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
