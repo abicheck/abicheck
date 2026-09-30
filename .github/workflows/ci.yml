@@ -194,6 +194,214 @@ jobs:
         run: python scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build
 
   unit-tests:
+    # The canonical Linux/3.13 coverage lane, split into three concurrent
+    # shards (`pytest --shard=K/3`, tests/pytest_shards.py: whole test files,
+    # balanced by test count). As one job it ran ~34 minutes on a 4-core
+    # runner and was the critical path of every CI run; the selection and
+    # the 95% floor are unchanged -- each shard only *collects* coverage
+    # data, and `unit-tests-coverage` below combines the three and enforces
+    # the floor once, over the whole.
+    #
+    # `not repo_scan`: tests that statically scan the whole repository tree
+    # (import/AST/text lint-style gates) run in the `repo-scan-tests` job
+    # instead -- once, uninstrumented. Their result depends only on the
+    # committed tree, not on the OS or on coverage, and they were the top of
+    # the slowest-tests list on every leg (120s+ each).
+    name: unit-tests (ubuntu-latest, ${{ matrix.python-version }}, shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      # Requests the sys.monitoring coverage backend (far lower
+      # instrumentation overhead than the default C-trace core).
+      #
+      # It is INERT today, and the comment here used to claim otherwise
+      # ("the same line+branch data"): `[tool.coverage.run] branch = true`
+      # in pyproject.toml applies to every lane, and sys.monitoring cannot
+      # measure branches before Python 3.14, so coverage.py warns
+      # ("Can't use core=sysmon: sys.monitoring can't measure branches in
+      # this version, using default core") and falls back to CTracer --
+      # measured on the canonical 3.13 lane's own interpreter, and already
+      # observed by this file's own slow-test carve-out comment below. The
+      # request is left in place rather than deleted because it becomes
+      # live, unchanged, the moment the coverage-collecting lane moves to
+      # 3.14; what was wrong was the claim, not the setting.
+      #
+      # tests/test_coverage_core_effectiveness.py asserts the two stay in
+      # agreement: it probes what coverage.py actually selects and fails if
+      # this is requested under a configuration where it silently falls
+      # back without the repo saying so.
+      #
+      # That move was measured and is BLOCKED -- do not re-attempt it as a
+      # speedup without re-measuring the floor first. On 3.14.0rc2 with
+      # coverage 7.16.0, `COVERAGE_CORE=sysmon` does engage under
+      # `branch = true` (`tracer_name()` reports `SysMonitor`, no fallback
+      # warning) and removes essentially all instrumentation overhead: on a
+      # 2,173-test subset, uninstrumented 21.9s / sysmon 19.9s / CTracer
+      # 35.1s, and on the full canonical selection at `-n 4`, 12m15s against
+      # 17m30s on 3.13 -- a ~30% reduction. But the same two full runs, same
+      # selection, same machine, near-identical test counts (48,708 vs
+      # 48,710 passed, with `repo_facts.json`'s `canonical_python` flipped so
+      # the canonical-only cases actually ran), report 93.73% on 3.14 against
+      # 96.30% on 3.13: 1,339 fewer branches covered, below this lane's 95%
+      # floor. The gap is interpreter-specific, not a backend artifact -- on
+      # one interpreter the two cores agree to four decimal places on the
+      # total and differ by a single branch arc in each direction. Lowering
+      # the floor to buy the speedup is not an option, so the lane stays on
+      # 3.13 until that 2.57 points is understood and closed, which is its
+      # own investigation.
+      COVERAGE_CORE: sysmon
+    strategy:
+      fail-fast: false
+      matrix:
+        # Full suite on the canonical interpreter only. Every other supported
+        # Python (3.11, 3.12, 3.14, and the in-development 3.15) is covered by
+        # python-compat.yml's wheel-install + import + smoke-subset lane.
+        python-version: ['3.13']
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      - name: Keep this job's temporary files off the shared /tmp
+        # Evidence, from one run (34778392930, `unit-tests (ubuntu-latest,
+        # 3.14)`): three unrelated consumers each lost a file under `/tmp`
+        # while still using it.
+        #   * an xdist worker's whole basetemp -- `.../popen-gw0: MISSING`,
+        #     reported by the harness guard added for exactly this;
+        #   * `action/run.sh`'s own `mktemp -d` scratch directory --
+        #     `cd: /tmp/tmp.r4jnmBWtyh: No such file or directory`;
+        #   * gcc's own intermediate object, mid-link --
+        #     `ld: cannot find /tmp/ccQIceDH.o: No such file or directory`.
+        # No test touches the second or third, so this is not test-owned
+        # state being mishandled: something prunes `/tmp` on these runners
+        # while the job is running. That had been surfacing as a handful of
+        # unattributable `FileNotFoundError`s per lane, a different set each
+        # time, none reproducible locally.
+        #
+        # `$RUNNER_TEMP` is job-private and not under `/tmp`, so pointing
+        # `TMPDIR` at it moves all three at once: `tempfile.gettempdir()`
+        # (hence pytest's own basetemp), `mktemp`, and the compilers. One
+        # variable rather than a per-consumer fix, because the consumers
+        # have nothing in common except the directory they were using.
+        #
+        # Written to `$GITHUB_ENV` from a step rather than set in this job's
+        # own `env:` block: the `runner` context is NOT available at
+        # `jobs.<id>.env`, so `${{ runner.temp }}` there is a workflow
+        # *validation* error -- GitHub rejects the whole file before any
+        # matrix cell starts, taking every job in it offline. Observed, not
+        # theorised: run 34779552374 completed "failure" with zero jobs one
+        # second after creation, and the run is titled by path rather than
+        # by the workflow's `name:`, because the file never parsed. Inside a
+        # step `$RUNNER_TEMP` is an ordinary environment variable and needs
+        # no context at all. Found in review by Codex on PR #1294.
+        #
+        # `shell: bash` so the one spelling works on the Windows lane too;
+        # `TMPDIR` is what Python's `tempfile` and bash's `mktemp` both
+        # read, on all three platforms.
+        shell: bash
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run tests with coverage (Linux 3.13 — canonical lane, one shard)
+        # Collects coverage data only (`--cov-report=`, no floor): a single
+        # shard's percentage means nothing. The data file is renamed per
+        # shard so `coverage combine` can merge them in the fan-in job.
+        # --durations=25 surfaces the slowest tests in the CI log every run so
+        # timing regressions stay visible (test-time hygiene).
+        env:
+          ABICHECK_DURATIONS_JSON: test-durations-shard${{ matrix.shard }}.json
+        run: |
+          pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow and not repo_scan" --shard=${{ matrix.shard }}/3 -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}-shard${{ matrix.shard }}.xml --cov=abicheck --cov-report=
+      - name: Keep this shard's coverage data for the fan-in job
+        if: always()
+        run: |
+          if [ -f .coverage ]; then mv .coverage ".coverage.shard${{ matrix.shard }}"; fi
+      - name: Upload coverage data
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: coverage-data-shard${{ matrix.shard }}
+          path: .coverage.shard${{ matrix.shard }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 3
+      - name: Test-time report (slowest tests → run summary)
+        # Reporting only — a hard per-test wall-time gate would be flaky given
+        # CI-runner variance; the uploaded artifact is the durable record.
+        if: always()
+        continue-on-error: true
+        run: python scripts/summarize_test_durations.py test-durations-shard${{ matrix.shard }}.json --top 25
+      - name: Upload test-durations artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: test-durations-shard${{ matrix.shard }}
+          path: test-durations-shard${{ matrix.shard }}.json
+          if-no-files-found: ignore
+      - name: Upload JUnit test results
+        # `if: always()` on purpose: the failing run is the one whose result
+        # file is worth reading. One artifact name per shard, since a shared
+        # name would have the legs overwrite each other.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: test-results-${{ runner.os }}-py${{ matrix.python-version }}-shard${{ matrix.shard }}
+          path: test-results-*.xml
+          if-no-files-found: ignore
+
+  unit-tests-coverage:
+    # Fan-in for the sharded canonical lane: combines the shards' coverage
+    # data, enforces the 95% floor over the whole selection (the same floor
+    # verify.py's `unit-pr` step enforces in one process), and uploads the
+    # combined report to Codecov. Runs even when a shard failed, so a test
+    # failure and a coverage shortfall are both reported; a missing shard
+    # fails the explicit count check rather than passing on partial data.
+    name: unit-tests coverage floor (combined shards)
+    needs: [unit-tests]
+    if: ${{ !cancelled() && needs.unit-tests.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.13'
+      - name: Install coverage
+        run: python -m pip install coverage
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+        with:
+          pattern: coverage-data-shard*
+          merge-multiple: true
+      - name: Combine shard data and enforce the 95% floor
+        run: |
+          test "$(ls .coverage.shard* | wc -l)" -eq 3
+          coverage combine .coverage.shard*
+          coverage report --skip-covered --fail-under=95
+          coverage xml
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7
+        with:
+          use_oidc: true
+          files: coverage.xml
+          flags: unit
+          fail_ci_if_error: false
+
+  unit-tests-other-os:
+    # The full unit suite on macOS and Windows, every PR, no coverage (they
+    # skip the Linux-only ELF/DWARF tests, so their figure is structurally
+    # below the floor and has no consumer). `repo_scan` tests are excluded
+    # here too: they are OS-independent and `repo-scan-tests` owns them.
+    name: unit-tests (${{ matrix.os }}, 3.13)
     runs-on: ${{ matrix.os }}
     # 15 was too tight for the canonical (ubuntu, 3.13) leg: its own
     # coverage-collecting main-suite step alone measured 803s (13m23s) on
@@ -257,69 +465,16 @@ jobs:
     timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 45 }}
     permissions:
       contents: read
-      id-token: write
-    env:
-      # Requests the sys.monitoring coverage backend (far lower
-      # instrumentation overhead than the default C-trace core).
-      #
-      # It is INERT today, and the comment here used to claim otherwise
-      # ("the same line+branch data"): `[tool.coverage.run] branch = true`
-      # in pyproject.toml applies to every lane, and sys.monitoring cannot
-      # measure branches before Python 3.14, so coverage.py warns
-      # ("Can't use core=sysmon: sys.monitoring can't measure branches in
-      # this version, using default core") and falls back to CTracer --
-      # measured on the canonical 3.13 lane's own interpreter, and already
-      # observed by this file's own slow-test carve-out comment below. The
-      # request is left in place rather than deleted because it becomes
-      # live, unchanged, the moment the coverage-collecting lane moves to
-      # 3.14; what was wrong was the claim, not the setting.
-      #
-      # tests/test_coverage_core_effectiveness.py asserts the two stay in
-      # agreement: it probes what coverage.py actually selects and fails if
-      # this is requested under a configuration where it silently falls
-      # back without the repo saying so.
-      #
-      # That move was measured and is BLOCKED -- do not re-attempt it as a
-      # speedup without re-measuring the floor first. On 3.14.0rc2 with
-      # coverage 7.16.0, `COVERAGE_CORE=sysmon` does engage under
-      # `branch = true` (`tracer_name()` reports `SysMonitor`, no fallback
-      # warning) and removes essentially all instrumentation overhead: on a
-      # 2,173-test subset, uninstrumented 21.9s / sysmon 19.9s / CTracer
-      # 35.1s, and on the full canonical selection at `-n 4`, 12m15s against
-      # 17m30s on 3.13 -- a ~30% reduction. But the same two full runs, same
-      # selection, same machine, near-identical test counts (48,708 vs
-      # 48,710 passed, with `repo_facts.json`'s `canonical_python` flipped so
-      # the canonical-only cases actually ran), report 93.73% on 3.14 against
-      # 96.30% on 3.13: 1,339 fewer branches covered, below this lane's 95%
-      # floor. The gap is interpreter-specific, not a backend artifact -- on
-      # one interpreter the two cores agree to four decimal places on the
-      # total and differ by a single branch arc in each direction. Lowering
-      # the floor to buy the speedup is not an option, so the lane stays on
-      # 3.13 until that 2.57 points is understood and closed, which is its
-      # own investigation.
-      COVERAGE_CORE: sysmon
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        # Full suite on the canonical interpreter only. Every other supported
-        # Python (3.11, 3.12, 3.14, and the in-development 3.15) is covered by
-        # python-compat.yml's wheel-install + import + smoke-subset lane.
+        os: [windows-latest, macos-latest]
         python-version: ['3.13']
-        allow-prereleases: [false]
-        include:
-          - os: windows-latest
-            python-version: '3.13'
-            allow-prereleases: false
-          - os: macos-latest
-            python-version: '3.13'
-            allow-prereleases: false
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: ${{ matrix.python-version }}
-          allow-prereleases: ${{ matrix.allow-prereleases }}
           cache: 'pip'
       - name: Keep this job's temporary files off the shared /tmp
         # Evidence, from one run (34778392930, `unit-tests (ubuntu-latest,
@@ -363,73 +518,43 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Run tests with coverage (Linux 3.13 — canonical lane, enforces 95% floor)
-        # Coverage + the 95% floor + the codecov upload run on ONE canonical
-        # Linux/Python lane (3.13). Other Pythons run only python-compat.yml's
-        # smoke lane, so there is no second Linux full-suite leg. macOS/Windows
-        # skip the Linux-only ELF/DWARF tests, so they don't enforce the floor.
-        # --durations=25 surfaces the slowest tests in the CI log every run so
-        # timing regressions stay visible (test-time hygiene).
-        if: runner.os == 'Linux' && matrix.python-version == '3.13'
-        env:
-          # Capture per-test durations (tests/conftest.py hook) for the
-          # test-time report + artifact below.
-          ABICHECK_DURATIONS_JSON: test-durations.json
+      - name: Run tests (no coverage, platform tests skip)
         run: |
-          pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}.xml --cov=abicheck --cov-report=term:skip-covered --cov-report=xml --cov-fail-under=95
-      - name: Run tests (macOS — no coverage, platform tests skip)
-        # Ran under --cov with an xml report until this change, and nothing
-        # read it: the Codecov upload below is gated to Linux/3.13, no
-        # artifact collected it, and no gate consulted it (macOS skips the
-        # Linux-only ELF/DWARF tests, so its ~93% is structurally below the
-        # floor and deliberately unenforced). That is instrumentation cost
-        # -- coverage adds ~60% wall time, per the canonical lane's own note
-        # above -- bought with no consumer. Every test still runs; only the
-        # measurement nobody read is gone.
-        if: runner.os == 'macOS'
-        run: |
-          pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}.xml
-      - name: Run tests (Windows — parallel, no coverage)
-        if: runner.os == 'Windows'
-        run: |
-          pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}.xml
-      - name: Test-time report (slowest tests → run summary)
-        # Renders the captured durations into the GitHub run summary. Reporting
-        # only — a hard per-test wall-time gate would be flaky given CI-runner
-        # variance; the uploaded artifact is the durable record for trends.
-        # continue-on-error keeps it truly non-blocking: a hiccup rendering the
-        # report must never fail an otherwise-green test job.
-        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
-        continue-on-error: true
-        run: python scripts/summarize_test_durations.py test-durations.json --top 25
-      - name: Upload test-durations artifact
-        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
-        with:
-          name: test-durations
-          path: test-durations.json
-          if-no-files-found: ignore
+          pytest tests/ -q --tb=short -r fE -m "not integration and not libabigail and not abicc and not slow and not repo_scan" -n auto --dist worksteal --durations=25 --durations-min=1 --junitxml=test-results-${{ runner.os }}-py${{ matrix.python-version }}.xml
       - name: Upload JUnit test results
-        # `if: always()` on purpose: the failing run is the one whose result
-        # file is worth reading, and `-q` above deliberately keeps the console
-        # log short, so this XML is the durable per-test record. One artifact
-        # name per OS/Python leg, since a shared name would have the matrix
-        # legs overwrite each other.
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: test-results-${{ runner.os }}-py${{ matrix.python-version }}
           path: test-results-*.xml
           if-no-files-found: ignore
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7
-        with:
-          use_oidc: true
-          files: coverage.xml
-          flags: unit
-          fail_ci_if_error: false
 
+  repo-scan-tests:
+    # Tests marked `repo_scan`: structural gates that read or parse the whole
+    # repository tree. Their result depends on the committed tree only -- not
+    # on the OS and not on coverage -- so they run exactly once, here,
+    # uninstrumented, instead of once per unit-test leg under coverage
+    # tracing. Routed through verify.py's `repo-scan-tests` step so the local
+    # `pr` profile runs the identical selection (CLAUDE.md "M0-3").
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - name: Keep this job's temporary files off the shared /tmp
+        shell: bash
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run repository-scan tests
+        run: python scripts/verify.py --profile pr --only repo-scan-tests
 
   slow-tests:
     # Split out of `unit-tests`' canonical (ubuntu, 3.13) leg, where it ran as
@@ -882,12 +1007,13 @@ jobs:
         run: pytest tests/test_xml_parity.py::TestXmlSchemaValidation tests/test_xml_report.py -v --tb=short
 
   packaging:
-    runs-on: ${{ matrix.os }}
+    # Windows only. The Linux leg ran `python -m build && twine check` --
+    # exactly what `fair-metadata`'s `distribution-build` verify.py step
+    # already does on ubuntu in the same run -- so it cost a runner slot
+    # (and ~54 minutes of queueing on a congested day) for no new signal.
+    # What this job adds is the Windows sdist/wheel build path.
+    runs-on: windows-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
@@ -900,153 +1026,3 @@ jobs:
           pip install build twine
           python -m build
           twine check dist/*
-
-  # ── PR A / PR 0B (CLI cleanup phase two): neutral-aggregate required
-  # checks for path-filtered workflows ────────────────────────────────────
-  #
-  # docs-pr.yml and test-action.yml are both `paths:`-filtered at the
-  # workflow level -- they simply don't run on a PR that doesn't touch their
-  # paths, and GitHub's branch-protection/Ruleset required-status-checks
-  # mechanism has no native way to say "required only when these paths
-  # changed" (checked directly against the GitHub REST/GraphQL API surface;
-  # confirmed absent). Requiring `build-docs`/`test-action-summary` directly
-  # would therefore strand every PR that never touches `docs/**`/
-  # `action/**`, since GitHub blocks merge on a required check that never
-  # reports at all, the same as on a failing one.
-  #
-  # These two jobs are the fix: `ci.yml` itself carries no `paths:` filter
-  # (it always runs), so each job independently re-evaluates the SAME path
-  # filter the target workflow's own trigger uses. When the paths don't
-  # match, there is nothing to gate and the job succeeds immediately. When
-  # they do match, the target workflow is guaranteed to have been triggered
-  # by the same `pull_request` event (running in parallel with this one), so
-  # this job polls that workflow's own aggregate check for the same head SHA
-  # and mirrors its conclusion -- succeeding, failing, or timing out loudly
-  # if the target check never completes. Only meaningful for `pull_request`
-  # events: neither `docs-pr.yml` nor `test-action.yml`'s `build-docs`/
-  # `test-action-summary` check re-runs on a `push`-triggered merge commit
-  # (a different, untested SHA), so waiting on `push` would only time out.
-  docs-pr-required:
-    name: docs-pr (required)
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
-      - name: Detect whether docs-pr.yml's own paths changed
-        id: filter
-        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4
-        with:
-          filters: |
-            docs:
-              - 'docs/**'
-              - 'abicheck/schemas/**'
-              - 'examples/**'
-              - 'catalog/**'
-              - 'mkdocs.yml'
-              - 'scripts/gen_examples_docs.py'
-              - 'scripts/publish_schemas.py'
-              - '.github/workflows/pages.yml'
-              - '.github/workflows/docs-pr.yml'
-      - name: Wait for docs-pr.yml's build-docs check and mirror its outcome
-        if: steps.filter.outputs.docs == 'true'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
-        with:
-          script: |
-            const sha = context.payload.pull_request.head.sha;
-            const checkName = 'build-docs';
-            const timeoutMs = 25 * 60 * 1000;
-            const pollMs = 15 * 1000;
-            const start = Date.now();
-            while (Date.now() - start < timeoutMs) {
-              const { data } = await github.rest.checks.listForRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: sha,
-                check_name: checkName,
-                per_page: 100,
-              });
-              const run = data.check_runs.find(r => r.name === checkName);
-              if (run && run.status === 'completed') {
-                core.info(`${checkName} completed with conclusion: ${run.conclusion}`);
-                if (!['success', 'neutral'].includes(run.conclusion)) {
-                  core.setFailed(`${checkName} did not succeed (conclusion: ${run.conclusion})`);
-                }
-                return;
-              }
-              core.info(run
-                ? `${checkName} status: ${run.status} -- waiting`
-                : `${checkName} not reported yet -- waiting`);
-              await new Promise(r => setTimeout(r, pollMs));
-            }
-            core.setFailed(`Timed out waiting for ${checkName} to complete`);
-      - name: Nothing to gate
-        if: steps.filter.outputs.docs != 'true'
-        run: echo "docs-pr.yml's own paths didn't change -- nothing to gate."
-
-  test-action-required:
-    name: test-action (required)
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    permissions:
-      contents: read
-      checks: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
-      - name: Detect whether test-action.yml's own paths changed
-        id: filter
-        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706  # v4
-        with:
-          filters: |
-            action:
-              - 'action.yml'
-              - 'action/**'
-              - 'actions/check-target/**'
-              - 'actions/resolve-baseline/**'
-              - 'abicheck/**'
-              - 'pyproject.toml'
-              - 'pixi.lock'
-              - '.github/workflows/test-action.yml'
-              - '.github/workflows/check-single.yml'
-              - 'tests/fixtures/action/**'
-      - name: Wait for test-action.yml's summary check and mirror its outcome
-        if: steps.filter.outputs.action == 'true'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
-        with:
-          script: |
-            const sha = context.payload.pull_request.head.sha;
-            const checkName = 'test-action summary';
-            const timeoutMs = 35 * 60 * 1000;
-            const pollMs = 15 * 1000;
-            const start = Date.now();
-            while (Date.now() - start < timeoutMs) {
-              const { data } = await github.rest.checks.listForRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: sha,
-                check_name: checkName,
-                per_page: 100,
-              });
-              const run = data.check_runs.find(r => r.name === checkName);
-              if (run && run.status === 'completed') {
-                core.info(`${checkName} completed with conclusion: ${run.conclusion}`);
-                if (!['success', 'neutral'].includes(run.conclusion)) {
-                  core.setFailed(`${checkName} did not succeed (conclusion: ${run.conclusion})`);
-                }
-                return;
-              }
-              core.info(run
-                ? `${checkName} status: ${run.status} -- waiting`
-                : `${checkName} not reported yet -- waiting`);
-              await new Promise(r => setTimeout(r, pollMs));
-            }
-            core.setFailed(`Timed out waiting for ${checkName} to complete`);
-      - name: Nothing to gate
-        if: steps.filter.outputs.action != 'true'
-        run: echo "test-action.yml's own paths didn't change -- nothing to gate."

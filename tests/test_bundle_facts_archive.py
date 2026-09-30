@@ -179,6 +179,8 @@ class TestBundleFactsArchiveFormat:
         assert result.compression == SnapshotCompression.NONE
         assert detect_snapshot_compression(out) == result.compression
 
+    # Production-scale round trip (~58s on CI), like its snapshot_compression siblings.
+    @pytest.mark.slow
     def test_save_load_round_trip_at_production_scale(self, tmp_path: Path) -> None:
         """The postmortem-shaped counterpart to
         ``test_snapshot_compression.py::test_zstd_round_trip_at_production_scale_and_level``

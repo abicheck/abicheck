@@ -439,10 +439,33 @@ def test_ci_canonical_unit_lane_matches_verify_pr_profile() -> None:
         f"as verify.py's unit-pr step ({marker_expr!r})"
     )
     cov_fail_under = next(a for a in unit_pr.cmd if a.startswith("--cov-fail-under="))
-    assert cov_fail_under in ci, (
-        f"ci.yml canonical unit lane must use the same coverage floor as "
+    floor = cov_fail_under.split("=", 1)[1]
+    # CI shards the lane and enforces the floor once, over the combined
+    # shard data, in `unit-tests-coverage` -- same number, `coverage report`
+    # spelling.
+    assert f"coverage report --skip-covered --fail-under={floor}" in ci, (
+        f"ci.yml's combined-coverage job must use the same coverage floor as "
         f"verify.py's unit-pr step ({cov_fail_under!r})"
     )
+
+
+def test_ci_shards_cover_the_whole_canonical_selection() -> None:
+    """Every shard index 1..N is a matrix leg, each leg passes `--shard=K/N`
+    with the same N, and the fan-in job checks it received N data files --
+    a missing leg must not quietly shrink the measured selection."""
+    yaml = pytest.importorskip("yaml")
+    workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+    job = workflow["jobs"]["unit-tests"]
+    shards = job["strategy"]["matrix"]["shard"]
+    total = len(shards)
+    assert sorted(shards) == list(range(1, total + 1))
+    run = " ".join(str(step.get("run", "")) for step in job["steps"])
+    assert f"--shard=${{{{ matrix.shard }}}}/{total}" in run
+    fan_in = " ".join(
+        str(step.get("run", ""))
+        for step in workflow["jobs"]["unit-tests-coverage"]["steps"]
+    )
+    assert f"-eq {total}" in fan_in
 
 
 def test_ci_fair_metadata_job_calls_verify_py() -> None:
@@ -727,7 +750,7 @@ class TestUnitTestsPerPlatformTimeout:
         data = yaml.safe_load(
             (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         )
-        return dict(data["jobs"]["unit-tests"])
+        return dict(data["jobs"]["unit-tests-other-os"])
 
     @classmethod
     def _matrix_operating_systems(cls) -> set[str]:
@@ -835,7 +858,7 @@ class TestUnitTestsPerPlatformTimeout:
 #: `unit-tests` until it was split into its own concurrently-running job; the
 #: guards below are written over both so the split did not quietly drop the
 #: slow lane's invocations out of their coverage.
-_PYTEST_JOBS = ("unit-tests", "slow-tests")
+_PYTEST_JOBS = ("unit-tests", "unit-tests-other-os", "slow-tests")
 
 
 class TestUnitTestJobLogVolume:
@@ -924,6 +947,10 @@ class TestUnitTestJobLogVolume:
                     f"JUnit XML path must vary per OS/Python leg, else matrix "
                     f"legs collide in the upload artifact: {path}"
                 )
+                assert "matrix.shard" in path, (
+                    f"JUnit XML path must vary per shard, else the shards "
+                    f"collide in the upload artifact: {path}"
+                )
 
     def test_the_slow_job_writes_its_own_distinct_result_files(self) -> None:
         yaml = pytest.importorskip("yaml")
@@ -943,11 +970,13 @@ class TestUnitTestJobLogVolume:
             )
 
     def test_the_coverage_table_skips_fully_covered_modules(self) -> None:
+        # The shards only collect data; the table is printed once, by the
+        # fan-in job's `coverage report`.
         covered = [c for c in self._invocations() if "--cov=" in c]
         assert covered, "expected a coverage-collecting invocation"
         for command in covered:
-            assert "--cov-report=term:skip-covered" in command, command
             assert "--cov-report=term-missing" not in command, command
+        assert "coverage report --skip-covered" in _read(".github/workflows/ci.yml")
 
 
 class TestTheSlowLaneHasExactlyOneOwner:

@@ -368,6 +368,7 @@ def _reads_a_file(node: ast.AST) -> bool:
 class TestNoUnguardedOutOfBandReader:
     """What keeps the class closed against a *new* reader."""
 
+    @pytest.mark.repo_scan
     def test_every_file_reading_a_snapshot_document_unwraps_the_envelope(self) -> None:
         offenders: list[str] = []
         for root in _SCANNED_ROOTS:

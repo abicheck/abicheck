@@ -126,6 +126,7 @@ def test_probe_pool_size_follows_include_map_jobs(
     assert igw._shared_pool_size() == (default if expected is None else expected)
 
 
+@pytest.mark.repo_scan
 def test_no_module_builds_a_thread_pool_outside_the_budget() -> None:
     """Every abicheck thread pool goes through `BudgetedExecutor`.
 

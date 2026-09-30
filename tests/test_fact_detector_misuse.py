@@ -51,6 +51,7 @@ from scripts.fact_detector_misuse import (  # noqa: E402
 )
 
 
+@pytest.mark.repo_scan
 def test_no_violation_in_real_repo() -> None:
     """The real repository has zero `Fact[T]` equality-misuse sites under
     `abicheck/` — this check has no baseline, so any hit at all is an

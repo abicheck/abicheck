@@ -25,6 +25,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -37,6 +39,7 @@ from scripts.no_inline_gate_computation import (  # noqa: E402
 )
 
 
+@pytest.mark.repo_scan
 def test_no_unlisted_violation_in_real_repo() -> None:
     """The real repository has zero WARN-level hits today -- this pins that
     the check is clean against the actual tree, not just a synthetic

@@ -1,6 +1,6 @@
 # CI cost and assurance — closing the audit's remaining items
 
-**Status:** Proposed. Phases 0 and 6 landed in PR #1240; Phase 2's platform-safe half landed as a follow-up; Phases 1, 3, 4 and 5 not started.
+**Status:** Proposed. Phases 0 and 6 landed in PR #1240; Phase 2's platform-safe half landed as a follow-up; Phase 1 and Phase 7 landed 2026-09-30; Phases 3, 4 and 5 not started.
 
 Origin: a CI audit that profiled this repository's workflows and found one
 real product performance bug plus a family of *inert configuration* — settings
@@ -46,10 +46,16 @@ job that is missing, skipped, cancelled or failed must not produce a green
 aggregate. `test-action summary` already implements exactly that predicate and
 is the model to follow.
 
-**Blocked on a human decision.** This changes required-check *names*, so it
-needs a coordinated branch-protection update — either preserve the existing
-names through the migration or change the protection rule in the same window.
-Not a unilateral workflow edit.
+**Landed (2026-09-30) — by deletion.** The blocker recorded here ("changes
+required-check names, needs a branch-protection update") dissolved when the
+maintainer removed the `required_status_checks` rule altogether
+(`.github/AGENTS.md`, "Required-status-check configuration"): with nothing
+required, the two bridges gated nothing and only held a runner. Measured on
+run 36642140703 (2026-09-29): `test-action (required)` queued 52.6 minutes
+and then polled for 35.2. Both jobs are gone;
+`tests/test_required_checks_governance.py` rejects any job that polls another
+check in a sleep loop, and states the reusable-workflow design above as the
+route if merge-blocking is ever re-enabled.
 
 ## Phase 2 — one owner for `test_cross_platform_integration.py`
 
@@ -160,6 +166,52 @@ dominating, since the exponent would then tend to zero and pass while
 measuring nothing; that predicate cannot fire under today's in-process
 harness (~27ms of overhead), so it is exercised directly rather than left as
 an assertion nobody has seen hold.
+
+## Phase 7 — queueing, the critical path, and work done once per OS
+
+**Measured** (run 36642140703, 2026-09-29, a PR push while four other PRs
+were also running CI). The run took 101 minutes. Every one of its 21 CI jobs
+waited **24–54 minutes in the queue** before starting — including jobs that
+then ran for 12 seconds — and trivial workflows (changelog fragment check,
+dependency review) took ~30 minutes of wall clock for seconds of work. A
+single PR push starts roughly 60 jobs across 14 workflows, so a handful of
+concurrent PRs saturate the account's concurrent-runner limit, and macOS's
+much smaller pool worst of all. Of the running time, the canonical
+coverage-collecting unit lane was the critical path: **33m29s** for 58,803
+tests on a 4-core runner (it measured 13m23s on 2026-08-29).
+
+That lane's slowest-25 list was dominated not by behaviour tests but by
+whole-tree structural scans (`fact_field_readers` 129s, `fact_detector_misuse`
+124s, `subprocess_bash_is_resolved` 81s + 46s + 28s, the encoding scan 73s,
+...). Each ran three times per push — Linux under coverage tracing, macOS,
+Windows — although its result depends only on the committed tree.
+
+**Landed:**
+
+| Change | Effect |
+|---|---|
+| `repo_scan` marker on the 21 whole-tree scan tests; excluded from every unit leg; run once, uninstrumented, by the new `repo-scan-tests` job (`verify.py --only repo-scan-tests`) | ~2 minutes once instead of ~15 CPU-minutes per leg ×3; same tests, same PR |
+| Canonical lane split into three `pytest --shard=K/3` jobs (`tests/pytest_shards.py`: whole files, LPT by test count, order-independent — property-tested) plus a `unit-tests-coverage` fan-in that combines the data and enforces the 95% floor once | Same selection, same floor, critical path divided; a missing shard fails the fan-in's explicit count check |
+| Four scale tests (≥35s each on CI) moved to the `slow` lane, which runs on every PR | Off the critical path; still run per PR |
+| `packaging (ubuntu-latest)` removed | It ran `build` + `twine check`, which `fair-metadata`'s `distribution-build` step already runs on Linux in the same workflow; the Windows leg stays |
+| The two polling bridges deleted (Phase 1) | Two fewer runners held per PR, up to 60 runner-minutes |
+
+**Considered and not landed here**, each for a stated reason:
+
+- *Running the macOS/Windows unit legs, the 3.15 prerelease `python-compat`
+  leg, the `agentready` PR job, or examples-validation's clang half only on
+  `main`/nightly/label.* These are the largest remaining queue consumers per
+  PR, but each moves a detection point from the PR to after merge. Per this
+  document's own rule ("reducing assurance is not an optimization"), that is
+  a maintainer decision, not a CI-efficiency edit — left open for one.
+- *`needs: lint-and-types` in front of the heavy matrices.* It saves runners
+  only on pushes that fail lint, and on a saturated pool it adds a second
+  queue wait to every push that passes — the common case. Not landed.
+- *Letting a non-`performance` label skip `performance.yml`.* Adding any label
+  re-runs that lane; the fix needs `github.event.label`, which
+  `tests/test_classify_perf_paths.py` deliberately bans from the workflow for
+  a separate, real bug. Needs its own design, not a local exception.
+- *Larger or self-hosted runners.* An account-level decision.
 
 ## Explicitly not pursued
 

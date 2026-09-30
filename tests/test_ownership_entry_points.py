@@ -133,6 +133,7 @@ def _producer_calls() -> set[tuple[str, str, str]]:
     return found
 
 
+@pytest.mark.repo_scan
 def test_every_snapshot_producer_call_is_classified() -> None:
     calls = _producer_calls()
     assert calls, "vacuity guard: the scan found no producer call at all"

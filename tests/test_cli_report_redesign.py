@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -165,6 +166,8 @@ def test_one_member_release_carries_scalar_group_and_count_semantics(tmp_path) -
     assert member["result_counts"] == scalar_data["result_counts"]
 
 
+# 10,000-finding scale case (~35s on CI).
+@pytest.mark.slow
 def test_terminal_is_bounded_for_ten_thousand_findings_but_json_is_complete() -> None:
     from abicheck.checker_policy import ChangeKind
     from abicheck.checker_types import Change, DiffResult

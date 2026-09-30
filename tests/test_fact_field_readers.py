@@ -90,6 +90,7 @@ def _repo_reader_scan() -> list[tuple[str, str, int, str, str]]:
     return scan
 
 
+@pytest.mark.repo_scan
 def test_no_unlisted_violation_in_real_repo(
     _repo_reader_scan: list[tuple[str, str, int, str, str]],
 ) -> None:
@@ -108,6 +109,7 @@ def test_no_unlisted_violation_in_real_repo(
     assert errors == [], "Unlisted Fact-bridged-field readers:\n" + "\n".join(errors)
 
 
+@pytest.mark.repo_scan
 def test_baseline_entries_are_real_sites(
     _repo_reader_scan: list[tuple[str, str, int, str, str]],
 ) -> None:
@@ -124,6 +126,7 @@ def test_baseline_entries_are_real_sites(
     assert stale == set(), f"Stale baseline entries (no longer a real read): {stale}"
 
 
+@pytest.mark.repo_scan
 def test_exempt_functions_are_real_sites(
     _repo_reader_scan: list[tuple[str, str, int, str, str]],
 ) -> None:

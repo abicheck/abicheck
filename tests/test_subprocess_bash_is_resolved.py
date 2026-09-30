@@ -371,6 +371,7 @@ def _private_clone_lines(source: str) -> list[int]:
 class TestNoModuleSpellsBashItself:
     """The structural half: one resolver, imported everywhere."""
 
+    @pytest.mark.repo_scan
     def test_no_test_module_passes_a_bare_bash_program(self) -> None:
         offenders = {}
         for path in _test_modules():
@@ -384,6 +385,7 @@ class TestNoModuleSpellsBashItself:
             f"{offenders}"
         )
 
+    @pytest.mark.repo_scan
     def test_no_test_module_clones_the_resolver(self) -> None:
         offenders = {}
         for path in _test_modules():
@@ -518,6 +520,7 @@ class TestEveryResolvedCallSiteGuardsFirst:
     remove it.
     """
 
+    @pytest.mark.repo_scan
     def test_every_function_that_resolves_also_guards(self) -> None:
         offenders = {}
         for path in _test_modules():
