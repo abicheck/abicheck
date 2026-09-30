@@ -1766,7 +1766,33 @@ PYEOF
 # (json/markdown/junit) -- this helper is no longer needed to skip the
 # PR-comment JSON export injection, but stays in use for the release-only
 # flags below (--dso-only, ...).
+# Memoised per run: the same `old-library`/`new-library` operands are asked
+# up to six times per run, and each uncached answer starts a Python process
+# that imports abicheck (~125ms apiece). The answer depends only on the
+# operand's path and content, both fixed for the life of this script. Keyed
+# on the anchored path, so a later `cd` cannot serve another directory's
+# answer; plain newline-separated records rather than an associative array,
+# which macOS's stock bash 3.2 lacks. A path containing a newline is simply
+# never cached.
+_RELEASE_OPERAND_MEMO=""
 _is_release_style_operand() {
+  local key="$1" line rc=0
+  _is_path_already_qualified "$key" || key="$PWD/$key"
+  if [[ "$key" != *$'\n'* && -n "$_RELEASE_OPERAND_MEMO" ]]; then
+    while IFS= read -r line; do
+      if [[ "${line#?|}" == "$key" ]]; then
+        return "${line%%|*}"
+      fi
+    done <<<"$_RELEASE_OPERAND_MEMO"
+  fi
+  _is_release_style_operand_uncached "$1" || rc=1
+  if [[ "$key" != *$'\n'* ]]; then
+    _RELEASE_OPERAND_MEMO+="${rc}|${key}"$'\n'
+  fi
+  return "$rc"
+}
+
+_is_release_style_operand_uncached() {
   local path="$1"
   [[ -d "$path" ]] && return 0
   # Ask the INSTALLED abicheck first (ADR-070 D3's rule, the same one
