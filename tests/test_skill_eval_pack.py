@@ -36,7 +36,7 @@ import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
-PACK = REPO / "agent-evals" / "skills" / "skill-eval-pack.json"
+PACK = REPO / "skills-src" / "evaluation" / "agents" / "skills" / "skill-eval-pack.json"
 
 # Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
 if str(SCRIPTS) not in sys.path:
@@ -94,7 +94,9 @@ def test_every_scenario_is_in_the_pack(pack: dict[str, Any]) -> None:
     import yaml
 
     manifest = yaml.safe_load(
-        (REPO / "agent-evals" / "skills" / "scenarios.yaml").read_text(encoding="utf-8")
+        (
+            REPO / "skills-src" / "evaluation" / "agents" / "skills" / "scenarios.yaml"
+        ).read_text(encoding="utf-8")
     )
     assert set(pack["scenarios"]) == {s["id"] for s in manifest["scenarios"]}
 
@@ -142,7 +144,9 @@ def test_category_b_platform_restrictions_are_honored_not_widened(
     that correct refusal as a wrong-verdict failure.
     """
     manifest = yaml.safe_load(
-        (REPO / "agent-evals" / "skills" / "scenarios.yaml").read_text(encoding="utf-8")
+        (
+            REPO / "skills-src" / "evaluation" / "agents" / "skills" / "scenarios.yaml"
+        ).read_text(encoding="utf-8")
     )
     declared = {
         s["id"]: s["platforms"] for s in manifest["scenarios"] if "platforms" in s
@@ -185,7 +189,9 @@ def test_category_b_architecture_restrictions_are_honored_not_widened(
     architecture break instead of the intended shallow-evidence result.
     """
     manifest = yaml.safe_load(
-        (REPO / "agent-evals" / "skills" / "scenarios.yaml").read_text(encoding="utf-8")
+        (
+            REPO / "skills-src" / "evaluation" / "agents" / "skills" / "scenarios.yaml"
+        ).read_text(encoding="utf-8")
     )
     declared = {
         s["id"]: s["architectures"]
@@ -474,7 +480,7 @@ def test_every_hash_maps_to_a_skill(pack: dict[str, Any]) -> None:
     "path",
     [
         ".agents/skills/check-abi-compatibility/SKILL.md",
-        "agent-evals/skills/scenarios.yaml",
+        "skills-src/evaluation/agents/skills/scenarios.yaml",
         "catalog/ground_truth.json",
         "catalog/cases/case01_symbol_removal/old.h",
         "tests/agent_skills/trigger_corpus.yaml",
@@ -629,7 +635,7 @@ def test_an_observed_input_routing_to_no_hash_fails(
     bundle = _bundle(pack)
     bundle["observed_inputs"].append(
         {
-            "path": "agent-evals/skills/newly-invented-input.yaml",
+            "path": "skills-src/evaluation/agents/skills/newly-invented-input.yaml",
             "digest": "sha256:" + "e" * 64,
         }
     )
@@ -857,7 +863,10 @@ def test_an_observed_input_that_changed_since_the_run_fails(
     untouched while the manifest A actually read changed underneath it."""
     bundle = _bundle(pack)
     bundle["observed_inputs"].append(
-        {"path": "agent-evals/skills/scenarios.yaml", "digest": "sha256:" + "1" * 64}
+        {
+            "path": "skills-src/evaluation/agents/skills/scenarios.yaml",
+            "digest": "sha256:" + "1" * 64,
+        }
     )
     assert _check_bundle(monkeypatch, tmp_path, bundle) == 1
 

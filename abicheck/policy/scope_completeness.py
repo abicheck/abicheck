@@ -208,7 +208,7 @@ def incomplete_scope_diagnostic(
     else:
         what = "Comparison scope incompletely checked -- no member was compared."
     if record.no_comparison_completed:
-        what += " No comparison completed (ADR-065 D7), which is never a clean pass."
+        what += " No comparison completed, which is never a clean pass."
     cause = (
         "no comparison completed (never accepted under any scope.on_incomplete setting)"
         if record.no_comparison_completed
@@ -228,7 +228,7 @@ def incomplete_scope_diagnostic(
             f"Contributes {floor}, below the compatibility axis's own exit "
             f"{base_exit}, which stands"
         )
-    return f"{what} {effect} (ADR-065 completeness axis). {mitigation}"
+    return f"{what} {effect}. {mitigation}"
 
 
 #: How many member names one state's group spells out before "+N more".

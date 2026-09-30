@@ -25,7 +25,7 @@ it already computed — remains the layout-authoritative L2 backend today. See
 — a Clang ASTRecordLayout plugin".
 
 This module bridges that gap with a small, OPTIONAL, out-of-process
-companion (``tools/clang-layout-tool/``, built with LibTooling) that walks
+companion (``contrib/clang-layout-tool/``, built with LibTooling) that walks
 every complete, non-dependent ``CXXRecordDecl`` and serializes the REAL
 layout ``clang::ASTRecordLayout`` computes internally. It is deliberately
 never a hard dependency (ADR-001's "lightweight, pure-Python tool" stance):

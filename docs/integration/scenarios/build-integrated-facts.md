@@ -3,8 +3,7 @@
 Instead of replaying a compile database after the fact
 ([S7](source-replay.md)), your build can emit normalized source facts
 *while it compiles* — no second pass over the sources, and no compile
-database needed at check time. [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
-§8 names two producers for this:
+database needed at check time. There are two producers for this:
 
 - **S8 — the `abicheck-cc` compiler wrapper.** Set `CC`/`CXX` (or your build
   system's compiler-launcher equivalent) to `abicheck-cc`; it transparently

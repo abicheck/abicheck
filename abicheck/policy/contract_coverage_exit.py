@@ -199,7 +199,7 @@ def _coverage_message(
     return (
         "Contract coverage incomplete for the selected --contract domain: "
         + ", ".join(where)
-        + f". {effect} (ADR-049 contract-coverage axis). "
+        + f". {effect}. "
         + mitigation
     )
 

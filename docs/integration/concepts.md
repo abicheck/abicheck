@@ -12,9 +12,7 @@ generated: false
 
 # Integration Concepts
 
-This page is the glossary behind [Project Integration](index.md) and
-[ADR-047](../contribute/adr/047-github-actions-integration-model.md)'s
-domain model — the vocabulary every scenario, reusable workflow, and Action
+This page is the glossary behind [Project Integration](index.md)'s domain model — the vocabulary every scenario, reusable workflow, and Action
 in this section uses consistently. If you only remember one sentence: a
 project is checked as one or more **checks**, and a check is one application
 of policy to `target × profile × baseline channel × evidence requirement` —
@@ -35,8 +33,7 @@ toolchain, C++ ABI/standard library, debug/release, ISA, feature flags — the
 axis that determines whether two binaries are even comparable in the first
 place. A project with more than one profile (e.g. Linux/GCC release and
 Windows/MSVC release) needs a separate baseline per profile; comparing across
-profiles is never valid and `resolve-baseline` rejects it outright
-(`wrong_profile`, see [ADR-047 §6](../contribute/adr/047-github-actions-integration-model.md#6-baseline-lifecycle)).
+profiles is never valid and `resolve-baseline` rejects it outright (`wrong_profile`).
 Declared under `.abicheck.yml`'s `profiles:` block
 ([Project Targets Schema](../reference/project-targets-schema.md)); `contract:
 true` (the default) marks a profile as an ABI contract that gets a baseline
@@ -84,9 +81,7 @@ plugin (`abicheck/buildsource/`) — either build-wide or target-specific. See
 [Build Info & Sources](../learn/build-source-data.md) for the full model.
 Every evidence pack must declare which target(s) it projects onto
 (`evidence.projection: "declared"` in `build-output.json`) — a pack is never
-automatically assumed to belong to every DSO in a build, the S16 boundary
-[ADR-047 §9](../contribute/adr/047-github-actions-integration-model.md#9-source-evidence-safe-model-now-vs-full-model-later)
-documents.
+automatically assumed to belong to every DSO in a build, the S16 boundary.
 
 ## Baseline channel
 
@@ -147,9 +142,7 @@ something `project plan` does for you. See the
 
 The result of one check: verdict, severity/gate decision, and full identity
 (target, profile, candidate, baseline, config, commit, evidence depth). The
-existing `compare`/`scan` JSON report, extended with the identity fields
-[ADR-047 §7](../contribute/adr/047-github-actions-integration-model.md#7-report-envelope)
-requires (`check_id`, `compatibility_verdict`, `policy_gate_decision`,
+existing `compare`/`scan` JSON report, extended with the check identity fields (`check_id`, `compatibility_verdict`, `policy_gate_decision`,
 `check_evidence_coverage`, ...) — additive, so an existing consumer of the
 plain `verdict`/`severity` fields keeps working unchanged.
 
@@ -165,6 +158,4 @@ whole answer.
 
 - [Project Integration](index.md) — the scenario-first "which page do I need"
   index this glossary supports.
-- [ADR-047 §1](../contribute/adr/047-github-actions-integration-model.md#1-domain-model) —
-  the source domain-model table, including the rationale for why these seven
-  boundaries matter and are easy to conflate.
+

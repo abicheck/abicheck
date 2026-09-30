@@ -25,7 +25,7 @@ its declaring header is reorganized (`include/demo/detail_v1.h` →
 `include/demo/detail_v2.h`). Because the mangled name — and therefore the L5
 graph node's own id — changed, the raw graph diff would show an unrelated
 node removal plus node addition that happen to share the name
-`demo::detail::helper`. abicheck's graph reconciliation (ADR-048) recognizes
+`demo::detail::helper`. abicheck's graph reconciliation recognizes
 the two as the same declaration via the qualified-name alias tier, and —
 since the declaring file also changed while the qualified name did not —
 classifies the outcome as `declaration_moved`.
@@ -157,13 +157,13 @@ Because the identity-perturbing edit lands on a `private_header`-visibility
 declaration, a real binary comparison of this exact scenario has no
 BREAKING/API_BREAK finding to sit alongside them; reconciliation only
 explains/localizes, it never suppresses or replaces another finding
-(ADR-028 D3).
+.
 
 ## Minimum evidence
 
 `min_evidence: L5` — recognizing the two nodes as "the same declaration,
 relocated" instead of an unrelated remove+add pair requires the derived
-source graph's canonical-identity/alias matching (G31 Phase B, ADR-048):
+source graph's canonical-identity/alias matching (G31 Phase B):
 both nodes share the qualified name `demo::detail::helper`. No lower
 evidence tier carries graph node identity at all.
 
@@ -230,7 +230,7 @@ info; neither has an equivalent to abicheck's source-graph canonical-identity
 and reconciliation machinery, and neither would see anything here at all —
 `demo::detail::helper` is entirely internal and outside either tool's
 ABI-surface scope regardless. This finding and its reconciliation are unique
-to abicheck's L5 build-source evidence layer (ADR-048). Contrast with
+to abicheck's L5 build-source evidence layer. Contrast with
 `case194` (a pure
 rename, no signature change, resolved via the weaker structural-context
 tier) and

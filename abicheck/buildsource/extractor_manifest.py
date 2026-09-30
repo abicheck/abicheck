@@ -282,14 +282,14 @@ def _resolve_actions_and_capabilities(
 
     if CollectionAction.NETWORK in actions:
         raise ManifestError(
-            f"extractor manifest {p}: the 'network' action is always denied "
-            "(ADR-032 D5) and cannot be registered."
+            f"extractor manifest {p}: the 'network' action is always denied"
+            " and cannot be registered."
         )
     capabilities = _coerce_capabilities(raw.get("capabilities"), p)
     if capabilities.requires_network:
         raise ManifestError(
             f"extractor manifest {p}: 'requires_network' is not supported — network "
-            "access is always denied (ADR-032 D5). Use a non-networked extractor or "
+            "access is always denied. Use a non-networked extractor or "
             "pre-capture the data and feed it as a file input."
         )
     missing = capabilities.implied_actions() - actions

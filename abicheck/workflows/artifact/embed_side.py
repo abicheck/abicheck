@@ -124,7 +124,7 @@ def embed_side_build_source(
       L2-facing *public_headers*/*public_header_dirs* need to stay narrower
       than what L4 replay should classify against. ``scan`` needs exactly
       this split: its L2/crosscheck-origin provenance
-      (``cli_scan_baseline._public_provenance_set``) deliberately does not
+      (the retired ``cli_scan_baseline._public_provenance_set``) deliberately did not
       activate for a lone ``-H`` *file* with no accompanying directory (a
       single header cannot establish a public directory boundary — see that
       function's own docstring, and its pinned
@@ -192,7 +192,7 @@ def embed_side_build_source(
             # L4 source-ABI replay must invoke the compiler this input's own L2
             # header AST was pointed at (`gcc_path`/`gcc_prefix`), not
             # `embed_build_source`'s bare "clang" default -- the same fix
-            # `scan_engine` and the `dump` CLI already carry. Without it a
+            # the retired `scan_engine` and the `dump` CLI carry. Without it a
             # typed request naming a non-default toolchain (e.g. icpx) replayed
             # L4 through a plain "clang" that may not understand the real
             # build's flags, so an omitted `depth` silently returned a weaker

@@ -431,8 +431,8 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
         detail = [
             f"exit code: {doc.exit_code}",
             f"contract coverage contribution: {doc.coverage_exit_contribution}",
-            "note: a candidate-side hygiene finding never gates on its own "
-            "(ADR-028 D3 / ADR-035 D1); an audit's exit code is a max over "
+            "note: a candidate-side hygiene finding never gates on its own"
+            "; an audit's exit code is a max over "
             "orthogonal axes.",
         ]
         if contributing:

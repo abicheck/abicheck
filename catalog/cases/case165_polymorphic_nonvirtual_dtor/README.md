@@ -52,13 +52,13 @@ the newly introduced `Exporter` triggers the finding.
 `min_evidence: L1` — DWARF alone carries enough to reconstruct the vtable
 (via the mangled `_ZTV...` symbols and `DW_AT_vtable_elem_location`) and the
 absence of a virtual destructor slot; no public headers are required.
-ADR-027's anti-pattern analysis (this finding's own detector) is
-unconditional (ADR-068 D4) — it runs automatically on every `compare`
+abicheck's anti-pattern analysis (this finding's own detector) is
+unconditional — it runs automatically on every `compare`
 wherever idiom evidence exists, with no flag needed to enable it.
 
 ## Why abicheck catches it
 
-abicheck's ADR-027 single-snapshot anti-pattern analysis inspects each
+abicheck's single-snapshot anti-pattern analysis inspects each
 type's vtable shape from DWARF: a type with a vtable (virtual functions)
 but no destructor slot, used as a base class or returned by pointer from a
 public factory, is flagged as `polymorphic_type_non_virtual_dtor`. It is

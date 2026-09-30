@@ -140,8 +140,8 @@ class DumpResult:
     consumed it (see
     :func:`~abicheck.service_input_resolution._resolve_side_snapshot_impl`'s
     own docstring). These fields are therefore safe to use for *identity or
-    comparison* (exactly how ``scan_engine``'s own, pre-existing pair-aware
-    baseline-context-reuse decision already uses its equivalent locals — see
+    comparison* (exactly how the retired ``scan_engine``'s pair-aware
+    baseline-context-reuse decision used its equivalent locals — see
     ``docs/contribute/plans/cli-cleanup-phase-two.md``'s PR 3A section), but
     a caller intending to re-read a file under one of these paths (the
     post-processing-hook use case named above) cannot yet do so safely — that

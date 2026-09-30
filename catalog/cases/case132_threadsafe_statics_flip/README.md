@@ -72,8 +72,7 @@ option, and reports the flip when the two sides disagree.
 
 **Severity: RISK (not a proven break)**
 
-This is a build-mode signal, not an artifact-proven binary break (ADR-028
-D3) — `compute()` runs identically either way in this minimal case, since it
+This is a build-mode signal, not an artifact-proven binary break — `compute()` runs identically either way in this minimal case, since it
 has no function-local static to race on. The risk only materializes for a
 public inline that *does* hold one and gets compiled under mixed modes
 across translation units, which this trivial case doesn't reproduce as an

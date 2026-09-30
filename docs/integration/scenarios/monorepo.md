@@ -3,9 +3,7 @@
 Your repository holds several independently-versioned components (not a
 release bundle — see [S14](release-bundle.md) if they ship together with
 cross-dependencies), and a PR usually only touches one or two of them. You
-don't want every PR running every component's full check matrix.
-[ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
-§8's S25: the [run plan](../../reference/run-plan-schema.md) may be filtered
+don't want every PR running every component's full check matrix. Scenario S25: the [run plan](../../reference/run-plan-schema.md) may be filtered
 by what changed, but **required-target coverage stays fail-closed** —
 filtering must never silently drop a required check with no error.
 

@@ -167,7 +167,7 @@ def _run_dump_uncached(
     if dump_manifest is not None and binary_fmt != "elf":
         raise ValidationError(
             f"dump_manifest is not yet supported for {binary_fmt.upper()} "
-            "binaries (ADR-050 D3); use a single-header dump for this format."
+            "binaries; use a single-header dump for this format."
         )
     from . import dumper_cache
 

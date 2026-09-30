@@ -78,7 +78,7 @@ demonstration* below can build a matching app.
 
 ## Why abicheck catches it
 
-The bundle layer (ADR-023) builds a symbol→provider map across every
+The bundle layer builds a symbol→provider map across every
 library in a release from each `.dynsym`, then diffs that map between
 releases: a symbol whose provider library changed (rather than
 disappearing from the release entirely) is `bundle_provider_changed` —

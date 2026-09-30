@@ -677,7 +677,7 @@ def dispatch(
         )
     if not result.per_library and fmt != "json":
         click.echo(
-            "Warning: no library pair was compared -- no comparison completed (ADR-065 D7).",
+            "Warning: no library pair was compared -- no comparison completed.",
             err=True,
         )
 

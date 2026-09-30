@@ -461,7 +461,14 @@ rather than assumed already checked out), exact-version selection against
 an existing acquisition/publishing channel, and parity for the advisory/
 required distinction in the Action's own `check-target`/`app-consumer`
 kind (today a Python-API/CLI-only distinction). **S3** declared source/
-use-case enrichment with coverage-qualified reports. **S4** separately
+use-case enrichment with coverage-qualified reports — **per-finding
+use-case attribution landed (2026-09-29):** under `compare --use-cases`,
+every JSON `changes` entry carries `affected_use_cases` (report schema
+5.10), derived once from the report-level `use_case_impact.by_use_case` by
+joining on `finding_id` so the two are exact inverses; Markdown change rows
+and the review digest's review groups and impacted-symbol list render it. Still open for S3:
+SARIF/JUnit/HTML-table carriage, coverage-qualified use-case reports, and
+the planned `USE_CASE_IMPACT_CONFIRMED` overlay. **S4** separately
 designed, opt-in compile/link/runtime validation with its own execution
 design review — never implied by S1–S3, and not a reauthorization of
 ADR-060.
@@ -757,6 +764,74 @@ and hygiene lifecycle, and summarizes only material evidence limitations.
 Correlated export/vtable evidence retains every member finding and library/
 entity identity; full human and machine exports remain complete. The Action
 uses the same scalar/package default split.
+
+**2026-09-29 S2/S3 slices.** Landed:
+
+- *Versioning (B) in compare reports.* `semver.recommend_release_for_report`
+  is the one call every report projection makes; it passes the policy
+  file's stated `versioning:` block, so `release_recommendation.
+  policy_acceptance` is populated in JSON whenever one is stated (and stays
+  `null` otherwise), and Markdown (recommendation table row), the review
+  digest and HTML (a "Versioning policy" card) render the same acceptance.
+  Acceptance never moves the verdict, findings or exit code.
+- *Consumer (D) in HTML.* `compare --use-cases` is accepted with
+  `-o html=...` and renders the existing `use_case_impact` block as a
+  "Consumer impact" section (`report/render_html_review_sections.py`).
+- *History visualization (S3).* `project history -o html` renders the
+  history document as a release-step verdict table, an SVG lifecycle
+  timeline (shape + text label per event, shaded coverage gaps, SVG
+  title/description) and the complete event table
+  (`report/render_history_html.py`).
+
+Tests: `tests/unit/report/test_review_sections_html.py` (every view states
+the same acceptance across a promise × enforcement × verdict matrix against
+an independent oracle, and adding a policy leaves the verdict, findings and
+exit code unchanged; HTML consumer rows match the JSON attribution) and
+`tests/unit/report/test_render_history_html.py` (drawn presence spans equal
+the maximal presence runs for every presence pattern up to five releases;
+the page lists exactly the JSON's events).
+
+Landed after that note, in the same slice:
+
+- *Surface changes in HTML.* The scalar HTML report renders the
+  `surface_changes` block (additions/removals/modifications with old/new
+  declarations, per-group cap with a stated omitted count, same as
+  Markdown); computed in `html_report.build_html_document`, rendered by
+  `report/render_html_review_sections.render_surface_changes_html`.
+- *Release HTML report.* A directory/package `compare` accepts
+  `-o html=...`, rendered from the release JSON document alone
+  (`report/render_release_html.py`): headline verdict/exit, per-member
+  table, the `comparison_scope` section with reasons, release-level surface
+  changes when present, coherence findings.
+- *Dependency graph (relationship visualization).* Release schema 1.9 adds
+  `libraries[].dependencies` (per side: recorded ELF `DT_SONAME`/
+  `DT_NEEDED`), and the release HTML draws it as a layered SVG (text +
+  colour status per node, per-node/edge titles, one-side-only edges dashed,
+  a full edge table, capped at 60 nodes with omitted counts stated)
+  (`report/release_dependency_graph.py`).
+
+Tests: `tests/test_release_html_report.py` (through the CLI, the JSON is the
+oracle: members, scope entries and edges in the HTML equal those in the
+JSON, with the edge oracle derived independently; exit code identical with
+and without `-o html`; generated documents check escaping and the cap) and
+`tests/test_html_surface_changes.py`.
+
+- *Per-finding consumer attribution.* Under `compare --use-cases`, each
+  JSON change carries `affected_use_cases` (report schema 5.10), derived as
+  the exact inverse of `use_case_impact.by_use_case`; Markdown and the review
+  digest render it (`tests/test_use_case_per_finding.py`).
+- *Real Action run.* `.github/workflows/test-action.yml` job
+  `test-report-policy-and-consumer-impact` runs the composite Action twice
+  (with and without a versioning policy) on a real breaking pair and asserts
+  the policy acceptance, the HTML sections, an unchanged verdict/exit code,
+  and no ADR numbers in the report files.
+
+Still open: `affected_use_cases` in the HTML changes table and SARIF;
+release-level `surface_changes` (the release JSON carries none yet, so the
+release page renders the section only when a document has one); dependency
+facts for PE/Mach-O members (only ELF is recorded); the step summary written
+by the Action is not itself asserted ADR-free by the new job (only the
+report files are).
 
 ## Files & surfaces
 

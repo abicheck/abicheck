@@ -129,8 +129,7 @@ cause happens to live there — use `cause_namespace` for that instead:
 A broad `namespace`/`source_location` rule can accidentally match an internal
 symbol that is not actually private to the library's compatibility contract —
 one a public inline/template function, a public type's field or base class,
-a public function signature, or (given an embedded L5 source/call graph,
-ADR-044 P1) a public inline/template function's own *body* depends on. abicheck
+a public function signature, or (given an embedded L5 source/call graph) a public inline/template function's own *body* depends on. abicheck
 computes this reachability — both the type-layout walk `internal_leak.py`'s
 leak detector uses, and, when build/source evidence is present, the L5
 call-graph walk described in
@@ -219,9 +218,7 @@ to this rule to suppress it anyway.
 This closes a specific correctness gap: without it, a suppression rule could
 remove the raw evidence for an internal-type change before abicheck's
 internal-leak detector had a chance to see it, silently hiding a genuine
-break through the public ABI surface with no trace in the report. See
-[ADR-044](../contribute/adr/044-reachability-aware-suppression.md) for the
-full design rationale.
+break through the public ABI surface with no trace in the report.
 
 Both walks recognize the same private-implementation namespace convention —
 `detail`/`impl`/`internal`/`__detail`/`_impl` by default, configurable per

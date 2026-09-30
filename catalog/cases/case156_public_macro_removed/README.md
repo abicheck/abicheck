@@ -74,7 +74,7 @@ replay is the floor.
 `reachable_source_surface.macros` (as embedded by `dump --sources`, or
 supplied out-of-band via `--old/new-sources`) and diffs the macro set
 directly — the same `diff_source_abi()` routine `tests/test_l3l4l5_examples.py`
-exercises against the committed fixtures. Per ADR-028 D3 a source-evidence
+exercises against the committed fixtures. By the authority rule, a source-evidence
 finding never decides a shipped-*ABI* break on its own, but `public_macro_removed`
 is registered as an `API_BREAK_KINDS` default verdict (a source-level break),
 not a risk signal — the compile failure it causes is deterministic, not

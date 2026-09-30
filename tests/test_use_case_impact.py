@@ -414,7 +414,7 @@ class TestStatKeepsItsSummaryOnlyShape:
         assert "-o oneline=..." in result.output
         assert "-o sarif=..." in result.output
 
-    @pytest.mark.parametrize("fmt", ["sarif", "junit", "html"])
+    @pytest.mark.parametrize("fmt", ["sarif", "junit"])
     def test_a_format_that_cannot_carry_the_block_is_rejected(
         self, tmp_path: Path, fmt: str
     ) -> None:
@@ -460,14 +460,14 @@ class TestStatKeepsItsSummaryOnlyShape:
                 "-o",
                 f"sarif={tmp_path / 'r.sarif'}",
                 "-o",
-                f"html={tmp_path / 'r.html'}",
+                f"junit={tmp_path / 'r.xml'}",
             ],
         )
         assert result.exit_code == 64, result.output
         assert "no output this run renders" in result.output
-        assert "-o html=..." in result.output
+        assert "-o junit=..." in result.output
 
-    @pytest.mark.parametrize("fmt", ["json", "markdown", "review"])
+    @pytest.mark.parametrize("fmt", ["json", "markdown", "review", "html"])
     def test_the_carrying_formats_stay_accepted(self, tmp_path: Path, fmt: str) -> None:
         # The rejection must be scoped to the formats that really drop it.
         old, new = self._pair(tmp_path)

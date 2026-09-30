@@ -19,9 +19,9 @@ generated: false
     superseded by 0.6 — always cross-check the 0.6 guide before adopting one.
 
 abicheck's CLI went through two rounds of change before 0.6: a **0.5.0** flag
-reset ([ADR-040](../contribute/adr/040-compare-surface-reduction.md)) that
+reset that
 reshaped `compare`'s flags, and a **0.5-era** command-surface reset
-([ADR-043](../contribute/adr/043-cli-pre-1.0-surface-reset.md)) that removed
+ that removed
 or folded most of the standalone companion commands. This page is the
 combined map for those two: which commands survived them, which became
 flags, which were gone by 0.5, and which flags/inputs were renamed.
@@ -74,23 +74,21 @@ examples as the ones that matter, this page only summarizes the mapping.
 ## Removed scan axes (`s0…s6`, `--mode`, `--source-method`, `--max`)
 
 !!! warning "`scan` itself no longer exists"
-    The `scan` command was retired outright in 0.6 (ADR-068 Phase 6).
+    The `scan` command was retired outright in 0.6.
     `abicheck scan` exits `64`. The table below is a **historical**
     evidence-axis mapping, useful for reading an old command line; its
     `--depth` right-hand column is still the live spelling, but it now
     belongs to `compare`. See
     [Upgrading to 0.6 §A1](../start/upgrading-to-0.6.md#a1-scan-is-retired).
 
-Earlier releases let you pick evidence in two other ways. As of the ADR-043
-CLI reset, both were **removed outright, not deprecated** — `scan`
+Earlier releases let you pick evidence in two other ways. As of the pre-1.0 CLI reset, both were **removed outright, not deprecated** — `scan`
 stopped accepting `--mode`/`--source-method`/`--max` at all; passing any of
 them was a plain "no such option" usage error (exit 64), same as any other
 unrecognized flag. There is no warn-and-map compatibility shim: this table is
 here only for anyone migrating an old command line, not as a live alias list.
 The internal `s0`…`s6` / `ScanMode` vocabulary still exists inside the engine
 (`model/evidence_depth_levels.py`), but it has no public entry point at all
-any more — the typed `ScanRequest` that used to accept it was removed in
-ADR-068 Phase 4 — and it must never leak into the public CLI, `--help`,
+any more — the typed `ScanRequest` that used to accept it was removed in 0.6 — and it must never leak into the public CLI, `--help`,
 reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 
 **`--source-method s0…s6`** (the old "how it gathers evidence" axis):
@@ -102,7 +100,7 @@ reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 | `s2` | preprocessor macro/include capture | folded into `--depth build` (runs when `clang -E` + a compile DB are present) |
 | `s4` | symbol/reference index → the *cheap* L5 structural graph (no L4 replay, no call edges) | **no user-facing `--depth` rung**: the graph-only level is internal. `--depth source` gives L5 edges but pays for the L4 replay; there is no cheap graph-only depth |
 | `s5` | semantic AST replay of changed TUs (L4) | `--depth source` |
-| `s6` | full AST replay of all TUs (L4) | `--depth source` — the old `full` rung collapsed into `source` (ADR-043 D6); they only ever differed in replay *scope*, and `--depth source` with no `--since`/`--changed-path` seed already analyses the whole target, matching what `s6`/`full` used to give |
+| `s6` | full AST replay of all TUs (L4) | `--depth source` — the old `full` rung collapsed into `source`; they only ever differed in replay *scope*, and `--depth source` with no `--since`/`--changed-path` seed already analyses the whole target, matching what `s6`/`full` used to give |
 
 **`--mode`** presets:
 
@@ -110,12 +108,11 @@ reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 |------------|-----|-------------|
 | `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` — pin the rung; omitting `--depth` resolves to `headers` and collects no L4 evidence at all |
 | `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only. `--depth source` gives the change-scoped edges; the full-graph preset is reachable only via the internal Python service API now |
-| `baseline` | whole-library replay of a release | `--depth source` with no `--since`/`--changed-path` seed (resolves to TARGET scope — the whole current library target, ADR-043 D7) |
-| `audit` | intra-version hygiene lint, no baseline | `compare --no-baseline NEW` (the old standalone `--audit` flag was removed as redundant in ADR-043 D5; `scan` with no `--against` then took its place, and 0.6 moved that onto `compare`). **Note the gate change**: `--severity-preset` is now required to make the audit gate — see [Upgrading to 0.6 §A2](../start/upgrading-to-0.6.md#a2-re-arming-an-audit-gate) |
+| `baseline` | whole-library replay of a release | `--depth source` with no `--since`/`--changed-path` seed (resolves to TARGET scope — the whole current library target) |
+| `audit` | intra-version hygiene lint, no baseline | `compare --no-baseline NEW` (the old standalone `--audit` flag was removed as redundant in the pre-1.0 CLI reset; `scan` with no `--against` then took its place, and 0.6 moved that onto `compare`). **Note the gate change**: `--severity-preset` is now required to make the audit gate — see [Upgrading to 0.6 §A2](../start/upgrading-to-0.6.md#a2-re-arming-an-audit-gate) |
 
 `--source-method auto`'s **risk-driven escalation is gone**, not relocated:
-ADR-068's second 2026-09-09 amendment retired it along with `--risk-rules`
-(ruling (b)). Omitting `--depth` still means `auto`, but `auto` resolves
+0.6 retired it along with `--risk-rules`. Omitting `--depth` still means `auto`, but `auto` resolves
 to the fixed `headers` rung — the same default `compare` uses — so a workflow
 that relied on a high-risk diff escalating itself to `build`/`source` must
 pin that rung explicitly.
@@ -170,7 +167,7 @@ reports — so `/` beside a named image root cannot be misread as a second
 environment someone chose. Exit codes: `0` PASS, `1` WARN (loads but ABI risk),
 `4` FAIL (load failure or binary ABI break).
 
-## Renamed/restructured flags (0.5.0, ADR-040)
+## Renamed/restructured flags (0.5.0)
 
 Before the command-surface reset above, 0.5.0 reshaped `compare`'s (and, at
 the time, `appcompat`'s) flags. Two kinds of change affect scripts still
@@ -223,7 +220,7 @@ Notes:
 
 These flags are no longer in `compare --help` **or** `dump --help`, and no
 CLI override survives — `.abicheck.yml` is each field's only source now
-(ADR-068 D5 / Phase 7a: a hidden-but-accepted flag still counts as public
+(a hidden-but-accepted flag still counts as public
 surface, so once a setting is fully config-backed the CLI spelling is
 removed outright rather than left hidden). See the
 [config-file reference](../reference/config-file.md#debug) and its
@@ -277,8 +274,7 @@ switch for public-surface scoping).
 ### Run profiles: added, then removed
 
 `--profile {ci-gate,release-cut,quick}` briefly bundled a workflow's common
-defaults into one token. It was removed outright (ADR-068 D5 / plan
-Phase 7e): it bundled evidence depth, report rendering, and CI gate policy
+defaults into one token. It was removed outright in 0.6: it bundled evidence depth, report rendering, and CI gate policy
 behind one word, and a rendering choice may never carry a gate setting.
 There is no direct config-key replacement — state `--depth`, `-o`,
 and `--severity-preset` (or `.abicheck.yml`'s `severity:` block)

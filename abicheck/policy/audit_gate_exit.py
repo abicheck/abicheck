@@ -20,7 +20,7 @@ audit finding, closing the gap ``docs/contribute/known-gaps.md``'s
 
 **What this reproduces, and what it deliberately does not.** Legacy
 ``scan``'s audit mode derived a *verdict* from its own findings
-(``cli_scan_baseline.py``'s ``compute_verdict``-over-``verdict_scored_
+(the retired ``cli_scan_baseline.py``'s ``compute_verdict``-over-``verdict_scored_
 changes`` path) and mapped that verdict to an exit code the same way a real
 two-sided comparison does: an ``API_BREAK_KINDS``-classified finding exits
 ``2``, a ``BREAKING_KINDS``-classified finding exits ``4``, and a

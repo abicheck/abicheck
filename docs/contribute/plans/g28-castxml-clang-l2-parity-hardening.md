@@ -308,7 +308,7 @@ gives rich declarations but zero layout data, which is exactly why CastXML
 — which runs its own bundled Clang internally and exports the layout it
 already computed — remains the stronger layout source for that path.
 
-**Shipped.** `tools/clang-layout-tool/` — a standalone LibTooling program
+**Shipped.** `contrib/clang-layout-tool/` — a standalone LibTooling program
 (`abicheck-clang-layout-tool`) that walks every complete, non-dependent
 `CXXRecordDecl`, calls `ASTContext::getASTRecordLayout()`, and serializes
 per-record JSON: `size_bits`/`alignment_bits`/`data_size_bits`,
@@ -366,7 +366,7 @@ shipped as fully additive/opt-in:
   larger surface) — scoped to size/alignment/offsets/vptr placement per
   this plan's own original scope note.
 
-**Files & surfaces.** `tools/clang-layout-tool/` (`CMakeLists.txt`,
+**Files & surfaces.** `contrib/clang-layout-tool/` (`CMakeLists.txt`,
 `src/main.cpp`, `tests/fixtures/*.cpp` hand-verification cases) outside the
 `abicheck/` Python package; `abicheck/clang_layout_tool.py` (the Python
 bridge); `service.py`'s `attach_clang_layout()` wiring; `RecordType`'s

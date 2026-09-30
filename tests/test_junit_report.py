@@ -1716,7 +1716,7 @@ class TestNotComparable:
         err = _parse(xml_str).find("testsuite/testcase/error")
         assert "1.0" in err.get("message")
         assert "2.0" in err.get("message")
-        assert "ADR-050" in err.get("message")
+        assert "comparable profile/scope contract" in err.get("message")
 
 
 class TestContractEvaluationProperties:

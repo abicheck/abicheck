@@ -156,8 +156,7 @@ on [Severity Configuration](severity.md).
 #### There is no `--profile` shortcut
 
 An earlier revision offered `--profile NAME` (`ci-gate`/`release-cut`/`quick`)
-to bundle a handful of flags into one token (ADR-040). It was removed
-(ADR-068 D5 / plan Phase 7e): it bundled three independent axes — evidence
+to bundle a handful of flags into one token. It was removed in 0.6: it bundled three independent axes — evidence
 depth, report rendering, and CI gate policy — behind one word, and a
 rendering choice may never carry a gate setting. State the three
 independently instead:

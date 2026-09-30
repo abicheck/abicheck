@@ -1,0 +1,29 @@
+{
+  "affects": [
+    "check-abi-compatibility"
+  ],
+  "architectures": [],
+  "category": "B",
+  "digest": "sha256:e8989344107a07595d79fa2c084ede778ae488e4f777b250551c80f29091fd78",
+  "expected": {
+    "consumer_verdict": "COMPATIBLE",
+    "verdict": "BREAKING"
+  },
+  "inputs": "skills-src/evaluation/agents/skills/fixtures/consumer-unaffected-despite-break",
+  "invocation": {
+    "used_by": [
+      "renderer"
+    ]
+  },
+  "platforms": [
+    "linux"
+  ],
+  "prompt": "The library team says this release has a breaking change. Does our renderer actually need rebuilding, or can we ship it as-is?",
+  "roots": [
+    "catalog/ground_truth.json",
+    "skills-src/evaluation/agents/skills/fixtures/consumer-unaffected-despite-break",
+    "skills-src/evaluation/agents/skills/scenarios.yaml"
+  ],
+  "skill": "check-abi-compatibility",
+  "status": "ready"
+}

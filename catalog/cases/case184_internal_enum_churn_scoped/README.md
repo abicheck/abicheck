@@ -1,6 +1,6 @@
 # Case 184: Internal Enum Churn, Scoped Out by Private-Header Origin
 
-**Category:** Public-surface scoping (ADR-024) | **Verdict:** ✅ NO_CHANGE
+**Category:** Public-surface scoping | **Verdict:** ✅ NO_CHANGE
 
 ## Verdict and consumer impact
 
@@ -58,7 +58,7 @@ this evidence level; clang is a supported alternative frontend
 An enum constant is consumer-visible the instant its header is included —
 unlike a struct's opaque layout, it behaves like a `#define`. So
 `abicheck/surface.py` deliberately seeds *every* header-declared enum into
-the public surface regardless of reachability (ADR-024) — reachability
+the public surface regardless of reachability — reachability
 alone is not trusted to clear an enum the way it clears an unreferenced
 struct (case118). That override is skipped only when the enum's own
 declaration origin is confidently non-public: because `v1_internal.h` was
@@ -70,7 +70,7 @@ and since nothing public reaches it, the value change is filtered.
 Without `--scope-public-headers`, or if `InternalMode` were declared
 directly in the public header itself (no separate private header — a
 confident `PUBLIC_HEADER` origin), the same value change is reported as
-`BREAKING` (`enum_member_value_changed`) instead — the ADR-024 override
+`BREAKING` (`enum_member_value_changed`) instead — the public-header override
 keeps genuinely public-header enums on the surface even when unreferenced
 by any function signature. See `case08_enum_value_change` and `case19` for
 that non-scoped, publicly-declared-enum baseline.
@@ -104,7 +104,7 @@ returned it, abicheck would report the change.
 ## Cross-tool comparison
 
 `abidiff`/ABICC have no concept of header-provenance-based public-surface
-scoping (ADR-024) — they either see every DWARF-visible enum member as ABI
+scoping — they either see every DWARF-visible enum member as ABI
 surface or none, with no notion of "declared in a private header,
 transitively included." This class of finding is abicheck-specific, so no
 cross-tool reproduction is included here.

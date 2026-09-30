@@ -150,7 +150,7 @@ def dump_provenance_option(func: F) -> F:
         multiple=True,
         callback=validate_provenance,
         metavar="KEY=VALUE",
-        help="Repeatable provenance stamp for the snapshot (ADR-068 D5). "
+        help="Repeatable provenance stamp for the snapshot. "
         "KEY=VALUE, one of: 'git-tag=<tag>' (e.g. git-tag=v2.0.0), "
         "'build-id=<id>' (CI run ID, build number, ...), or 'git=auto'/"
         "'git=off' ('off' skips commit-SHA auto-detection). Replaces "

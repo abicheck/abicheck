@@ -390,9 +390,7 @@ def _finalize_release_output(
                 )
             click.echo(
                 "Contract coverage incomplete for the selected --contract "
-                "domain in: "
-                + ", ".join(_affected)
-                + f". {_effect} (ADR-049 contract-coverage axis). See "
+                "domain in: " + ", ".join(_affected) + f". {_effect}. See "
                 "contract_coverage_failure_count in -o json=... output "
                 "for per-library detail.",
                 err=True,
@@ -496,7 +494,7 @@ _MAX_RELEASE_FINDINGS_PER_LIBRARY = _display_limits.MAX_RELEASE_FINDINGS_PER_LIB
 def _release_change_kind_str(c: Any) -> str:
     """The same tolerant ``kind`` read ``release_finding_entry`` uses, standalone.
 
-    Mirrors ``cli_scan_baseline._change_kind_str`` -- kept local rather than
+    Mirrored the retired ``cli_scan_baseline._change_kind_str`` -- kept local rather than
     imported since the two ``cli_*`` command families are independently
     owned and this is a five-line, dependency-free primitive. Shared so the
     per-kind truncation ledger below counts a raw ``Change`` the identical
@@ -513,7 +511,7 @@ def _accumulate_release_kind_counts(
 ) -> None:
     """Add *kinds* (an iterable of kind strings) onto ``entry[field]``.
 
-    Mirrors ``cli_scan_baseline._accumulate_kind_counts``: a running dict
+    Mirrored the retired ``cli_scan_baseline._accumulate_kind_counts``: a running dict
     (not overwritten), sorted by kind name so the JSON is deterministic and
     diff-friendly across runs of the same input.
     """
@@ -670,7 +668,7 @@ def _release_finding_dicts(
     lossy result, and this release schema has no per-library findings array
     elsewhere for a consumer to fall back to.
 
-    Same shape as ``cli_scan_baseline._baseline_finding_dicts`` /
+    Same shape as the retired ``cli_scan_baseline._baseline_finding_dicts`` /
     ``stack_report._stack_finding_dicts``. Counts (not already-built dicts)
     decide the cap so a large diff never builds more dicts than the cap can
     ever keep. See :func:`_release_display_buckets` for which findings this
@@ -698,7 +696,7 @@ def _release_finding_dicts(
     Returns ``(dicts, cut_kinds)`` -- ``cut_kinds`` is every kind string cut
     from *any* bucket (not just the one that first hit the cap), so a
     caller can accumulate an exact kind -> count truncation ledger the same
-    way ``cli_scan_baseline._baseline_summary`` does, instead of a bare
+    way the retired ``cli_scan_baseline._baseline_summary`` did, instead of a bare
     ``findings_truncated`` boolean that hides the shape of what was cut.
     """
     from .reporter import release_finding_entry

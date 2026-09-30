@@ -608,7 +608,7 @@ def _resolve_scan_jobs(n_files: int) -> int:
     """Worker count for the pattern scan (``ABICHECK_PATTERN_SCAN_JOBS``).
 
     ``re`` matching holds the GIL, so a whole-tree pre-scan is CPU-bound and
-    single-threaded — the named cost in ``validation/oneapi-conda-scan-*`` (a
+    single-threaded — the named cost in ``skills-src/evaluation/validation/oneapi-conda-scan-*`` (a
     67 MB tree ran past 900 s). Spreading files across processes is the fix.
 
     - a **daemonic** process → always serial (it may not spawn children);

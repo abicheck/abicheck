@@ -6,7 +6,7 @@
 
 This is the sibling scenario to
 [case196](../case196_header_graph_move_reconciled/README.md), isolating the
-*other* outcome ADR-048's graph reconciliation can classify a genuine
+*other* outcome graph reconciliation can classify a genuine
 node-identity change into. A private, never-exported internal helper
 `demo::detail::helper` keeps its exact qualified name *and* its declaring
 header (`include/demo/detail.h`, unchanged on both sides of this fixture) —
@@ -117,13 +117,13 @@ Because the identity-perturbing edit lands on a `private_header`-visibility
 declaration, a real binary comparison of this exact scenario has no
 BREAKING/API_BREAK finding to sit alongside them; reconciliation only
 explains/localizes, it never suppresses or replaces another finding
-(ADR-028 D3).
+.
 
 ## Minimum evidence
 
 `min_evidence: L5` — recognizing the two nodes as "the same declaration,
 resignatured" instead of an unrelated remove+add pair requires the derived
-source graph's canonical-identity/alias matching (G31 Phase B, ADR-048):
+source graph's canonical-identity/alias matching (G31 Phase B):
 both nodes share the qualified name `demo::detail::helper`. No lower
 evidence tier carries graph node identity at all.
 
@@ -193,7 +193,7 @@ info; neither has an equivalent to abicheck's source-graph canonical-identity
 and reconciliation machinery, and neither would see anything here at all —
 `demo::detail::helper` is entirely internal and outside either tool's
 ABI-surface scope regardless. This finding and its reconciliation are unique
-to abicheck's L5 build-source evidence layer (ADR-048). Contrast with
+to abicheck's L5 build-source evidence layer. Contrast with
 [case196](../case196_header_graph_move_reconciled/README.md) (the sibling
 case where the declaring header *also* changes, reached instead via the
 `declaration_moved` outcome), and with

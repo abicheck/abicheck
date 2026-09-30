@@ -140,7 +140,7 @@ if TYPE_CHECKING:
 
 
 #: The formats the release fan-out actually produces.
-_ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
+_ENGINE_FORMATS = ["json", "markdown", "junit", "oneline", "html"]
 
 
 # NOTE: not registered on `main` — the user-facing `compare-release` command was
@@ -203,7 +203,7 @@ _ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
     type=click.Choice(["off", "declared"]),
     default="off",
     show_default=True,
-    help="Report a proven change to the release's declared component set as a finding (ADR-065 D1/D6, a contract-policy field): 'off' (the default) emits nothing; 'declared' emits support_promise_component_retired/_introduced for every member whose absence the *other* side's proven-complete inventory establishes -- a package archive unpacked in full, or a stored snapshot whose capture asserted inventory_complete. Never fires on an unmatched member under an unproven inventory, whatever the setting. (directory/package inputs only)",
+    help="Report a proven change to the release's declared component set as a finding: 'off' (the default) emits nothing; 'declared' emits support_promise_component_retired/_introduced for every member whose absence the *other* side's proven-complete inventory establishes -- a package archive unpacked in full, or a stored snapshot whose capture asserted inventory_complete. Never fires on an unmatched member under an unproven inventory, whatever the setting. (directory/package inputs only)",
 )
 @click.option(
     "--select",
@@ -211,8 +211,8 @@ _ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
     multiple=True,
     metavar="KEY",
     help="Declare an expected release member by its canonical release-"
-    "matching key (e.g. 'libfoo.so', never a raw filename stem -- ADR-065 "
-    "S1). Repeatable. With any --select/--select-required given, only "
+    "matching key (e.g. 'libfoo.so', never a raw filename stem). "
+    "Repeatable. With any --select/--select-required given, only "
     "declared members are compared; a discovered member not named here is "
     "out of scope. Missing on one side is reported but does not, by "
     "itself, make the scope incomplete (that gate is --select-required).",
@@ -223,7 +223,7 @@ _ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
     multiple=True,
     metavar="KEY",
     help="Like --select, but a missing declared member here contributes to "
-    "--on-incomplete-scope's completeness gate (ADR-065 S1/D6). A key "
+    "--on-incomplete-scope's completeness gate. A key "
     "named in both --select and --select-required is required.",
 )
 @click.option(
@@ -269,9 +269,8 @@ _ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
     type=click.Path(exists=True, path_type=Path),
     default=None,
     help="ABI instantiation manifest (YAML/JSON) listing symbols the "
-    "release publicly promises. See ADR-023. Renamed from --manifest "
-    "(CLI cleanup phase two, PR J) -- inert here (ADR-037 D7, see this "
-    "module's own release_input_options docstring), kept in sync with "
+    "release publicly promises. Renamed from --manifest. Inert here, "
+    "kept in sync with "
     "the real, user-facing spelling on frontends/cli/options/release.py "
     "purely for reader consistency.",
 )
@@ -281,8 +280,8 @@ _ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
     type=click.Path(path_type=Path),
     default=None,
     help="Persist this run's OLD-side bundle facts (per-library snapshots "
-    "plus the instantiation manifest, if any) to PATH (G38 Phase 2, "
-    "ADR-023 amendment). A later comparison can load this file and pass "
+    "plus the instantiation manifest, if any) to PATH. "
+    "A later comparison can load this file and pass "
     "it to abicheck.model.bundle_facts.compare_bundle_from_facts() (Python API; "
     "no CLI consumer yet) to get a bundle-level verdict from this stored "
     "baseline without reopening the old .so files. This is an additive "
@@ -316,7 +315,7 @@ _ENGINE_FORMATS = ["json", "markdown", "junit", "oneline"]
     default=None,
     metavar="VARIANT_ID",
     help="Which build variant to compare when OLD_DIR is a stored "
-    "ProjectSnapshot package declaring more than one (ADR-062 A1.7). "
+    "ProjectSnapshot package declaring more than one. "
     "Defaults to the package's only variant when it declares exactly one; "
     "a usage error otherwise. No-op for a live directory/archive operand.",
 )

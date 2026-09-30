@@ -139,7 +139,11 @@ def build_review_digest_document(
         "out_of_surface_count": digest.out_of_surface_count,
         "bump_value": digest.bump_value,
         "soname_value": digest.soname_value,
-        "impacted": [{"symbol": s.symbol, "kind": s.kind} for s in digest.impacted],
+        "impacted": [
+            {"symbol": s.symbol, "kind": s.kind}
+            | ({"use_cases": list(s.use_cases)} if s.use_cases else {})
+            for s in digest.impacted
+        ],
         "disposition_audit": (
             None
             if digest.disposition_audit is None
@@ -161,12 +165,29 @@ def build_review_digest_document(
         "result_counts": digest.result_counts,
         "evidence_summary": digest.evidence_summary,
         "show_release_recommendation": digest.show_release_recommendation,
+        "policy_acceptance": digest.policy_acceptance,
+        **(
+            {
+                "review_group_use_cases": {
+                    k: list(v) for k, v in digest.review_group_use_cases.items()
+                }
+            }
+            if digest.review_group_use_cases
+            else {}
+        ),
     }
     return ReportDocument.from_mapping(d)
 
 
 def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
-    impacted = tuple(ImpactedSymbol(**item) for item in d["impacted"])
+    impacted = tuple(
+        ImpactedSymbol(
+            symbol=item["symbol"],
+            kind=item["kind"],
+            use_cases=tuple(item.get("use_cases", ())),
+        )
+        for item in d["impacted"]
+    )
     return ReviewDigest(
         library=d["library"],
         old_version=d["old_version"],
@@ -204,7 +225,11 @@ def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
         gate_exit_code=d.get("gate_exit_code"),
         result_counts=dict(d.get("result_counts") or {}),
         evidence_summary=d.get("evidence_summary", ""),
+        review_group_use_cases={
+            k: tuple(v) for k, v in (d.get("review_group_use_cases") or {}).items()
+        },
         show_release_recommendation=bool(d.get("show_release_recommendation", False)),
+        policy_acceptance=d.get("policy_acceptance"),
     )
 
 

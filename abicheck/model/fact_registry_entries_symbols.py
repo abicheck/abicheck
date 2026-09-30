@@ -60,7 +60,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         reportable=True,
         lifecycle=FactLifecycle.PERSISTED,
         notes=(
-            "Provenance (ADR-015, schema v6): defining header. Unlike "
+            "Provenance: defining header. Unlike "
             "RecordType.source_header_fact/EnumType.source_header_fact, "
             "dwarf/pdb are NOT producers here: dwarf_snapshot.py "
             "constructs every Variable without source_location (its "
@@ -306,7 +306,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         reportable=True,
         lifecycle=FactLifecycle.PERSISTED,
         notes=(
-            "Provenance (ADR-015, schema v6): defining header. Unlike "
+            "Provenance: defining header. Unlike "
             "RecordType.source_header_fact/EnumType.source_header_fact, "
             "dwarf/pdb are NOT producers here: dwarf_snapshot.py "
             "constructs every Function without source_location, and no "
@@ -525,7 +525,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         reportable=True,
         lifecycle=FactLifecycle.PERSISTED,
         notes=(
-            "ADR-075 D2: owner/contract/rule id from the declaring file, stamped once by extract.ownership_stamp after the parse (so both header backends, identically) and persisted as model.extraction_scope's interned table. No legacy scalar sibling; unset is unclassified (a pre-v52 snapshot), never a guessed owner. Read only through model.extraction_scope.ownership_of."
+            "Owner/contract/rule id from the declaring file, stamped once by extract.ownership_stamp after the parse (so both header backends, identically) and persisted as model.extraction_scope's interned table. No legacy scalar sibling; unset is unclassified (a pre-v52 snapshot), never a guessed owner. Read only through model.extraction_scope.ownership_of."
         ),
     ),
     _E(
@@ -540,7 +540,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         reportable=True,
         lifecycle=FactLifecycle.PERSISTED,
         notes=(
-            "ADR-075 D2: owner/contract/rule id from the declaring file, stamped once by extract.ownership_stamp after the parse (so both header backends, identically) and persisted as model.extraction_scope's interned table. No legacy scalar sibling; unset is unclassified (a pre-v52 snapshot), never a guessed owner. Read only through model.extraction_scope.ownership_of."
+            "Owner/contract/rule id from the declaring file, stamped once by extract.ownership_stamp after the parse (so both header backends, identically) and persisted as model.extraction_scope's interned table. No legacy scalar sibling; unset is unclassified (a pre-v52 snapshot), never a guessed owner. Read only through model.extraction_scope.ownership_of."
         ),
     ),
 ]

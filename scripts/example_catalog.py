@@ -5,7 +5,7 @@ on-disk directory -- Phase 3 of the examples/catalog split
 
 Before this module, roughly a dozen consumers (`scripts/gen_examples_docs.py`,
 `scripts/benchmark_comparison.py`, `scripts/check_ai_readiness.py`, every
-`validation/scripts/run_*_examples.py` runner, and the various
+`skills-src/evaluation/validation/scripts/run_*_examples.py` runner, and the various
 `tests/test_*_examples.py` / `tests/validate_examples.py` fast-lane tests)
 each independently derived `EXAMPLES_DIR = <repo root> / "examples"` and then
 joined a case id onto it by hand (`EXAMPLES_DIR / case_name`). That's fine

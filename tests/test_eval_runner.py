@@ -18,7 +18,7 @@ The runner shells out to abicheck/git/cmake for the live scans (covered by the
 scheduled CI lane, not here). These tests pin the *pure* halves — the embedded
 `build_source` coverage parser, the binary-tier drift gate, the source-entry
 filter, and the report renderers — so the regression guard and the source-tier
-table cannot silently break. The runner lives in `eval/`, imported by adding
+table cannot silently break. The runner lives in `skills-src/evaluation/field/`, imported by adding
 that directory to `sys.path`.
 """
 
@@ -30,11 +30,15 @@ from types import SimpleNamespace
 
 import pytest
 
-_EVAL_DIR = Path(__file__).resolve().parent.parent / "eval"
+_EVAL_DIR = (
+    Path(__file__).resolve().parent.parent / "skills-src" / "evaluation" / "field"
+)
 if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
-runner = pytest.importorskip("runner", reason="eval/runner.py importable")
+runner = pytest.importorskip(
+    "runner", reason="skills-src/evaluation/field/runner.py importable"
+)
 
 
 def _snap() -> dict:

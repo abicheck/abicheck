@@ -84,9 +84,7 @@ Runs entirely on an ordinary `pull_request` trigger: read-only
 `contents: read`/`pull-requests: read` permissions, the default
 `GITHUB_TOKEN`. **Never** wire this into a `pull_request_target` caller —
 that would hand a fork PR's own workflow changes elevated permissions for
-no benefit this check needs, the same rule
-[ADR-047 §12](../contribute/adr/047-github-actions-integration-model.md)
-already states for the baseline-publishing workflows.
+no benefit this check needs, the same rule the baseline-publishing workflows already follow.
 
 ## Residual gap: pin this check with a Ruleset, not just branch protection
 

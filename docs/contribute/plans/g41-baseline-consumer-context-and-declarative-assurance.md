@@ -31,7 +31,7 @@ generated: false
    **landed (WS-A slice 2, 2026-09-30)** for `kind: target` cells:
    `RunPlanCheck.build_system`/`build_generator`, `check-target`
    `build-system`/`build-generator` inputs, report envelope
-   `profile_build_system` (schema 5.10). Still open: bundle cells, and the
+   `profile_build_system` (schema 5.11). Still open: bundle cells, and the
    lab's `clang_profile_not_a_contract_profile` failure itself, which needs
    item 1 (a baseline published for the Clang profile) rather than
    attribution alone.

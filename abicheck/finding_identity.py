@@ -1884,7 +1884,7 @@ def report_canonical_finding_id(c: object) -> str:
     ``change.qualified_name``/``change.kind`` via plain attribute access
     (not ``getattr`` with a default) -- a real :class:`~abicheck.checker_types.Change`
     always has both, but a lightweight test double standing in for one (see
-    ``cli_scan_baseline._baseline_finding_dicts``'s own "safe to call against
+    the retired ``cli_scan_baseline._baseline_finding_dicts``'s "safe to call against
     fakes/stubs" contract, which this id is emitted alongside) may not. That
     case degrades to :func:`report_finding_id` itself -- self-consistent and
     still deterministic, just not guaranteed cross-backend-stable for the

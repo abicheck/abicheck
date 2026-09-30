@@ -17,9 +17,7 @@ to report on**, resolves the pull request that run belongs to, and unpacks
 its artifact as hostile input. It analyses nothing.
 
 Task owner for the whole pattern:
-[Reporting on fork pull requests](../use/fork-pr-reporting.md). Design
-record:
-[ADR-073](../contribute/adr/073-report-only-publication-and-the-trusted-reporter-boundary.md).
+[Reporting on fork pull requests](../use/fork-pr-reporting.md).
 
 It exists as an Action because every project attempting the two-workflow
 split needs the same checks, and they are the ones that are easy to get

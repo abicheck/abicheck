@@ -259,8 +259,8 @@ def detect_python_extension(snap: AbiSnapshot) -> PythonExtMetadata | None:
 
 def abi3_precondition_message(abi3_floor: tuple[int, int], binary_name: str) -> str:
     """The "not a recognisable extension module" message ``scan --abi3``'s
-    real precondition failure reports (:func:`abicheck.scan_engine.
-    _run_abi3_audit`'s ``_EvidenceContractError``) and both dry-run previews
+    real precondition failure reported (the retired ``scan_engine.
+    _run_abi3_audit``'s ``_EvidenceContractError``) and both dry-run previews
     of the identical precondition state -- one shared spelling so all three
     callers describe the same failure identically rather than three
     independently-drifting copies of the same sentence.

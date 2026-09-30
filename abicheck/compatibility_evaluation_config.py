@@ -172,7 +172,7 @@ def _require_nonempty_digest(sha256: str, *, owner: str) -> None:
         raise TypeError(f"{owner}.sha256 must be a str, not {sha256!r}.")
     if not sha256:
         raise ValueError(
-            f"{owner}.sha256 must be a non-empty digest (ADR-049 D6): an "
+            f"{owner}.sha256 must be a non-empty digest: an "
             "empty string is exactly as unable to detect content drift on "
             "replay as no digest at all."
         )
@@ -443,7 +443,7 @@ class ImmutableIdentity:
             )
         if not self.id:
             raise ValueError(
-                "ImmutableIdentity.id must be non-empty (ADR-049 D6): a "
+                "ImmutableIdentity.id must be non-empty: a "
                 "persisted provider/base/preset/pack needs its identity "
                 "name to say what the digest represents, the same "
                 "replay-exactness guarantee sha256 already carries."
@@ -515,12 +515,12 @@ class ContractConfig:
                 "runtime-enforced, so an untyped service/manifest/API "
                 "adapter could otherwise pass a typo'd string (e.g. "
                 '"pubic") through to a state with no defined '
-                "contract-membership semantics (ADR-049 D2)."
+                "contract-membership semantics."
             )
         if self.unresolved not in _VALID_UNRESOLVED_BEHAVIORS:
             raise ValueError(
                 f"ContractConfig.unresolved must be one of "
-                f"{sorted(_VALID_UNRESOLVED_BEHAVIORS)} (ADR-049 D9), got "
+                f"{sorted(_VALID_UNRESOLVED_BEHAVIORS)}, got "
                 f"{self.unresolved!r}"
             )
         object.__setattr__(
@@ -732,7 +732,7 @@ class CompatibilityPolicyConfig:
                 "annotation isn't runtime-enforced, so an untyped service/"
                 "manifest adapter could otherwise pass a bare slug (e.g. "
                 '"strict_abi") through to a config that cannot support exact '
-                "replay (ADR-049 D6)."
+                "replay."
             )
         # A non-Mapping overrides previously sailed through the key/value
         # checks below (which only iterate), then crashed with AttributeError
@@ -762,7 +762,7 @@ class CompatibilityPolicyConfig:
         if unknown:
             raise ValueError(
                 f"CompatibilityPolicyConfig.overrides has unknown "
-                f"ChangeKind slugs: {unknown} (ADR-049 D8: a hard load "
+                f"ChangeKind slugs: {unknown} (a hard load "
                 "error, matching policy_file.py's PolicyFile.load)"
             )
         non_verdict = sorted(
@@ -888,7 +888,7 @@ class GateConfig:
         if self.exit_code_scheme not in _VALID_EXIT_CODE_SCHEMES:
             raise ValueError(
                 f"GateConfig.exit_code_scheme must be one of "
-                f"{sorted(_VALID_EXIT_CODE_SCHEMES)} (ADR-037 D12; 'auto' is "
+                f"{sorted(_VALID_EXIT_CODE_SCHEMES)} ('auto' is "
                 "a resolution-time choice, not a valid resolved value), got "
                 f"{self.exit_code_scheme!r}"
             )
@@ -896,7 +896,7 @@ class GateConfig:
             raise TypeError(
                 "GateConfig.preset must be an ImmutableIdentity or None, not "
                 f"{self.preset!r} -- same replay-exactness gap as "
-                "CompatibilityPolicyConfig.base (ADR-049 D6)."
+                "CompatibilityPolicyConfig.base."
             )
         if not isinstance(self.severity, SeverityConfig):
             raise TypeError(

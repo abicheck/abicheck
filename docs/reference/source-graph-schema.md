@@ -22,8 +22,7 @@ The optional L5 source graph (`SourceGraphSummary.nodes`/`.edges`) is what
 suppression gating all read. [Build-Source Data](../learn/build-source-data.md)
 walks one node/edge through the L0-L5 layer model end to end; this page is
 the exhaustive reference for the graph's own *identity, evidence-merge, and
-traversal-policy* schema — the machinery [ADR-046](../contribute/adr/046-source-graph-identity-v2-and-evidence-merge.md)
-(G29 Phase 2) added on top of the plain node/edge shape. It does not
+traversal-policy* schema — the machinery G29 Phase 2 added on top of the plain node/edge shape. It does not
 re-list every `NODE_KINDS`/`EDGE_KINDS` value (the exhaustive, authoritative
 list lives in `abicheck/buildsource/source_graph.py`) — see
 [Build-Source Data](../learn/build-source-data.md) for illustrative examples.
@@ -45,7 +44,7 @@ evidence shape:
 | `conflicts` | array | Genuine cross-producer disagreements found while folding `facts`. |
 | `occurrences` *(edges only)* | array of string | Per-call-site occurrence ids — see [`occurrence_id`](#relation_key-and-occurrence_id) below. |
 
-### Evidence-preserving merge (ADR-046 D2)
+### Evidence-preserving merge
 
 Before this schema, a second producer registering an already-known node/edge
 silently lost to the first (`SourceGraphSummary.add_node`/`add_edge`'s old
@@ -67,7 +66,7 @@ instead of one value silently winning with no trace of the other.
 
 ### `relation_key` and `occurrence_id`
 
-Edge identity has three layers, coarsest to finest (ADR-046 D1):
+Edge identity has three layers, coarsest to finest:
 
 | Layer | Shape | Used by |
 |---|---|---|
@@ -94,7 +93,7 @@ stays empty — and costs nothing to compute — until a producer populates
 them. No current producer does; this is forward-compatible surface, not a
 promise that today's packs carry per-call-site data.
 
-## `TraversalPolicy` (ADR-046 D5)
+## `TraversalPolicy`
 
 `abicheck/internal_leak.py`'s `TraversalPolicy` formalizes a graph walk's
 rules into one reusable object, instead of re-deriving the same edge-kind
@@ -115,8 +114,7 @@ consumer code, and `effect_transitions={"virtual": "overapprox",
 
 ### `effect_transitions`: precision downgrade
 
-A virtual or function-pointer call is never statically exact (ADR-031 D4's
-own `resolution="overapprox"` label on that `CallEdge`) — `effect_transitions`
+A virtual or function-pointer call is never statically exact (the `resolution="overapprox"` label on that `CallEdge`) — `effect_transitions`
 mirrors that at the *path* level. Once `_consumer_compiled_reachability`'s
 walk crosses an edge whose resolved `call_kind` is a key in
 `effect_transitions`, that target node — and every node reached transitively
@@ -130,16 +128,16 @@ Not (yet) adopted by `compute_leak_paths` (the layout/type-graph walk) — that
 walk traverses `RecordType`/typedef structures, not `GraphNode`/`GraphEdge`,
 so `TraversalPolicy` doesn't naturally fit without a data-model change first.
 
-## Proof-path preference order (ADR-046 D6)
+## Proof-path preference order
 
 When more than one candidate path reaches the same target, plain
 shortest-wins can pick a weaker proof over a stronger one just because it's
 fewer hops. The ADR's target six-tier order — best to worst — is:
 
-1. **Consumer-proven** — a real `--used-by` consumer binary requires a node on the path ([ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md)).
+1. **Consumer-proven** — a real `--used-by` consumer binary requires a node on the path.
 2. **Exact / high-confidence** — every edge is `CONF_HIGH`.
 3. **Public-header structural** — every node on the path has a `public_header`/`generated` (`PUBLIC_VISIBILITIES`) visibility, not a private-header/source one.
-4. **Multi-producer-confirmed** — some edge has more than one distinct fact producer (ADR-046 D2).
+4. **Multi-producer-confirmed** — some edge has more than one distinct fact producer.
 5. **Reduced-confidence name resolution** — no stronger signal found (the residual case).
 6. **Virtual/indirect over-approximation** — crosses an `effect_transitions`-tagged edge.
 
@@ -156,7 +154,7 @@ structured per-hop data their walk's path representation carries:
   fact-producer count, and (via each endpoint node's `visibility` attr)
   public/private surface information. It also implements **tier 1**, read
   straight off the graph it is given: whenever a consumer graph has been
-  folded in (`impact.consumer_graph.join_consumer_graph`, ADR-057), a path
+  folded in (`impact.consumer_graph.join_consumer_graph`), a path
   touching a `CONSUMER_REQUIRES_SYMBOL` target is consumer-proven. With no
   consumer facts in the graph — every run without `--used-by` — that set is
   empty and the tier is inert. Tier 1 stays out of scope for
@@ -164,13 +162,11 @@ structured per-hop data their walk's path representation carries:
 
 Tier 1 matches on the path's **endpoint**, and the tier-6 overapprox check
 still runs first and wins — so in practice tier 1 means "consumer-proven
-*and* exactly resolved". See
-[ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md) D4 for why
-it is scoped that way.
+*and* exactly resolved". See [Impact Analysis](../learn/impact-analysis.md) for how the join is used.
 
 Both break ties within a tier by shortest path (fewest hops).
 
-## The consumer half of the graph (ADR-057)
+## The consumer half of the graph
 
 `compare --used-by <app>` can fold the consumer's own requirements into the
 library's graph, so a `consumer_required_symbol_removed` finding can name the
@@ -187,8 +183,7 @@ public entry point behind the dependency instead of only the missing symbol.
 There is deliberately **no** `consumer_required_symbol` node kind: a
 requirement is an edge onto the *existing* `binary_symbol://<symbol>` node the
 library graph already uses for that export, and that one shared node id is the
-entire join — see
-[ADR-057](../contribute/adr/057-consumer-graph-and-impact-join.md) D1.
+entire join.
 
 The vocabulary constants live in `abicheck/buildsource/graph_facts.py` and are
 unioned into `source_graph.NODE_KINDS`/`EDGE_KINDS`; the producer is
@@ -196,7 +191,7 @@ unioned into `source_graph.NODE_KINDS`/`EDGE_KINDS`; the producer is
 
 ## The archive/object half of the graph (G29 Phase 5 item 6)
 
-`source_graph._fold_link_provenance` (ADR-041 P1 #2) already creates an
+`source_graph._fold_link_provenance` already creates an
 `object_file`/`static_library` node for each `BuildEvidence` link input, by
 filename suffix alone. `abicheck/buildsource/archive_graph.py` is the real
 `ar`-index introspection that fills in the rest, driven by
@@ -224,7 +219,7 @@ edges — recorded as a diagnostic, not inferred around.
 Like the consumer join, **`OBJECT_DEFINES_SYMBOL` only ever joins onto a
 `binary_symbol` node the graph already carries** — an archive's internal-only
 indexed symbols (never exported by any side) mint no node, keeping the graph
-compact (ADR-031 D7). `archive_graph.defining_members(graph, symbol)` is the
+compact. `archive_graph.defining_members(graph, symbol)` is the
 localization read view: every `(archive label, member name)` pair the graph
 records as defining a symbol, for a "`cache_dispatch.o` in
 `libinternal_dispatch.a`" finding detail.
@@ -262,7 +257,7 @@ Like the archive/object join, **`TEMPLATE_USES_TYPE`/`INSTANTIATION_EMITS_SYMBOL
 only ever join onto a node the graph already carries** — an unresolved
 template argument (a builtin type, a non-type literal) contributes no edge,
 and an instantiated member the linker discarded (never ODR-used, or inlined
-away) mints no symbol node, keeping the graph compact (ADR-031 D7).
+away) mints no symbol node, keeping the graph compact.
 
 Two AST shapes were the load-bearing empirical findings while building the
 parser (see the module's own docstring for the full detail): an *explicit*
@@ -298,8 +293,7 @@ joined by line-range containment. Driven by
 | `MACRO_EXPANDS_TO_VALUE` / `MACRO_EXPANDS_TO_TYPE` / `MACRO_CONTROLS_EDGE` *(edges)* | reserved | See the module's own docstring for why each is deferred (real macro-*expansion* tracing for the first two; per-edge rather than per-declaration conditional attribution for the third). |
 
 No new **node** kind — both edges join onto the existing `macro`/
-`source_decl` node kinds only (join-only-onto-an-existing-node, the same
-ADR-057 D1 rule `archive_graph.py`'s `OBJECT_DEFINES_SYMBOL` reapplies): a
+`source_decl` node kinds only (join-only-onto-an-existing-node, the same rule `archive_graph.py`'s `OBJECT_DEFINES_SYMBOL` reapplies): a
 macro or declaration this pass discovers in the AST/text scan but the graph
 doesn't already carry a node for mints nothing.
 
@@ -499,7 +493,7 @@ all three as `GraphProofPath.alternative_paths`/`discarded_path_count` on
 
 `extractor_passes`/`narrowed_passes`/`degraded_passes` track coverage at the
 family level (`"call_graph"`, `"type_graph"`, …); `ROLE_COVERAGE_MATRIX`
-(`abicheck/buildsource/inline_graph_fold.py`, ADR-046 D3) extends this to a
+(`abicheck/buildsource/inline_graph_fold.py`) extends this to a
 `(kind, role)` grain, e.g. `"type_graph:DECL_HAS_TYPE:param"` vs.
 `"type_graph:DECL_HAS_TYPE:var"` — so a producer that covers
 return/parameter types but not variable/typedef-underlying types can
@@ -544,12 +538,12 @@ third would take, is recorded once in
 [G29 Phase 5 item 5](../contribute/plans/g29-impact-analysis-layer.md#phase-5-new-semantic-graph-families)
 — the rationale owner for these decisions — rather than restated here.
 
-## `EntityResolver` (ADR-046 D4, scoped implementation)
+## `EntityResolver` (scoped implementation)
 
 `abicheck/buildsource/entity_resolver.py`'s `EntityResolver` computes a
 USR-preferring canonical identity for a `GraphNode` — reusing
 `entity_identity.resolve_identity_for_node`
-([ADR-048](../contribute/adr/048-canonical-entity-identity-and-graph-reconciliation.md))
+
 as its resolution source — and records the result as an alias:
 
 ```json
@@ -579,9 +573,7 @@ correctly through its existing `GraphNode.id` values, with no forced
 re-collection.
 
 **What this does not do:** change `GraphNode.id` generation itself across
-every graph-producing module, or provide an on-disk v2 pack format keyed by
-canonical identity — see [ADR-046](../contribute/adr/046-source-graph-identity-v2-and-evidence-merge.md)'s
-"D4 implementation" section for the full scoping rationale.
+every graph-producing module, or provide an on-disk v2 pack format keyed by canonical identity.
 
 ---
 
@@ -715,17 +707,17 @@ independently-nullable keys:
 - `proof_path` mirrors `affected_public_roots`/`impact_proof_path`/
   `impact_is_direct`/`reachability_proof_path`, when the finding has any of
   them — `root` and `steps` come from the structured L5 graph walk
-  ([ADR-048](../contribute/adr/048-canonical-entity-identity-and-graph-reconciliation.md)),
+ ,
   `prose` is the human-readable rendering. `steps` is empty when only the
   prose rendering is available. When a producer had more than one candidate
   path and picked this one via the
-  [ADR-046 D6 preference order](source-graph-schema.md#proof-path-preference-order-adr-046-d6),
+  [proof-path preference order](source-graph-schema.md#proof-path-preference-order),
   the runner-ups appear as `alternative_paths` (each its own nested
   `proof_path`-shaped object) and `discarded_path_count` counts any further
   candidates beyond the kept cap — both absent for the common single-candidate
   case. `occurrence_id` is a stable, `description`-independent hash over this
   path's underlying graph occurrences
-  ([ADR-046 D1](source-graph-schema.md#relation_key-and-occurrence_id)) —
+  —
   absent today for nearly every finding, since no current producer populates
   the per-call-site attrs it's derived from.
 - `decision` records whether the finding was kept or suppressed, and (when a

@@ -1,5 +1,5 @@
 # Executable contract for this workflow example (Phase 5 of the
-# examples/catalog split). `validation/scripts/run_workflow_examples.py`
+# examples/catalog split). `skills-src/evaluation/validation/scripts/run_workflow_examples.py`
 # copies the directory to a scratch tree, runs each `run:` line below as a
 # single program invocation -- no shell, `shlex.split` + `shell=False` --
 # and checks what it claims.

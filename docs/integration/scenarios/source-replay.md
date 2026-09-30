@@ -3,8 +3,7 @@
 You have a compile database (or something abicheck can derive one from) and
 want PR-scoped source-level checks — inline function bodies, template
 instantiations, macro values, default arguments, `constexpr` — not just the
-binary/header surface. [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
-§8's S7: on a pull request, scope the (expensive) replay to just the changed
+binary/header surface. Scenario S7: on a pull request, scope the (expensive) replay to just the changed
 translation units; on a release/nightly run, replay the whole target.
 
 This is the **replay** evidence producer — abicheck derives source facts
@@ -39,8 +38,7 @@ where the *build* emits source facts as it compiles instead.
 
 **One-step, root-Action `mode: compare`** — the simplest wiring, classifies
 changed paths, runs the pinned evidence level, and compares in one step
-([ADR-068's Action-input-lifecycle amendment](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-11-the-action-input-lifecycle-mode-scan-retired-outright)
-retired the once-separate `mode: scan` outright — this is now the same
+(0.6 retired the once-separate `mode: scan` outright — this is now the same
 `mode: compare` the rest of this page's two-sided examples use, with
 `old-library` as the baseline):
 

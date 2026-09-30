@@ -2,7 +2,7 @@
 
 Generate, validate, and diff [Debian symbols files](https://manpages.debian.org/unstable/dpkg-dev/dpkg-gensymbols.1.en.html) for integration with Debian/Ubuntu packaging workflows where `dpkg-gensymbols` and `dpkg-shlibdeps` use symbols files for fine-grained dependency tracking.
 
-> **No CLI command anymore.** The pre-1.0 CLI reset (ADR-043) removed the
+> **No CLI command anymore.** The pre-1.0 CLI reset removed the
 > standalone `abicheck debian-symbols` command (`generate`/`validate`/`diff`
 > subcommands) with **no CLI replacement**. The underlying logic still exists
 > as plain Python functions in `abicheck/debian_symbols.py` — everything

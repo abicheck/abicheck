@@ -1,8 +1,7 @@
 # Scenarios S26 & S27: Migration and Intentional Breaks
 
 Two situations where the check itself doesn't change, but how it's allowed
-to affect CI does — [ADR-047](../../contribute/adr/047-github-actions-integration-model.md)
-§8 names them S26 and S27:
+to affect CI does — scenarios S26 and S27:
 
 - **S26 — shadow rollout / migrating from another ABI tool.** You're
   adopting abicheck alongside an existing tool (or introducing ABI checks to

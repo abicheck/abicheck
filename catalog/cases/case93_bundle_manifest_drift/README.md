@@ -29,7 +29,7 @@ apart on its own.
 | `train_double_sparse` | present | *(removed)* |
 
 `manifest.yaml` declares all four as promised public instantiations
-(`docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md`).
+(see [Multi-binary analysis](../../../docs/use/multi-binary.md)).
 
 ## abicheck command
 

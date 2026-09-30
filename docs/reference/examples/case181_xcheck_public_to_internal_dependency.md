@@ -18,8 +18,7 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline. abicheck reports **no verdict at all** (`"verdict": null`): ADR-068
-D2 — a single build has nothing to be compatible *with*. (The catalog's 🟢
+baseline. abicheck reports **no verdict at all** (`"verdict": null`): a single build has nothing to be compatible *with*. (The catalog's 🟢
 COMPATIBLE classification above describes the case, not the command's output:
 the ABI hasn't broken.) But the audit flags an advisory finding: the public,
 header-declared `json_parse()` calls straight into `validate_utf8()`, a helper
@@ -52,8 +51,7 @@ abicheck compare --no-baseline snapshot.abi.json
 ```
 
 !!! note "`compare --no-baseline`, not `scan`"
-    [ADR-068](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    D2 makes this the declared spelling for a single-build audit, and
+    0.6 makes this the declared spelling for a single-build audit, and
     retires `scan`. This case was blocked on that migration until
     2026-09-09; the audit now reports the finding below directly, and
     `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that it

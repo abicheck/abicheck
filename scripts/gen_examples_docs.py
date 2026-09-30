@@ -119,7 +119,7 @@ CATEGORY_META = {
     "bundle": {
         "label": "Bundle (Multi-library)",
         "blurb": (
-            "Multi-library release cohorts (ADR-023) — the break is between "
+            "Multi-library release cohorts — the break is between "
             "libraries in one bundle, not inside any single one."
         ),
     },
@@ -683,7 +683,7 @@ def _render_index(cases: list[Case]) -> str:
         "cases are a minimal compilable v1/v2 pair plus a consumer "
         "(`app.c`/`app.cpp`) that demonstrates the actual runtime effect; some "
         "build-mode cases ship only the v1/v2 sources plus a per-side "
-        "`compile_commands.json`, and the multi-library bundle cases (ADR-023) "
+        "`compile_commands.json`, and the multi-library bundle cases "
         "ship a whole release cohort.\n\n",
         "> **Looking for how to *use* abicheck on your own library?** Start "
         "with the task-oriented [workflow examples](../../start/first-check.md) "
@@ -814,7 +814,7 @@ def _render_index(cases: list[Case]) -> str:
     lines.append("\n## All cases\n\n")
     lines.append(
         "> Every case in `catalog/ground_truth.json`, including the "
-        "multi-library bundle cases (ADR-023), sorted by case number. Gaps "
+        "multi-library bundle cases, sorted by case number. Gaps "
         "in the numbering are retired cases, not missing pages.\n\n"
     )
     lines.append("| Case | Title | Verdict | Category |\n")
@@ -1106,9 +1106,7 @@ def _render_readme_headline(entries: list[ReadmeEntry]) -> str:
     n_single = n_total - n_bundle
     return (
         f"This directory contains **{n_total} cases** "
-        f"({n_single} single-library + {n_bundle} multi-library bundle cases, "
-        "the latter tracked under "
-        "[ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) "
+        f"({n_single} single-library + {n_bundle} multi-library bundle cases) "
         "demonstrating real-world ABI/API break scenarios. Most cases are a "
         "minimal, compilable C/C++ example with:"
     )
@@ -1144,7 +1142,7 @@ def _render_readme_distribution(entries: list[ReadmeEntry]) -> str:
         (
             "Bundle (multi-binary)",
             n_bundle,
-            "see [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)",
+            "see [Multi-binary analysis](../docs/use/multi-binary.md)",
             "🔵",
         ),
     ]

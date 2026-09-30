@@ -251,7 +251,7 @@ def collect_inline_pack(
             # silently pays full-target (== s6) replay cost — the ADR-035 P3 cliff
             # (found during a real-world UXL field run). 'headers-only' keeps a
             # non-empty public surface for the cross-checks at a fraction of the cost;
-            # the caller (cli_scan) emits the advisory naming --since to focus further.
+            # the retired caller (cli_scan, deleted by ADR-068 Phase 6) emitted the advisory naming --since to focus further.
             replay_scope = (
                 "headers-only" if (scope == "changed" and not changed_paths) else scope
             )

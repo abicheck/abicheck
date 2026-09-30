@@ -215,7 +215,7 @@ def test_source_links_to_docs_pages_all_resolve():
     The generator itself also hard-fails on a missing target; this asserts the
     committed sources are clean rather than relying on generation order."""
     offenders: list[str] = []
-    for path in sorted(SRC.rglob("*.md")):
+    for path in gen.published_source_files(SRC):
         # Code examples are masked for the same reason the generator masks
         # them: link syntax shown inside a fence is content, not a link, and
         # demanding it resolve would reject a source for demonstrating one.

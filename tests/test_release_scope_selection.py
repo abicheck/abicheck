@@ -689,7 +689,7 @@ class TestDirectBundleApiHonorsDegradation:
         new_snapshot = bundle_snapshot_from_facts(
             capture_bundle_facts({"libalgo.so": _lib("libalgo.so")})
         )
-        with pytest.raises(ValueError, match="libcore.so.*ADR-065 D8"):
+        with pytest.raises(ValueError, match="libcore.so.*not bundle evidence"):
             compare_bundle_from_facts(self._facts(), new_snapshot, [])
 
     def test_compare_bundle_sides_refuses(self, tmp_path: Path) -> None:

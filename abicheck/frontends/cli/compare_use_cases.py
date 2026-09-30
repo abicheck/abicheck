@@ -40,7 +40,7 @@ def reject_use_cases_without_carrying_output(
     """Reject ``--use-cases`` when nothing this run renders would carry it.
 
     A manifest resolved and then dropped is the same failure --use-cases is
-    rejected for set inputs to avoid -- sarif/junit/html never read
+    rejected for set inputs to avoid -- sarif/junit never read
     ``DiffResult.use_case_impact``, and ``oneline`` has no room for it
     either. Asked across *every* export this run produces (``-o`` is
     repeatable): "one output carrying it" is satisfied by any one of them,
@@ -59,6 +59,6 @@ def reject_use_cases_without_carrying_output(
         f"no output this run renders ({rendered}) carries use-case "
         "attribution, so the manifest would be resolved and its result "
         "dropped. Add an export that carries it -- -o json=PATH, or "
-        "markdown/review -- alongside the ones you already asked for."
+        "markdown/review/html -- alongside the ones you already asked for."
     )
     raise click.UsageError(f"--use-cases is not supported here: {detail}")

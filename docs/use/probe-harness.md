@@ -54,7 +54,7 @@ configuration's C++ standard floor.
 
 > **History note:** running probes and diffing matrices used to be two
 > standalone commands, `abicheck probe run` and `abicheck probe compare`.
-> The ADR-043 CLI reset removed both with no replacement command — the
+> The pre-1.0 CLI reset removed both with no replacement command — the
 > underlying Python functions are unchanged and still directly callable
 > (below), and `compare --build-info old=<matrix> --build-info new=<matrix>`
 > still folds a pair of pre-built `MatrixSnapshot` files into a comparison's
@@ -91,7 +91,7 @@ write_matrix_snapshot(new, "onedpl-2023.json")
 `load_matrix_snapshot`, or `matrix_snapshot_to_json`/
 `matrix_snapshot_from_dict` for an in-memory round trip), not on
 `probe_harness.py` itself — `probe_harness.py` is `compare`-classified and
-may not own a `storage` operation (ADR-061 gap E).
+may not own a `storage` operation.
 
 Save each `MatrixSnapshot` this way to feed `compare --build-info
 old=onedpl-2022.json --build-info new=onedpl-2023.json` instead, so the

@@ -68,7 +68,7 @@ Deployment Risk Changes:
 or DWARF for this fixture; it is only visible in the per-side compile flags
 captured from a `compile_commands.json` (or an equivalent build-system
 compile database). No artifact-level (L0/L1/L2) evidence carries this fact,
-which is why the verdict tops out at RISK rather than BREAKING (ADR-028 D3).
+which is why the verdict tops out at RISK rather than BREAKING.
 
 ## Why abicheck catches it
 
