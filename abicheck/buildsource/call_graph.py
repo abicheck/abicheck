@@ -25,10 +25,11 @@ This module is split so the hard part stays testable:
 - :func:`parse_clang_ast_calls` is a **pure function** over a
   ``clang -Xclang -ast-dump=json`` tree (a plain dict). It is exercised by unit
   tests against captured AST fixtures — no compiler required.
-- :class:`ClangCallGraphExtractor` is the thin, side-effecting wrapper that
-  shells out to ``clang`` for a translation unit and feeds the parser. It is
-  only run on the ``integration`` lane (it needs a real ``clang``); a missing
-  compiler degrades gracefully, exactly like the L4 source extractors.
+- :func:`merge_call_edges` folds every TU's edges; the live clang run that
+  feeds the parser is ``l5_ast_pass`` (one dump per TU shared by every L5
+  graph family, integration-only; a missing compiler degrades gracefully,
+  exactly like the L4 source extractors). This module still owns the replay
+  argv (``_safe_clang_args_from_compile_unit``) and worker sizing it uses.
 - :func:`augment_graph_with_calls` folds the resulting edges into a
   :class:`~abicheck.model.source_graph.SourceGraphSummary`.
 """
@@ -37,17 +38,10 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
-import time
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field, replace
-from functools import partial
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
 
-from .. import deadline
-from ..build_context import _extract_flags
-from ..extract.progress import track
 from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -57,13 +51,10 @@ from ..model.graph_facts import (
 )
 from ..model.mangled_name import strip_macho_itanium_decoration
 from ..model.source_graph import function_decl_identity
-from ..process_resources import BudgetedExecutor
-from .adapters.base import source_from_argv
 from .call_decl_record import (
     _OVERRIDE_MARKER_KINDS,
     _compact_decl_record,
 )
-from .clang_ast_run import parse_clang_ast
 from .source_graph_build import project_source_files
 from .source_graph_build_source_abi import _file_in_project
 
@@ -825,7 +816,7 @@ def extractor_pass_fully_covered(
     - At least one compile unit to examine: an empty target trivially "finds
       nothing" without having looked at anything at all.
     - No per-TU diagnostics recorded on *extractor* (seventh Codex review):
-      ``extract_from_build`` degrades a failing TU (clang crash/timeout/
+      the L5 AST pass (``l5_ast_pass.run_ast_passes``) degrades a failing TU (clang crash/timeout/
       degenerate AST) to zero edges *silently* — the returned edge list alone
       cannot distinguish "every TU parsed cleanly, zero found" from "some TU
       never actually got parsed." Diagnostics are the only signal a partial
@@ -993,23 +984,6 @@ def _safe_replay_flags_from_context(
     return out
 
 
-def _safe_clang_args_from_argv(argv: list[str], cwd: str | None = None) -> list[str]:
-    """Return a safe parse-only argv reconstructed from a compile argv."""
-    ctx = _extract_flags(argv, Path(cwd or "."))
-    source = source_from_argv(argv)
-    flags = _safe_replay_flags_from_context(
-        standard=ctx.language_standard or "",
-        target_triple=ctx.target_triple or "",
-        sysroot=str(ctx.sysroot) if ctx.sysroot else None,
-        defines=ctx.defines,
-        undefines=ctx.undefines,
-        include_paths=[str(p) for p in ctx.include_paths],
-        system_include_paths=[str(p) for p in ctx.system_includes],
-        abi_relevant_flags=ctx.extra_flags,
-    )
-    return [*flags, "--", source] if source else flags
-
-
 def _safe_clang_args_from_compile_unit(cu: BuildEvidenceCompileUnit) -> list[str]:
     """Return safe clang AST-replay args for one normalized compile unit.
 
@@ -1129,161 +1103,16 @@ def _call_graph_jobs(n_units: int) -> int:
     return jobs
 
 
-#: Generic over a worker's own return shape -- originally always
-#: ``list[Any]`` (one AST-pass's edge/range list), now also the
-#: ``(edges, local_diagnostics)`` tuple every ``Clang*GraphExtractor``'s
-#: ``extract_from_build`` uses to keep its ``diagnostics`` list
-#: deterministically input-ordered instead of subprocess-completion-ordered
-#: (see each extractor's own ``extract_from_build`` docstring).
-_WorkerResult = TypeVar("_WorkerResult")
-
-
-def _deadline_bound_worker(
-    deadline_ts: float | None,
-    worker: Callable[[BuildEvidenceCompileUnit], _WorkerResult],
-    unit: BuildEvidenceCompileUnit,
-) -> _WorkerResult:
-    """Re-establish a captured scan deadline inside a ThreadPoolExecutor worker.
-
-    ``contextvars`` don't cross a ``ThreadPoolExecutor`` boundary, so a worker
-    submitted from ``extract_from_build`` would otherwise see no active
-    deadline and each clang subprocess call inside it would run to its full
-    fixed 120s regardless of ``--budget`` (Codex review, PR #591; same
-    pattern as ``source_replay._deadline_bound_worker``). Shared by every
-    ``Clang*GraphExtractor.extract_from_build`` in this package (call/
-    callback/override/macro/type/template graphs).
-    """
-    with deadline.with_deadline_ts(deadline_ts):
-        return worker(unit)
-
-
-# ── live clang extraction (integration only) ────────────────────────────────
-
-
-@dataclass
-class ClangCallGraphExtractor:
-    """Shell out to ``clang`` to emit a TU's AST and parse its call edges.
-
-    Side-effecting and compiler-dependent: only exercised on the ``integration``
-    lane. A missing ``clang`` (or a parse failure) degrades gracefully —
-    :meth:`extract` returns ``[]`` and records nothing — so the no-tool MVP and
-    the verdict pipeline never depend on it (ADR-028 D3).
-    """
-
-    clang_bin: str = "clang++"
-    diagnostics: list[str] = field(default_factory=list)
-    last_jobs: int = 0
-    last_elapsed_s: float = 0.0
-
-    def available(self) -> bool:
-        return shutil.which(self.clang_bin) is not None
-
-    def extract_from_args(
-        self, argv: list[str], cwd: str | None = None
-    ) -> list[CallEdge]:
-        """Run clang AST extraction for one TU after allowlisting argv flags."""
-        return self._extract_from_safe_args(
-            _safe_clang_args_from_argv(argv, cwd), cwd=cwd
-        )
-
-    def _extract_from_safe_args(
-        self,
-        argv: list[str],
-        cwd: str | None = None,
-        *,
-        diagnostics: list[str] | None = None,
-    ) -> list[CallEdge]:
-        """Run ``clang -Xclang -ast-dump=json -fsyntax-only`` with pre-sanitized args.
-
-        The bounded run itself lives in :func:`clang_ast_run.run_clang_ast_dump`,
-        shared verbatim with the type-graph pass; only the parser applied to the
-        resulting AST differs between the two.
-
-        *diagnostics*, when given, is appended to instead of ``self.diagnostics``
-        — see :meth:`extract_from_build`'s own docstring for why a parallel
-        caller passes a fresh per-unit list here rather than the shared one.
-        """
-        diag = self.diagnostics if diagnostics is None else diagnostics
-        if not self.available():
-            diag.append(f"{self.clang_bin} not found in PATH")
-            return []
-        try:
-            return parse_clang_ast(
-                self.clang_bin, argv, cwd, diag, parse_clang_ast_calls, []
-            )
-        except (ValueError, RecursionError) as exc:
-            diag.append(f"could not parse clang AST JSON: {exc}")
-            return []
-
-    def _extract_from_compile_unit(
-        self, cu: BuildEvidenceCompileUnit, *, diagnostics: list[str] | None = None
-    ) -> list[CallEdge]:
-        argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(
-            argv, cwd=_replay_cwd(cu), diagnostics=diagnostics
-        )
-
-    def extract_from_build(self, build: BuildEvidence) -> list[CallEdge]:
-        """Extract call edges across every compile unit in *build* (best effort).
-
-        Each unit's own diagnostics are collected into a *fresh, per-call*
-        list (never the shared ``self.diagnostics`` directly) and only
-        folded into ``self.diagnostics`` back on this (single) driving
-        thread, in the loop below -- which iterates ``pool.map``'s result in
-        *input* order, not worker-completion order. Appending straight to
-        ``self.diagnostics`` from inside a worker (the original shape here)
-        would still be individually thread-safe (``list.append`` is GIL-
-        atomic) but nondeterministically *ordered* across identical, pinned
-        inputs -- see :mod:`abicheck.parallel_probe`'s module docstring,
-        which documents this exact bug class found here across all six
-        ``Clang*GraphExtractor`` classes in this package (Codex review).
-        """
-        start = time.monotonic()
-        units = [cu for cu in build.compile_units if cu.source]
-        self.last_jobs = _call_graph_jobs(len(units))
-        if not units:
-            self.last_elapsed_s = 0.0
-            return []
-        if not self.available():
-            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
-            self.last_elapsed_s = time.monotonic() - start
-            return []
-
-        all_edges: list[CallEdge] = []
-        seen: set[tuple[str, str, str]] = set()
-
-        def add_edges(edges: Iterable[CallEdge]) -> None:
-            for e in edges:
-                key = (e.caller, e.callee, e.call_kind)
-                if key not in seen:
-                    seen.add(key)
-                    all_edges.append(e)
-
-        def _probe(cu: BuildEvidenceCompileUnit) -> tuple[list[CallEdge], list[str]]:
-            local_diagnostics: list[str] = []
-            edges = self._extract_from_compile_unit(cu, diagnostics=local_diagnostics)
-            return edges, local_diagnostics
-
-        try:
-            if self.last_jobs > 1 and len(units) > 1:
-                pool_worker = partial(
-                    _deadline_bound_worker,
-                    deadline.current_deadline_ts(),
-                    _probe,
-                )
-                with BudgetedExecutor(self.last_jobs) as pool:
-                    done = pool.map(pool_worker, units)
-                    for edges, local_diagnostics in track(
-                        done, "call graph", len(units)
-                    ):
-                        add_edges(edges)
-                        self.diagnostics.extend(local_diagnostics)
-            else:
-                for cu in track(units, "call graph", len(units)):
-                    edges, local_diagnostics = _probe(cu)
-                    add_edges(edges)
-                    self.diagnostics.extend(local_diagnostics)
-        finally:
-            self.last_elapsed_s = time.monotonic() - start
-
-        return all_edges
+def merge_call_edges(per_unit: Iterable[Iterable[CallEdge]]) -> list[CallEdge]:
+    """Fold every TU's call edges into one list, in TU order, first-seen
+    ``(caller, callee, call_kind)`` wins (a shared header's inline body is
+    parsed by every TU that includes it)."""
+    merged: list[CallEdge] = []
+    seen: set[tuple[str, str, str]] = set()
+    for edges in per_unit:
+        for e in edges:
+            key = (e.caller, e.callee, e.call_kind)
+            if key not in seen:
+                seen.add(key)
+                merged.append(e)
+    return merged

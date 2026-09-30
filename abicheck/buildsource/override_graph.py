@@ -47,10 +47,9 @@ Architecture mirrors ``call_graph.py``/``type_graph.py`` deliberately:
 
 - :func:`parse_clang_ast_overrides` is a **pure function** over a
   ``clang -Xclang -ast-dump=json`` tree — unit-tested without a compiler.
-- :class:`ClangOverrideGraphExtractor` is the thin, side-effecting wrapper
-  that shells out to ``clang`` for a translation unit and feeds the parser.
-  Only exercised on the ``integration`` lane; a missing compiler degrades
-  gracefully.
+- :func:`parse_clang_ast_override_facts`/:func:`merge_override_facts` are
+  this family's per-TU parser and cross-TU merge; the live clang run is
+  ``l5_ast_pass`` (integration-only; a missing compiler degrades gracefully).
 - :func:`augment_graph_with_overrides` folds the resulting edges into a
   :class:`~abicheck.model.source_graph.SourceGraphSummary`.
 
@@ -119,6 +118,7 @@ omissions):
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -594,8 +594,7 @@ def augment_graph_with_overrides(
     ``resolution`` pair lives (``call_graph.augment_graph_with_calls``).
 
     *virtual_methods* (:func:`parse_clang_ast_virtual_methods`'s output,
-    aggregated across every TU — see :attr:`ClangOverrideGraphExtractor.
-    last_virtual_methods`) additionally stamps an ``is_virtual: True`` fact
+    unioned across every TU by :func:`merge_override_facts`) additionally stamps an ``is_virtual: True`` fact
     (``CONF_HIGH`` — a real, clang-confirmed structural fact, not a guess)
     onto every identity's ``decl://`` node the graph **already carries**
     (Codex review, fresh evidence): a method that is virtual but has no
@@ -671,3 +670,35 @@ def augment_graph_with_overrides(
                 )
             )
     return added
+
+
+def parse_clang_ast_override_facts(
+    ast: dict[str, Any],
+) -> tuple[list[OverrideEdge], frozenset[str], frozenset[str]]:
+    """This pass's three per-TU facts from one AST: override edges, every
+    virtual-method identity, and every class declaring its own virtual
+    destructor."""
+    return (
+        parse_clang_ast_overrides(ast),
+        parse_clang_ast_virtual_methods(ast),
+        parse_clang_ast_virtual_destructor_owners(ast),
+    )
+
+
+def merge_override_facts(
+    per_unit: Iterable[tuple[list[OverrideEdge], frozenset[str], frozenset[str]]],
+) -> tuple[list[OverrideEdge], set[str], set[str]]:
+    """Fold every TU's override facts, in TU order: edges deduped by
+    first-seen ``(src, dst)``, the two identity sets unioned."""
+    edges: list[OverrideEdge] = []
+    seen: set[tuple[str, str]] = set()
+    virtual_methods: set[str] = set()
+    virtual_destructor_owners: set[str] = set()
+    for unit_edges, unit_methods, unit_owners in per_unit:
+        for e in unit_edges:
+            if (e.src, e.dst) not in seen:
+                seen.add((e.src, e.dst))
+                edges.append(e)
+        virtual_methods.update(unit_methods)
+        virtual_destructor_owners.update(unit_owners)
+    return edges, virtual_methods, virtual_destructor_owners

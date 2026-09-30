@@ -23,8 +23,8 @@ compiler front end over the same TUs**:
 | L5 call-graph pass — **a second** `clang -ast-dump=json` per TU | 343s |
 | L5 type/override/template/macro/callback passes — **four more full dumps** per TU each... | > 15 min (run was killed at 30 min) |
 
-The six clang-backed L5 passes (`l5_shared_ast.fold_semantic_graphs`)
-built the *identical* argv for a TU (`call_graph._safe_clang_args_from_compile_unit`)
+The six clang-backed L5 passes (`inline_graph_fold.fold_semantic_graphs`,
+before this plan) built the *identical* argv for a TU (`call_graph._safe_clang_args_from_compile_unit`)
 and ran the identical bounded dump (`clang_ast_run.run_clang_ast_dump`); they
 differed only in which **pure** parser they applied to the resulting tree.
 L4's replay then dumps the same TU a seventh time under a separately-built
@@ -49,7 +49,7 @@ high call counts. Measure unprofiled before attacking a "hotspot".
 | clang argv from a compile unit | `dumper_ast_config.py` | L4 `source_extractors/clang.py:_clang_context_args` · L5 `call_graph._safe_replay_flags_from_context` | **Duplicated three ways** → Phase 2/3 |
 | compile-db flag rewriting | `CompileContext` / `header_utils` | `source_extractors/_argv.py` (~1,700 lines) + `_argv_shortopts.py` | **Duplicated** → Phase 3 (parent plan's P1) |
 | clang subprocess runner | `dumper_toolchain` / `dumper_clang_streaming` | L4 `_deadline_bound.run_bounded_for_extraction` · L5 `clang_ast_run.run_clang_ast_dump` | **Duplicated** → Phase 2 |
-| L5 per-TU AST dump | — | six passes, one dump each | **Fixed (Phase 1)** |
+| L5 per-TU AST dump | — | six extractors, one dump + one loop each | **Fixed (Phase 1)**: one `l5_ast_pass` run |
 | clang JSON → declarations/types | `dumper_clang._ClangAstParser` → `RecordType`/`Function` | `source_extractors/clang.py` + `clang_nodes.py` → `SourceEntity` | **Duplicated** → Phase 4 |
 | body/default-arg/template fingerprints, macros (`-E -dD`) | — | `clang_nodes.py`, `clang.py:macros_from_preprocessor` | **Intentionally L4-only** — additive facts, keep |
 | entity identity | `model.identity.EntityId`, `extract.semantic_normalizer` | `SourceEntity.identity`, `abicheck-clang-canonical` fact set | **Duplicated** → Phase 5 (ADR-063) |
@@ -63,34 +63,60 @@ Each phase is a separate PR, is behavior-preserving unless it says otherwise,
 and proves itself on the public workflow (a real `dump --depth source`), not
 only on an internal unit.
 
-### Phase 1 — one clang dump per TU across the L5 graph passes (implemented)
+### Phase 1 — one L5 AST pass replaces six extractors (implemented)
 
-`clang_ast_run.parse_clang_ast` + `shared_ast_scope`. Inside the scope
-`fold_semantic_graphs` opens, the first request for a `(clang_bin, argv,
-cwd)` key dumps once and applies every registered pass's parser to that one
-tree; the tree is dropped and only the parsers' results and the dump's
-diagnostics are kept. Later passes are answered from that record with the
-same diagnostics replayed and the same exception re-raised into their own
-`except` clause, so each pass observes what an independent dump would have
-given it. Outside a scope nothing changes. The override pass's three parsers
-became one bundled parser (`override_graph.parse_clang_ast_override_facts`).
+`buildsource/l5_ast_pass.py`. The six `Clang*GraphExtractor` classes (call,
+type, override, template, macro-range, callback) are **deleted**, with the
+two modules that existed only to hold two of them
+(`override_graph_extractor.py`, `template_graph_extractor.py`), the lazy
+`template_graph.ClangTemplateGraphExtractor` re-export, and
+`call_graph.extract_from_args`/`_safe_clang_args_from_argv`. Each class
+carried its own copy of one loop -- select the units, size a worker pool,
+dump every TU, fold diagnostics in input order, merge across TUs -- and
+dumped every TU itself.
 
-One accepted difference: before, a malformed AST that made the override
-pass's *third* parser raise still left the first two parsers' virtual-method
-facts recorded; the bundled parser records none of them for that TU. Both
-answers degrade the TU to a diagnostic, and neither was tested.
+What replaced them:
 
-Tests: `tests/test_clang_ast_shared_scope.py` — a generated property test
-(unit sets, failing TUs and pass order all generated) against a direct
-`parser(ast)` oracle, plus the scope-lifetime, overlapping-scope,
-concurrency and end-to-end "N units → N dumps" invariants. Mutating the
-scope to register nothing fails the end-to-end test (16 dumps instead of 1).
+- `run_l5_ast_pass` scopes the compile DB **once** (the precedence
+  `_scope_narrowed_target` already defined) and resolves the clang binary
+  once; `run_ast_passes` sizes one pool, dumps each TU **once**, and applies
+  every family's `AstPass` (`L5_AST_PASSES`: a per-TU parser, a cross-TU
+  merge, and the exceptions that degrade a TU for that family only).
+- Each family keeps only what is genuinely its own: its pure parser, its
+  cross-TU merge (now public: `merge_call_edges`, `merge_type_edges`,
+  `merge_override_facts`, `merge_template_instantiations`,
+  `merge_decl_ranges`, `merge_callback_edges`; the macro family's per-TU
+  cwd resolution is `parse_tu_decl_ranges`), and its `inline_graph_fold`
+  fold, which now reads `run.outcomes[name]` instead of constructing an
+  extractor.
+- `fold_semantic_graphs` is the one entry point. The out-of-band `collect`
+  path used to keep its own copy of the pass list (and fell behind it three
+  times, per its own comments); it now calls the same function.
+
+Two observable differences, both deliberate:
+
+- The override family's three parsers run as one parser
+  (`parse_clang_ast_override_facts`); a malformed AST that made the *third*
+  raise used to still record the first two's facts for that TU, and now
+  records none. Either way the TU degrades to a diagnostic.
+- The `collect` path now runs the include-graph fold last (as the inline
+  path always did) rather than third; the include pass is independent of
+  the others, so only the order of extractor rows changes.
+
+Tests: `tests/test_l5_ast_pass.py` states the runner's contract as
+generated invariants against an independent oracle (the family's own
+`merge(parse(...))` computed directly): one dump per TU whatever the family
+count, each family's result and diagnostics equal to that derivation, a
+parse failure degrading only its own family and TU, and no dependence on
+worker completion order. Mutating the runner to dump per family, or to fold
+in completion order, fails it. `tests/_fake_l5_ast_pass.py` is the shared
+stand-in the fold tests use in place of the old per-class fakes.
 
 ### Phase 2 — L4 replay and L5 read the same dump
 
 Make L4's `ClangSourceExtractor` and the L5 passes share one dump per TU:
 one argv builder for a clang AST replay of a `CompileUnit`, one bounded
-runner, and the L4 extractor registering its own parser in the same scope
+runner, and the L4 extractor contributing an `AstPass` to the same run
 (its macro pass, `-E -dD`, is a different invocation and stays separate).
 Prerequisite: reconcile `_clang_context_args` with
 `_safe_replay_flags_from_context` — they intentionally differ today (L5

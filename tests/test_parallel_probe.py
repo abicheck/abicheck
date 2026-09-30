@@ -23,12 +23,11 @@ classes an S2 preprocessor-pre-scan PR review found in a hand-rolled
    ``pool.map`` result list holds every payload in memory at once).
 
 A follow-up audit (this same review round) found the identical bug-1 shape
-copy-pasted across SIX ``Clang*GraphExtractor`` classes
-(``call_graph.py``, ``callback_graph.py``, ``override_graph.py``,
-``macro_graph.py``, ``type_graph.py``, ``template_graph_extractor.py``) --
-confirming this is a systemic pattern, not a one-off, which is why the fix
-lives here as a reusable primitive rather than staying local to
-``preprocessor_facts.py``. These tests exercise the primitive directly,
+copy-pasted across six ``Clang*GraphExtractor`` classes -- confirming this is
+a systemic pattern, not a one-off, which is why the fix lives here as a
+reusable primitive rather than staying local to ``preprocessor_facts.py``.
+Those six classes have since been replaced by one caller of this primitive,
+``buildsource/l5_ast_pass.run_ast_passes``. These tests exercise the primitive directly,
 decoupled from any one caller's domain logic, per this repo's own
 "primitive-level property tests" convention (AGENTS.md).
 """
@@ -347,3 +346,26 @@ def test_reorder_restores_input_order_for_a_random_failing_subset(
 
     expected = [f"msg-{u}" for u in units if u in failing]
     assert diag.messages == expected
+
+
+@pytest.mark.parametrize("jobs", [1, 4])
+def test_progress_label_reports_every_item_without_changing_results(
+    monkeypatch, jobs
+) -> None:
+    from abicheck.extract import progress
+
+    reported: list[tuple[str, int, int]] = []
+
+    def fake_track(items, label, total):
+        for n, item in enumerate(items, 1):
+            reported.append((label, n, total))
+            yield item
+
+    monkeypatch.setattr(progress, "track", fake_track)
+    items = list(range(6))
+    with_label = run_parallel_probes(
+        items, lambda i: (i, i * i), jobs=jobs, progress="probes"
+    )
+    without = run_parallel_probes(items, lambda i: (i, i * i), jobs=jobs)
+    assert with_label == without == [(i, i * i) for i in items]
+    assert reported == [("probes", n, 6) for n in range(1, 7)]

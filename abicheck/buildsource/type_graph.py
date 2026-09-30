@@ -34,10 +34,8 @@ Architecture mirrors ``call_graph.py`` deliberately:
 
 - :func:`parse_clang_ast_types` is a **pure function** over a
   ``clang -Xclang -ast-dump=json`` tree — unit-tested without a compiler.
-- :class:`ClangTypeGraphExtractor` is the thin, side-effecting wrapper that
-  shells out to ``clang`` for a translation unit and feeds the parser. Only
-  exercised on the ``integration`` lane; a missing compiler degrades
-  gracefully.
+- :func:`merge_type_edges` folds every TU's edges; the live clang run is
+  ``l5_ast_pass`` (integration-only; a missing compiler degrades gracefully).
 - :func:`augment_graph_with_types` folds the resulting edges into a
   :class:`~abicheck.model.source_graph.SourceGraphSummary`.
 
@@ -61,24 +59,18 @@ is future work; see ADR-041 P0/P1.
 from __future__ import annotations
 
 import re
-import shutil
-import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from functools import lru_cache, partial
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-from .. import deadline
 from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 from ..model.mangled_name import strip_macho_itanium_decoration
 from ..model.source_graph import function_decl_identity
-from ..process_resources import BudgetedExecutor
-from .clang_ast_run import parse_clang_ast
 from .graph_facts import register_fact
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
-    from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
 
 # ── edge kinds (already reserved by source_graph.GRAPH_EDGE_KINDS) ─────────
 EDGE_TYPE_INHERITS = "TYPE_INHERITS"
@@ -1875,122 +1867,24 @@ def _merge_type_edges(existing: TypeEdge, new: TypeEdge) -> TypeEdge:
     return existing
 
 
-# ── live clang extraction (integration only) ────────────────────────────────
+def merge_type_edges(per_unit: Iterable[Iterable[TypeEdge]]) -> list[TypeEdge]:
+    """Fold every TU's type edges into one list, in TU order.
 
-
-@dataclass
-class ClangTypeGraphExtractor:
-    """Shell out to ``clang`` to emit a TU's AST and parse its type edges.
-
-    Side-effecting and compiler-dependent: only exercised on the
-    ``integration`` lane. A missing ``clang`` (or a parse failure) degrades
-    gracefully — extraction returns ``[]`` and records nothing (ADR-028 D3).
-    Reuses ``call_graph``'s vetted parse-only argv builder (same ABI-relevant
-    flag allowlist) so the two passes stay in lockstep on what is safe to
-    replay.
+    Keyed by ``(src, dst, kind, role)``: two TUs emitting the same private
+    type as one function's return type and another's parameter type must not
+    collapse onto one role. A repeat is merged (:func:`_merge_type_edges`),
+    not dropped -- a TU that includes the header declaring the private
+    ``dst`` sees richer provenance than one that does not.
     """
-
-    clang_bin: str = "clang++"
-    diagnostics: list[str] = field(default_factory=list)
-    last_jobs: int = 0
-    last_elapsed_s: float = 0.0
-
-    def available(self) -> bool:
-        return shutil.which(self.clang_bin) is not None
-
-    def _extract_from_safe_args(
-        self,
-        argv: list[str],
-        cwd: str | None = None,
-        *,
-        diagnostics: list[str] | None = None,
-    ) -> list[TypeEdge]:
-        """Run ``clang -Xclang -ast-dump=json -fsyntax-only`` with pre-sanitized args.
-
-        The bounded run itself lives in :func:`clang_ast_run.run_clang_ast_dump`,
-        shared verbatim with the call-graph pass; only the parser differs.
-        """
-        diag = self.diagnostics if diagnostics is None else diagnostics
-        if not self.available():
-            diag.append(f"{self.clang_bin} not found in PATH")
-            return []
-        try:
-            return parse_clang_ast(
-                self.clang_bin, argv, cwd, diag, parse_clang_ast_types, []
-            )
-        except (ValueError, RecursionError) as exc:
-            diag.append(f"could not parse clang AST JSON: {exc}")
-            return []
-
-    def _extract_from_compile_unit(
-        self, cu: BuildEvidenceCompileUnit, *, diagnostics: list[str] | None = None
-    ) -> list[TypeEdge]:
-        from .call_graph import _replay_cwd, _safe_clang_args_from_compile_unit
-
-        argv = _safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(
-            argv, cwd=_replay_cwd(cu), diagnostics=diagnostics
-        )
-
-    def extract_from_build(self, build: BuildEvidence) -> list[TypeEdge]:
-        """Extract type edges across every compile unit in *build* (best effort)."""
-        from .call_graph import _call_graph_jobs, _deadline_bound_worker
-
-        start = time.monotonic()
-        units = [cu for cu in build.compile_units if cu.source]
-        self.last_jobs = _call_graph_jobs(len(units))
-        if not units:
-            self.last_elapsed_s = 0.0
-            return []
-        if not self.available():
-            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
-            self.last_elapsed_s = time.monotonic() - start
-            return []
-
-        all_edges: list[TypeEdge] = []
-        # Role-aware key (Codex review, fresh evidence) -- same fix as
-        # _dedupe_edges above, applied to the cross-TU merge: two TUs
-        # emitting the same private type as a function's return type in one
-        # and its parameter type in the other must not collapse onto a
-        # single role, the same way one TU's own return+param edges must not.
-        seen: dict[tuple[str, str, str, str], int] = {}
-
-        def add_edges(edges: Iterable[TypeEdge]) -> None:
-            for e in edges:
-                key = (e.src, e.dst, e.kind, e.role)
-                idx = seen.get(key)
-                if idx is None:
-                    seen[key] = len(all_edges)
-                    all_edges.append(e)
-                else:
-                    # A different TU may see the same logical edge with richer
-                    # provenance (one TU doesn't include the header declaring
-                    # the private dst, another does) — merge in the stronger
-                    # confidence and any dst_file the first-seen edge lacked,
-                    # rather than silently keeping whichever TU happened to
-                    # run first (Codex review).
-                    all_edges[idx] = _merge_type_edges(all_edges[idx], e)
-
-        def _probe(cu: BuildEvidenceCompileUnit) -> tuple[list[TypeEdge], list[str]]:
-            local_diagnostics: list[str] = []
-            edges = self._extract_from_compile_unit(cu, diagnostics=local_diagnostics)
-            return edges, local_diagnostics
-
-        try:
-            if self.last_jobs > 1 and len(units) > 1:
-                pool_worker = partial(
-                    _deadline_bound_worker, deadline.current_deadline_ts(), _probe
-                )
-                with BudgetedExecutor(self.last_jobs) as pool:
-                    for edges, local_diagnostics in pool.map(pool_worker, units):
-                        add_edges(edges)
-                        self.diagnostics.extend(local_diagnostics)
+    merged: list[TypeEdge] = []
+    seen: dict[tuple[str, str, str, str], int] = {}
+    for edges in per_unit:
+        for e in edges:
+            key = (e.src, e.dst, e.kind, e.role)
+            idx = seen.get(key)
+            if idx is None:
+                seen[key] = len(merged)
+                merged.append(e)
             else:
-                for cu in units:
-                    edges, local_diagnostics = _probe(cu)
-                    add_edges(edges)
-                    self.diagnostics.extend(local_diagnostics)
-        finally:
-            self.last_elapsed_s = time.monotonic() - start
-
-        return all_edges
+                merged[idx] = _merge_type_edges(merged[idx], e)
+    return merged

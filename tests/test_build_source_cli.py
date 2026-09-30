@@ -3506,22 +3506,13 @@ def _tree_with_two_units(tmp_path):
 
 
 def _stub_call_graph(monkeypatch, seen: list[str]):
-    from abicheck.buildsource import call_graph
-    from abicheck.buildsource.call_graph import CallEdge
+    from tests._fake_l5_ast_pass import install_fake_l5
 
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
+    def record(target):
+        seen.extend(cu.source for cu in target.compile_units)
+        return []
 
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build) -> list[CallEdge]:
-            seen.extend(cu.source for cu in build.compile_units)
-            return []
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    install_fake_l5(monkeypatch, results={"call_graph": record})
 
 
 def test_inline_unseeded_call_graph_uses_l4_selection(tmp_path, monkeypatch):
