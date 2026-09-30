@@ -574,3 +574,22 @@ def test_a_floor_declared_below_the_promise_is_accepted(tmp_path: Path):
     assert "runtime_floors_declared" not in _failed(
         grader.grade(work, "cmake-c-rhel8-floor", "", CORPUS)
     )
+
+
+def test_cli_side_scoped_sources_count_as_baseline_source_evidence(tmp_path: Path):
+    """`abicheck compare --sources old=… --sources new=…` gives the old side
+    L4 evidence directly — only the Action's `sources` input is new-side-only."""
+    work = tmp_path / "ws"
+    shutil.copytree(EVAL / "fixtures" / "cmake-cpp-inline-heavy", work)
+    _write(
+        work,
+        ".github/workflows/abi.yml",
+        "name: abi\non:\n  pull_request:\npermissions:\n  contents: read\njobs:\n  abi:\n    runs-on: ubuntu-24.04\n    steps:\n"
+        "      - run: pip install abicheck==0.6.0 castxml && sudo apt-get install -y clang\n"
+        "      - run: |\n"
+        "          abicheck compare old/build/libvecmath.so build/libvecmath.so --header old=old/include --header new=include \\\n"
+        "            --depth source --sources old=old --sources new=.\n",
+    )
+    failed = _failed(grader.grade(work, "cmake-cpp-inline-heavy", "", CORPUS))
+    assert "baseline_has_source_evidence" not in failed
+    assert "source_depth_complete" not in failed

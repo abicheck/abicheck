@@ -822,6 +822,10 @@ def _baseline_source(ctx: Context) -> tuple[bool, str]:
                 return True, "baseline dumped with source evidence (CLI)"
         elif any(k in s.inputs for k in ("sources", "build-info", "compile-db")):
             return True, "baseline dumped with source evidence"
+    for s in ctx.pr_compare_steps():
+        # The CLI (unlike the Action) takes side-scoped build evidence.
+        if s.is_cli and re.search(r"--(sources|build-info)[ =]\"?old=", str(s.raw.get("run", ""))):
+            return True, "old side gets source evidence via --sources old= (CLI)"
     if re.search(r"(old|baseline)[^.\n]{0,80}(no|without|lacks?|only the new)[^.\n]{0,40}(source|L4)", ctx.final, re.I):
         return True, "one-sided L4 stated in the report"
     return False, "old side has no L4 evidence and the report does not say so"
