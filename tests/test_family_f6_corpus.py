@@ -195,6 +195,35 @@ def test_main_gates_stored_results_and_exits_nonzero(tmp_path: Path) -> None:
     assert rcc.main(args) == 0
 
 
+def test_write_baseline_with_only_keeps_unselected_pairs(tmp_path: Path) -> None:
+    corpus = tmp_path / "c.json"
+    corpus.write_text(
+        json.dumps({"schema": rcc.CORPUS_SCHEMA, "pairs": [_entry("p"), _entry("q")]})
+    )
+    rdir = tmp_path / "r"
+    rdir.mkdir()
+    for pid in ("p", "q"):
+        (rdir / f"{pid}.json").write_text(json.dumps(_result(l={"func_added": 1})))
+    base = tmp_path / "b.json"
+    common = [
+        "--corpus",
+        str(corpus),
+        "--baseline",
+        str(base),
+        "--out-dir",
+        str(tmp_path / "o"),
+        "--results-dir",
+        str(rdir),
+        "--write-baseline",
+    ]
+    assert rcc.main(common) == 0
+    (rdir / "p.json").write_text(json.dumps(_result(l={"func_added": 3})))
+    assert rcc.main([*common, "--only", "p"]) == 0
+    baseline = rcc.load_baseline(base)
+    assert baseline is not None and set(baseline) == {"p", "q"}
+    assert baseline["p"] == {"func_added": 3} and baseline["q"] == {"func_added": 1}
+
+
 # ------------------------------------------------------------ corpus schema
 
 

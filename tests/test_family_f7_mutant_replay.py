@@ -147,6 +147,13 @@ def _node_failed(node: str, failed: list[str]) -> bool:
     return any(f == node or f.startswith(node + "[") for f in failed)
 
 
+class MutantSurvived(Exception):
+    """The nested harness run completed cleanly with the mutant applied.
+
+    The only outcome a ``harness_gap`` xfail may absorb: a patch, import,
+    collection or process failure is an ``AssertionError`` and still fails."""
+
+
 def _replay(
     mutant: cat.Mutant | None, tmp_path: Path, nodes: tuple[str, ...]
 ) -> tuple[int, list[str], str]:
@@ -169,7 +176,7 @@ def _slow_params() -> list[object]:
         if m.harness_gap:
             marks.append(
                 pytest.mark.xfail(
-                    strict=True, raises=AssertionError, reason=m.harness_gap
+                    strict=True, raises=MutantSurvived, reason=m.harness_gap
                 )
             )
         out.append(pytest.param(m, id=m.name, marks=marks))
@@ -182,9 +189,11 @@ def test_harness_kills_replayed_mutant(mutant: cat.Mutant, tmp_path: Path) -> No
     assert (
         "error during collection" not in output and "found no collectors" not in output
     ), output[-3000:]
-    assert rc == 1, (
-        f"{mutant.name}: harness passed with the mutant applied (rc={rc})\n{output[-3000:]}"
-    )
+    if rc == 0:
+        raise MutantSurvived(
+            f"{mutant.name}: harness passed with the mutant applied\n{output[-3000:]}"
+        )
+    assert rc == 1, f"{mutant.name}: nested pytest exited {rc}\n{output[-3000:]}"
     assert any(_node_failed(n, failed) for n in mutant.must_fail), (
         failed,
         output[-3000:],

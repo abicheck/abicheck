@@ -393,8 +393,12 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.write_baseline:
+        # Merge, so a run narrowed by --only keeps every other pair's entry.
+        doc = baseline_from_results(results)
+        existing = load_baseline(args.baseline) or {}
+        doc["pairs"] = dict(sorted({**existing, **doc["pairs"]}.items()))
         args.baseline.write_text(
-            json.dumps(baseline_from_results(results), indent=2) + "\n",
+            json.dumps(doc, indent=2) + "\n",
             encoding="utf-8",
         )
         print(f"baseline written to {args.baseline}", file=sys.stderr)
