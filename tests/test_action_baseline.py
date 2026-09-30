@@ -35,6 +35,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 from _workflow_exec import bash_executable, require_bash
 
@@ -180,10 +181,9 @@ class TestBuildConfigReachesTheDocumentedPublishers:
 
     @pytest.mark.parametrize("workflow", WORKFLOWS)
     def test_the_input_is_declared_and_forwarded(self, workflow: str) -> None:
-        import yaml
         from _workflow_files import read_repo_text
 
-        document = yaml.safe_load(read_repo_text(REPO_ROOT / workflow))
+        document = _yaml_fast.safe_load(read_repo_text(REPO_ROOT / workflow))
         # PyYAML parses the bare `on:` key as the boolean True.
         triggers = document.get("on", document.get(True, {}))
         declared = triggers["workflow_call"]["inputs"]
@@ -199,13 +199,25 @@ class TestBuildConfigReachesTheDocumentedPublishers:
             and step["uses"].endswith("actions/baseline")
         ]
         assert forwarded, f"{workflow} no longer invokes actions/baseline"
+        # G41 Phase 1: build-config reaches actions/baseline through the
+        # "Resolve baseline extraction context" step, which folds the
+        # profile's compile overlay into it (or passes it through unchanged).
+        steps_by_id = {
+            step.get("id"): step
+            for job in document["jobs"].values()
+            for step in job.get("steps", [])
+            if step.get("id")
+        }
         for step in forwarded:
             assert step.get("with", {}).get("build-config") == (
-                "${{ inputs.build-config }}"
+                "${{ steps.context.outputs.build-config }}"
             ), (
                 f"{workflow} declares build-config but does not pass it to "
                 "actions/baseline"
             )
+            assert steps_by_id["context"]["env"]["BUILD_CONFIG"] == (
+                "${{ inputs.build-config }}"
+            ), f"{workflow}'s context step does not read the build-config input"
 
 
 class TestValidationInputRejected:

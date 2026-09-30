@@ -1,0 +1,38 @@
+name: ABI check
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  abi-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lib: libalpha
+            so: libalpha.so.2
+            headers: include/alpha
+          - lib: libbeta
+            so: libbeta.so.1
+            headers: include/beta
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: new
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: old
+      - run: make -C old CFLAGS="-O2 -g" && make -C new CFLAGS="-O2 -g"
+      - uses: abicheck/abicheck@v0.6.0
+        with:
+          old-library: old/build/${{ matrix.so }}
+          new-library: new/build/${{ matrix.so }}
+          old-header: old/${{ matrix.headers }}
+          new-header: new/${{ matrix.headers }}
+          include: include
+          lang: c

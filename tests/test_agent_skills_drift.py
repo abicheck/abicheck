@@ -394,6 +394,25 @@ NON_REPORT_IDENTIFIERS = frozenset(
         # not report fields — the `_` is what makes them look like one.
         "plugin_init",
         "plugin_shutdown",
+        # GitHub Actions event names and a hostname, used throughout the
+        # CI-onboarding skill (`set-up-abi-compatibility-ci`). Workflow
+        # vocabulary, not report fields.
+        "pull_request",
+        "pull_request_target",
+        "workflow_dispatch",
+        "workflow_run",
+        "github.com",
+        # Build-system file names without a `_FILENAME_SUFFIXES` extension.
+        "meson.build",
+        "configure.ac",
+        # Built-in `--policy` names and `.abicheck.yml` config keys (the
+        # config file, not the report).
+        "strict_abi",
+        "sdk_vendor",
+        "plugin_abi",
+        "compile.lang",
+        "deployment.runtime_floors",
+        "build.targets",
     }
 )
 

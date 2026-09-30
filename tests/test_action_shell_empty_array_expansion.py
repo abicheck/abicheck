@@ -49,6 +49,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 import yaml
 from _workflow_files import read_repo_text
@@ -194,7 +195,7 @@ def _shell_sources() -> list[tuple[str, str]]:
         if not path.is_file():
             continue
         try:
-            parsed = yaml.safe_load(read_repo_text(path))
+            parsed = _yaml_fast.safe_load(read_repo_text(path))
         except yaml.YAMLError:  # pragma: no cover - a parse failure is its own test
             continue
         label = str(path.relative_to(REPO_ROOT))

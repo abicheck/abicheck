@@ -44,8 +44,8 @@ from __future__ import annotations
 
 import re
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_files import read_repo_text, workflow_paths
 
 #: Contexts GitHub does not resolve at the *job* level. `runner` describes the
@@ -178,7 +178,7 @@ def _job_level_violations(document: dict) -> list[str]:
 
 @pytest.mark.parametrize("path", workflow_paths(), ids=lambda p: p.name)
 def test_no_job_level_key_uses_a_step_only_context(path) -> None:
-    document = yaml.safe_load(read_repo_text(path))
+    document = _yaml_fast.safe_load(read_repo_text(path))
     if not isinstance(document, dict):  # pragma: no cover - a non-mapping workflow
         pytest.skip(f"{path.name} is not a mapping")
     violations = _job_level_violations(document)
@@ -198,7 +198,7 @@ def test_the_check_catches_the_shape_that_broke_ci() -> None:
     when the real one shipped.
     """
 
-    rejected = yaml.safe_load(
+    rejected = _yaml_fast.safe_load(
         "jobs:\n"
         "  unit-tests:\n"
         "    env:\n"
@@ -214,7 +214,7 @@ def test_the_check_catches_the_shape_that_broke_ci() -> None:
 def test_the_same_expression_inside_a_step_is_accepted() -> None:
     """And the rule must not reject the correct spelling one level down."""
 
-    accepted = yaml.safe_load(
+    accepted = _yaml_fast.safe_load(
         "jobs:\n"
         "  unit-tests:\n"
         "    steps:\n"

@@ -59,6 +59,7 @@ from .process_resources import BudgetedExecutor
 
 _Item = TypeVar("_Item")
 _Result = TypeVar("_Result")
+_T = TypeVar("_T")
 
 
 def run_parallel_probes(
@@ -66,8 +67,12 @@ def run_parallel_probes(
     probe: Callable[[_Item], tuple[_Item, _Result]],
     *,
     jobs: int,
+    progress: str | None = None,
 ) -> list[tuple[_Item, _Result]]:
     """Run ``probe`` over ``items``, preserving *input order* in the result.
+
+    *progress*, when given, is the label :func:`abicheck.extract.progress.track`
+    reports completed items under (in input order, as results are taken).
 
     Serial (a plain list comprehension) when ``jobs <= 1`` or there is at
     most one item; otherwise a ``ThreadPoolExecutor`` with ``jobs`` workers.
@@ -89,7 +94,7 @@ def run_parallel_probes(
     L4 process/thread pool).
     """
     if jobs <= 1 or len(items) <= 1:
-        return [probe(item) for item in items]
+        return [probe(item) for item in _tracked(items, progress, len(items))]
     deadline_ts = deadline.current_deadline_ts()
 
     def _bound(item: _Item) -> tuple[_Item, _Result]:
@@ -97,7 +102,15 @@ def run_parallel_probes(
             return probe(item)
 
     with BudgetedExecutor(jobs) as pool:
-        return list(pool.map(_bound, items))
+        return list(_tracked(pool.map(_bound, items), progress, len(items)))
+
+
+def _tracked(items: Iterable[_T], label: str | None, total: int) -> Iterable[_T]:
+    if label is None:
+        return items
+    from .extract.progress import track
+
+    return track(items, label, total)
 
 
 @dataclass

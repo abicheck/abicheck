@@ -194,6 +194,27 @@ on:
           own input exists to close (Codex review).
         type: string
         default: ''
+      project-config:
+        description: >-
+          G41 Phase 1: path to the project's .abicheck.yml carrying the
+          `profiles:` block (default: build-config when set, else
+          `.abicheck.yml`). Each profile's baseline is dumped under the same
+          compile context its candidate cells use -- its consumer_compile:
+          overlay when declared, else its compile: overlay -- folded into a
+          copy of build-config's `compile:` block. A profile with neither
+          overlay (or a missing config) dumps exactly as before.
+        type: string
+        default: ''
+      toolchain-bindings-path:
+        description: >-
+          Toolchain-bindings file (schema abicheck.toolchain-bindings/v1)
+          resolving each profile's compile/consumer_compile `binding:` to a
+          compiler path -- the same file check-project.yml's
+          toolchain-bindings-path takes. Empty skips binding resolution (a
+          declared binding then contributes no compiler path, exactly as on
+          the candidate side).
+        type: string
+        default: ''
       baseline-generation:
         description: >-
           Forwarded to actions/baseline's baseline-generation input --
@@ -900,6 +921,21 @@ jobs:
             echo "ABICHECK_LIBRARIES_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # G41 Phase 1: dump this profile's baseline under the compile context
+      # its candidate cells use, so the pair is comparable. Resolved by the
+      # same per-profile resolvers the run plan uses for the candidate side
+      # (abicheck/buildsource/baseline_extraction_context.py).
+      - name: Resolve baseline extraction context
+        id: context
+        if: needs.discover.outputs.mode == 'capture'
+        shell: bash
+        env:
+          PROFILE_ID: ${{ matrix.profile_id }}
+          PROJECT_CONFIG: ${{ inputs.project-config }}
+          BUILD_CONFIG: ${{ inputs.build-config }}
+          BINDINGS_PATH: ${{ inputs.toolchain-bindings-path }}
+        run: python3 -I -m abicheck.buildsource.baseline_extraction_context
+
       - name: Dump baseline-set
         id: baseline
         if: needs.discover.outputs.mode == 'capture'
@@ -911,7 +947,8 @@ jobs:
           profile: ${{ matrix.profile_id }}
           build-info: ${{ inputs.build-info != '' && format('build-output/{0}/{1}', matrix.profile_id, inputs.build-info) || '' }}
           depth: ${{ inputs.depth }}
-          build-config: ${{ inputs.build-config }}
+          build-config: ${{ steps.context.outputs.build-config }}
+          extraction-context: ${{ steps.context.outputs.extraction-context }}
           baseline-generation: ${{ inputs.baseline-generation }}
           generator-git-sha: ${{ steps.identity.outputs.ref }}
           generator-action-ref: ${{ job.workflow_ref }}

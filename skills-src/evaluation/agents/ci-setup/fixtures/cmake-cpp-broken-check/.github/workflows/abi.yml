@@ -1,0 +1,16 @@
+name: ABI
+on: [pull_request]
+jobs:
+  abi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build && cmake --build build
+      - name: ABI scan
+        uses: abicheck/abicheck@main
+        continue-on-error: true
+        with:
+          mode: scan
+          against: abi/baseline.json
+          new-library: build/libcodec.so
+          header: .

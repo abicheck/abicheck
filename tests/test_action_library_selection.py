@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 
 from abicheck.frontends.action.library_selection import (
@@ -347,12 +348,11 @@ class TestBaselineActionWiring:
 
     @staticmethod
     def _action() -> dict:
-        import yaml
 
         path = (
             Path(__file__).resolve().parents[1] / "actions" / "baseline" / "action.yml"
         )
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
+        return _yaml_fast.safe_load(path.read_text(encoding="utf-8"))
 
     def test_the_spec_inputs_are_declared(self) -> None:
         inputs = self._action()["inputs"]

@@ -760,7 +760,7 @@ Three problems, not one, need solving together:
 
 ## Product positioning
 
-A good skill in this portfolio should answer requests such as these ten —
+A good skill in this portfolio should answer requests such as these eleven —
 none of which name abicheck, and each of which a real user could type
 without knowing the tool exists:
 
@@ -774,6 +774,7 @@ without knowing the tool exists:
 8. "My program fails with 'undefined symbol' after we updated a library. Why?"
 9. "Our program crashes after a shared library was updated. What changed?"
 10. "A shared library we depend on was bumped and its symbols look different. What changed, and does our program care?"
+11. "Set up ABI compatibility checks for our library in GitHub Actions."
 
 abicheck should appear inside the resulting workflow as a deterministic
 verification engine, not as the user-facing job. At the time these seven
@@ -790,7 +791,8 @@ as future scope for that same skill and for a distinct future second skill
 respectively. Phrasings 8-10 were added by the 2026-09-30 amendment (second skill,
 `explain-abi-change`), which claims all three: a developer working out what
 changed between a program and the libraries it uses in an existing
-environment, failing or not, rather than a change under review. This list is the source both `SKILL.md` `description` fields
+environment, failing or not, rather than a change under review. Phrasing 11 was added by the 2026-09-30 "CI onboarding candidate"
+amendment below and is claimed by `set-up-abi-compatibility-ci`. This list is the source both `SKILL.md` `description` fields
 (Decision → Skill content model) and the trigger-test positive corpus
 (Testing and evaluation architecture, and G36's P0.8) are built from.
 
@@ -1547,3 +1549,36 @@ unaffected: `scripts/gen_agent_skills.py` publishes only `skills-src/<name>/`
 directories that contain a `SKILL.md`, and `evaluation/` has none. The
 Harbor task battery and `skill-eval-pack.json` were regenerated for the new
 paths with their own generators.
+
+## Amendment (2026-09-30): second candidate skill — `set-up-abi-compatibility-ci`
+
+A second internal candidate, `set-up-abi-compatibility-ci`, was added for
+the job "we have a GitHub repository with a native library; enable
+compatibility checking in CI, correctly". It was previously treated only as
+the optional last step of a review (`shared/ci-wiring.md`), which left the
+onboarding job — the one most users meet first — with no workflow at all.
+Against the five admission criteria:
+
+1. **Distinct user intent.** "Set up the check" precedes any change to
+   review; no diff, verdict, or consumer exists yet.
+2. **Distinct decision tree.** Repository inventory (build system, shared
+   targets, public headers, language, release process) → baseline strategy
+   (release snapshot / merge-base build / committed snapshot) → gate and
+   rollout → workflow authoring → validation. None of it overlaps
+   `check-abi-compatibility`'s evidence-then-verdict tree.
+3. **Distinct user-visible outcome.** Workflow files plus a setup report,
+   not a compatibility decision.
+4. **Useful standalone.** It needs only the repository; abicheck need not be
+   installed locally (the Action installs it).
+5. **Specialized knowledge.** The Action's input contract, the
+   `*.abicheck.json` release-asset convention, bootstrap of a release
+   baseline, label-relaxed gating, fork-PR and permission constraints — the
+   failure modes a generic agent reproduces from a README snippet.
+
+Claims ADR prompt 8 above. Its status is the same as the first
+candidate's: preview, with the evidence recorded in
+`skills-src/evaluation/agents/ci-setup/results/`. That evaluation is a
+deterministic grader over the workflow files an agent writes into small
+fixture repositories, run A/B (skill vs. no skill); it is a different
+harness from G37's verdict-claim corpus because the outcome is a
+configuration, not a verdict.

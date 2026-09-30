@@ -1,0 +1,123 @@
+{
+  "schema": "compat_corpus_baseline.v1",
+  "pairs": {
+    "I1_icu_major": {
+      "func_added": 6911,
+      "imported_symbol_added": 971,
+      "imported_symbol_removed": 954,
+      "needed_added": 8,
+      "needed_removed": 8,
+      "public_surface_grew": 3,
+      "runtime_floor_raised": 9,
+      "soname_changed": 6,
+      "symbol_binding_became_unique": 1,
+      "symbol_leaked_from_dependency_changed": 3,
+      "symbol_version_required_added": 9,
+      "symbol_version_required_removed": 1,
+      "var_added": 1748,
+      "versioned_symbol_scheme_detected": 5,
+      "visibility_leak": 2
+    },
+    "N1_libpng_patch": {
+      "imported_symbol_added": 1,
+      "visibility_leak": 1
+    },
+    "O1_openssl_patch": {
+      "visibility_leak": 2
+    },
+    "O2_openssl_minor": {
+      "func_added": 23,
+      "imported_symbol_added": 17,
+      "public_surface_grew": 1,
+      "runtime_floor_raised": 1,
+      "symbol_version_defined_added": 1,
+      "symbol_version_required_added": 1,
+      "visibility_leak": 2
+    },
+    "P1_protobuf_patch": {
+      "exported_object_alignment_reduced": 8,
+      "func_added": 90,
+      "glibcxx_dual_abi_flip_detected": 1,
+      "imported_symbol_added": 326,
+      "imported_symbol_removed": 323,
+      "needed_added": 49,
+      "needed_removed": 49,
+      "soname_bump_unnecessary": 2,
+      "soname_changed": 5,
+      "symbol_leaked_from_dependency_changed": 6,
+      "unnamed_type_in_public_abi": 6,
+      "versioned_symbol_scheme_detected": 3,
+      "visibility_leak": 3
+    },
+    "P2_protobuf_major": {
+      "exported_object_alignment_reduced": 86,
+      "func_added": 304,
+      "imported_symbol_added": 8,
+      "imported_symbol_removed": 6,
+      "needed_added": 4,
+      "needed_removed": 4,
+      "public_surface_grew": 3,
+      "soname_bump_unnecessary": 2,
+      "soname_changed": 5,
+      "symbol_version_required_added_compat": 2,
+      "unnamed_type_in_public_abi": 27,
+      "var_added": 3,
+      "visibility_leak": 3
+    },
+    "T1_tbb_minor": {
+      "enum_last_member_value_changed": 1,
+      "imported_symbol_added": 5,
+      "imported_symbol_removed": 3,
+      "runtime_floor_raised": 1,
+      "soname_bump_recommended": 2,
+      "symbol_version_required_added": 1,
+      "type_added": 1,
+      "type_field_added_compatible": 3
+    },
+    "T2_tbb_series": {
+      "dwarf_info_missing": 4,
+      "func_added": 120,
+      "imported_symbol_added": 10,
+      "imported_symbol_removed": 6,
+      "public_surface_grew": 4,
+      "runtime_floor_raised": 2,
+      "symbol_version_required_added": 2,
+      "symbol_version_required_added_compat": 4,
+      "var_added": 7
+    },
+    "T3_tbb_patch": {
+      "func_added": 5,
+      "imported_symbol_added": 15,
+      "imported_symbol_removed": 1,
+      "public_surface_grew": 1,
+      "public_surface_shrank": 1,
+      "runtime_floor_raised": 1,
+      "soname_bump_recommended": 1,
+      "symbol_version_required_added": 1,
+      "visibility_leak": 3
+    },
+    "X1_libxml2_patch": {
+      "dwarf_info_missing": 1,
+      "exported_object_alignment_reduced": 10,
+      "func_added": 1569,
+      "imported_symbol_added": 12,
+      "imported_symbol_removed": 7,
+      "needed_removed": 3,
+      "public_surface_grew": 1,
+      "soname_bump_recommended": 1,
+      "symbol_version_defined_added": 1,
+      "symbol_version_required_added_compat": 2,
+      "unversioned_exported_symbol": 100
+    },
+    "Z1_zstd_minor": {
+      "func_added": 7,
+      "imported_symbol_added": 1,
+      "imported_symbol_removed": 1,
+      "public_surface_grew": 1,
+      "runtime_floor_raised": 1,
+      "soname_bump_recommended": 1,
+      "symbol_version_required_added": 2,
+      "visibility_leak": 1
+    }
+  }
+}

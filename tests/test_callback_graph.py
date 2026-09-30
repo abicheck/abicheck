@@ -36,7 +36,6 @@ from abicheck.buildsource.callback_graph import (
     EDGE_DECL_TAKES_ADDRESS_OF,
     CallbackDispatchResult,
     CallbackEdge,
-    ClangCallbackGraphExtractor,
     _address_taken_function,
     augment_graph_with_callback_invocations,
     augment_graph_with_callback_registrations,
@@ -49,6 +48,7 @@ from abicheck.buildsource.graph_facts import (
     GraphNode,
 )
 from abicheck.buildsource.inline_graph_fold import fold_call_graph, fold_callback_graph
+from abicheck.buildsource.l5_ast_pass import run_l5_ast_pass
 from abicheck.buildsource.source_graph import SourceGraphSummary
 
 # ── Part B fixtures: hand-built clang AST node shapes ───────────────────────
@@ -944,40 +944,35 @@ class TestAugmentGraphWithCallbackRegistrations:
         assert "function_pointer_signature" not in slot_node.resolved
 
 
+def test_merge_callback_edges_dedupes_across_units_by_src_dst_kind() -> None:
+    from abicheck.buildsource.callback_graph import merge_callback_edges
+
+    reg = CallbackEdge("f", "h", EDGE_DECL_REGISTERS_CALLBACK, CONF_HIGH)
+    reg_again = CallbackEdge("f", "h", EDGE_DECL_REGISTERS_CALLBACK, CONF_REDUCED)
+    addr = CallbackEdge("f", "h", EDGE_DECL_TAKES_ADDRESS_OF, CONF_HIGH)
+    assert merge_callback_edges([[reg], [reg_again, addr], []]) == [reg, addr]
+
+
 # ── fold_callback_graph wiring ───────────────────────────────────────────────
 
 
 class TestFoldCallbackGraphGracefulDegradation:
     def test_missing_clang_records_failed_extractor_row(self, monkeypatch) -> None:
+        import abicheck.buildsource.l5_ast_pass as l5
         from abicheck.buildsource.build_evidence import BuildEvidence
 
-        monkeypatch.setattr(shutil, "which", lambda _: None)
+        monkeypatch.setattr(l5, "_clang_available", lambda _b: False)
+        merged = BuildEvidence()
+        run = run_l5_ast_pass(merged, "clang")
+        assert run.clang_available is False
         graph = SourceGraphSummary()
         rows: list = []
-        fold_callback_graph(graph, BuildEvidence(), "clang", rows, ())
+        fold_callback_graph(graph, merged, run, rows)
 
         assert any(
             r.name == "callback_graph:clang" and r.status == "failed" for r in rows
         )
         assert not graph.extractor_passes.get("callback_graph")
-
-
-class _FakeCleanCallbackExtractor:
-    """A callback extractor whose own clang run always succeeds cleanly (no
-    diagnostics, zero edges) -- used to isolate the ``call_graph`` coverage
-    propagation below from this pass's own extraction result."""
-
-    def __init__(self, *a, **k) -> None:
-        self.clang_bin = "clang++"
-        self.diagnostics: list[str] = []
-        self.last_jobs = 0
-        self.last_elapsed_s = 0.0
-
-    def available(self) -> bool:
-        return True
-
-    def extract_from_build(self, build):
-        return []
 
 
 def _merged_one_unit():
@@ -987,6 +982,22 @@ def _merged_one_unit():
         compile_units=[
             CompileUnit(id="cu://t", source="t.c", directory=".", language="C")
         ]
+    )
+
+
+def _clean_callback_run(merged):
+    """An L5 AST run whose callback family succeeded cleanly (no diagnostics,
+    zero edges) -- used to isolate the ``call_graph`` coverage propagation
+    below from this pass's own extraction result."""
+    from abicheck.buildsource.l5_ast_run import AstPassOutcome, L5AstRun
+
+    return L5AstRun(
+        "clang++",
+        merged,
+        "",
+        False,
+        frozenset(),
+        outcomes={"callback_graph": AstPassOutcome(result=[])},
     )
 
 
@@ -1002,75 +1013,53 @@ class TestFoldCallbackGraphPropagatesCallGraphCoverage:
     """
 
     def test_degraded_call_graph_degrades_callback_graph_despite_clean_own_run(
-        self, monkeypatch
+        self,
     ) -> None:
-        from abicheck.buildsource import callback_graph
-
-        monkeypatch.setattr(
-            callback_graph, "ClangCallbackGraphExtractor", _FakeCleanCallbackExtractor
-        )
         graph = SourceGraphSummary()
         graph.degraded_passes["call_graph"] = True
         rows: list = []
 
-        fold_callback_graph(graph, _merged_one_unit(), "clang", rows)
+        merged = _merged_one_unit()
+        fold_callback_graph(graph, merged, _clean_callback_run(merged), rows)
 
         assert graph.degraded_passes.get("callback_graph") is True
         assert "callback_graph" not in graph.extractor_passes
         assert "callback_graph" not in graph.narrowed_passes
 
-    def test_missing_call_graph_coverage_degrades_callback_graph(
-        self, monkeypatch
-    ) -> None:
+    def test_missing_call_graph_coverage_degrades_callback_graph(self) -> None:
         # call_graph never ran at all (e.g. clang unavailable for that pass)
         # -- as untrustworthy as a real per-TU diagnostic, same as
         # fold_virtual_dispatch_graph's "missing" case.
-        from abicheck.buildsource import callback_graph
-
-        monkeypatch.setattr(
-            callback_graph, "ClangCallbackGraphExtractor", _FakeCleanCallbackExtractor
-        )
         graph = SourceGraphSummary()
         rows: list = []
 
-        fold_callback_graph(graph, _merged_one_unit(), "clang", rows)
+        merged = _merged_one_unit()
+        fold_callback_graph(graph, merged, _clean_callback_run(merged), rows)
 
         assert graph.degraded_passes.get("callback_graph") is True
         assert "callback_graph" not in graph.extractor_passes
 
-    def test_narrowed_call_graph_propagates_to_callback_graph(
-        self, monkeypatch
-    ) -> None:
-        from abicheck.buildsource import callback_graph
-
-        monkeypatch.setattr(
-            callback_graph, "ClangCallbackGraphExtractor", _FakeCleanCallbackExtractor
-        )
+    def test_narrowed_call_graph_propagates_to_callback_graph(self) -> None:
         graph = SourceGraphSummary()
         graph.narrowed_passes["call_graph"] = True
         graph.narrowed_scope["call_graph"] = frozenset({"a.cpp"})
         rows: list = []
 
-        fold_callback_graph(graph, _merged_one_unit(), "clang", rows)
+        merged = _merged_one_unit()
+        fold_callback_graph(graph, merged, _clean_callback_run(merged), rows)
 
         assert graph.narrowed_passes.get("callback_graph") is True
         assert graph.narrowed_scope.get("callback_graph") == frozenset({"a.cpp"})
         assert not graph.degraded_passes.get("callback_graph")
         assert "callback_graph" not in graph.extractor_passes
 
-    def test_fully_covered_call_graph_leaves_callback_graph_fully_covered(
-        self, monkeypatch
-    ) -> None:
-        from abicheck.buildsource import callback_graph
-
-        monkeypatch.setattr(
-            callback_graph, "ClangCallbackGraphExtractor", _FakeCleanCallbackExtractor
-        )
+    def test_fully_covered_call_graph_leaves_callback_graph_fully_covered(self) -> None:
         graph = SourceGraphSummary()
         graph.extractor_passes["call_graph"] = True
         rows: list = []
 
-        fold_callback_graph(graph, _merged_one_unit(), "clang", rows)
+        merged = _merged_one_unit()
+        fold_callback_graph(graph, merged, _clean_callback_run(merged), rows)
 
         assert graph.extractor_passes.get("callback_graph") is True
         assert "callback_graph" not in graph.narrowed_passes
@@ -1117,8 +1106,9 @@ class TestFoldCallbackGraphEndToEnd:
         )
         graph = SourceGraphSummary()
         extractors: list = []
-        fold_call_graph(graph, merged, "clang", extractors)
-        fold_callback_graph(graph, merged, "clang", extractors)
+        run = run_l5_ast_pass(merged, "clang")
+        fold_call_graph(graph, merged, run, extractors)
+        fold_callback_graph(graph, merged, run, extractors)
 
         assert graph.extractor_passes.get("callback_graph") is True
         assert any(e.kind == EDGE_DECL_REGISTERS_CALLBACK for e in graph.edges)
@@ -1165,8 +1155,9 @@ class TestFoldCallbackGraphEndToEnd:
         )
         graph = SourceGraphSummary()
         extractors: list = []
-        fold_call_graph(graph, merged, "clang", extractors)
-        fold_callback_graph(graph, merged, "clang", extractors)
+        run = run_l5_ast_pass(merged, "clang")
+        fold_call_graph(graph, merged, run, extractors)
+        fold_callback_graph(graph, merged, run, extractors)
 
         assert graph.extractor_passes.get("callback_graph") is True
         # The outer registration call is still captured correctly...
@@ -1189,23 +1180,20 @@ class TestFoldCallbackGraphEndToEnd:
 @pytest.mark.skipif(shutil.which("clang") is None, reason="clang not installed")
 def test_extractor_unavailable_returns_empty_and_records_diagnostic() -> None:
     """Codex review, fresh evidence: an earlier version of this test passed
-    an empty ``BuildEvidence()`` (no compile units), which hits
-    ``extract_from_build``'s own "nothing to do" early return *before* its
-    availability check ever runs -- the same ordering
-    ``ClangCallGraphExtractor.extract_from_build``/
-    ``ClangTypeGraphExtractor.extract_from_build``/
-    ``ClangOverrideGraphExtractor.extract_from_build`` all share, and whose
-    own sibling tests (e.g. ``test_call_graph.
-    test_extractor_missing_clang_returns_empty``) accordingly always pass at
-    least one real compile unit for exactly this reason. With no work to
-    attempt at all, recording a diagnostic would be noise, not signal --
-    this test's own intent (confirm a genuinely *missing* clang is
-    diagnosed) needs a real compile unit present, matching the established
-    sibling convention."""
-    extractor = ClangCallbackGraphExtractor(clang_bin="clang-does-not-exist")
-    assert extractor.available() is False
+    an empty ``BuildEvidence()`` (no compile units), which never exercises
+    the pass at all. With no work to attempt, recording a diagnostic would be
+    noise, not signal -- this test's own intent (confirm a genuinely
+    *missing* clang is diagnosed) needs a real compile unit present, matching
+    the sibling convention (``test_call_graph.
+    test_extractor_missing_clang_returns_empty``)."""
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
     build = BuildEvidence(compile_units=[CompileUnit(id="cu://x", source="x.cpp")])
-    assert extractor.extract_from_build(build) == []
-    assert extractor.diagnostics
+    run = run_l5_ast_pass(build, "clang-does-not-exist")
+    assert run.clang_available is False
+    graph = SourceGraphSummary()
+    rows: list = []
+    fold_callback_graph(graph, build, run, rows)
+    assert not any(e.kind == EDGE_DECL_REGISTERS_CALLBACK for e in graph.edges)
+    assert [(r.name, r.status) for r in rows] == [("callback_graph:clang", "failed")]
+    assert rows[0].detail

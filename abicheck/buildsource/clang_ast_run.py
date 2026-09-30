@@ -15,19 +15,11 @@
 
 """One bounded ``clang -Xclang -ast-dump=json`` run, shared by the L5 passes.
 
-A **leaf** module: the call-graph (``call_graph.py``) and type-graph
-(``type_graph.py``) extractors run the *identical* procedure — same argv shape,
-same 120s local cap folded against the active ``--budget`` deadline, same
-degrade-to-``diagnostic``-and-give-up contract at every failure point — and
-differ only in which pure parser they hand the resulting AST to. Both used to
-carry their own copy, kept in step by hand through comments pointing at each
-other ("mirrors ``call_graph.ClangCallGraphExtractor._extract_from_safe_args``")
-across several review rounds of deadline fixes; stated once here instead, so a
-fix to the bounding or the diagnostics cannot land on one pass only (CodeFactor:
-duplicate code).
-
-Imports nothing from either caller, so neither has to import the other's
-internals for this.
+A **leaf** module: the bounded dump every clang-backed L5 graph family reads --
+same argv shape, same 120s local cap folded against the active ``--budget``
+deadline, same degrade-to-``diagnostic``-and-give-up contract at every failure
+point. ``l5_ast_pass.run_ast_passes`` calls it once per TU and hands the tree to
+every family's parser (the families used to each dump the TU themselves).
 """
 
 from __future__ import annotations

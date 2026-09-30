@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import _yaml_fast
 import pytest
 from _check_target_exec import (
     _BASE_IDENTITY,
@@ -1010,10 +1011,9 @@ class TestStaleAnalysisOutputIsCleanedBeforeEachRun:
     def test_cleanup_step_runs_unconditionally_immediately_before_analysis(
         self,
     ) -> None:
-        import yaml
 
         action_yml = ACTION_DIR / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         steps = data["runs"]["steps"]
         names = [s.get("name") for s in steps]
         assert "Clean stale analysis output" in names, (
@@ -1063,10 +1063,9 @@ class TestReplaySourcesForwardedWithDefault:
     """
 
     def test_sources_expression_matches_collect_facts_own_default(self) -> None:
-        import yaml
 
         action_yml = ACTION_DIR / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         steps = data["runs"]["steps"]
         analysis_step = next(s for s in steps if s.get("name") == "Run analysis")
         expr = analysis_step["with"]["sources"]
@@ -1111,19 +1110,17 @@ class TestExpectedProjectRefForwardedToResolveBaseline:
     """
 
     def test_action_yml_declares_the_input(self) -> None:
-        import yaml
 
         action_yml = ACTION_DIR / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         assert "expected-project-ref" in data["inputs"]
         assert data["inputs"]["expected-project-ref"]["required"] is False
         assert data["inputs"]["expected-project-ref"]["default"] == ""
 
     def test_resolve_step_forwards_it(self) -> None:
-        import yaml
 
         action_yml = ACTION_DIR / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         steps = data["runs"]["steps"]
         resolve_step = next(s for s in steps if s.get("name") == "Resolve baseline")
         assert resolve_step["with"]["expected-project-ref"] == (
@@ -1138,19 +1135,17 @@ class TestAllowNewTargetForwardedToResolveBaseline:
     input a no-op."""
 
     def test_action_yml_declares_the_input(self) -> None:
-        import yaml
 
         action_yml = ACTION_DIR / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         assert "allow-new-target" in data["inputs"]
         assert data["inputs"]["allow-new-target"]["required"] is False
         assert data["inputs"]["allow-new-target"]["default"] == "false"
 
     def test_resolve_step_forwards_it(self) -> None:
-        import yaml
 
         action_yml = ACTION_DIR / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         steps = data["runs"]["steps"]
         resolve_step = next(s for s in steps if s.get("name") == "Resolve baseline")
         assert resolve_step["with"]["allow-new-target"] == (
@@ -1158,10 +1153,9 @@ class TestAllowNewTargetForwardedToResolveBaseline:
         )
 
     def test_validate_step_forwards_it(self) -> None:
-        import yaml
 
         action_yml = ACTION_DIR / "action.yml"
-        data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(action_yml.read_text(encoding="utf-8"))
         steps = data["runs"]["steps"]
         validate_step = next(
             s for s in steps if s.get("name") == "Validate check-target inputs"

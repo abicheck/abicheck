@@ -1,0 +1,23 @@
+name: ABI check
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  abi-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_EXPORT_COMPILE_COMMANDS=ON && cmake --build build
+      - uses: abicheck/abicheck@v0.6.0
+        with:
+          abi-baseline: latest-release
+          new-library: build/libvecmath.so
+          new-header: include/
+          depth: source
+          sources: .
+          compile-db: build/compile_commands.json
+          dependency-source: conda-forge-clang20

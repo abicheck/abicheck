@@ -36,8 +36,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 PUBLISH_BASELINE = WORKFLOWS_DIR / "publish-baseline.yml"
@@ -52,7 +52,7 @@ CAPTURE_ONLY_STEPS = (
 
 @pytest.fixture(scope="module")
 def workflow() -> dict[str, Any]:
-    return yaml.safe_load(PUBLISH_BASELINE.read_text(encoding="utf-8"))
+    return _yaml_fast.safe_load(PUBLISH_BASELINE.read_text(encoding="utf-8"))
 
 
 def _publish_steps(workflow: dict[str, Any]) -> list[dict[str, Any]]:

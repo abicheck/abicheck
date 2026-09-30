@@ -8,8 +8,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, require_bash
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,7 +68,7 @@ def test_installer_verifies_before_extracting_and_persists_path() -> None:
 
 def test_linux_workflow_jobs_using_installer_pin_supported_runner() -> None:
     for path in WORKFLOWS:
-        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        workflow = _yaml_fast.safe_load(path.read_text(encoding="utf-8"))
         for name, job in workflow.get("jobs", {}).items():
             steps = job.get("steps", [])
             if not any(
@@ -261,7 +261,7 @@ def test_composite_castxml_action_invokes_the_pinned_installer() -> None:
     it -- otherwise the contract test would keep passing while checking
     nothing."""
     action = ROOT / ".github/actions/setup-castxml/action.yml"
-    spec = yaml.safe_load(action.read_text(encoding="utf-8"))
+    spec = _yaml_fast.safe_load(action.read_text(encoding="utf-8"))
     steps = spec["runs"]["steps"]
     assert any(
         "action/install-castxml.sh" in str(step.get("run", "")) for step in steps

@@ -20,6 +20,7 @@ import ast
 import re
 from pathlib import Path
 
+import _yaml_fast
 import click
 import pytest
 
@@ -168,9 +169,8 @@ def test_action_yml_files_found() -> None:
     "path", ACTION_YMLS, ids=lambda p: p.relative_to(REPO_ROOT).as_posix()
 )
 def test_no_adr_reference_in_action_descriptions(path: Path) -> None:
-    import yaml
 
-    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    doc = _yaml_fast.safe_load(path.read_text(encoding="utf-8"))
     descriptions = list(_descriptions(doc, path.name))
     assert descriptions, f"{path}: no description strings found"
     offending = [(w, d[:120]) for w, d in descriptions if ADR_RE.search(d)]

@@ -47,6 +47,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import _yaml_fast
 from _workflow_exec import bash_executable, require_bash  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
@@ -235,9 +236,8 @@ class TestTestedShaSourceNamesWhereTheValueCameFrom:
         assert 'TESTED_SHA_SOURCE="analysis-context"' in SOURCE
 
     def test_the_declared_output_documents_all_three(self) -> None:
-        import yaml
 
-        action = yaml.safe_load(
+        action = _yaml_fast.safe_load(
             (RUN_SH.parent / "action.yml").read_text(encoding="utf-8")
         )
         described = action["outputs"]["tested-sha-source"]["description"]

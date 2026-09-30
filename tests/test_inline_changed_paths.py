@@ -30,6 +30,7 @@ import abicheck.buildsource.inline as inline
 from abicheck.buildsource import source_replay
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, LinkUnit
 from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+from tests._fake_l5_ast_pass import install_fake_l5
 
 
 class _FakeExtractor:
@@ -145,21 +146,14 @@ def test_inline_graph_folds_call_edges_for_l4_l5_mode(monkeypatch):
     # When L4 + L5 are both collected (a semantic source mode), the inline graph
     # build folds a call graph so the decl-dependency cross-checks are reachable
     # from `scan`. The clang extractor is stubbed (no compiler needed).
-    from abicheck.buildsource import call_graph
     from abicheck.buildsource.call_graph import CallEdge
 
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build) -> list[CallEdge]:
-            return [CallEdge("caller", "callee", "direct", "exact")]
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    install_fake_l5(
+        monkeypatch,
+        results={
+            "call_graph": lambda _t: [CallEdge("caller", "callee", "direct", "exact")]
+        },
+    )
     merged = _build_with_one_unit()
     graph = inline._build_inline_graph(
         merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=[]
@@ -174,17 +168,7 @@ def test_inline_graph_folds_call_edges_for_l4_l5_mode(monkeypatch):
 def test_inline_graph_no_call_edges_when_clang_absent(monkeypatch):
     # Best-effort: a missing clang++ records a failed extractor row and leaves the
     # graph without call edges — never raises.
-    from abicheck.buildsource import call_graph
-
-    class _Unavailable:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return False
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _Unavailable)
+    install_fake_l5(monkeypatch, available=False)
     merged = _build_with_one_unit()
     rows: list = []
     graph = inline._build_inline_graph(
@@ -216,24 +200,14 @@ def test_inline_graph_folds_source_edges_and_still_runs_replay(monkeypatch):
     callee/referenced node as internal, so skipping the replay would
     silently miss a public-to-internal dependency addition (Codex review on
     PR #560). This test locks in that the replay is never skipped this way."""
-    from abicheck.buildsource import call_graph
     from abicheck.buildsource.call_graph import CallEdge
 
-    called = {"call": False}
-
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            called["call"] = True
-            return True
-
-        def extract_from_build(self, build) -> list[CallEdge]:
-            return [CallEdge("caller", "callee", "direct", "exact")]
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    runs = install_fake_l5(
+        monkeypatch,
+        results={
+            "call_graph": lambda _t: [CallEdge("caller", "callee", "direct", "exact")]
+        },
+    )
     merged = _build_with_one_unit()
     surface = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
     surface.source_edges = [{"edge": "DECL_CALLS_DECL", "src": "a", "dst": "b"}]
@@ -245,7 +219,7 @@ def test_inline_graph_folds_source_edges_and_still_runs_replay(monkeypatch):
     # fold_source_edges's edge is present...
     assert any(e.src == "decl://a" and e.dst == "decl://b" for e in graph.edges)
     # ...and the replay still ran (not skipped) and folded its own edge too.
-    assert called["call"] is True
+    assert len(runs) == 1
     assert any(
         e.src == "decl://caller" and e.dst == "decl://callee" for e in graph.edges
     )
@@ -256,25 +230,9 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
     # A PR/--since scan scopes the call-graph pass to the changed compile units —
     # parsing every TU of a large compile DB would defeat the targeted PR cost
     # model (ADR-035 D7 / Codex review).
-    from abicheck.buildsource import call_graph
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-    from abicheck.buildsource.call_graph import CallEdge
 
-    seen_sources: list[str] = []
-
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build) -> list[CallEdge]:
-            seen_sources.extend(cu.source for cu in build.compile_units)
-            return []
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    runs = install_fake_l5(monkeypatch)
     merged = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
@@ -290,7 +248,7 @@ def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
         changed_paths=("src/a.cpp",),
     )
     # Only the changed TU was parsed for call edges.
-    assert seen_sources == ["src/a.cpp"]
+    assert [cu.source for run in runs for cu in run.compile_units] == ["src/a.cpp"]
     # Narrowed (changed-path-scoped) run: does NOT claim confirmed pass
     # coverage — it only examined a subset of TUs, so "found nothing" there
     # says nothing about the rest of the codebase (sixth Codex review).
@@ -315,22 +273,12 @@ def test_inline_call_graph_scoped_with_diagnostics_does_not_confirm_narrowed_pas
     # clang crash/timeout/degenerate AST inside the scope) must NOT claim
     # narrowed_passes — the scope was not examined cleanly, mirroring the
     # seventh review's rationale for the full-pass case.
-    from abicheck.buildsource import call_graph
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-    from abicheck.buildsource.call_graph import CallEdge
 
-    class _FlakyCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = ["clang timed out on src/a.cpp"]
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build) -> list[CallEdge]:
-            return []
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FlakyCallExtractor)
+    install_fake_l5(
+        monkeypatch,
+        diagnostics={"call_graph": lambda _t: ["clang timed out on src/a.cpp"]},
+    )
     merged = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
@@ -359,22 +307,9 @@ def test_inline_call_graph_scoped_no_diagnostics_does_not_mark_degraded(monkeypa
     # Contrast case: a clean narrowed run (no diagnostics) must NOT be marked
     # degraded — only narrowed_passes/narrowed_scope, per the fourteenth/
     # fifteenth review.
-    from abicheck.buildsource import call_graph
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-    from abicheck.buildsource.call_graph import CallEdge
 
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build) -> list[CallEdge]:
-            return []
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    install_fake_l5(monkeypatch)
     merged = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
@@ -399,25 +334,9 @@ def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
     # fan out to all TUs (like the L4 selector) rather than match cu.source and
     # drop everything — else public_to_internal_dependency is skipped exactly for
     # header-only API changes (Codex review).
-    from abicheck.buildsource import call_graph
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-    from abicheck.buildsource.call_graph import CallEdge
 
-    seen_sources: list[str] = []
-
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build) -> list[CallEdge]:
-            seen_sources.extend(cu.source for cu in build.compile_units)
-            return []
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    runs = install_fake_l5(monkeypatch)
     merged = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
@@ -433,7 +352,10 @@ def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
         changed_paths=("include/foo.h",),
     )
     # Header change → all TUs parsed for call edges.
-    assert sorted(seen_sources) == ["src/a.cpp", "src/b.cpp"]
+    assert sorted(cu.source for run in runs for cu in run.compile_units) == [
+        "src/a.cpp",
+        "src/b.cpp",
+    ]
     # Not narrowed (fanned out to the whole compile DB despite changed_paths
     # being set) — confirmed pass coverage is still recorded.
     assert graph is not None
@@ -441,23 +363,12 @@ def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
     assert "call_graph" not in graph.narrowed_passes
 
 
-def _fake_call_extractor(monkeypatch, seen_sources: list[str]):
-    from abicheck.buildsource import call_graph
-    from abicheck.buildsource.call_graph import CallEdge
+def _record_call_pass_targets(monkeypatch, seen_sources: list[str]):
+    def record(target):
+        seen_sources.extend(cu.source for cu in target.compile_units)
+        return []
 
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build) -> list[CallEdge]:
-            seen_sources.extend(cu.source for cu in build.compile_units)
-            return []
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    install_fake_l5(monkeypatch, results={"call_graph": record})
 
 
 def test_inline_unseeded_call_graph_scoped_to_l4_units(monkeypatch):
@@ -468,7 +379,7 @@ def test_inline_unseeded_call_graph_scoped_to_l4_units(monkeypatch):
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
     seen_sources: list[str] = []
-    _fake_call_extractor(monkeypatch, seen_sources)
+    _record_call_pass_targets(monkeypatch, seen_sources)
     merged = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
@@ -506,7 +417,7 @@ def test_inline_unseeded_call_graph_broad_without_scoped_units(monkeypatch):
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
     seen_sources: list[str] = []
-    _fake_call_extractor(monkeypatch, seen_sources)
+    _record_call_pass_targets(monkeypatch, seen_sources)
     merged = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
@@ -636,35 +547,16 @@ def test_run_inline_source_abi_extractor_unavailable_returns_empty_selection(
 
 
 def test_inline_graph_has_type_edges_when_clang_available(monkeypatch):
-    from abicheck.buildsource import call_graph, type_graph
     from abicheck.buildsource.type_graph import TypeEdge
 
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build):
-            return []
-
-    class _FakeTypeExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-            self.last_jobs = 0
-            self.last_elapsed_s = 0.0
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build):
-            return [TypeEdge("ns::Widget", "ns::Base", "TYPE_INHERITS")]
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
-    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeTypeExtractor)
+    install_fake_l5(
+        monkeypatch,
+        results={
+            "type_graph": lambda _t: [
+                TypeEdge("ns::Widget", "ns::Base", "TYPE_INHERITS")
+            ]
+        },
+    )
     merged = _build_with_one_unit()
     graph = inline._build_inline_graph(
         merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=[]
@@ -676,36 +568,17 @@ def test_inline_graph_has_type_edges_when_clang_available(monkeypatch):
 def test_inline_graph_type_pass_marks_role_coverage_matrix(monkeypatch):
     # ADR-046 D3: a confirmed full type-graph pass earns the finer
     # per-(kind, role) extractor_passes keys alongside the family key.
-    from abicheck.buildsource import call_graph, type_graph
     from abicheck.buildsource.inline_graph_fold import role_pass_covered
     from abicheck.buildsource.type_graph import TypeEdge
 
-    class _FakeCallExtractor:
-        def __init__(self, *a: object, **k: object) -> None:
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build: BuildEvidence) -> list[object]:
-            return []
-
-    class _FakeTypeExtractor:
-        def __init__(self, *a: object, **k: object) -> None:
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-            self.last_jobs = 0
-            self.last_elapsed_s = 0.0
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build: BuildEvidence) -> list[TypeEdge]:
-            return [TypeEdge("ns::Widget", "ns::Base", "TYPE_INHERITS")]
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
-    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeTypeExtractor)
+    install_fake_l5(
+        monkeypatch,
+        results={
+            "type_graph": lambda _t: [
+                TypeEdge("ns::Widget", "ns::Base", "TYPE_INHERITS")
+            ]
+        },
+    )
     merged = _build_with_one_unit()
     graph = inline._build_inline_graph(
         merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=[]
@@ -732,18 +605,8 @@ def test_inline_graph_type_pass_marks_role_coverage_matrix(monkeypatch):
 def test_inline_graph_no_type_edges_when_clang_absent(monkeypatch):
     # Best-effort: a missing clang++ records a failed extractor row and leaves the
     # graph without type edges — never raises.
-    from abicheck.buildsource import call_graph, type_graph
 
-    class _Unavailable:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return False
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _Unavailable)
-    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _Unavailable)
+    install_fake_l5(monkeypatch, available=False)
     merged = _build_with_one_unit()
     rows: list = []
     graph = inline._build_inline_graph(
@@ -775,14 +638,6 @@ def _surface_with_macro_and_function() -> SourceAbiSurface:
 
 
 def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_path):
-    from abicheck.buildsource import (
-        call_graph,
-        callback_graph,
-        macro_graph,
-        override_graph,
-        template_graph,
-        type_graph,
-    )
     from abicheck.buildsource.macro_graph import DeclRange
 
     header = tmp_path / "t.h"
@@ -790,52 +645,11 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
         "#define FEATURE_X 1\n#ifdef FEATURE_X\nvoid f() { return FEATURE_X; }\n#endif\n"
     )
 
-    class _FakeNoEdgeExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-            self.last_jobs = 0
-            self.last_elapsed_s = 0.0
-            # ClangOverrideGraphExtractor's own extra fields
-            # (fold_override_graph reads them after extract_from_build).
-            self.last_virtual_methods: set[str] = set()
-            self.last_virtual_destructor_owners: set[str] = set()
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build):
-            return []
-
-    class _FakeMacroExtractor(_FakeNoEdgeExtractor):
-        def extract_from_build(self, build):
-            return [DeclRange("_Z1fv", str(header), 3, 3)]
-
-    # Codex review, fresh evidence: `with_call_graph=True` runs
-    # `fold_semantic_graphs`, which also constructs real
-    # `ClangOverrideGraphExtractor`/`ClangTemplateGraphExtractor`/
-    # `ClangCallbackGraphExtractor` instances -- previously unfaked here, so
-    # this fast (non-`integration`-marked) test could shell out to a real
-    # `clang++` if one happens to be on the runner's PATH.
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeNoEdgeExtractor)
-    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeNoEdgeExtractor)
-    monkeypatch.setattr(macro_graph, "ClangMacroGraphExtractor", _FakeMacroExtractor)
-    monkeypatch.setattr(
-        override_graph, "ClangOverrideGraphExtractor", _FakeNoEdgeExtractor
-    )
-    # Patched on `template_graph` itself (not `template_graph_extractor`,
-    # where the class actually lives) -- this is the historical monkeypatch
-    # path `template_graph_extractor.py`'s own module docstring documents,
-    # and `inline_graph_fold.fold_template_graph` reads
-    # `template_graph.ClangTemplateGraphExtractor` (through the module)
-    # specifically so this keeps working (Codex review, fresh evidence: an
-    # earlier revision imported the class directly from the new module in
-    # that function, which silently broke this exact guarantee).
-    monkeypatch.setattr(
-        template_graph, "ClangTemplateGraphExtractor", _FakeNoEdgeExtractor
-    )
-    monkeypatch.setattr(
-        callback_graph, "ClangCallbackGraphExtractor", _FakeNoEdgeExtractor
+    # The whole L5 AST pass is faked (not just the macro family), so this
+    # fast test can never shell out to a real clang++ on the runner's PATH.
+    install_fake_l5(
+        monkeypatch,
+        results={"macro_graph": lambda _t: [DeclRange("_Z1fv", str(header), 3, 3)]},
     )
     merged = _build_with_one_unit()
     rows: list = []
@@ -856,19 +670,8 @@ def test_inline_graph_folds_macro_edges_when_clang_available(monkeypatch, tmp_pa
 def test_inline_graph_no_macro_edges_when_clang_absent(monkeypatch):
     # Best-effort: a missing clang++ records a failed extractor row and leaves
     # the graph without macro edges — never raises.
-    from abicheck.buildsource import call_graph, macro_graph, type_graph
 
-    class _Unavailable:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-
-        def available(self) -> bool:
-            return False
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _Unavailable)
-    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _Unavailable)
-    monkeypatch.setattr(macro_graph, "ClangMacroGraphExtractor", _Unavailable)
+    install_fake_l5(monkeypatch, available=False)
     merged = _build_with_one_unit()
     rows: list = []
     graph = inline._build_inline_graph(
@@ -888,38 +691,15 @@ def test_inline_graph_no_macro_edges_when_clang_absent(monkeypatch):
 def test_inline_type_graph_scoped_to_changed_tus(monkeypatch):
     # Mirrors the call-graph scoping: a PR/--since scan narrows the type-graph
     # pass to the changed compile units, not the whole compile DB.
-    from abicheck.buildsource import call_graph, type_graph
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
     seen_sources: list[str] = []
 
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
+    def record(target):
+        seen_sources.extend(cu.source for cu in target.compile_units)
+        return []
 
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build):
-            return []
-
-    class _FakeTypeExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-            self.last_jobs = 0
-            self.last_elapsed_s = 0.0
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build):
-            seen_sources.extend(cu.source for cu in build.compile_units)
-            return []
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
-    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeTypeExtractor)
+    install_fake_l5(monkeypatch, results={"type_graph": record})
     merged = BuildEvidence(
         compile_units=[
             CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
@@ -952,23 +732,10 @@ def test_inline_include_graph_scoped_to_changed_tus(monkeypatch):
     # the whole compile DB — and, since it went through a live clang -M
     # extractor here (no recorded build-tool inputs), records the same
     # narrowed-pass coverage bookkeeping call/type graph already do.
-    from abicheck.buildsource import call_graph, include_graph, type_graph
+    from abicheck.buildsource import include_graph
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
 
     seen_sources: list[str] = []
-
-    class _FakeNoEdgeExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-            self.last_jobs = 0
-            self.last_elapsed_s = 0.0
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build):
-            return []
 
     class _FakeIncludeExtractor:
         def __init__(self, *a, **k):
@@ -982,8 +749,7 @@ def test_inline_include_graph_scoped_to_changed_tus(monkeypatch):
             seen_sources.extend(cu.source for cu in build.compile_units)
             return {}
 
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeNoEdgeExtractor)
-    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeNoEdgeExtractor)
+    install_fake_l5(monkeypatch)
     monkeypatch.setattr(include_graph, "ClangIncludeExtractor", _FakeIncludeExtractor)
     merged = BuildEvidence(
         compile_units=[
@@ -1013,28 +779,14 @@ def test_inline_include_graph_prefers_recorded_inputs_over_live_clang(monkeypatc
     # a live clang invocation cannot reach (Codex review context: the
     # record_bazel_inputs wiring in cli_buildsource.py exists precisely so
     # this path is taken instead of the live-clang one).
-    from abicheck.buildsource import call_graph, include_graph, type_graph
+    from abicheck.buildsource import include_graph
     from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-
-    class _FakeNoEdgeExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
-            self.last_jobs = 0
-            self.last_elapsed_s = 0.0
-
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build):
-            return []
 
     class _ExplodingIncludeExtractor:
         def available(self) -> bool:
             raise AssertionError("must not shell out when inputs were recorded")
 
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeNoEdgeExtractor)
-    monkeypatch.setattr(type_graph, "ClangTypeGraphExtractor", _FakeNoEdgeExtractor)
+    install_fake_l5(monkeypatch)
     monkeypatch.setattr(
         include_graph, "ClangIncludeExtractor", _ExplodingIncludeExtractor
     )

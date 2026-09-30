@@ -1027,8 +1027,9 @@ jobs:
       # every test and pass), see tests/conftest.py's silent-skip guard.
       - name: Run ABICC parity tests
         run: python scripts/verify.py --profile full --only abicc-parity
-      - name: Run XML schema validation tests (no ABICC required)
-        run: pytest tests/test_xml_parity.py::TestXmlSchemaValidation tests/test_xml_report.py -v --tb=short
+      # No separate XML-schema step here: tests/test_xml_parity.py's
+      # TestXmlSchemaValidation and tests/test_xml_report.py carry no marker,
+      # so every unit-tests shard already runs them.
 
   packaging:
     # Windows only. The Linux leg ran `python -m build && twine check` --

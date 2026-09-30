@@ -51,6 +51,7 @@ from abicheck.buildsource.check_report import (
     build_operational_error_report,
     final_exit_code,
 )
+from abicheck.buildsource.check_report_build_system import stamp_profile_build_system
 
 #: Usage error, matching the repo-wide convention documented in AGENTS.md
 #: ("64 = usage error (bad flags/inputs)").
@@ -116,6 +117,16 @@ def main(argv: list[str] | None = None) -> int:
             "'~<explicit_id>' tail by build_check_id(). Empty (the "
             "default) means no explicit id, the pre-G42 shape."
         ),
+    )
+    parser.add_argument(
+        "--build-system",
+        default="",
+        help="This cell's profile.build_system.name from build-output.json (WS-A); empty = unrecorded.",
+    )
+    parser.add_argument(
+        "--build-generator",
+        default="",
+        help="This cell's profile.build_system.generator (WS-A).",
     )
     parser.add_argument(
         "--gate-mode", default="local", choices=["local", "deferred", "advisory"]
@@ -260,6 +271,9 @@ def main(argv: list[str] | None = None) -> int:
         # consistent with it, not just the persisted report field.
         real_exit_code = max(real_exit_code, args.analysis_exit_code)
 
+    stamp_profile_build_system(
+        report, name=args.build_system, generator=args.build_generator
+    )
     args.report_out.parent.mkdir(parents=True, exist_ok=True)
     args.report_out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 

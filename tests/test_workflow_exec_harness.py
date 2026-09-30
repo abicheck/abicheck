@@ -44,8 +44,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import _workflow_exec
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import (
     REPO_ROOT,
     _is_under_windows_system_dir,
@@ -95,7 +95,7 @@ def _real_run_bodies() -> list[str]:
     documents = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
     documents += sorted((REPO_ROOT / "actions").glob("*/action.yml"))
     for path in documents:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             continue
         step_lists = []

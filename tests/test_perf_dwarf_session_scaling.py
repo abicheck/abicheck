@@ -137,25 +137,43 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
     so = _compile_multi_cu_lib(tmp_path, "cmp", n_cus=14)
     elf_meta = parse_elf_metadata(so)
 
-    # Legacy: three independent ELF opens (pre-DwarfSession behaviour).
-    t0 = time.perf_counter()
-    dwarf_meta = parse_dwarf_metadata(so)
-    dwarf_adv = parse_advanced_dwarf(so)
-    legacy_snap = build_snapshot_from_dwarf(
-        so, elf_meta, dwarf_meta, dwarf_adv, version="legacy"
-    )
-    legacy_elapsed = max(time.perf_counter() - t0, 1e-4)
+    def _legacy() -> tuple[float, object]:
+        # Legacy: three independent ELF opens (pre-DwarfSession behaviour).
+        t0 = time.perf_counter()
+        dwarf_meta = parse_dwarf_metadata(so)
+        dwarf_adv = parse_advanced_dwarf(so)
+        snap = build_snapshot_from_dwarf(
+            so, elf_meta, dwarf_meta, dwarf_adv, version="legacy"
+        )
+        return max(time.perf_counter() - t0, 1e-4), snap
 
-    # Current production path: one shared DwarfSession across all three passes.
-    t1 = time.perf_counter()
-    sess = open_dwarf_session(so)
-    assert sess is not None
-    meta2, adv2 = parse_dwarf_from_session(sess)
-    session_snap = build_snapshot_from_dwarf(
-        so, elf_meta, meta2, adv2, version="session", session=sess
-    )
-    sess.close()
-    session_elapsed = max(time.perf_counter() - t1, 1e-4)
+    def _session() -> tuple[float, object]:
+        # Current production path: one shared DwarfSession across all passes.
+        t1 = time.perf_counter()
+        sess = open_dwarf_session(so)
+        assert sess is not None
+        meta2, adv2 = parse_dwarf_from_session(sess)
+        snap = build_snapshot_from_dwarf(
+            so, elf_meta, meta2, adv2, version="session", session=sess
+        )
+        sess.close()
+        return max(time.perf_counter() - t1, 1e-4), snap
+
+    # Alternate the two paths and compare each one's *fastest* run. A single
+    # back-to-back sample let one scheduler hiccup on a loaded (and
+    # coverage-instrumented) CI runner decide the verdict: CI saw ratios of
+    # 0.86-0.87 against the 0.85 bar while local runs measure 0.46-0.64.
+    # The minimum is the standard noise-robust estimator for a wall-clock
+    # comparison, and a genuine loss of sharing still fails every round.
+    legacy_times: list[float] = []
+    session_times: list[float] = []
+    for _ in range(3):
+        elapsed, legacy_snap = _legacy()
+        legacy_times.append(elapsed)
+        elapsed, session_snap = _session()
+        session_times.append(elapsed)
+    legacy_elapsed = min(legacy_times)
+    session_elapsed = min(session_times)
 
     # Sanity: both paths actually extracted the same real work, not near-empty
     # snapshots that would make the timing comparison meaningless.

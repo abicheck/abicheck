@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO / "scripts"
@@ -41,6 +40,7 @@ PACK = REPO / "skills-src" / "evaluation" / "agents" / "skills" / "skill-eval-pa
 # Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
+import _yaml_fast  # noqa: E402
 import example_catalog  # noqa: E402
 
 
@@ -91,9 +91,8 @@ def test_every_published_skill_is_in_the_pack(pack: dict[str, Any]) -> None:
 
 
 def test_every_scenario_is_in_the_pack(pack: dict[str, Any]) -> None:
-    import yaml
 
-    manifest = yaml.safe_load(
+    manifest = _yaml_fast.safe_load(
         (
             REPO / "skills-src" / "evaluation" / "agents" / "skills" / "scenarios.yaml"
         ).read_text(encoding="utf-8")
@@ -143,7 +142,7 @@ def test_category_b_platform_restrictions_are_honored_not_widened(
     `NOT_VERIFIED` for the out-of-scope platform, and the grader would score
     that correct refusal as a wrong-verdict failure.
     """
-    manifest = yaml.safe_load(
+    manifest = _yaml_fast.safe_load(
         (
             REPO / "skills-src" / "evaluation" / "agents" / "skills" / "scenarios.yaml"
         ).read_text(encoding="utf-8")
@@ -188,7 +187,7 @@ def test_category_b_architecture_restrictions_are_honored_not_widened(
     for arm64 against an x86_64 old side, producing a real cross-
     architecture break instead of the intended shallow-evidence result.
     """
-    manifest = yaml.safe_load(
+    manifest = _yaml_fast.safe_load(
         (
             REPO / "skills-src" / "evaluation" / "agents" / "skills" / "scenarios.yaml"
         ).read_text(encoding="utf-8")
@@ -744,7 +743,7 @@ def test_every_corpus_prompt_has_an_id_in_the_pack(pack: dict[str, Any]) -> None
     """The ids are positional, which is only safe because the corpus digest is
     itself a pack entry: reordering renames ids *and* invalidates every trigger
     bundle in the same edit, so an id cannot come to mean a different prompt."""
-    corpus = yaml.safe_load(
+    corpus = _yaml_fast.safe_load(
         (REPO / "tests" / "agent_skills" / "trigger_corpus.yaml").read_text(
             encoding="utf-8"
         )

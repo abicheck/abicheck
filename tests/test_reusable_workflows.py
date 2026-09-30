@@ -36,8 +36,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, require_bash
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
@@ -56,7 +56,7 @@ def _load(path: Path) -> dict[str, Any]:
     # Actions parser example does the same and callers index with
     # `data[True]`/`data.get(True)`; done once here rather than per test.
     with path.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return _yaml_fast.safe_load(fh)
 
 
 def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:

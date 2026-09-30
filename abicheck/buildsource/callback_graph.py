@@ -314,21 +314,15 @@ not a drive-by extension here):
 from __future__ import annotations
 
 import re
-import shutil
-import time
-from dataclasses import dataclass, field
-from functools import partial
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .. import deadline
-from ..process_resources import BudgetedExecutor
 from . import call_graph
-from .clang_ast_run import run_clang_ast_dump
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode, register_fact
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
-    from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
 
 EDGE_DECL_TAKES_ADDRESS_OF = "DECL_TAKES_ADDRESS_OF"
 EDGE_DECL_REGISTERS_CALLBACK = "DECL_REGISTERS_CALLBACK"
@@ -959,109 +953,17 @@ def augment_graph_with_callback_registrations(
     return result
 
 
-# ── live clang extraction (integration only) ────────────────────────────────
-
-
-@dataclass
-class ClangCallbackGraphExtractor:
-    """Shell out to ``clang`` to emit a TU's AST and parse its callback
-    registration/address-of edges.
-
-    Side-effecting and compiler-dependent: only exercised on the
-    ``integration`` lane. A missing ``clang`` (or a parse failure) degrades
-    gracefully -- extraction returns ``[]`` and records nothing (ADR-028 D3).
-    Mirrors ``type_graph.ClangTypeGraphExtractor``'s shape exactly, reusing
-    ``call_graph``'s vetted argv-sanitizing/deadline/parallelism helpers.
-    """
-
-    clang_bin: str = "clang++"
-    diagnostics: list[str] = field(default_factory=list)
-    last_jobs: int = 0
-    last_elapsed_s: float = 0.0
-
-    def available(self) -> bool:
-        return shutil.which(self.clang_bin) is not None
-
-    def _extract_from_safe_args(
-        self,
-        argv: list[str],
-        cwd: str | None = None,
-        *,
-        diagnostics: list[str] | None = None,
-    ) -> list[CallbackEdge]:
-        diag = self.diagnostics if diagnostics is None else diagnostics
-        if not self.available():
-            diag.append(f"{self.clang_bin} not found in PATH")
-            return []
-        ast = run_clang_ast_dump(self.clang_bin, argv, cwd=cwd, diagnostics=diag)
-        if ast is None:
-            return []
-        try:
-            return parse_clang_ast_callbacks(ast)
-        except (ValueError, RecursionError) as exc:
-            diag.append(f"could not parse clang AST JSON: {exc}")
-            return []
-
-    def _extract_from_compile_unit(
-        self, cu: BuildEvidenceCompileUnit, *, diagnostics: list[str] | None = None
-    ) -> list[CallbackEdge]:
-        argv = call_graph._safe_clang_args_from_compile_unit(cu)
-        return self._extract_from_safe_args(
-            argv, cwd=call_graph._replay_cwd(cu), diagnostics=diagnostics
-        )
-
-    def extract_from_build(self, build: BuildEvidence) -> list[CallbackEdge]:
-        """Extract callback edges across every compile unit in *build* (best
-        effort). See ``call_graph.ClangCallGraphExtractor.extract_from_build``'s
-        docstring for why each unit's diagnostics are collected into a fresh
-        per-call list and only folded into ``self.diagnostics`` on the single
-        driving thread, in ``pool.map``'s own input-ordered iteration.
-        """
-        start = time.monotonic()
-        units = [cu for cu in build.compile_units if cu.source]
-        self.last_jobs = call_graph._call_graph_jobs(len(units))
-        if not units:
-            self.last_elapsed_s = 0.0
-            return []
-        if not self.available():
-            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
-            self.last_elapsed_s = time.monotonic() - start
-            return []
-
-        all_edges: list[CallbackEdge] = []
-        seen: set[tuple[str, str, str]] = set()
-
-        def add_edges(edges: list[CallbackEdge]) -> None:
-            for e in edges:
-                key = (e.src, e.dst, e.kind)
-                if key not in seen:
-                    seen.add(key)
-                    all_edges.append(e)
-
-        def _probe(
-            cu: BuildEvidenceCompileUnit,
-        ) -> tuple[list[CallbackEdge], list[str]]:
-            local_diagnostics: list[str] = []
-            edges = self._extract_from_compile_unit(cu, diagnostics=local_diagnostics)
-            return edges, local_diagnostics
-
-        try:
-            if self.last_jobs > 1 and len(units) > 1:
-                pool_worker = partial(
-                    call_graph._deadline_bound_worker,
-                    deadline.current_deadline_ts(),
-                    _probe,
-                )
-                with BudgetedExecutor(self.last_jobs) as pool:
-                    for edges, local_diagnostics in pool.map(pool_worker, units):
-                        add_edges(edges)
-                        self.diagnostics.extend(local_diagnostics)
-            else:
-                for cu in units:
-                    edges, local_diagnostics = _probe(cu)
-                    add_edges(edges)
-                    self.diagnostics.extend(local_diagnostics)
-        finally:
-            self.last_elapsed_s = time.monotonic() - start
-
-        return all_edges
+def merge_callback_edges(
+    per_unit: Iterable[Iterable[CallbackEdge]],
+) -> list[CallbackEdge]:
+    """Fold every TU's callback edges into one list, in TU order, first-seen
+    ``(src, dst, kind)`` wins."""
+    merged: list[CallbackEdge] = []
+    seen: set[tuple[str, str, str]] = set()
+    for edges in per_unit:
+        for e in edges:
+            key = (e.src, e.dst, e.kind)
+            if key not in seen:
+                seen.add(key)
+                merged.append(e)
+    return merged

@@ -630,7 +630,7 @@ def test_collect_source_graph_folds_template_graph_pass(tmp_path):
 @pytest.mark.integration
 def test_collect_source_graph_folds_override_and_macro_graph_passes(tmp_path):
     """A third round of the same gap (Codex review, fresh evidence): this
-    collect path had fallen behind ``inline_graph_fold.fold_semantic_graphs``
+    collect path had fallen behind ``l5_shared_ast.fold_semantic_graphs``
     a third time -- override/virtual-dispatch/macro folding were still
     missing here, so an otherwise-equivalent collected pack silently carried
     no ``METHOD_POSSIBLE_OVERRIDE``/``VIRTUAL_CALL_MAY_DISPATCH_TO``/
@@ -3506,22 +3506,13 @@ def _tree_with_two_units(tmp_path):
 
 
 def _stub_call_graph(monkeypatch, seen: list[str]):
-    from abicheck.buildsource import call_graph
-    from abicheck.buildsource.call_graph import CallEdge
+    from tests._fake_l5_ast_pass import install_fake_l5
 
-    class _FakeCallExtractor:
-        def __init__(self, *a, **k):
-            self.clang_bin = "clang++"
-            self.diagnostics: list[str] = []
+    def record(target):
+        seen.extend(cu.source for cu in target.compile_units)
+        return []
 
-        def available(self) -> bool:
-            return True
-
-        def extract_from_build(self, build) -> list[CallEdge]:
-            seen.extend(cu.source for cu in build.compile_units)
-            return []
-
-    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    install_fake_l5(monkeypatch, results={"call_graph": record})
 
 
 def test_inline_unseeded_call_graph_uses_l4_selection(tmp_path, monkeypatch):

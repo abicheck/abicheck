@@ -35,8 +35,8 @@ import json
 import re
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -69,7 +69,7 @@ def _scenarios() -> list[dict]:
     assert files, "no scenario catalog files found under tests/scenarios/"
     items: list[dict] = []
     for fp in files:
-        data = yaml.safe_load(fp.read_text(encoding="utf-8"))
+        data = _yaml_fast.safe_load(fp.read_text(encoding="utf-8"))
         assert isinstance(data, dict) and "scenarios" in data, (
             f"{fp.name}: needs a top-level 'scenarios' list"
         )
@@ -84,7 +84,7 @@ def _scenarios() -> list[dict]:
 
 
 def _registry_ids() -> set[str]:
-    data = yaml.safe_load(_REGISTRY.read_text(encoding="utf-8"))
+    data = _yaml_fast.safe_load(_REGISTRY.read_text(encoding="utf-8"))
     return {c["id"] for c in data["use_cases"]}
 
 

@@ -29,6 +29,7 @@ _spec.loader.exec_module(bench)
 # scripts/perf_baseline.py (split out to keep benchmark_scaling.py under the
 # file-size cap) — importing benchmark_scaling.py above already put
 # scripts/ on sys.path as a side effect, so a plain import resolves it.
+import _yaml_fast  # noqa: E402
 import perf_baseline  # noqa: E402
 
 
@@ -677,10 +678,9 @@ def test_memory_defaults_are_tighter_than_the_timing_defaults() -> None:
 
 
 def _performance_workflow() -> dict:
-    import yaml
 
     root = pathlib.Path(__file__).resolve().parents[1]
-    return yaml.safe_load(
+    return _yaml_fast.safe_load(
         (root / ".github" / "workflows" / "performance.yml").read_text()
     )
 

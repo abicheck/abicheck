@@ -91,10 +91,9 @@ AST pass *and* a raw-text scan the AST alone cannot answer):
   ``MACRO_CONTROLS_DECL`` edge, and every macro name its own span textually
   references (defined earlier in the same file) becomes a ``DECL_USES_MACRO``
   edge.
-- :class:`ClangMacroGraphExtractor` is the live, side-effecting wrapper
-  (integration-only), mirroring :class:`~abicheck.buildsource.type_graph.
-  ClangTypeGraphExtractor`'s shape and reusing ``call_graph.py``'s vetted
-  argv-sanitizing/deadline/parallelism helpers rather than a fresh copy.
+- :func:`parse_tu_decl_ranges`/:func:`merge_decl_ranges` are Pass A's
+  per-TU parser and cross-TU merge; the live clang run is ``l5_ast_pass``
+  (integration-only), shared with every other L5 graph family.
 
 **Empirical AST-dump finding, load-bearing for Pass A** (this module's own
 discovery, verified against real ``clang -Xclang -ast-dump=json`` output,
@@ -194,17 +193,11 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
-import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from .. import deadline
 from ..model.mangled_name import strip_macho_itanium_decoration
-from ..process_resources import BudgetedExecutor
-from .clang_ast_run import run_clang_ast_dump
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
 from .preprocessor_facts import _DEFINE_RE
 from .type_graph import (
@@ -216,7 +209,7 @@ from .type_graph import (
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
-    from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
+    from .build_evidence import CompileUnit as BuildEvidenceCompileUnit
 
 # ── edge kinds (reserved by graph_facts.MACRO_DEP_EDGE_KINDS) ──────────────
 EDGE_MACRO_CONTROLS_DECL = "MACRO_CONTROLS_DECL"
@@ -913,7 +906,7 @@ def augment_graph_with_macro_dependencies(
             # A raised OSError/etc. can embed the real, resolved (i.e.
             # un-redacted) path in both the filename operand and the
             # exception's own text — *file* itself may already be
-            # un-redacted too, since ClangMacroGraphExtractor resolves a
+            # un-redacted too, since parse_tu_decl_ranges resolves a
             # relative source path against the compile unit's own replayed
             # cwd before this function ever sees it. Redact both before
             # this diagnostic reaches `merged.diagnostics`/the persisted
@@ -976,158 +969,51 @@ def augment_graph_with_macro_dependencies(
     return result
 
 
-# ── live clang extraction (integration only) ────────────────────────────────
+def parse_tu_decl_ranges(
+    ast: dict[str, Any], cu: BuildEvidenceCompileUnit
+) -> list[DeclRange]:
+    """:func:`parse_clang_ast_decl_ranges` for one TU, with its paths resolved.
 
-
-@dataclass
-class ClangMacroGraphExtractor:
-    """Shell out to ``clang`` to emit a TU's AST and parse its declaration
-    ranges (Pass A only — the raw-text Pass B needs no compiler at all and is
-    driven separately by :func:`augment_graph_with_macro_dependencies`'s
-    caller, e.g. :func:`~abicheck.buildsource.inline_graph_fold.
-    fold_macro_graph`).
-
-    Side-effecting and compiler-dependent: only exercised on the
-    ``integration`` lane. A missing ``clang`` (or a parse failure) degrades
-    gracefully — extraction returns ``[]`` and records nothing (ADR-028 D3).
-    Reuses ``call_graph``'s vetted parse-only argv builder and deadline/
-    parallelism helpers (same shape as
-    :class:`~abicheck.buildsource.type_graph.ClangTypeGraphExtractor`) rather
-    than a fresh copy — this is a fourth independent
-    ``clang -ast-dump=json`` pass per TU alongside the call/type/template
-    graph passes ``inline_graph_fold.fold_semantic_graphs`` already runs; no
-    per-TU AST-JSON cache is shared across them today (confirmed: each pass's
-    own ``extract_from_build`` re-invokes clang independently), a pre-existing
-    inefficiency this module does not attempt to fix.
+    clang echoes a relative source path (an out-of-source build's
+    ``../src/a.cpp``) back into the AST dump's ``file`` fields exactly as
+    given on the command line, never resolved against the replayed cwd.
+    :func:`augment_graph_with_macro_dependencies` reads source text by that
+    ``file`` string against the *process*'s cwd, so a relative path is
+    resolved against this TU's own replayed cwd here, while it is still
+    known -- otherwise it silently resolves to nothing, or to an unrelated
+    file at that relative path (Codex review, PR #708). An already-absolute
+    path, the common case, is left untouched.
     """
+    from .call_graph import _replay_cwd
 
-    clang_bin: str = "clang++"
-    diagnostics: list[str] = field(default_factory=list)
-    last_jobs: int = 0
-    last_elapsed_s: float = 0.0
+    ranges = parse_clang_ast_decl_ranges(ast)
+    cwd = _replay_cwd(cu)
+    if not cwd:
+        return ranges
+    return [
+        r
+        if os.path.isabs(r.file)
+        else replace(r, file=os.path.normpath(os.path.join(cwd, r.file)))
+        for r in ranges
+    ]
 
-    def available(self) -> bool:
-        return shutil.which(self.clang_bin) is not None
 
-    def _extract_from_safe_args(
-        self,
-        argv: list[str],
-        cwd: str | None = None,
-        *,
-        diagnostics: list[str] | None = None,
-    ) -> list[DeclRange]:
-        diag = self.diagnostics if diagnostics is None else diagnostics
-        if not self.available():
-            diag.append(f"{self.clang_bin} not found in PATH")
-            return []
-        ast = run_clang_ast_dump(self.clang_bin, argv, cwd=cwd, diagnostics=diag)
-        if ast is None:
-            return []
-        try:
-            return parse_clang_ast_decl_ranges(ast)
-        except (TypeError, ValueError, RecursionError) as exc:
-            # TypeError (CodeRabbit review, fresh evidence): _LocationCursor.
-            # advance() calls int(loc["line"]) with no type check -- a
-            # malformed line value (null, a list, ...) in adversarial or
-            # corrupted AST JSON raises TypeError, which must degrade to a
-            # diagnostic like every other malformed-input case here, not
-            # escape and abort extraction for the whole build.
-            diag.append(f"could not parse clang AST JSON: {exc}")
-            return []
+def merge_decl_ranges(per_unit: Iterable[Iterable[DeclRange]]) -> list[DeclRange]:
+    """Fold every TU's decl ranges into one list, in TU order.
 
-    def _extract_from_compile_unit(
-        self, cu: BuildEvidenceCompileUnit, *, diagnostics: list[str] | None = None
-    ) -> list[DeclRange]:
-        from .call_graph import _replay_cwd, _safe_clang_args_from_compile_unit
-
-        argv = _safe_clang_args_from_compile_unit(cu)
-        cwd = _replay_cwd(cu)
-        ranges = self._extract_from_safe_args(argv, cwd=cwd, diagnostics=diagnostics)
-        if not cwd:
-            return ranges
-        # clang echoes a relative source path (e.g. an out-of-source build's
-        # ``../src/a.cpp``) back into the AST dump's ``file`` fields exactly
-        # as given on the command line — it never resolves it against *cwd*
-        # itself (Codex review, PR #708). augment_graph_with_macro_dependencies's
-        # caller (fold_macro_graph) reads source text by that same ``file``
-        # string against the *process*'s cwd, not this compile unit's own —
-        # so a relative path here would silently resolve to nothing (or, far
-        # worse, to an unrelated file that happens to exist at that relative
-        # path from the process cwd) unless resolved against the *replayed*
-        # cwd right here, while we still know it. An already-absolute path
-        # (the common case — most compile DBs record one) is left untouched.
-        return [
-            r
-            if os.path.isabs(r.file)
-            else replace(r, file=os.path.normpath(os.path.join(cwd, r.file)))
-            for r in ranges
-        ]
-
-    def extract_from_build(self, build: BuildEvidence) -> list[DeclRange]:
-        """Extract decl ranges across every compile unit in *build* (best
-        effort), deduped by ``(identity, file, begin_line, end_line)`` — the
-        first-seen span for an exact repeat (e.g. the same header parsed
-        identically from two TUs) wins, but two declarations sharing an
-        identity with *different* spans (a forward declaration and its own
-        later definition in the same file) are both kept, since only the
-        definition's span may carry the real macro guard/reference this
-        module exists to find (Codex review, PR #708 — a same-``(identity,
-        file)`` dedup discarded the definition's span whenever the forward
-        declaration was visited first). A later exact duplicate is harmless
-        either way since :func:`augment_graph_with_macro_dependencies` only
-        reads each joined declaration's own line span to test region
-        containment, not accumulate a range union. Each unit's diagnostics
-        are collected into a fresh per-call list and only folded into
-        ``self.diagnostics`` on the single driving thread, in ``pool.map``'s
-        own input-ordered iteration — see
-        ``call_graph.ClangCallGraphExtractor.extract_from_build``'s
-        docstring for the full rationale.
-        """
-        from .call_graph import _call_graph_jobs, _deadline_bound_worker
-
-        start = time.monotonic()
-        units = [cu for cu in build.compile_units if cu.source]
-        self.last_jobs = _call_graph_jobs(len(units))
-        if not units:
-            self.last_elapsed_s = 0.0
-            return []
-        if not self.available():
-            self.diagnostics.append(f"{self.clang_bin} not found in PATH")
-            self.last_elapsed_s = time.monotonic() - start
-            return []
-
-        all_ranges: list[DeclRange] = []
-        seen: set[tuple[str, str, int, int]] = set()
-
-        def add_ranges(ranges: list[DeclRange]) -> None:
-            for r in ranges:
-                key = (r.identity, r.file, r.begin_line, r.end_line)
-                if key not in seen:
-                    seen.add(key)
-                    all_ranges.append(r)
-
-        def _probe(cu: BuildEvidenceCompileUnit) -> tuple[list[DeclRange], list[str]]:
-            local_diagnostics: list[str] = []
-            ranges = self._extract_from_compile_unit(cu, diagnostics=local_diagnostics)
-            return ranges, local_diagnostics
-
-        try:
-            if self.last_jobs > 1 and len(units) > 1:
-                pool_worker = partial(
-                    _deadline_bound_worker,
-                    deadline.current_deadline_ts(),
-                    _probe,
-                )
-                with BudgetedExecutor(self.last_jobs) as pool:
-                    for ranges, local_diagnostics in pool.map(pool_worker, units):
-                        add_ranges(ranges)
-                        self.diagnostics.extend(local_diagnostics)
-            else:
-                for cu in units:
-                    ranges, local_diagnostics = _probe(cu)
-                    add_ranges(ranges)
-                    self.diagnostics.extend(local_diagnostics)
-        finally:
-            self.last_elapsed_s = time.monotonic() - start
-
-        return all_ranges
+    Deduped by ``(identity, file, begin_line, end_line)``: an exact repeat
+    (one header parsed identically from two TUs) keeps its first-seen span,
+    but two declarations sharing an identity with *different* spans (a
+    forward declaration and its later definition in the same file) are both
+    kept, since only the definition's span may carry the macro guard or
+    reference this module looks for (Codex review, PR #708).
+    """
+    merged: list[DeclRange] = []
+    seen: set[tuple[str, str, int, int]] = set()
+    for ranges in per_unit:
+        for r in ranges:
+            key = (r.identity, r.file, r.begin_line, r.end_line)
+            if key not in seen:
+                seen.add(key)
+                merged.append(r)
+    return merged

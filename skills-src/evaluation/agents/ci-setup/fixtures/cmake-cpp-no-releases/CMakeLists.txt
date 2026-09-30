@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(tinyjson VERSION 0.3.0 LANGUAGES CXX)
+option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+set(CMAKE_CXX_STANDARD 17)
+add_library(tinyjson src/value.cpp src/detail/parser.cpp)
+target_include_directories(tinyjson PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> PRIVATE src)
+install(TARGETS tinyjson)
+install(DIRECTORY include/ DESTINATION include)

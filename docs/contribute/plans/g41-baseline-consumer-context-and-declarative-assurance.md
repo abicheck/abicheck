@@ -21,20 +21,40 @@ generated: false
 
 **Remaining for WS-A** (not in that slice):
 
-1. Phase 1 proper: baseline generation through the same
+1. Phase 1 proper — **first slice landed (WS-A slice 3, 2026-09-30):**
+   `publish-baseline.yml`/`update-main-baseline.yml` resolve each profile's
+   baseline compile context with the run plan's own per-profile resolvers
+   (`buildsource/baseline_extraction_context.py`: consumer overlay when
+   active, else producer overlay), fold it into a copy of `build-config`'s
+   `compile:` block, and record it as `manifest.json`'s
+   `extraction_context`. Still open from Phase 1: baseline generation
+   through the same
    `ResolvedExtractionContext` as the candidate; baseline-manifest selection
    key `(target, profile, channel, depth, evidence-producer, fingerprint)`;
    `publish-baseline.yml`/`update-main-baseline.yml`/`actions/baseline`
    artifact naming widened to the profile id so a per-profile (e.g.
    `clang18-cmake`) accepted baseline exists.
-2. Carry `profile.build_system` from `build-output.json` into run-plan cells
-   (`RunPlanCheck`) and the report, so a cell's findings are attributed to
-   its own profile (lab gap `producer-attribution-through-project-path`).
+2. ~~Carry `profile.build_system` into run-plan cells and the report~~ —
+   **landed (WS-A slice 2, 2026-09-30)** for `kind: target` cells:
+   `RunPlanCheck.build_system`/`build_generator`, `check-target`
+   `build-system`/`build-generator` inputs, report envelope
+   `profile_build_system` (schema 5.11). Still open: bundle cells, and the
+   lab's `clang_profile_not_a_contract_profile` failure itself, which needs
+   item 1 (a baseline published for the Clang profile) rather than
+   attribution alone.
 3. Stamp build identity when evidence is used only for compile flags and not
    embedded (today the axis sees only embedded L3 evidence), and surface it
    in the report's effective-config digest.
-4. G34 consumer-compile leftovers (`toolchain_bindings.py` per-profile
-   consumer compile in the baseline job).
+4. ~~G34 consumer-compile leftovers (per-profile consumer compile in the
+   baseline job)~~ — landed with slice 3 above. Still open around it:
+   resolve-baseline does not yet compare `extraction_context` against the
+   candidate cell's context (the comparability gate still refuses a
+   mismatch at compare time, as `NOT_COMPARABLE`); `update-main-baseline`'s
+   cache key does not fold the context in; the baseline selection key does
+   not yet include requested depth / evidence producer (depth is recorded
+   per artifact in `dump_provenance`, unread by the resolver); and the
+   `actions/baseline` fan-out over several depths per (target, profile,
+   channel) is not built.
 
 ## Problem
 

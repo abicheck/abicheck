@@ -1205,7 +1205,7 @@ def _build_inline_graph(
     evidence exists — it is compact by design (ADR-031 D7), so there is no
     separate opt-in flag.
 
-    When ``with_call_graph`` is set, :func:`inline_graph_fold.fold_semantic_graphs`
+    When ``with_call_graph`` is set, :func:`l5_ast_pass.fold_semantic_graphs`
     folds the Clang call/type/override/template/include-graph edges into the
     graph (best-effort throughout — see its own docstring for the edge kinds
     and scoping precedence, including the template-instantiation pass, G29
@@ -1224,7 +1224,7 @@ def _build_inline_graph(
 
     graph = build_source_graph(merged, source_abi=surface)
     if with_call_graph:
-        from .inline_graph_fold import fold_semantic_graphs
+        from .l5_ast_pass import fold_semantic_graphs
 
         # NOTE: this always runs the replay passes even when `surface`'s
         # source_edges are already confirmed complete (build_source_graph()

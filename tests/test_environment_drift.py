@@ -32,6 +32,7 @@ import pytest
 # Phase 3 resolver (scripts/CLAUDE.md, docs/contribute/plans/examples-catalog-split.md).
 _REPO_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_DIR / "scripts"))
+import _yaml_fast  # noqa: E402
 import example_catalog  # noqa: E402
 
 from abicheck.checker import ChangeKind, Verdict, compare  # noqa: E402
@@ -1026,11 +1027,12 @@ class TestEnvironmentMatrixRuntimeFloors:
     def test_wheel_context_blank_value_end_to_end_does_not_enable_check(
         self,
     ) -> None:
-        import yaml
 
         old = _snap(_elf(rpath="/usr/local/lib"))
         new = _snap(_elf(rpath="/usr/local/lib"))
-        data = yaml.safe_load('runtime_floors:\n  WHEEL_CONTEXT:\n  GLIBC: "2.28"\n')
+        data = _yaml_fast.safe_load(
+            'runtime_floors:\n  WHEEL_CONTEXT:\n  GLIBC: "2.28"\n'
+        )
         matrix = EnvironmentMatrix.from_dict(data)
         result = compare(old, new, env_matrix=matrix)
         assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE not in _kinds(result.changes)

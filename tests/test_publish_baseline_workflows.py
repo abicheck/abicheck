@@ -41,8 +41,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+import _yaml_fast
 import pytest
-import yaml
 from _workflow_exec import bash_executable, require_bash
 
 from abicheck.buildsource.baseline_publish import (
@@ -68,7 +68,7 @@ _DOWNLOAD_ARTIFACT_V8_SHA = "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
 
 def _load(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        return _yaml_fast.safe_load(fh)
 
 
 def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:

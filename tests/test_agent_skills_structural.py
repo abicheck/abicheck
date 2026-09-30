@@ -35,8 +35,8 @@ import re
 import sys
 from pathlib import Path
 
+import _yaml_fast
 import pytest
-import yaml
 
 REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "skills-src"
@@ -68,7 +68,7 @@ def _front_matter(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
     match = re.match(r"\A---\r?\n(.*?)\r?\n---\r?\n", text, re.DOTALL)
     assert match is not None, f"{path}: missing YAML frontmatter"
-    data = yaml.safe_load(match.group(1))
+    data = _yaml_fast.safe_load(match.group(1))
     assert isinstance(data, dict), f"{path}: frontmatter is not a mapping"
     return data
 
@@ -88,11 +88,12 @@ def _version_tuple(text: str) -> tuple[int, ...]:
 def test_the_published_portfolio_is_exactly_the_admitted_skills():
     """ADR-058: every public skill passes the five-criteria admission bar in
     an ADR amendment of its own. `check-abi-compatibility` survived the
-    2026-08-20 portfolio reset; `explain-abi-change` was admitted by the
-    2026-09-30 amendment. A new directory here without that record fails."""
+    2026-08-20 portfolio reset; `explain-abi-change` and
+    `set-up-abi-compatibility-ci` were admitted by 2026-09-30 amendments. A new directory here without that record fails."""
     assert [d.name for d in SKILL_DIRS] == [
         "check-abi-compatibility",
         "explain-abi-change",
+        "set-up-abi-compatibility-ci",
     ]
 
 

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.16)
+project(codec VERSION 2.4.0 LANGUAGES CXX)
+add_library(codec SHARED src/codec.cpp)
+target_include_directories(codec PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+set_target_properties(codec PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION 2)

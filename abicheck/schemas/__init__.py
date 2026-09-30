@@ -1062,12 +1062,16 @@ _ARTIFACT_NAMES = frozenset(
 #:        reached the finding from no declared entrypoint; an absent key
 #:        means it never ran. Projected through ``--show-only`` with the
 #:        block.
-#: 5.11 -- additive ``declined`` on each ``detectors`` entry (ADR-063 T9):
+#: 5.11 -- additive: optional top-level ``profile_build_system``
+#:        (``{name, generator}``) on a check-target envelope -- the
+#:        build-output.json ``profile.build_system`` of the profile the cell
+#:        ran under (WS-A per-profile attribution). Absent = unrecorded.
+#: 5.12 -- additive ``declined`` on each ``detectors`` entry (ADR-063 T9):
 #:        ``[{entity, reason}]`` for comparisons the detector ran but declined
 #:        to judge on incomplete/unsupported evidence -- the per-entity
 #:        counterpart of ``not_evaluated``. A detector is now listed when it
 #:        declined anything, even with no findings and no coverage gap.
-REPORT_SCHEMA_VERSION = "5.11"
+REPORT_SCHEMA_VERSION = "5.12"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

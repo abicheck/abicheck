@@ -50,7 +50,6 @@ from .build_evidence import (
 )
 from .call_graph import (
     CallEdge,
-    ClangCallGraphExtractor,
     augment_graph_with_calls,
     parse_clang_ast_calls,
 )
@@ -159,7 +158,6 @@ __all__ = [
     "BuildOption",
     "CallEdge",
     "CastxmlSourceExtractor",
-    "ClangCallGraphExtractor",
     "ClangIncludeExtractor",
     "ClangSourceExtractor",
     "CollectionAction",
