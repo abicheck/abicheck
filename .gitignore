@@ -36,7 +36,3 @@ site/
 mutants/
 mutation-receipt.json
 mutmut-results.txt
-# npm skill package build output (scripts/build_npm_skill_package.py)
-packages/abicheck-skills/skills/
-packages/abicheck-skills/LICENSE
-packages/abicheck-skills/*.tgz

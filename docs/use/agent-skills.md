@@ -38,7 +38,7 @@ the portfolio is shaped this way.
 > version isn't inside the `0.6.x` range, the installed skill will decline
 > to execute.
 
-**Status (2026-09-29): preview, installable with `npx abicheck-skills`.**
+**Status (2026-09-29): preview, installable with `npx skills add abicheck/abicheck`.**
 A second evaluation pilot compared agents with and without the skill. It
 ran 14 compatibility scenarios with one model, headless Claude Code. With
 the skill:
@@ -77,32 +77,26 @@ still-unrun behavioral evaluation. See
 
 | Skill | Status | The question it answers |
 |---|---|---|
-| [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/skills-src/check-abi-compatibility/SKILL.md) | **Preview** (`npx abicheck-skills`) | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
+| [`check-abi-compatibility`](https://github.com/abicheck/abicheck/blob/main/skills-src/check-abi-compatibility/SKILL.md) | **Preview** (`npx skills add abicheck/abicheck`) | "Will this change break existing consumers?" — review a diff, branch, commit, or PR, ending in a verdict plus a root-cause explanation. Also handles "why did this suddenly report dozens of breaks?" |
 
 ## Installing it
 
 ```bash
-npx abicheck-skills                         # into the current project
-npx abicheck-skills --global --agent claude # for every project, one agent
-npx abicheck-skills doctor                  # check the abicheck CLI it drives
+npx skills add abicheck/abicheck                     # into the current project
+npx skills add abicheck/abicheck -g -a claude-code   # for every project, one agent
+npx skills add abicheck/abicheck -l                  # list what the repository offers
 ```
 
-[`abicheck-skills`](https://www.npmjs.com/package/abicheck-skills) is a
-dependency-free installer published from this repository
-(`packages/abicheck-skills/`), versioned in lockstep with abicheck itself. It
-copies the skill into the directory your agent reads:
+This uses the [`skills` CLI](https://www.npmjs.com/package/skills), which
+installs skills straight from a GitHub repository into the directory each
+agent reads (Claude Code, Codex, Copilot, Cursor, Gemini CLI and others) and
+handles `list`, `update` and `remove` itself. abicheck publishes the skill
+for it as the committed, self-contained `skills/check-abi-compatibility/`
+tree: generated from `skills-src/`, with every reference it cites copied in,
+and checked against a fresh render in CI so it cannot drift.
 
-| `--agent` | Tree | Read by |
-|---|---|---|
-| `agents` (aliases `codex`, `copilot`, `cursor`) | `.agents/skills/` | GitHub Copilot, OpenAI Codex, Cursor — the portable, cross-vendor convention |
-| `claude` | `.claude/skills/` | Claude Code, which does not scan `.agents/skills` |
-| `gemini` | `.gemini/skills/` | Gemini CLI, which does not either |
-
-Without `--agent` it installs for every agent it detects in the target
-directory (`.claude/`, `AGENTS.md`/`.codex/`/`.cursor/`, `.gemini/`), else for
-Claude Code and the portable tree. `list` and `uninstall` do what they say;
-the installer records what it wrote and never replaces a directory it did not
-create unless given `--force`.
+The skill drives the abicheck CLI, so install that too:
+`pipx install abicheck` (or `pip install abicheck`).
 
 **From a checkout** (contributors): `skills-src/` is the one hand-authored
 source and the three trees are generated build output, not committed
@@ -142,8 +136,8 @@ is refused up front instead of failing partway through a workflow.
 
 ## Contributing
 
-Edit `skills-src/`, never the generated trees or the npm package's staged
-`skills/` directory (`python scripts/build_npm_skill_package.py` restages it). `skills-src/CLAUDE.md` is the
+Edit `skills-src/`, never the generated trees, including the committed
+`skills/` tree (`python scripts/gen_agent_skills.py` regenerates it). `skills-src/CLAUDE.md` is the
 contributor contract — the three-layer model, the shared-fragment rules, and
 the admission bar a second public skill would have to clear. The phased plan is
 [G36](../contribute/plans/g36-native-compatibility-agent-skills.md).

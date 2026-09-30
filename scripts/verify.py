@@ -429,15 +429,6 @@ STEPS: tuple[Step, ...] = (
         description="Generated agent-skill trees match skills-src/ (ADR-058)",
     ),
     Step(
-        # ADR-058 publication: the npx-installable package's version must be
-        # abicheck's own, and every skill must declare the range the
-        # installer's `doctor` checks against.
-        "npm-skill-package",
-        _pyscript("scripts/build_npm_skill_package.py", "--check"),
-        frozenset({PR, FULL}),
-        description="npm abicheck-skills package consistent with skills-src/ and pyproject.toml",
-    ),
-    Step(
         "repo-facts",
         _pyscript("scripts/gen_repo_facts.py", "--check"),
         frozenset({PR, FULL}),
