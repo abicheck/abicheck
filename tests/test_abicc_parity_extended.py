@@ -555,21 +555,6 @@ class TestOutputFormatParity:
             assert "symbol" in change
             assert "description" in change
 
-    @pytest.mark.xfail(
-        reason=(
-            "Newly exercised in CI by PR #604's marker-scoped `-m abicc` "
-            "selection fix (ci.yml's job previously hardcoded a 2-file list "
-            "that never included this file, so it silently never ran). "
-            "Failing as of that fix landing: the literal word 'Verdict' is no "
-            "longer present in the rendered HTML report (the CSS still has a "
-            "`.verdict-box` element, so this looks like label-text drift in "
-            "html_report.py's template rather than a missing feature) — not "
-            "yet triaged. Investigate separately (strict=True: this fails "
-            "loudly on an unexpected XPASS once fixed, forcing the marker's "
-            "removal instead of rotting silently)."
-        ),
-        strict=True,
-    )
     def test_report_html_contains_abicc_sections(self, tmp_path):
         """HTML report has ABICC-equivalent sections: verdict, summary, changes."""
         _require_tool("castxml")
