@@ -92,16 +92,19 @@ _PE_STDCALL_DECORATION_RE = re.compile(r"^_(.+)@\d+$")
 # __stdcall/__fastcall/__cdecl above, it applies on *every* PE machine type
 # (x64/ARM64 included, not just 32-bit x86) -- MSVC's argument-passing
 # convention decorates a __vectorcall export with a trailing "@@N" on any
-# architecture, with the leading underscore itself still x86-32-only
-# (Codex review, PR #1015). The optional leading "_" here covers both
-# shapes with one pattern rather than depending on getting that underscore
-# rule exactly right for a decoration this codebase does not otherwise
-# need to fully model.
-_PE_VECTORCALL_DECORATION_RE = re.compile(r"^_?(.+)@@\d+$")
+# architecture. It carries NO leading-underscore prefix on any machine
+# (MSVC "Argument Passing and Naming Conventions"), so a leading "_" is part
+# of the real name and is never stripped: "_f@@8" is function "_f" and
+# "f@@8" is function "f" -- two distinct entities that an optional "_?"
+# prefix used to join. This agrees with
+# ``model.graph_entity_identity.pe_c_decoration_base``, which decodes
+# "_f@@8" as "_f".
+_PE_VECTORCALL_DECORATION_RE = re.compile(r"^(.+)@@\d+$")
 
 
 def _strip_pe_vectorcall_decoration(sym: str) -> str | None:
-    """Undo __vectorcall's ``name@@N``/``_name@@N`` export decoration.
+    """Undo __vectorcall's ``name@@N`` export decoration (a leading ``_``
+    is part of ``name``, never a prefix).
     Unlike :func:`_strip_pe_c_decoration`, this applies on every PE machine
     type. Returns ``None`` (not the unchanged string) when *sym* doesn't
     match, so a caller can tell "no vectorcall decoration here" apart from
