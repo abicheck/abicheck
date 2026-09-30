@@ -424,7 +424,10 @@ def current_backend_declaration_readers() -> dict[tuple[str, str, str], int]:
             if name is None:
                 continue
             key = (rel, name, field_name)
-            found[key] = found.get(key, 0) + n
+            # max, not sum: in a mutmut tree one source function can appear
+            # as more than one copy that maps back to its name (observed:
+            # every read counted exactly twice), and it is still one reader.
+            found[key] = max(found.get(key, 0), n)
     return found
 
 

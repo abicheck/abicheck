@@ -136,3 +136,29 @@ def test_a_mutmut_tree_reports_the_source_reader_not_its_copies(
     from semantic_ir_cutover import _unmangled_qualname
 
     assert _unmangled_qualname(qualname) == expected
+
+
+def test_copies_of_one_source_function_count_as_one_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mutmut tree can hold a function both under its own name and as its
+    `_mutmut_orig` copy; the gate must report the source count, not a sum."""
+    import semantic_ir_cutover as gate
+
+    mod = tmp_path / "abicheck" / "diff_x.py"
+    mod.parent.mkdir()
+    body = "    return snap.dwarf\n"
+    mod.write_text(
+        "def _f(snap):\n"
+        + body
+        + "def x__f__mutmut_orig(snap):\n"
+        + body
+        + "def x__f__mutmut_1(snap):\n"
+        + body,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gate, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_checker_modules", lambda: [mod])
+    assert gate.current_backend_declaration_readers() == {
+        ("abicheck/diff_x.py", "_f", "dwarf"): 1
+    }
