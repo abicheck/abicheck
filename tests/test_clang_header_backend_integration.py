@@ -472,7 +472,7 @@ def test_clang_backend_field_default_initializer_removed_end_to_end(
 
     old_snap = dump(v1_so, [old_header], header_backend="clang")
     new_snap = dump(v2_so, [new_header], header_backend="clang")
-    assert old_snap.clang_field_initializer_facts_reliable is True
+    assert not old_snap.stale_fact_families
     cfg = next(t for t in old_snap.declarations.types if t.name == "Cfg")
     assert next(f for f in cfg.fields if f.name == "timeout").default == "30"
 

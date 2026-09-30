@@ -566,13 +566,11 @@ class TestClangVtableFactsReliabilityGate:
         old = _snap(
             from_headers=True,
             ast_producer="clang",
-            clang_vtable_facts_reliable=True,
             types=[self._legacy_clang_record()],
         )
         new = _snap(
             from_headers=True,
             ast_producer="clang",
-            clang_vtable_facts_reliable=True,
             types=[self._fresh_clang_record()],
         )
         result = compare(old, new)
@@ -584,13 +582,12 @@ class TestClangVtableFactsReliabilityGate:
         old = _snap(
             from_headers=True,
             ast_producer="clang",
-            clang_vtable_facts_reliable=False,
             types=[self._legacy_clang_record()],
+            stale_fact_families=frozenset({"clang_vtable"}),
         )
         new = _snap(
             from_headers=True,
             ast_producer="clang",
-            clang_vtable_facts_reliable=True,
             types=[self._fresh_clang_record()],
         )
         result = compare(old, new)
@@ -607,7 +604,6 @@ class TestClangVtableFactsReliabilityGate:
         old = _snap(
             from_headers=True,
             ast_producer="clang",
-            clang_vtable_facts_reliable=False,
             types=[
                 RecordType(
                     name="A",
@@ -617,11 +613,11 @@ class TestClangVtableFactsReliabilityGate:
                     size_bits=64,
                 )
             ],
+            stale_fact_families=frozenset({"clang_vtable"}),
         )
         new = _snap(
             from_headers=True,
             ast_producer="clang",
-            clang_vtable_facts_reliable=True,
             types=[
                 RecordType(
                     name="A",
@@ -665,7 +661,6 @@ class TestClangVtableFactsReliabilityGate:
         old = _snap(
             from_headers=True,
             ast_producer="clang",
-            clang_vtable_facts_reliable=False,
             types=[
                 RecordType(
                     name="A",
@@ -675,11 +670,11 @@ class TestClangVtableFactsReliabilityGate:
                     size_bits=None,
                 )
             ],
+            stale_fact_families=frozenset({"clang_vtable"}),
         )
         new = _snap(
             from_headers=True,
             ast_producer="clang",
-            clang_vtable_facts_reliable=True,
             types=[
                 RecordType(
                     name="A",

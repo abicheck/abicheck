@@ -64,6 +64,7 @@ from .model import (
     stdlib_namespaces_excluded,
 )
 from .model.change_catalog.kinds import ChangeKind
+from .model.snapshot_reliability import family_reliable
 
 
 def _type_map(snap: AbiSnapshot) -> TypeMap[RecordType]:
@@ -123,7 +124,7 @@ def _is_polymorphic(
     true.
 
     *vtable_facts_reliable* (Codex review, this slice) is the same
-    whole-snapshot flag (``AbiSnapshot.clang_vtable_facts_reliable``)
+    whole-snapshot flag (``the stale 'clang_vtable' fact family (model.snapshot_reliability)``)
     ``diff_layout``/``diff_types_vtable`` already thread through their own
     vtable reads — layered *alongside* the per-record ``FactStatus`` check
     above, not instead of it. In every real pipeline the two agree (a
@@ -366,12 +367,12 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # reliable-producer case.
     old_virtual_owner_index = (
         _virtual_signatures_by_owner(old.function_map)
-        if not old.clang_vtable_facts_reliable
+        if not family_reliable(old, "clang_vtable")
         else None
     )
     new_virtual_owner_index = (
         _virtual_signatures_by_owner(new.function_map)
-        if not new.clang_vtable_facts_reliable
+        if not family_reliable(new, "clang_vtable")
         else None
     )
 
@@ -431,14 +432,14 @@ def _diff_vtable_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 o,
                 old_types,
                 old_memo,
-                vtable_facts_reliable=old.clang_vtable_facts_reliable,
+                vtable_facts_reliable=family_reliable(old, "clang_vtable"),
                 virtual_owner_index=old_virtual_owner_index,
             )
             ng = _secondary_groups(
                 n,
                 new_types,
                 new_memo,
-                vtable_facts_reliable=new.clang_vtable_facts_reliable,
+                vtable_facts_reliable=family_reliable(new, "clang_vtable"),
                 virtual_owner_index=new_virtual_owner_index,
             )
             if og is not None and ng is not None and og != ng:

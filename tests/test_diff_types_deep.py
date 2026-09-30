@@ -20,6 +20,8 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.snapshot_reliability import family_reliable
+from tests._legacy_snapshot import as_legacy_baseline
 
 
 def _snap(
@@ -1073,7 +1075,7 @@ class TestLegacyCvFactsReliableGating:
             types=[t],
             from_headers=True,
             ast_producer="castxml",
-            header_cv_facts_reliable=False,
+            stale_fact_families=frozenset({"header_cv"}),
         )
 
     def _fresh_snap(self, version, **type_kwargs):
@@ -1089,7 +1091,6 @@ class TestLegacyCvFactsReliableGating:
             types=[t],
             from_headers=True,
             ast_producer="castxml",
-            header_cv_facts_reliable=True,
         )
 
     def test_legacy_vs_fresh_suppresses_false_field_became_volatile(self):
@@ -1162,7 +1163,7 @@ class TestLegacyCvFactsReliableGating:
             types=[u_old],
             from_headers=True,
             ast_producer="castxml",
-            header_cv_facts_reliable=False,
+            stale_fact_families=frozenset({"header_cv"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -1170,7 +1171,6 @@ class TestLegacyCvFactsReliableGating:
             types=[u_new],
             from_headers=True,
             ast_producer="castxml",
-            header_cv_facts_reliable=True,
         )
         r = compare(old, new)
         assert ChangeKind.UNION_FIELD_TYPE_CHANGED not in _kinds(r)
@@ -1546,6 +1546,12 @@ class TestFieldDefaultUnreliableLegacySnapshot:
     """
 
     def _clang_snap(self, version, field_default, *, reliable=True):
+        snap = self._fresh_clang_snap(version, field_default)
+        # An unreliable side is a real pre-v20 document, loaded through the
+        # decoder that demotes its field defaults (tests/_legacy_snapshot.py).
+        return snap if reliable else as_legacy_baseline(snap, 19)
+
+    def _fresh_clang_snap(self, version, field_default):
         return AbiSnapshot(
             library="libtest.so.1",
             version=version,
@@ -1559,7 +1565,6 @@ class TestFieldDefaultUnreliableLegacySnapshot:
             ],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=reliable,
         )
 
     def test_no_false_removal_against_unreliable_legacy_new_side(self):
@@ -1700,7 +1705,7 @@ class TestFieldDefaultUnreliableLegacyHybridSnapshot:
         legacy_dict["schema_version"] = 19
         legacy_dict.pop("clang_field_initializer_facts_reliable", None)
         legacy = snapshot_from_dict(legacy_dict)
-        assert legacy.clang_field_initializer_facts_reliable is False
+        assert family_reliable(legacy, "clang_field_initializer") is False
         assert "type:Cfg:field:timeout:default" not in legacy.fact_provenance
 
         r = compare(fresh, legacy)

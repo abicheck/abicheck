@@ -51,6 +51,7 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.dumper_clang import _clang_param_is_restrict
 from abicheck.dumper_clang_qualifiers import _declarator_group
 from abicheck.model import AbiSnapshot, Fact, Function, Param, Visibility
+from tests._legacy_snapshot import as_legacy_baseline
 
 
 def _param_node(qual_type: str, desugared: str | None = None) -> dict:
@@ -629,25 +630,24 @@ class TestLegacyClangBaselineSuppression:
         the finding for this pair."""
         old = _snap(
             ast_producer="clang",
-            clang_restrict_facts_reliable=True,
             functions=[_func(False)],
         )
         new = _snap(
             ast_producer="clang",
-            clang_restrict_facts_reliable=True,
             functions=[_func(True)],
         )
         assert ChangeKind.PARAM_RESTRICT_CHANGED in _kinds(compare(old, new))
 
     def test_legacy_clang_baseline_suppresses_the_finding(self) -> None:
-        old = _snap(
-            ast_producer="clang",
-            clang_restrict_facts_reliable=False,
-            functions=[_func(False)],
+        old = as_legacy_baseline(
+            _snap(
+                ast_producer="clang",
+                functions=[_func(False)],
+            ),
+            21,
         )
         new = _snap(
             ast_producer="clang",
-            clang_restrict_facts_reliable=True,
             functions=[_func(True)],
         )
         assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
@@ -657,13 +657,14 @@ class TestLegacyClangBaselineSuppression:
         tool's output) reads as a REMOVAL, and is declined the same way."""
         old = _snap(
             ast_producer="clang",
-            clang_restrict_facts_reliable=True,
             functions=[_func(True)],
         )
-        new = _snap(
-            ast_producer="clang",
-            clang_restrict_facts_reliable=False,
-            functions=[_func(False)],
+        new = as_legacy_baseline(
+            _snap(
+                ast_producer="clang",
+                functions=[_func(False)],
+            ),
+            21,
         )
         assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))
 
@@ -688,12 +689,10 @@ class TestParamRestrictFactStatusGating:
     def test_uncollected_old_side_declines(self) -> None:
         old = _snap(
             ast_producer="clang",
-            clang_restrict_facts_reliable=True,
             functions=[_func_with_restrict_fact(Fact.not_collected())],
         )
         new = _snap(
             ast_producer="clang",
-            clang_restrict_facts_reliable=True,
             functions=[_func(True)],
         )
         assert ChangeKind.PARAM_RESTRICT_CHANGED not in _kinds(compare(old, new))

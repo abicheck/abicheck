@@ -17230,6 +17230,26 @@ not new design.
   `policy/analysis_assurance_*` modules also need a load-time "degraded fact
   families" record in place of eight model booleans. About 90 test sites set
   a flag directly and would move to decoding a legacy document.
+- **Phase 0 flags, closed (2026-09-30).** The eight `AbiSnapshot.
+  *_facts_reliable` booleans are removed. What they recorded -- which fact
+  families a stored document's own writer could not vouch for -- is one
+  load-time record, `AbiSnapshot.stale_fact_families`, read only through
+  `model/snapshot_reliability.family_reliable`; the encoder still writes the
+  eight historical keys in their historical position, so the persisted
+  document is byte-identical and no schema bump was needed. The detector
+  gates on `restrict`/`va_list`/`var_access` and `fact_provenance.py`'s
+  legacy `deprecated`/`is_scoped`/field-`default` branches are gone: each of
+  those detectors already gated per declaration on the fact's own status,
+  and loading a stale document demotes those facts to `NOT_COLLECTED`. Three
+  families still read the record, by design rather than as residue:
+  `header_cv` (CV spelling inside `TypeField.type`/`Variable.type` strings,
+  which no per-declaration fact carries), `clang_field_initializer` for
+  `Param`/constant default fingerprints (same reason), and `clang_vtable`,
+  whose "not reliable" answer selects a different comparison path for the
+  whole pair -- a per-record `vtable_fact` status would also switch a fresh
+  DWARF record whose fact is simply uncollected. Tests that used to set a
+  flag on an in-memory snapshot now either load a real legacy document
+  (`tests/_legacy_snapshot.py`) or set `stale_fact_families`.
 - Phase 0: the *domain-side* `AbiSnapshot.clang_*_facts_reliable` boolean
   attributes are removed once every consumer reads the `Fact[...]` field
   instead. **Not removed, ever, per Phase 0's own corrected design**: the

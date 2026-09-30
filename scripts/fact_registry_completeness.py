@@ -106,8 +106,8 @@ different way a registry could go silently stale:
    claiming ``value_type="bool"`` for a field whose real annotation is
    ``Fact[str]`` disagrees with the code it claims to describe.
 7. Every key of ``fact_registry.REFERENCE_FLAG_COVERAGE`` (a
-   ``*_facts_reliable`` flag name) must name a real field declared on
-   ``AbiSnapshot`` (``abicheck/model/snapshot.py``) — direction 3 above
+   ``*_facts_reliable`` flag name) must name a real persisted reliability
+   flag (``model/snapshot_reliability.RELIABILITY_FLAG_NAMES``) — direction 3 above
    only ever unions the *values* (the covered ``(owner, field)`` pairs)
    and silently discards the keys, so a typo'd or renamed flag name (e.g.
    ``clang_vtables_facts_reliable``) would keep passing as long as its
@@ -199,7 +199,6 @@ from typing import Protocol
 ROOT = Path(__file__).resolve().parent.parent
 PKG = ROOT / "abicheck"
 MODEL_DIR = PKG / "model"
-_SNAPSHOT_PATH = MODEL_DIR / "snapshot.py"
 
 # This script's own directory, so `backend_capabilities` (below) resolves
 # whether this module is run directly, loaded as a sibling import from
@@ -371,25 +370,17 @@ def _all_model_dataclass_field_pairs() -> set[tuple[str, str]]:
     return pairs
 
 
-def _abi_snapshot_field_names() -> set[str]:
-    """Every field declared directly on ``AbiSnapshot`` in
-    ``abicheck/model/snapshot.py``, via AST — the ground truth Direction 7
-    validates ``REFERENCE_FLAG_COVERAGE``'s keys against. Returns an empty
-    set (rather than raising) if the file is unreadable or the class isn't
-    found, so a caller can treat that as "nothing to check against" the
-    same way every other best-effort scan in this module does.
+def _reliability_flag_names() -> set[str]:
+    """The persisted ``*_facts_reliable`` keys -- the ground truth Direction 7
+    validates ``REFERENCE_FLAG_COVERAGE``'s keys against. ADR-063 Phase 10
+    retired the eight ``AbiSnapshot`` booleans for one
+    ``stale_fact_families`` record, so the names now live in
+    ``model/snapshot_reliability.RELIABILITY_FLAG_NAMES`` rather than as
+    dataclass fields.
     """
-    source = _read(_SNAPSHOT_PATH)
-    if not source:
-        return set()
-    try:
-        tree = ast.parse(source, filename=_rel(_SNAPSHOT_PATH))
-    except SyntaxError:
-        return set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and node.name == "AbiSnapshot":
-            return _dataclass_field_names(node)
-    return set()
+    from abicheck.model.snapshot_reliability import RELIABILITY_FLAG_NAMES
+
+    return set(RELIABILITY_FLAG_NAMES)
 
 
 def scan_model_dataclasses(
@@ -1097,21 +1088,20 @@ def check_fact_registry_completeness(f: Findings) -> None:
                 f"{entry.id} is lifecycle={entry.lifecycle.value}, but {problem}",
             )
 
-    # Direction 7: every REFERENCE_FLAG_COVERAGE key must name a real field
-    # declared on AbiSnapshot (Codex review — direction 3 above only unions
+    # Direction 7: every REFERENCE_FLAG_COVERAGE key must name a real
+    # persisted reliability flag (Codex review — direction 3 above only unions
     # the covered (owner, field) *values* and silently discards the keys, so
     # a typo'd/renamed flag name would keep passing as long as its covered
     # pairs stay tracked).
-    snapshot_fields = _abi_snapshot_field_names()
-    if snapshot_fields:
-        for flag in REFERENCE_FLAG_COVERAGE:
-            if flag not in snapshot_fields:
-                f.err(
-                    "fact-registry-completeness",
-                    f"fact_registry.REFERENCE_FLAG_COVERAGE names {flag!r}, "
-                    f"but AbiSnapshot (abicheck/model/snapshot.py) has no "
-                    f"such field — stale or typo'd reliability-flag key",
-                )
+    flag_names = _reliability_flag_names()
+    for flag in REFERENCE_FLAG_COVERAGE:
+        if flag not in flag_names:
+            f.err(
+                "fact-registry-completeness",
+                f"fact_registry.REFERENCE_FLAG_COVERAGE names {flag!r}, "
+                f"but model/snapshot_reliability.RELIABILITY_FLAG_NAMES has "
+                f"no such flag — stale or typo'd reliability-flag key",
+            )
 
 
 if __name__ == "__main__":

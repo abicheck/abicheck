@@ -51,6 +51,7 @@ from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.dumper_clang_qualifiers import _clang_param_is_va_list
 from abicheck.model import AbiSnapshot, Fact, Function, Param, Visibility
+from tests._legacy_snapshot import as_legacy_baseline
 
 
 def _param_node(qual_type: str, desugared: str | None = None) -> dict:
@@ -309,12 +310,10 @@ class TestParamVaListHybridExcluded:
         the reliability flag happening to be unset."""
         old = _snap(
             ast_producer="hybrid",
-            clang_va_list_facts_reliable=True,
             functions=[_func(False)],
         )
         new = _snap(
             ast_producer="hybrid",
-            clang_va_list_facts_reliable=True,
             functions=[_func(True)],
         )
         assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(compare(old, new))
@@ -411,25 +410,24 @@ class TestLegacyClangBaselineSuppression:
     def test_reproduces_without_the_flag(self) -> None:
         old = _snap(
             ast_producer="clang",
-            clang_va_list_facts_reliable=True,
             functions=[_func(False)],
         )
         new = _snap(
             ast_producer="clang",
-            clang_va_list_facts_reliable=True,
             functions=[_func(True)],
         )
         assert ChangeKind.PARAM_BECAME_VA_LIST in _kinds(compare(old, new))
 
     def test_legacy_clang_baseline_suppresses_the_finding(self) -> None:
-        old = _snap(
-            ast_producer="clang",
-            clang_va_list_facts_reliable=False,
-            functions=[_func(False)],
+        old = as_legacy_baseline(
+            _snap(
+                ast_producer="clang",
+                functions=[_func(False)],
+            ),
+            22,
         )
         new = _snap(
             ast_producer="clang",
-            clang_va_list_facts_reliable=True,
             functions=[_func(True)],
         )
         assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(compare(old, new))
@@ -437,13 +435,14 @@ class TestLegacyClangBaselineSuppression:
     def test_unreliable_new_side_is_also_suppressed(self) -> None:
         old = _snap(
             ast_producer="clang",
-            clang_va_list_facts_reliable=True,
             functions=[_func(True)],
         )
-        new = _snap(
-            ast_producer="clang",
-            clang_va_list_facts_reliable=False,
-            functions=[_func(False)],
+        new = as_legacy_baseline(
+            _snap(
+                ast_producer="clang",
+                functions=[_func(False)],
+            ),
+            22,
         )
         assert ChangeKind.PARAM_BECAME_VA_LIST not in _kinds(compare(old, new))
 

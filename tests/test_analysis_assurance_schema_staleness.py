@@ -36,6 +36,7 @@ from abicheck import checker
 from abicheck.analysis_assurance import AnalysisAssurance
 from abicheck.fact_provenance import func_fact_key
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.snapshot_reliability import family_reliable
 from abicheck.policy.analysis_assurance_degraded_facts import (
     degraded_reliability_facts,
 )
@@ -116,7 +117,7 @@ class TestSchemaStalenessStatus:
         # content, or the pair is provably finding-free and correctly reads
         # "clean" (see test_content_identical_reload_is_never_degraded).
         new = snapshot_from_dict({**d, "version": f"{d.get('version', '1.0')}-next"})
-        assert old.clang_restrict_facts_reliable is False
+        assert family_reliable(old, "clang_restrict") is False
 
         result = checker.compare(old, new)
         aa = result.analysis_assurance
@@ -172,8 +173,7 @@ class TestSchemaStalenessStatus:
         other context-status axes, there is no "both sides must agree"
         symmetry requirement here."""
         old, new = _header_pair()
-        old.param_kind_facts_reliable = False
-
+        old.stale_fact_families = old.stale_fact_families | {"param_kind"}
         result = checker.compare(old, new)
         aa = result.analysis_assurance
         assert aa.schema_staleness_status == "degraded"
@@ -188,8 +188,7 @@ class TestSchemaStalenessStatus:
         name it as the new snapshot's own, not silently fold into the old
         snapshot's note or get skipped because old_degraded is empty."""
         old, new = _header_pair()
-        new.param_kind_facts_reliable = False
-
+        new.stale_fact_families = new.stale_fact_families | {"param_kind"}
         result = checker.compare(old, new)
         aa = result.analysis_assurance
         assert aa.schema_staleness_status == "degraded"
@@ -213,7 +212,12 @@ class TestSchemaStalenessStatus:
             common = {"library": "libfoo.so.1", **extra_kwargs}
             fns = [_fn("pub_a", "_Z5pub_av")]
             old = AbiSnapshot(
-                version="1.0", functions=fns, **{flag_name: False}, **common
+                version="1.0",
+                functions=fns,
+                stale_fact_families=frozenset(
+                    {flag_name.removesuffix("_facts_reliable")}
+                ),
+                **common,
             )
             new = AbiSnapshot(version="2.0", functions=fns, **common)
             assert degraded_reliability_facts(old) == [flag_name], flag_name
@@ -242,9 +246,8 @@ class TestSchemaStalenessStatus:
         old = AbiSnapshot(
             version="1.0",
             functions=fns,
-            clang_va_list_facts_reliable=False,
-            castxml_var_access_facts_reliable=False,
             **common,
+            stale_fact_families=frozenset({"clang_va_list", "castxml_var_access"}),
         )
         new = AbiSnapshot(version="2.0", functions=fns, **common)
         assert degraded_reliability_facts(old) == []
@@ -270,7 +273,7 @@ class TestSchemaStalenessStatus:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_va_list_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_va_list"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -300,7 +303,7 @@ class TestSchemaStalenessStatus:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_va_list_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_va_list"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -329,7 +332,7 @@ class TestSchemaStalenessStatus:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_va_list_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_va_list"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -389,7 +392,9 @@ class TestSchemaStalenessStatus:
                 functions=[_fn("pub_a", "_Z5pub_av")],
                 from_headers=True,
                 ast_producer="clang",
-                **{flag_name: False},
+                stale_fact_families=frozenset(
+                    {flag_name.removesuffix("_facts_reliable")}
+                ),
             )
             new = AbiSnapshot(
                 version="2.0",
@@ -422,7 +427,9 @@ class TestSchemaStalenessStatus:
                 functions=[_fn("pub_a", "_Z5pub_av")],
                 from_headers=True,
                 ast_producer="clang",
-                **{flag_name: False},
+                stale_fact_families=frozenset(
+                    {flag_name.removesuffix("_facts_reliable")}
+                ),
             )
             new = AbiSnapshot(
                 version="2.0",
@@ -459,7 +466,7 @@ class TestSchemaStalenessStatus:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_deprecation_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_deprecation"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -496,7 +503,7 @@ class TestSchemaStalenessStatus:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_deprecation_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_deprecation"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -504,7 +511,7 @@ class TestSchemaStalenessStatus:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_deprecation_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_deprecation"}),
         )
         assert degraded_reliability_facts(old) == ["clang_deprecation_facts_reliable"]
         assert degraded_reliability_facts(new) == ["clang_deprecation_facts_reliable"]
@@ -542,7 +549,7 @@ class TestSchemaStalenessStatus:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_deprecation_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_deprecation"}),
         )
         for other_producer in ("castxml", "clang"):
             new = AbiSnapshot(
@@ -576,7 +583,7 @@ class TestSchemaStalenessStatus:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_deprecation_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_deprecation"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -607,7 +614,7 @@ class TestSchemaStalenessStatus:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_deprecation_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_deprecation"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -657,7 +664,7 @@ class TestSchemaStalenessStatus:
             functions=[fn],
             from_headers=True,
             ast_producer="clang",
-            param_kind_facts_reliable=False,
+            stale_fact_families=frozenset({"param_kind"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -716,8 +723,8 @@ class TestSchemaStalenessStatus:
             library="libfoo.so.1",
             functions=[fn],
             elf_only_mode=True,
-            param_kind_facts_reliable=False,
             types=[RecordType(name="S", kind="struct")],
+            stale_fact_families=frozenset({"param_kind"}),
         )
         new_types_leftover = AbiSnapshot(
             version="2.0",
@@ -743,8 +750,8 @@ class TestSchemaStalenessStatus:
             library="libfoo.so.1",
             functions=[fn],
             elf_only_mode=True,
-            param_kind_facts_reliable=False,
             dwarf=DwarfMetadata(structs={"S": StructLayout(name="S", byte_size=4)}),
+            stale_fact_families=frozenset({"param_kind"}),
         )
         new_dwarf_leftover = AbiSnapshot(
             version="2.0",
@@ -772,7 +779,7 @@ class TestSchemaStalenessStatus:
         double-counting the one candidate's own degradation as if it were
         two distinct sides."""
         _, new = _header_pair()
-        new.param_kind_facts_reliable = False
+        new.stale_fact_families = new.stale_fact_families | {"param_kind"}
         assert degraded_reliability_facts(new) == ["param_kind_facts_reliable"]
 
         result = checker.compare(new, new)
@@ -792,7 +799,7 @@ class TestSchemaStalenessStatus:
             library=new.library,
             functions=list(new.declarations.functions),
             from_headers=new.from_headers,
-            param_kind_facts_reliable=False,
+            stale_fact_families=frozenset({"param_kind"}),
         )
         assert new_copy == new
         result2 = checker.compare(new, new_copy)
@@ -806,7 +813,7 @@ class TestSchemaStalenessStatus:
             library=new.library,
             functions=list(new.declarations.functions),
             from_headers=new.from_headers,
-            param_kind_facts_reliable=False,
+            stale_fact_families=frozenset({"param_kind"}),
         )
         assert differing != new
         result3 = checker.compare(new, differing)
@@ -836,7 +843,7 @@ class TestFieldInitializerSameProducerGating:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -874,7 +881,7 @@ class TestFieldInitializerSameProducerGating:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="hybrid",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new_clang = AbiSnapshot(
             version="2.0",
@@ -896,7 +903,7 @@ class TestFieldInitializerSameProducerGating:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new_hybrid = AbiSnapshot(
             version="2.0",
@@ -919,7 +926,7 @@ class TestFieldInitializerSameProducerGating:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -944,7 +951,7 @@ class TestFieldInitializerSameProducerGating:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             version="2.0",
@@ -972,7 +979,7 @@ class TestFieldInitializerSameProducerGating:
             functions=[_fn("pub_a", "_Z5pub_av")],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             version="2.0",

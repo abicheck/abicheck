@@ -17,6 +17,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.model.snapshot_reliability import family_reliable
 
 
 def _snap(
@@ -699,7 +700,7 @@ class TestParamDefaultChanged:
             functions=[f_old],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -707,7 +708,6 @@ class TestParamDefaultChanged:
             functions=[f_new],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=True,
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
@@ -737,7 +737,7 @@ class TestParamDefaultChanged:
             functions=[f_old],
             from_headers=True,
             ast_producer=None,
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -745,7 +745,6 @@ class TestParamDefaultChanged:
             functions=[f_new],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=True,
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
@@ -790,7 +789,7 @@ class TestParamDefaultChanged:
         legacy_dict.pop("clang_field_initializer_facts_reliable", None)
         old = snapshot_from_dict(legacy_dict)
         assert old.ast_producer is None
-        assert old.clang_field_initializer_facts_reliable is False
+        assert family_reliable(old, "clang_field_initializer") is False
 
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -829,7 +828,7 @@ class TestParamDefaultChanged:
             functions=[f_old],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -837,7 +836,6 @@ class TestParamDefaultChanged:
             functions=[f_new],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=True,
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
@@ -896,7 +894,7 @@ class TestParamDefaultChanged:
             functions=[f_old],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -904,7 +902,6 @@ class TestParamDefaultChanged:
             functions=[f_new],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=True,
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
@@ -929,7 +926,7 @@ class TestParamDefaultChanged:
             functions=[f_old],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -937,7 +934,6 @@ class TestParamDefaultChanged:
             functions=[f_new],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=True,
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _kinds(r)
@@ -965,7 +961,6 @@ class TestParamDefaultChanged:
             functions=[f_old],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=True,
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -973,7 +968,7 @@ class TestParamDefaultChanged:
             functions=[f_new],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED not in _kinds(r)
@@ -1003,7 +998,7 @@ class TestParamDefaultChanged:
             functions=[f_old],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -1011,7 +1006,7 @@ class TestParamDefaultChanged:
             functions=[f_new],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
@@ -1042,7 +1037,7 @@ class TestParamDefaultChanged:
             functions=[f_old],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -1050,7 +1045,7 @@ class TestParamDefaultChanged:
             functions=[f_new],
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         r = compare(old, new)
         assert ChangeKind.PARAM_DEFAULT_VALUE_CHANGED in _kinds(r)
@@ -1325,7 +1320,7 @@ class TestVarLegacyVolatileNoise:
         v_old = _pub_var("g", "g", "int")
         v_new = _pub_var("g", "g", "volatile int")
         old = _snap(variables=[v_old])
-        old.header_cv_facts_reliable = False
+        old.stale_fact_families = old.stale_fact_families | {"header_cv"}
         new = _snap(variables=[v_new])
         r = compare(old, new)
         assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
@@ -1343,7 +1338,7 @@ class TestVarLegacyVolatileNoise:
         v_old = _pub_var("g", "g", "int")
         v_new = _pub_var("g", "g", "long")
         old = _snap(variables=[v_old])
-        old.header_cv_facts_reliable = False
+        old.stale_fact_families = old.stale_fact_families | {"header_cv"}
         new = _snap(variables=[v_new])
         r = compare(old, new)
         assert ChangeKind.VAR_TYPE_CHANGED in _kinds(r)
@@ -1359,7 +1354,7 @@ class TestVarLegacyVolatileNoise:
         v_old = _pub_var("g", "g", "int *", is_const=False)
         v_new = _pub_var("g", "g", "const int *", is_const=True)
         old = _snap(variables=[v_old])
-        old.header_cv_facts_reliable = False
+        old.stale_fact_families = old.stale_fact_families | {"header_cv"}
         new = _snap(variables=[v_new])
         r = compare(old, new)
         assert ChangeKind.VAR_TYPE_CHANGED not in _kinds(r)
@@ -1424,7 +1419,9 @@ class TestConstantChanges:
             constants=constants,
             from_headers=True,
             ast_producer="clang",
-            clang_field_initializer_facts_reliable=field_initializer_facts_reliable,
+            stale_fact_families=frozenset()
+            if field_initializer_facts_reliable
+            else frozenset({"clang_field_initializer"}),
         )
 
     def test_stale_clang_fingerprint_collision_not_reported(self):
@@ -1480,7 +1477,7 @@ class TestConstantChanges:
             constants={"K1": "expr:aaaaaaaaaaaaaaaa", "K2": "expr:aaaaaaaaaaaaaaaa"},
             from_headers=True,
             ast_producer=None,
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -1491,7 +1488,6 @@ class TestConstantChanges:
             constants={"K1": "expr:bbbbbbbbbbbbbbbb", "K2": "expr:cccccccccccccccc"},
             from_headers=True,
             ast_producer=None,
-            clang_field_initializer_facts_reliable=True,
         )
         r = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED not in _kinds(r)
@@ -1566,7 +1562,7 @@ class TestConstantChanges:
             constants={"K": "expr::OLD_VALUE"},
             from_headers=True,
             ast_producer=None,
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -1577,7 +1573,7 @@ class TestConstantChanges:
             constants={"K": "expr::NEW_VALUE"},
             from_headers=True,
             ast_producer=None,
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         r = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED in _kinds(r)
@@ -1598,7 +1594,7 @@ class TestConstantChanges:
             constants={"K": "expr:aaaaaaaaaaaaaaaa"},
             from_headers=True,
             ast_producer="hybrid",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         new = AbiSnapshot(
             library="libtest.so.1",
@@ -1609,7 +1605,7 @@ class TestConstantChanges:
             constants={"K": "expr:bbbbbbbbbbbbbbbb"},
             from_headers=True,
             ast_producer="hybrid",
-            clang_field_initializer_facts_reliable=False,
+            stale_fact_families=frozenset({"clang_field_initializer"}),
         )
         r = compare(old, new)
         assert ChangeKind.CONSTANT_CHANGED in _kinds(r)

@@ -138,7 +138,7 @@ went through three rounds on this PR, each correcting the previous one:
    record, which the ``RecordType.__post_init__`` bridge (``model/fact.py``'s
    ``bridge_legacy_and_fact``) resolves to ``Fact.not_collected()``
    unconditionally, for *every* PDB-derived record, independent of
-   ``AbiSnapshot.clang_vtable_facts_reliable``. A cross-backend comparison
+   ``the stale 'clang_vtable' fact family (model.snapshot_reliability)``. A cross-backend comparison
    against a PDB side following either fallback stream on that status
    produced a *reachable, confirmed* fabricated ``TYPE_VTABLE_CHANGED``
    (an apparent vtable removal) from an unrelated size delta or a
@@ -516,7 +516,7 @@ def _diff_type_vtable(
         # Either side is a persisted, pre-v21 direct-clang snapshot whose
         # vtable was unconditionally vtable=[] for EVERY record -- real but
         # WRONG data for an already-polymorphic class, not merely absent
-        # (AbiSnapshot.clang_vtable_facts_reliable's own docstring). Every
+        # (the stale 'clang_vtable' fact family (model.snapshot_reliability)'s own docstring). Every
         # differing-vtable pair reaching this point on such a comparison is
         # capture-tool noise, not a genuine change, so decline exactly like
         # the unevidenced-transition guard below -- see

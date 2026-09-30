@@ -107,6 +107,7 @@ from .model import (
 from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId, EntityKind
 from .model.semantic_ir_legacy_adapter import semantic_ir_covers_kind
+from .model.snapshot_reliability import family_reliable
 
 #: Back-compat alias: the ADR-063 Phase 6 typedef cutover moved this
 #: predicate into ``diff_typedefs.py`` with the rest of its family, but
@@ -126,7 +127,7 @@ def _field_type_genuinely_changed(
     Layered on top of the existing pointer/reference cv neutralization
     (``cv_qualifiers_only_differ``): when *either* snapshot in the pair
     predates the CastXML CV-fact fix (``cv_facts_reliable=False``, see
-    ``AbiSnapshot.header_cv_facts_reliable``), a BY-VALUE cv-only difference
+    ``the stale 'header_cv' fact family (model.snapshot_reliability)``), a BY-VALUE cv-only difference
     is *also* neutralized here — reusing ``func_signature_cv_only_differ``'s
     strip-and-compare logic, even though its own docstring warns against
     that for fields. That warning is about unconditionally neutralizing a
@@ -295,9 +296,11 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # own old_types/new_types for the identical virtual_method_addition() walk.
     old_types = _build_type_map(t for t in old.declarations.types)
     new_types = _build_type_map(t for t in new.declarations.types)
-    cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
-    vtable_facts_reliable = (
-        old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
+    cv_facts_reliable = family_reliable(old, "header_cv") and family_reliable(
+        new, "header_cv"
+    )
+    vtable_facts_reliable = family_reliable(old, "clang_vtable") and family_reliable(
+        new, "clang_vtable"
     )
     # ADR-063 6B: record layout is read from each side's SemanticIR.
     layout_indexes = (
@@ -1402,7 +1405,9 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     )
     # Same legacy-snapshot cv-fact concern as _diff_type_field_pair (Codex
     # review, PR #582).
-    cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
+    cv_facts_reliable = family_reliable(old, "header_cv") and family_reliable(
+        new, "header_cv"
+    )
 
     for t_old in old_unions.values():
         t_new = _lookup_matched_type(old_unions, new_unions, t_old)

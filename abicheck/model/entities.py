@@ -54,7 +54,7 @@ _OMITTED_IS_MUTABLE: bool = cast("bool", _Omitted())
 # RecordType/EnumType/Variable/Function, `None` here is a real, meaningful
 # value ("this member has no default initializer" / "this member is not
 # deprecated"), so it cannot double as the omission marker either -- the
-# availability signal is AbiSnapshot.clang_field_initializer_facts_reliable
+# availability signal is the stale 'clang_field_initializer' fact family (model.snapshot_reliability)
 # / clang_deprecation_facts_reliable, not the value.
 _OMITTED_FIELD_DEFAULT: str | None = cast("str | None", _Omitted())
 _OMITTED_FIELD_DEPRECATED: str | None = cast("str | None", _Omitted())
@@ -76,7 +76,7 @@ class TypeField:
     # False — an omitted field and an explicitly-confirmed-false one must
     # backfill their *_fact sibling differently (not_collected() vs.
     # present(False)). These are case-(a) fields: their availability is
-    # carried by AbiSnapshot.header_cv_facts_reliable, not by their own
+    # carried by the stale 'header_cv' fact family (model.snapshot_reliability), not by their own
     # value, which is exactly why a bare False cannot answer "did anyone
     # look?" See is_const_fact/is_volatile_fact/is_mutable_fact below.
     is_const: bool = _OMITTED_IS_CONST
@@ -98,7 +98,7 @@ class TypeField:
     # facts above — a detector reads these, never the plain fields, once it
     # needs to tell "this producer never determined CV qualification"
     # (a DWARF/PDB record, or a pre-fix castxml snapshot whose blanket False
-    # AbiSnapshot.header_cv_facts_reliable already marks untrustworthy) apart
+    # the stale 'header_cv' fact family (model.snapshot_reliability) already marks untrustworthy) apart
     # from a genuinely non-const field.
     is_const_fact: Fact[bool] | None = field(default=None, kw_only=True)
     is_volatile_fact: Fact[bool] | None = field(default=None, kw_only=True)
@@ -237,7 +237,7 @@ class RecordType:
     # See Function.deprecated for the message-string convention. ADR-063
     # Phase 5 (ninth batch): defaults to a private omission sentinel, since
     # `None` is a real value here ("not deprecated"), never an availability
-    # signal -- AbiSnapshot.clang_deprecation_facts_reliable carries that.
+    # signal -- the stale 'clang_deprecation' fact family (model.snapshot_reliability) carries that.
     deprecated: str | None = _OMITTED_RECORD_DEPRECATED
 
     # ── ADR-063 Phase 0: Fact[T] siblings for the fields AGENTS.md's
@@ -451,7 +451,7 @@ class EnumType:
     # See Function.deprecated for the message-string convention. ADR-063
     # Phase 5 (ninth batch): defaults to a private omission sentinel, since
     # `None` is a real value here ("not deprecated"), never an availability
-    # signal -- AbiSnapshot.clang_deprecation_facts_reliable carries that.
+    # signal -- the stale 'clang_deprecation' fact family (model.snapshot_reliability) carries that.
     deprecated: str | None = _OMITTED_ENUM_DEPRECATED
     # Namespace/enclosing-class-qualified spelling, mirroring
     # ``RecordType.qualified_name`` (same bare-``name``-collision motivation:
@@ -482,7 +482,7 @@ class EnumType:
     qualified_name_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     source_header_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     # ADR-063 Phase 5 (ninth batch), both case (a) and both guarded by
-    # AbiSnapshot.clang_deprecation_facts_reliable: `is_scoped` needs no
+    # the stale 'clang_deprecation' fact family (model.snapshot_reliability): `is_scoped` needs no
     # omission sentinel (its own None already means "not determined" --
     # castxml is its only real producer), `deprecated` does (None means
     # "not deprecated" there).

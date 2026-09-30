@@ -43,7 +43,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
             "CastXML never populates this fact at all — its blanket "
             "False is unconditionally correct-as-not-collected, on "
             "any schema version. Guarded by "
-            "AbiSnapshot.clang_va_list_facts_reliable for the clang "
+            "the stale 'clang_va_list' fact family (model.snapshot_reliability) for the clang "
             "producer only (deliberately excludes hybrid — see the "
             "field's own docstring)."
         ),
@@ -332,7 +332,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
-            "by AbiSnapshot.clang_deprecation_facts_reliable -- whose "
+            "by the stale 'clang_deprecation' fact family (model.snapshot_reliability) -- whose "
             "False marks a pre-v19 clang snapshot's blanket None as a "
             "placeholder -- not by the value. Shares that flag with "
             "every other surface kind's own `deprecated` and with "
@@ -354,7 +354,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
-            "by AbiSnapshot.clang_deprecation_facts_reliable -- whose "
+            "by the stale 'clang_deprecation' fact family (model.snapshot_reliability) -- whose "
             "False marks a pre-v19 clang snapshot's blanket None as a "
             "placeholder -- not by the value. Shares that flag with "
             "every other surface kind's own `deprecated` and with "
@@ -378,7 +378,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
             "(a): a plain bool whose False cannot distinguish "
             '"not restrict" from "never determined" -- a pre-v22 clang '
             "snapshot reported False for every parameter, which "
-            "AbiSnapshot.clang_restrict_facts_reliable is what marks."
+            "the stale 'clang_restrict' fact family (model.snapshot_reliability) is what marks."
         ),
     ),
     _E(
@@ -401,7 +401,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
             "DW_TAG_rvalue_reference_type); neither header-AST backend "
             "determined this at all before schema v45, so a pre-v45 "
             "header-derived snapshot's blanket VALUE is a placeholder, "
-            "which AbiSnapshot.param_kind_facts_reliable marks."
+            "which the stale 'param_kind' fact family (model.snapshot_reliability) marks."
         ),
     ),
     _E(
@@ -421,7 +421,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
             "and the one registered fact whose value type is neither a "
             "bool, a number, a string nor a list: AccessLevel.PUBLIC is "
             "both this field's resting value and a real answer, so only "
-            "AbiSnapshot.castxml_var_access_facts_reliable can mark a "
+            "the stale 'castxml_var_access' fact family (model.snapshot_reliability) can mark a "
             "pre-v24 castxml snapshot's blanket PUBLIC as a placeholder. "
             "Decoded back into a real AccessLevel member (storage/"
             "fact_codec.decode_variable_facts), the same reconstruction "

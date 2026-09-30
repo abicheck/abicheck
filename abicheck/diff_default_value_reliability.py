@@ -33,7 +33,7 @@ anonymous-type/lambda source-location normalization — none of which touch a
 LITERAL default's value at all. A pre-v20 clang-producer snapshot's
 fingerprint for an UNCHANGED non-literal default can therefore differ from a
 fresh one purely from that algorithm change, not a real edit — the same
-class of gap ``AbiSnapshot.clang_field_initializer_facts_reliable`` closes
+class of gap ``the stale 'clang_field_initializer' fact family (model.snapshot_reliability)`` closes
 for ``TypeField.default``'s own presence/absence, reused here for a
 different reason: a default's presence was never unreliable, only the
 non-literal VALUE representation is.
@@ -72,6 +72,7 @@ from __future__ import annotations
 import re
 
 from .model import AbiSnapshot
+from .model.snapshot_reliability import family_reliable
 
 #: The exact shape ``dumper_clang_expr._expr_fingerprint`` produces --
 #: ``"expr:" + sha256(...).hexdigest()[:16]`` (16 lowercase hex digits) --
@@ -185,7 +186,7 @@ def default_value_representation_unreliable(
         producer != "castxml"
         and snap.from_headers
         and not snap.from_headers_inferred
-        and not snap.clang_field_initializer_facts_reliable
+        and not family_reliable(snap, "clang_field_initializer")
     )
 
 
@@ -295,8 +296,8 @@ def constant_value_fingerprint_comparison_unreliable(
     return _fingerprint_comparison_unreliable(
         _is_expr_fingerprint(old_value),
         old.ast_producer not in ("castxml", "hybrid")
-        and not old.clang_field_initializer_facts_reliable,
+        and not family_reliable(old, "clang_field_initializer"),
         _is_expr_fingerprint(new_value),
         new.ast_producer not in ("castxml", "hybrid")
-        and not new.clang_field_initializer_facts_reliable,
+        and not family_reliable(new, "clang_field_initializer"),
     )

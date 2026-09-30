@@ -525,7 +525,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "output that a static class member's `<Variable>` element "
             "carries it too. `diff_symbols._diff_var_access` requires "
             '`ast_producer == "castxml"` specifically (not "hybrid" — '
-            "see `AbiSnapshot.castxml_var_access_facts_reliable`'s own "
+            "see `the stale 'castxml_var_access' fact family (model.snapshot_reliability)`'s own "
             "docstring) and gates on that reliability flag for the "
             "pre-v24-legacy-baseline case."
         ),
@@ -540,7 +540,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "access. NONE for both backends because neither names the "
             "keyword -- each passes the real value and Variable."
             "__post_init__'s bridge derives the Fact. Availability is "
-            "carried by AbiSnapshot.castxml_var_access_facts_reliable."
+            "carried by the stale 'castxml_var_access' fact family (model.snapshot_reliability)."
         ),
     ),
     FactRow("Variable", "elf_visibility", _OTHER, _OTHER, note=_DYNSYM),
@@ -700,7 +700,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "bridge derives Fact.present(...) from it -- the same honest "
             "reading this matrix already records for RecordType's own "
             "bridge-derived case-(b) siblings. Availability for this field "
-            "is carried by AbiSnapshot.header_cv_facts_reliable, not by "
+            "is carried by the stale 'header_cv' fact family (model.snapshot_reliability), not by "
             "either backend's own construction."
         ),
     ),
@@ -770,7 +770,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
         _NONE,
         note=(
             "Same shape as default_fact -- see that row's own note; "
-            "guarded by AbiSnapshot.clang_deprecation_facts_reliable "
+            "guarded by the stale 'clang_deprecation' fact family (model.snapshot_reliability) "
             "instead."
         ),
     ),
@@ -1266,7 +1266,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "(`extract/headers/clang/param_kind.py`, same spelling-heuristic "
             "status as its sibling `pointer_depth`). Before this batch, "
             "neither backend populated it at all -- see "
-            "`AbiSnapshot.param_kind_facts_reliable`."
+            "`the stale 'param_kind' fact family (model.snapshot_reliability)`."
         ),
     ),
     FactRow(
@@ -1278,7 +1278,7 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "Fact[ParamKind] sibling of "
             "kind, bridge-derived on both backends the same way "
             "is_restrict_fact is; guarded by "
-            "AbiSnapshot.param_kind_facts_reliable."
+            "the stale 'param_kind' fact family (model.snapshot_reliability)."
         ),
     ),
     FactRow(

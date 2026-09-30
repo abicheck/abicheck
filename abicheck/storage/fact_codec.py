@@ -671,7 +671,7 @@ def decode_field_facts(fld: dict[str, Any], schema_version: int) -> dict[str, An
     *name*, and ``f`` already means ``Function`` there (the same collision
     the binary-format batch's own ``elf``/``pe``/``macho`` renames avoided).
     Unlike those, every field here is case-(a) — availability is carried by
-    ``AbiSnapshot.header_cv_facts_reliable``, not by the value — so each
+    ``the stale 'header_cv' fact family (model.snapshot_reliability)``, not by the value — so each
     routes through :func:`decode_fact_with_legacy_presence`, and a legacy
     document whose flag says its blanket ``False``s are untrustworthy is
     corrected afterwards by :func:`apply_case_a_fact_backfill`.

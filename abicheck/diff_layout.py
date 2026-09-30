@@ -54,6 +54,7 @@ from .detector_registry import registry
 from .diff_helpers import build_type_map, lookup_matched_type, make_change
 from .model import FactStatus, fact_confirmed_true, resolved_fact_value
 from .model.change_catalog.kinds import ChangeKind
+from .model.snapshot_reliability import family_reliable
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:
@@ -205,10 +206,10 @@ def _check_vptr_introduced(
     side reading "non-polymorphic" there is real but WRONG, not genuine
     positive evidence, so this detector must decline entirely rather than
     fire on what looks like a first-vptr introduction
-    (AbiSnapshot.clang_vtable_facts_reliable's own docstring).
+    (the stale 'clang_vtable' fact family (model.snapshot_reliability)'s own docstring).
 
     ``vtable_facts_reliable`` is a *whole-snapshot* flag, computed once for
-    the entire comparison from ``AbiSnapshot.clang_vtable_facts_reliable``
+    the entire comparison from ``the stale 'clang_vtable' fact family (model.snapshot_reliability)``
     -- it cannot see a gap scoped to this one record. ADR-063 Phase 5B adds
     a direct, per-record ``FactStatus`` check alongside it: the old side is
     only trusted as "confirmed non-polymorphic" when its own
@@ -436,8 +437,8 @@ def _diff_layout_descriptor(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     excl = stdlib_namespaces_excluded(old, new)
     old_idx = _index(old, exclude_stdlib=excl)
     new_idx = _index(new, exclude_stdlib=excl)
-    vtable_facts_reliable = (
-        old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
+    vtable_facts_reliable = family_reliable(old, "clang_vtable") and family_reliable(
+        new, "clang_vtable"
     )
 
     # .items() iterates one entry per type under its qualified TypeMap key

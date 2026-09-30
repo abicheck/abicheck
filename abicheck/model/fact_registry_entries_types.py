@@ -81,7 +81,7 @@ TYPE_FACTS: list[FactDefinition] = [
             "abicheck.compare.vtable_evidence:vtable_fact_declined",
             "abicheck.diff_layout:_check_vptr_introduced",
         ),
-        notes="Guarded by AbiSnapshot.clang_vtable_facts_reliable for the clang producer.",
+        notes="Guarded by the stale 'clang_vtable' fact family (model.snapshot_reliability) for the clang producer.",
     ),
     _E(
         owner="RecordType",
@@ -95,7 +95,7 @@ TYPE_FACTS: list[FactDefinition] = [
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
         consumed_by=("abicheck.diff_layout:_check_vptr_introduced",),
-        notes="Guarded by AbiSnapshot.clang_vtable_facts_reliable for the clang producer.",
+        notes="Guarded by the stale 'clang_vtable' fact family (model.snapshot_reliability) for the clang producer.",
     ),
     # ── Phase 5's first worked-example conversion ───────────────────
     _E(
@@ -291,7 +291,7 @@ TYPE_FACTS: list[FactDefinition] = [
         consumed_by=("abicheck.diff_types_field_facts:_check_field_qualifier_pair",),
         notes=(
             "Whether the member is const-qualified. Case (a): guarded by "
-            "AbiSnapshot.header_cv_facts_reliable, whose False marks a "
+            "the stale 'header_cv' fact family (model.snapshot_reliability), whose False marks a "
             "pre-fix castxml snapshot's blanket False values as "
             "placeholders rather than facts -- the plain bool cannot "
             "distinguish those from a genuinely unqualified member. "
@@ -313,7 +313,7 @@ TYPE_FACTS: list[FactDefinition] = [
         consumed_by=("abicheck.diff_types_field_facts:_check_field_qualifier_pair",),
         notes=(
             "Whether the member is volatile-qualified. Case (a): guarded by "
-            "AbiSnapshot.header_cv_facts_reliable, whose False marks a "
+            "the stale 'header_cv' fact family (model.snapshot_reliability), whose False marks a "
             "pre-fix castxml snapshot's blanket False values as "
             "placeholders rather than facts -- the plain bool cannot "
             "distinguish those from a genuinely unqualified member. "
@@ -335,7 +335,7 @@ TYPE_FACTS: list[FactDefinition] = [
         consumed_by=("abicheck.diff_types_field_facts:_check_field_qualifier_pair",),
         notes=(
             "Whether the member is declared `mutable`. Case (a): guarded "
-            "by AbiSnapshot.header_cv_facts_reliable, whose False "
+            "by the stale 'header_cv' fact family (model.snapshot_reliability), whose False "
             "marks a pre-fix castxml snapshot's blanket False values "
             "as placeholders rather than facts. DWARF has no DW_AT for "
             "`mutable` at all and states Fact.unsupported() explicitly "
@@ -381,7 +381,7 @@ TYPE_FACTS: list[FactDefinition] = [
             "[[deprecated]] message string. Case (a) for the same "
             'reason as `default` above -- None means "not '
             'deprecated" as well as "not captured" -- guarded by '
-            "AbiSnapshot.clang_deprecation_facts_reliable, the flag "
+            "the stale 'clang_deprecation' fact family (model.snapshot_reliability), the flag "
             "that also covers every other surface kind's own "
             "`deprecated` field."
         ),
@@ -401,7 +401,7 @@ TYPE_FACTS: list[FactDefinition] = [
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
-            "by AbiSnapshot.clang_deprecation_facts_reliable -- whose "
+            "by the stale 'clang_deprecation' fact family (model.snapshot_reliability) -- whose "
             "False marks a pre-v19 clang snapshot's blanket None as a "
             "placeholder -- not by the value. Shares that flag with "
             "every other surface kind's own `deprecated` and with "
@@ -423,7 +423,7 @@ TYPE_FACTS: list[FactDefinition] = [
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
-            "by AbiSnapshot.clang_deprecation_facts_reliable -- whose "
+            "by the stale 'clang_deprecation' fact family (model.snapshot_reliability) -- whose "
             "False marks a pre-v19 clang snapshot's blanket None as a "
             "placeholder -- not by the value. Shares that flag with "
             "every other surface kind's own `deprecated` and with "
@@ -447,7 +447,7 @@ TYPE_FACTS: list[FactDefinition] = [
             "(a) even though the field is already tri-state: a pre-v19 "
             "clang snapshot reported a blanket False for every enum, "
             "which no value can distinguish from a genuine unscoped "
-            "one -- AbiSnapshot.clang_deprecation_facts_reliable (the "
+            "one -- the stale 'clang_deprecation' fact family (model.snapshot_reliability) (the "
             "same flag, since both facts landed together) is what "
             "says so."
         ),

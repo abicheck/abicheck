@@ -33,6 +33,7 @@ from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
 
 from ..model import AbiSnapshot
+from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
 from .enum_codec import encode_platform_enums
 from .extraction_scope_codec import encode_extraction_scope
@@ -262,6 +263,20 @@ def _with_declarations(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
     return out
 
 
+def _expand_stale_fact_families(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
+    """Write ``stale_fact_families`` as the eight historical
+    ``*_facts_reliable`` keys, in that field's position (ADR-063 Phase 10:
+    the persisted document is unchanged by the model's retirement of them)."""
+    out: dict[str, Any] = {}
+    for key, value in d.items():
+        if key != "stale_fact_families":
+            out[key] = value
+            continue
+        for family in FACT_FAMILIES:
+            out[flag_name(family)] = family not in snap.stale_fact_families
+    return out
+
+
 def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     """Encode *snap* into its canonical, fully-detached dictionary form.
 
@@ -274,6 +289,7 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     )
     # Runtime-only provenance qualifier — never persisted.
     d.pop("from_headers_inferred", None)
+    d = _expand_stale_fact_families(d, snap)
     # Runtime-only source-read licence — never persisted, by design. Writing it
     # would let a stored snapshot grant itself permission to re-read whatever
     # now lives at the ``source_header`` paths it records, which is exactly the

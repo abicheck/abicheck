@@ -84,7 +84,7 @@ _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS = 39
 # (Function/Variable/RecordType/EnumType -- TypeField's own landed one batch
 # earlier, at v39) and EnumType.is_scoped started being persisted at. All
 # five are case (a), guarded by the one flag that already covers them:
-# AbiSnapshot.clang_deprecation_facts_reliable.
+# the stale 'clang_deprecation' fact family (model.snapshot_reliability).
 _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS = 40
 
 # ADR-063 Phase 5 (tenth batch): the schema_version Param.is_restrict_fact
@@ -101,7 +101,7 @@ _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS = 41
 # availability-ambiguous in the first place (no header backend had ever set
 # it to anything but the dataclass's own resting ParamKind.VALUE, so nothing
 # about it looked wrong by inspection). Guarded by
-# AbiSnapshot.param_kind_facts_reliable.
+# the stale 'param_kind' fact family (model.snapshot_reliability).
 _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT = 45
 
 # The schema_version ``Function``/``Variable``'s three surface facts
