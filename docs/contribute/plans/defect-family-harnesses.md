@@ -1,6 +1,10 @@
 # Defect-family harnesses: generalizing the September 2026 fix history
 
-**Status:** Proposed · not started. Extends
+**Status:** In progress. Landed: the family layer of the registry
+(`tests/regressions/families.py`, enforced by
+`tests/test_regressions_families.py`) and harnesses H1, H2, H3 and H5
+(`tests/test_family_f{1,2,3,5}_*.py`). Not landed yet: H4, H6, the H7 patch
+replay, and the merge-quiescence gate. Extends
 [bug-class regression testing](bug-class-regression-testing.md) (its Phases
 0–9 and `tests/regressions/manifest*.py` stay as they are).
 
@@ -265,3 +269,48 @@ round's findings were pushed". Proposed gate:
 For each harness, replaying its family's historical fixes from this month in
 reverse (by reverting the fix) must make the harness fail **without** any
 test named after that fix. That is the definition of "generalized".
+
+## Implementation record (first round)
+
+- **Registry families.** Every registered `BugClass` belongs to exactly one
+  family. The integrity test rejects a class with no family and a family entry
+  whose class no longer exists.
+  - The rule that a new F1/F2/F3/F5 class must list its family harness in
+    `seed_tests` holds for every class registered after this change. Classes
+    that already existed are listed in `families_legacy.py`, and that list may
+    only shrink.
+  - The `OTHER` bucket has a budget. Growing past it needs review.
+  - Each harness must carry at least two seeded-mutant tests.
+- **H1, evidence ablation.** The site inventory is built by introspecting the
+  model: 59 `Fact[...]` fields and 18 snapshot evidence containers.
+  - Each seeded historical mutant is caught: the pre-#1033 Fact collapse and
+    the pre-#1384 reading of an unknown export as absent.
+  - **Real bug found:** when a header-origin type's `source_header_fact` is
+    unknown on both sides, the public-surface closure seed silently drops a
+    real break to NO_CHANGE. Recorded as a strict xfail.
+- **H2, route parity.** Covers CLI, typed API, a one-member release, and
+  stored vs live operands.
+  - It checks all 47 `compare` Click parameters and all 37 `CompareRequest`
+    fields against a routing table. Every parameter and field needs an entry,
+    and the table may not name one that no longer exists.
+  - **Real divergences found:**
+    - The `pattern_verdicts` default differs between front ends.
+    - `*_evidence_depth` is set only by the CLI.
+    - `suppression_audit` is set only by the CLI.
+    - The `effective_config_digest` tier depends on the route.
+- **H3, identity transforms.** The transform catalogue covers path and
+  hash-seed variations, plus codecs for Mach-O, PE and Itanium special-member
+  names.
+  - Of the identity functions found by scanning the tree, 23 are covered and
+    22 are in `UNCOVERED` with a reason.
+  - **Real bugs found:**
+    - A checkout path containing a space leaks into canonical identity (the
+      anonymous-type location regex uses `\S+`).
+    - PE vectorcall decoding strips a leading `_`, so two distinct names map
+      to one identity.
+- **H5, optimization equals reference.** The site inventory covers 67
+  cache and pool sites.
+  - The cells compare memo-bypass vs default, 1 thread vs 8, a cold vs warm
+    disk cache on separate roots, and a warm vs fresh run. Each cell asserts
+    that the optimization actually engaged.
+  - Three historical mutants are caught. No current bug was found.
