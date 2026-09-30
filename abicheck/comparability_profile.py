@@ -473,3 +473,26 @@ def header_ast_producer_dimensions(
     if old_producer and new_producer and old_producer != new_producer:
         return _HEADER_AST_PRODUCER_DIMENSIONS
     return frozenset()
+
+
+def check_build_identity_comparable(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> ComparabilityMismatch | None:
+    """``check_contracts_comparable``'s build-identity axis (WS-A, ADR-050
+    amendment): build system/generator and requested root targets, read off
+    each side's persisted L3 build evidence by
+    :func:`model.extraction_contract.build_identity_divergence`. Kind
+    ``"profile"``: a different build is a different extraction profile.
+    """
+    from .model.extraction_contract import (
+        BUILD_IDENTITY_DIMENSIONS,
+        build_identity_divergence,
+    )
+
+    divergence = build_identity_divergence(old, new)
+    if divergence is None:
+        return None
+    reason, fatal = divergence
+    return ComparabilityMismatch(
+        "profile", reason, dimensions=BUILD_IDENTITY_DIMENSIONS, fatal=fatal
+    )

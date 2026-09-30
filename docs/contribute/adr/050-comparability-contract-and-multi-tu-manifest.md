@@ -2470,6 +2470,47 @@ precedent for pair-selection-as-an-explicit-input) and
 `docs/contribute/plans/vision-api-abi-evolution.md` for where implementing
 this split, if picked up, would be sequenced.
 
+## Amendment (2026-09-29): build identity is a comparability axis
+
+**Problem.** Two snapshots whose L3 build evidence came from different build
+systems (CMake+Ninja vs. Make vs. Bazel), or from the same build scoped to
+different root targets, were diffed as if they were one extraction: the gate
+fingerprints compile *flags* but not the build that produced them, so build-
+system drift surfaced as ABI findings (integration lab P0.7 / WS-A).
+
+**Decision.** `check_contracts_comparable` gains a last axis,
+`comparability_profile.check_build_identity_comparable`, over
+`model.extraction_contract.build_identity_of(snapshot)`: the sorted set of
+`(kind, generator)` pairs in `build_source.build_evidence.generators`
+(generator *versions* excluded; `generic` ignored) plus the requested root
+targets in `build_evidence.target_scope` (`None` = unscoped). Mismatch kind
+is `profile`; dimensions `declaration`, `layout`, `source`.
+
+| Old side | New side | Outcome |
+|---|---|---|
+| no L3 evidence (either side) | — | axis not applicable |
+| root targets differ (incl. scoped vs. unscoped) | | **refused** (`ProfileMismatchError`) |
+| build system recorded, differs | | **refused** |
+| recorded on one side only | | compared, **bounded** (`fatal=False`: coverage warning, per-dimension `unverified`, assurance `partial`) |
+| both unrecorded, or equal | | comparable |
+
+**Migration.** No snapshot field and no `SCHEMA_VERSION` bump: the identity is
+*derived* from evidence every snapshot with embedded L3 already persists, so a
+baseline written before this amendment yields exactly the record a fresh dump
+of the same build does. The record carries `BUILD_IDENTITY_VERSION = 1` so a
+future change to what counts as identity is explicit. A pre-identity baseline
+whose evidence names no generator (a bare `compile_commands.json`) is the
+one-sided case: bounded, never refused (no spurious break) and never a clean
+pass (the gap is reported) — "absent is not removed; weaker evidence narrows
+conclusions". Not a `profile_fingerprint` component, deliberately: folding it
+into the hash would change every stored fingerprint and refuse every existing
+baseline, which is exactly the regression this ADR's legacy-fingerprint
+discipline forbids.
+
+`build-output.json`'s optional `profile.build_system: {name, generator}`
+states the same identity at the producer boundary; its validator checks it
+agrees with the target's attribution evidence.
+
 ## References
 
 - `abicheck/model.py` — `AbiSnapshot`, `ScopeOrigin` (`:131-147`)
