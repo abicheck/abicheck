@@ -943,17 +943,16 @@ def _report_compare_result(
     # any --depth (Codex review, PR #1020, second round).
     from functools import partial
 
+    from .evidence_depth import embedded_evidence_pack
     from .workflows.analysis_assurance_attach import attach_evidence_depths
     from .workflows.gate import compute_analysis_assurance, same_persisted_content
 
-    old_pack = old.build_source
-    new_pack = new.build_source
     result.analysis_assurance = compute_analysis_assurance(
         result,
         old,
         new,
-        old_pack=old_pack,
-        new_pack=new_pack,
+        old_pack=embedded_evidence_pack(old),  # header graph stands in (ADR-063)
+        new_pack=embedded_evidence_pack(new),
         same_content=partial(same_persisted_content, old, new),
     )
     # ADR-061 Phase 2 item 5 (post-render mutation): resolved here, before

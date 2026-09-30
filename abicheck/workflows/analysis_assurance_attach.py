@@ -52,14 +52,16 @@ def attach_analysis_assurance(
     ``compute_analysis_assurance`` directly and passes it explicitly.
     """
     from ..analysis_assurance import compute_analysis_assurance
+    from ..evidence_depth import embedded_evidence_pack
     from ..storage.snapshot_encode import same_persisted_content
 
     result.analysis_assurance = compute_analysis_assurance(
         result,
         old,
         new,
-        old_pack=getattr(old, "build_source", None),
-        new_pack=getattr(new, "build_source", None),
+        # A header-only side's graph stands in as its pack (ADR-063 Phase 10).
+        old_pack=embedded_evidence_pack(old) if old is not None else None,
+        new_pack=embedded_evidence_pack(new),
         same_content=(
             partial(same_persisted_content, old, new) if old is not None else None
         ),

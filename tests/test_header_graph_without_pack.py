@@ -258,3 +258,41 @@ class TestSurfaceGraphFollowsL5Scope:
             self._snap_with_graph(with_pack=with_pack), depth
         )
         assert resolve_l5_source_graph(projected, projected.build_source) is None
+
+
+@pytest.mark.parametrize("shape", _GRAPH_SHAPES)
+class TestConsumersReadBothShapesAlike:
+    """The consumers that reached the graph *off* the pack rather than through
+    `resolve_l5_source_graph` -- `--use-cases` (`impact.use_case_impact`) and
+    analysis assurance -- must see the same graph and coverage from either
+    shape. The first version of this change missed both, and only the
+    composite Action's `--use-cases` job caught it."""
+
+    def test_use_case_impact_finds_the_graph(self, shape: dict) -> None:
+        from abicheck.impact.use_case_impact import _source_graph
+
+        old = _source_graph(_retired_shape(_graph(**shape)))
+        new = _source_graph(_current_shape(_graph(**shape)))
+        assert (old is None) == (new is None)
+        if old is not None and new is not None:
+            assert [n.id for n in old.nodes] == [n.id for n in new.nodes]
+
+    def test_analysis_assurance_sees_the_same_pack(self, shape: dict) -> None:
+        from abicheck.checker_policy import Verdict
+        from abicheck.checker_types import DiffResult
+        from abicheck.workflows.analysis_assurance_attach import (
+            attach_analysis_assurance,
+        )
+
+        def _assurance(make):
+            old, new = make(_graph(**shape)), make(_graph(**shape))
+            result = DiffResult(
+                old_version="1",
+                new_version="1",
+                library="lib",
+                verdict=Verdict.NO_CHANGE,
+            )
+            attach_analysis_assurance(result, old, new)
+            return result.analysis_assurance
+
+        assert _assurance(_retired_shape) == _assurance(_current_shape)
