@@ -1778,16 +1778,16 @@ _RELEASE_OPERAND_MEMO=""
 _is_release_style_operand() {
   local key="$1" line rc=0
   _is_path_already_qualified "$key" || key="$PWD/$key"
-  if [[ "$key" != *$'\n'* && -n "$_RELEASE_OPERAND_MEMO" ]]; then
+  if [[ "$key" != *$'\n'* && -n "${_RELEASE_OPERAND_MEMO:-}" ]]; then
     while IFS= read -r line; do
       if [[ "${line#?|}" == "$key" ]]; then
         return "${line%%|*}"
       fi
-    done <<<"$_RELEASE_OPERAND_MEMO"
+    done <<<"${_RELEASE_OPERAND_MEMO:-}"
   fi
   _is_release_style_operand_uncached "$1" || rc=1
   if [[ "$key" != *$'\n'* ]]; then
-    _RELEASE_OPERAND_MEMO+="${rc}|${key}"$'\n'
+    _RELEASE_OPERAND_MEMO="${_RELEASE_OPERAND_MEMO:-}${rc}|${key}"$'\n'
   fi
   return "$rc"
 }

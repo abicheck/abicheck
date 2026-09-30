@@ -282,6 +282,11 @@ jobs:
         # unattributable `FileNotFoundError`s per lane, a different set each
         # time, none reproducible locally.
         #
+        # Found 2026-09-30: a unit test handed `scripts/check_l2_cli_perf.py`'s
+        # cache reset the path `/tmp`, which it `rmtree`d (fixed, see
+        # docs/contribute/known-gaps.md). This step stays as containment for
+        # the next such helper.
+        #
         # `$RUNNER_TEMP` is job-private and not under `/tmp`, so pointing
         # `TMPDIR` at it moves all three at once: `tempfile.gettempdir()`
         # (hence pytest's own basetemp), `mktemp`, and the compilers. One
@@ -505,6 +510,11 @@ jobs:
         # while the job is running. That had been surfacing as a handful of
         # unattributable `FileNotFoundError`s per lane, a different set each
         # time, none reproducible locally.
+        #
+        # Found 2026-09-30: a unit test handed `scripts/check_l2_cli_perf.py`'s
+        # cache reset the path `/tmp`, which it `rmtree`d (fixed, see
+        # docs/contribute/known-gaps.md). This step stays as containment for
+        # the next such helper.
         #
         # `$RUNNER_TEMP` is job-private and not under `/tmp`, so pointing
         # `TMPDIR` at it moves all three at once: `tempfile.gettempdir()`
