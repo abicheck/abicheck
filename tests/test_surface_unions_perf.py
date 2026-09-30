@@ -42,7 +42,8 @@ this repo's own "move responsibility, don't shrink the file to fit" rule
 from __future__ import annotations
 
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
-from abicheck.surface import compute_public_surface, surface_unions
+from abicheck.policy.public_surface_closure import resolve_public_surface
+from abicheck.surface import surface_unions
 
 
 def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, mangled=None):
@@ -66,7 +67,7 @@ def _surf(types):
         functions=[_fn("api", ret="Result *")],
         types=[_rec("Result"), *[_rec(t) for t in types]],
     )
-    return compute_public_surface(snap)
+    return resolve_public_surface(snap)
 
 
 def test_true_when_a_qualified_type_is_present():

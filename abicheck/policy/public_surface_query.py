@@ -143,13 +143,21 @@ class PublicSurfaceQuery:
 
     @staticmethod
     def resolve_public_domain(snapshot: AbiSnapshot) -> PublicSurface:
-        """The structured replacement for ``compute_public_surface()``'s
+        """The structured replacement for the retired ``surface.compute_public_surface()``'s
         result — ``resolvable``/``has_typed_roots``/``has_provenance``/
         ``ambiguous_type_names``/``exact_type_identities``/both origin
         indices, none of which a bare id set can express. Today this *is*
         :func:`~abicheck.policy.public_surface.resolve_public_surface`'s own
         return value."""
         return resolve_public_surface(snapshot)
+
+    @staticmethod
+    def public_type_names(snapshot: AbiSnapshot) -> frozenset[str] | None:
+        """*snapshot*'s resolved public type closure, or ``None`` when no
+        public surface is resolvable -- the shape ``surface_graph.
+        compute_surface_metrics`` counts public types/enums against."""
+        surface = resolve_public_surface(snapshot)
+        return frozenset(surface.public_types) if surface.resolvable else None
 
     @staticmethod
     def resolve_export_domain(snapshot: AbiSnapshot) -> ExportSurface:

@@ -103,9 +103,9 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
     """
     from .diff_helpers import type_map_key
     from .model import is_non_abi_surface_type
-    from .surface import compute_public_surface
+    from .policy.public_surface_query import PublicSurfaceQuery
 
-    surface = compute_public_surface(snap)
+    surface = PublicSurfaceQuery.resolve_public_domain(snap)
     public_types = _public_by_value_type_closure(snap) if surface.resolvable else None
 
     for rec in snap.declarations.types:

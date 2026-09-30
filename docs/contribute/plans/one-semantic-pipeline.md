@@ -17341,6 +17341,18 @@ not new design.
 - **Phase 3, `buildsource/graph_facts.py` facade (closed, 2026-09-30).** The
   re-export facade is deleted; its 22 importers (10 production, 12 test)
   import `abicheck.model.graph_facts`/`graph_identity` directly.
+- **Phase 3, public-surface entry points (closed, 2026-09-30).**
+  `surface.compute_public_surface`, the last wrapper around the shared
+  closure walk, is deleted; every production caller (`post_processing.py`,
+  `contract_pipeline.py`, `diff_stdlib_impl.py`, `surface.py`'s own
+  confidence scoring) asks `PublicSurfaceQuery.resolve_public_domain`, and
+  `contract_pipeline.py` asks `resolve_export_domain` rather than calling
+  `export_surface.compute_export_surface` itself. `export_surface.py` already
+  shared `_walk_type_closure`, so no second walk remained there.
+  `surface_graph.py` had been reaching `policy/` through the policy-owned
+  `surface.py` despite its own "imports nothing from policy" test; it now
+  takes the resolved closure as `public_type_names`, which `checker.py`
+  (workflows) resolves through `PublicSurfaceQuery.public_type_names`.
 - Phase 3: `surface.py`'s pre-graph traversal implementation and
   `export_surface.py`'s independent closure walk, once
   `PublicSurfaceQuery.resolve` is the only path either one calls; the

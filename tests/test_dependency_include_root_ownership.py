@@ -210,9 +210,9 @@ class TestDependencyIncludeRootIsNotAPublicApiRoot:
         dependency header, so leak/closure analysis must still resolve it."""
         _require_toolchain()
         so, pub, extra = _build_dependency_tree(tmp_path)
-        from abicheck.surface import compute_public_surface
+        from abicheck.policy.public_surface_closure import resolve_public_surface
 
-        surface = compute_public_surface(_dump(so, pub, extra))
+        surface = resolve_public_surface(_dump(so, pub, extra))
         assert "DepType" in surface.public_types
 
     def test_old_and_new_side_include_paths_stay_isolated(self, tmp_path: Path) -> None:

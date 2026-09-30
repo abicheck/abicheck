@@ -59,7 +59,7 @@ from abicheck.policy.contract_graph_encoding import (
     graph_node_index,
     resolve_graph_node,
 )
-from abicheck.surface import compute_public_surface
+from abicheck.policy.public_surface_closure import resolve_public_surface
 
 
 def _exact(graph: TypeGraphSnapshot, spelling: str) -> set[str]:
@@ -497,7 +497,7 @@ class TestTypeGraph:
             "type://ns1::Mode",
             "type://ns2::Mode",
         }
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert "Mode" in surf.ambiguous_type_names
         # ...and the collision reaches the persisted record, which is what a
         # replay consults instead of re-deriving it.
@@ -610,7 +610,7 @@ class TestProviderLedger:
     def test_header_provider_records_public_roots(self) -> None:
         snap = _snap(functions=[_public_fn("api")])
         block = collect_contract_evidence(
-            snap, snap, compute_public_surface(snap), compute_public_surface(snap)
+            snap, snap, resolve_public_surface(snap), resolve_public_surface(snap)
         )
         entry = next(
             e
@@ -630,7 +630,7 @@ class TestProviderLedger:
         """
         snap = _snap()
         block = collect_contract_evidence(
-            snap, snap, compute_public_surface(snap), compute_public_surface(snap)
+            snap, snap, resolve_public_surface(snap), resolve_public_surface(snap)
         )
         entry = next(e for e in block.providers if e.record.side == "old")
         assert entry.record.status is EvidenceProviderStatus.UNAVAILABLE
@@ -643,7 +643,7 @@ class TestProviderLedger:
         """ "Not consulted" is a different fact from "consulted and failed"."""
         snap = _snap(functions=[_public_fn("api")])
         block = collect_contract_evidence(
-            snap, snap, compute_public_surface(snap), compute_public_surface(snap)
+            snap, snap, resolve_public_surface(snap), resolve_public_surface(snap)
         )
         assert not [
             e for e in block.providers if e.record.provider == PROVIDER_EXPORT_TABLE
@@ -656,8 +656,8 @@ class TestProviderLedger:
         block = collect_contract_evidence(
             snap,
             snap,
-            compute_public_surface(snap),
-            compute_public_surface(snap),
+            resolve_public_surface(snap),
+            resolve_public_surface(snap),
             exports_old=exports,
             exports_new=exports,
         )
@@ -695,8 +695,8 @@ class TestProviderLedger:
         block = collect_contract_evidence(
             snap,
             snap,
-            compute_public_surface(snap),
-            compute_public_surface(snap),
+            resolve_public_surface(snap),
+            resolve_public_surface(snap),
             exports_old=exports,
             exports_new=exports,
         )
@@ -724,8 +724,8 @@ class TestProviderLedger:
         block = collect_contract_evidence(
             snap,
             snap,
-            compute_public_surface(snap),
-            compute_public_surface(snap),
+            resolve_public_surface(snap),
+            resolve_public_surface(snap),
             exports_old=exports,
             exports_new=exports,
         )
@@ -740,8 +740,8 @@ class TestProviderLedger:
         block = collect_contract_evidence(
             snap,
             snap,
-            compute_public_surface(snap),
-            compute_public_surface(snap),
+            resolve_public_surface(snap),
+            resolve_public_surface(snap),
             public_surface_allowlist=["api"],
             force_public_symbols=["other"],
         )
@@ -757,14 +757,14 @@ class TestProviderLedger:
         block_a = collect_contract_evidence(
             snap_a,
             snap_a,
-            compute_public_surface(snap_a),
-            compute_public_surface(snap_a),
+            resolve_public_surface(snap_a),
+            resolve_public_surface(snap_a),
         )
         block_b = collect_contract_evidence(
             snap_b,
             snap_b,
-            compute_public_surface(snap_b),
-            compute_public_surface(snap_b),
+            resolve_public_surface(snap_b),
+            resolve_public_surface(snap_b),
         )
         assert block_a == block_b
 
@@ -772,10 +772,10 @@ class TestProviderLedger:
         one = _snap(functions=[_public_fn("api")])
         two = _snap(functions=[_public_fn("api"), _public_fn("extra")])
         block_one = collect_contract_evidence(
-            one, one, compute_public_surface(one), compute_public_surface(one)
+            one, one, resolve_public_surface(one), resolve_public_surface(one)
         )
         block_two = collect_contract_evidence(
-            two, two, compute_public_surface(two), compute_public_surface(two)
+            two, two, resolve_public_surface(two), resolve_public_surface(two)
         )
         digests = [
             next(e for e in b.providers if e.record.side == "old").record.input_identity
@@ -791,7 +791,7 @@ class TestEvidenceReferences:
             functions=[_public_fn("api")],
             elf=ElfMetadata(symbols=[ElfSymbol(name="api")]),
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         export_surface = compute_export_surface(snap) if exports else None
         return collect_contract_evidence(
             snap,
@@ -954,7 +954,7 @@ class TestOverlayAttribution:
         from abicheck.contract_relevance_types import ContractMode
 
         old, _new = self._pair()
-        surf = compute_public_surface(old)
+        surf = resolve_public_surface(old)
         receipt = build_persisted_context(
             collect_contract_evidence(old, old, surf, surf),
             mode=ContractMode.PUBLIC,

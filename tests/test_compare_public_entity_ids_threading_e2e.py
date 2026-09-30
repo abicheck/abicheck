@@ -110,10 +110,15 @@ def test_resolved_pair_reaches_both_boundaries_through_compare_snapshots(
     csm_calls: list[tuple[object, object]] = []
     real_compute_surface_metrics = diff_surface_metrics_module.compute_surface_metrics
 
-    def _compute_surface_metrics_spy(snap, *, top_n=10, public_entity_ids=None):
+    def _compute_surface_metrics_spy(
+        snap, *, top_n=10, public_entity_ids=None, public_type_names=None
+    ):
         csm_calls.append((snap, public_entity_ids))
         return real_compute_surface_metrics(
-            snap, top_n=top_n, public_entity_ids=public_entity_ids
+            snap,
+            top_n=top_n,
+            public_entity_ids=public_entity_ids,
+            public_type_names=public_type_names,
         )
 
     monkeypatch.setattr(

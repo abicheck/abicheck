@@ -27,10 +27,19 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
+from abicheck.policy.public_surface_query import PublicSurfaceQuery
 from abicheck.surface_graph import (
     build_surface_graph,
     compute_surface_metrics,
 )
+
+
+def _resolved_metrics(snap, **kwargs):
+    """``compute_surface_metrics`` with the public type closure resolved the
+    way ``diff_surface_metrics`` resolves it (policy owns the resolution)."""
+    return compute_surface_metrics(
+        snap, public_type_names=PublicSurfaceQuery.public_type_names(snap), **kwargs
+    )
 
 
 def _snap() -> AbiSnapshot:
@@ -153,7 +162,7 @@ def test_inverse_reachability_derivable_from_supported_surface() -> None:
 
 
 def test_metrics_counts_and_undocumented_ratio() -> None:
-    m = compute_surface_metrics(_snap())
+    m = _resolved_metrics(_snap())
     assert m.library == "libfoo.so.1"
     assert m.evidence_tier == "header_aware"
     assert m.public_functions == 2  # foo_open + foo_undocumented
@@ -267,7 +276,7 @@ def test_fan_in_not_double_counted_for_namespaced_record() -> None:
     )
     g = build_surface_graph(snap)
     assert g.fan_in("ns::A") == 1
-    m = compute_surface_metrics(snap)
+    m = _resolved_metrics(snap)
     # ns::A appears at most once in the top-fan-in listing (not as both A/ns::A).
     names = [n for n, _ in m.top_fan_in]
     assert names.count("ns::A") <= 1
@@ -337,7 +346,7 @@ def test_header_coverage_counts_overloads() -> None:
             ),
         ],
     )
-    m = compute_surface_metrics(snap)
+    m = _resolved_metrics(snap)
     api = next(hc for hc in m.header_coverage if hc.header == "api.h")
     assert api.declared == 2  # both overloads, not collapsed to 1
     assert api.exported == 2
@@ -378,7 +387,7 @@ def test_virtual_bases_counted_in_public_types() -> None:
             ),
         ],
     )
-    m = compute_surface_metrics(snap)
+    m = _resolved_metrics(snap)
     assert m.public_types == 2  # both D and its virtual base B
 
 
@@ -450,7 +459,7 @@ def test_cohesion_merges_unqualified_namespaced_reference() -> None:
             ),
         ],
     )
-    m = compute_surface_metrics(snap)
+    m = _resolved_metrics(snap)
     hc = next(c for c in m.header_coverage if c.header == "h.h")
     assert hc.cohesion_clusters == 1  # ns::B -> ns::A is one component
 
@@ -479,7 +488,7 @@ def test_public_type_count_falls_back_when_unresolvable() -> None:
 
 
 def test_metrics_header_coverage_and_cohesion() -> None:
-    m = compute_surface_metrics(_snap())
+    m = _resolved_metrics(_snap())
     by_header = {hc.header: hc for hc in m.header_coverage}
     # api.h declares foo_open, foo_version, Handle, Detail, Widget, Status.
     api = by_header["foo/api.h"]
@@ -494,7 +503,7 @@ def test_metrics_header_coverage_and_cohesion() -> None:
 
 
 def test_top_fan_in_sorted_desc() -> None:
-    m = compute_surface_metrics(_snap())
+    m = _resolved_metrics(_snap())
     counts = [c for _, c in m.top_fan_in]
     assert counts == sorted(counts, reverse=True)
     assert all(c > 0 for c in counts)
@@ -504,7 +513,7 @@ def test_metrics_json_round_trips_through_snapshot() -> None:
     # `surface-report --format json` (deleted CLI command, ADR-043) was a thin
     # `compute_surface_metrics(snap).to_dict()` wrapper — exercise that
     # directly; the JSON shape is the dataclass's own `to_dict()`.
-    data = compute_surface_metrics(_snap()).to_dict()
+    data = _resolved_metrics(_snap()).to_dict()
     assert data["library"] == "libfoo.so.1"
     assert data["undocumented_exports"] == 1
     assert any(hc["header"] == "foo/api.h" for hc in data["header_coverage"])
@@ -552,7 +561,7 @@ def test_reachable_types_empty_for_void_root() -> None:
 
 
 def test_metrics_no_headers_no_types() -> None:
-    m = compute_surface_metrics(_bare_snap())
+    m = _resolved_metrics(_bare_snap())
     assert m.evidence_tier == "elf_only"  # no headers, no dwarf
     assert m.top_fan_in == []
     assert m.header_coverage == []
@@ -566,13 +575,13 @@ def test_dwarf_tier_without_headers() -> None:
     # has_dwarf=True, not a bare DwarfMetadata(): the tier follows collected
     # debug info, and every ELF dump attaches an object either way.
     snap.dwarf = DwarfMetadata(has_dwarf=True)
-    assert compute_surface_metrics(snap).evidence_tier == "dwarf_aware"
+    assert _resolved_metrics(snap).evidence_tier == "dwarf_aware"
 
     # The complementary half, which this file could not state before: an
     # attached-but-empty object is the elf_only tier, not dwarf_aware.
     empty = _bare_snap()
     empty.dwarf = DwarfMetadata()
-    assert compute_surface_metrics(empty).evidence_tier == "elf_only"
+    assert _resolved_metrics(empty).evidence_tier == "elf_only"
 
 
 def test_closure_handles_namespaces_diamonds_typedefs_vbases() -> None:
@@ -616,7 +625,7 @@ def test_closure_handles_namespaces_diamonds_typedefs_vbases() -> None:
 def test_metrics_json_empty_surface() -> None:
     # `surface-report --format json` (deleted CLI command) on an empty
     # surface — exercise `compute_surface_metrics().to_dict()` directly.
-    data = compute_surface_metrics(_bare_snap()).to_dict()
+    data = _resolved_metrics(_bare_snap()).to_dict()
     assert data["top_fan_in"] == []
     assert data["header_coverage"] == []
 
@@ -652,7 +661,7 @@ class TestPublicEntityIdsDefaultIsUnchanged:
 
     def test_metrics_unaffected(self) -> None:
         snap = _snap()
-        assert compute_surface_metrics(snap) == compute_surface_metrics(
+        assert _resolved_metrics(snap) == _resolved_metrics(
             snap, public_entity_ids=None
         )
 

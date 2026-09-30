@@ -39,7 +39,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
-from abicheck.surface import compute_public_surface
+from abicheck.policy.public_surface_closure import resolve_public_surface
 
 pytestmark = pytest.mark.slow
 
@@ -130,12 +130,12 @@ def _all_finding_keys(result) -> set[tuple[str, str]]:
 @settings(max_examples=75)
 def test_surface_resolution_is_order_independent(snap: AbiSnapshot):
     """Resolved surface is invariant under reordering functions/types."""
-    base = compute_public_surface(snap)
+    base = resolve_public_surface(snap)
 
     shuffled = copy.deepcopy(snap)
     shuffled.declarations.functions.reverse()
     shuffled.declarations.types.reverse()
-    other = compute_public_surface(shuffled)
+    other = resolve_public_surface(shuffled)
 
     assert base.resolvable == other.resolvable
     assert base.public_symbols == other.public_symbols
@@ -148,8 +148,8 @@ def test_surface_resolution_is_order_independent(snap: AbiSnapshot):
 @settings(max_examples=50)
 def test_surface_resolution_is_idempotent(snap: AbiSnapshot):
     """Resolving the same snapshot twice yields identical surfaces."""
-    a = compute_public_surface(snap)
-    b = compute_public_surface(snap)
+    a = resolve_public_surface(snap)
+    b = resolve_public_surface(snap)
     assert a.public_symbols == b.public_symbols
     assert a.public_types == b.public_types
     assert a.resolvable == b.resolvable

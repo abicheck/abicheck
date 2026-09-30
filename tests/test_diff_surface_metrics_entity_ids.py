@@ -36,9 +36,14 @@ def test_each_side_receives_its_own_set_not_the_others(monkeypatch) -> None:
 
     real_compute = diff_surface_metrics_module.compute_surface_metrics
 
-    def _spy(snap, *, top_n=10, public_entity_ids=None):
+    def _spy(snap, *, top_n=10, public_entity_ids=None, public_type_names=None):
         calls.append((snap, public_entity_ids))
-        return real_compute(snap, top_n=top_n, public_entity_ids=public_entity_ids)
+        return real_compute(
+            snap,
+            top_n=top_n,
+            public_entity_ids=public_entity_ids,
+            public_type_names=public_type_names,
+        )
 
     monkeypatch.setattr(diff_surface_metrics_module, "compute_surface_metrics", _spy)
 
@@ -58,9 +63,14 @@ def test_none_pair_is_the_default_and_reaches_both_sides_as_none(monkeypatch) ->
     calls: list[frozenset | None] = []
     real_compute = diff_surface_metrics_module.compute_surface_metrics
 
-    def _spy(snap, *, top_n=10, public_entity_ids=None):
+    def _spy(snap, *, top_n=10, public_entity_ids=None, public_type_names=None):
         calls.append(public_entity_ids)
-        return real_compute(snap, top_n=top_n, public_entity_ids=public_entity_ids)
+        return real_compute(
+            snap,
+            top_n=top_n,
+            public_entity_ids=public_entity_ids,
+            public_type_names=public_type_names,
+        )
 
     monkeypatch.setattr(diff_surface_metrics_module, "compute_surface_metrics", _spy)
 

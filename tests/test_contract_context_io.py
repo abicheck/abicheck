@@ -62,8 +62,8 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.severity import SeverityConfig, SeverityLevel
-from abicheck.surface import compute_public_surface
 
 
 def _pair() -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -131,7 +131,7 @@ class TestPersistedContextRoundTrip:
         would otherwise see churn that means nothing.
         """
         old, new = _pair()
-        surf_old, surf_new = compute_public_surface(old), compute_public_surface(new)
+        surf_old, surf_new = resolve_public_surface(old), resolve_public_surface(new)
         forward = collect_contract_evidence(old, new, surf_old, surf_new)
         # Same observations, opposite provider-traversal order: the block
         # canonicalizes on (side, provider, id), so the two must serialize

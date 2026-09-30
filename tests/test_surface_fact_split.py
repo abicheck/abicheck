@@ -65,6 +65,8 @@ from abicheck.model import (
     surface_fact_summary,
 )
 from abicheck.model.change_catalog.kinds import ChangeKind
+from abicheck.policy.public_surface_query import PublicSurfaceQuery
+from abicheck.surface_graph import compute_surface_metrics
 
 #: Every way a producer can leave one of the three facts. "Unknown" is
 #: represented by all four of its real statuses, not just one, so an
@@ -79,6 +81,14 @@ _UNKNOWNS = (
     Fact.not_applicable(),
 )
 _STATES = (_TRUE, _FALSE, *_UNKNOWNS)
+
+
+def _resolved_metrics(snap, **kwargs):
+    """``compute_surface_metrics`` with the public type closure resolved the
+    way ``diff_surface_metrics`` resolves it (policy owns the resolution)."""
+    return compute_surface_metrics(
+        snap, public_type_names=PublicSurfaceQuery.public_type_names(snap), **kwargs
+    )
 
 
 def _fn(name: str = "foo", mangled: str = "_Z3foov", **facts: object) -> Function:
@@ -289,7 +299,6 @@ class TestTheQuestionDecidesTheFact:
             }
 
     def test_export_named_metrics_count_the_export_fact(self) -> None:
-        from abicheck.surface_graph import compute_surface_metrics
 
         snap = _snap(
             "1.0",
@@ -308,7 +317,7 @@ class TestTheQuestionDecidesTheFact:
                 binary_exported_fact=_FALSE,
             ),
         )
-        metrics = compute_surface_metrics(snap)
+        metrics = _resolved_metrics(snap)
         assert metrics.public_functions == 2
         assert metrics.exported_symbols == 1, (
             "an export-named counter must not count a promised, unexported "

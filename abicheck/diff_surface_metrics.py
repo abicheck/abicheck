@@ -51,6 +51,8 @@ def diff_surface_metrics(
     *,
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
+    old_public_type_names: frozenset[str] | None = None,
+    new_public_type_names: frozenset[str] | None = None,
 ) -> list[Change]:
     """Return informational metric-drift findings between *old* and *new*.
 
@@ -63,9 +65,22 @@ def diff_surface_metrics(
     for why old/new must never share one set. ``None`` (every call site
     outside ``compare()``'s own pipeline) preserves the exact pre-Phase-3
     ``Visibility.PUBLIC``-derived behavior on that side.
+
+    *old_public_type_names*/*new_public_type_names*: each side's resolved
+    public type closure (``PublicSurfaceQuery.public_type_names``), passed
+    through to ``compute_surface_metrics``; resolving it is policy's job, not
+    this compare-layer module's.
     """
-    om = compute_surface_metrics(old, public_entity_ids=old_public_entity_ids)
-    nm = compute_surface_metrics(new, public_entity_ids=new_public_entity_ids)
+    om = compute_surface_metrics(
+        old,
+        public_entity_ids=old_public_entity_ids,
+        public_type_names=old_public_type_names,
+    )
+    nm = compute_surface_metrics(
+        new,
+        public_entity_ids=new_public_entity_ids,
+        public_type_names=new_public_type_names,
+    )
     changes: list[Change] = []
 
     old_count = _public_decl_count(om)

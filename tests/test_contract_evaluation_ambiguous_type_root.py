@@ -35,7 +35,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
-from abicheck.surface import compute_public_surface
+from abicheck.policy.public_surface_closure import resolve_public_surface
 
 
 def _fn(
@@ -60,7 +60,7 @@ class TestPublicModeAmbiguousTypeRoot:
     """When two distinct records/enums share one bare tail name (e.g.
     ``one::Point``/``two::Point``, both spelled bare ``Point``) and an
     unqualified ``Point *`` public signature cannot identify which one it
-    references, ``compute_public_surface`` deliberately keeps *both* in
+    references, ``resolve_public_surface`` deliberately keeps *both* in
     ``public_types`` (its own anti-hiding rule) while recording ``Point`` in
     ``ambiguous_type_names``. Confirmation must not treat that conservative
     closure expansion as proof of root membership (Codex review, eleventh
@@ -109,7 +109,7 @@ class TestPublicModeAmbiguousTypeRoot:
         )
 
     def test_ambiguous_bare_tail_is_unresolved_not_confirmed(self) -> None:
-        s = compute_public_surface(self._two_siblings(ScopeOrigin.PUBLIC_HEADER))
+        s = resolve_public_surface(self._two_siblings(ScopeOrigin.PUBLIC_HEADER))
         assert "Point" in s.ambiguous_type_names
         assert "Point" in s.public_types
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
@@ -122,7 +122,7 @@ class TestPublicModeAmbiguousTypeRoot:
         # origin: `origin_by_key` resolves the collision with public
         # winning, so the private sibling that makes the ambiguity matter
         # leaves no trace there.
-        s = compute_public_surface(self._two_siblings(ScopeOrigin.PRIVATE_HEADER))
+        s = resolve_public_surface(self._two_siblings(ScopeOrigin.PRIVATE_HEADER))
         assert s.origin_by_key["Point"] is ScopeOrigin.PUBLIC_HEADER
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Point", description="")
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
@@ -162,7 +162,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         # Both qualified identities end up in `public_types` (the closure
         # walks every record that collides on the shared bare key, and
         # unconditionally records each one's own qualified spelling too --
@@ -216,7 +216,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Point" in s.ambiguous_type_names
         assert "Clear" not in s.ambiguous_type_names
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Clear", description="")
@@ -256,7 +256,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Mode" in s.ambiguous_type_names
         assert {"ns1::Mode", "ns2::Mode"} <= s.public_types
         c = Change(
@@ -288,7 +288,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Widget" not in s.ambiguous_type_names
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="ns::Widget", description=""
@@ -351,7 +351,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Point" in s.ambiguous_type_names
         assert {"ns1::Point", "ns2::Point"} <= s.public_types
         assert s.exact_type_identities == {"ns1::Point"}
@@ -401,7 +401,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Point" in s.ambiguous_type_names
         assert s.exact_type_identities == {"ns1::Point"}
         c = Change(
@@ -433,7 +433,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Widget" not in s.ambiguous_type_names
         assert "ns::Widget" not in s.ambiguous_type_names
 
@@ -446,7 +446,7 @@ class TestPublicModeAmbiguousTypeRoot:
         # for both -- there is no exact route to distinguish, so this must
         # still be rejected exactly like
         # `test_a_public_header_sibling_no_public_api_reaches_is_not_confirmed`.
-        s = compute_public_surface(self._two_siblings(ScopeOrigin.PUBLIC_HEADER))
+        s = resolve_public_surface(self._two_siblings(ScopeOrigin.PUBLIC_HEADER))
         assert s.exact_type_identities == set()
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="one::Point", description=""
@@ -511,7 +511,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Container" in s.ambiguous_type_names
         # one::Point is still conservatively kept (anti-hiding: never hide a
         # real dependency behind snapshot order) -- it just must not be
@@ -554,7 +554,7 @@ class TestPublicModeAmbiguousTypeRoot:
             ],
             typedefs={"Alias": "Foo"},
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Alias" in s.exact_type_identities
         assert "Foo" in s.exact_type_identities
         c = Change(kind=ChangeKind.TYPEDEF_REMOVED, symbol="Alias", description="")
@@ -597,7 +597,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Point" not in s.ambiguous_type_names
         assert s.exact_type_identities == {"Point", "ns::Point"}
         # The real-world shape: diff_types.py emits the bare .name.
@@ -644,7 +644,7 @@ class TestPublicModeAmbiguousTypeRoot:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Cache" in s.ambiguous_type_names
         assert s.exact_type_identities == {"ns1::Cache"}
         # The qualified candidate confirms.

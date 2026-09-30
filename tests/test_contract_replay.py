@@ -62,7 +62,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
-from abicheck.surface import compute_public_surface
+from abicheck.policy.public_surface_closure import resolve_public_surface
 
 
 def _pair(*, with_exports: bool = False) -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -237,7 +237,7 @@ class TestReevaluateFromEvidence:
         snap = AbiSnapshot(
             library="libdemo.so.1", version="1", functions=[hidden], types=[secret]
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         block = collect_contract_evidence(
             snap, snap, surf, surf, force_public_symbols={"hidden"}
         )
@@ -283,7 +283,7 @@ class TestReevaluateFromEvidence:
             origin=ScopeOrigin.PRIVATE_HEADER,
         )
         snap = AbiSnapshot(library="libdemo.so.1", version="1", functions=[cxx])
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         block = collect_contract_evidence(
             snap, snap, surf, surf, public_surface_allowlist={"foo"}
         )
@@ -316,7 +316,7 @@ class TestReevaluateFromEvidence:
             for name in ("api", "kept")
         ]
         snap = AbiSnapshot(library="libdemo.so.1", version="1", functions=fns)
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         block = collect_contract_evidence(
             snap, snap, surf, surf, public_surface_allowlist={"kept"}
         )
@@ -375,7 +375,7 @@ class TestReevaluateFromEvidence:
         snap = AbiSnapshot(
             library="libdemo.so.1", version="1", functions=[hidden], elf=elf
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         exports = compute_export_surface(snap)
         block = collect_contract_evidence(
             snap,
@@ -502,7 +502,7 @@ class TestReevaluateFromEvidence:
             ],
             elf=elf,
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         exports = compute_export_surface(snap)
         ctx = build_persisted_context(
             collect_contract_evidence(
@@ -556,7 +556,7 @@ class TestReevaluateFromEvidence:
             types=[RecordType(name="Shared", kind="struct", fields=[])],
             elf=elf,
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         exports = compute_export_surface(snap)
         ctx = build_persisted_context(
             collect_contract_evidence(
@@ -613,7 +613,7 @@ class TestReevaluateFromEvidence:
             ],
             elf=elf,
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         exports = compute_export_surface(snap)
         ctx = build_persisted_context(
             collect_contract_evidence(
@@ -726,7 +726,7 @@ class TestReevaluateFromEvidence:
             ],
             elf=elf,
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         exports = compute_export_surface(snap) if with_exports else None
         return build_persisted_context(
             collect_contract_evidence(
