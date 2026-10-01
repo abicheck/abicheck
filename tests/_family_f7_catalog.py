@@ -175,12 +175,6 @@ MUTANTS: tuple[Mutant, ...] = (
         "F5/release_dispatch_drops_member.patch",
         (f"{F5}::test_release_threads_1_matches_threads_8",),
         "The pooled release dispatch drops its last member unconditionally.",
-        harness_gap=(
-            "H5's threads=1 reference arm still reaches _compare_release_parallel "
-            "(ABICHECK_MAX_THREADS=1 leaves the release plan's pool_size at 2 for an "
-            "8-member release), so both arms share the mutated dispatch and agree; "
-            "no H5 cell compares the pooled path against _compare_release_sequential."
-        ),
     ),
 )
 

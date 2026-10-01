@@ -127,6 +127,46 @@ def test_plan_never_exceeds_parallelism_or_memory(
     assert failures == []
 
 
+@pytest.mark.parametrize("depth", ["headers", "binary", None])
+def test_plan_never_exceeds_the_process_thread_budget(
+    monkeypatch: pytest.MonkeyPatch, depth: str | None
+) -> None:
+    """ABICHECK_MAX_THREADS bounds the plan itself, auto and explicit alike.
+
+    Oracle: an independent minimum. With a budget of *cap* the plan holds at
+    most *cap* threads and runs at most *cap* members; with no budget it is
+    the unbudgeted plan unchanged. A budget of 1 therefore selects the
+    sequential member path (``pool_size == 1``), which is what the H5
+    reference arm needs to compare the pooled dispatch against.
+    """
+    monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
+    failures = []
+    for cpus, avail, parallel, jobs, cap in itertools.product(
+        _CPUS, _AVAIL, _PARALLEL, (0, 1, 5, 64), (None, 1, 2, 3, 500)
+    ):
+        monkeypatch.setattr("os.cpu_count", lambda c=cpus: c)
+        monkeypatch.setattr(process_resources, "available_mem_gib", lambda a=avail: a)
+        monkeypatch.setattr(
+            process_resources, "python_parallelism", lambda p=parallel: p
+        )
+        monkeypatch.delenv(process_resources.MAX_THREADS_ENV_VAR, raising=False)
+        free = release_jobs.plan_release_workers(jobs, depth=depth, header_roots=True)
+        if cap is not None:
+            monkeypatch.setenv(process_resources.MAX_THREADS_ENV_VAR, str(cap))
+        plan = release_jobs.plan_release_workers(jobs, depth=depth, header_roots=True)
+        bound = free.pool_size if cap is None else min(free.pool_size, cap)
+        case = (cpus, avail, parallel, jobs, cap)
+        if plan.pool_size != bound:
+            failures.append((case, "pool", plan.pool_size, bound))
+        if plan.initial_jobs != (
+            free.initial_jobs if cap is None else min(free.initial_jobs, cap)
+        ):
+            failures.append((case, "jobs", plan.initial_jobs))
+        if cap == 1 and plan.pool_size != 1:
+            failures.append((case, "sequential"))
+    assert failures == []
+
+
 # ---------------------------------------------------------------------------
 # Level 1: result independent of submission and completion order
 # ---------------------------------------------------------------------------
