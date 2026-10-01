@@ -13,11 +13,13 @@ generated: false
 every capability it exclusively owned reached `compare` behind a parity gate.
 Phase 7 has **nothing executable left**: each remaining item is gated on a
 named prerequisite or owned by another workstream (see
-[What remains in Phase 7](#phase-7l-external-cli-audit-2026-09-12-reconciled)). Phase 9 is **blocked** on
-[`public-contract-default.md`](public-contract-default.md) Phase 6's two open
-relevance defects (the template-instantiated-parameter seed mismatch and the
-unresolved `ambiguous_namespaced_leaf` identity gap) and its two uncovered
-measurement lanes (`package`, `real_binaries`).
+[What remains in Phase 7](#phase-7l-external-cli-audit-2026-09-12-reconciled)). Phase 9's two named
+relevance-defect blockers in
+[`public-contract-default.md`](public-contract-default.md) Phase 6 are
+**closed** (2026-10-01; see [Phase 9](#phase-9-contract-mechanism-consolidation-gated-may-not-start-early)).
+It now waits only on accepting the `package`/`real_binaries` lane-coverage
+bound. Those lanes are covered by integration tests, not by the always-on
+measurement.
 **Effort:** XL · **Risk:** high — this deleted a public command and moved
 capabilities between analysis paths. Phase ordering was the safety mechanism.
 
@@ -65,6 +67,28 @@ Stale facts corrected while compacting, each verified against the tree:
   modules.
 - **Stale-comment sweep.** Scan-era references in `abicheck/` comments and
   docstrings were rewritten to describe `scan` as retired rather than live.
+
+### Status re-evaluation (2026-10-01)
+
+Re-checked against the tree with Click introspection and the contract gates:
+
+- **Live counts match §4.5** (`compare` 43, `dump` 20, `aggregate` 5, no
+  hidden options). `abicheck scan` exits `64` with the migration hint. The
+  rulings bijection (`tests/test_config_rebalance.py`), the root-surface pin,
+  the CLI contract and the export-grammar tests pass, and
+  `docs/reference/cli-reference.md` is in sync.
+- **A new subcommand this table did not list:** `project capture-variants`
+  (7 options, storage-format-v2 A1.6). It is now in §4.5.
+- **Per-option rulings cover only `compare` and `dump`.** Nothing rules
+  `aggregate` or `project` options flag by flag (`aggregate
+  --analysis-context`, all of `capture-variants`). This is an open item in
+  the [Phase 7 table](#phase-7l-external-cli-audit-2026-09-12-reconciled).
+- **Phase 9's blockers moved.** The template-instantiated-parameter seed
+  mismatch had already been closed, but this plan and the plans index still
+  listed it. The `ambiguous_namespaced_leaf` identity gap is closed by
+  schema v54. The `package` lane's recorded reason ("compare rejects
+  `--contract` for package operands") was stale: the release fan-out does
+  apply it per library.
 
 ---
 
@@ -382,6 +406,7 @@ Click parameter, excluding `--help`/`--help-all`):
 | `dump` | **20** | 13 | 39 |
 | `aggregate` | **5** | 4 | 6 |
 | `deps tree` | **6** | 6 | — |
+| `project capture-variants` | **7** | — | (added by storage-format-v2 A1.6, after this audit) |
 | `deps compare` | **7** | 7 | — |
 | `project history` | **4** | 4 | — |
 | `project plan` | **6** | 6 | — |
@@ -433,7 +458,7 @@ Six cross-cutting blockers. Each gated a whole phase, not one row.
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion | **Landed** (Phase 4 commit 2); §3 #19/#28 |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public_header_dirs` | §3 #4, #5, #22 | **Solved** for both sources, threaded into `InputSpec.public_header_dirs`/`provenance.apply_provenance`. No new CLI flag. The file-vs-directory asymmetry is preserved verbatim (see `workflows/cross_source_evolution.py`'s module docstring) |
 | P5 | ADR-065 S3's package component inventories | `compare --no-baseline DIR` (§3 #16, #17); `--select-required` merge | **Open** — workstream A's, not this plan's |
-| P6 | `EntityId`-based public closure (ADR-063 Phase 2) and `public-contract-default.md` Phase 6's two open relevance defects plus two uncovered measurement lanes | Phase 9 only | **Open.** Not a string heuristic, and never traded for a shorter CLI |
+| P6 | `EntityId`-based public closure (ADR-063 Phase 2) and `public-contract-default.md` Phase 6's two relevance defects plus two uncovered measurement lanes | Phase 9 only | **Defects closed (2026-10-01).** The seed mismatch was closed earlier; the identity gap is closed by schema v54 slot identities captured at extraction, not by a string heuristic. **Open:** accepting the `package`/`real_binaries` coverage bound (integration-tested, not in the always-on measurement) |
 
 P1 and P5 are ADR-065 work this plan consumes rather than owns; starting them
 here would fork the model workstream A is building.
@@ -881,6 +906,7 @@ authoritative open list:
 | `dump --compression`, `--dry-run`→`--plan`, `--used-by-manifest`→`--used-by @FILE` | declined with a measurement (7k/7l) |
 | `compare --env-matrix` → `deployment:`, `dump --build-target` → `build.targets` | tracked follow-ups in `rulings.py` (need a new config key / caller rewiring) |
 | Per-library scope ledger and suppression audit in release human output | missing feature left by 7o (machine projections unaffected) |
+| Per-option rulings for `aggregate` and `project` (`aggregate --analysis-context`, `project capture-variants`' 7 options) | `rulings.py` and its bijection test cover only `compare`/`dump`; extend them, or record that the exclusion is deliberate |
 
 ### Phase 8 — `deps` convergence (ADR-068 D6) — done
 
@@ -899,12 +925,31 @@ direction**, not scoped here.
 ### Phase 9 — Contract-mechanism consolidation (gated, may not start early)
 
 `--scope-public-headers` → `--contract public`, `--post-manifest` → a
-contract overlay. **Blocked** on
-[`public-contract-default.md`](public-contract-default.md) Phase 6's two open
-relevance defects (template-instantiated-parameter seed mismatch; unresolved
-`ambiguous_namespaced_leaf` identity gap) and two uncovered measurement lanes
-(`package`, `real_binaries`). Never trade a possible false negative for a
-shorter CLI (ADR-068 context).
+contract overlay. Never trade a possible false negative for a shorter CLI
+(ADR-068 context).
+
+**Blocker status (2026-10-01).** Both relevance defects named in
+[`public-contract-default.md`](public-contract-default.md) Phase 6 are closed:
+
+- *Template-instantiated-parameter seed mismatch*: closed earlier
+  (directly-referenced stdlib spellings threaded through
+  `contract_pipeline.build_contract_stage`). This plan had not recorded it.
+- *`ambiguous_namespaced_leaf` identity gap*: closed by schema v54. castxml
+  records which record/enum each type slot resolves to; the exact
+  public-surface walk and the evaluator use it. Verified on real binaries for
+  the single pair and the directory fan-out: the reached record's break goes
+  from `UNKNOWN_UNRESOLVED`/exit 1 to `IN_CONTRACT`/exit 4, and an unreached
+  sibling stays unconfirmed.
+
+`public`'s unresolved-loss budget is now **1**, an explained case: the
+spelling-only shape that the clang JSON backend, DWARF and pre-v54 baselines
+still produce (`docs/contribute/known-gaps.md`). **What still gates Phase 9:**
+accepting that the `package` and `real_binaries` lanes are covered by
+integration tests (`tests/test_contract_type_identities_integration.py`,
+`tests/test_abi_examples.py`) rather than by the always-on
+`measure_contract_shadow.py` measurement. Also, under `--ast-frontend clang`
+a same-leaf record's break still only reaches the coverage floor. Both are
+maintainer acceptance decisions, not engineering defects.
 
 ### Re-homed from `cli-cleanup-phase-two.md`
 

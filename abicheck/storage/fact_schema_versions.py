@@ -113,3 +113,10 @@ _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT = 45
 # the stored ``visibility`` value (marked ``PARTIAL``) instead of reading a
 # missing key as a confirmed negative.
 _MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS = 46
+
+# Schema v54: ``Function.return_type_identities_fact`` and
+# ``Param``/``Variable``/``TypeField.type_identities_fact`` -- each type slot's
+# resolved record/enum identities. Written only when captured (castxml), so at
+# or above this a missing key reads as ``NOT_COLLECTED`` (the clang JSON
+# backend, DWARF); below it as ``None`` (the document predates the field).
+_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS = 54

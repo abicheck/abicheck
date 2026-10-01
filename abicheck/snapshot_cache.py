@@ -45,7 +45,14 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "32"
+_SNAPSHOT_CACHE_VERSION: str = "33"
+# v33: castxml-dumped snapshots now carry each type slot's resolved record/enum
+# identities (Function.return_type_identities_fact, Param/Variable/TypeField.
+# type_identities_fact; snapshot schema v54). A v32 entry was dumped without them
+# under identical key inputs, and serving it silently drops the evidence the
+# `public` contract domain confirms a same-leaf record's break with -- found
+# on a directory `compare --contract public` that kept losing a break the
+# single-pair run had just caught.
 # v32: castxml's emulated compiler now receives the run's language standard,
 # sysroot, target and feature-macro flags (extract/castxml_compiler_emulation.py).
 # Before, `--castxml-cc-gnu g++ -std=c++20` parsed with g++'s *default*

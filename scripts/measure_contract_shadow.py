@@ -151,10 +151,14 @@ FACT_LOSS_BASELINE = 0
 #: check reports a drop as well as a rise.
 UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
     "public": 1,
-    "exports": 30,
+    "exports": 31,
     "all": 0,
 }
-#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 -> 31 -> 30. The +2 to 31 was
+#: `exports` moved 20 -> 23 -> 26 -> 27 -> 29 -> 31 -> 30 -> 31. The last +1
+#: is `ambiguous_namespaced_leaf_spelling_only` (schema v54's split of the
+#: ambiguous-leaf case into an identity-carrying pair and a spelling-only
+#: one): a real break with no export table to resolve against, the same
+#: benign reason as every step below. The +2 to 31 was
 #: `overaligned_pure_virtual_stays_breaking`, an FN sentinel for a pure
 #: virtual whose declaration-only DIE never reaches `snapshot.declarations.functions`, so
 #: the owned-signature check cannot see it; the guard answered from
@@ -208,15 +212,27 @@ UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
 #: _vtable_transition_is_evidenced` -- so this budget doubles as independent
 #: end-to-end confirmation that the suppression really reaches the contract
 #: pipeline, not just the detector's own unit tests.
-#: The `public` entry's remaining case, named so the budget cannot be
-#: mistaken for "nothing left to do".
+#: The `public` budget is **1**, and that one is *explained*, not a defect:
+#: `ambiguous_namespaced_leaf_spelling_only` carries no identity evidence at
+#: all (the clang JSON / DWARF / pre-v54 shape), so which `Cache` the API
+#: reaches is genuinely undecidable from the snapshot, and `UNKNOWN_UNRESOLVED`
+#: is the correct answer. It also keeps the replay-soundness gate non-vacuous.
+#: The previous defect closed with schema v54:
 #:
 #: `ambiguous_namespaced_leaf` is a real break on a type whose bare tail
-#: collides with another type's. Confirming it needs per-identity
-#: reachability the surface does not record -- an attempt to prove the
-#: collision harmless from *header origin* instead was reverted for
+#: collides with another type's. The signature spells only the bare `Cache *`,
+#: so no spelling-level rule can say which record it reaches -- an attempt to
+#: prove the collision harmless from *header origin* was reverted for
 #: confirming an unreachable sibling (see
-#: `contract_evaluation._confirmed_type_matches`).
+#: `contract_evaluation._confirmed_type_matches`). **Closed** at extraction
+#: instead: castxml records the slot's resolved identity
+#: (`Function.return_type_identities_fact`), the exact walk enters the closure
+#: through it (`policy/captured_type_identities.captured_identity_seeds`), and
+#: the finding is confirmed on the matched record's own `qualified_name`
+#: (`policy/finding_type_candidates.qualified_type_candidates`). A snapshot without
+#: that evidence (clang JSON, DWARF, pre-v54) keeps the old,
+#: `UNKNOWN_UNRESOLVED` answer -- `tests/test_contract_type_identities.py`
+#: pins both shapes.
 #:
 #: `public_stdlib_type_used_directly_layout_changed` and
 #: `public_std_string_typedef_alias_layout_changed` were the same gap as
@@ -246,8 +262,8 @@ UNRESOLVED_LOSS_BASELINE: dict[str, int] = {
 #: detector-wording change can trip this gate. Re-run
 #: `python scripts/measure_contract_shadow.py --json` and update these
 #: entries deliberately; do not widen the key to make a failure go away.
-UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES = (
-    "ambiguous_namespaced_leaf:public:type_size_changed:Cache:6c6732052b32c3ad",
+UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES: tuple[str, ...] = (
+    "ambiguous_namespaced_leaf_spelling_only:public:type_size_changed:Cache:6c6732052b32c3ad",
 )
 #: A replayed decision that out-claims the live one that wrote it. The
 #: persisted evaluator may only ever *weaken*, so this baseline is 0 and is

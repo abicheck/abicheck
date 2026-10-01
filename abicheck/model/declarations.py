@@ -90,6 +90,20 @@ class Param:
     # by-value" apart from "no producer ever determined this parameter's
     # indirection kind" (diff_symbols._params_differ).
     kind_fact: Fact[ParamKind] | None = field(default=None, kw_only=True)
+    # Resolved type identities of this slot (schema v54): the exact qualified
+    # names of the records/enums the header backend *resolved* ``type`` to,
+    # through pointer/reference/cv/array/typedef layers. ``type`` itself is
+    # the bare source spelling (``Cache *``), which cannot say *which*
+    # ``Cache`` when ``ns1::Cache`` and ``ns2::Cache`` both exist; this is
+    # the compiler's own answer, so ``policy/captured_type_identities`` can
+    # enter the exact public-surface walk without guessing. A ``Fact`` with
+    # no legacy sibling (like ``binary_exported_fact``): ``PRESENT(())`` is
+    # "captured, the slot names no record/enum", distinct from ``None``/
+    # ``NOT_COLLECTED`` (clang JSON, DWARF, a pre-v54 snapshot). Provenance,
+    # not ABI content, hence ``compare=False``.
+    type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
 
     def __post_init__(self, is_va_list: bool) -> None:
         _, self.is_va_list_fact = bridge_legacy_and_fact(
@@ -259,6 +273,11 @@ class Function:
     # `api_relevant` computation, and AGENTS.md's "PR C" known-gaps entry
     # for the full empirical account.
     is_compiler_generated: bool | None = None
+    # The return type's resolved identities -- see
+    # ``Param.type_identities_fact``.
+    return_type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
     # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
     # ``model/entities.py``'s ``RecordType.entity_id`` for the full
     # rationale, including why this is keyword-only, excluded from
@@ -408,6 +427,10 @@ class Variable:
     # keyword, so this closes off a new positional dependency without
     # touching any of them.
     is_static: bool = field(default=False, kw_only=True)
+    # See ``Param.type_identities_fact``.
+    type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
     # ADR-063 Phase 2 identity carrier (persisted since schema v28) -- see
     # ``model/entities.py``'s ``RecordType.entity_id`` for the full
     # rationale, including why this is keyword-only, excluded from

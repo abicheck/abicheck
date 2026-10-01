@@ -847,6 +847,8 @@ _STATUS_GATES = frozenset(
         "both_facts_present",
         "vtable_fact_declined",
         "fact_confirmed_true",
+        # policy/captured_type_identities: PRESENT-only, by status.
+        "present_identities",
     }
 )
 _STATUS_ATTRS = frozenset({"status", "is_present"})

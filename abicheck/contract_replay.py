@@ -238,12 +238,12 @@ def _entity_lookups(
 
 
 def _member_owner(change: Change) -> str | None:
-    """A member-level finding's owning *type*, as ``_type_candidates`` reads it.
+    """A member-level finding's owning *type*, as ``policy.finding_type_candidates.type_candidates`` reads it.
 
     The member-level families disagree on what ``symbol`` carries, and live
-    selects per kind rather than guessing: ``_OWNER_PLUS_MEMBER_KINDS``
+    selects per kind rather than guessing: ``OWNER_PLUS_MEMBER_KINDS``
     record ``"{owner}::{member}"``, so the owner is the ``"::"``-stripped
-    prefix, while ``_OWNER_IS_SYMBOL_KINDS`` record the owning type alone
+    prefix, while ``OWNER_IS_SYMBOL_KINDS`` record the owning type alone
     (stripping there would turn ``ns::Foo`` into the namespace fragment
     ``ns``). Only the first shape needs deriving here -- the second is
     already offered as the symbol spelling.
@@ -256,10 +256,10 @@ def _member_owner(change: Change) -> str | None:
     member-level family (found while adding the enum coverage this file's
     tests never had).
     """
-    from .contract_evaluation import _OWNER_PLUS_MEMBER_KINDS
+    from .policy.finding_type_candidates import OWNER_PLUS_MEMBER_KINDS
 
     symbol = change.symbol or ""
-    if change.kind.value not in _OWNER_PLUS_MEMBER_KINDS or "::" not in symbol:
+    if change.kind.value not in OWNER_PLUS_MEMBER_KINDS or "::" not in symbol:
         return None
     return symbol.rsplit("::", 1)[0]
 

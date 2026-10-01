@@ -6,14 +6,17 @@ contract decision became authoritative** (`contract_pipeline.py`'s
 `ContractEvaluationStage` runs before `checker._compute_verdict_for`, not
 after `verdict`) — the "still open" items in this document that predate
 that change (framed as "flipping the evaluator to run before the verdict")
-are done. This does **not** mean the *default* flip (making `--contract`
-apply without being asked for) is the only remaining item: Phase 6 below
-documents two unresolved relevance defects that can lose a known public
-break (a template-instantiated-parameter seed mismatch, and an
-unresolved `ambiguous_namespaced_leaf` identity gap) and two explicitly
-uncovered measurement lanes (`package`, `real_binaries`) — those stay open
-prerequisites alongside the flip, not items the "authoritative" milestone
-already closed. The MCP `abi_compare`/`mcp_server.py`/
+are done. **2026-10-01: both Phase 6 relevance defects are closed** (see Phase 6's
+"Updated (2026-10-01)" note): the template-instantiated-parameter seed
+mismatch (directly-referenced stdlib spellings threaded through
+`contract_pipeline.build_contract_stage`), and the `ambiguous_namespaced_leaf`
+identity gap (schema v54: castxml records each type slot's resolved
+identity). `public`'s unresolved-loss budget is **1**, and that one is an
+*explained*, evidence-limited case (the spelling-only shape the clang JSON /
+DWARF backends still produce), not a defect. What remains before the
+default flip: accepting that the `package` and `real_binaries` lanes are
+covered by integration tests rather than by the always-on measurement, and
+the flip itself. The MCP `abi_compare`/`mcp_server.py`/
 `mcp_compare_receipt.py` references in this document's history below are
 historical — the MCP server was later retired in full (see
 [ADR-021](../adr/021-mcp-security-model.md)); do not read them as a
@@ -4007,6 +4010,65 @@ directory/package operands, so there is no contract decision on a package
 pair to measure) and `real_binaries` (needs a compiler; covered by the
 integration lanes, `tests/test_scan_compare_parity.py` and
 `tests/test_abi_examples.py`, not by this always-on measurement).
+
+**Updated (2026-10-01): both named relevance defects are closed.**
+
+*Template-instantiated parameter seed mismatch* (`public_stdlib_type_used_directly_layout_changed`,
+`public_std_string_typedef_alias_layout_changed`): closed earlier, as the
+sizing note above proposed. `contract_pipeline.build_contract_stage` computes
+each side's `type_reachability.directly_referenced_stdlib_type_spellings`
+and threads it to `_in_surface_result_is_confirmed`, which confirms on an
+exact spelling match. This plan text had not been updated, which is why the
+plans index still listed the defect as open.
+
+*`ambiguous_namespaced_leaf`*: the note above sized this as needing
+per-identity reachability in `PublicSurface`. That half already existed
+(`exact_type_identities`, the ambiguity-vetoing walk). What was missing was
+*evidence*: a signature's spelling is the bare `Cache *`, and both real
+header backends write it that way (checked against a real two-namespace
+header with castxml 0.7 and clang). No spelling-level rule can recover
+which record is meant. The fix is at extraction. castxml's type graph
+already resolves every slot to one element, so
+`extract/headers/castxml/type_resolution.type_identities` records that
+element's qualified name on `Function.return_type_identities` and on
+`Param`/`Variable`/`TypeField.type_identities` (snapshot schema v54; written
+only when captured). `policy/captured_type_identities.py` feeds those
+identities to the exact walk as entry points and field edges.
+`policy/finding_type_candidates.qualified_type_candidates` then confirms a
+type finding on the matched record's own `Change.qualified_name`, which the
+layout/field detectors stamp from the matched pair.
+
+Two soundness decisions, each found on real dumps rather than assumed:
+
+- A compiler-generated member never seeds. castxml synthesizes implicit
+  members for every parsed record, private-header ones included, and they
+  reach `in_public_surface` only through the unknown-export fallback.
+  Seeding from them made a private, unreached sibling "exact".
+- The identity is offered only to the *exact* check, never to
+  `public_types`. A qualified name that names something other than a
+  record simply matches nothing.
+
+Verified end to end on real binaries
+(`tests/test_contract_type_identities_integration.py`), for the single pair
+and the directory fan-out. The reached record's break goes from
+`UNKNOWN_UNRESOLVED`/exit 1 to `IN_CONTRACT`/exit 4. An unreached sibling's
+break is unchanged (not confirmed). Properties over generated namespace
+sets, all four slot kinds, and declaration order are in
+`tests/test_contract_type_identities.py`. The FP-rate corpus splits the case
+in two: `ambiguous_namespaced_leaf` now carries the identity and resolves,
+and `ambiguous_namespaced_leaf_spelling_only` is the identity-less shape. It
+stays `UNKNOWN_UNRESOLVED` as the one pinned, explained `public` loss, and it
+keeps the replay-soundness gate non-vacuous.
+
+**Remaining, recorded rather than hidden.** The clang JSON backend cannot
+capture identities: its `qualType` carries no declaration reference. A
+`--ast-frontend clang` dump, DWARF, and every pre-v54 baseline therefore
+keep the spelling-only answer (see `docs/contribute/known-gaps.md`). The
+`package` lane's recorded reason was also stale. The directory/package
+fan-out *does* apply `--contract` per library. It stays outside the
+always-on measurement only because that measurement drives `compare()` over
+snapshots and the fan-out takes artifact sets. Its agreement with the single
+pair is covered by the integration test above.
 
 ### Phase 7 — default flip
 

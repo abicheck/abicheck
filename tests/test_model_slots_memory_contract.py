@@ -232,9 +232,12 @@ class TestSlottingDidNotChangeBehaviour:
         detail: the codecs iterate declared fields."""
         # 49: ADR-075 D2 added `ownership_fact` (persisted as a side table,
         # stripped from the per-entity dict by storage/extraction_scope_codec).
-        assert len(dataclasses.fields(Function)) == 49
+        # 50: schema v54 added `return_type_identities_fact` (written only
+        # when captured -- storage/snapshot_encode drops an uncaptured one).
+        assert len(dataclasses.fields(Function)) == 50
         # 9: ADR-063 Phase 10 retired `is_va_list` to an InitVar view.
-        assert len(dataclasses.fields(Param)) == 9
+        # 10: schema v54 added `type_identities_fact`, same encode rule.
+        assert len(dataclasses.fields(Param)) == 10
         assert len(dataclasses.fields(Fact)) == 4
 
 

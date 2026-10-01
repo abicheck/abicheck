@@ -113,6 +113,7 @@ from ..model.graph_join import EDGE_KIND_EXPORTS
 from ..model.surface_facts import in_public_surface
 from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..model.vocabulary import ScopeOrigin
+from .captured_type_identities import captured_identity_seeds, field_identities
 from .header_origin_evidence import collect_header_origin_unknown_types
 from .public_surface import (
     _DEMOTE_ORIGINS,
@@ -551,7 +552,10 @@ def _walk_exact_type_closure(
             surface, rec_node, record_by_name, enum_by_name
         )
         rec_node_id = refs.node_id(rec_node)
-        for ident in _referenced_identifiers_for_record(refs, rec_node_id, rec_node):
+        for ident in (
+            *_referenced_identifiers_for_record(refs, rec_node_id, rec_node),
+            *field_identities(rec_node),
+        ):
             if ident not in seen:
                 queue.append(ident)
 
@@ -752,7 +756,12 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     # Separate, ambiguity-vetoing closure -- see its own docstring for why
     # this can't be folded into the walk above.
     _walk_exact_type_closure(
-        refs, snap, surface, record_by_name, enum_by_name, seed_types
+        refs,
+        snap,
+        surface,
+        record_by_name,
+        enum_by_name,
+        seed_types | captured_identity_seeds(snap),
     )
     return surface
 

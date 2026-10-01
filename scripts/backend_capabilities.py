@@ -1356,6 +1356,42 @@ FACT_ROWS: tuple[FactRow, ...] = (
             "around it doesn't change its precision."
         ),
     ),
+    FactRow(
+        "Function",
+        "return_type_identities_fact",
+        _FULL,
+        _NONE,
+        note=(
+            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang's `-ast-dump=json` gives a declaration's type only as a `qualType` string with no reference to the declaration it names, so there is nothing to record without a name-lookup heuristic; a clang slot stays NOT_COLLECTED and the exact public-surface walk falls back to the spelling-only answer (docs/contribute/known-gaps.md)."
+        ),
+    ),
+    FactRow(
+        "Param",
+        "type_identities_fact",
+        _FULL,
+        _NONE,
+        note=(
+            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang's `-ast-dump=json` gives a declaration's type only as a `qualType` string with no reference to the declaration it names, so there is nothing to record without a name-lookup heuristic; a clang slot stays NOT_COLLECTED and the exact public-surface walk falls back to the spelling-only answer (docs/contribute/known-gaps.md)."
+        ),
+    ),
+    FactRow(
+        "Variable",
+        "type_identities_fact",
+        _FULL,
+        _NONE,
+        note=(
+            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang's `-ast-dump=json` gives a declaration's type only as a `qualType` string with no reference to the declaration it names, so there is nothing to record without a name-lookup heuristic; a clang slot stays NOT_COLLECTED and the exact public-surface walk falls back to the spelling-only answer (docs/contribute/known-gaps.md)."
+        ),
+    ),
+    FactRow(
+        "TypeField",
+        "type_identities_fact",
+        _FULL,
+        _NONE,
+        note=(
+            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang's `-ast-dump=json` gives a declaration's type only as a `qualType` string with no reference to the declaration it names, so there is nothing to record without a name-lookup heuristic; a clang slot stays NOT_COLLECTED and the exact public-surface walk falls back to the spelling-only answer (docs/contribute/known-gaps.md)."
+        ),
+    ),
 )
 
 

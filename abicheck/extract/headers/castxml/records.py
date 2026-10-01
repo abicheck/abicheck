@@ -70,7 +70,12 @@ from .names import (
     _vt_sort_key,
 )
 from .scope import scope_path
-from .type_resolution import qualified_type_name, resolve_cv_restrict, type_name
+from .type_resolution import (
+    qualified_type_name,
+    resolve_cv_restrict,
+    type_identities,
+    type_name,
+)
 
 
 def parse_types(ctx: CastxmlParserContext) -> list[RecordType]:
@@ -284,6 +289,7 @@ def parse_record_fields(ctx: CastxmlParserContext, el: Any) -> list[TypeField]:
                 default=child.get("init"),
                 # See RecordType.deprecated for the message-text convention.
                 deprecated=_deprecation_marker(child),
+                type_identities_fact=Fact.present(type_identities(ctx, field_type_id)),
             )
         )
     return fields
@@ -360,6 +366,7 @@ def expand_anonymous_field(
                 # just because it was flattened (Codex review, PR #582).
                 default=inner.get("init"),
                 deprecated=_deprecation_marker(inner),
+                type_identities_fact=Fact.present(type_identities(ctx, inner_type_id)),
             )
         )
     return result
