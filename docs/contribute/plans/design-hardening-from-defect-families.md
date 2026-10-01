@@ -85,6 +85,24 @@ an exit state; that is the `mixed`/`wired` state the families come from.
    no unresolved red findings; Windows/macOS smoke before merge for
    `touches:paths|shell|platform`).
 
+#### Phase 0 status (2026-10-01)
+
+Re-checked against `main` before starting; several items had already been
+fixed by the time this plan landed.
+
+| Item | Status |
+|---|---|
+| H1 unknown `source_header_fact` | Already fixed on `main` (no strict xfail left in H1). |
+| H2 `*_evidence_depth`, `suppression_audit`, digest tier | Already fixed (`KNOWN_DIVERGENCES` is empty). |
+| H2 `pattern_verdicts` default (CLI `True`, typed API `False`) | **Open — needs a decision.** Flipping the typed-API default changes the verdict of a bare API request, which `service_compare_pipeline` defers to ADR-027. |
+| H3 path-with-space, PE vectorcall | Already fixed. |
+| H4 name-only enum sentinel | **Fixed** on this branch: the name only nominates; `compare.enum_sentinel.holds_enum_maximum` confirms on both sides (width-forcing and other sentinel-named members are not peers). |
+| H4 `detail::`/`impl::` vs `priv::` | **Open — needs a decision.** The cause is `internal_leak.detect_internal_leaks`' deliberate pointer-only suppression (an internal type reached only behind a pointer with a layout-only change emits no leak, so `DemoteUnreachableInternalChurn` records it as `out_of_contract`); a neutral namespace gets no such leniency. Either the leniency needs a structural fact (the type is opaque to consumers) or it applies to every namespace — a product rule, not a local fix. |
+| H7 `release_dispatch_drops_member` | **Fixed**: `ABICHECK_MAX_THREADS` now bounds the release worker plan, so a budget of 1 takes the sequential path and the H5 reference arm differs from the pooled one. |
+| H7 `cache_key_drops_binary_content` / `cache_key_drops_version` | **Fixed**: two H5 cells each vary exactly one disk-cache key input. No H7 harness gap remains. |
+| H6 corpus false positives | In progress. |
+| Merge quiescence | Repository setting — for a maintainer. |
+
 ### Phase 1 — Unknown cannot be written as a value (F1)
 
 Owner of the design: ADR-063 Phase 5B.
