@@ -51,7 +51,8 @@ below) was triaged by heading only.
 3. [An `-I` include root makes another library's public headers this
    component's export
    obligations](#an-i-include-root-makes-another-librarys-public-headers-this-components-export-obligations-2026-09-16)
-   — the remaining half.
+   — narrowed 2026-10-01 (LOW confidence, "not established"); three
+   follow-ups listed in the entry.
 4. Header exclusion. **`dump` stamping** — already fixed, now pinned by a
    test (entry struck through). **Path-shaped patterns** — fixed 2026-10-01
    (entry struck through). Still open: [`--exclude-header` vs.
@@ -9846,6 +9847,34 @@ own docstring already records for the evidence-kind bucket, and it should be
 closed in the same pass as that one.
 
 ## An `-I` include root makes another library's public headers this component's export obligations (2026-09-16)
+
+> **Update (2026-10-01): the PVXS case is narrowed, per the maintainer's
+> ruling.** Recording the declared `-H` set turned out to need no
+> `SCHEMA_VERSION` bump: ADR-075's `extraction_scope.ownership_rules.
+> target_roots` (schema v52) already persists the run's target roots. It
+> took only `-H` *directories*, so a run naming files recorded no root and
+> every declaration read `unresolved`/`no_root` alike.
+> `workflows.ownership_request.with_target_roots` now makes every existing
+> `-H` entry a root (a file covers exactly itself). A declaration no root
+> covers -- reached only through `#include` and an `-I` root -- is still
+> reported as `public_not_exported`, but at LOW confidence and worded as
+> *not established* (`buildsource/export_obligation_ownership.py`), and the
+> check's coverage detail counts them. The declared header's own missing
+> exports keep HIGH confidence (the positive control), and a `-H`
+> *directory* declares everything under it, so nothing changes there.
+> `tests/test_include_root_export_obligation.py` pins both, with the
+> reported-symbol set checked against the fixture's undefined declarations
+> so nothing can be dropped.
+>
+> **Still open.** (1) Per-finding `confidence` is not on the JSON wire
+> format, so a JSON reader sees the narrowing only in the description and
+> the check detail, not as a field. (2) The release surface's obligations
+> (`policy.release_contract_reconciliation`) do not apply the narrowing;
+> in a multi-member release the union of exports satisfies a sibling's
+> declarations anyway, but a declaration *no* member exports is still
+> reported at full strength. (3) An umbrella header (`-H foo.h` including
+> the library's own `foo/bar.h`) now gets LOW-confidence findings for
+> `bar.h` -- the accepted cost; pass the directory as `-H` to declare it.
 
 > **Partially closed (2026-09-16).** An `-I` root now widens public
 > provenance only where the run's own *declared* public headers live
