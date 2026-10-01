@@ -190,3 +190,194 @@ def test_generated_binary_against_cxxfilt_oracle(tmp_path: Path) -> None:
     ]
     # Exact agreement with the demangler: reclassified iff it names our type.
     assert not disagreements, disagreements
+
+
+# Every std-scoped export of a g++ 13 -O1 build (std::shared_ptr deleters and
+# in-place control blocks, vector, map/_Rb_tree, sort internals, their
+# vtables/typeinfo) over a library's own types, labelled by c++filt:
+# True iff the demangled spelling names a non-std type. Committed so the
+# whole scanner runs in the unit lane, not only under the integration test.
+_GXX_GENERATED: list[tuple[str, bool]] = [
+    (
+        "_ZNSt15_Sp_counted_ptrIP11dnnl_memoryLN9__gnu_cxx12_Lock_policyE2EE10_M_destroyEv",
+        True,
+    ),
+    (
+        "_ZNSt15_Sp_counted_ptrIP11dnnl_memoryLN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv",
+        True,
+    ),
+    (
+        "_ZNSt15_Sp_counted_ptrIP11dnnl_memoryLN9__gnu_cxx12_Lock_policyE2EE14_M_get_deleterERKSt9type_info",
+        True,
+    ),
+    ("_ZNSt15_Sp_counted_ptrIP11dnnl_memoryLN9__gnu_cxx12_Lock_policyE2EED0Ev", True),
+    ("_ZNSt15_Sp_counted_ptrIP11dnnl_memoryLN9__gnu_cxx12_Lock_policyE2EED1Ev", True),
+    ("_ZNSt15_Sp_counted_ptrIP11dnnl_memoryLN9__gnu_cxx12_Lock_policyE2EED2Ev", True),
+    (
+        "_ZNSt19_Sp_counted_deleterIP11dnnl_streamPF13dnnl_status_tS1_ESaIvELN9__gnu_cxx12_Lock_policyE2EE10_M_destroyEv",
+        True,
+    ),
+    (
+        "_ZNSt19_Sp_counted_deleterIP11dnnl_streamPF13dnnl_status_tS1_ESaIvELN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv",
+        True,
+    ),
+    (
+        "_ZNSt19_Sp_counted_deleterIP11dnnl_streamPF13dnnl_status_tS1_ESaIvELN9__gnu_cxx12_Lock_policyE2EE14_M_get_deleterERKSt9type_info",
+        True,
+    ),
+    (
+        "_ZNSt19_Sp_counted_deleterIP11dnnl_streamPF13dnnl_status_tS1_ESaIvELN9__gnu_cxx12_Lock_policyE2EED0Ev",
+        True,
+    ),
+    (
+        "_ZNSt19_Sp_counted_deleterIP11dnnl_streamPF13dnnl_status_tS1_ESaIvELN9__gnu_cxx12_Lock_policyE2EED1Ev",
+        True,
+    ),
+    (
+        "_ZNSt19_Sp_counted_deleterIP11dnnl_streamPF13dnnl_status_tS1_ESaIvELN9__gnu_cxx12_Lock_policyE2EED2Ev",
+        True,
+    ),
+    (
+        "_ZNSt23_Sp_counted_ptr_inplaceIN4dnnl4impl3fooESaIvELN9__gnu_cxx12_Lock_policyE2EE10_M_destroyEv",
+        True,
+    ),
+    (
+        "_ZNSt23_Sp_counted_ptr_inplaceIN4dnnl4impl3fooESaIvELN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv",
+        True,
+    ),
+    (
+        "_ZNSt23_Sp_counted_ptr_inplaceIN4dnnl4impl3fooESaIvELN9__gnu_cxx12_Lock_policyE2EE14_M_get_deleterERKSt9type_info",
+        True,
+    ),
+    (
+        "_ZNSt23_Sp_counted_ptr_inplaceIN4dnnl4impl3fooESaIvELN9__gnu_cxx12_Lock_policyE2EED0Ev",
+        True,
+    ),
+    (
+        "_ZNSt23_Sp_counted_ptr_inplaceIN4dnnl4impl3fooESaIvELN9__gnu_cxx12_Lock_policyE2EED1Ev",
+        True,
+    ),
+    (
+        "_ZNSt23_Sp_counted_ptr_inplaceIN4dnnl4impl3fooESaIvELN9__gnu_cxx12_Lock_policyE2EED2Ev",
+        True,
+    ),
+    (
+        "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tag",
+        False,
+    ),
+    (
+        "_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_N4dnnl4impl4kindEESt10_Select1stISB_ESt4lessIS5_ESaISB_EE22_M_emplace_hint_uniqueIJRKSt21piecewise_construct_tSt5tupleIJOS5_EESM_IJEEEEESt17_Rb_tree_iteratorISB_ESt23_Rb_tree_const_iteratorISB_EDpOT_",
+        True,
+    ),
+    (
+        "_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_N4dnnl4impl4kindEESt10_Select1stISB_ESt4lessIS5_ESaISB_EE24_M_get_insert_unique_posERS7_",
+        True,
+    ),
+    (
+        "_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_N4dnnl4impl4kindEESt10_Select1stISB_ESt4lessIS5_ESaISB_EE29_M_get_insert_hint_unique_posESt23_Rb_tree_const_iteratorISB_ERS7_",
+        True,
+    ),
+    (
+        "_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_N4dnnl4impl4kindEESt10_Select1stISB_ESt4lessIS5_ESaISB_EE8_M_eraseEPSt13_Rb_tree_nodeISB_E",
+        True,
+    ),
+    (
+        "_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_iESt10_Select1stIS8_ESt4lessIS5_ESaIS8_EE22_M_emplace_hint_uniqueIJRKSt21piecewise_construct_tSt5tupleIJOS5_EESJ_IJEEEEESt17_Rb_tree_iteratorIS8_ESt23_Rb_tree_const_iteratorIS8_EDpOT_",
+        False,
+    ),
+    (
+        "_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_iESt10_Select1stIS8_ESt4lessIS5_ESaIS8_EE24_M_get_insert_unique_posERS7_",
+        False,
+    ),
+    (
+        "_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_iESt10_Select1stIS8_ESt4lessIS5_ESaIS8_EE29_M_get_insert_hint_unique_posESt23_Rb_tree_const_iteratorIS8_ERS7_",
+        False,
+    ),
+    (
+        "_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_iESt10_Select1stIS8_ESt4lessIS5_ESaIS8_EE8_M_eraseEPSt13_Rb_tree_nodeIS8_E",
+        False,
+    ),
+    (
+        "_ZSt13__adjust_heapIN9__gnu_cxx17__normal_iteratorIPPN4dnnl4impl3fooESt6vectorIS5_SaIS5_EEEElS5_NS0_5__ops15_Iter_less_iterEEvT_T0_SE_T1_T2_",
+        True,
+    ),
+    (
+        "_ZSt16__insertion_sortIN9__gnu_cxx17__normal_iteratorIPPN4dnnl4impl3fooESt6vectorIS5_SaIS5_EEEENS0_5__ops15_Iter_less_iterEEvT_SD_T0_",
+        True,
+    ),
+    (
+        "_ZSt16__introsort_loopIN9__gnu_cxx17__normal_iteratorIPPN4dnnl4impl3fooESt6vectorIS5_SaIS5_EEEElNS0_5__ops15_Iter_less_iterEEvT_SD_T0_T1_",
+        True,
+    ),
+    ("_ZSt19piecewise_construct", False),
+    ("_ZTISt11_Mutex_baseILN9__gnu_cxx12_Lock_policyE2EE", False),
+    ("_ZTISt15_Sp_counted_ptrIP11dnnl_memoryLN9__gnu_cxx12_Lock_policyE2EE", True),
+    ("_ZTISt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE", False),
+    (
+        "_ZTISt19_Sp_counted_deleterIP11dnnl_streamPF13dnnl_status_tS1_ESaIvELN9__gnu_cxx12_Lock_policyE2EE",
+        True,
+    ),
+    (
+        "_ZTISt23_Sp_counted_ptr_inplaceIN4dnnl4impl3fooESaIvELN9__gnu_cxx12_Lock_policyE2EE",
+        True,
+    ),
+    ("_ZTSSt11_Mutex_baseILN9__gnu_cxx12_Lock_policyE2EE", False),
+    ("_ZTSSt15_Sp_counted_ptrIP11dnnl_memoryLN9__gnu_cxx12_Lock_policyE2EE", True),
+    ("_ZTSSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE", False),
+    (
+        "_ZTSSt19_Sp_counted_deleterIP11dnnl_streamPF13dnnl_status_tS1_ESaIvELN9__gnu_cxx12_Lock_policyE2EE",
+        True,
+    ),
+    ("_ZTSSt19_Sp_make_shared_tag", False),
+    (
+        "_ZTSSt23_Sp_counted_ptr_inplaceIN4dnnl4impl3fooESaIvELN9__gnu_cxx12_Lock_policyE2EE",
+        True,
+    ),
+    ("_ZTVSt15_Sp_counted_ptrIP11dnnl_memoryLN9__gnu_cxx12_Lock_policyE2EE", True),
+    (
+        "_ZTVSt19_Sp_counted_deleterIP11dnnl_streamPF13dnnl_status_tS1_ESaIvELN9__gnu_cxx12_Lock_policyE2EE",
+        True,
+    ),
+    (
+        "_ZTVSt23_Sp_counted_ptr_inplaceIN4dnnl4impl3fooESaIvELN9__gnu_cxx12_Lock_policyE2EE",
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize(("name", "expected"), _GXX_GENERATED)
+def test_generated_names_match_cxxfilt_labels(name: str, expected: bool) -> None:
+    assert has_foreign_template_argument(name) is expected
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        # Literal value with a character no mangled literal carries.
+        ("_ZNSt3fooILi5.EE", False),
+        # Literal never closed.
+        ("_ZNSt3fooILi5", False),
+        # Stray E with nothing open.
+        ("_ZSt3fooEv", False),
+        # Malformed substitution / template-parameter references.
+        ("_ZSt3fooISx", False),
+        ("_ZSt3fooITxE", False),
+        # A nested name opened by a back-reference is never counted.
+        ("_ZSt3fooI3barNS0_3bazEE", True),
+        ("_ZSt3fooINS_3bazEE", False),
+        # Unmodelled D-code and character.
+        ("_ZSt3fooIDxE", False),
+        ("_ZSt3foo!", False),
+        # Complex prefix and nullptr_t builtin.
+        ("_ZSt3fooICdE", False),
+        ("_ZSt3fooIDnE", False),
+        ("_ZSt3fooIDn3barE", True),
+        # A ctor/dtor of a std class over a foreign type.
+        ("_ZNSt3fooI3barEC2Ev", True),
+        ("_ZNSt3fooI3barED0Ev", True),
+        # cv-qualified nested name inside the template arguments.
+        ("_ZSt3fooINK3bar3bazEE", True),
+    ],
+)
+def test_scanner_edge_constructs(name: str, expected: bool) -> None:
+    assert has_foreign_template_argument(name) is expected
