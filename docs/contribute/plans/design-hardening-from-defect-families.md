@@ -18,9 +18,12 @@ plan already owns ([ADR-063](../adr/063-one-semantic-pipeline.md),
 A phase that changes a snapshot or report schema needs an amendment to the
 owning ADR first, as those plans already require.
 
-**Type:** Sequencing plan. It owns *order and exit criteria*, not new
-designs. Each phase names the plan that owns the design; this document must
-not grow a second copy of it.
+**Type:** Sequencing plan. For Phases 1–3 it owns *order and exit
+criteria* only: each names the plan that owns the design, and this document
+must not grow a second copy of it. Phases 4–6 have no existing design owner
+for their production-code half, so this plan **introduces** those designs
+(each phase says which part is new). Once a dedicated plan or ADR adopts one
+of them, the phase here shrinks to a pointer.
 
 ## Problem
 
@@ -126,6 +129,10 @@ Owner of the design: ADR-063 Phase 2B.
 
 ### Phase 4 — Caches and parallelism go through one wrapper (F5)
 
+Owner of the design: **new, introduced here.** The test-side oracle is
+[Defect-family harnesses](defect-family-harnesses.md) H5, which deliberately
+added no production switch; this phase reverses that decision.
+
 - One cache wrapper (memory and disk) whose key is derived from the request
   identity, records hits, and honours a production
   `ABICHECK_REFERENCE_MODE=1` that disables every cache and forces the
@@ -138,6 +145,10 @@ Owner of the design: ADR-063 Phase 2B.
 
 ### Phase 5 — Name heuristics cannot raise severity alone (F4)
 
+Owner of the design: **new, introduced here.** It promotes
+[Defect-family harnesses](defect-family-harnesses.md) H4's test inventory to a
+runtime registry; H4 stays the oracle.
+
 - A spelling-based classifier may only lower confidence or route a finding to
   review. Raising severity requires a named structural fact. The H4 registry
   becomes the runtime registration point, not only a test inventory.
@@ -145,6 +156,10 @@ Owner of the design: ADR-063 Phase 2B.
   site that can raise severity is registered.
 
 ### Phase 6 — One subprocess supervisor; structured output only
+
+Owner of the design: the structured-output half finishes
+[ADR-063](../adr/063-one-semantic-pipeline.md)'s 7B item (#1415). The
+supervisor half is **new, introduced here**.
 
 - One bounded-run implementation (process group, SIGTERM then SIGKILL,
   bounded reap) used by every child-process site in `buildsource/` and
