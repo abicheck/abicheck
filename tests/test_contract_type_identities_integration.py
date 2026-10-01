@@ -156,16 +156,25 @@ def test_the_unreached_siblings_break_is_not_confirmed(tmp_path: Path) -> None:
     assert relevance != "IN_CONTRACT"
 
 
-@pytest.mark.parametrize(
-    ("grown", "verdict", "code"), [("ns1", "BREAKING", 4), ("ns2", "NO_CHANGE", 1)]
-)
+@pytest.mark.parametrize("grown", ["ns1", "ns2"])
 def test_the_directory_fan_out_agrees_with_the_single_pair(
-    tmp_path: Path, grown: str, verdict: str, code: int
+    tmp_path: Path, grown: str
 ) -> None:
     # The package lane: one library per directory must reach the decision a
     # single-pair compare of that library does (cardinality invariance).
-    # `NO_CHANGE` + exit 1 is the unreached sibling's honest answer: its
-    # break is withheld as unresolved and only the coverage floor fires.
-    exit_code, doc = _run_compare(tmp_path, grown, operand="dir")
-    assert doc["verdict"] == verdict
-    assert exit_code == code
+    # Compared against the single pair on the *same* platform rather than a
+    # fixed verdict: Mach-O adds its own risk findings (macOS reports the
+    # unreached case as COMPATIBLE_WITH_RISK, Linux as NO_CHANGE), which is
+    # not what this test is about.
+    pair_code, pair = _run_compare(tmp_path / "pair", grown, operand="file")
+    dir_code, release = _run_compare(tmp_path / "dir", grown, operand="dir")
+    assert release["verdict"] == pair["verdict"]
+    assert dir_code == pair_code
+    if grown == "ns1":
+        # The reached record's break gates as an ABI break...
+        assert dir_code == 4
+    else:
+        # ...and the unreached sibling's never does: at most the coverage
+        # floor, whatever risk findings the platform adds.
+        assert dir_code != 4
+        assert release["verdict"] != "BREAKING"
