@@ -1086,6 +1086,33 @@ def _unresolved_type_edges(
     return frozenset(unresolved)
 
 
+#: Elaborated-type keywords a C/C++ typedef target may spell its tag with.
+_TAG_KEYWORDS = ("struct ", "union ", "enum ", "class ")
+
+
+def _is_tag_self_alias(
+    alias: str,
+    target: str,
+    record_by_name: dict[str, list[RecordType]],
+    enum_by_name: dict[str, list[EnumType]],
+) -> bool:
+    """Whether typedef *alias* -> *target* names the alias's own single tag.
+
+    True only when the target, with an optional elaborated-type keyword
+    removed, is spelled exactly *alias* **and** exactly one record/enum is
+    indexed under that name -- so the alias and the tag cannot resolve to
+    two different nodes. Any other shape stays ambiguous.
+    """
+    spelled = " ".join(target.split())
+    for keyword in _TAG_KEYWORDS:
+        if spelled.startswith(keyword):
+            spelled = spelled[len(keyword) :].strip()
+            break
+    if spelled != alias:
+        return False
+    return len(record_by_name.get(alias, ())) + len(enum_by_name.get(alias, ())) == 1
+
+
 def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     """Compute *snap*'s export-rooted ABI surface (ADR-049 ``exports``).
 
@@ -1151,10 +1178,17 @@ def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     # treatment a record-vs-record or record-vs-enum collision already gets.
     # Computed after the augmentation above so a typedef aliasing a
     # *qualified* record identity is caught too.
+    # One exception, and only one: the C tag idiom `typedef struct X {...} X;`
+    # (and its `union`/`enum`/`class` siblings) records an alias whose target
+    # *is* the one record/enum of that name. Both resolutions reach the same
+    # node, so there is nothing to disambiguate -- flagging it made every
+    # such type undecidable under `--contract exports`, and it is how most C
+    # libraries spell their public structs.
     surface.ambiguous_type_names |= {
         alias
-        for alias in snap.declarations.typedefs
-        if alias in record_by_name or alias in enum_by_name
+        for alias, target in snap.declarations.typedefs.items()
+        if (alias in record_by_name or alias in enum_by_name)
+        and not _is_tag_self_alias(alias, target, record_by_name, enum_by_name)
     }
 
     join = join_exports(snap)

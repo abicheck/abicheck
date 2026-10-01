@@ -478,6 +478,17 @@ def _compare_one_library(
             ),
         }
         add_member_review_summary(entry, result, severity_config)
+        # Known-gaps "-H applied to every member", step 3: which of this
+        # member's type findings its own export surface actually reaches.
+        # Read by the release-level shared-finding fold; never rendered.
+        from .workflows.release_member_attribution import member_type_attribution
+
+        if type_attribution := member_type_attribution(
+            (c.symbol for c in result.changes),
+            compare_result.old_snapshot,
+            compare_result.new_snapshot,
+        ):
+            entry["_type_attribution"] = dict(type_attribution)
         # Release schema 1.9: the recorded DT_SONAME/DT_NEEDED facts, per side.
         from .report.release_dependency_graph import member_dependencies
 

@@ -42,8 +42,9 @@ below) was triaged by heading only.
 
 1. [A directory `compare`'s `-H`/`--header` set is applied to every
    member](#a-directory-compares-h-header-set-is-applied-to-every-member-so-header-derived-findings-are-reported-against-libraries-they-do-not-belong-to-steps-1-and-the-export-obligation-half-closed-2026-09-17-steps-23-open)
-   — steps 2/3 still open. Wrong attribution of header-derived findings,
-   and the root cause of the quadratic multi-library cost below.
+   — step 3 landed as report attribution (2026-10-01); the verdict half of
+   step 3 and step 2 (per-member headers, which also fixes the quadratic
+   multi-library cost) remain.
 2. [`compare --depth binary` still performs a deep DWARF type
    walk](#compare-depth-binary-still-performs-a-deep-dwarf-type-walk-the-public-evidence-depth-contract-says-that-rung-skips)
    — re-verified 2026-10-01: a `struct Point` field addition with no
@@ -8516,6 +8517,29 @@ silently. It is also why that file's own patch coverage will not reach
 100% -- the uncovered lines are this guard, and covering them would mean
 reaching past the public entry point, which this repo's own
 third-party-boundary rule refuses.
+
+**Update (2026-10-01): step 3 landed as attribution, not yet as a
+verdict change.** `workflows/release_member_attribution.py` computes each
+member's export surfaces and `policy/member_type_attribution.py` answers,
+per type finding, `reaches`/`proven_unreachable`/`unestablished`; the
+release fold attaches that partition to each product-level finding
+(`shared_findings[].attribution`, release schema 1.11). On the example
+below, `Widget` is now `reaches: libfoo.so`, `unestablished: libbar.so` —
+libbar's only export has no declaration, so its reach cannot be decided,
+and saying so is the honest answer. What remains open:
+
+- **Member verdicts and counts still include unreached findings.**
+  `libbar.so` above is still `BREAKING` on `Widget`. Excluding a
+  `proven_unreachable` finding from a member's own verdict is the policy
+  half; it was deliberately not bundled with the report half, because it
+  changes exit codes and `--contract exports` already offers that scoping
+  explicitly per member.
+- **Step 2 (a per-member header operand) is still open**, and with it the
+  quadratic cost: every member still parses the union header set.
+- Making this work exposed an `export_surface` defect that was its own
+  bug: the C tag idiom `typedef struct X {...} X;` was flagged as an
+  ambiguous name, so every such type was undecidable under
+  `--contract exports` too. Fixed in the same change.
 
 The original entry follows, unchanged.
 

@@ -199,6 +199,16 @@ honest rather than merely smaller:
   library, and each member entry records how many of its findings were
   folded there (`product_level_findings`). Per-library counts, verdicts and
   the exit code are unchanged by that fold.
+- **A shared type finding says which members it belongs to.** Every
+  member parses the same header set, so a type declared for one library is
+  diffed for all of them. The product-level entry therefore carries an
+  `attribution` partition built from each member's *own* export surface:
+  `reaches` (an export of that member takes or returns the type, directly
+  or transitively), `proven_unreachable` (that member's exports are fully
+  typed and none reaches it), and `unestablished` (anything less — an
+  export the headers do not declare, an unresolved type, no export table).
+  "Not shown to reach" is never reported as "shown not to reach", and
+  `affected_libraries` still lists every member that reported the finding.
 
 You do not maintain a header-to-library mapping for any of this. There is
 no configuration: the union of the members' exports is the evidence, and
