@@ -21,6 +21,7 @@ import dataclasses
 import enum
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -147,6 +148,10 @@ std::map<std::string, int> g() { std::map<std::string, int> m; m["a"]; return m;
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="builds and reads an ELF shared library",
+)
 @pytest.mark.skipif(
     not (shutil.which("g++") and shutil.which("nm") and shutil.which("c++filt")),
     reason="needs g++, nm and c++filt",
