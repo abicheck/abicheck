@@ -30,6 +30,62 @@ looked like the obvious fix and wasn't.
 
 ---
 
+## Triage (2026-10-01) — what is still open, and in what order
+
+A re-evaluation of this page against `main` at `556b878`. Entries below
+were re-checked by reproducing them on small purpose-built libraries where
+that was possible; the long pre-2026-09 bullet list (the first section
+below) was triaged by heading only.
+
+**Priority order for the open correctness gaps** (maintainer ruling,
+2026-10-01):
+
+1. [A directory `compare`'s `-H`/`--header` set is applied to every
+   member](#a-directory-compares-h-header-set-is-applied-to-every-member-so-header-derived-findings-are-reported-against-libraries-they-do-not-belong-to-steps-1-and-the-export-obligation-half-closed-2026-09-17-steps-23-open)
+   — steps 2/3 still open. Wrong attribution of header-derived findings,
+   and the root cause of the quadratic multi-library cost below.
+2. [`compare --depth binary` still performs a deep DWARF type
+   walk](#compare-depth-binary-still-performs-a-deep-dwarf-type-walk-the-public-evidence-depth-contract-says-that-rung-skips)
+   — re-verified 2026-10-01: a `struct Point` field addition with no
+   headers still yields `BREAKING` (`type_size_changed`,
+   `type_field_added_compatible`) at `--depth binary`.
+3. [An `-I` include root makes another library's public headers this
+   component's export
+   obligations](#an-i-include-root-makes-another-librarys-public-headers-this-components-export-obligations-2026-09-16)
+   — the remaining half.
+4. Header exclusion that reports more than it did:
+   [`--exclude-header` vs. `--dump-manifest`](#-exclude-header-cannot-narrow-a-dump-manifest-dump),
+   [`dump` not stamping `excluded_header_patterns`](#the-native-dump-cli-does-not-stamp-excluded_header_patterns-on-the-snapshot-it-writes-2026-09-16),
+   [path-shaped patterns on Windows](#an-exclude-header-pattern-spelled-as-a-path-matches-nothing-on-windows-2026-09-16).
+5. [`effective_depth` reports `source` for a `--depth headers`
+   dump](#effective_depth-reports-source-for-a-depth-headers-dump-whose-only-l5-is-the-header-only-graph-2026-09-16).
+
+Next, unranked: one-sided detectors carry no candidate-side marker and no
+gate enforces one (see the re-verified status on
+[`compare --no-baseline` crashes on any real ELF shared
+library](#compare-no-baseline-crashes-on-any-real-elf-shared-library)), and
+[`--severity-preset strict` gating on informational reconciliation
+outcomes](#an-informational-no-material-change-reconciliation-outcome-gates-the-build-under-severity-preset-strict-2026-09-12).
+
+**No longer applicable — kept for history, do not re-attempt.** `scan`,
+`scan --against`, `scan_engine.py`, `cli_scan*.py`, `service_scan.py` and
+`scan_abi3_resolve.py` were deleted by ADR-068 Phase 6. Every entry whose
+defect lives *only* in that code is moot; where an entry used `scan` merely
+as an oracle for a `compare` defect (the `--depth binary` entry is the
+worked example) the `compare` defect stands on its own. The Action's
+`mode: scan` is now a hard error with a migration message
+(`action/run.sh`), which closes "The Action's `mode: scan` still routes
+several request shapes to the legacy `scan` CLI". Entries already struck
+through or marked CLOSED/fixed/superseded in their own heading or first
+paragraph are likewise history only.
+
+**Negative results — keep as-is.** Digest/save amplification, the clang
+AST memory peak (both 2026-09-19 entries), the release future map, and the
+m1360 performance round record approaches measured *not* to help; their
+value is stopping a re-attempt.
+
+---
+
 ## Known gaps — acknowledged remaining work
 
 - **A `kind: bundle` check still cannot run at `depth: headers`: only the
@@ -7737,6 +7793,10 @@ compare report's identity -- see that field's own note in
 
 ### The Action's `mode: scan` still routes several request shapes to the legacy `scan` CLI
 
+> **Closed (2026-10-01 triage).** `mode: scan` is now a hard error with a
+> migration message in `action/run.sh`; nothing routes to the deleted
+> `scan` CLI any more. The per-condition record below is history.
+
 Found while closing ADR-068's baseline cross-source authority divergence
 (see the ADR's 2026-09-09 amendment,
 [`plans/one-comparison-product.md`](plans/one-comparison-product.md) Phase
@@ -8570,6 +8630,18 @@ bug class in `tests/regressions/manifest.py`'s report sibling
 class sees them without re-deriving the grep.
 
 ## `compare --no-baseline` crashes on any real ELF shared library
+
+> **Status re-verified (2026-10-01): the crash no longer reproduces, the
+> defect class remains.** `compare --no-baseline` exits 0 on the system
+> `libm.so.6` and on a stripped library whose exports trip
+> `_looks_internal` (`internal_helper`, `detail_impl`). But on that same
+> library the audit reports `changes: []` and no verdict, while
+> `compare libv.so libv.so` reports `visibility_leak` — so the one-sided
+> finding is now silently absent from the audit instead of crashing it,
+> and a self-comparison still yields a "comparison" finding.
+> `_diff_visibility_leak` still opens with `del new` and still emits an
+> unmarked `make_change(...)`; the fix shape below (enumerate the
+> `new`-ignoring detectors, mark them, gate it) is unchanged.
 
 Auditing a real ELF shared library raises an **uncaught**
 `NoBaselineInvariantError` — a Python traceback, not a diagnostic — from a
