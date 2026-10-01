@@ -75,6 +75,7 @@ from ._helpers import (  # noqa: F401
     _setup_logging as _setup_logging,
     _warn_stub_flags as _warn_stub_flags,
     _write_affected_list as _write_affected_list,
+    apply_abicc_source_level_parity,
 )
 from .descriptor import CompatDescriptor, parse_descriptor
 from .descriptor_expansion import (  # noqa: F401
@@ -1087,8 +1088,10 @@ def compat_check_cmd(  # noqa: PLR0913
                 )
             _members.record(_index, _old_lib, _new_lib, old_snap, new_snap)
             _results.append(
-                compare(
-                    old_snap, new_snap, suppression=suppression, policy="strict_abi"
+                apply_abicc_source_level_parity(
+                    compare(
+                        old_snap, new_snap, suppression=suppression, policy="strict_abi"
+                    )
                 )
             )
         if len(_results) > 1:

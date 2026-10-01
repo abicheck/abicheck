@@ -281,7 +281,7 @@ These changes break the source-level API contract but do not affect already-comp
 |------|-------------|
 | `enum_member_renamed` | An enumerator was renamed (same value, different name). Source code referencing the old name fails to compile. |
 | `field_renamed` | A struct/class field was renamed (same offset and type). Source code accessing the old field name fails to compile. |
-| `param_renamed` | A function parameter was renamed. Source code using designated initializers or named argument extensions breaks. |
+| `param_renamed` | A function parameter was renamed. Not a binary break, and not a C/C++ source break either (neither language has named arguments), so it is reported as a risk: generated bindings, documentation or IDE tooling keyed on the old name may notice. `abicheck compat` reports it as a source-level problem, matching abi-compliance-checker. |
 
 ### Default Argument Changes
 

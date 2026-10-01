@@ -1894,8 +1894,8 @@
     },
     {
       "kind": "param_renamed",
-      "category": "api_break",
-      "default_verdict": "API_BREAK",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "param_renamed",
