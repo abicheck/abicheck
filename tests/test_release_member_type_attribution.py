@@ -17,6 +17,7 @@ import itertools
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -272,6 +273,7 @@ def test_no_attribution_input_leaves_the_fold_unchanged() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="ELF/DWARF tests require Linux")
 @pytest.mark.skipif(
     shutil.which("gcc") is None or shutil.which("castxml") is None,
     reason="needs gcc + castxml",

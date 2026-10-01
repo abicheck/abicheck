@@ -16,6 +16,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -74,6 +75,7 @@ _STRUCTS = {
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="ELF/DWARF tests require Linux")
 @pytest.mark.skipif(shutil.which("gcc") is None, reason="needs gcc")
 @pytest.mark.parametrize("case", sorted(_STRUCTS))
 def test_depth_binary_reports_dwarf_layout_breaks_without_headers(
