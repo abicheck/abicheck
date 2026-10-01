@@ -366,8 +366,7 @@ class TestExecutionConsumesTheResolvedPlan:
             if options is not None:
                 seen["build_config"] = options.build_config
                 seen["allow_build_query"] = options.allow_build_query
-                seen["legacy_compile_db_tokens"] = options.legacy_compile_db_tokens
-                seen["legacy_compile_db_matched"] = options.legacy_compile_db_matched
+                seen["compile_db"] = options.compile_db
                 seen["seed_collect_mode"] = options.seed_collect_mode
                 seen["source_frontend_from_folded_context"] = (
                     options.source_frontend_from_folded_context

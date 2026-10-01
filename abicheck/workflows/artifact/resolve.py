@@ -289,7 +289,7 @@ def _gated_build_query_inputs(
     return gated_config, gated_query
 
 
-def _fold_legacy_compile_db_tokens(
+def _fold_compile_db_tokens(
     ctx: CompileContext | None, tokens: tuple[str, ...]
 ) -> CompileContext | None:
     """Merge already-derived legacy ``-p``/``--compile-db`` castxml flags into
@@ -386,7 +386,7 @@ def _with_rendered_defines(ctx: CompileContext | None) -> CompileContext | None:
     )
 
 
-def _legacy_compile_db_achieved(matched: bool, tokens: tuple[str, ...]) -> bool:
+def _compile_db_achieved(matched: bool, tokens: tuple[str, ...]) -> bool:
     """Whether the legacy ``-p``/``--compile-db`` auto-match should count as
     having achieved real build context (Codex review, fresh evidence on
     ``f381deb``).
@@ -415,8 +415,8 @@ def _seeded_includes_and_compile_context(
     allow_build_query: bool = False,
     build_config_locally_trusted: bool = False,
     collect_mode: str | None = None,
-    legacy_compile_db_tokens: tuple[str, ...] = (),
-    legacy_compile_db_matched: bool = False,
+    compile_db_tokens: tuple[str, ...] = (),
+    compile_db_matched: bool = False,
     build_config_explicit: bool = True,
 ) -> tuple[list[Path], CompileContext | None, bool, list[Callable[[], None]]]:
     """This input's L2 include-dir seed *and* its P0.3 L3->L2 compile-context
@@ -493,11 +493,11 @@ def _seeded_includes_and_compile_context(
     primitive instead of a second, independent call to the same underlying
     function.
 
-    *legacy_compile_db_tokens* (ADR-063 Phase 1, threading the ``-p``/
+    *compile_db_tokens* (ADR-063 Phase 1, threading the ``-p``/
     ``--compile-db`` legacy auto-match into the typed pipeline -- see
     ``docs/contribute/known-gaps.md``'s "ADR-063 Phase 1" entry for the
     precise mechanism this closes): the castxml flags
-    ``cli_helpers_compare._resolve_build_context_flags`` already derived
+    ``workflows.artifact.compile_db_match.match_compile_db`` already derived
     from that *separate*, older ``build_context_for_header``/
     ``build_context_union_fallback`` match -- passed in already-computed,
     the same way ``perform_elf_dump``'s own ``legacy_build_context_flags``
@@ -522,11 +522,11 @@ def _seeded_includes_and_compile_context(
     formats) and passes both parameters for real; the two functions it used
     to call were deleted by Track 1.
 
-    *legacy_compile_db_matched* (Codex review, fresh evidence): whether the
+    *compile_db_matched* (Codex review, fresh evidence): whether the
     legacy match actually matched a compile unit at all -- the second
-    element of ``cli_helpers_compare._resolve_build_context_flags``'s own
+    element of ``workflows.artifact.compile_db_match.match_compile_db``'s own
     return, mirroring ``perform_elf_dump``'s ``compile_db_context_matched``
-    parameter exactly. A separate signal from *legacy_compile_db_tokens*
+    parameter exactly. A separate signal from *compile_db_tokens*
     on purpose: a genuinely matched compile unit that legitimately derives
     zero castxml flags is real build-context evidence (the returned
     ``applied`` must become ``True`` so ``parsed_with_build_context`` gets
@@ -581,13 +581,9 @@ def _seeded_includes_and_compile_context(
         return (
             list(side.includes),
             _with_rendered_defines(
-                _fold_legacy_compile_db_tokens(
-                    evidence.compile, legacy_compile_db_tokens
-                )
+                _fold_compile_db_tokens(evidence.compile, compile_db_tokens)
             ),
-            _legacy_compile_db_achieved(
-                legacy_compile_db_matched, legacy_compile_db_tokens
-            ),
+            _compile_db_achieved(compile_db_matched, compile_db_tokens),
             [],
         )
     from ...buildsource.l2_seed import seed_includes_and_fold_compile_context
@@ -653,24 +649,20 @@ def _seeded_includes_and_compile_context(
     # fold's own explicit input, so the legacy tokens are simply discarded
     # here rather than double-counted on top of it.
     if not applied:
-        effective_ctx = _fold_legacy_compile_db_tokens(
-            effective_ctx, legacy_compile_db_tokens
-        )
+        effective_ctx = _fold_compile_db_tokens(effective_ctx, compile_db_tokens)
         # Codex review, fresh evidence (twice over): folding the legacy
         # tokens into effective_ctx above is not enough on its own --
         # `applied` is what `_resolve_side_snapshot_impl` actually gates
         # `parsed_with_build_context` on (mirroring `perform_elf_dump`'s own
         # `compile_db_context_matched` OR `l3_context_applied` condition).
         # Two independent ways a call can prove a real match: an explicit
-        # `legacy_compile_db_matched=True` (a real match with zero derived
+        # `compile_db_matched=True` (a real match with zero derived
         # tokens, which an empty token tuple alone can't represent), or a
-        # non-empty `legacy_compile_db_tokens` (which is itself proof a
+        # non-empty `compile_db_tokens` (which is itself proof a
         # match already derived real flags, even when a caller left
-        # `legacy_compile_db_matched` at its default). See
-        # `_legacy_compile_db_achieved`.
-        applied = _legacy_compile_db_achieved(
-            legacy_compile_db_matched, legacy_compile_db_tokens
-        )
+        # `compile_db_matched` at its default). See
+        # `_compile_db_achieved`.
+        applied = _compile_db_achieved(compile_db_matched, compile_db_tokens)
     # ADR-074: both exits return a *fully normalized* context, so no caller
     # has to remember to render the logical defines itself.
     return includes, _with_rendered_defines(effective_ctx), applied, cleanups

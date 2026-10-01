@@ -77,7 +77,7 @@ typically a small fraction of a dump's size next to full record layouts,
 so this is a low-cost simplification, not a hidden accuracy gap the way
 skipping type layouts would be. `service._attach_header_graph` (G29 Phase
 A, always-on by default -- `_HEADER_GRAPH_ENABLED`) separately embeds a
-semantic header-only graph (`snap.build_source.source_graph`, a
+semantic header-only graph (`snap.surface_graph`, a
 `model.source_graph.SourceGraphSummary`) built from the *same*
 unscoped header AST; this module leaves it untouched for the same reasons
 the previous (now-superseded) public-surface design documented: a correct

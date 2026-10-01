@@ -106,8 +106,8 @@ different way a registry could go silently stale:
    claiming ``value_type="bool"`` for a field whose real annotation is
    ``Fact[str]`` disagrees with the code it claims to describe.
 7. Every key of ``fact_registry.REFERENCE_FLAG_COVERAGE`` (a
-   ``*_facts_reliable`` flag name) must name a real field declared on
-   ``AbiSnapshot`` (``abicheck/model/snapshot.py``) — direction 3 above
+   ``*_facts_reliable`` flag name) must name a real persisted reliability
+   flag (``model/snapshot_reliability.RELIABILITY_FLAG_NAMES``) — direction 3 above
    only ever unions the *values* (the covered ``(owner, field)`` pairs)
    and silently discards the keys, so a typo'd or renamed flag name (e.g.
    ``clang_vtables_facts_reliable``) would keep passing as long as its
@@ -136,9 +136,9 @@ claims in D7's own design, the same as ``persisted`` — but unlike
 ``persisted`` (direction 4 above, checked against real ``fact_codec.py``/
 ``serialization.py`` call sites), no consumer code reading a ``Fact[...]``
 sibling for suppression or reporting purposes exists anywhere in this
-codebase yet: ``fact_registry.py``'s own ``FactLifecycle`` docstring states
-plainly that every entry today sits no higher than ``PERSISTED`` and that
-"no detector has migrated ... this is intentional." A wiring check modeled
+codebase yet. (Detector consumption *is* wired and checked -- direction 9,
+``consumer_problems``, for every ``CONSUMED`` entry -- but no entry is
+``REPORTED``/``PUBLIC``.) A wiring check modeled
 on direction 4 has nothing real to check against — every current entry
 already declares ``reportable=True`` with zero report-schema wiring by
 design, so a check requiring real wiring would fail the entire committed
@@ -199,7 +199,6 @@ from typing import Protocol
 ROOT = Path(__file__).resolve().parent.parent
 PKG = ROOT / "abicheck"
 MODEL_DIR = PKG / "model"
-_SNAPSHOT_PATH = MODEL_DIR / "snapshot.py"
 
 # This script's own directory, so `backend_capabilities` (below) resolves
 # whether this module is run directly, loaded as a sibling import from
@@ -371,25 +370,17 @@ def _all_model_dataclass_field_pairs() -> set[tuple[str, str]]:
     return pairs
 
 
-def _abi_snapshot_field_names() -> set[str]:
-    """Every field declared directly on ``AbiSnapshot`` in
-    ``abicheck/model/snapshot.py``, via AST — the ground truth Direction 7
-    validates ``REFERENCE_FLAG_COVERAGE``'s keys against. Returns an empty
-    set (rather than raising) if the file is unreadable or the class isn't
-    found, so a caller can treat that as "nothing to check against" the
-    same way every other best-effort scan in this module does.
+def _reliability_flag_names() -> set[str]:
+    """The persisted ``*_facts_reliable`` keys -- the ground truth Direction 7
+    validates ``REFERENCE_FLAG_COVERAGE``'s keys against. ADR-063 Phase 10
+    retired the eight ``AbiSnapshot`` booleans for one
+    ``stale_fact_families`` record, so the names now live in
+    ``model/snapshot_reliability.RELIABILITY_FLAG_NAMES`` rather than as
+    dataclass fields.
     """
-    source = _read(_SNAPSHOT_PATH)
-    if not source:
-        return set()
-    try:
-        tree = ast.parse(source, filename=_rel(_SNAPSHOT_PATH))
-    except SyntaxError:
-        return set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and node.name == "AbiSnapshot":
-            return _dataclass_field_names(node)
-    return set()
+    from abicheck.model.snapshot_reliability import RELIABILITY_FLAG_NAMES
+
+    return set(RELIABILITY_FLAG_NAMES)
 
 
 def scan_model_dataclasses(
@@ -848,6 +839,79 @@ def _cross_check_against_backend_capabilities(
     return problems
 
 
+#: What makes a consumer status-aware (direction 9): a shared gate call, or a
+#: direct read of a fact's availability.
+_STATUS_GATES = frozenset(
+    {
+        "compare_facts",
+        "both_facts_present",
+        "vtable_fact_declined",
+        "fact_confirmed_true",
+    }
+)
+_STATUS_ATTRS = frozenset({"status", "is_present"})
+
+
+def consumer_problems(
+    field: str, consumed_by: tuple[str, ...], root: Path
+) -> list[str]:
+    """Why each ``"module:function"`` in *consumed_by* fails to consume *field*.
+
+    Direction 9 (ADR-063 5B): a ``CONSUMED`` registry entry is a claim that a
+    named detector branches on the fact's ``FactStatus``. Resolved by AST, not
+    import: the module must exist, define the function, and the function's
+    own body must read ``<field>_fact`` or pass ``"<field>"`` to
+    ``both_facts_present`` -- a renamed detector or one that moved back to the
+    legacy field stops satisfying the entry.
+    """
+    problems: list[str] = []
+    for target in consumed_by:
+        module, _, func = target.partition(":")
+        if not module or not func:
+            problems.append(f"{target!r} is not 'module:function'")
+            continue
+        path = root / (module.replace(".", "/") + ".py")
+        if not path.is_file():
+            problems.append(f"{target}: module file {_rel(path)} does not exist")
+            continue
+        source = _read(path)
+        # Module-level definitions only: a same-named method or nested
+        # function is not the `module:function` the entry names.
+        defs = [
+            n
+            for n in ast.parse(source).body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == func
+        ]
+        if not defs:
+            problems.append(f"{target}: no function {func!r} in {_rel(path)}")
+            continue
+        reads = status_aware = False
+        for node in defs:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Attribute) and sub.attr == f"{field}_fact":
+                    reads = True
+                if isinstance(sub, ast.Attribute) and sub.attr in _STATUS_ATTRS:
+                    status_aware = True
+                if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
+                    if sub.func.id in _STATUS_GATES:
+                        status_aware = True
+                    if sub.func.id == "both_facts_present" and any(
+                        _string_constant(a) == field for a in sub.args
+                    ):
+                        reads = True
+        if not reads:
+            problems.append(
+                f"{target}: never reads {field}_fact nor gates on "
+                f"both_facts_present(..., {field!r})"
+            )
+        elif not status_aware:
+            problems.append(
+                f"{target}: reads {field}_fact but never branches on its "
+                "availability (FactStatus, compare_facts, both_facts_present)"
+            )
+    return problems
+
+
 def check_fact_registry_completeness(f: Findings) -> None:
     """ERROR on any of the eight directions this module's docstring states.
 
@@ -1016,21 +1080,28 @@ def check_fact_registry_completeness(f: Findings) -> None:
                 f"it claims to describe",
             )
 
-    # Direction 7: every REFERENCE_FLAG_COVERAGE key must name a real field
-    # declared on AbiSnapshot (Codex review — direction 3 above only unions
+    # Direction 9: a CONSUMED entry's named detectors really read the fact.
+    for entry in FACT_REGISTRY.entries.values():
+        for problem in consumer_problems(entry.field, entry.consumed_by, ROOT):
+            f.err(
+                "fact-registry-completeness",
+                f"{entry.id} is lifecycle={entry.lifecycle.value}, but {problem}",
+            )
+
+    # Direction 7: every REFERENCE_FLAG_COVERAGE key must name a real
+    # persisted reliability flag (Codex review — direction 3 above only unions
     # the covered (owner, field) *values* and silently discards the keys, so
     # a typo'd/renamed flag name would keep passing as long as its covered
     # pairs stay tracked).
-    snapshot_fields = _abi_snapshot_field_names()
-    if snapshot_fields:
-        for flag in REFERENCE_FLAG_COVERAGE:
-            if flag not in snapshot_fields:
-                f.err(
-                    "fact-registry-completeness",
-                    f"fact_registry.REFERENCE_FLAG_COVERAGE names {flag!r}, "
-                    f"but AbiSnapshot (abicheck/model/snapshot.py) has no "
-                    f"such field — stale or typo'd reliability-flag key",
-                )
+    flag_names = _reliability_flag_names()
+    for flag in REFERENCE_FLAG_COVERAGE:
+        if flag not in flag_names:
+            f.err(
+                "fact-registry-completeness",
+                f"fact_registry.REFERENCE_FLAG_COVERAGE names {flag!r}, "
+                f"but model/snapshot_reliability.RELIABILITY_FLAG_NAMES has "
+                f"no such flag — stale or typo'd reliability-flag key",
+            )
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ audience:
 summarizes:
   - impact-analysis
 depends_on:
-  - abicheck/buildsource/graph_facts.py
+  - abicheck/model/graph_facts.py
   - abicheck/impact/consumer_graph.py
   - abicheck/buildsource/source_graph.py
   - abicheck/internal_leak.py
@@ -29,7 +29,7 @@ list lives in `abicheck/buildsource/source_graph.py`) — see
 
 ## `GraphNode` / `GraphEdge`
 
-Both dataclasses (`abicheck/buildsource/graph_facts.py`) share the same
+Both dataclasses (`abicheck/model/graph_facts.py`) share the same
 evidence shape:
 
 | Field | Type | Meaning |
@@ -185,7 +185,7 @@ requirement is an edge onto the *existing* `binary_symbol://<symbol>` node the
 library graph already uses for that export, and that one shared node id is the
 entire join.
 
-The vocabulary constants live in `abicheck/buildsource/graph_facts.py` and are
+The vocabulary constants live in `abicheck/model/graph_facts.py` and are
 unioned into `source_graph.NODE_KINDS`/`EDGE_KINDS`; the producer is
 `abicheck/impact/consumer_graph.py`.
 

@@ -340,7 +340,10 @@ def _evidence_tier(snap: AbiSnapshot) -> str:
 
 
 def _public_type_counts(
-    snap: AbiSnapshot, *, public_entity_ids: frozenset[EntityId] | None = None
+    snap: AbiSnapshot,
+    *,
+    public_entity_ids: frozenset[EntityId] | None = None,
+    public_type_names: frozenset[str] | None = None,
 ) -> tuple[int, int]:
     """Count public record types and enums.
 
@@ -357,6 +360,11 @@ def _public_type_counts(
     resolver: when it cannot resolve a surface (no header-derived
     visibility, e.g. ELF-only), fall back to the raw counts, which are then
     correct because nothing was scoped.
+
+    That resolution is the caller's (*public_type_names*, the resolved
+    public type closure, ``None`` when unresolvable): this module is a leaf
+    the ``policy/`` layer calls into, never the reverse
+    (``PublicSurfaceQuery.public_type_names``).
     """
     if public_entity_ids is not None:
         public_records = sum(
@@ -371,10 +379,7 @@ def _public_type_counts(
         )
         return public_records, public_enums
 
-    from .surface import compute_public_surface
-
-    psurf = compute_public_surface(snap)
-    if not psurf.resolvable:
+    if public_type_names is None:
         return len(snap.declarations.types), len(snap.declarations.enums)
 
     def _in_surface(name: str) -> bool:
@@ -382,9 +387,9 @@ def _public_type_counts(
         # ``ns::A``), so the closure can hold only the short spelling. Count the
         # record if *either* its canonical name or its trailing segment is in
         # the public surface.
-        if name in psurf.public_types:
+        if name in public_type_names:
             return True
-        return "::" in name and name.rsplit("::", 1)[1] in psurf.public_types
+        return "::" in name and name.rsplit("::", 1)[1] in public_type_names
 
     public_records = sum(1 for r in snap.declarations.types if _in_surface(r.name))
     public_enums = sum(1 for e in snap.declarations.enums if _in_surface(e.name))
@@ -468,6 +473,7 @@ def compute_surface_metrics(
     *,
     top_n: int = 10,
     public_entity_ids: frozenset[EntityId] | None = None,
+    public_type_names: frozenset[str] | None = None,
 ) -> SurfaceMetrics:
     """Compute the A1 descriptive metrics for *snap*.
 
@@ -482,6 +488,11 @@ def compute_surface_metrics(
     physically defined in a header regardless of visibility, and
     ``exported_counts`` is measured *against* it as a denominator, so
     filtering it too would misreport header coverage rather than fix it.
+
+    *public_type_names*: the resolved public type closure used for
+    ``public_types``/``public_enums`` when *public_entity_ids* is ``None``;
+    ``None`` means the surface was not resolvable and raw counts apply
+    (``PublicSurfaceQuery.public_type_names`` resolves it).
     """
     graph = build_surface_graph(snap, public_entity_ids=public_entity_ids)
 
@@ -559,7 +570,9 @@ def compute_surface_metrics(
         )
 
     public_types, public_enums = _public_type_counts(
-        snap, public_entity_ids=public_entity_ids
+        snap,
+        public_entity_ids=public_entity_ids,
+        public_type_names=public_type_names,
     )
 
     return SurfaceMetrics(

@@ -890,13 +890,10 @@ class TestRequireRealAstAttach:
         def __init__(self, passes):
             self.extractor_passes = passes
 
-    class _FakeBuildSource:
-        def __init__(self, graph):
-            self.source_graph = graph
-
     class _FakeSnap:
-        def __init__(self, build_source):
-            self.build_source = build_source
+        def __init__(self, graph):
+            # ADR-063 Phase 10: the header graph lives on `surface_graph`.
+            self.surface_graph = graph
 
     def test_passes_when_both_passes_stamped(self):
         from abicheck.buildsource.header_graph import HEADER_INCLUDE_GRAPH_PASS
@@ -905,16 +902,14 @@ class TestRequireRealAstAttach:
         )
 
         snap = self._FakeSnap(
-            self._FakeBuildSource(
-                self._FakeGraph(
-                    {HEADER_CALL_GRAPH_PASS: True, HEADER_INCLUDE_GRAPH_PASS: True}
-                )
+            self._FakeGraph(
+                {HEADER_CALL_GRAPH_PASS: True, HEADER_INCLUDE_GRAPH_PASS: True}
             )
         )
         assert hg_gate._require_real_ast_attach(snap, 5, "clang") is None
 
     def test_raises_when_call_graph_pass_missing(self):
-        snap = self._FakeSnap(self._FakeBuildSource(self._FakeGraph({})))
+        snap = self._FakeSnap(self._FakeGraph({}))
         with pytest.raises(RuntimeError, match="degraded"):
             hg_gate._require_real_ast_attach(snap, 5, "castxml")
 
@@ -926,13 +921,11 @@ class TestRequireRealAstAttach:
             HEADER_CALL_GRAPH_PASS,
         )
 
-        snap = self._FakeSnap(
-            self._FakeBuildSource(self._FakeGraph({HEADER_CALL_GRAPH_PASS: True}))
-        )
+        snap = self._FakeSnap(self._FakeGraph({HEADER_CALL_GRAPH_PASS: True}))
         with pytest.raises(RuntimeError, match="include-graph"):
             hg_gate._require_real_ast_attach(snap, 5, "clang")
 
-    def test_raises_when_no_build_source_at_all(self):
+    def test_raises_when_no_header_graph_at_all(self):
         snap = self._FakeSnap(None)
         with pytest.raises(RuntimeError, match="degraded"):
             hg_gate._require_real_ast_attach(snap, 5, "clang")

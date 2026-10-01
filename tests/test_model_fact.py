@@ -196,13 +196,15 @@ class TestRecordTypeFactBridge:
         assert r.vptr_offset_bits_fact.value == 64
 
     def test_field_types_never_widen(self) -> None:
-        """A dataclasses.fields() reader (asdict-based external consumer)
-        must see exactly the type each field has always declared — bool/
-        list[str], never a union with the sentinel's own type."""
-        by_name = {f.name: f for f in dataclasses.fields(RecordType)}
-        assert by_name["bases"].type == "list[str]"
-        assert by_name["vtable"].type == "list[str]"
-        assert by_name["vptr_offset_bits"].type == "int | None"
+        """The constructor inputs keep exactly the type each field always
+        declared -- never a union with the sentinel's own type -- and, since
+        ADR-063 Phase 10, are InitVars rather than stored fields."""
+        declared = RecordType.__dataclass_fields__
+        assert declared["bases"].type == "InitVar[list[str]]"
+        assert declared["vtable"].type == "InitVar[list[str]]"
+        assert declared["vptr_offset_bits"].type == "InitVar[int | None]"
+        stored = {f.name for f in dataclasses.fields(RecordType)}
+        assert not stored & {"bases", "virtual_bases", "vtable", "vptr_offset_bits"}
 
     def test_two_separately_omitted_instances_do_not_share_a_list_object(self) -> None:
         """The default_factory must return the *same* sentinel each time
@@ -241,10 +243,22 @@ class TestPostConstructionMutationIsUnsafeForFactBridgedFields:
     for this path; the guidance is to treat a bridged field as effectively
     immutable after construction."""
 
-    def test_mutating_the_legacy_field_leaves_the_fact_sibling_stale(self) -> None:
+    def test_assigning_a_retired_field_raises_and_keeps_the_fact(self) -> None:
+        """ADR-063 Phase 10 closed this trap for the five Phase 0 fields:
+        they are read-only views of their fact, so assignment raises rather
+        than leaving the pair out of sync."""
         r = RecordType(name="Foo", kind="struct", bases=["OldBase"])
-        r.bases = ["NewBase"]
-        assert r.bases == ["NewBase"]
+        for name, value in (
+            ("bases", ["NewBase"]),
+            ("virtual_bases", ["V"]),
+            ("vtable", ["_ZN3Foo1fEv"]),
+            ("vptr_offset_bits", 64),
+        ):
+            with pytest.raises(AttributeError, match="read-only view"):
+                setattr(r, name, value)
+        with pytest.raises(AttributeError, match="read-only view"):
+            Param(name="p", type="int").is_va_list = True  # type: ignore[misc]
+        assert r.bases == ["OldBase"]
         assert r.bases_fact is not None
         assert r.bases_fact.value == ["OldBase"]
 
@@ -318,8 +332,8 @@ class TestParamFactBridge:
         assert p.is_va_list is True
 
     def test_field_type_never_widens(self) -> None:
-        by_name = {f.name: f for f in dataclasses.fields(Param)}
-        assert by_name["is_va_list"].type == "bool"
+        assert Param.__dataclass_fields__["is_va_list"].type == "InitVar[bool]"
+        assert "is_va_list" not in {f.name for f in dataclasses.fields(Param)}
 
 
 class TestResolvedFactValue:
@@ -525,3 +539,16 @@ class TestFactProducer:
         encode_fact_fields(d)
         vtable_fact = d["types"][0]["vtable_fact"]  # type: ignore[index]
         assert vtable_fact["producer"] == "pdb"
+
+
+def test_retire_bridge_fields_rejects_a_non_initvar_and_exposes_the_descriptor() -> (
+    None
+):
+    from abicheck.model.fact import RetiredBridgeField, retire_bridge_fields
+
+    assert isinstance(RecordType.__dict__["bases"], RetiredBridgeField)
+    assert isinstance(RecordType.bases, RetiredBridgeField)  # class access
+    with pytest.raises(TypeError, match="must be an InitVar"):
+        retire_bridge_fields(RecordType, {"name": ""})  # a stored field
+    with pytest.raises(TypeError, match="must be an InitVar"):
+        retire_bridge_fields(RecordType, {"no_such_field": None})

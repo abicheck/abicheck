@@ -55,7 +55,7 @@ def _snapshot(**kwargs) -> AbiSnapshot:
 
 class TestResolvePublicSurfaceIsCompatible:
     """``resolve_public_surface`` is (today) a direct passthrough to the
-    existing, proven ``compute_public_surface`` -- its result must be the
+    existing, proven ``resolve_public_surface`` -- its result must be the
     exact same ``PublicSurface`` type/shape."""
 
     def test_returns_a_public_surface(self) -> None:
@@ -141,7 +141,7 @@ class TestPublicSurfaceQueryResolve:
         assert PublicSurfaceQuery.resolve(snap) is None
 
     def test_unresolvable_snapshot_returns_none(self) -> None:
-        # No declarations at all -> compute_public_surface() itself is
+        # No declarations at all -> resolve_public_surface() itself is
         # unresolvable (surf.resolvable is False) -- same "fall back to
         # legacy behavior" answer as the no-entity-id-data case above, for
         # the same reason: this query genuinely cannot answer, so it must

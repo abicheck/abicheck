@@ -55,7 +55,7 @@ def param_kind(type_str: str) -> ParamKind:
     Before this function existed, clang never populated ``Param.kind`` at
     all -- every parameter, pointer or not, read the dataclass's own
     resting ``ParamKind.VALUE`` (see
-    ``AbiSnapshot.param_kind_facts_reliable``).
+    ``the stale 'param_kind' fact family (model.snapshot_reliability)``).
     """
     bracket = 0
     last: str | None = None

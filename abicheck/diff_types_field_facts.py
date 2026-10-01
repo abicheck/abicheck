@@ -58,6 +58,7 @@ from .model import (
 )
 from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId
+from .model.snapshot_reliability import family_reliable
 
 
 @registry.detector("enum_renames")
@@ -264,7 +265,7 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     this whole-snapshot gate, not in place of it — see that function's own
     docstring.
     """
-    if not (old.header_cv_facts_reliable and new.header_cv_facts_reliable):
+    if not (family_reliable(old, "header_cv") and family_reliable(new, "header_cv")):
         return []
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)

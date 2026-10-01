@@ -148,16 +148,7 @@ def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
     ``--ast-frontend castxml``/``--ast-frontend clang`` run already does.
 
     - Not (confirmed) header-aware: None.
-    - ``ast_producer == "clang"`` AND *key* is a ``deprecated``/``is_scoped``
-      fact AND ``snap.clang_deprecation_facts_reliable`` is False (a
-      snapshot persisted before schema v19/G31 Phase C): None — a legacy
-      clang-producer snapshot's value for exactly these two facts is real
-      but WRONG (unconditional None/False), not merely absent.
-    - ``ast_producer == "clang"`` AND *key* is a field ``default`` fact AND
-      ``snap.clang_field_initializer_facts_reliable`` is False (a snapshot
-      persisted before schema v20/G31 Phase C): None — same shape, one
-      schema version later.
-    - ``ast_producer in ("castxml", "clang")`` (and the above didn't apply):
+    - ``ast_producer in ("castxml", "clang")``:
       that value unconditionally — every fact on a single-backend snapshot
       came from that one backend.
     - ``ast_producer == "hybrid"``: whatever the merge recorded for *key*
@@ -166,33 +157,12 @@ def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
     """
     if not (snap.from_headers and not snap.from_headers_inferred):
         return None
-    if (
-        snap.ast_producer == "clang"
-        and not snap.clang_field_initializer_facts_reliable
-        and key.endswith(":default")
-    ):
-        # G31 Phase C / schema v20, exactly the reasoning the deprecation
-        # gate below records: a clang-producer snapshot persisted before the
-        # direct-clang backend extracted default member initializers has real
-        # but WRONG data for this fact (an unconditional None,
-        # indistinguishable by value alone from "this field genuinely has no
-        # initializer"), so its "clang" producer tag must not be trusted for
-        # it. ``:default`` is only ever the suffix of a field_fact_key(...,
-        # "default") key -- Param.default's own key ends in
-        # ``:param_defaults`` -- so this stays scoped to the affected fact.
-        return None
-    if snap.ast_producer == "clang" and not snap.clang_deprecation_facts_reliable:
-        # G31 Phase C / schema v19 (Codex review, fresh evidence): a
-        # deprecated/is_scoped comparison against a snapshot persisted
-        # before the direct-clang backend genuinely extracted these facts
-        # cannot trust a "clang" producer tag for them -- every declaration
-        # on that legacy snapshot has real but WRONG data (an
-        # unconditional None/False, indistinguishable by value alone from
-        # a genuine "not deprecated"/"not scoped" fact). Scoped to exactly
-        # the two affected fact suffixes so this doesn't spuriously
-        # invalidate an unrelated multi-backend fact (e.g. param_defaults).
-        if key.endswith(":deprecated") or key.endswith(":is_scoped"):
-            return None
+    # The legacy clang ``deprecated``/``is_scoped``/field-``default`` gates
+    # that used to live here (schema v19/v20) are gone: loading such a
+    # document demotes each affected declaration's own ``*_fact`` to
+    # ``NOT_COLLECTED`` (``storage.fact_backfill``), and every consumer of
+    # those three facts gates per declaration on that status
+    # (``compare.fact_gate.both_facts_present``) before asking this function.
     if snap.ast_producer in ("castxml", "clang"):
         return snap.ast_producer
     if snap.ast_producer == "hybrid":

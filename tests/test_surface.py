@@ -24,6 +24,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.surface import (
     REASON_NON_PUBLIC_TYPE,
     REASON_NOT_EXPORTED,
@@ -33,7 +34,6 @@ from abicheck.surface import (
     _type_identifiers,
     change_in_public_surface,
     classify_change_surface,
-    compute_public_surface,
 )
 
 
@@ -108,7 +108,7 @@ class TestTypeIdentifiers:
         assert _type_identifiers("") == set()
 
 
-# ── compute_public_surface ──────────────────────────────────────────────────
+# ── resolve_public_surface ──────────────────────────────────────────────────
 
 
 class TestComputePublicSurface:
@@ -119,7 +119,7 @@ class TestComputePublicSurface:
             elf_only_mode=True,
             functions=[_fn("internal", vis=Visibility.ELF_ONLY)],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert surf.resolvable is False
 
     def test_public_symbol_and_reachable_type(self):
@@ -129,7 +129,7 @@ class TestComputePublicSurface:
             functions=[_fn("api_call", ret="Result *", params=("Config *",))],
             types=[_rec("Result"), _rec("Config"), _rec("InternalCache")],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert surf.resolvable is True
         assert "api_call" in surf.public_symbols
         # Types referenced by the public function are public.
@@ -151,7 +151,7 @@ class TestComputePublicSurface:
                 _rec("Unrelated"),
             ],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert {"Widget", "Pixels", "Drawable"} <= surf.public_types
         assert "Unrelated" not in surf.public_types
 
@@ -164,7 +164,7 @@ class TestComputePublicSurface:
                 _fn("internal_helper", vis=Visibility.ELF_ONLY),
             ],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert "public_api" in surf.public_symbols
         assert "internal_helper" not in surf.public_symbols
         assert "internal_helper" in surf.all_symbols
@@ -180,7 +180,7 @@ class TestComputePublicSurface:
             functions=[_fn("api", params=("Mode",))],
             enums=[_enum("ns::Mode")],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         # The *canonical* name is what downstream member findings scope against.
         assert "ns::Mode" in surf.public_types
 
@@ -192,7 +192,7 @@ class TestComputePublicSurface:
             functions=[_fn("api", params=("ns::Mode",))],
             enums=[_enum("ns::Mode")],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert "ns::Mode" in surf.public_types
 
     def test_unreferenced_namespaced_enum_stays_out_of_surface(self):
@@ -206,7 +206,7 @@ class TestComputePublicSurface:
             functions=[_fn("api")],
             enums=[_enum("ns::Mode")],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert "ns::Mode" in surf.all_types
         assert "ns::Mode" not in surf.public_types
 
@@ -222,7 +222,7 @@ class TestComputePublicSurface:
             functions=[_fn("get_result", ret="int")],
             enums=[_enum("ErrorCode", source_header="lib.h")],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert "ErrorCode" in surf.public_types
 
     def test_unreferenced_private_header_enum_stays_out_of_surface(self):
@@ -243,7 +243,7 @@ class TestComputePublicSurface:
                 )
             ],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert "Internal" not in surf.public_types
 
     def test_ambiguous_enum_tail_keeps_all_matches_public(self):
@@ -259,7 +259,7 @@ class TestComputePublicSurface:
             functions=[_fn("api", params=("Mode",))],
             enums=[_enum("ns1::Mode"), _enum("ns2::Mode")],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert {"ns1::Mode", "ns2::Mode"} <= surf.public_types
 
     def test_ambiguous_record_tail_keeps_all_matches_public(self):
@@ -271,7 +271,7 @@ class TestComputePublicSurface:
             functions=[_fn("api", params=("Impl *",))],
             types=[_rec("ns1::Impl"), _rec("ns2::Impl")],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert {"ns1::Impl", "ns2::Impl"} <= surf.public_types
 
     def test_public_method_seeds_its_own_class_even_without_typed_signature(self):
@@ -286,7 +286,7 @@ class TestComputePublicSurface:
             functions=[_fn("process", mangled="_ZN11ReorderDemo7processEv")],
             types=[_rec("ReorderDemo", bases=("Logger",)), _rec("Logger")],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert "ReorderDemo" in surf.public_types
         assert "Logger" in surf.public_types
 
@@ -299,7 +299,7 @@ class TestComputePublicSurface:
             functions=[_fn("free_fn", mangled="_Z7free_fnv")],
             types=[_rec("Unrelated")],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert "Unrelated" not in surf.public_types
 
 
@@ -308,7 +308,7 @@ class TestComputePublicSurface:
 
 class TestChangeClassification:
     def _surf(self, snap):
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     def test_public_symbol_change_is_in_surface(self):
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
@@ -511,7 +511,7 @@ class TestChangeClassification:
 
 class TestSurfaceExclusionReason:
     def _surf(self, snap):
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     def test_in_surface_has_no_reason(self):
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
@@ -1099,7 +1099,7 @@ class TestSurfaceLedgerOutput:
 
 class TestProvenanceReasons:
     def _surf(self, snap):
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     def test_private_header_symbol_demoted_even_when_exported(self):
         # A symbol the binary exports (PUBLIC linkage) but that originates in a
@@ -1195,7 +1195,7 @@ class TestProvenanceReasons:
                 _fn("sym", origin=ScopeOrigin.PUBLIC_HEADER),
             ],
         )
-        s_old, s_new = compute_public_surface(old), compute_public_surface(new)
+        s_old, s_new = resolve_public_surface(old), resolve_public_surface(new)
         c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="sym", description="")
         # sym is in public_symbols on both sides; the public-header side blocks
         # the private-header demotion, so it stays in surface.
@@ -1225,7 +1225,7 @@ class TestHiddenFriendSurface:
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("point", origin=owner_origin)],
         )
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     def test_system_header_hidden_friend_out_of_surface(self):
         s = self._surf_with_owner(ScopeOrigin.SYSTEM_HEADER)
@@ -1277,7 +1277,7 @@ class TestHiddenFriendSurface:
             ],
             types=[_rec("point", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1304,7 +1304,7 @@ class TestHiddenFriendSurface:
             version="1",
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1329,7 +1329,7 @@ class TestHiddenFriendSurface:
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("point", origin=ScopeOrigin.SYSTEM_HEADER)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1354,7 +1354,7 @@ class TestHiddenFriendSurface:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1391,8 +1391,8 @@ class TestHiddenFriendSurface:
                 ),
             ],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_ADDED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1425,8 +1425,8 @@ class TestHiddenFriendSurface:
             version="2",
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1456,8 +1456,8 @@ class TestHiddenFriendSurface:
                 ),
             ],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_ADDED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1485,8 +1485,8 @@ class TestHiddenFriendSurface:
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("point", origin=ScopeOrigin.PRIVATE_HEADER)],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_ADDED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1513,8 +1513,8 @@ class TestHiddenFriendSurface:
             version="2",
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1544,7 +1544,7 @@ class TestHiddenFriendSurface:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN4priv3FooeqERKS0_S1_",
@@ -1569,7 +1569,7 @@ class TestHiddenFriendSurface:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN3pub3FooeqERKS0_S1_",
@@ -1605,7 +1605,7 @@ class TestHiddenFriendSurface:
                 _rec("Foo", origin=ScopeOrigin.PRIVATE_HEADER),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Foo" in s.ambiguous_type_names
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
@@ -1647,7 +1647,7 @@ class TestHiddenFriendSurface:
                 )
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Foo" in s.ambiguous_type_names
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
@@ -1672,8 +1672,8 @@ class TestHiddenFriendSurface:
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("point", origin=ScopeOrigin.UNKNOWN)],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_ADDED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1703,8 +1703,8 @@ class TestHiddenFriendSurface:
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("point", origin=ScopeOrigin.PRIVATE_HEADER)],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         assert s_old.resolvable is False
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
@@ -1740,8 +1740,8 @@ class TestHiddenFriendSurface:
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("Foo", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN2ns3FooeqERKS0_S1_",
@@ -1778,8 +1778,8 @@ class TestHiddenFriendSurface:
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("Foo", origin=ScopeOrigin.UNKNOWN)],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN2ns3FooeqERKS0_S1_",
@@ -1819,8 +1819,8 @@ class TestHiddenFriendSurface:
                 )
             ],
         )
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = resolve_public_surface(old)
+        s_new = resolve_public_surface(new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN2ns3FooeqERKS0_S1_",
@@ -1850,7 +1850,7 @@ class TestHiddenFriendSurface:
             ],
             types=[_rec("Foo", origin=ScopeOrigin.UNKNOWN, qualified_name="ns::Foo")],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN2ns3FooeqERKS0_S1_",

@@ -70,7 +70,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..model import AccessLevel, Fact, ParamKind
+from ..model import AccessLevel, Fact, ParamKind, set_legacy_field
 from ..model.fact_registry import FACT_REGISTRY
 from .fact_schema_versions import (
     _FACT_FIELDS_SCHEMA_VERSION,
@@ -525,7 +525,7 @@ def apply_case_a_fact_backfill(
             if raw.get(fact_key):
                 continue
             if unreliable:
-                setattr(obj, rule.field, rule.normalized_default)
+                set_legacy_field(obj, rule.field, rule.normalized_default)
                 setattr(obj, fact_key, Fact.not_collected())
                 continue
             downgrade_claim_only = unproduceable

@@ -23,7 +23,6 @@
 
 from __future__ import annotations
 
-from abicheck.buildsource.graph_facts import edge_occurrence_id, edge_relation_key
 from abicheck.buildsource.source_graph_build_source_abi import fold_source_edges
 from abicheck.model.graph_facts import (
     CONF_HIGH,
@@ -33,6 +32,8 @@ from abicheck.model.graph_facts import (
     GraphEdge,
     GraphFact,
     GraphNode,
+    edge_occurrence_id,
+    edge_relation_key,
 )
 from abicheck.model.source_graph import SourceGraphSummary
 

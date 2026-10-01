@@ -360,7 +360,7 @@ def top_level_param_kind(
 
     Before this function existed, castxml never populated ``Param.kind`` at
     all -- every parameter, pointer or not, read the dataclass's own resting
-    ``ParamKind.VALUE`` (see ``AbiSnapshot.param_kind_facts_reliable``).
+    ``ParamKind.VALUE`` (see ``the stale 'param_kind' fact family (model.snapshot_reliability)``).
     """
     if depth > 10 or not id_:
         return ParamKind.VALUE

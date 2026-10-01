@@ -13,14 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-063 Phase 1: ``legacy_compile_db_matched`` is a signal independent of
-``legacy_compile_db_tokens`` (Codex review, fresh evidence on PR #935).
+"""ADR-063 Phase 1: ``compile_db_matched`` is a signal independent of
+``compile_db_tokens`` (Codex review, fresh evidence on PR #935).
 
 ``_seeded_includes_and_compile_context``'s returned ``applied`` boolean is
 what ``_resolve_side_snapshot_impl`` gates ``AbiSnapshot.parsed_with_
 build_context`` on (mirroring ``perform_elf_dump``'s own ``compile_db_
 context_matched``/``l3_context_applied`` OR condition). An earlier version
-of the ``legacy_compile_db_tokens`` threading folded the legacy match's
+of the ``compile_db_tokens`` threading folded the legacy match's
 derived flags into the resolved ``CompileContext`` but left ``applied``
 unchanged when the P0.3 fold itself did not match -- so a typed dump that
 got real compile-database context purely from the legacy-match fallback
@@ -30,7 +30,7 @@ advisory findings and wrongly failing a ``--depth build`` gate that legacy
 CLI dump run would have satisfied. Doubly wrong for a compile unit that
 matched the legacy auto-match but genuinely derived zero castxml flags
 (possible when a matched TU carries no ABI-relevant ``-D``/``-I``/... at
-all): an empty ``legacy_compile_db_tokens`` tuple is indistinguishable from
+all): an empty ``compile_db_tokens`` tuple is indistinguishable from
 "never matched" without a separate signal.
 
 These are fast, monkeypatch-based unit tests (no compiler needed) --
@@ -39,17 +39,17 @@ the true end-to-end proof against a real compile database lives in
 
 A second review round on the fix above (still fresh evidence on PR #935,
 same commit range) found the complementary gap: a caller that passes
-non-empty ``legacy_compile_db_tokens`` while leaving ``legacy_compile_db_
+non-empty ``compile_db_tokens`` while leaving ``legacy_compile_db_
 matched`` at its default ``False`` -- exactly the shape
 ``tests/test_legacy_compile_db_typed_threading.py``'s own end-to-end caller
 uses -- still got ``applied=False`` even though the non-empty tokens are
-themselves proof a match occurred. ``_legacy_compile_db_achieved`` closes
+themselves proof a match occurred. ``_compile_db_achieved`` closes
 this by treating non-empty tokens as sufficient evidence on their own,
 independent of whether ``matched`` was also passed; see
 ``test_tokens_alone_without_explicit_matched_flag_still_marks_applied``.
 
 A third review round (still PR #935, commit ``8f2c22d``) found a distinct
-bug in the same neighborhood: ``_fold_legacy_compile_db_tokens`` used to
+bug in the same neighborhood: ``_fold_compile_db_tokens`` used to
 ``" ".join()`` the already-split argv tokens into the free-form
 ``gcc_options`` string, which every consumer later re-splits via
 ``split_gcc_options``. A token containing embedded whitespace (a Windows
@@ -101,8 +101,8 @@ class TestLegacyMatchedIsASeparateSignalFromTokens:
         includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
             side,
             evidence,
-            legacy_compile_db_tokens=(),
-            legacy_compile_db_matched=True,
+            compile_db_tokens=(),
+            compile_db_matched=True,
         )
         assert applied is True
 
@@ -122,7 +122,7 @@ class TestLegacyMatchedIsASeparateSignalFromTokens:
         side, evidence = _side_and_evidence(tmp_path)
 
         includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
-            side, evidence, legacy_compile_db_tokens=(), legacy_compile_db_matched=False
+            side, evidence, compile_db_tokens=(), compile_db_matched=False
         )
         assert applied is False
         assert ctx is None
@@ -134,7 +134,7 @@ class TestLegacyMatchedIsASeparateSignalFromTokens:
         derived real flags -- both the folded tokens and `applied` must
         reflect it. The tokens ride in `gcc_option_tokens` (verbatim argv
         entries), not joined into the `gcc_options` string -- see
-        `_fold_legacy_compile_db_tokens`'s own docstring for why."""
+        `_fold_compile_db_tokens`'s own docstring for why."""
 
         def _fake_seed(*, pending_cleanups, **kwargs):
             return [], False, None, ()
@@ -148,8 +148,8 @@ class TestLegacyMatchedIsASeparateSignalFromTokens:
         includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
             side,
             evidence,
-            legacy_compile_db_tokens=("-DWIDE=1",),
-            legacy_compile_db_matched=True,
+            compile_db_tokens=("-DWIDE=1",),
+            compile_db_matched=True,
         )
         assert applied is True
         assert ctx is not None
@@ -177,8 +177,8 @@ class TestLegacyMatchedIsASeparateSignalFromTokens:
         includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
             side,
             evidence,
-            legacy_compile_db_tokens=("-DLEGACY=1",),
-            legacy_compile_db_matched=True,
+            compile_db_tokens=("-DLEGACY=1",),
+            compile_db_matched=True,
         )
         assert applied is True
         assert ctx is not None
@@ -189,7 +189,7 @@ class TestLegacyMatchedIsASeparateSignalFromTokens:
         self, monkeypatch, tmp_path: Path
     ) -> None:
         """Codex review, second round: a caller may pass non-empty
-        `legacy_compile_db_tokens` while leaving `legacy_compile_db_matched`
+        `compile_db_tokens` while leaving `compile_db_matched`
         at its default `False` -- the shape
         `test_legacy_compile_db_typed_threading.py`'s own end-to-end caller
         uses. Non-empty tokens are themselves proof a match occurred, so
@@ -208,8 +208,8 @@ class TestLegacyMatchedIsASeparateSignalFromTokens:
         includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
             side,
             evidence,
-            legacy_compile_db_tokens=("-DWIDE=1",),
-            # legacy_compile_db_matched deliberately omitted (defaults False)
+            compile_db_tokens=("-DWIDE=1",),
+            # compile_db_matched deliberately omitted (defaults False)
         )
         assert applied is True
         assert ctx is not None
@@ -231,7 +231,7 @@ class TestLegacyMatchedIsASeparateSignalFromTokens:
         includes, ctx, applied, cleanups = _seeded_includes_and_compile_context(
             side,
             evidence,
-            legacy_compile_db_tokens=("-DWIDE=1",),
+            compile_db_tokens=("-DWIDE=1",),
         )
         assert applied is True
         assert ctx is not None
@@ -247,20 +247,20 @@ class TestWhitespaceBearingTokensSurviveTheFold:
 
     def test_whitespace_bearing_include_path_is_not_split_apart(self) -> None:
         from abicheck.workflows.artifact.resolve import (
-            _fold_legacy_compile_db_tokens,
+            _fold_compile_db_tokens,
         )
 
-        result = _fold_legacy_compile_db_tokens(None, ("-I", "/opt/SDK Files/include"))
+        result = _fold_compile_db_tokens(None, ("-I", "/opt/SDK Files/include"))
         assert result is not None
         assert result.gcc_option_tokens == ("-I", "/opt/SDK Files/include")
         assert result.gcc_options is None
 
     def test_whitespace_bearing_define_value_is_not_split_apart(self) -> None:
         from abicheck.workflows.artifact.resolve import (
-            _fold_legacy_compile_db_tokens,
+            _fold_compile_db_tokens,
         )
 
-        result = _fold_legacy_compile_db_tokens(None, ("-DNAME=a b",))
+        result = _fold_compile_db_tokens(None, ("-DNAME=a b",))
         assert result is not None
         assert result.gcc_option_tokens == ("-DNAME=a b",)
 
@@ -276,11 +276,11 @@ class TestWhitespaceBearingTokensSurviveTheFold:
         joined string to two fields."""
         from abicheck._compiler_options import split_gcc_options
         from abicheck.workflows.artifact.resolve import (
-            _fold_legacy_compile_db_tokens,
+            _fold_compile_db_tokens,
         )
 
         ctx = CompileContext(gcc_options="-DFOO=explicit")
-        result = _fold_legacy_compile_db_tokens(ctx, ("-DFOO=legacy",))
+        result = _fold_compile_db_tokens(ctx, ("-DFOO=legacy",))
         assert result is not None
         combined = list(result.gcc_option_tokens)
         if result.gcc_options:
@@ -292,11 +292,11 @@ class TestWhitespaceBearingTokensSurviveTheFold:
 
     def test_existing_gcc_option_tokens_still_win_over_legacy(self) -> None:
         from abicheck.workflows.artifact.resolve import (
-            _fold_legacy_compile_db_tokens,
+            _fold_compile_db_tokens,
         )
 
         ctx = CompileContext(gcc_option_tokens=("-DFOO=explicit",))
-        result = _fold_legacy_compile_db_tokens(ctx, ("-DFOO=legacy",))
+        result = _fold_compile_db_tokens(ctx, ("-DFOO=legacy",))
         assert result is not None
         combined = list(result.gcc_option_tokens)
         assert combined.index("-DFOO=legacy") < combined.index("-DFOO=explicit")
@@ -305,9 +305,9 @@ class TestWhitespaceBearingTokensSurviveTheFold:
         """Empty tokens must return *ctx* completely unchanged -- not even
         re-encoded -- so every pre-existing caller is unaffected."""
         from abicheck.workflows.artifact.resolve import (
-            _fold_legacy_compile_db_tokens,
+            _fold_compile_db_tokens,
         )
 
         ctx = CompileContext(gcc_options="-DFOO=1", gcc_option_tokens=("-DBAR=1",))
-        assert _fold_legacy_compile_db_tokens(ctx, ()) is ctx
-        assert _fold_legacy_compile_db_tokens(None, ()) is None
+        assert _fold_compile_db_tokens(ctx, ()) is ctx
+        assert _fold_compile_db_tokens(None, ()) is None

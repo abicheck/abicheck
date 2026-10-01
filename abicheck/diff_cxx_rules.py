@@ -1100,7 +1100,7 @@ def virtual_method_addition(
     non-public/hidden entries) — used both for the already-existed guard
     just below and to consult the shared vtable-evidence predicate further
     down. ``vtable_facts_reliable`` mirrors ``diff_types.py``'s own
-    ``old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable``
+    ``family_reliable(old, "clang_vtable") and family_reliable(new, "clang_vtable")``
     computation for the identical pair of snapshots; a caller that does not
     have both snapshots at hand (unusual — every real caller does) may leave
     it at its conservative default (never declines to defer on account of

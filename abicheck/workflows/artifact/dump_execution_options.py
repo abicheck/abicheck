@@ -108,24 +108,14 @@ class DumpExecutionOptions:
     shared primitive instead of a second, independent call to the same
     underlying fold.
 
-    *legacy_compile_db_tokens* (ADR-063 Phase 1): the castxml flags the CLI's
-    own legacy ``-p``/``--compile-db`` auto-match
-    (``cli_helpers_compare._resolve_build_context_flags``) already derived,
-    forwarded verbatim to :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`
-    -- see that function's own docstring for the precedence rule (the P0.3
-    fold's own result wins whenever it applies) and
-    ``docs/contribute/known-gaps.md``'s "ADR-063 Phase 1" entry for exactly
-    what this closes and what still doesn't. *legacy_compile_db_matched*
-    (Codex review, fresh evidence) is a separate signal from whether any
-    tokens were actually derived -- see the resolve-layer function's own
-    docstring for why a real match with zero derived flags still must set
-    it. Both are passed by the migrated ``dump`` CLI's real run for either
-    binary format (``frontends.cli.dump_execute.execute_dump_cli_run``) --
-    ADR-063 Phase 1 migrated PE/Mach-O onto this same function after ELF, so
-    ``cli_dump_non_elf.handle_non_elf_dump`` stopped being called from
-    ``dump_cmd`` for either format; ADR-063 Track 1 then deleted it, and
-    ``cli_dump_helpers.perform_elf_dump`` with it, once the only thing left
-    holding either alive was its own unit tests.
+    *compile_db*/*compile_db_filter* (ADR-063 Phase 10, Phase 1 row): a
+    ``compile_commands.json`` to match against the dump's headers (the
+    ``-p``/``--compile-db`` flag, or a typed caller's own). The pipeline
+    matches it itself through
+    :func:`~abicheck.workflows.artifact.compile_db_match.match_compile_db` --
+    the CLI used to pre-derive the tokens and pass them in. The derived flags
+    apply only when the P0.3 L3->L2 fold does not; see
+    :func:`~abicheck.workflows.artifact.execute._resolve_side_snapshot_impl`.
 
     *seed_collect_mode*/*source_frontend_from_folded_context* (Codex review
     on the initial ELF migration -- two real regressions it introduced):
@@ -158,7 +148,7 @@ class DumpExecutionOptions:
     build_compile_db: str | None = None
     changed_paths: tuple[str, ...] = ()
     allow_build_query: bool | None = None
-    legacy_compile_db_tokens: tuple[str, ...] = ()
-    legacy_compile_db_matched: bool = False
+    compile_db: Path | None = None
+    compile_db_filter: str | None = None
     seed_collect_mode: str | None = None
     source_frontend_from_folded_context: bool = False

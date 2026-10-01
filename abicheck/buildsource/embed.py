@@ -264,8 +264,9 @@ def embed_build_source(
     if merged is None:
         return
     # ADR-041 addendum / G29 Phase A: the always-on header-only-graph attach
-    # already ran and attached a header-only L5 pack to `snap.build_source`
-    # before this function ran (see service._attach_header_graph, called from
+    # already ran and attached a header-only L5 graph (on `snap.surface_graph`
+    # since ADR-063 Phase 10; on a synthesized `snap.build_source` pack
+    # before it) before this function ran (see service._attach_header_graph, called from
     # cli_dump_helpers before write_snapshot_output). `_combine_packs` above
     # only sees bi_pack/src_pack/inline_pack, so a plain
     # `snap.build_source = merged` would silently drop that graph whenever
@@ -282,15 +283,16 @@ def embed_build_source(
     # not_collected) L5 row even when its source_graph is None, so a chained
     # combine would silently keep reporting L5 as not collected despite the
     # backfilled facts now being present.
-    existing = snap.build_source
-    if (
-        merged.source_graph is None
-        and existing is not None
-        and existing.source_graph is not None
-    ):
-        import dataclasses
+    from ..evidence_depth import embedded_header_graph, header_graph_coverage
 
-        graph_layer = DataLayer.L5_SOURCE_GRAPH.value
+    graph_layer = DataLayer.L5_SOURCE_GRAPH.value
+    existing = snap.build_source
+    adopt_graph = None
+    graph_row = None
+    if existing is not None and existing.source_graph is not None:
+        # A pack-carried graph (a pre-Phase-10 stored header pack, or an
+        # earlier embed), with the coverage row that pack recorded for it.
+        adopt_graph = existing.source_graph
         graph_row = next(
             (
                 c
@@ -299,6 +301,18 @@ def embed_build_source(
             ),
             None,
         )
+    elif existing is None and (header := embedded_header_graph(snap)) is not None:
+        # ADR-063 Phase 10: a header-only dump carries its graph on
+        # `surface_graph` alone; adopt it with the row that graph stands for.
+        adopt_graph = header
+        graph_row = next(
+            c
+            for c in header_graph_coverage(header)
+            if _layer_value(c.layer) == graph_layer
+        )
+    if merged.source_graph is None and adopt_graph is not None:
+        import dataclasses
+
         coverage = [
             c for c in merged.manifest.coverage if _layer_value(c.layer) != graph_layer
         ]
@@ -317,7 +331,7 @@ def embed_build_source(
         # review).
         merged = dataclasses.replace(
             merged,
-            source_graph=existing.source_graph,
+            source_graph=adopt_graph,
             manifest=dataclasses.replace(
                 merged.manifest, coverage=coverage, artifacts=[]
             ),

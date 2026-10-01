@@ -49,7 +49,7 @@ def _snap_with_public_function() -> AbiSnapshot:
     )
 
 
-def test_surface_graph_is_the_same_object_as_build_source_source_graph(
+def test_surface_graph_is_the_one_home_of_the_header_graph(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
@@ -68,9 +68,13 @@ def test_surface_graph_is_the_same_object_as_build_source_source_graph(
         public_header_dirs=None,
     )
 
+    # ADR-063 Phase 10: no synthesized pack; the graph lives on
+    # `surface_graph` alone and still resolves as the snapshot's L5 evidence.
+    from abicheck.evidence_depth import resolve_l5_source_graph
+
     assert snap.surface_graph is not None
-    assert snap.build_source is not None
-    assert snap.surface_graph is snap.build_source.source_graph
+    assert snap.build_source is None
+    assert resolve_l5_source_graph(snap, snap.build_source) is snap.surface_graph
 
 
 def test_surface_graph_carries_the_l5_builders_own_facts(
@@ -176,9 +180,8 @@ def test_compare_surface_graph_facts_can_still_be_populated_on_the_shared_instan
     assert len(f_nodes) == 1
     assert f_nodes[0].kind == "source_decl"
     assert "referenced_identifiers" in f_nodes[0].attrs
-    # Still the same shared instance -- populating it explicitly doesn't
-    # fork it away from AbiSnapshot.build_source.source_graph.
-    assert snap.surface_graph is snap.build_source.source_graph
+    # Populated in place: still the snapshot's one header graph.
+    assert snap.surface_graph is graph
 
 
 def test_no_op_when_header_graph_not_requested(tmp_path: Path) -> None:

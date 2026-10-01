@@ -93,8 +93,9 @@ unconditionally, same reasoning), ``python_api``,
 ``from_headers``, ``semantic_ir`` and ``surface_graph`` (both L2+
 header-AST/header-graph facts, gated the same as ``from_headers`` —
 ``_attach_header_graph``'s own docstring: "the header-only (L2) semantic
-graph", not an L4/L5 fact despite a first version of this module gating it
-to ``source`` on that wrong assumption), ``contract`` (an ADR-050
+graph"; since ADR-063 Phase 10 a *pack-less* snapshot's ``surface_graph`` is
+also its L5 evidence, so :func:`project_snapshot_to_depth` drops it below
+``source`` too whenever no pack survives), ``contract`` (an ADR-050
 ``ExtractionContract`` computed from the same header-scope/compile-context
 inputs this module discards — left alone, it can still make
 ``checker.compare()`` raise a scope/profile mismatch error from two sides'
@@ -649,6 +650,16 @@ def project_snapshot_to_depth(
         out.build_source = _project_build_source_pack(
             pack, rank, build_rank, source_rank
         )
+    if rank < source_rank and out.build_source is None:
+        # ADR-063 Phase 10: with no pack, the header graph on `surface_graph`
+        # is the snapshot's L5 evidence (`evidence_depth.
+        # resolve_l5_source_graph`), so a projection that excludes L5 must
+        # drop it -- exactly what `_project_build_source_pack` does to a
+        # pack's own `source_graph`. A pack that survives (a `build`-depth
+        # projection) keeps it: that pack's explicit L5 "not collected" row
+        # already stops the fallback. Checked after the pack is projected,
+        # since below `build` the pack itself is dropped.
+        out.surface_graph = None
     return out
 
 

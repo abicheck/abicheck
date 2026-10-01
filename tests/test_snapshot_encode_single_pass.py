@@ -258,8 +258,59 @@ def test_fused_walk_matches_asdict_then_sets_to_lists(
         snap.declarations.enums,
     ):
         for item in declaration:
-            expected = _oracle_sets_to_lists(asdict(item))
+            expected = _oracle_sets_to_lists(_with_retired_views(item, asdict(item)))
             assert _encode_value(item) == expected
+
+
+def _with_retired_views(obj: Any, projected: Any) -> Any:
+    """``asdict`` plus the ADR-063 Phase 10 retired bridge fields, which are
+    ``InitVar`` views ``asdict`` cannot see but the document still carries."""
+    from dataclasses import is_dataclass
+
+    from abicheck.model.fact import RetiredBridgeField
+
+    if is_dataclass(obj) and isinstance(projected, dict):
+        out = {k: _with_retired_views(getattr(obj, k), v) for k, v in projected.items()}
+        for name in type(obj).__dataclass_fields__:
+            if isinstance(getattr(type(obj), name, None), RetiredBridgeField):
+                out[name] = getattr(obj, name)
+        return out
+    if isinstance(obj, (list, tuple)) and isinstance(projected, (list, tuple)):
+        return type(projected)(
+            _with_retired_views(o, p) for o, p in zip(obj, projected, strict=True)
+        )
+    return projected
+
+
+def test_retired_bridge_fields_keep_their_historical_document_position() -> None:
+    """The wire order written before ADR-063 Phase 10 retired these fields."""
+    from abicheck.model import Param, RecordType
+
+    rec = _encode_value(RecordType(name="A", kind="class", bases=["B"]))
+    assert list(rec)[:9] == [
+        "name",
+        "kind",
+        "size_bits",
+        "alignment_bits",
+        "fields",
+        "bases",
+        "virtual_bases",
+        "vtable",
+        "source_location",
+    ]
+    assert rec["bases"] == ["B"] and rec["vtable"] == []
+    assert list(rec).index("vptr_offset_bits") < list(rec).index("bases_fact")
+    param = _encode_value(Param(name="p", type="int", is_va_list=True))
+    assert list(param)[:7] == [
+        "name",
+        "type",
+        "kind",
+        "default",
+        "pointer_depth",
+        "is_restrict",
+        "is_va_list",
+    ]
+    assert param["is_va_list"] is True
 
 
 def test_sets_become_sorted_lists_at_every_depth() -> None:
@@ -396,3 +447,18 @@ def test_nested_containers_are_all_fresh_objects() -> None:
     encoded = _encode_value(source)
     encoded["outer"][0]["inner"].append(2)  # type: ignore[index,union-attr]
     assert source == {"outer": [{"inner": [1]}]}
+
+
+def test_a_subclass_keeps_its_own_fields_and_the_retired_views() -> None:
+    from dataclasses import dataclass
+
+    from abicheck.model import Param
+
+    @dataclass(slots=True)
+    class TaggedParam(Param):
+        tag: str = "x"
+
+    encoded = _encode_value(TaggedParam(name="p", type="int", is_va_list=True, tag="t"))
+    assert encoded["tag"] == "t"
+    assert encoded["is_va_list"] is True
+    assert list(encoded)[-1] == "tag"

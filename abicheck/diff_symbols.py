@@ -147,6 +147,7 @@ from .model import (
 # for back-compat.
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .model.change_catalog.kinds import ChangeKind
+from .model.snapshot_reliability import family_reliable
 from .model.surface_facts import (
     is_abi_visible,
     is_export_confirmed_absent,
@@ -494,7 +495,7 @@ def _params_differ(p_old: Param, p_new: Param, is_llp64: bool) -> bool:
     # Gated through compare_facts rather than a bare `p_old.kind !=
     # p_new.kind`: neither header-AST backend
     # determined a parameter's indirection kind at all before schema v45
-    # (AbiSnapshot.param_kind_facts_reliable), so every parameter's `kind`
+    # (the stale 'param_kind' fact family (model.snapshot_reliability)), so every parameter's `kind`
     # read the dataclass's own resting ParamKind.VALUE -- comparing that raw
     # default against DWARF's real POINTER/REFERENCE/RVALUE_REF reading
     # fabricated FUNC_PARAMS_CHANGED for every pointer/reference parameter
@@ -1089,8 +1090,8 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # snapshots -- see virtual_method_addition's own docstring for why it
     # needs this to decide whether TYPE_VTABLE_CHANGED would decline for a
     # reason unrelated to evidence (a legacy pre-v21 direct-clang snapshot).
-    vtable_facts_reliable = (
-        old.clang_vtable_facts_reliable and new.clang_vtable_facts_reliable
+    vtable_facts_reliable = family_reliable(old, "clang_vtable") and family_reliable(
+        new, "clang_vtable"
     )
 
     # Build a lookup of ALL functions in new snapshot (including hidden).
@@ -1299,7 +1300,9 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     what performs the join, so both flat symbol paths share one implementation
     and one ambiguity contract.
     """
-    cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
+    cv_facts_reliable = family_reliable(old, "header_cv") and family_reliable(
+        new, "header_cv"
+    )
     old_vars, _reconciled_new_vars = _reconciled_variable_surfaces(old, new)
     new_vars_index = SymbolIdentityIndex.for_variables(_reconciled_new_vars)
     _prewarm_elf_only_demangling(old_vars, new_vars_index)
@@ -1678,12 +1681,10 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     comparing it against a header-parsed side reports every real ``restrict``
     as removed/added purely from an evidence-tier difference.
 
-    Additionally declined when either side's restrict facts are marked
-    unreliable (``AbiSnapshot.clang_restrict_facts_reliable``): the
-    direct-clang backend populated this fact for the first time in schema
-    v22, so a persisted pre-v22 clang/hybrid baseline's blanket ``False``
-    is real-but-WRONG data — indistinguishable by value from a genuinely
-    unqualified parameter, exactly like the pre-v21 clang vtable case.
+    A persisted pre-v22 clang/hybrid baseline's blanket ``False`` is
+    real-but-WRONG data; loading it leaves every ``Param.is_restrict_fact``
+    ``NOT_COLLECTED`` (``storage.fact_backfill``), so the per-parameter
+    ``compare_facts`` gate declines it -- no snapshot-wide check is needed.
 
     Two *reliable* header sides may safely be compared across producers:
     since v22 both backends populate this fact, and unlike ``Param.default``
@@ -1700,8 +1701,6 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     from .diff_param_qualifiers import param_restrict_changes
 
     if not _both_header_aware(old, new):
-        return []
-    if not (old.clang_restrict_facts_reliable and new.clang_restrict_facts_reliable):
         return []
     return param_restrict_changes(*_reconciled_function_surfaces(old, new))
 
@@ -1864,8 +1863,6 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
     if old.ast_producer != "clang" or new.ast_producer != "clang":
         return []
-    if not (old.clang_va_list_facts_reliable and new.clang_va_list_facts_reliable):
-        return []
     return param_va_list_changes(*_reconciled_function_surfaces(old, new))
 
 
@@ -1932,16 +1929,12 @@ def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect global data access level changes (ABICC: Global_Data_Became_Private/Protected/Public).
 
     Header-tier, "castxml"-producer-ONLY (not "hybrid" either -- same
-    coverage-shift risk as ``param_va_list`` above), reliability-gated --
-    see ``AbiSnapshot.castxml_var_access_facts_reliable`` (G31 Phase C
-    continued) for the full reasoning.
+    coverage-shift risk as ``param_va_list`` above). A legacy document whose
+    access facts cannot be trusted loads with ``Variable.access_fact``
+    ``NOT_COLLECTED``, which the per-variable gate declines.
     """
     if not _both_header_aware(old, new):
         return []
     if old.ast_producer != "castxml" or new.ast_producer != "castxml":
-        return []
-    if not (
-        old.castxml_var_access_facts_reliable and new.castxml_var_access_facts_reliable
-    ):
         return []
     return var_access_changes(*_reconciled_variable_surfaces(old, new))

@@ -73,6 +73,7 @@ from ..errors import IncompatibleSnapshotSchemaError, SnapshotError
 from ..model import AbiSnapshot, DependencyInfo
 from ..model.header_exclusion_record import normalize_matching
 from ..model.semantic_ir_legacy_adapter import finalize_snapshot_semantic_ir
+from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from ..snapshot_platform_blocks import (
     dwarf_advanced_from_dict as _dwarf_advanced_from_dict,
     dwarf_from_dict as _dwarf_from_dict,
@@ -487,43 +488,15 @@ def decode_snapshot(
         ast_sysroot=ast_sysroot,
         dwarf_layout_coherence=dwarf_layout_coherence,
         dwarf_layout_coherence_mismatches=dwarf_layout_coherence_mismatches,
-        # See header_cv_facts_reliable_value's computation above: prefers an
-        # explicit dict key (round-trip stability) and otherwise derives
-        # from schema_version scoped to the CastXML header path specifically
-        # (Codex review, PR #582).
-        header_cv_facts_reliable=header_cv_facts_reliable_value,
-        # See clang_deprecation_facts_reliable_value's computation above:
-        # prefers an explicit dict key (round-trip stability) and otherwise
-        # derives from schema_version, scoped to the clang-producer path
-        # specifically (Codex review, fresh evidence).
-        clang_deprecation_facts_reliable=clang_deprecation_facts_reliable_value,
-        # See clang_field_initializer_facts_reliable_value's computation
-        # above: prefers an explicit dict key, falling back to a
-        # schema_version + producer derivation.
-        clang_field_initializer_facts_reliable=(
-            clang_field_initializer_facts_reliable_value
+        # ADR-063 Phase 10: the eight former `*_facts_reliable` booleans,
+        # each preferring an explicit dict key (round-trip stability) and
+        # otherwise derived from schema_version + producer
+        # (storage/snapshot_reliability_flags.py), recorded as one set.
+        stale_fact_families=frozenset(
+            family
+            for family in FACT_FAMILIES
+            if not reliability_flags[flag_name(family)]
         ),
-        # See clang_vtable_facts_reliable_value's computation above: prefers
-        # an explicit dict key, falling back to a schema_version + producer
-        # derivation scoped to the direct-clang path specifically.
-        clang_vtable_facts_reliable=clang_vtable_facts_reliable_value,
-        # See clang_restrict_facts_reliable_value's computation above: prefers
-        # an explicit dict key, falling back to a schema_version + producer
-        # derivation covering the clang and hybrid paths alike.
-        clang_restrict_facts_reliable=clang_restrict_facts_reliable_value,
-        # See clang_va_list_facts_reliable_value's computation above: prefers
-        # an explicit dict key, falling back to a schema_version + producer
-        # derivation scoped to the "clang" producer specifically (NOT
-        # "hybrid" — see the field's own docstring).
-        clang_va_list_facts_reliable=clang_va_list_facts_reliable_value,
-        # See castxml_var_access_facts_reliable_value's computation above:
-        # prefers an explicit dict key, falling back to a schema_version +
-        # producer derivation scoped to the "castxml" producer specifically.
-        castxml_var_access_facts_reliable=castxml_var_access_facts_reliable_value,
-        # See param_kind_facts_reliable_value's computation above: prefers an
-        # explicit dict key, falling back to a schema_version + from_headers
-        # derivation covering both header-AST backends alike.
-        param_kind_facts_reliable=param_kind_facts_reliable_value,
         # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
         # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
         # loads as the empty dict (same "unknown" default as a fresh snapshot).

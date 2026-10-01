@@ -1182,7 +1182,7 @@ def compile_db_filter_scope_error(
     """Refuse a filter that would scope L2 but silently not L3.
 
     ``--compile-db-filter`` parameterizes the **header parse** only: the
-    filtered subset is what ``_resolve_build_context_flags`` proves a match
+    filtered subset is what ``workflows.artifact.compile_db_match.match_compile_db`` proves a match
     against and what the AST is built from. L3 collection reads the database
     through ``embed_build_source``'s own adapter, which has no filter of its
     own -- so on a monorepo database the embedded build facts cover every

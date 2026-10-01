@@ -380,7 +380,7 @@ class TestTheWarmRunReallySkipsTheParse:
         )
 
     def _graph_shape(self, snap) -> tuple:
-        g = snap.build_source.source_graph
+        g = snap.surface_graph
         return (
             tuple(
                 sorted((n.id, n.kind, tuple(sorted(n.attrs.items()))) for n in g.nodes)
@@ -613,8 +613,8 @@ class TestThePathsWhereNoAstIsAcquired:
         without reproducing how a caller reaches it.
         """
         snap = self._attach(self._snapshot(), [Path("no-such-header.h")])
-        assert snap.build_source is not None
-        assert snap.build_source.source_graph is not None
+        assert snap.surface_graph is not None
+        assert snap.surface_graph is not None
 
     @pytest.mark.parametrize("exc_name", ["SnapshotError", "ValidationError"])
     def test_a_failed_clang_acquisition_still_attaches_a_graph(
@@ -639,8 +639,8 @@ class TestThePathsWhereNoAstIsAcquired:
         monkeypatch.setattr("abicheck.dumper._clang_header_dump", raising)
 
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
-        assert snap.build_source is not None
-        assert snap.build_source.source_graph is not None
+        assert snap.surface_graph is not None
+        assert snap.surface_graph is not None
 
     @pytest.mark.parametrize(
         ("label", "ast"),
@@ -694,8 +694,8 @@ class TestThePathsWhereNoAstIsAcquired:
         )
 
         snap = self._attach(self._snapshot(), [Path(PUBLIC_HEADER)])
-        assert snap.build_source is not None
-        assert snap.build_source.source_graph is not None
+        assert snap.surface_graph is not None
+        assert snap.surface_graph is not None
 
     def test_the_misshapen_asts_really_do_break_the_readers(self) -> None:
         """Vacuity guard: each fixture above must actually raise.
@@ -809,7 +809,7 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
 
     @staticmethod
     def _shape(snap) -> tuple:
-        g = snap.build_source.source_graph
+        g = snap.surface_graph
         return (
             tuple(sorted((n.id, n.kind) for n in g.nodes)),
             tuple(sorted((e.src, e.dst, e.kind) for e in g.edges)),

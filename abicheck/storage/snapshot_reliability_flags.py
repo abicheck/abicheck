@@ -168,7 +168,7 @@ def decode_reliability_flags(
         # function, so only its clang-ONLY appended functions carry clang's
         # blanket-False parameters -- but that is enough to need the flag,
         # exactly as the pre-v20 hybrid clang-only-append case did for
-        # field initializers. See AbiSnapshot.clang_restrict_facts_reliable.
+        # field initializers. See the stale 'clang_restrict' fact family (model.snapshot_reliability).
         clang_restrict_facts_reliable_value = (
             not from_headers
             or ast_producer_value == "castxml"
@@ -182,7 +182,7 @@ def decode_reliability_flags(
         # Unlike clang_restrict_facts_reliable, this does NOT special-case
         # "hybrid" as trusted — `diff_symbols._diff_param_va_list` excludes
         # "hybrid" from its producer gate entirely (Codex review; see
-        # AbiSnapshot.clang_va_list_facts_reliable's own docstring for why),
+        # the stale 'clang_va_list' fact family (model.snapshot_reliability)'s own docstring for why),
         # so this flag's value is consulted only for a "clang" snapshot. The
         # `== "castxml"` spelling still matters for treating an untracked
         # pre-`ast_producer` snapshot (None here) as possibly clang-family
@@ -205,7 +205,7 @@ def decode_reliability_flags(
         # trusted-by-irrelevance" — an untracked pre-`ast_producer` snapshot
         # (None here) is treated as possibly castxml rather than silently
         # trusted, same principle as the others. See
-        # AbiSnapshot.castxml_var_access_facts_reliable's own docstring for
+        # the stale 'castxml_var_access' fact family (model.snapshot_reliability)'s own docstring for
         # why "hybrid" is NOT treated as trusted-by-irrelevance either.
         castxml_var_access_facts_reliable_value = (
             not from_headers

@@ -7,7 +7,7 @@ AI-readiness file-size cap (it is otherwise part of the same test area and
 uses the same `_rec` helper convention).
 
 The two helpers here are the load-bearing primitives behind the "confirmed-
-public-header-origin record" seed in `compute_public_surface` -- an earlier
+public-header-origin record" seed in `resolve_public_surface` -- an earlier
 draft of that seed shipped several real gaps (promoting a `GENERATED`-origin
 type, promoting a private/protected nested class, promoting a function-local
 record, and -- the most recent -- misreading an unrelated record's own
@@ -15,7 +15,7 @@ trailing-segment *alias* as evidence that an unrelated namespace is really a
 class), each caught only after landing, via automated review rather than a
 hand-written test. Per this repo's own "Primitive-level property tests"
 convention (AGENTS.md), these test the primitives' actual contracts as
-invariants, decoupled from the one `compute_public_surface` caller and from
+invariants, decoupled from the one `resolve_public_surface` caller and from
 any one example input, rather than only pinning the reported cases. A
 hand-written example test only forecloses the specific input it names --
 these are what would have caught each gap *before* it needed an external
@@ -34,8 +34,9 @@ from abicheck.policy.public_surface_closure import (
     _record_exact_identities,
     _record_is_confirmed_public_seed,
     _record_nested_in_known_record,
+    resolve_public_surface,
 )
-from abicheck.surface import classify_change_surface, compute_public_surface
+from abicheck.surface import classify_change_surface
 
 
 def _rec(
@@ -182,7 +183,7 @@ class _FakeSnapshot:
 
 class TestUnrelatedRecordAliasDoesNotHideANamespacedTypeEndToEnd:
     """Same regression as `TestExactIdentitiesRejectsAliasCollisions`, but
-    end-to-end through `compute_public_surface`/`classify_change_surface`
+    end-to-end through `resolve_public_surface`/`classify_change_surface`
     (not just the two extracted primitives directly) -- confirming the real
     caller's own wiring, not only the primitives in isolation."""
 
@@ -194,7 +195,7 @@ class TestUnrelatedRecordAliasDoesNotHideANamespacedTypeEndToEnd:
             version="1",
             # An unrelated public function is required so header-derived
             # public visibility (and therefore scoping) actually engages --
-            # otherwise `compute_public_surface` treats every type as public
+            # otherwise `resolve_public_surface` treats every type as public
             # regardless of this test's own bug (ADR-016: no headers means
             # no scoping at all).
             functions=[_fn("other_api", origin=ScopeOrigin.PUBLIC_HEADER)],
@@ -219,7 +220,7 @@ class TestUnrelatedRecordAliasDoesNotHideANamespacedTypeEndToEnd:
                 ),
             ],
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="api::Thing", description=""
         )

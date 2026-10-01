@@ -338,8 +338,9 @@ def build_contract_stage(
     from .compatibility_evaluation_wiring import resolve_legacy_contract_mode
     from .contract_evidence_collect import collect_contract_evidence
     from .contract_relevance_types import coerce_contract_mode
-    from .export_surface import ExportSurface, compute_export_surface
-    from .surface import PublicSurface, compute_public_surface
+    from .export_surface import ExportSurface
+    from .policy.public_surface_query import PublicSurfaceQuery
+    from .surface import PublicSurface
     from .type_reachability import directly_referenced_stdlib_type_spellings
 
     surf_old = pp_ctx.surf_old if old is not None else PublicSurface()
@@ -351,8 +352,12 @@ def build_contract_stage(
         # never computes them, so compute independently here (mirroring
         # that step's own call) rather than leave contract evaluation
         # entirely unresolvable for those runs.
-        surf_old = compute_public_surface(old) if old is not None else PublicSurface()
-        surf_new = compute_public_surface(new)
+        surf_old = (
+            PublicSurfaceQuery.resolve_public_domain(old)
+            if old is not None
+            else PublicSurface()
+        )
+        surf_new = PublicSurfaceQuery.resolve_public_domain(new)
 
     # ADR-049 D7 precedence: an explicit `--contract` (EXPLICIT_CLI) outranks
     # the legacy `--scope-public-headers`/`--no-scope-public-headers` alias
@@ -388,8 +393,12 @@ def build_contract_stage(
     # re-reading the binaries" guarantee Phase 4 advertises (Codex review,
     # fresh evidence). The cost is one export-table match per side, paid only
     # under `--contract`, which is off by default.
-    exports_old = compute_export_surface(old) if old is not None else ExportSurface()
-    exports_new = compute_export_surface(new)
+    exports_old = (
+        PublicSurfaceQuery.resolve_export_domain(old)
+        if old is not None
+        else ExportSurface()
+    )
+    exports_new = PublicSurfaceQuery.resolve_export_domain(new)
 
     # Independent of the mode/header resolutions above: a per-side signature
     # scan over the raw snapshot, not a public-surface closure. Computed

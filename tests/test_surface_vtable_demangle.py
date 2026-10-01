@@ -49,10 +49,10 @@ from abicheck.model.owner_recovery import (
     itanium_special_name_owner_identifiers,
     itanium_special_name_owner_scope_components,
 )
+from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.surface import (
     REASON_NON_PUBLIC_TYPE,
     classify_change_surface,
-    compute_public_surface,
 )
 
 
@@ -92,7 +92,7 @@ def _rec(name):
 
 class TestMangledVtableSymbolSurfaceClassification:
     def _surf(self, snap):
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     def test_mangled_vtable_symbol_demotes_a_non_public_type(self):
         snap = AbiSnapshot(
@@ -320,7 +320,7 @@ class TestTemplatedOwnerHostIndependence:
     """
 
     def _surf(self, snap):
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     #: Representative libstdc++-shaped and user-shaped templated owners
     #: (mangled symbol, declared type name the owner is *composed of* that
@@ -407,7 +407,7 @@ class TestNamespaceComponentCannotMasqueradeAsOwner:
     """
 
     def _surf(self, snap):
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     def test_unrelated_type_sharing_a_bare_namespace_name_cannot_demote(self):
         # "ns" is modeled (so it participates in `all_types`) but is neither
@@ -574,7 +574,7 @@ class TestDemanglerFallbackForUnparseableShapes:
     """
 
     def _surf(self, snap):
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     #: (mangled symbol, declared type name the demangled spelling is
     #: composed of, present in `types=` but unreachable from any public
@@ -709,7 +709,7 @@ class TestStandardSubstitutionOwnerResolvesStructurally:
     """
 
     def _surf(self, snap):
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     def test_bare_substitution_owner_resolves_without_a_demangler(self):
         import abicheck.surface as surface_mod
@@ -775,7 +775,7 @@ class TestStdSubstitutionOwnerDemotesLikeItsFullySpelledEquivalent:
     emit for a given translation unit."""
 
     def _surf(self, snap):
-        return compute_public_surface(snap)
+        return resolve_public_surface(snap)
 
     def test_substituted_and_spelled_out_forms_classify_identically(self):
         # Only the qualified `std::vector` is modeled (not a bare `vector`)

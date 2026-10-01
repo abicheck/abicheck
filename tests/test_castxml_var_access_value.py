@@ -51,6 +51,7 @@ from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.dumper import _CastxmlParser
 from abicheck.model import AbiSnapshot, AccessLevel, Fact, Variable
+from tests._legacy_snapshot import as_legacy_baseline
 
 
 def _make_root_with_static_members_and_free_var() -> Element:
@@ -560,12 +561,10 @@ class TestVarAccessProducerGate:
     def test_two_hybrid_sides_never_fire(self) -> None:
         old = _snap(
             ast_producer="hybrid",
-            castxml_var_access_facts_reliable=True,
             variables=[_var(AccessLevel.PUBLIC)],
         )
         new = _snap(
             ast_producer="hybrid",
-            castxml_var_access_facts_reliable=True,
             variables=[_var(AccessLevel.PRIVATE)],
         )
         assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(compare(old, new))
@@ -587,25 +586,24 @@ class TestLegacyCastxmlVarAccessBaselineSuppression:
     def test_reproduces_without_the_flag(self) -> None:
         old = _snap(
             ast_producer="castxml",
-            castxml_var_access_facts_reliable=True,
             variables=[_var(AccessLevel.PUBLIC)],
         )
         new = _snap(
             ast_producer="castxml",
-            castxml_var_access_facts_reliable=True,
             variables=[_var(AccessLevel.PRIVATE)],
         )
         assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(compare(old, new))
 
     def test_legacy_castxml_baseline_suppresses_the_finding(self) -> None:
-        old = _snap(
-            ast_producer="castxml",
-            castxml_var_access_facts_reliable=False,
-            variables=[_var(AccessLevel.PUBLIC)],
+        old = as_legacy_baseline(
+            _snap(
+                ast_producer="castxml",
+                variables=[_var(AccessLevel.PUBLIC)],
+            ),
+            23,
         )
         new = _snap(
             ast_producer="castxml",
-            castxml_var_access_facts_reliable=True,
             variables=[_var(AccessLevel.PRIVATE)],
         )
         assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(compare(old, new))
@@ -622,7 +620,6 @@ class TestVarAccessFactStatusGating:
     def test_uncollected_old_side_declines(self) -> None:
         old = _snap(
             ast_producer="castxml",
-            castxml_var_access_facts_reliable=True,
             variables=[
                 Variable(
                     name="data",
@@ -634,7 +631,6 @@ class TestVarAccessFactStatusGating:
         )
         new = _snap(
             ast_producer="castxml",
-            castxml_var_access_facts_reliable=True,
             variables=[_var(AccessLevel.PRIVATE)],
         )
         result = compare(old, new)

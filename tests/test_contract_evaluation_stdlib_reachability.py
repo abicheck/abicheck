@@ -38,7 +38,7 @@ from abicheck.model import (
     ScopeOrigin,
     Visibility,
 )
-from abicheck.surface import compute_public_surface
+from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.type_reachability import directly_referenced_stdlib_type_spellings
 
 
@@ -73,7 +73,7 @@ class TestPublicModeDirectlyReferencedStdlib:
         # (surface.py never walks into it) -- confirmation must come purely
         # from the reachability evidence.
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="vector<int, std::allocator<int> >",
@@ -107,7 +107,7 @@ class TestPublicModeDirectlyReferencedStdlib:
         # matching only) landed. The vector itself is genuinely NOT among
         # the directly-referenced identities here.
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="vector<int, std::allocator<int> >",
@@ -132,7 +132,7 @@ class TestPublicModeDirectlyReferencedStdlib:
         # manufacture confidence about an old, unresolved obligation, same
         # as the existing public_types side-authority rule.
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="vector<int, std::allocator<int> >",
@@ -155,7 +155,7 @@ class TestPublicModeDirectlyReferencedStdlib:
         # Default None on both -- every pre-existing caller's behaviour is
         # unchanged.
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="vector<int, std::allocator<int> >",
@@ -179,10 +179,10 @@ class TestExportOnlyReferenceDoesNotConfirmThePublicContract:
     ``s`` here) so this isolates ``_in_surface_result_is_confirmed``'s
     *second* confirmation source (``directly_referenced_stdlib_old``/
     ``_new``) from its first (``auth.public_types``, via
-    ``compute_public_surface``) -- mirroring how
+    ``resolve_public_surface``) -- mirroring how
     ``TestPublicModeDirectlyReferencedStdlib`` above already decouples the
     two so a synthetic evidence set alone drives the assertion. Feeding the
-    same snapshot into both ``compute_public_surface`` and
+    same snapshot into both ``resolve_public_surface`` and
     ``directly_referenced_stdlib_type_spellings`` would let
     ``surface.py``'s own closure -- which, unlike this module, seeds a type
     from a ``Visibility.PUBLIC`` declaration of *any* origin including
@@ -210,7 +210,7 @@ class TestExportOnlyReferenceDoesNotConfirmThePublicContract:
         # plain public function with no stdlib reference at all, just to
         # make the surface resolvable (`has_public`) without itself
         # contributing anything to `public_types`.
-        s = compute_public_surface(
+        s = resolve_public_surface(
             AbiSnapshot(library="l", version="1", functions=[_fn("api")])
         )
         evidence = directly_referenced_stdlib_type_spellings(
@@ -241,7 +241,7 @@ class TestExportOnlyReferenceDoesNotConfirmThePublicContract:
         # plain public function with no stdlib reference at all, just to
         # make the surface resolvable (`has_public`) without itself
         # contributing anything to `public_types`.
-        s = compute_public_surface(
+        s = resolve_public_surface(
             AbiSnapshot(library="l", version="1", functions=[_fn("api")])
         )
         evidence = directly_referenced_stdlib_type_spellings(evidence_snap)

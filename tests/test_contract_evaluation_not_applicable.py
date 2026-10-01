@@ -38,7 +38,8 @@ from abicheck.contract_relevance_types import (
     ContractRelevance,
 )
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin, Visibility
-from abicheck.surface import PublicSurface, compute_public_surface
+from abicheck.policy.public_surface_closure import resolve_public_surface
+from abicheck.surface import PublicSurface
 
 
 def _fn(name, vis=Visibility.PUBLIC, origin=ScopeOrigin.UNKNOWN, mangled=None):
@@ -71,7 +72,7 @@ class TestNotApplicableKinds:
 
     def test_not_applicable_kind_wins_even_with_resolvable_surfaces(self) -> None:
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.RELRO_WEAKENED, symbol="", description="")
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.NOT_APPLICABLE

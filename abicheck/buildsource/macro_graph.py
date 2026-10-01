@@ -17,7 +17,7 @@
 second open graph family).
 
 Populates two of the five edge kinds the plan originally sketched for this
-family (:data:`~abicheck.buildsource.graph_facts.MACRO_DEP_EDGE_KINDS`):
+family (:data:`~abicheck.model.graph_facts.MACRO_DEP_EDGE_KINDS`):
 
 - :data:`EDGE_MACRO_CONTROLS_DECL` (macro node -> source_decl node) — a
   declaration is compiled only under a simple ``#ifdef X`` / ``#ifndef X`` /
@@ -197,8 +197,8 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
 from ..model.mangled_name import strip_macho_itanium_decoration
-from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
 from .preprocessor_facts import _DEFINE_RE
 from .type_graph import (
     _FUNCTION_DECL_KINDS,

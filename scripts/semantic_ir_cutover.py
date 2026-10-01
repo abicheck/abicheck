@@ -88,6 +88,7 @@ check) or directly for a standalone report.
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -279,6 +280,211 @@ def legacy_collection_reads(
     return sorted(set(found))
 
 
+# ---------------------------------------------------------------------------
+# Backend-specific declaration representations (ADR-063 6B closure).
+#
+# Since Phase 10 the snapshot's declarations live inside its SemanticIR, so the
+# checker can no longer read a legacy `AbiSnapshot.functions`/`types`
+# collection at all. The one *second* representation of declarations a
+# snapshot still carries is the debug-format side: `AbiSnapshot.dwarf`
+# (`DwarfMetadata.structs`/`enums`, a per-CU layout model with no identity)
+# and `AbiSnapshot.dwarf_advanced`. Criterion (4) of the plan's mechanical
+# definition of done is "the checker reads no backend-specific collection
+# directly", so every checker read of those two fields is recorded below and
+# may only shrink: a new reader fails, and an entry whose reads are gone must
+# be lowered or deleted. Each remaining entry is either a presence check
+# (`has_dwarf`, an evidence tier) or a DWARF-layout detector whose model
+# carries no identity to join into the IR (the plan's 2B sweep note).
+
+#: The checker layers this rule scopes to. Producers, storage and model build
+#: these representations, so they are out of scope.
+CHECKER_GLOBS: tuple[str, ...] = (
+    "abicheck/compare/**/*.py",
+    "abicheck/policy/**/*.py",
+    "abicheck/diff_*.py",
+    "abicheck/checker*.py",
+    "abicheck/detector*.py",
+    "abicheck/post_processing*.py",
+    "abicheck/internal_leak.py",
+    "abicheck/type_reachability*.py",
+    "abicheck/confidence.py",
+    "abicheck/analysis_assurance*.py",
+    "abicheck/export_surface.py",
+    "abicheck/surface*.py",
+    "abicheck/contract_*.py",
+    "abicheck/idioms.py",
+    "abicheck/pattern_verdicts.py",
+)
+
+BACKEND_DECLARATION_FIELDS: frozenset[str] = frozenset({"dwarf", "dwarf_advanced"})
+
+#: `(module, enclosing qualname, field) -> read count`: the reviewed baseline.
+KNOWN_BACKEND_DECLARATION_READERS: dict[tuple[str, str, str], int] = {
+    ("abicheck/analysis_assurance.py", "_dwarf_context_status", "dwarf"): 2,
+    ("abicheck/analysis_assurance.py", "_dwarf_context_status", "dwarf_advanced"): 2,
+    (
+        "abicheck/analysis_assurance_layout.py",
+        "layout_unverified_detectors",
+        "dwarf",
+    ): 2,
+    (
+        "abicheck/analysis_assurance_layout.py",
+        "layout_unverified_detectors",
+        "dwarf_advanced",
+    ): 2,
+    ("abicheck/checker.py", "_diff_advanced_dwarf", "dwarf_advanced"): 4,
+    ("abicheck/compare/debug_type_join.py", "join_debug_types", "dwarf"): 1,
+    ("abicheck/compare/edge_query.py", "debug_coverage_record", "dwarf"): 2,
+    ("abicheck/confidence.py", "_detect_evidence_tiers", "dwarf"): 4,
+    ("abicheck/confidence.py", "_detect_evidence_tiers", "dwarf_advanced"): 4,
+    ("abicheck/diff_filtering.py", "_enum_canonical_names", "dwarf"): 1,
+    ("abicheck/diff_helpers.py", "record_canonical_names", "dwarf"): 1,
+    ("abicheck/diff_helpers.py", "typedef_flat_map_is_dwarf_qualified", "dwarf"): 1,
+    ("abicheck/diff_long_double.py", "_ld_base_size", "dwarf"): 1,
+    ("abicheck/diff_platform.py", "_diff_dwarf", "dwarf"): 2,
+    ("abicheck/diff_platform.py", "_has_any_dwarf", "dwarf"): 2,
+    ("abicheck/diff_symbols.py", "_is_stripped_symbols_only", "dwarf"): 1,
+    ("abicheck/diff_types.py", "_has_type_evidence", "dwarf"): 1,
+    ("abicheck/internal_leak.py", "_build_type_map", "dwarf"): 1,
+    (
+        "abicheck/policy/analysis_assurance_schema_staleness.py",
+        "_side_is_stripped_symbols_only",
+        "dwarf",
+    ): 1,
+    (
+        "abicheck/policy/depth_projection.py",
+        "_strip_header_and_above_evidence",
+        "dwarf",
+    ): 5,
+    (
+        "abicheck/policy/depth_projection.py",
+        "_structural_facts_are_dwarf_confirmed",
+        "dwarf",
+    ): 2,
+    ("abicheck/surface_graph.py", "_evidence_tier", "dwarf"): 1,
+}
+
+
+def _checker_modules() -> list[Path]:
+    return sorted({p for g in CHECKER_GLOBS for p in REPO_ROOT.glob(g)})
+
+
+def backend_declaration_reads(tree: ast.AST) -> dict[tuple[str, str], int]:
+    """`(enclosing qualname, field) -> count` of every read of a
+    :data:`BACKEND_DECLARATION_FIELDS` field in *tree*: an attribute access,
+    or a `getattr` call through any alias :func:`legacy_collection_reads`
+    also resolves."""
+    module_aliases = _builtins_module_aliases(tree)
+    getattr_aliases = _getattr_aliases(tree, module_aliases)
+    counts: dict[tuple[str, str], int] = {}
+
+    def visit(node: ast.AST, qualname: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            scope = qualname
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                scope = f"{qualname}.{child.name}" if qualname else child.name
+            field_name = None
+            if (
+                isinstance(child, ast.Attribute)
+                and child.attr in BACKEND_DECLARATION_FIELDS
+                and (
+                    isinstance(child.ctx, ast.Load)
+                    or (isinstance(node, ast.AugAssign) and child is node.target)
+                )
+            ):
+                field_name = child.attr
+            elif (
+                isinstance(child, ast.Call)
+                and _is_getattr_call(child, getattr_aliases, module_aliases)
+                and len(child.args) >= 2
+                and isinstance(child.args[1], ast.Constant)
+                and child.args[1].value in BACKEND_DECLARATION_FIELDS
+            ):
+                field_name = child.args[1].value
+            if field_name is not None:
+                key = (qualname or "<module>", field_name)
+                counts[key] = counts.get(key, 0) + 1
+            visit(child, scope)
+
+    visit(tree, "")
+    return counts
+
+
+def current_backend_declaration_readers() -> dict[tuple[str, str, str], int]:
+    """Every checker read of a backend-specific declaration field, now."""
+    found: dict[tuple[str, str, str], int] = {}
+    for path in _checker_modules():
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
+        except SyntaxError:
+            continue
+        for (qualname, field_name), n in backend_declaration_reads(tree).items():
+            name = _unmangled_qualname(qualname)
+            if name is None:
+                continue
+            key = (rel, name, field_name)
+            # max, not sum: in a mutmut tree one source function can appear
+            # as more than one copy that maps back to its name (observed:
+            # every read counted exactly twice), and it is still one reader.
+            found[key] = max(found.get(key, 0), n)
+    return found
+
+
+#: mutmut's copy of a function: ``x_<name>__mutmut_<n|orig>`` (module level,
+#: so ``_f`` becomes ``x__f__mutmut_orig``) or ``xǁ<Class>ǁ<name>__mutmut_...``
+#: (method).
+_MUTMUT_NAME = re.compile(r"^x(?:_|ǁ\w+ǁ)(?P<name>\w+?)__mutmut_(?P<which>orig|\d+)$")
+
+
+def _unmangled_qualname(qualname: str) -> str | None:
+    """*qualname* as written in the source, or ``None`` for a mutant copy.
+
+    Run from a mutmut ``mutants/`` tree, every function body exists as
+    ``..._mutmut_orig`` plus one numbered copy per mutant: the original is
+    the reader the baseline names, and the mutants are not readers at all.
+    Without this, the gate reported every baselined reader as new there.
+    """
+    head, _, last = qualname.rpartition(".")
+    match = _MUTMUT_NAME.match(last)
+    if match is None:
+        return qualname
+    if match["which"] != "orig":
+        return None
+    return f"{head}.{match['name']}" if head else match["name"]
+
+
+def backend_declaration_problems(
+    current: dict[tuple[str, str, str], int],
+    baseline: dict[tuple[str, str, str], int],
+) -> list[str]:
+    """Why *current* disagrees with *baseline*: a read above its baseline
+    (a new reader), or a baseline above its reads (a stale entry)."""
+    problems: list[str] = []
+    for key, n in sorted(current.items()):
+        allowed = baseline.get(key, 0)
+        if n > allowed:
+            rel, qualname, field_name = key
+            problems.append(
+                f"{rel}: {qualname} reads `AbiSnapshot.{field_name}` {n} time(s) "
+                f"(baseline {allowed}). The checker reads declarations through "
+                "the snapshot's SemanticIR (ADR-063 6B); a backend-specific "
+                "representation is not an input for a new detector. Read "
+                "`snapshot.declarations`/the IR, or fold the fact into the IR "
+                "at extraction"
+            )
+    for key, allowed in sorted(baseline.items()):
+        if current.get(key, 0) < allowed:
+            rel, qualname, field_name = key
+            problems.append(
+                f"KNOWN_BACKEND_DECLARATION_READERS[{key!r}] = {allowed}, but "
+                f"{rel}:{qualname} now reads `{field_name}` "
+                f"{current.get(key, 0)} time(s) -- lower the baseline (it only "
+                "shrinks)"
+            )
+    return problems
+
+
 def check_semantic_ir_cutover(f) -> None:  # noqa: ANN001 - Findings, see caller
     """ERROR if a migrated cohort's module reads a legacy collection it was
     migrated off (see this module's docstring)."""
@@ -311,6 +517,10 @@ def check_semantic_ir_cutover(f) -> None:  # noqa: ANN001 - Findings, see caller
                     "is deliberately no per-site exemption: this cohort is "
                     "freshly migrated, so a grandfathered reader cannot exist",
                 )
+    for problem in backend_declaration_problems(
+        current_backend_declaration_readers(), KNOWN_BACKEND_DECLARATION_READERS
+    ):
+        f.err("semantic-ir-cutover", problem)
 
 
 def main() -> int:

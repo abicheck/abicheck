@@ -128,16 +128,11 @@ def execute_dump_cli_run(
     own ``_write_snapshot_output`` call stays the sole enforcement point,
     exactly as it already is today.
 
-    *exec_resolved.execution_options*'s own ``legacy_compile_db_tokens``/
-    ``legacy_compile_db_matched`` fields (ADR-063 Phase 1): the legacy
-    ``-p``/``--compile-db`` auto-match's own derived signal, which has no
-    equivalent inside the shared pipeline's typed ``InputSpec`` -- threaded
-    through as an explicit pass-through (``execute_dump_request``'s own
-    docstring states the precedence rule: the P0.3 fold's own result wins
-    whenever it applies) rather than a new typed field on ``InputSpec``
-    itself, so the migrated real run keeps seeing it exactly like
-    ``perform_elf_dump`` did via its own ``legacy_build_context_flags``
-    parameter.
+    *exec_resolved.execution_options*'s own ``compile_db``/``compile_db_filter``
+    (ADR-063 Phase 10): the ``-p``/``--compile-db`` database, which the
+    pipeline matches against the headers itself
+    (``workflows.artifact.compile_db_match``); the P0.3 fold's own result
+    still wins whenever it applies (``execute_dump_request``'s docstring).
 
     *notify*: ``perform_elf_dump`` used ``click.echo(..., err=True)``
     directly for every user-facing progress note along this path; the

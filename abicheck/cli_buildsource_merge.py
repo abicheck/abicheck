@@ -38,6 +38,7 @@ from .buildsource.merge_support import (
 )
 from .buildsource.model import DataLayer
 from .buildsource.pack import BuildSourcePack
+from .evidence_depth import embedded_evidence_pack
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -123,10 +124,12 @@ def _merge_fold_packs(
     combined: BuildSourcePack | None = None
     contributors = 0
     for _p, s in snaps:
-        if s.build_source is None:
+        # A header-only input's graph counts as its pack (ADR-063 Phase 10).
+        pack = embedded_evidence_pack(s)
+        if pack is None:
             continue
         contributors += 1
-        combined = _combine_packs(combined, s.build_source)
+        combined = _combine_packs(combined, pack)
     return combined, contributors
 
 
@@ -268,7 +271,9 @@ def embed_inputs_pack(
     from .workflows.extraction import pack_to_ref
 
     ingested = _ingest_inputs_pack_snapshot(inputs_path)
-    combined = _combine_packs(snap.build_source, ingested.build_source)
+    combined = _combine_packs(
+        embedded_evidence_pack(snap), embedded_evidence_pack(ingested)
+    )
     if combined is None:
         return
     base_exports = _exported_symbols_from_snapshot(snap)

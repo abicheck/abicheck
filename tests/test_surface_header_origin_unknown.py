@@ -37,13 +37,13 @@ from abicheck.model import (
     ScopeOrigin,
     TypeField,
 )
+from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.surface import (
     REASON_HEADER_ORIGIN_UNKNOWN,
     REASON_NO_PROVENANCE,
     REASON_NON_PUBLIC_TYPE,
     SCOPE_NOTE_HEADER_ORIGIN_UNKNOWN,
     classify_change_surface,
-    compute_public_surface,
     scope_note_coverage_warnings,
     surface_scope_confidence,
 )
@@ -151,7 +151,7 @@ def test_unknown_header_origin_is_never_a_confirmed_exclusion(
     change: Callable[[], Change],
     status: str,
 ) -> None:
-    surf = compute_public_surface(build(_STATED_UNKNOWN[status]()))
+    surf = resolve_public_surface(build(_STATED_UNKNOWN[status]()))
     in_surface, reason = classify_change_surface(change(), surf, surf)
     assert in_surface or reason == REASON_HEADER_ORIGIN_UNKNOWN, (site, status, reason)
 
@@ -159,14 +159,14 @@ def test_unknown_header_origin_is_never_a_confirmed_exclusion(
 @pytest.mark.parametrize("status", sorted(_STATED_UNKNOWN))
 @pytest.mark.parametrize("side", ["old", "new"])
 def test_one_sided_unknown_still_labels_or_keeps(status: str, side: str) -> None:
-    unknown = compute_public_surface(
+    unknown = resolve_public_surface(
         _snap(
             enums=[
                 _enum(source_header=None, source_header_fact=_STATED_UNKNOWN[status]())
             ]
         )
     )
-    known = compute_public_surface(_snap(enums=[_enum(source_header="/inc/x.h")]))
+    known = resolve_public_surface(_snap(enums=[_enum(source_header="/inc/x.h")]))
     old, new = (unknown, known) if side == "old" else (known, unknown)
     in_surface, reason = classify_change_surface(_enum_change(), old, new)
     assert in_surface or reason == REASON_HEADER_ORIGIN_UNKNOWN
@@ -183,7 +183,7 @@ def test_present_header_facts_seed_the_type(
         snap = _snap(enums=[_enum(source_header="/inc/x.h")])
     else:
         snap = _snap(types=[_record(source_header="/inc/api.h")])
-    surf = compute_public_surface(snap)
+    surf = resolve_public_surface(snap)
     assert classify_change_surface(change(), surf, surf) == (True, None)
     assert not surf.header_origin_unknown_types
 
@@ -202,7 +202,7 @@ def test_no_fact_statement_keeps_the_legacy_non_public_reading(
 ) -> None:
     # A legacy ``None`` with no fact statement backfills to a bare
     # not_collected -- the established "no header recorded" spelling.
-    surf = compute_public_surface(snap)
+    surf = resolve_public_surface(snap)
     assert not surf.header_origin_unknown_types
     change = _enum_change() if snap.declarations.enums else _record_change()
     assert classify_change_surface(change, surf, surf) in {
@@ -222,12 +222,12 @@ def test_a_demoting_origin_is_not_relabelled(origin: ScopeOrigin) -> None:
             )
         ]
     )
-    assert not compute_public_surface(snap).header_origin_unknown_types
+    assert not resolve_public_surface(snap).header_origin_unknown_types
 
 
 def test_the_demotion_is_stated_as_scope_note_and_coverage_warning() -> None:
     snap = _snap(enums=[_enum(source_header=None, source_header_fact=Fact.failed("x"))])
-    surf = compute_public_surface(snap)
+    surf = resolve_public_surface(snap)
     c = _enum_change()
     c.surface_exclusion_reason = classify_change_surface(c, surf, surf)[1]
     confidence, notes = surface_scope_confidence(
@@ -276,7 +276,7 @@ def test_unknown_origin_reaches_types_only_the_blocked_seed_reaches(
 ) -> None:
     """A type reachable only through a blocked seed inherits its undecided
     state: its finding is kept or labelled, never a quiet exclusion."""
-    surf = compute_public_surface(_nested_pair(_STATED_UNKNOWN[status]()))
+    surf = resolve_public_surface(_nested_pair(_STATED_UNKNOWN[status]()))
     in_surface, reason = classify_change_surface(_inner_change(), surf, surf)
     assert in_surface or reason == REASON_HEADER_ORIGIN_UNKNOWN, (status, reason)
 
@@ -284,7 +284,7 @@ def test_unknown_origin_reaches_types_only_the_blocked_seed_reaches(
 def test_nested_type_of_a_read_seed_is_public_and_not_relabelled() -> None:
     """Controls: with the seed's origin read, the nested type is simply in
     the surface, and nothing is marked unknown."""
-    surf = compute_public_surface(_nested_pair(None))
+    surf = resolve_public_surface(_nested_pair(None))
     assert classify_change_surface(_inner_change(), surf, surf) == (True, None)
     assert not surf.header_origin_unknown_types
 
@@ -301,7 +301,7 @@ def test_unreached_type_keeps_its_confirmed_exclusion() -> None:
             qualified_name="detail::Other",
         )
     )
-    surf = compute_public_surface(snap)
+    surf = resolve_public_surface(snap)
     change = Change(
         kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="detail::Other", description=""
     )

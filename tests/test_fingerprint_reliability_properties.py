@@ -108,7 +108,9 @@ def _snap(*, ast_producer, reliable, version):
         version=version,
         from_headers=True,
         ast_producer=ast_producer,
-        clang_field_initializer_facts_reliable=reliable,
+        stale_fact_families=frozenset()
+        if reliable
+        else frozenset({"clang_field_initializer"}),
     )
 
 

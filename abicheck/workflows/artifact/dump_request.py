@@ -182,7 +182,7 @@ class ResolvedDumpRequest:
     # has resolved one -- so `dump --dry-run`
     # (`cli_dump_helpers.render_dump_dry_run`) can show these nine values.
     # `resolve_dump_request` never populates this itself (`build_config`/
-    # `legacy_compile_db_tokens`/`legacy_compile_db_matched` are CLI-only
+    # `compile_db`/`compile_db_filter` are CLI-only
     # values with no `DumpRequest` equivalent); the `dump` CLI attaches its
     # own via `dataclasses.replace(resolved, execution_options=...)`.
     # `execute_dump_request` reads this as its default when its own

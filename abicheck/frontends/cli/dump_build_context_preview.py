@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``dump --dry-run``'s legacy compile-db flags preview and its own
-"Execution options" report section.
+"""``dump --dry-run``'s "Execution options" report section (including what
+the pipeline's compile-database match would derive).
 
 ADR-063 Track T4 ("Dump request contract") follow-up. A genuinely new
 module rather than an addition to ``cli_helpers_compare.py`` (its own
@@ -38,60 +38,34 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import click
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
     from ...dry_run import DryRunResult
-    from ...service_dump_pipeline import ResolvedDumpRequest
+    from ...service_dump_pipeline import DumpExecutionOptions, ResolvedDumpRequest
 
 __all__ = [
     "add_execution_options_dry_run_section",
     "add_ownership_dry_run_section",
-    "dry_run_build_context_preview",
 ]
 
 
-def dry_run_build_context_preview(
-    compile_db_path: Path | None,
-    headers: tuple[Path, ...],
-    compile_db_filter: str | None,
-) -> tuple[list[str], bool] | None:
-    """Silent, non-raising sibling of
-    ``cli_helpers_compare._resolve_build_context_flags`` that also returns
-    the derived castxml flags themselves -- ``dump --dry-run``'s
-    :class:`~abicheck.service_dump_pipeline.DumpExecutionOptions` preview.
+def _compile_db_line(
+    opts: DumpExecutionOptions, resolved: ResolvedDumpRequest
+) -> str | None:
+    """What the pipeline's compile-database match would derive, computed by the
+    same :func:`~abicheck.workflows.artifact.compile_db_match.try_match_compile_db`
+    the dry run's depth check uses (read-only, never raises)."""
+    from ...workflows.artifact.compile_db_match import try_match_compile_db
 
-    Same relationship to ``_resolve_build_context_flags`` that
-    ``cli_helpers_compare.dry_run_compile_db_matched`` already has (loading
-    and matching a compile database is cheap, deterministic, read-only
-    resolution, so a dry run may perform it) -- extended to return ``flags``
-    too, since a dry run reporting ``legacy_compile_db_tokens`` needs the
-    actual list, not just the match verdict. Never echoes to stderr and
-    never raises: an unreadable/malformed compile database folds to
-    ``([], False)`` rather than the ``click.ClickException`` the real run
-    would raise -- the same accepted imprecision
-    ``dry_run_compile_db_matched`` already documents for the identical
-    failure shape.
-
-    Returns ``None`` when no compile database was given at all (the ``dump``
-    CLI's dry-run preview reads this as "no legacy compile-db flags to
-    show", the same as an execution that never threads any).
-    """
-    if not compile_db_path:
+    match = try_match_compile_db(
+        opts.compile_db, resolved.request.input.headers, opts.compile_db_filter
+    )
+    if match is None:
         return None
-    from ...cli_helpers_compare import _matched_build_context
-    from ...errors import AbicheckError
-
-    try:
-        ctx, _entry_count = _matched_build_context(
-            compile_db_path, headers, compile_db_filter
-        )
-        return ctx.to_castxml_flags(), ctx.compile_db_path is not None
-    except (AbicheckError, OSError, ValueError, click.ClickException):
-        return [], False
+    verdict = "matched" if match.matched else "no match"
+    return f"compile-db flags: {len(match.tokens)} derived ({verdict})"
 
 
 def add_execution_options_dry_run_section(
@@ -112,10 +86,7 @@ def add_execution_options_dry_run_section(
         "Execution options",
         f"build config: {opts.build_config}" if opts.build_config else None,
         f"allow build query: {opts.allow_build_query}",
-        f"legacy compile-db flags: {len(opts.legacy_compile_db_tokens)} "
-        f"derived ({'matched' if opts.legacy_compile_db_matched else 'no match'})"
-        if opts.legacy_compile_db_tokens or opts.legacy_compile_db_matched
-        else None,
+        _compile_db_line(opts, resolved),
         f"seed collect mode: {opts.seed_collect_mode}"
         if opts.seed_collect_mode
         else None,

@@ -73,7 +73,7 @@ from .model.owner_recovery import (
 )
 from .model.type_identifiers import type_identifiers as _type_identifiers
 from .policy.public_surface import PublicSurface as PublicSurface
-from .policy.public_surface_closure import resolve_public_surface
+from .policy.public_surface_query import PublicSurfaceQuery
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -294,36 +294,6 @@ def is_symbol_level_finding(change: Change) -> bool:
 # see the re-export import at the top of this file for why.
 
 
-def compute_public_surface(
-    snap: AbiSnapshot, resolution: PublicSurface | None = None
-) -> PublicSurface:
-    """Compute the public-ABI surface of *snap*.
-
-    When *resolution* is given, it is returned directly -- a caller that
-    already resolved a structured public-surface answer (e.g. via
-    ``policy.public_surface_query.PublicSurfaceQuery.resolve_public_domain()``)
-    is not made to pay for a second, redundant resolution. Otherwise this
-    resolves lazily via the same query, imported at module level:
-    ``policy/public_surface.py`` is a leaf module with respect to this one
-    (it needs nothing from ``surface.py``, precisely so this import can be
-    a real, top-level one rather than a deferred workaround for a cycle).
-
-    Public roots are functions/variables in the public surface (the three
-    split facts, ``model/surface_facts.in_public_surface``). The
-    public type set is the transitive closure over the types they
-    reference (returns, params, fields, bases, typedef targets) -- computed
-    today (ADR-063 Phase 3 D5) from ``compare/surface_graph.py``'s
-    ``referenced_identifiers_by_node()``, a pure function of *snap*'s own
-    current declarations, not by this module's own former closure-walk
-    implementation and deliberately not by reading ``snap.surface_graph``
-    itself either -- see ``policy/public_surface_closure.py``'s own
-    docstring for why.
-    """
-    if resolution is not None:
-        return resolution
-    return resolve_public_surface(snap)
-
-
 # Scope-level confidence notes (ADR-024 §D5.3). Unlike the per-finding
 # exclusion reasons below, these qualify the *whole* surface resolution: they
 # flag that the resolved surface (and therefore every demotion decision made
@@ -359,7 +329,8 @@ def surface_scope_confidence(
     surface that nonetheless lacks provenance adds ``no-provenance``.
 
     ``surf_old`` / ``surf_new`` may be passed when the caller has already run
-    :func:`compute_public_surface` (e.g. the ``FilterNonPublicSurface`` pipeline
+    :meth:`~abicheck.policy.public_surface_query.PublicSurfaceQuery.
+    resolve_public_domain` (e.g. the ``FilterNonPublicSurface`` pipeline
     step) to avoid repeating the type-closure walk; otherwise they are computed
     on demand.
     """
@@ -373,8 +344,16 @@ def surface_scope_confidence(
         _add(getattr(snap, "scope_fallback", None))
 
     if scope_enabled:
-        s_old = surf_old if surf_old is not None else compute_public_surface(old)
-        s_new = surf_new if surf_new is not None else compute_public_surface(new)
+        s_old = (
+            surf_old
+            if surf_old is not None
+            else PublicSurfaceQuery.resolve_public_domain(old)
+        )
+        s_new = (
+            surf_new
+            if surf_new is not None
+            else PublicSurfaceQuery.resolve_public_domain(new)
+        )
         # Flag reduced confidence when *any* resolvable side was scoped without
         # provenance — a mixed comparison (one side has provenance, the other
         # resolvable side does not) is still only half-trustworthy, so the note

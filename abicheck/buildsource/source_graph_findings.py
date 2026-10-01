@@ -598,7 +598,7 @@ def _untrusted_dependency_roles(
 def _edge_role(e: GraphEdge) -> str:
     """The effective role an edge carries -- the D2-merged ``resolved`` view
     when present, falling back to raw ``attrs`` pre-registration, mirroring
-    :meth:`~abicheck.buildsource.graph_facts.GraphEdge.relation_key`."""
+    :meth:`~abicheck.model.graph_facts.GraphEdge.relation_key`."""
     return str((e.resolved or e.attrs).get("role", ""))
 
 

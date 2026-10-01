@@ -176,7 +176,13 @@ class UseCaseImpact:
 
 
 def _source_graph(snapshot: AbiSnapshot | None) -> Any:
-    return getattr(getattr(snapshot, "build_source", None), "source_graph", None)
+    # ADR-063 Phase 10: a header-only dump carries its graph on
+    # `surface_graph` alone, so resolve it the one shared way.
+    if snapshot is None:
+        return None
+    from ..evidence_depth import resolve_l5_source_graph
+
+    return resolve_l5_source_graph(snapshot, snapshot.build_source)
 
 
 def _coalesce_definitions(

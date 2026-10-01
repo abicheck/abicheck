@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import Verdict, compare
+from abicheck.model.snapshot_reliability import family_reliable
 from abicheck.serialization import (
     SCHEMA_VERSION,
     snapshot_from_dict,
@@ -302,7 +303,7 @@ class TestReserialization:
         d["ast_producer"] = "clang"
         with pytest.warns(UserWarning, match="clang_deprecation_facts_reliable"):
             snap = snapshot_from_dict(d)
-        assert snap.clang_deprecation_facts_reliable is False
+        assert family_reliable(snap, "clang_deprecation") is False
 
     def test_older_version_silent_when_nothing_is_degraded(self):
         """The opposite of the case above: an older snapshot whose producer
@@ -343,9 +344,9 @@ class TestReserialization:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             snap = snapshot_from_dict(d)
-        assert snap.clang_va_list_facts_reliable is False
-        assert snap.castxml_var_access_facts_reliable is False
-        assert snap.param_kind_facts_reliable is False
+        assert family_reliable(snap, "clang_va_list") is False
+        assert family_reliable(snap, "castxml_var_access") is False
+        assert family_reliable(snap, "param_kind") is False
         messages = [str(w.message) for w in caught if w.category is UserWarning]
         assert any("param_kind_facts_reliable" in m for m in messages)
         assert not any("clang_va_list_facts_reliable" in m for m in messages)
@@ -386,7 +387,7 @@ class TestReserialization:
 
         with pytest.warns(UserWarning, match="clang_deprecation_facts_reliable"):
             snap2 = snapshot_from_dict(resaved)
-        assert snap2.clang_deprecation_facts_reliable is False
+        assert family_reliable(snap2, "clang_deprecation") is False
 
     def test_older_version_silent_for_inferred_header_flags_no_detector_reads(self):
         """Five of the seven flags' one real consumer requires CONFIRMED

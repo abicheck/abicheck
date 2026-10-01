@@ -26,13 +26,13 @@ from abicheck.model import (
     ScopeOrigin,
     Visibility,
 )
+from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif
 from abicheck.surface import (
     REASON_NO_PROVENANCE,
     REASON_NON_PUBLIC_TYPE,
     classify_change_surface,
-    compute_public_surface,
     surface_scope_confidence,
 )
 
@@ -127,7 +127,7 @@ class TestNoProvenanceReason:
                 _rec("Orphan", origin=ScopeOrigin.UNKNOWN),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert s.has_provenance is True
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Orphan", description="")
         assert classify_change_surface(c, s, s) == (False, REASON_NO_PROVENANCE)
@@ -141,7 +141,7 @@ class TestNoProvenanceReason:
             functions=[_fn("api", ret="Public *")],
             types=[_rec("Public"), _rec("Orphan")],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert s.has_provenance is False
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Orphan", description="")
         assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
@@ -179,7 +179,7 @@ class TestExportOnlyAntiHiding:
             functions=[self._export_only_fn("Api")],
             types=[_rec("Widget", size=128, origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        s_old, s_new = compute_public_surface(old), compute_public_surface(new)
+        s_old, s_new = resolve_public_surface(old), resolve_public_surface(new)
         assert s_old.has_typed_roots is False
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Widget", description="")
         # Kept in surface — NOT demoted as non-public-type.
@@ -200,7 +200,7 @@ class TestExportOnlyAntiHiding:
             functions=[self._export_only_fn("Api")],
             types=[_rec("Internal", size=128, origin=ScopeOrigin.PRIVATE_HEADER)],
         )
-        s_old, s_new = compute_public_surface(old), compute_public_surface(new)
+        s_old, s_new = resolve_public_surface(old), resolve_public_surface(new)
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Internal", description="")
         in_surf, reason = classify_change_surface(c, s_old, s_new)
         assert in_surf is False
@@ -215,7 +215,7 @@ class TestExportOnlyAntiHiding:
             functions=[_fn("api", ret="Public *")],
             types=[_rec("Public"), _rec("Unreached")],
         )
-        s = compute_public_surface(old)
+        s = resolve_public_surface(old)
         assert s.has_typed_roots is True
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Unreached", description=""
@@ -234,7 +234,7 @@ class TestExportOnlyAntiHiding:
             functions=[_fn("api", ret="Public *")],
             types=[_rec("Public"), _rec("p11_virtual")],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "p11_virtual" not in s.public_types
         c = Change(
             kind=ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
@@ -272,7 +272,7 @@ class TestExportOnlyAntiHiding:
             types=[_rec("Public"), _rec("p11_virtual")],
             enums=[EnumType(name="p11_secret")],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "p11_virtual" not in s.public_types
         assert "p11_secret" not in s.public_types
         c = Change(kind=kind, symbol=symbol, description="member change")
@@ -289,7 +289,7 @@ class TestExportOnlyAntiHiding:
             functions=[_fn("api", ret="Public *")],
             types=[_rec("Public")],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert "Public" in s.public_types
         c = Change(
             kind=ChangeKind.STRUCT_FIELD_TYPE_CHANGED,

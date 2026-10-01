@@ -216,8 +216,8 @@ def _validate_snapshot(path: Path) -> list[str]:
                 f"declaration {declaration!r} missing from the snapshot "
                 "-- headers were lost or never parsed"
             )
-    pack = snapshot.build_source
-    graph = getattr(pack, "source_graph", None) if pack else None
+    # ADR-063 Phase 10: the header graph lives on `surface_graph`.
+    graph = snapshot.surface_graph
     if graph is None:
         problems.append("no source graph: the header-graph attach never ran")
         return problems

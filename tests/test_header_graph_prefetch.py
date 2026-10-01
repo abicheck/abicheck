@@ -118,7 +118,7 @@ def test_prefetched_and_sequential_dumps_are_identical(
     assert len(calls) == 1, "the sequential path must acquire exactly once"
     assert not calls[0].startswith("abicheck-hgraph"), calls
 
-    assert prefetched["build_source"] is not None, "the header graph was not built"
+    assert prefetched["surface_graph"] is not None, "the header graph was not built"
     assert prefetched == sequential
 
 

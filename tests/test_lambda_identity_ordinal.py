@@ -44,13 +44,13 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.buildsource.graph_facts import GraphEdge, GraphNode
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import SourceGraphSummary
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, Visibility
 from abicheck.model.fact import replace_with_fact_sync
+from abicheck.model.graph_facts import GraphEdge, GraphNode
 from abicheck.model.identity import (
     Namespace,
     Record,

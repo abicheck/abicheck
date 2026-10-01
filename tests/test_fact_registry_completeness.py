@@ -540,17 +540,12 @@ class TestReferenceFlagCoverage:
         assert owners == {"Function", "Variable", "TypeField", "RecordType", "EnumType"}
         assert ("EnumType", "is_scoped") in pairs
 
-    def test_every_key_names_a_real_abisnapshot_field(self) -> None:
+    def test_every_key_names_a_real_reliability_flag(self) -> None:
         """Direction 7 (Codex review): the earlier check only ever unions
         REFERENCE_FLAG_COVERAGE's *values* and silently discards the keys —
-        this proves every key itself is a real AbiSnapshot field too."""
-        snapshot_fields = fact_registry_completeness._abi_snapshot_field_names()
-        assert snapshot_fields  # sanity: the real scan actually found fields
-        for flag in REFERENCE_FLAG_COVERAGE:
-            assert flag in snapshot_fields, (
-                f"{flag!r} is not a real field on AbiSnapshot "
-                f"(abicheck/model/snapshot.py)"
-            )
+        this proves every key itself is a real persisted reliability flag."""
+        flag_names = fact_registry_completeness._reliability_flag_names()
+        assert set(REFERENCE_FLAG_COVERAGE) == flag_names
 
 
 # ---------------------------------------------------------------------------
@@ -570,23 +565,13 @@ class TestReferenceFlagCoverageAgainstSnapshot:
         findings = _LocalFindings()
         check_fact_registry_completeness(findings)
         assert any(
-            "totally_fake_facts_reliable" in msg and "no such field" in msg
+            "totally_fake_facts_reliable" in msg and "no such flag" in msg
             for _, msg in findings.errors
         )
 
-    def test_abi_snapshot_field_names_finds_a_real_flag(self) -> None:
-        snapshot_fields = fact_registry_completeness._abi_snapshot_field_names()
-        assert "header_cv_facts_reliable" in snapshot_fields
-
-    def test_abi_snapshot_field_names_empty_for_missing_file(
-        self, tmp_path: Path
-    ) -> None:
-        original = fact_registry_completeness._SNAPSHOT_PATH
-        fact_registry_completeness._SNAPSHOT_PATH = tmp_path / "does_not_exist.py"
-        try:
-            assert fact_registry_completeness._abi_snapshot_field_names() == set()
-        finally:
-            fact_registry_completeness._SNAPSHOT_PATH = original
+    def test_reliability_flag_names_finds_a_real_flag(self) -> None:
+        flag_names = fact_registry_completeness._reliability_flag_names()
+        assert "header_cv_facts_reliable" in flag_names
 
 
 # ---------------------------------------------------------------------------

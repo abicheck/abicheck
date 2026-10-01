@@ -17,12 +17,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import cast
 
 from .elf_facts import SymbolBinding
 from .extraction_scope import EntityOwnership
-from .fact import Fact, _Omitted, bridge_legacy_and_fact
+from .fact import Fact, _Omitted, bridge_legacy_and_fact, retire_bridge_fields
 from .identity import EntityId
 from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visibility
 
@@ -36,25 +36,25 @@ from .vocabulary import AccessLevel, ElfVisibility, ParamKind, ScopeOrigin, Visi
 _OMITTED_IS_VA_LIST: bool = cast(bool, _Omitted())
 # ADR-063 Phase 5 (tenth batch): Param.is_restrict's own omission sentinel --
 # same shape as _OMITTED_IS_VA_LIST above (a bare False cannot double as an
-# omission marker), guarded by AbiSnapshot.clang_restrict_facts_reliable.
+# omission marker), guarded by the stale 'clang_restrict' fact family (model.snapshot_reliability).
 _OMITTED_IS_RESTRICT: bool = cast(bool, _Omitted())
 # ADR-063 Phase 5 (eleventh batch): Param.kind's own omission sentinel.
 # ParamKind.VALUE is both this field's resting value and a real answer (a
 # genuine by-value parameter), so -- exactly like AccessLevel.PUBLIC for
 # Variable.access below -- a bare VALUE cannot mark "no producer ever
-# determined this"; guarded by AbiSnapshot.param_kind_facts_reliable.
+# determined this"; guarded by the stale 'param_kind' fact family (model.snapshot_reliability).
 _OMITTED_PARAM_KIND: ParamKind = cast("ParamKind", _Omitted())
 # ADR-063 Phase 5 (ninth batch): `Function.deprecated`/`Variable.deprecated`
 # share the identical case-(a) shape -- `None` means "not deprecated" as
 # much as "not captured" (see Function.deprecated's own comment below), so
-# availability is carried by AbiSnapshot.clang_deprecation_facts_reliable,
+# availability is carried by the stale 'clang_deprecation' fact family (model.snapshot_reliability),
 # never by the value.
 _OMITTED_FUNC_DEPRECATED: str | None = cast("str | None", _Omitted())
 _OMITTED_VAR_DEPRECATED: str | None = cast("str | None", _Omitted())
 # ADR-063 Phase 5 (tenth batch): Variable.access's own omission sentinel.
 # AccessLevel.PUBLIC is both this field's resting value and a real answer,
 # so -- exactly like a bare False -- it cannot mark "nobody looked";
-# AbiSnapshot.castxml_var_access_facts_reliable carries that instead.
+# the stale 'castxml_var_access' fact family (model.snapshot_reliability) carries that instead.
 _OMITTED_VAR_ACCESS: AccessLevel = cast("AccessLevel", _Omitted())
 
 
@@ -76,9 +76,8 @@ class Param:
     is_restrict: bool = _OMITTED_IS_RESTRICT  # restrict-qualified pointer
     # ADR-063 Phase 0: defaults to a private omission sentinel, not False —
     # see is_va_list_fact below and __post_init__.
-    is_va_list: bool = (
-        _OMITTED_IS_VA_LIST  # parameter is va_list (variadic argument list)
-    )
+    # ADR-063 Phase 10: a constructor input only; is_va_list_fact is stored.
+    is_va_list: InitVar[bool] = _OMITTED_IS_VA_LIST  # parameter is va_list
     # Fact[bool] sibling — see RecordType's identical bases_fact/vtable_fact
     # comment in model/entities.py for the full rationale. A detector reads
     # this, never the plain is_va_list field above.
@@ -92,9 +91,9 @@ class Param:
     # indirection kind" (diff_symbols._params_differ).
     kind_fact: Fact[ParamKind] | None = field(default=None, kw_only=True)
 
-    def __post_init__(self) -> None:
-        self.is_va_list, self.is_va_list_fact = bridge_legacy_and_fact(
-            self.is_va_list, self.is_va_list_fact, _OMITTED_IS_VA_LIST, False
+    def __post_init__(self, is_va_list: bool) -> None:
+        _, self.is_va_list_fact = bridge_legacy_and_fact(
+            is_va_list, self.is_va_list_fact, _OMITTED_IS_VA_LIST, False
         )
         self.is_restrict, self.is_restrict_fact = bridge_legacy_and_fact(
             self.is_restrict, self.is_restrict_fact, _OMITTED_IS_RESTRICT, False
@@ -102,6 +101,9 @@ class Param:
         self.kind, self.kind_fact = bridge_legacy_and_fact(
             self.kind, self.kind_fact, _OMITTED_PARAM_KIND, ParamKind.VALUE
         )
+
+
+retire_bridge_fields(Param, {"is_va_list": False})
 
 
 @dataclass(slots=True)

@@ -544,7 +544,13 @@ def test_real_elf_capture_records_the_dwarf_producer(tmp_path: Path) -> None:
     own DW_AT_producer, not from the config."""
     import shutil
     import subprocess
+    import sys
 
+    # The assertions are about an ELF's DW_AT_producer: macOS's `gcc` is
+    # Apple clang emitting Mach-O (plus a `.dSYM` bundle beside it) and
+    # Windows' is MinGW emitting PE, so neither can produce the fixture.
+    if not sys.platform.startswith("linux"):
+        pytest.skip("needs a gcc that emits ELF (Linux)")
     gcc = shutil.which("gcc")
     if gcc is None:
         pytest.skip("gcc not available")

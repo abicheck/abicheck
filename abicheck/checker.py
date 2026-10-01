@@ -324,6 +324,7 @@ def _apply_surface_metrics(
     to :func:`diff_surface_metrics` (ADR-063 Phase 3 D5).
     """
     from .diff_surface_metrics import diff_surface_metrics
+    from .policy.public_surface_query import PublicSurfaceQuery
 
     visible = _filter_suppressed_changes(
         list(
@@ -332,6 +333,12 @@ def _apply_surface_metrics(
                 new,
                 old_public_entity_ids=old_public_entity_ids,
                 new_public_entity_ids=new_public_entity_ids,
+                old_public_type_names=None
+                if old_public_entity_ids is not None
+                else PublicSurfaceQuery.public_type_names(old),
+                new_public_type_names=None
+                if new_public_entity_ids is not None
+                else PublicSurfaceQuery.public_type_names(new),
             )
         ),
         suppression,

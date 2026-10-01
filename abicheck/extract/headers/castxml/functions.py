@@ -266,7 +266,7 @@ def parse_function_params(
                     # spelling heuristic. Previously never set at all, so
                     # every parameter read the dataclass's own resting
                     # ParamKind.VALUE regardless of its real spelling (see
-                    # AbiSnapshot.param_kind_facts_reliable).
+                    # the stale 'param_kind' fact family (model.snapshot_reliability)).
                     kind=top_level_param_kind(ctx, p_type_id),
                     pointer_depth=p_depth,
                     default=arg.get("default"),

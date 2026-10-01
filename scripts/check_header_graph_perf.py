@@ -546,7 +546,7 @@ def _require_real_ast_attach(snap: Any, n: int, backend: str) -> None:
     """
     from abicheck.buildsource.header_graph import HEADER_INCLUDE_GRAPH_PASS
 
-    graph = getattr(getattr(snap, "build_source", None), "source_graph", None)
+    graph = getattr(snap, "surface_graph", None)
     passes = getattr(graph, "extractor_passes", {}) if graph is not None else {}
     call_graph_pass = _header_call_graph_pass()
     if not passes.get(call_graph_pass):

@@ -60,6 +60,7 @@
         "abicheck/_compiler_options.py",
         "abicheck/binary_utils.py",
         "abicheck/btf_metadata.py",
+        "abicheck/build_context.py",
         "abicheck/build_mode.py",
         "abicheck/buildsource/adapters/bazel.py",
         "abicheck/buildsource/adapters/cmake_file_api.py",

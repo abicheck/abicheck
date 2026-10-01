@@ -347,12 +347,9 @@ class MarkReachability:
         # DECL_REFERENCES_DECL (type_graph.py) edges, each gated by its own
         # pass (Codex review, three passes).
         def _call_graph_fully_trusted(snap: AbiSnapshot) -> bool:
-            build_source = getattr(snap, "build_source", None)
-            graph = (
-                getattr(build_source, "source_graph", None)
-                if build_source is not None
-                else None
-            )
+            from .evidence_depth import resolve_l5_source_graph
+
+            graph = resolve_l5_source_graph(snap, snap.build_source)
             if graph is None:
                 return False
             if not (

@@ -14,8 +14,8 @@
 # limitations under the License.
 
 """Virtual-dispatch graph augmentation (G29 Phase 5 item 3, G29.6's third
-open graph family: :data:`~abicheck.buildsource.graph_facts.
-VIRTUAL_DISPATCH_NODE_KINDS`/:data:`~abicheck.buildsource.graph_facts.
+open graph family: :data:`~abicheck.model.graph_facts.
+VIRTUAL_DISPATCH_NODE_KINDS`/:data:`~abicheck.model.graph_facts.
 VIRTUAL_DISPATCH_EDGE_KINDS`).
 
 Unlike every sibling module in this family (``override_graph.py``,
@@ -120,7 +120,7 @@ known to own or inherit a virtual slot, "this class has a vtable" is a
 structural, provable fact, not a guess.
 
 **``DECL_OVERRIDES_DECL`` and ``VTABLE_SLOT_MAPS_TO_DECL`` are deliberately
-not populated here** — see :data:`~abicheck.buildsource.graph_facts.
+not populated here** — see :data:`~abicheck.model.graph_facts.
 VIRTUAL_DISPATCH_EDGE_KINDS`'s own docstring for why: the former is already
 satisfied by ``override_graph.py``'s existing ``METHOD_POSSIBLE_OVERRIDE``
 (``resolution == "override_confirmed"``) edges, and the latter needs a real,
@@ -133,8 +133,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 from ..model.mangled_name import itanium_scope_components, msvc_scope_components
-from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge, GraphNode
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary

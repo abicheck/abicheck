@@ -77,7 +77,7 @@ def var_access_changes(
     The evidence gates (header-tier, "castxml"-producer-only,
     reliability-gated) live with the registration in ``diff_symbols.py``'s
     ``_diff_var_access`` (G31 Phase C continued — see
-    ``AbiSnapshot.castxml_var_access_facts_reliable``'s own docstring for
+    ``the stale 'castxml_var_access' fact family (model.snapshot_reliability)``'s own docstring for
     the full reasoning); by the time this runs both sides are known-safe.
 
     That whole-snapshot gate only says the producer is trustworthy when it

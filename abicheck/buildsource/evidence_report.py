@@ -216,10 +216,19 @@ def intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:
     ]
 
 
-def optional_coverage(pack: BuildSourcePack | None) -> list[LayerCoverage]:
-    """L3/L4/L5 coverage rows from a pack manifest, or all-absent rows."""
+def optional_coverage(
+    pack: BuildSourcePack | None, snap: AbiSnapshot | None = None
+) -> list[LayerCoverage]:
+    """L3/L4/L5 coverage rows from a pack manifest, else from *snap*'s header
+    graph when that is its L5 evidence (ADR-063 Phase 10: no synthesized pack;
+    ``evidence_depth.header_graph_coverage``), else all-absent rows."""
+    from ..evidence_depth import header_graph_coverage, resolve_l5_source_graph
+
     if pack is not None:
         return list(pack.manifest.coverage)
+    graph = resolve_l5_source_graph(snap, None) if snap is not None else None
+    if graph is not None:
+        return header_graph_coverage(graph)
     return [
         LayerCoverage(layer=layer.value, status=CoverageStatus.NOT_COLLECTED)
         for layer in (
@@ -290,7 +299,7 @@ def layer_presence(snap: AbiSnapshot, pack: BuildSourcePack | None) -> dict[str,
         row.layer: row.status != CoverageStatus.NOT_COLLECTED
         for row in intrinsic_coverage(snap)
     }
-    by_layer = {c.layer: c.present for c in (pack.manifest.coverage if pack else [])}
+    by_layer = {c.layer: c.present for c in optional_coverage(pack, snap)}
     for layer in (
         DataLayer.L3_BUILD,
         DataLayer.L4_SOURCE_ABI,
@@ -531,7 +540,9 @@ def diff_embedded_build_source(
         new_build_info, new_sources, new_snapshot, on_warning=on_output
     )
 
-    if old_pack is None and new_pack is None:
+    header_graphs = [_side_source_graph(s, None) for s in (old_snapshot, new_snapshot)]
+    # ADR-063 Phase 10: a header graph alone is evidence too.
+    if old_pack is None and new_pack is None and header_graphs == [None, None]:
         if collect_mode != "off":
             _emit(
                 on_output,
@@ -644,7 +655,7 @@ def diff_embedded_build_source(
     # coverage when the new side has none would over-claim that source/build
     # checks ran for this scan (Codex review). The side-by-side table below
     # still exposes old/new asymmetry to humans.
-    coverage = optional_coverage(new_pack)
+    coverage = optional_coverage(new_pack, new_snapshot)
     if graph_not_compared is not None:
         # Evidence-entity-model I1: a pre-v3 graph against a v3 one is not
         # diffed (their node ids name entities differently); say so on the
@@ -679,7 +690,7 @@ def diff_embedded_build_source(
                 on_output,
                 compare_side_coverage_lines(
                     intrinsic_coverage(old_snapshot),
-                    optional_coverage(old_pack),
+                    optional_coverage(old_pack, old_snapshot),
                     intrinsic,
                     coverage,
                 ),
@@ -724,8 +735,13 @@ def prepare_embedded_build_source(
         x is not None
         for x in (old_build_info, new_build_info, old_sources, new_sources)
     )
-    has_embedded = (
-        old_snapshot.build_source is not None or new_snapshot.build_source is not None
+    from ..evidence_depth import embedded_header_graph
+
+    # A header-only dump's header graph is embedded L5 evidence (ADR-063
+    # Phase 10), engaging the pipeline the same way an embedded pack does.
+    has_embedded = any(
+        s.build_source is not None or embedded_header_graph(s) is not None
+        for s in (old_snapshot, new_snapshot)
     )
     # require_evidence must be able to fail a run that supplied no evidence at
     # all, so engage the pipeline when the policy declares any requirement.

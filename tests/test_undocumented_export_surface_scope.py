@@ -58,7 +58,8 @@ from abicheck.model.elf_facts import ElfSymbol, SymbolType
 from abicheck.model.macho_facts import MachoExport
 from abicheck.model.vocabulary import ScopeOrigin
 from abicheck.pe_metadata import PeMetadata
-from abicheck.surface import classify_change_surface, compute_public_surface
+from abicheck.policy.public_surface_closure import resolve_public_surface
+from abicheck.surface import classify_change_surface
 
 #: The undocumented export's own hygiene finding, and a representative
 #: spread of the *other* binary-level kinds that land on the same symbol.
@@ -112,8 +113,8 @@ def _elf_snapshot(
 def _classify(kind: ChangeKind, symbol: str, old: AbiSnapshot, new: AbiSnapshot):
     return classify_change_surface(
         Change(kind=kind, symbol=symbol, description="x"),
-        compute_public_surface(old),
-        compute_public_surface(new),
+        resolve_public_surface(old),
+        resolve_public_surface(new),
     )
 
 
@@ -220,7 +221,7 @@ class TestRemovalOfAnUndocumentedExportIsNeverDemoted:
             source_header="/src/priv.h",
         )
         snap = _elf_snapshot(declared=[_public_fn(), private], exports=["api", "priv"])
-        assert "priv" not in compute_public_surface(snap).undeclared_export_symbols
+        assert "priv" not in resolve_public_surface(snap).undeclared_export_symbols
         in_surface, _ = _classify(ChangeKind.FUNC_REMOVED_ELF_ONLY, "priv", snap, snap)
         assert in_surface is False
 
@@ -254,7 +255,7 @@ class TestCompilerEmittedClassArtifactsAreNotUndocumented:
     )
     def test_the_artifact_is_not_seeded(self, symbol: str) -> None:
         snap = _elf_snapshot(declared=[_public_fn()], exports=["api", symbol])
-        assert symbol not in compute_public_surface(snap).all_symbols
+        assert symbol not in resolve_public_surface(snap).all_symbols
 
     def test_so_a_finding_about_it_is_retained(self) -> None:
         snap = _elf_snapshot(declared=[_public_fn()], exports=["api", "_ZTVN3foo3BarE"])
@@ -269,7 +270,7 @@ class TestCompilerEmittedClassArtifactsAreNotUndocumented:
         snap = _elf_snapshot(
             declared=[_public_fn()], exports=["api", "_ZN3foo8internalEv"]
         )
-        assert "_ZN3foo8internalEv" in compute_public_surface(snap).all_symbols
+        assert "_ZN3foo8internalEv" in resolve_public_surface(snap).all_symbols
 
 
 class TestConservativeRetentionWhereEvidenceIsMissing:
@@ -282,7 +283,7 @@ class TestConservativeRetentionWhereEvidenceIsMissing:
         anything is undocumented."""
         fn = Function(name="api", mangled="api", return_type="int", params=[])
         snap = _elf_snapshot(declared=[fn], exports=["api", "internal_table"])
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert surf.has_provenance is False
         assert "internal_table" not in surf.all_symbols
 
@@ -291,7 +292,7 @@ class TestConservativeRetentionWhereEvidenceIsMissing:
         snap = AbiSnapshot(
             library="libx.so", version="1", functions=[_public_fn()], from_headers=True
         )
-        surf = compute_public_surface(snap)
+        surf = resolve_public_surface(snap)
         assert surf.all_symbols == {"api"}
 
     def test_an_unresolvable_side_retains_everything(self) -> None:
@@ -341,7 +342,7 @@ class TestExportSpellingsAcrossPlatforms:
             ),
             from_headers=True,
         )
-        assert "old_impl" not in compute_public_surface(snap).all_symbols
+        assert "old_impl" not in resolve_public_surface(snap).all_symbols
 
     def test_elf_default_versioned_name_is_seeded_unversioned(self) -> None:
         snap = _elf_snapshot(
@@ -349,7 +350,7 @@ class TestExportSpellingsAcrossPlatforms:
             exports=["api", "internal_table"],
             versioned={"internal_table": "V1"},
         )
-        assert "internal_table" in compute_public_surface(snap).all_symbols
+        assert "internal_table" in resolve_public_surface(snap).all_symbols
 
     def test_macho_names_are_seeded(self) -> None:
         snap = AbiSnapshot(
@@ -361,7 +362,7 @@ class TestExportSpellingsAcrossPlatforms:
             ),
             from_headers=True,
         )
-        assert "internal_table" in compute_public_surface(snap).all_symbols
+        assert "internal_table" in resolve_public_surface(snap).all_symbols
 
     def test_pe_exports_are_seeded(self) -> None:
         from abicheck.model.pe_facts import PeExport
@@ -375,7 +376,7 @@ class TestExportSpellingsAcrossPlatforms:
             ),
             from_headers=True,
         )
-        assert "internal_table" in compute_public_surface(snap).all_symbols
+        assert "internal_table" in resolve_public_surface(snap).all_symbols
 
 
 class TestThroughTheRealPipeline:
@@ -583,8 +584,8 @@ class TestIntroductionOfAnUndocumentedExportIsNeverDemoted:
         assert (
             _is_undeclared_export_existence_change(
                 Change(kind=kind, symbol="", description="x"),
-                compute_public_surface(old),
-                compute_public_surface(new),
+                resolve_public_surface(old),
+                resolve_public_surface(new),
             )
             is False
         )

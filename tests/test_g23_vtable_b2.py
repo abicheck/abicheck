@@ -84,7 +84,7 @@ class TestSecondaryVtableGroup:
         # fact_backfill, but this defense-in-depth check does not assume a
         # caller does).
         old = self._hierarchy(b_is_poly=False)
-        old.clang_vtable_facts_reliable = False
+        old.stale_fact_families = old.stale_fact_families | {"clang_vtable"}
         new = self._hierarchy(b_is_poly=True)
         assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED not in _kinds(
             compare(old, new)
@@ -161,7 +161,7 @@ class TestSecondaryVtableGroup:
         old = AbiSnapshot(
             library="lib.so", version="1", types=[a, b_old, d], functions=[b_method]
         )
-        old.clang_vtable_facts_reliable = False
+        old.stale_fact_families = old.stale_fact_families | {"clang_vtable"}
         new = AbiSnapshot(library="lib.so", version="2", types=[a, b_new, d])
         assert ChangeKind.SECONDARY_VTABLE_GROUP_CHANGED in _kinds(compare(old, new))
 

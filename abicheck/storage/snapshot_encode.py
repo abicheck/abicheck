@@ -33,6 +33,7 @@ from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
 
 from ..model import AbiSnapshot
+from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
 from .enum_codec import encode_platform_enums
 from .extraction_scope_codec import encode_extraction_scope
@@ -90,12 +91,26 @@ _IMMUTABLE_LEAF_TYPES: frozenset[type] = frozenset(
 _FIELD_NAMES: dict[type, tuple[str, ...] | None] = {}
 
 
+def _wire_field_names(cls: type) -> tuple[str, ...]:
+    """*cls*'s persisted fields in declaration order: its stored fields plus
+    any retired bridge views it inherits (ADR-063 Phase 10), computed per
+    concrete class so a subclass's own fields are never dropped."""
+    stored = {f.name for f in dataclass_fields(cls)}
+    retired: frozenset[str] = getattr(cls, "__retired_bridge_fields__", frozenset())
+    if not retired:
+        return tuple(f.name for f in dataclass_fields(cls))
+    declared = cls.__dataclass_fields__  # type: ignore[attr-defined]
+    return tuple(n for n in declared if n in stored or n in retired)
+
+
 def _dataclass_field_names(cls: type) -> tuple[str, ...] | None:
     try:
         return _FIELD_NAMES[cls]
     except KeyError:
         names = (
-            tuple(f.name for f in dataclass_fields(cls)) if is_dataclass(cls) else None
+            # ADR-063 Phase 10: a class with retired bridge fields persists
+            # them from their read-only views, in their historical position.
+            _wire_field_names(cls) if is_dataclass(cls) else None
         )
         _FIELD_NAMES[cls] = names
         return names
@@ -248,6 +263,20 @@ def _with_declarations(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
     return out
 
 
+def _expand_stale_fact_families(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
+    """Write ``stale_fact_families`` as the eight historical
+    ``*_facts_reliable`` keys, in that field's position (ADR-063 Phase 10:
+    the persisted document is unchanged by the model's retirement of them)."""
+    out: dict[str, Any] = {}
+    for key, value in d.items():
+        if key != "stale_fact_families":
+            out[key] = value
+            continue
+        for family in FACT_FAMILIES:
+            out[flag_name(family)] = family not in snap.stale_fact_families
+    return out
+
+
 def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     """Encode *snap* into its canonical, fully-detached dictionary form.
 
@@ -260,6 +289,7 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     )
     # Runtime-only provenance qualifier — never persisted.
     d.pop("from_headers_inferred", None)
+    d = _expand_stale_fact_families(d, snap)
     # Runtime-only source-read licence — never persisted, by design. Writing it
     # would let a stored snapshot grant itself permission to re-read whatever
     # now lives at the ``source_header`` paths it records, which is exactly the

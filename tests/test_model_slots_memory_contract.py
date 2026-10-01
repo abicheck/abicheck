@@ -233,7 +233,8 @@ class TestSlottingDidNotChangeBehaviour:
         # 49: ADR-075 D2 added `ownership_fact` (persisted as a side table,
         # stripped from the per-entity dict by storage/extraction_scope_codec).
         assert len(dataclasses.fields(Function)) == 49
-        assert len(dataclasses.fields(Param)) == 10
+        # 9: ADR-063 Phase 10 retired `is_va_list` to an InitVar view.
+        assert len(dataclasses.fields(Param)) == 9
         assert len(dataclasses.fields(Fact)) == 4
 
 

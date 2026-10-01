@@ -51,13 +51,13 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.policy.public_surface_closure import resolve_public_surface
 from abicheck.surface import (
     REASON_NO_PROVENANCE,
     REASON_NOT_EXPORTED,
     REASON_OFF_PYTHON_SURFACE,
     REASON_PRIVATE_INTERNAL_UNREACHABLE,
     PublicSurface,
-    compute_public_surface,
 )
 
 
@@ -167,7 +167,7 @@ class TestPublicModeUnresolvedSurface:
 
     def test_one_sided_unresolvable_surface_downgrades_too(self) -> None:
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        resolvable = compute_public_surface(snap)
+        resolvable = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3apiv", description="")
         decision = evaluate_change_contract_relevance(
             c, resolvable, _UNRESOLVABLE, mode=ContractMode.PUBLIC
@@ -190,7 +190,7 @@ class TestPublicModeUnresolvedSurface:
         # sides-required gate here can only ever *gain* a correct
         # IN_CONTRACT, never wrongly reach PROVEN_OUT_OF_CONTRACT.
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        resolvable = compute_public_surface(snap)
+        resolvable = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3api", description="")
         decision = evaluate_change_contract_relevance(
             c, resolvable, _UNRESOLVABLE, mode=ContractMode.PUBLIC
@@ -206,7 +206,7 @@ class TestPublicModeUnresolvedSurface:
         # alone, with the old side completely unresolvable (e.g. a
         # from-scratch comparison against an empty baseline).
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        resolvable = compute_public_surface(snap)
+        resolvable = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3api", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, resolvable, mode=ContractMode.PUBLIC
@@ -291,7 +291,7 @@ class TestPublicModeAlreadyExcludedByPipeline:
         # classify_change_surface call would happily call IN_CONTRACT, the
         # already-recorded confirmed-private reason must win.
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="detail::Impl",
@@ -390,7 +390,7 @@ class TestPublicModeAlreadyExcludedByPipeline:
             surface_exclusion_reason="some future pipeline stage's own custom reason",
         )
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.IN_CONTRACT
 
@@ -418,7 +418,7 @@ class TestPublicModeAlreadyExcludedByPipeline:
             surface_exclusion_reason=mod._REASON_POST_MANIFEST_NOT_COMMITTED,
         )
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision == ContractEvaluationDecision(
             relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT,
@@ -468,7 +468,7 @@ class TestPublicModeIdentityAmbiguous:
         # on surface resolvability for this decision.
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="", description="")
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision == ContractEvaluationDecision(
             relevance=ContractRelevance.UNKNOWN_UNRESOLVED,
@@ -494,7 +494,7 @@ class TestPublicModeIdentityAmbiguous:
             description="leaked: foo, bar",
         )
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision == ContractEvaluationDecision(
             relevance=ContractRelevance.IN_CONTRACT,
@@ -534,7 +534,7 @@ class TestPublicModeSourceAbiKindsTrustedByConstruction:
         self,
     ) -> None:
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.PUBLIC_MACRO_REMOVED, symbol="MY_MACRO", description=""
         )
@@ -567,7 +567,7 @@ class TestPublicModeSourceAbiKindsTrustedByConstruction:
         # bypass happens before the identity-ambiguity gate too.
         c = Change(kind=ChangeKind.PUBLIC_TYPEDEF_REMOVED, symbol="", description="")
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.IN_CONTRACT
         assert decision.reason_code == "public_root_membership"
@@ -576,7 +576,7 @@ class TestPublicModeSourceAbiKindsTrustedByConstruction:
 class TestPublicModeInSurface:
     def test_public_function_is_in_contract(self) -> None:
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="api", description="")
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision == ContractEvaluationDecision(
@@ -614,10 +614,10 @@ class TestPublicModeSideAuthority:
             origin=ScopeOrigin.PUBLIC_HEADER,
             mangled="_Z3foov",
         )
-        surf_old = compute_public_surface(
+        surf_old = resolve_public_surface(
             AbiSnapshot(library="l", version="1", functions=[fn_old, other_old])
         )
-        surf_new = compute_public_surface(
+        surf_new = resolve_public_surface(
             AbiSnapshot(library="l", version="1", functions=[fn_new, other_new])
         )
         c = Change(
@@ -642,10 +642,10 @@ class TestPublicModeSideAuthority:
             origin=ScopeOrigin.PRIVATE_HEADER,
             mangled="_Z3foov",
         )
-        surf_old = compute_public_surface(
+        surf_old = resolve_public_surface(
             AbiSnapshot(library="l", version="1", functions=[fn_old])
         )
-        surf_new = compute_public_surface(
+        surf_new = resolve_public_surface(
             AbiSnapshot(library="l", version="1", functions=[fn_new])
         )
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
@@ -662,7 +662,7 @@ class TestPublicModeSideAuthority:
         snap_new = AbiSnapshot(
             library="l", version="1", functions=[_fn("bar", mangled="_Z3barv")]
         )
-        surf_new = compute_public_surface(snap_new)
+        surf_new = resolve_public_surface(snap_new)
         c = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
@@ -686,7 +686,7 @@ class TestPublicModeSideAuthority:
                 )
             ],
         )
-        surf_new = compute_public_surface(snap_new)
+        surf_new = resolve_public_surface(snap_new)
         c = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
@@ -697,7 +697,7 @@ class TestPublicModeSideAuthority:
         # The old side being resolvable (but irrelevant to an addition) must
         # not substitute for the new side's own resolvability.
         snap_old = AbiSnapshot(library="l", version="1", functions=[_fn("other")])
-        surf_old = compute_public_surface(snap_old)
+        surf_old = resolve_public_surface(snap_old)
         c = Change(kind=ChangeKind.FUNC_ADDED, symbol="_Z3barv", description="")
         decision = evaluate_change_contract_relevance(
             c, surf_old, _UNRESOLVABLE, mode=ContractMode.PUBLIC
@@ -708,7 +708,7 @@ class TestPublicModeSideAuthority:
 
     def test_removal_needs_the_old_side_resolvable_not_the_new_side(self) -> None:
         snap_new = AbiSnapshot(library="l", version="1", functions=[_fn("other")])
-        surf_new = compute_public_surface(snap_new)
+        surf_new = resolve_public_surface(snap_new)
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="_Z3foov", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
@@ -731,7 +731,7 @@ class TestPublicModeSideAuthority:
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[owner_new],
         )
-        surf_new = compute_public_surface(snap_new)
+        surf_new = resolve_public_surface(snap_new)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_ADDED,
             symbol="operator==",
@@ -754,12 +754,12 @@ class TestPublicModeSideAuthority:
             name="Foo", kind="class", size_bits=8, origin=ScopeOrigin.PRIVATE_HEADER
         )
         public_api = _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)
-        surf_old = compute_public_surface(
+        surf_old = resolve_public_surface(
             AbiSnapshot(
                 library="l", version="1", functions=[public_api], types=[owner_old]
             )
         )
-        surf_new = compute_public_surface(
+        surf_new = resolve_public_surface(
             AbiSnapshot(
                 library="l", version="1", functions=[public_api], types=[owner_new]
             )
@@ -800,7 +800,7 @@ class TestPublicModeSideAuthority:
                 )
             ],
         )
-        surf_new = compute_public_surface(snap_new)
+        surf_new = resolve_public_surface(snap_new)
         c = Change(kind=ChangeKind.TYPE_FIELD_ADDED, symbol="Point", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
@@ -821,7 +821,7 @@ class TestPublicModeSideAuthority:
             version="1",
             functions=[_fn("bar", mangled="_Z3barv", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        surf_new = compute_public_surface(snap_new)
+        surf_new = resolve_public_surface(snap_new)
         c = Change(
             kind=ChangeKind.VIRTUAL_METHOD_ADDED, symbol="_Z3barv", description=""
         )
@@ -846,7 +846,7 @@ class TestPublicModeSideAuthority:
             version="1",
             functions=[_fn("bar", mangled="_Z3barv", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        surf_new = compute_public_surface(snap_new)
+        surf_new = resolve_public_surface(snap_new)
         c = Change(kind=ChangeKind.OVERLOAD_ADDED, symbol="_Z3barv", description="")
         decision = evaluate_change_contract_relevance(
             c, _UNRESOLVABLE, surf_new, mode=ContractMode.PUBLIC
@@ -874,10 +874,10 @@ class TestPublicModeSideAuthority:
             mangled="_Z3foov",
         )
         fn_new = _fn("foo", origin=ScopeOrigin.PUBLIC_HEADER, mangled="_Z3foov")
-        surf_old = compute_public_surface(
+        surf_old = resolve_public_surface(
             AbiSnapshot(library="l", version="1", functions=[fn_old])
         )
-        surf_new = compute_public_surface(
+        surf_new = resolve_public_surface(
             AbiSnapshot(library="l", version="1", functions=[fn_new])
         )
         c = Change(kind=ChangeKind.FUNC_VIRTUAL_ADDED, symbol="_Z3foov", description="")
@@ -901,7 +901,7 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
         self,
     ) -> None:
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
             symbol="TotallyUnknownType",
@@ -931,7 +931,7 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
             version="1",
             functions=[_fn("Foo", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Foo", description="")
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.UNKNOWN_UNRESOLVED
@@ -946,7 +946,7 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
             functions=[_fn("api")],
             types=[_rec("detail::Impl")],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="detail::Impl", description=""
         )
@@ -962,7 +962,7 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
         # so it must stay trusted even though a constant name never
         # appears in public_symbols/public_types at all.
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.CONSTANT_CHANGED, symbol="MY_CONST", description="")
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision.relevance is ContractRelevance.IN_CONTRACT
@@ -974,7 +974,7 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
         # A python_* finding lives on a distinct evidence axis the
         # header-surface universes don't cover at all.
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.PYTHON_ABI3_DROPPED,
             symbol="some.python.name",
@@ -989,7 +989,7 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
         # public symbol is genuine confirmation, mirroring
         # classify_change_surface's own qualified-tail handling.
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="ns::api", description=""
         )
@@ -1005,7 +1005,7 @@ class TestPublicModeConservativeRetentionIsNotConfirmation:
         # public symbol either, falling through to the type-candidate check
         # (which also fails to confirm, since the symbol isn't a type name).
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.FUNC_RETURN_CHANGED,
             symbol="ns::totally_unrelated",
@@ -1047,7 +1047,7 @@ class TestPublicModeMemberLevelConfirmation:
                 )
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
             symbol="Point",
@@ -1075,7 +1075,7 @@ class TestPublicModeMemberLevelConfirmation:
                 )
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
             symbol="Mode::A",
@@ -1113,7 +1113,7 @@ class TestPublicModeHiddenFriendConfirmation:
                 )
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1141,7 +1141,7 @@ class TestPublicModeHiddenFriendConfirmation:
                 )
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1161,7 +1161,7 @@ class TestPublicModeHiddenFriendConfirmation:
             version="1",
             functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1194,7 +1194,7 @@ class TestPublicModeHiddenFriendConfirmation:
                 )
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol="_ZN5mylibeqERKNS_5pointES2_",
@@ -1214,7 +1214,7 @@ class TestPublicModeTerminalExclusion:
             functions=[_fn("api", ret="Result *")],
             types=[_rec("Result"), _rec("InternalCache")],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="InternalCache", description=""
         )
@@ -1243,7 +1243,7 @@ class TestPublicModeTerminalExclusion:
             version="1",
             functions=[_fn("secret_impl", origin=ScopeOrigin.PRIVATE_HEADER)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="secret_impl", description="")
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision == ContractEvaluationDecision(
@@ -1265,7 +1265,7 @@ class TestPublicModeWeakReason:
             functions=[_fn("api", ret="int", origin=ScopeOrigin.PUBLIC_HEADER)],
             types=[_rec("InternalCache", origin=ScopeOrigin.UNKNOWN)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="InternalCache", description=""
         )
@@ -1290,7 +1290,7 @@ class TestPublicModeWeakReason:
             version="1",
             functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description=""
         )
@@ -1327,7 +1327,7 @@ class TestPublicModeWeakReason:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="inline_api", description="")
         decision = evaluate_change_contract_relevance(c, s, s, mode=ContractMode.PUBLIC)
         assert decision == ContractEvaluationDecision(
@@ -1348,7 +1348,7 @@ class TestPublicModeWeakReason:
                 _fn("internal", vis=Visibility.ELF_ONLY, origin=ScopeOrigin.UNKNOWN),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description=""
         )
@@ -1375,7 +1375,7 @@ class TestPublicModeWeakReason:
                 ),
             ],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(
             kind=ChangeKind.FUNC_REMOVED, symbol="ns::inline_api", description=""
         )
@@ -1402,7 +1402,7 @@ class TestPublicModeForcePublicOverlay:
             version="1",
             functions=[_fn("secret_impl", origin=ScopeOrigin.PRIVATE_HEADER)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="secret_impl", description="")
         # Without the overlay, a confident private-header origin resolves
         # to a terminal exclusion.
@@ -1489,7 +1489,7 @@ class TestPublicModePostManifestOverlay:
             version="1",
             functions=[_fn("pp_foo", origin=ScopeOrigin.PRIVATE_HEADER)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="pp_foo", description="")
         # Without the overlay, a confident private-header origin resolves
         # to a terminal exclusion.
@@ -1602,7 +1602,7 @@ class TestEvaluateSnapshotPairContractRelevance:
             version="1",
             functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
         )
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         changes = [
             Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="api", description=""),
             Change(
@@ -1621,5 +1621,5 @@ class TestEvaluateSnapshotPairContractRelevance:
 
     def test_empty_changes_list(self) -> None:
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
-        s = compute_public_surface(snap)
+        s = resolve_public_surface(snap)
         assert evaluate_snapshot_pair_contract_relevance([], s, s) == []

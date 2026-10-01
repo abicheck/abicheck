@@ -230,8 +230,8 @@ def _resolve_side_snapshot_impl(
     source_frontend_from_folded_context: bool = False,
     l4_public_headers: list[Path] | None = None,
     l4_public_header_dirs: list[Path] | None = None,
-    legacy_compile_db_tokens: tuple[str, ...] = (),
-    legacy_compile_db_matched: bool = False,
+    compile_db_tokens: tuple[str, ...] = (),
+    compile_db_matched: bool = False,
 ) -> SideResolution:
     """The real implementation behind :func:`resolve_side_snapshot`.
 
@@ -281,7 +281,7 @@ def _resolve_side_snapshot_impl(
       therefore guards the seed with ``lang == "c"`` while leaving the parse's
       own auto-detection alone, exactly as it did before this migration.
 
-    *legacy_compile_db_tokens*/*legacy_compile_db_matched* (ADR-063 Phase 1):
+    *compile_db_tokens*/*compile_db_matched* (ADR-063 Phase 1):
     forwarded verbatim to
     :func:`~abicheck.workflows.artifact.resolve._seeded_includes_and_compile_context`
     -- see that function's own docstring for the precedence rule (the P0.3
@@ -362,8 +362,8 @@ def _resolve_side_snapshot_impl(
                 build_config_locally_trusted=build_config_locally_trusted,
                 build_config_explicit=build_config_explicit,
                 collect_mode=seed_collect_mode,
-                legacy_compile_db_tokens=legacy_compile_db_tokens,
-                legacy_compile_db_matched=legacy_compile_db_matched,
+                compile_db_tokens=compile_db_tokens,
+                compile_db_matched=compile_db_matched,
             )
         )
         _artifact_plan.pending_cleanups.extend(_seed_cleanups)
