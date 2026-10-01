@@ -141,6 +141,33 @@ def _set_member(value: Any) -> Any:
     return value
 
 
+def _canonical_dict(value: dict[Any, Any]) -> dict[str, Any]:
+    """`canonical_form` of an exact `dict`: string keys only, emitted in
+    sorted key order.
+
+    One pass checks both that every key is a `str` and whether the keys
+    already ascend -- which they do for every document read back from a
+    canonical store, since it was written in this order. Only an unsorted
+    mapping pays for `sorted`, and then by key alone (plain `str` ordering,
+    no per-item key function), never by the pair. The result is identical
+    to sorting unconditionally: an ascending key sequence is its own sort.
+    """
+    previous: str | None = None
+    ordered = True
+    for raw_key in value:
+        if type(raw_key) is not str and not isinstance(raw_key, str):
+            raise TypeError(
+                f"mapping key {raw_key!r} is {type(raw_key).__name__}, not str; "
+                "canonical storage form does not coerce keys"
+            )
+        if ordered and previous is not None and not previous < raw_key:
+            ordered = False
+        previous = raw_key
+    if ordered:
+        return {k: canonical_form(v) for k, v in value.items()}
+    return {k: canonical_form(value[k]) for k in sorted(value)}
+
+
 def canonical_form(value: Any) -> Any:
     """Recursively normalize a value into its canonical logical form.
 
@@ -173,35 +200,24 @@ def canonical_form(value: Any) -> Any:
     the document, in both directions — is asserted as a property test rather
     than argued here.
     """
-    if value is None or isinstance(value, (str, bool)):
+    value_type = type(value)
+    # Exact-type dispatch first: a decoded storage document is made only of
+    # these, and `type() is` costs far less than the `isinstance` chain
+    # below (which still handles every subclass exactly as before).
+    if value_type is str or value_type is int or value_type is bool or value is None:
+        return value
+    if value_type is dict:
+        return _canonical_dict(value)
+    if value_type is list or value_type is tuple:
+        return [canonical_form(v) for v in value]
+    if value_type is float:
+        return _canonical_number(value)
+    if isinstance(value, (str, bool)):
         return value
     if isinstance(value, int):
         return value
     if isinstance(value, float):
         return _canonical_number(value)
-    # Fast path for the overwhelmingly common concrete `dict`/`list` shapes
-    # (every storage payload is built from these, not from a custom
-    # `Mapping`/`Sequence`), checked by exact `type()` ahead of the general
-    # `isinstance(..., Mapping)`/`isinstance(..., Sequence)` checks below.
-    # `isinstance` against an `abc`-registered protocol walks the class's
-    # MRO/registry on every call (`abc.ABCMeta.__instancecheck__`), which is
-    # measurably more expensive than a `type() is dict` identity check at
-    # the scale a large snapshot's canonical form is computed at — this
-    # changes no observable behavior, since the general branches below still
-    # handle every other `Mapping`/`Sequence` subtype exactly as before.
-    value_type = type(value)
-    if value_type is dict:
-        for raw_key in value:
-            if not isinstance(raw_key, str):
-                raise TypeError(
-                    f"mapping key {raw_key!r} is {type(raw_key).__name__}, not str; "
-                    "canonical storage form does not coerce keys"
-                )
-        return {
-            k: canonical_form(v) for k, v in sorted(value.items(), key=lambda kv: kv[0])
-        }
-    if value_type is list:
-        return [canonical_form(v) for v in value]
     if _is_binary_buffer(value):
         # `bytes` is a Sequence, so without this guard it would fall through
         # and encode as a list of integers — a silent, lossy reinterpretation
