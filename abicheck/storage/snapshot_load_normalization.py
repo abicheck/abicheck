@@ -47,11 +47,51 @@ from .closure_identity import (
     _LAMBDA_IDENTITY_FIELDS,
     _lambda_identity_containers_and_strings,
     _set_identity_container,
+    renumber_anonymous_closure_identities,
+)
+from .closure_marking import (
+    collect_closure_identity_marking,
+    defer_active,
+    renumber_with_marking,
+    source_proven_marker_free,
 )
 from .guards import decision_key, identity_text, mapping as _mapping_guard, strict_int
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
+
+
+def normalize_and_renumber_closure_identities_on_load(
+    snapshot: AbiSnapshot,
+) -> AbiSnapshot:
+    """`normalize_anonymous_type_spellings_on_load` then
+    `closure_identity.renumber_anonymous_closure_identities`, with one walk
+    of the snapshot's identity fields where the two used to take two.
+
+    Both steps start by walking every string of the same
+    `_LAMBDA_IDENTITY_FIELDS` containers just to learn whether any closure/
+    anonymous marker is present, and both are documented no-ops when none
+    is -- the overwhelmingly common case, and on a large snapshot each walk
+    is millions of nodes. So the renumbering's own marking walk runs first
+    and answers that question for both: with no marker, neither step can
+    change anything and the snapshot is returned as is. With a marker, the
+    original two steps run in their original order -- the spelling
+    normalization may rewrite strings, which invalidates the marking -- and
+    only the normalization's own trigger walk is skipped, since the marking
+    already answered it.
+    """
+    if source_proven_marker_free():
+        # `serialization.load_snapshot` scanned the document text and found
+        # no marker: both steps are no-ops, so neither needs its walk.
+        return snapshot
+    if defer_active():
+        normalize_anonymous_type_spellings_on_load(snapshot)
+        return renumber_anonymous_closure_identities(snapshot)
+    marking = collect_closure_identity_marking(snapshot)
+    if not marking.has_marker:
+        return renumber_with_marking(snapshot, marking)
+    _strip_anonymous_type_locations(snapshot, marking.containers)
+    return renumber_anonymous_closure_identities(snapshot)
 
 
 def normalize_anonymous_type_spellings_on_load(snapshot: AbiSnapshot) -> AbiSnapshot:
@@ -94,11 +134,17 @@ def normalize_anonymous_type_spellings_on_load(snapshot: AbiSnapshot) -> AbiSnap
     if collected is None:
         return snapshot
     containers, _strings = collected
+    _strip_anonymous_type_locations(snapshot, containers)
+    return snapshot
+
+
+def _strip_anonymous_type_locations(
+    snapshot: AbiSnapshot, containers: list[object]
+) -> None:
     for field_name, container in zip(_LAMBDA_IDENTITY_FIELDS, containers):
         new_container = _walk_rewrite_strings(container, strip_anonymous_type_location)
         if new_container is not container:
             _set_identity_container(snapshot, field_name, new_container)
-    return snapshot
 
 
 def backfill_missing_elf_binding(snap: AbiSnapshot) -> None:

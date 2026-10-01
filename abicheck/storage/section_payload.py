@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .canonical import canonical_form
+from .canonical import canonical_form, input_is_owned, is_canonical_tree
 from .dto import SECTION_SCHEMA_VERSIONS, SectionDTO
 from .guards import mapping as _mapping, required_field as _required_field
 
@@ -59,7 +59,7 @@ def section_dto_dict(section_kind: str, payload: Mapping[str, Any]) -> dict[str,
 
 
 def current_section_payload(
-    raw: Mapping[str, Any],
+    raw: Mapping[str, Any], *, owned: bool | None = None
 ) -> tuple[str, dict[str, Any]] | None:
     """``(kind, SectionDTO.from_dict(raw).to_dict()["payload"])`` for a
     section already at its kind's current version, without building the
@@ -72,7 +72,16 @@ def current_section_payload(
     `canonical_form` produces. What is skipped is the round trip itself, two
     full copies of every section on every load (~6 s of a ~30 s oneDAL
     baseline load) for a DTO the loader discards immediately. The returned
-    payload is a fresh copy the caller owns.
+    payload is one the caller owns.
+
+    *owned* (default: `canonical.input_is_owned()`, i.e. inside
+    `canonical.owned_input`): *raw* belongs exclusively to this decode.
+    Then a payload that is already canonical (`is_canonical_tree`, true of
+    everything a canonical store wrote) is returned as-is instead of as a
+    `canonical_form` copy -- equal by that check's own definition, and
+    already the caller's to own. A payload that is not canonical is still
+    copied and normalized, so a hand-edited document reads exactly as
+    before.
     """
     _mapping(raw, "a section DTO")
     payload = _required_field(raw, "payload", "a section DTO")
@@ -90,6 +99,10 @@ def current_section_payload(
         header.section_kind
     ):
         return None
+    if owned is None:
+        owned = input_is_owned()
+    if owned and type(payload) is dict and is_canonical_tree(payload):
+        return header.section_kind, payload
     canonical = canonical_form(payload)
     assert isinstance(canonical, dict)
     return header.section_kind, canonical

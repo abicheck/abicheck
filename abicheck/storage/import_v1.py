@@ -114,7 +114,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from .canonical import canonical_input_trusted
+from .canonical import canonical_input_trusted, input_is_owned
 from .dto import (
     BINARY_SECTION_KIND,
     BUILD_SECTION_KIND,
@@ -158,7 +158,11 @@ from .legacy_sections import (
 )
 from .package import ArtifactRef, ObjectRef, ObjectStore, PackageManifest, VariantRef
 from .section_payload import current_section_payload, section_dto_dict
-from .semantic_ir_codec import semantic_ir_from_document, semantic_ir_to_document
+from .semantic_ir_codec import (
+    PredecodedSemanticIR,
+    semantic_ir_from_document,
+    semantic_ir_to_document,
+)
 from .sparse_section_codec import (
     BinarySection,
     BuildSection,
@@ -352,7 +356,10 @@ def artifact_kind_from_facts(
 
 
 def legacy_section_dtos(
-    legacy_document: Mapping[str, Any], *, max_known_schema_version: int
+    legacy_document: Mapping[str, Any],
+    *,
+    max_known_schema_version: int,
+    semantic_ir_encoded_here: bool = False,
 ) -> tuple[int, list[tuple[str, dict[str, Any]]]]:
     """`import_legacy_snapshot`'s validation and section encoding, without
     the object store: ``(source_schema_version, [(section_kind, dto_dict)])``.
@@ -362,6 +369,18 @@ def legacy_section_dtos(
     Split out so `sectioned_document.to_sectioned_document`, which inlines
     the sections anyway, does not hash, canonicalize and deep-copy the whole
     document through a throwaway store only to read each section back.
+
+    *semantic_ir_encoded_here*: *legacy_document*'s ``semantic_ir``/
+    ``semantic_ir_conflicts`` keys were just written by this build's own
+    `semantic_ir_codec.encode_semantic_ir` from a live `SemanticIR` (the
+    `serialization.snapshot_to_dict` a write path packages). The section is
+    then built from that encoding as it stands, instead of decoding it back
+    into a `SemanticIR` only to encode it again and freeze-thaw it through a
+    `SectionDTO`: re-encoding the encoder's own output is an identity, so
+    that round trip -- the largest term of a large snapshot's write --
+    produced the same section. A document from anywhere else (an import of
+    a stored legacy file) leaves it false and is still decoded, so a
+    malformed IR is refused exactly as before.
     """
     _mapping(legacy_document, "legacy_document")
     # This value gates the "too new to interpret" refusal below, so -- the
@@ -441,7 +460,19 @@ def legacy_section_dtos(
             "semantics this build has not validated"
         )
 
-    ir, conflicts = semantic_ir_from_document(legacy_document)
+    ir_section: dict[str, Any] | None = None
+    if semantic_ir_encoded_here:
+        own_encoding = {
+            key: legacy_document[key]
+            for key in ("semantic_ir", "semantic_ir_conflicts")
+            if key in legacy_document
+        }
+        if own_encoding:
+            ir_section = section_dto_dict(SEMANTIC_IR_SECTION_KIND, own_encoding)
+    else:
+        ir, conflicts = semantic_ir_from_document(legacy_document)
+        if ir is not None or conflicts:
+            ir_section = semantic_ir_to_dto(ir, conflicts).to_dict()
     section_dtos: list[tuple[str, dict[str, Any]]] = []
     for section_kind, payload in split_legacy_document(legacy_document).items():
         # ADR-063 Track 4 (8B): every `LEGACY_SECTION_KINDS` member now has
@@ -467,10 +498,8 @@ def legacy_section_dtos(
             continue
         section_dto = legacy_section_to_dto(section_kind, payload)
         section_dtos.append((section_kind, section_dto.to_dict()))
-    if ir is not None or conflicts:
-        section_dtos.append(
-            (SEMANTIC_IR_SECTION_KIND, semantic_ir_to_dto(ir, conflicts).to_dict())
-        )
+    if ir_section is not None:
+        section_dtos.append((SEMANTIC_IR_SECTION_KIND, ir_section))
     return source_schema_version, section_dtos
 
 
@@ -549,10 +578,15 @@ def _graph_section_loader(
 ) -> Callable[[], dict[str, Any]]:
     """The deferred half of `export_legacy_sections` for the `graph` section:
     the same `SectionDTO` validation and `graph_from_dto` decode an eager
-    read performs, run on first access."""
+    read performs, run on first access.
+
+    Whether *raw* is owned (`canonical.owned_input`) is decided now, while
+    the reading decode is still in progress -- first access runs after it
+    returned, outside that block."""
+    owned = input_is_owned()
 
     def load() -> dict[str, Any]:
-        current = current_section_payload(raw)
+        current = current_section_payload(raw, owned=owned)
         if current is not None and current[0] == GRAPH_SECTION_KIND:
             # The eager path's fast decode (`_owned_document`): same checks,
             # same document, no throwaway DTO copies.
@@ -581,7 +615,10 @@ def export_legacy_sections(
     section's DTO decode for first access. Its `surface_graph` value becomes
     a `surface_graph_codec.DeferredGraphPayload` whose `load()` runs exactly
     the eager decode below (same checks, same errors), so only a caller that
-    hands the document straight to `decode_surface_graph` may set it.
+    hands the document straight to `decode_surface_graph` may set it. The
+    same contract also hands the decoded `semantic_ir` section through as a
+    `semantic_ir_codec.PredecodedSemanticIR` rather than re-encoding it for
+    `decode_semantic_ir` to decode a second time.
 
     Each *sections* entry is ``(section_kind, locator, raw_section_dto)``;
     *locator* only names the object in error messages (a digest for a real
@@ -624,7 +661,14 @@ def export_legacy_sections(
             current_ir = current_section_payload(raw)
             if current_ir is not None and current_ir[0] == section_kind:
                 ir, conflicts = semantic_ir_from_document(current_ir[1])
-                document.update(semantic_ir_to_document(ir, conflicts))
+                if defer_graph:
+                    # Straight to `decode_snapshot`: hand it the decoded IR
+                    # instead of re-encoding it for a second decode.
+                    document["semantic_ir"] = PredecodedSemanticIR.from_section(
+                        ir, conflicts
+                    )
+                else:
+                    document.update(semantic_ir_to_document(ir, conflicts))
                 continue
         current = current_section_payload(raw) if document_codec is not None else None
         if (

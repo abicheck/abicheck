@@ -260,9 +260,29 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
 def load_snapshot(path: str | Path) -> AbiSnapshot:
     """Load a snapshot from *path*, transparently handling plain, gzip, and
     zstd storage (ADR-059) — detected from magic bytes, not the filename."""
-    from .snapshot_io import read_snapshot_text
+    from contextlib import ExitStack
 
-    return snapshot_from_dict(json.loads(read_snapshot_text(path)))
+    from .snapshot_io import read_snapshot_text
+    from .storage.canonical import owned_input
+    from .storage.closure_marking import (
+        json_text_may_hold_marker,
+        markers_absent_from_source,
+    )
+
+    text = read_snapshot_text(path)
+    marker_free = not json_text_may_hold_marker(text)
+    document = json.loads(text)
+    del text
+    with ExitStack() as stack:
+        # The parsed document is this function's alone and is dropped once
+        # the snapshot is built, so the decode may keep its subtrees
+        # uncopied.
+        stack.enter_context(owned_input())
+        if marker_free:
+            # No closure/anonymous marker anywhere in the text: the load-time
+            # spelling normalization and renumbering have nothing to do.
+            stack.enter_context(markers_absent_from_source())
+        return snapshot_from_dict(document)
 
 
 # ADR-061 gap E: BundleFacts (de)serialization is classified `storage`

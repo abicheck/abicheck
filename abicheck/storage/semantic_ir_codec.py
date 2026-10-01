@@ -442,6 +442,51 @@ def encode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
             d.pop(key, None)
 
 
+class PredecodedSemanticIR:
+    """A flat document's ``semantic_ir`` value whose section was already
+    decoded, so `decode_semantic_ir` need not decode it a second time.
+
+    Placed by ``storage.import_v1.export_legacy_sections`` for a caller that
+    hands the flat document straight to `decode_snapshot` (the same
+    ``defer_graph`` contract as `surface_graph_codec.DeferredGraphPayload`).
+    Before this existed the section was decoded, re-encoded with
+    `semantic_ir_to_document`, and decoded again -- two full passes over the
+    largest section of a header-AST snapshot for an identical result.
+
+    `from_section` applies exactly the normalizations that JSON round trip
+    applied, so the snapshot built from it is the one the round trip built:
+    occurrences and conflicts are re-ordered by their encoding's own sort
+    key, and an empty conflict map is reported as absent. Not a ``dict``, so
+    no other reader of the flat document can mistake it for a payload.
+    """
+
+    __slots__ = ("conflicts", "ir")
+
+    def __init__(self, ir: SemanticIR | None, conflicts: dict[str, str] | None) -> None:
+        self.ir = ir
+        self.conflicts = conflicts
+
+    @classmethod
+    def from_section(
+        cls, ir: SemanticIR | None, conflicts: Mapping[str, str]
+    ) -> PredecodedSemanticIR:
+        sorted_conflicts = (
+            {key: conflicts[key] for key in sorted(conflicts)} if conflicts else None
+        )
+        if ir is None or not ir.canonical:
+            return cls(None, sorted_conflicts)
+        return cls(
+            SemanticIR(
+                occurrences=dict(
+                    sorted(
+                        ir.occurrences.items(), key=lambda item: canonical_key(item[0])
+                    )
+                )
+            ),
+            sorted_conflicts,
+        )
+
+
 def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
     """In-place: rebuild ``snap.semantic_ir`` and ``snap.semantic_ir_conflicts``
     from *d*, leaving the IR ``None`` for a document that carries no
@@ -451,6 +496,13 @@ def decode_semantic_ir(d: dict[str, Any], snap: AbiSnapshot) -> None:
     A thin wrapper over `semantic_ir_from_document` — see that function for
     the actual decoding.
     """
+    predecoded = d.get("semantic_ir")
+    if isinstance(predecoded, PredecodedSemanticIR):
+        if predecoded.conflicts is not None:
+            snap.semantic_ir_conflicts = predecoded.conflicts
+        if predecoded.ir is not None:
+            snap.semantic_ir = predecoded.ir
+        return
     ir, conflicts = semantic_ir_from_document(d)
     if "semantic_ir_conflicts" in d:
         snap.semantic_ir_conflicts = conflicts

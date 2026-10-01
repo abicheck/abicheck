@@ -302,6 +302,95 @@ def copy_of_canonical_form(value: Any) -> Any:
     return value
 
 
+def _is_canonical_container(value: Any) -> bool:
+    if type(value) is dict:
+        previous: str | None = None
+        for key, item in value.items():
+            if type(key) is not str or (previous is not None and not previous < key):
+                return False
+            previous = key
+            item_type = type(item)
+            if (
+                item_type is str
+                or item_type is int
+                or item_type is bool
+                or item is None
+            ):
+                continue
+            if not _is_canonical_value(item):
+                return False
+        return True
+    for item in value:
+        item_type = type(item)
+        if item_type is str or item_type is int or item_type is bool or item is None:
+            continue
+        if not _is_canonical_value(item):
+            return False
+    return True
+
+
+def _is_canonical_value(value: Any) -> bool:
+    value_type = type(value)
+    if value_type is dict or value_type is list:
+        return _is_canonical_container(value)
+    if value_type is float:
+        # `_canonical_number` rewrites zero and integral floats to `int` and
+        # rejects non-finite ones, so only a finite, non-integral float is
+        # its own canonical form.
+        return math.isfinite(value) and not value.is_integer()
+    return value_type is str or value_type is int or value_type is bool or value is None
+
+
+def is_canonical_tree(value: Any) -> bool:
+    """Whether ``canonical_form(value)`` would return a value equal to
+    *value* in content, key order and leaf types -- so *value* can stand in
+    for that result without being copied.
+
+    Deliberately strict and read-only: only exact ``dict`` (string keys, in
+    ascending order), ``list``, ``str``, ``int``, ``bool``, ``None`` and a
+    finite non-integral ``float`` qualify. Anything `canonical_form` would
+    rewrite -- an unsorted mapping, a tuple, ``2.0``, ``-0.0``, a subclass --
+    answers ``False``, and the caller takes the copying path, so the only
+    effect of this check is skipping a copy that could not change anything.
+    A document parsed back from a canonical store passes in full, which is
+    what makes the check worth having: on a 238 MB snapshot it costs ~0.9 s
+    where the copy it replaces cost ~6 s.
+    """
+    return _is_canonical_value(value)
+
+
+#: Set only inside :func:`owned_input`.
+_INPUT_IS_OWNED: ContextVar[bool] = ContextVar(
+    "abicheck_storage_input_is_owned", default=False
+)
+
+
+@contextmanager
+def owned_input() -> Iterator[None]:
+    """Declare that the document being decoded inside this block is owned
+    exclusively by the decode: nothing outside it holds a reference, or will
+    read or mutate it afterwards.
+
+    Under that guarantee a decoder may let the decoded result share the
+    document's own subtrees instead of copying them first (see
+    `storage.section_payload.current_section_payload`). The one caller that
+    can prove it is `serialization.load_snapshot`, which parses the document
+    itself from a file and drops it once the snapshot is built. A caller
+    that hands in a dict it keeps -- `snapshot_from_dict(d)` -- must not
+    open it, since the snapshot would then alias that caller's dict.
+    """
+    token = _INPUT_IS_OWNED.set(True)
+    try:
+        yield
+    finally:
+        _INPUT_IS_OWNED.reset(token)
+
+
+def input_is_owned() -> bool:
+    """Whether the caller is inside :func:`owned_input`."""
+    return _INPUT_IS_OWNED.get()
+
+
 #: Set only inside :func:`canonical_input_trusted`.
 _INPUT_IS_CANONICAL: ContextVar[bool] = ContextVar(
     "abicheck_storage_input_is_canonical", default=False

@@ -365,7 +365,9 @@ def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
     # flat `.abi.json` a prior build wrote stays fully readable.
     return json.dumps(
         to_sectioned_document(
-            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
+            snapshot_to_dict(snap),
+            max_known_schema_version=SCHEMA_VERSION,
+            semantic_ir_encoded_here=True,
         ),
         indent=indent,
     )
