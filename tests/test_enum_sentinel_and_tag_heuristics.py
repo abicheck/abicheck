@@ -253,3 +253,34 @@ def test_oracle_is_not_vacuous() -> None:
     # collapsing to a constant.
     assert is_confirmed_enum_sentinel("E_MAX", {"A": 0, "E_MAX": 3})
     assert not is_confirmed_enum_sentinel("E_MAX", {"A": 0, "E_MAX": 1, "B": 2})
+
+
+def test_one_sided_sentinel_confirmation_does_not_hide_a_tag_change():
+    # E_MAX is the maximum only on the NEW side; on OLD it is an ordinary
+    # mid-list tag, so its value change is a real persisted-id change.
+    old = _enum_snap("1", "mylib::SerializationTag", [("A", 1), ("E_MAX", 2), ("B", 3)])
+    new = _enum_snap("2", "mylib::SerializationTag", [("A", 1), ("E_MAX", 4), ("B", 3)])
+    syms = {c.symbol for c in detect_serialization_tag_changes(old, new)}
+    assert "mylib::SerializationTag::E_MAX" in syms
+
+
+@given(_enums(), _enums())
+def test_tag_change_is_hidden_only_for_a_two_sided_sentinel(
+    old: dict[str, int], new: dict[str, int]
+) -> None:
+    """Oracle: every member present on both sides whose value differs is
+    reported unless it is a confirmed end marker on *both* sides
+    (``_oracle`` restates the peer rule independently)."""
+    ename = "mylib::SerializationTag"
+    reported = {
+        c.symbol
+        for c in detect_serialization_tag_changes(
+            _enum_snap("1", ename, list(old.items())),
+            _enum_snap("2", ename, list(new.items())),
+        )
+    }
+    for name in set(old) & set(new):
+        if old[name] == new[name]:
+            continue
+        hidden = _oracle(name, old) and _oracle(name, new)
+        assert (f"{ename}::{name}" not in reported) is hidden, (name, old, new)

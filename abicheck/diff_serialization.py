@@ -151,18 +151,35 @@ def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, tuple[str, str]]:
             out.setdefault(var.name, (str(var.value), _ENTITY_VARIABLE))
     for enum_t in snap.declarations.enums or []:
         type_is_tag = _enum_type_is_tag_registry(enum_t.name)
-        values = {m.name: m.value for m in enum_t.members}
         for m in enum_t.members:
-            # An end-of-list marker (``*_last``, ``LastSymbol``, ``*_count``)
-            # is not a persisted id; its value moves whenever a member is
-            # added and the enum-member detectors already report it.
-            # Cheap name test first: the sentinel check tokenizes, and almost
-            # no member of an ordinary enum is a tag candidate at all.
             if not (type_is_tag or _looks_like_serialization_tag(m.name)):
                 continue
-            if is_confirmed_enum_sentinel(m.name, values):
-                continue
             out.setdefault(f"{enum_t.name}::{m.name}", (str(m.value), _ENTITY_ENUM))
+    return out
+
+
+def _confirmed_sentinel_members(snap: AbiSnapshot) -> set[str]:
+    """``Enum::member`` keys that are structurally confirmed end markers in
+    *snap* (name nominates, :func:`holds_enum_maximum` confirms).
+
+    Kept apart from :func:`_collect_tag_constants` because confirmation is a
+    per-side fact and exclusion is a two-side decision: a member confirmed on
+    only one side is an ordinary member on the other, and its value change
+    must still reach the detector.
+    """
+    out: set[str] = set()
+    for enum_t in snap.declarations.enums or []:
+        type_is_tag = _enum_type_is_tag_registry(enum_t.name)
+        values: dict[str, int] | None = None
+        for m in enum_t.members:
+            # Cheap name test first: only a tag candidate can be excluded,
+            # and almost no member of an ordinary enum is one.
+            if not (type_is_tag or _looks_like_serialization_tag(m.name)):
+                continue
+            if values is None:
+                values = {x.name: x.value for x in enum_t.members}
+            if is_confirmed_enum_sentinel(m.name, values):
+                out.add(f"{enum_t.name}::{m.name}")
     return out
 
 
@@ -172,8 +189,17 @@ def detect_serialization_tag_changes(
 ) -> list[Change]:
     """Emit ``SERIALIZATION_TAG_CHANGED`` for tag constants whose values
     changed between *old* and *new*, including swaps."""
-    old_tags = _collect_tag_constants(old)
-    new_tags = _collect_tag_constants(new)
+    # An end-of-list marker (``*_last``, ``LastSymbol``, ``*_count``) is not
+    # a persisted id: its value moves whenever a member is added, and the
+    # enum-member detectors already report it. It is excluded only when it is
+    # a confirmed end marker on *both* sides.
+    sentinels = _confirmed_sentinel_members(old) & _confirmed_sentinel_members(new)
+    old_tags = {
+        k: v for k, v in _collect_tag_constants(old).items() if k not in sentinels
+    }
+    new_tags = {
+        k: v for k, v in _collect_tag_constants(new).items() if k not in sentinels
+    }
     findings: list[Change] = []
     for name, (old_val, entity) in old_tags.items():
         new_entry = new_tags.get(name)
