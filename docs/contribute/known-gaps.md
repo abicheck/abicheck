@@ -52,12 +52,16 @@ below) was triaged by heading only.
    component's export
    obligations](#an-i-include-root-makes-another-librarys-public-headers-this-components-export-obligations-2026-09-16)
    — the remaining half.
-4. Header exclusion that reports more than it did:
-   [`--exclude-header` vs. `--dump-manifest`](#-exclude-header-cannot-narrow-a-dump-manifest-dump),
-   [`dump` not stamping `excluded_header_patterns`](#the-native-dump-cli-does-not-stamp-excluded_header_patterns-on-the-snapshot-it-writes-2026-09-16),
-   [path-shaped patterns on Windows](#an-exclude-header-pattern-spelled-as-a-path-matches-nothing-on-windows-2026-09-16).
-5. [`effective_depth` reports `source` for a `--depth headers`
-   dump](#effective_depth-reports-source-for-a-depth-headers-dump-whose-only-l5-is-the-header-only-graph-2026-09-16).
+4. Header exclusion. **`dump` stamping** — already fixed, now pinned by a
+   test (entry struck through). **Path-shaped patterns** — fixed 2026-10-01
+   (entry struck through). Still open: [`--exclude-header` vs.
+   `--dump-manifest`](#-exclude-header-cannot-narrow-a-dump-manifest-dump)
+   — the combination is honestly *rejected* today; what remains is a
+   manifest-schema feature (an exclusion expressed in the manifest), not a
+   correctness defect.
+5. ~~`effective_depth` reports `source` for a `--depth headers` dump~~ —
+   already fixed 2026-09-17 (re-verified 2026-10-01); the entry's heading
+   now says so.
 
 Next, unranked: one-sided detectors carry no candidate-side marker and no
 gate enforces one (see the re-verified status on
@@ -9960,7 +9964,17 @@ in a header that *is* in `-H` and genuinely absent from the binary must still
 report. A suppression rule or a per-project carve-out is explicitly not the
 answer.
 
-## The native `dump` CLI does not stamp `excluded_header_patterns` on the snapshot it writes (2026-09-16)
+## ~~The native `dump` CLI does not stamp `excluded_header_patterns` on the snapshot it writes (2026-09-16)~~ — CLOSED
+
+> **Closed (re-verified 2026-10-01).** No longer reproduces: `dump` now
+> executes through `workflows.input_resolution.resolve_input`, whose wrapper
+> stamps the *achieved* patterns (`record_achieved_header_exclusions`). The
+> 2026-09-16 measurement below predates that. An earlier triage misread the
+> sectioned snapshot envelope as "not stamped"; read it through
+> `load_snapshot`. `tests/test_dump_records_header_exclusions.py` now pins the
+> stamp through the `dump` CLI and the comparability gate it feeds (a `dump`
+> baseline vs a `compare` candidate, across symmetric and asymmetric
+> exclusion sets). The record below is history.
 
 **Measured, not inferred** (2026-09-16, while wiring
 `scope.exclude_headers` through `dump`): a snapshot written by
@@ -10006,7 +10020,25 @@ candidate rests on both commands *resolving* the same rules, which is why
 that wiring is load-bearing, not a convenience on top of a gate that would
 otherwise have caught the divergence.
 
-## An `--exclude-header` pattern spelled as a path matches nothing on Windows (2026-09-16)
+## ~~An `--exclude-header` pattern spelled as a path matches nothing on Windows (2026-09-16)~~ — FIXED
+
+> **Fixed (2026-10-01), and the premise was partly wrong.** `fnmatch` applies
+> `os.path.normcase` to both sides, and on Windows that already turns `/` into
+> `\`, so a forward-slash pattern against a *live* Windows path did match. The
+> real defect was elsewhere and host-dependent: a stored snapshot's
+> `source_header` keeps the *dumping* host's separators, while normalization
+> depends on the *reading* host -- POSIX normalizes nothing, so a
+> Windows-dumped `C:\inc\fftw\fftw3.h` read on Linux never matched
+> `fftw/*` (and a backslash pattern never matched a Linux path).
+> `model.header_exclusion_record.glob_header_matches` now also matches the
+> `/`-spelled form of both sides. It only *adds* matches where a backslash is
+> present, so every POSIX path/POSIX pattern pair is decided exactly as before
+> -- the migration concern below does not arise for any input that already
+> matched. `tests/test_header_exclusion_separator_invariance.py` states it as
+> invariants over generated spellings on both simulated hosts, against the
+> previous rule as oracle; the `skipif(win32)` in
+> `tests/test_header_exclusion_primitives.py` is removed. The record below is
+> history.
 
 `extract/header_exclusions.apply_header_exclusions` tries each pattern against
 three spellings of a header: the bare name (`fftw3.h`), the full path
@@ -10029,7 +10061,7 @@ normalization that alters matching also alters run identity, and a baseline
 dumped before it would stop being comparable against a candidate dumped
 after. That is a migration, not a one-line `as_posix()`.
 
-## `effective_depth` reports `source` for a `--depth headers` dump whose only L5 is the header-only graph (2026-09-16)
+## ~~`effective_depth` reports `source` for a `--depth headers` dump whose only L5 is the header-only graph (2026-09-16)~~ — FIXED (2026-09-17)
 
 Same PVXS run as the entry above: `dump --depth headers` produced a snapshot
 whose `compare` reported `L5 source graph summary: present` on both sides and
