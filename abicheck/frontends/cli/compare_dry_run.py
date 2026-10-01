@@ -150,6 +150,17 @@ def build_compare_dry_run_result(
     from ...dry_run import DryRunResult, tool_status
 
     result = DryRunResult(command="compare")
+    from ...model.sided_inputs import compose_sided_paths
+    from ...workflows.header_frontend_preflight import operand_parses_headers
+
+    l2_sides = [
+        side
+        for side, path, own, manifest in (
+            ("old", old_input, old_headers_only, old_dump_manifest),
+            ("new", new_input, new_headers_only, new_dump_manifest),
+        )
+        if operand_parses_headers(path, compose_sided_paths(headers, own), manifest)
+    ]
     result.add(
         "Inputs",
         f"old: {old_input} ({old_kind})",
@@ -160,12 +171,14 @@ def build_compare_dry_run_result(
         f"requested depth: {depth or '(not given)'}",
         f"effective depth: {effective_depth_label}",
         f"effective collect mode: {collect_mode}",
-        # Depth governs L3-L5 collection only; header parsing is L2 and runs
-        # whenever headers are given, so an "off" depth beside a non-zero
-        # header TU estimate below is not a contradiction -- say so here.
-        "L2 header parsing: independent of depth; runs on every side given "
-        "headers (see the cost preview's header TU count)"
-        if headers or old_headers_only or new_headers_only
+        # Depth governs L3-L5 collection only; header parsing is L2, so an
+        # "off" depth beside a non-zero header TU estimate is not a
+        # contradiction. Named per side, and only for a side that really
+        # parses headers (a stored snapshot ignores -H).
+        "L2 header parsing: independent of depth; runs on the "
+        + " and ".join(l2_sides)
+        + " side (see the cost preview's header TU count)"
+        if l2_sides
         else None,
         "source scope: target on each side (compare has no PR change seed)"
         if collect_mode in ("source-target", "source-changed", "graph-full")

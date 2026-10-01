@@ -557,21 +557,24 @@ def acquire_header_graph_ast(
             # group that succeeds; only the headers that fail on their own
             # are lost, and the pass stays marked degraded below.
             def _parse_group(group: list[Path]) -> HeaderGraphAstProjection:
-                tree, _kind, _force = _clang_header_dump(
-                    group,
-                    eff_includes,
-                    compiler="cc" if _is_c else "c++",
-                    gcc_path=cc.gcc_path,
-                    gcc_prefix=cc.gcc_prefix,
-                    gcc_options=cc.gcc_options,
-                    gcc_option_tokens=eff_tokens,
-                    sysroot=cc.sysroot,
-                    nostdinc=cc.nostdinc,
-                    lang=lang,
-                    extra_hash_dirs=deferred_dirs,
-                    frontend_context=cc.frontend_context,
-                    memoize=False,
-                )
+                # Same scope as the batch parse above: the call-graph reader
+                # needs the dependency declarations a prune would collapse.
+                with suppress_streaming_prune():
+                    tree, _kind, _force = _clang_header_dump(
+                        group,
+                        eff_includes,
+                        compiler="cc" if _is_c else "c++",
+                        gcc_path=cc.gcc_path,
+                        gcc_prefix=cc.gcc_prefix,
+                        gcc_options=cc.gcc_options,
+                        gcc_option_tokens=eff_tokens,
+                        sysroot=cc.sysroot,
+                        nostdinc=cc.nostdinc,
+                        lang=lang,
+                        extra_hash_dirs=deferred_dirs,
+                        frontend_context=cc.frontend_context,
+                        memoize=False,
+                    )
                 return project_header_graph_ast(tree)
 
             with memory_trace.phase("dump.header_graph.clang_ast_bisect"):
@@ -582,14 +585,19 @@ def acquire_header_graph_ast(
                 )
             if parts:
                 projection_from_groups = merge_header_graph_ast_projections(parts)
-                ast_failure = (
-                    f"clang AST parse failed for {len(failed)} of "
-                    f"{len(resolved_headers)} header(s) "
-                    f"({', '.join(p.name for p in failed[:5])}"
-                    f"{', ...' if len(failed) > 5 else ''}); "
-                    f"the rest were parsed separately: {ast_failure}"
-                )
-                _log.warning("header graph: %s", ast_failure)
+            names = ", ".join(p.name for p in failed[:5])
+            more = ", ..." if len(failed) > 5 else ""
+            recovered = (
+                "the rest were parsed separately"
+                if parts
+                else "no header could be recovered"
+            )
+            ast_failure = (
+                f"clang AST parse failed for {len(failed)} of "
+                f"{len(resolved_headers)} header(s) ({names}{more}); "
+                f"{recovered}: {ast_failure}"
+            )
+            _log.warning("header graph: %s", ast_failure)
     # Reduce the AST to the four compact projections the graph builder
     # actually reads, then drop the tree BEFORE the graph is allocated, so
     # the two are never resident together.

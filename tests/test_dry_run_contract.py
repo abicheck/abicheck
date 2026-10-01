@@ -637,27 +637,35 @@ class TestCompareDryRun:
     ) -> None:
         # "effective depth: off" next to a non-zero header-TU estimate read
         # as a contradiction: depth governs L3-L5 only, header parsing is L2.
-        # The receipt must say what "off" covers, and only claim header
-        # parsing when headers were actually given.
-        old = tmp_path / "old.abi.json"
-        new = tmp_path / "new.abi.json"
-        _write_snapshot(old, "1.0")
-        _write_snapshot(new, "2.0")
+        # The note is claimed only for a side that really parses headers --
+        # a stored snapshot ignores -H.
+        old_snap = tmp_path / "old.abi.json"
+        new_snap = tmp_path / "new.abi.json"
+        _write_snapshot(old_snap, "1.0")
+        _write_snapshot(new_snap, "2.0")
         hdr = tmp_path / "a.h"
         hdr.write_text("int f(void);\n")
-        with_headers = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--dry-run", "-H", str(hdr)]
+        new_lib = tmp_path / "libnew.so"
+        new_lib.write_bytes(b"\x7fELF" + b"\0" * 60)
+
+        live = CliRunner().invoke(
+            main,
+            ["compare", str(old_snap), str(new_lib), "--dry-run", "-H", str(hdr)],
         )
-        assert with_headers.exit_code == 0, with_headers.output
-        assert (
-            "effective depth: off -- no L3-L5 source/build evidence"
-            in with_headers.output
+        assert live.exit_code == 0, live.output
+        assert "effective depth: off -- no L3-L5 source/build evidence" in live.output
+        assert "L2 header parsing: independent of depth; runs on the new side" in (
+            live.output
         )
-        assert "L2 header parsing: independent of depth" in with_headers.output
-        without = CliRunner().invoke(main, ["compare", str(old), str(new), "--dry-run"])
-        assert without.exit_code == 0, without.output
-        assert "effective depth: off -- no L3-L5" in without.output
-        assert "L2 header parsing" not in without.output
+        assert "old and new side" not in live.output
+
+        snaps = CliRunner().invoke(
+            main,
+            ["compare", str(old_snap), str(new_snap), "--dry-run", "-H", str(hdr)],
+        )
+        assert snaps.exit_code == 0, snaps.output
+        assert "effective depth: off -- no L3-L5" in snaps.output
+        assert "L2 header parsing" not in snaps.output
 
     def test_dry_run_shows_cost_preview(
         self, tmp_path: Path, source_tree_with_compile_db: Path

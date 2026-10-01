@@ -170,3 +170,53 @@ def test_attach_keeps_edges_of_headers_that_parse(monkeypatch, tmp_path: Path) -
     assert got.projection is not None
     assert "Good" in got.projection.type_files
     assert got.ast_failure is not None and "1 of 2" in got.ast_failure
+
+
+def test_attach_reports_every_failed_header_when_none_recover(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import abicheck.dumper as dumper
+    from abicheck.errors import SnapshotError
+    from abicheck.service_header_graph_attach import acquire_header_graph_ast
+
+    paths = [tmp_path / f"h{i}.h" for i in range(3)]
+    for p in paths:
+        p.write_text("#error nope\n")
+
+    def always_fail(headers, *_a, **_k):
+        raise SnapshotError("boom")
+
+    monkeypatch.setattr(dumper, "_clang_header_dump", always_fail)
+    got = acquire_header_graph_ast(paths, [], "c++", None)
+    assert got.projection is None
+    assert got.ast_failure is not None
+    assert "3 of 3" in got.ast_failure
+    assert "no header could be recovered" in got.ast_failure
+    for p in paths:
+        assert p.name in got.ast_failure
+
+
+def test_recovery_parses_run_with_streaming_prune_suppressed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import abicheck.dumper as dumper
+    from abicheck.dumper_clang_streaming import streaming_prune_suppressed
+    from abicheck.errors import SnapshotError
+    from abicheck.service_header_graph_attach import acquire_header_graph_ast
+
+    monkeypatch.setenv("ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS", "1")
+    good, bad = tmp_path / "good.h", tmp_path / "bad.h"
+    good.write_text("int g;\n")
+    bad.write_text("#error\n")
+    prune_seen: list[bool] = []
+
+    def fake_dump(headers, *_a, **_k):
+        prune_seen.append(streaming_prune_suppressed())
+        if any(Path(h).name == "bad.h" for h in headers):
+            raise SnapshotError("bad")
+        return {"kind": "TranslationUnitDecl", "inner": []}, "c++", False
+
+    monkeypatch.setattr(dumper, "_clang_header_dump", fake_dump)
+    acquire_header_graph_ast([good, bad], [], "c++", None)
+    assert len(prune_seen) == 3  # batch + two halves
+    assert all(prune_seen)

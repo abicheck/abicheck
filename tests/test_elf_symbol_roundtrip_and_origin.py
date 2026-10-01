@@ -97,6 +97,9 @@ _RUNTIME_OWNED = [
     "_ZTVSt9exception",
     "_ZTISt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE",
     "_ZTINSt6locale5facetE",
+    # std templates over global C-library types libstdc++ owns.
+    "_ZNKSt7codecvtIwc11__mbstate_tE6do_outERS0_PKwS4_RS4_PcS6_RS6_",
+    "_ZNSt4fposI11__mbstate_tEC1Ev",
     "_ZSt4cout",
     "_ZNSt15_Sp_counted_ptrIPiLN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv",
 ]

@@ -22,7 +22,20 @@ from __future__ import annotations
 from functools import lru_cache
 
 #: Source-names that open a runtime-owned scope as a nested-name's first part.
-_RUNTIME_SCOPES = frozenset({"__gnu_cxx", "__cxxabiv1", "__cxx11"})
+_RUNTIME_SCOPES = frozenset(
+    {
+        "__gnu_cxx",
+        "__cxxabiv1",
+        "__cxx11",
+        # Global C-library types libstdc++ itself instantiates std templates
+        # over (codecvt<wchar_t, char, __mbstate_t>, fpos<__mbstate_t>, the
+        # locale facets' __locale_t): runtime-owned, never the library's.
+        "__mbstate_t",
+        "__locale_t",
+        "__locale_struct",
+        "__va_list_tag",
+    }
+)
 
 #: Two-letter standard substitutions (``St`` = ``::std::``; the rest name
 #: std types). All of them are runtime-owned.
