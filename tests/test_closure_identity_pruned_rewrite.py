@@ -218,7 +218,8 @@ def test_collect_and_flag_matches_oracles_on_snapshot_dataclasses(
         # reachable through `_rewrite_plan` fields, sequences, and both
         # halves of a mapping.
         assert flagged == any(
-            closure_marker_walk._may_hold_marker(s) for s in _rewrite_plan_strings(value)
+            closure_marker_walk._may_hold_marker(s)
+            for s in _rewrite_plan_strings(value)
         ), field
         # Collection off: nothing collected, identical flag.
         silent: list[str] = []
