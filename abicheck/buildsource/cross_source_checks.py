@@ -458,6 +458,13 @@ def _check_exported_not_public(
 # ---------------------------------------------------------------------------
 
 
+def _header_name(decl: Any) -> str:
+    """The declaring header's file name -- never its absolute path, which
+    carries the checkout root and would make two identical trees differ."""
+    path = str(decl.source_header or "")
+    return path.replace("\\", "/").rsplit("/", 1)[-1] or "unknown header"
+
+
 _FN_CONSEQUENCE = (
     "Code that compiles against the header gets an undefined-symbol link error."
 )
@@ -518,7 +525,7 @@ def _check_public_not_exported(
             unresolved += 1
             text = (
                 f"Public {label or 'declaration '}{decl.name!r} (expected symbol "
-                f"{decl.mangled!r}) is not exported, but its header ({decl.source_header}) is not one this "
+                f"{decl.mangled!r}) is not exported, but its header ({_header_name(decl)}) is not one this "
                 "run's -H set names: it was reached only through #include, so "
                 "whether this library owes the export is not established."
             )
