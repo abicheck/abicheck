@@ -359,6 +359,65 @@ def is_canonical_tree(value: Any) -> bool:
     return _is_canonical_value(value)
 
 
+def canonical_form_shared(value: Any) -> Any:
+    """``canonical_form(value)``, reusing every subtree of *value* that is
+    already in canonical form instead of copying it.
+
+    Equal to `canonical_form`'s result in content, key order and leaf types,
+    and never mutates *value*: a container is rebuilt only when its own key
+    order or one of its children changes; anything already canonical is
+    returned as the very same object. Callers must therefore treat the
+    result as possibly sharing structure with *value* -- right for a
+    document that is serialized next and then dropped (the write path), not
+    for one a caller will mutate.
+
+    The write path's own encoder (`snapshot_encode`'s sorted mode) emits
+    dataclass fields in key order and sequences as lists, so on a real
+    snapshot nearly every container is reused and this costs a read-only
+    walk where `canonical_form` rebuilt the whole document.
+    """
+    value_type = type(value)
+    if value_type is str or value_type is int or value_type is bool or value is None:
+        return value
+    if value_type is dict:
+        previous: str | None = None
+        ordered = True
+        for key in value:
+            if type(key) is not str:
+                return canonical_form(value)
+            if ordered and previous is not None and not previous < key:
+                ordered = False
+            previous = key
+        if not ordered:
+            return {k: canonical_form_shared(value[k]) for k in sorted(value)}
+        rebuilt: dict[str, Any] | None = None
+        for key, item in value.items():
+            new_item = canonical_form_shared(item)
+            if rebuilt is None and new_item is not item:
+                rebuilt = {}
+                for done_key, done_item in value.items():
+                    if done_key == key:
+                        break
+                    rebuilt[done_key] = done_item
+            if rebuilt is not None:
+                rebuilt[key] = new_item
+        return value if rebuilt is None else rebuilt
+    if value_type is list:
+        new_list: list[Any] | None = None
+        for index, item in enumerate(value):
+            new_item = canonical_form_shared(item)
+            if new_list is None and new_item is not item:
+                new_list = list(value[:index])
+            if new_list is not None:
+                new_list.append(new_item)
+        return value if new_list is None else new_list
+    if value_type is tuple:
+        return [canonical_form_shared(item) for item in value]
+    if value_type is float:
+        return _canonical_number(value)
+    return canonical_form(value)
+
+
 #: Set only inside :func:`owned_input`.
 _INPUT_IS_OWNED: ContextVar[bool] = ContextVar(
     "abicheck_storage_input_is_owned", default=False

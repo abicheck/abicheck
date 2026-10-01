@@ -263,6 +263,7 @@ def load_snapshot(path: str | Path) -> AbiSnapshot:
     from contextlib import ExitStack
 
     from .snapshot_io import read_snapshot_text
+    from .storage.acyclic_json import gc_paused
     from .storage.canonical import owned_input
     from .storage.closure_marking import (
         json_text_may_hold_marker,
@@ -271,9 +272,15 @@ def load_snapshot(path: str | Path) -> AbiSnapshot:
 
     text = read_snapshot_text(path)
     marker_free = not json_text_may_hold_marker(text)
-    document = json.loads(text)
-    del text
     with ExitStack() as stack:
+        # Parsing and decoding allocate millions of containers, none of them
+        # garbage until the load returns; with the cyclic collector running
+        # it re-traverses that growing young set throughout (~30% of a
+        # 238 MB load). Pausing it is scheduling only -- any cycle the
+        # decode leaves is collected at the first collection after.
+        stack.enter_context(gc_paused())
+        document = json.loads(text)
+        del text
         # The parsed document is this function's alone and is dropped once
         # the snapshot is built, so the decode may keep its subtrees
         # uncopied.

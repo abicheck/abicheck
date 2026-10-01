@@ -7,12 +7,17 @@ change the output."""
 
 from __future__ import annotations
 
+import copy
 import json
 
 import pytest
 from hypothesis import given, strategies as st
 
-from abicheck.storage.canonical import canonical_form, is_canonical_tree
+from abicheck.storage.canonical import (
+    canonical_form,
+    canonical_form_shared,
+    is_canonical_tree,
+)
 
 
 class _Key(str):
@@ -105,3 +110,52 @@ def test_is_canonical_tree_accepts_every_canonical_document_read_back(tree):
     # reader parsed back passes, so the copy really is skipped on load.
     read_back = json.loads(json.dumps(canonical_form(tree)))
     assert is_canonical_tree(read_back)
+
+
+_finite_trees = st.recursive(
+    st.none()
+    | st.booleans()
+    | st.integers()
+    | st.text(max_size=4)
+    | st.floats(allow_nan=False, allow_infinity=False),
+    lambda inner: (
+        st.lists(inner, max_size=4)
+        | st.lists(inner, max_size=4).map(tuple)
+        | st.dictionaries(_keys, inner, max_size=5)
+    ),
+    max_leaves=30,
+)
+
+
+@given(_finite_trees)
+def test_shared_canonical_form_equals_canonical_form_and_never_mutates(tree):
+    before = copy.deepcopy(tree)
+    assert _typed(canonical_form_shared(tree)) == _typed(canonical_form(tree))
+    assert _typed(tree) == _typed(before)
+
+
+@given(_finite_trees)
+def test_shared_canonical_form_reuses_an_already_canonical_tree(tree):
+    # The point of the shared form: a tree that is already canonical comes
+    # back as the very same object, not a copy. Stated for plain-`str` keys
+    # (a JSON round trip), the shape every encoder here produces: a `str`
+    # subclass key is canonical too, but deliberately takes the copying path.
+    canonical = json.loads(json.dumps(canonical_form(tree)))
+    assert canonical_form_shared(canonical) is canonical
+
+
+def test_shared_canonical_form_rebuilds_only_the_changed_path():
+    clean = {"a": [1, 2], "b": {"x": 1}}
+    tree = {"b": clean["b"], "a": clean["a"], "c": (3,)}
+    result = canonical_form_shared(tree)
+    assert result == {"a": [1, 2], "b": {"x": 1}, "c": [3]}
+    assert result is not tree
+    assert result["a"] is clean["a"] and result["b"] is clean["b"]
+
+
+@pytest.mark.parametrize("bad", [{1: "a"}, {"a": [{2: None}]}, (float("nan"),)])
+def test_shared_canonical_form_rejects_what_canonical_form_rejects(bad):
+    with pytest.raises((TypeError, ValueError)):
+        canonical_form(bad)
+    with pytest.raises((TypeError, ValueError)):
+        canonical_form_shared(bad)

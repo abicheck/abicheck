@@ -27,14 +27,21 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .canonical import canonical_form, input_is_owned, is_canonical_tree
+from .canonical import (
+    canonical_form,
+    canonical_form_shared,
+    input_is_owned,
+    is_canonical_tree,
+)
 from .dto import SECTION_SCHEMA_VERSIONS, SectionDTO
 from .guards import mapping as _mapping, required_field as _required_field
 
 __all__ = ["current_section_payload", "section_dto_dict"]
 
 
-def section_dto_dict(section_kind: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+def section_dto_dict(
+    section_kind: str, payload: Mapping[str, Any], *, shared: bool = False
+) -> dict[str, Any]:
     """``SectionDTO(section_kind, <current version>, payload).to_dict()``
     without the freeze/thaw round trip -- the write-side counterpart of
     `current_section_payload`.
@@ -44,6 +51,10 @@ def section_dto_dict(section_kind: str, payload: Mapping[str, Any]) -> dict[str,
     ``_unfreeze(_freeze(canonical_form(p)))`` is ``canonical_form(p)``. The
     payload is a fresh canonical copy, so every value below the returned
     dict's top level is already in canonical form.
+
+    *shared*: *payload* belongs to a document the caller serializes next and
+    then drops, so the result may share its already-canonical structure
+    (`canonical_form_shared`) instead of copying all of it.
     """
     header = SectionDTO(
         section_kind=section_kind,
@@ -54,7 +65,7 @@ def section_dto_dict(section_kind: str, payload: Mapping[str, Any]) -> dict[str,
     return {
         "section_kind": header.section_kind,
         "section_schema_version": header.section_schema_version,
-        "payload": canonical_form(payload),
+        "payload": (canonical_form_shared if shared else canonical_form)(payload),
     }
 
 

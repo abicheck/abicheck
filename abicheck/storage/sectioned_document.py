@@ -114,7 +114,7 @@ def to_sectioned_document(
     legacy_document: Mapping[str, Any],
     *,
     max_known_schema_version: int,
-    semantic_ir_encoded_here: bool = False,
+    document_encoded_here: bool = False,
 ) -> dict[str, Any]:
     """*legacy_document* (a `serialization.snapshot_to_dict()`-shaped
     mapping) repackaged into this module's single-file sectioned shape.
@@ -124,7 +124,7 @@ def to_sectioned_document(
     every real caller (this function is always packaging a document this
     same build just produced, or one already validated readable by it).
 
-    *semantic_ir_encoded_here*: see `import_v1.legacy_section_dtos` -- only
+    *document_encoded_here*: see `import_v1.legacy_section_dtos` -- only
     for a document whose IR keys `snapshot_to_dict` just encoded.
     """
     # Encoded directly, not through a throwaway object store: the store
@@ -136,7 +136,7 @@ def to_sectioned_document(
     source_schema_version, section_dtos = legacy_section_dtos(
         legacy_document,
         max_known_schema_version=max_known_schema_version,
-        semantic_ir_encoded_here=semantic_ir_encoded_here,
+        document_encoded_here=document_encoded_here,
     )
     section_dtos.sort(key=lambda item: item[0])
     section_dtos.reverse()

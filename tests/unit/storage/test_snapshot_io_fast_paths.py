@@ -17,7 +17,7 @@ Four shortcuts, each skipping work whose result was already known:
   (`closure_marking.json_text_may_hold_marker`), and a document that does
   hold one walks the snapshot once for both steps instead of twice;
 * the write packages the ``semantic_ir`` encoding `snapshot_to_dict` just
-  produced (`import_v1.legacy_section_dtos(semantic_ir_encoded_here=True)`)
+  produced (`import_v1.legacy_section_dtos(document_encoded_here=True)`)
   instead of decoding and re-encoding it.
 
 The oracle for each is the slow path itself, reached by a route the
@@ -138,7 +138,7 @@ def _reference_sectioned_text(snap: AbiSnapshot) -> str:
         to_sectioned_document(
             snapshot_to_dict(snap),
             max_known_schema_version=SCHEMA_VERSION,
-            semantic_ir_encoded_here=False,
+            document_encoded_here=False,
         ),
         indent=2,
     )

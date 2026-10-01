@@ -359,7 +359,7 @@ def legacy_section_dtos(
     legacy_document: Mapping[str, Any],
     *,
     max_known_schema_version: int,
-    semantic_ir_encoded_here: bool = False,
+    document_encoded_here: bool = False,
 ) -> tuple[int, list[tuple[str, dict[str, Any]]]]:
     """`import_legacy_snapshot`'s validation and section encoding, without
     the object store: ``(source_schema_version, [(section_kind, dto_dict)])``.
@@ -370,8 +370,11 @@ def legacy_section_dtos(
     the sections anyway, does not hash, canonicalize and deep-copy the whole
     document through a throwaway store only to read each section back.
 
-    *semantic_ir_encoded_here*: *legacy_document*'s ``semantic_ir``/
-    ``semantic_ir_conflicts`` keys were just written by this build's own
+    *document_encoded_here*: *legacy_document* is a `snapshot_to_dict`
+    result this build just produced for this write and nothing else holds,
+    so its sections may be packaged sharing its structure
+    (`canonical.canonical_form_shared`) rather than copied. In particular
+    its ``semantic_ir``/``semantic_ir_conflicts`` keys were just written by this build's own
     `semantic_ir_codec.encode_semantic_ir` from a live `SemanticIR` (the
     `serialization.snapshot_to_dict` a write path packages). The section is
     then built from that encoding as it stands, instead of decoding it back
@@ -461,14 +464,16 @@ def legacy_section_dtos(
         )
 
     ir_section: dict[str, Any] | None = None
-    if semantic_ir_encoded_here:
+    if document_encoded_here:
         own_encoding = {
             key: legacy_document[key]
             for key in ("semantic_ir", "semantic_ir_conflicts")
             if key in legacy_document
         }
         if own_encoding:
-            ir_section = section_dto_dict(SEMANTIC_IR_SECTION_KIND, own_encoding)
+            ir_section = section_dto_dict(
+                SEMANTIC_IR_SECTION_KIND, own_encoding, shared=True
+            )
     else:
         ir, conflicts = semantic_ir_from_document(legacy_document)
         if ir is not None or conflicts:
@@ -493,7 +498,12 @@ def legacy_section_dtos(
                 else document_codec.from_document(payload).to_document()
             )
             section_dtos.append(
-                (section_kind, section_dto_dict(section_kind, document))
+                (
+                    section_kind,
+                    section_dto_dict(
+                        section_kind, document, shared=document_encoded_here
+                    ),
+                )
             )
             continue
         section_dto = legacy_section_to_dto(section_kind, payload)
