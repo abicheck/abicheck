@@ -48,8 +48,9 @@ class Covered:
 COVERED: dict[str, Covered] = {
     "sentinel": Covered(
         structure=(
-            "declaration order and value: an end-of-list marker is the last "
-            "declared member and holds the enum's maximum value"
+            "value (compare.enum_sentinel.holds_enum_maximum): an end-of-list "
+            "marker holds its enum's maximum value on every compared side; the "
+            "name only nominates"
         ),
         fp_cells=("sentinel.fp.mid_list_max_name",),
         fn_cells=(

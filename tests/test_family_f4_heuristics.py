@@ -85,13 +85,6 @@ UNCOVERED_CEILINGS: dict[str, int] = {
 }
 
 KNOWN_VIOLATIONS: dict[str, frozenset[str]] = {
-    "sentinel.fp.mid_list_max_name": frozenset(
-        {
-            "sentinel.fp.mid_list_max_name: missing ('enum_member_value_changed', 'E::E_MAX')",
-            "sentinel.fp.mid_list_max_name: unexpected enum_last_member_value_changed",
-            "sentinel.fp.mid_list_max_name: verdict COMPATIBLE_WITH_RISK (breaking=True)",
-        }
-    ),
     **{
         f"internal_ns.fp.reached_by_pointer_{ns}": frozenset(
             {

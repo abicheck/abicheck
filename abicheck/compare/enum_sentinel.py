@@ -10,10 +10,13 @@ recognizer used by ``diff_types``, ``diff_platform`` and
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
-# Sentinel detection for enum members is name-pattern based, not value based:
-# a max-value heuristic accidentally downgrades an ordinary member that merely
-# happens to hold the largest value in an evolving enum.
+# Sentinel detection is name-nominated and structure-confirmed. The name alone
+# never decides: a member is a sentinel only when it *also* holds the maximum
+# value among its peers (``holds_enum_maximum``). Value alone never decides
+# either: an ordinary member that merely holds the largest value is not
+# nominated by its name.
 #
 # The name is split into lowercase word tokens on ``_``/``::``/non-alnum
 # characters *and* on camelCase/PascalCase boundaries, so ``FOO_LAST``,
@@ -87,3 +90,50 @@ def is_sentinel_enum_member(member_name: str) -> bool:
     # already covered above).
     lead = tokens[1:] if tokens[0] == "k" and len(tokens) > 1 else tokens
     return len(lead) >= 2 and lead[0] in _SENTINEL_LEAD_TOKENS
+
+
+#: Values C/C++ code assigns to a member whose only job is to force the
+#: enum's storage width (``FOO_FORCE_32BIT = 0x7FFFFFFF``, Vulkan's
+#: ``VK_*_MAX_ENUM``). Such a member is not a peer of the real end marker.
+_WIDTH_FORCING_VALUES = frozenset(
+    {0x7FFFFFFF, 0xFFFFFFFF, 0x7FFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF}
+)
+
+
+def holds_enum_maximum(member_name: str, values: Mapping[str, int]) -> bool:
+    """True when *member_name* holds the largest value among its peers.
+
+    The structural half of sentinel recognition: an end-of-list marker sits at
+    the top of its enum's *ordinary* value range. Peers are the members that
+    are neither themselves sentinel-named nor width-forcing (see
+    ``_WIDTH_FORCING_VALUES``); ties count. A member whose name merely *looks*
+    like a marker (``E_MAX`` between ``A`` and ``B``, or ``LAST`` below an
+    ordinary ``OTHER = 99``) is an ordinary member, and its value change is a
+    real break.
+    """
+    value = values.get(member_name)
+    if value is None:
+        return False
+    return all(
+        value >= v
+        for n, v in values.items()
+        if n != member_name
+        and v not in _WIDTH_FORCING_VALUES
+        and not is_sentinel_enum_member(n)
+    )
+
+
+def is_confirmed_enum_sentinel(
+    member_name: str,
+    *sides: Mapping[str, int],
+) -> bool:
+    """A sentinel by name *and* by structure on every given side.
+
+    The name-only :func:`is_sentinel_enum_member` may only nominate; a member
+    is classified as a sentinel only when it also holds its peers' maximum
+    value in each snapshot it is compared across. Name evidence alone never
+    demotes a finding.
+    """
+    return is_sentinel_enum_member(member_name) and all(
+        holds_enum_maximum(member_name, side) for side in sides
+    )

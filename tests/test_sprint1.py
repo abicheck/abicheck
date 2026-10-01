@@ -103,8 +103,37 @@ def test_enum_additions_plus_last_change_are_risk_not_breaking() -> None:
     assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
-def test_enum_named_sentinel_not_max_value_is_risk() -> None:
-    """Named sentinel (*_last/*_max/*_count) should downgrade even if not max value."""
+def test_enum_named_sentinel_below_width_forcing_member_is_risk() -> None:
+    """A named sentinel still downgrades when only non-peers sit above it.
+
+    ``FORCE_32BIT``-style width-forcing values and other sentinel-named members
+    (Vulkan's ``*_MAX_ENUM``) are not peers of the real end marker.
+    """
+    for top in (EnumMember("FORCE", 0x7FFFFFFF), EnumMember("ERR_MAX_ENUM", 99)):
+        old = _snap(
+            enums=[EnumType("Err", [EnumMember("A", 0), EnumMember("LAST", 1), top])]
+        )
+        new = _snap(
+            enums=[
+                EnumType(
+                    "Err",
+                    [
+                        EnumMember("A", 0),
+                        EnumMember("B", 1),
+                        EnumMember("LAST", 2),
+                        top,
+                    ],
+                )
+            ]
+        )
+        result = compare(old, new)
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED in kinds, top
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK, top
+
+
+def test_enum_sentinel_name_below_ordinary_member_is_a_real_value_change() -> None:
+    """The name alone never demotes: an ordinary member above vetoes it."""
     old = _snap(
         enums=[EnumType("Err", [EnumMember("LAST", 1), EnumMember("OTHER", 99)])]
     )
@@ -113,8 +142,9 @@ def test_enum_named_sentinel_not_max_value_is_risk() -> None:
     )
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
-    assert ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED in kinds
-    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+    assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED in kinds
+    assert ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED not in kinds
+    assert result.verdict == Verdict.BREAKING
 
 
 # ---------------------------------------------------------------------------

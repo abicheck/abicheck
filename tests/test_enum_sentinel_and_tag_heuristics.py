@@ -12,8 +12,14 @@ from __future__ import annotations
 import itertools
 
 import pytest
+from hypothesis import given, strategies as st
 
-from abicheck.compare.enum_sentinel import identifier_tokens, is_sentinel_enum_member
+from abicheck.compare.enum_sentinel import (
+    holds_enum_maximum,
+    identifier_tokens,
+    is_confirmed_enum_sentinel,
+    is_sentinel_enum_member,
+)
 from abicheck.diff_serialization import (
     _enum_type_is_tag_registry,
     detect_serialization_tag_changes,
@@ -179,3 +185,71 @@ def test_compare_classifies_shifted_end_marker_as_last_member(ename, sentinel):
     assert ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED in kinds
     assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED not in kinds
     assert ChangeKind.SERIALIZATION_TAG_CHANGED not in kinds
+
+
+# ---------------------------------------------------------------------------
+# Structural confirmation (design-hardening Phase 0 / F4): the name only
+# nominates. Oracle: an independent restatement over generated enums -- a
+# nominated member is confirmed iff no *ordinary* peer (non-sentinel-named,
+# non-width-forcing) holds a strictly larger value on any side.
+# ---------------------------------------------------------------------------
+
+
+_ORDINARY = ["ALPHA", "BETA", "GAMMA", "DELTA", "OMEGA"]
+_SENTINELS = ["E_LAST", "E_MAX", "NUM_KINDS", "E_COUNT"]
+_FORCE = 0x7FFFFFFF
+
+
+@st.composite
+def _enums(draw: st.DrawFn) -> dict[str, int]:
+    names = draw(
+        st.lists(
+            st.sampled_from(_ORDINARY + _SENTINELS), min_size=1, max_size=7, unique=True
+        )
+    )
+    return {n: draw(st.one_of(st.integers(-5, 50), st.just(_FORCE))) for n in names}
+
+
+def _oracle(name: str, side: dict[str, int]) -> bool:
+    if name not in side or name in _ORDINARY:
+        return False
+    ordinary_values = [v for n, v in side.items() if n in _ORDINARY and v != _FORCE]
+    return all(side[name] >= v for v in ordinary_values)
+
+
+@given(_enums(), _enums())
+def test_confirmed_sentinel_matches_independent_oracle(
+    old: dict[str, int], new: dict[str, int]
+) -> None:
+    for name in set(old) | set(new):
+        expected = (
+            name in old and name in new and _oracle(name, old) and _oracle(name, new)
+        )
+        assert is_confirmed_enum_sentinel(name, old, new) is expected, (name, old, new)
+
+
+@given(_enums(), st.randoms(use_true_random=False))
+def test_confirmation_is_independent_of_declaration_order(
+    side: dict[str, int], rnd
+) -> None:  # type: ignore[no-untyped-def]
+    items = list(side.items())
+    rnd.shuffle(items)
+    shuffled = dict(items)
+    for name in side:
+        assert holds_enum_maximum(name, side) == holds_enum_maximum(name, shuffled)
+
+
+@given(_enums())
+def test_ordinary_name_is_never_confirmed_whatever_its_value(
+    side: dict[str, int],
+) -> None:
+    for name in side:
+        if name in _ORDINARY:
+            assert not is_confirmed_enum_sentinel(name, side)
+
+
+def test_oracle_is_not_vacuous() -> None:
+    # Both outcomes are reachable, so the property above cannot pass by
+    # collapsing to a constant.
+    assert is_confirmed_enum_sentinel("E_MAX", {"A": 0, "E_MAX": 3})
+    assert not is_confirmed_enum_sentinel("E_MAX", {"A": 0, "E_MAX": 1, "B": 2})

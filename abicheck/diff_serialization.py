@@ -34,7 +34,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .checker_types import Change
-from .compare.enum_sentinel import identifier_tokens, is_sentinel_enum_member
+from .compare.enum_sentinel import identifier_tokens, is_confirmed_enum_sentinel
 from .diff_helpers import make_change
 from .model.change_catalog.kinds import ChangeKind
 
@@ -151,6 +151,7 @@ def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, tuple[str, str]]:
             out.setdefault(var.name, (str(var.value), _ENTITY_VARIABLE))
     for enum_t in snap.declarations.enums or []:
         type_is_tag = _enum_type_is_tag_registry(enum_t.name)
+        values = {m.name: m.value for m in enum_t.members}
         for m in enum_t.members:
             # An end-of-list marker (``*_last``, ``LastSymbol``, ``*_count``)
             # is not a persisted id; its value moves whenever a member is
@@ -159,7 +160,7 @@ def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, tuple[str, str]]:
             # no member of an ordinary enum is a tag candidate at all.
             if not (type_is_tag or _looks_like_serialization_tag(m.name)):
                 continue
-            if is_sentinel_enum_member(m.name):
+            if is_confirmed_enum_sentinel(m.name, values):
                 continue
             out.setdefault(f"{enum_t.name}::{m.name}", (str(m.value), _ENTITY_ENUM))
     return out

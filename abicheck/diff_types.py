@@ -21,7 +21,7 @@ from collections.abc import Collection, Mapping
 
 from .checker_types import Change
 from .compare.base_class_diff import diff_bases as _diff_bases
-from .compare.enum_sentinel import is_sentinel_enum_member
+from .compare.enum_sentinel import holds_enum_maximum, is_sentinel_enum_member
 from .compare.fact_gate import both_facts_present
 from .compare.record_layout import (
     RecordLayoutIndex,
@@ -1172,6 +1172,8 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 kind = (
                     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED
                     if is_sentinel_enum_member(mname)
+                    and holds_enum_maximum(mname, old_members)
+                    and holds_enum_maximum(mname, new_members)
                     else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
                 )
                 changes.append(
