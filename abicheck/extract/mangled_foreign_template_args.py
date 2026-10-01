@@ -19,8 +19,6 @@ existing runtime attribution rather than being reclassified on a guess.
 
 from __future__ import annotations
 
-from functools import lru_cache
-
 #: Source-names that open a runtime-owned scope as a nested-name's first part.
 _RUNTIME_SCOPES = frozenset(
     {
@@ -61,7 +59,6 @@ def _type_done(stack: list[tuple[str, bool]]) -> None:
         stack[-1] = ("L", True)
 
 
-@lru_cache(maxsize=65536)
 def has_foreign_template_argument(name: str) -> bool:
     """True when a std-prefixed *name* names a non-runtime ``<source-name>``.
 
