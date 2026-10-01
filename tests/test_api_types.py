@@ -114,7 +114,7 @@ class TestCompareRequestDefaults:
         assert req.policy_file_path is None
         assert req.suppress is None
         assert req.force_public_symbols is None
-        assert req.pattern_verdicts is False
+        assert req.pattern_verdicts is True
         assert req.enable_debuginfod is False
         # ADR-055 D1
         assert req.depth is None

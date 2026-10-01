@@ -183,7 +183,7 @@ def compare_snapshots(
     scope_to_public_surface: bool = True,
     force_public_symbols: set[str] | None = None,
     extra_changes: list[Change] | None = None,
-    pattern_verdicts: bool = False,
+    pattern_verdicts: bool = True,
     collapse_versioned_symbols: bool = False,
     public_surface_allowlist: set[str] | None = None,
     env_matrix: EnvironmentMatrix | None = None,

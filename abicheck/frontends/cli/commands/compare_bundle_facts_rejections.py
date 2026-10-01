@@ -579,13 +579,11 @@ def reject_unsupported_options(
     #   this path honours the format-driven contract rather than being the
     #   one Markdown output with raw mangled names (CodeRabbit review, PR
     #   #1284).
-    # * The pattern-modulation ledger is absent because it is never
-    #   *computed* on this path -- `compare_snapshots` defaults
-    #   `pattern_verdicts=False` and `bundle_side_input.py` deliberately
-    #   does not pass True (ADR-027 defers that flip). So there is no ledger
-    #   in this comparison's JSON either, and the retired token could only
-    #   ever have echoed an empty one. Nothing was lost; disclosure here
-    #   becomes real work only if that ADR-027 decision changes.
+    # * The pattern-modulation ledger is computed on this path too:
+    #   `compare_snapshots` defaults `pattern_verdicts=True`, matching the
+    #   native compare CLI (ADR-068 D4), so the comparison's JSON carries the
+    #   same ledger every other route does. The retired disclosure token is
+    #   not needed to show it.
     if new_is_single_file and (dso_only or include_private_dso):
         raise click.UsageError(
             "release.dso_only/release.include_private_dso are not supported "

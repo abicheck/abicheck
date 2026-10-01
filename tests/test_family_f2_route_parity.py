@@ -425,16 +425,6 @@ def test_shared_defaults_agree() -> None:
     assert not violations, "\n".join(violations)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="REAL DIVERGENCE: the native compare CLI (cli_compare_helpers, "
-    "compare_no_baseline) and the release fan-out hard-code "
-    "pattern_verdicts=True, while CompareRequest.pattern_verdicts / "
-    "service.run_compare default to False (service_compare_pipeline's "
-    "comment defers the flip to ADR-027); a bare typed-API request "
-    "therefore scores under a different policy than the identical CLI call",
-)
 def test_pattern_verdicts_default_matches_cli(tmp_path: Path) -> None:
     ops = write_operands(tmp_path, "removal_and_addition")
     cli = run_cli(ops, AXES_BY_NAME["default"], tmp_path)

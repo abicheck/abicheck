@@ -967,24 +967,19 @@ class TestInvalidExitCodeScheme:
             request.validate()
 
 
-class TestPatternVerdictsStaysOptInAtTier2:
-    """Codex review, second look (PR #1154 follow-up: "Obtain ADR approval
-    before forcing verdict modulation"): an earlier fix forced
-    `pattern_verdicts=True` unconditionally at `classify_compare_pair` and
-    at `workflows.compare_policy.compare_snapshots` itself, citing ADR-068
-    D4's "no legitimate off position" principle the same way
-    `cross_source_checks` earns it. That citation doesn't hold: ADR-068 is
-    "Proposed -- not implemented", not an accepted decision, while the ADR
-    that *is* accepted (ADR-027) explicitly defers flipping
-    `--pattern-verdicts` to default-on until a release cycle's worth of
-    FP-rate and parity validation. So both chokepoints were reverted to
-    forward the request's/caller's own `pattern_verdicts` value again --
-    these tests pin that a bare `CompareRequest()`/`compare_snapshots()`
-    call keeps modulation off, matching the accepted opt-in default, while
-    `surface_metrics` (pre-existing, unaffected by this correction) stays
-    unconditional."""
+class TestPatternVerdictsDefaultMatchesCliAtTier2:
+    """A bare `CompareRequest()` scores with pattern verdicts on, matching the
+    native compare CLI, which runs them unconditionally (ADR-068 D4).
 
-    def test_default_request_leaves_pattern_verdicts_off(
+    History: an earlier change forced this at the Tier-2 chokepoints and was
+    reverted in review because ADR-068 was then only proposed while ADR-027
+    (accepted) deferred default-on. ADR-068 has since been accepted, and the
+    CLI has run pattern verdicts unconditionally ever since, so the typed API
+    defaulting to off was a route divergence (design-hardening Phase 0, H2).
+    The opt-out stays: a caller passing `pattern_verdicts=False` still gets
+    raw detector output, which the second test below pins."""
+
+    def test_default_request_turns_pattern_verdicts_on(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.workflows.compare_policy as compare_policy_mod
@@ -1007,12 +1002,12 @@ class TestPatternVerdictsStaysOptInAtTier2:
         )
 
         request = CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
-        assert request.pattern_verdicts is False
+        assert request.pattern_verdicts is True
         run_compare_request(request)
 
-        assert seen_pattern_verdicts == [False]
+        assert seen_pattern_verdicts == [True]
 
-    def test_request_can_still_opt_in(
+    def test_request_can_still_opt_out(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.workflows.compare_policy as compare_policy_mod
@@ -1035,11 +1030,11 @@ class TestPatternVerdictsStaysOptInAtTier2:
         )
 
         request = CompareRequest(
-            old=InputSpec(path=old), new=InputSpec(path=new), pattern_verdicts=True
+            old=InputSpec(path=old), new=InputSpec(path=new), pattern_verdicts=False
         )
         run_compare_request(request)
 
-        assert seen_pattern_verdicts == [True]
+        assert seen_pattern_verdicts == [False]
 
 
 class TestSurfaceMetricsIsUnconditionalAtTheTier2Verb:
