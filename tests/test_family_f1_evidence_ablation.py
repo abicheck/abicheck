@@ -124,6 +124,10 @@ from abicheck.model import Fact, FactStatus
 #: Sites the harness cannot ablate yet. Shrink-only: see
 #: ``test_uncovered_is_shrink_only``.
 UNCOVERED: dict[str, str] = {
+    "Function.return_type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
+    "Param.type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
+    "TypeField.type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
+    "Variable.type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
     "EnumType.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
     "Function.contract_attributes_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
     "Function.exception_spec_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",

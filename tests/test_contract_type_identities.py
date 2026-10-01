@@ -480,6 +480,29 @@ class TestTypeIdentityStorage:
             FactStatus.NOT_COLLECTED
         ] * 4
 
+    @pytest.mark.parametrize(
+        "fact",
+        [
+            None,
+            Fact.not_collected(),
+            Fact.present(()),
+            Fact.present(("ns1::Cache",)),
+            Fact.not_collected("diag"),
+        ],
+    )
+    def test_save_load_save_is_byte_stable(self, fact) -> None:
+        # The omit-when-uncaptured rule must agree with what the decoder
+        # reads an absent key back as, or a re-save materialises it.
+        snap = _identity_snapshot(None)
+        fn = snap.declarations.functions[0]
+        fn.return_type_identities_fact = fact
+        fn.params[0].type_identities_fact = fact
+        snap.declarations.variables[0].type_identities_fact = fact
+        snap.declarations.types[0].fields[0].type_identities_fact = fact
+        first = _round_trip(snap)
+        second = _round_trip(snapshot_from_dict(first))
+        assert second == first
+
     def test_identities_are_provenance_not_abi_content(self) -> None:
         # compare=False: two snapshots differing only in captured evidence
         # describe the same ABI, so no declaration-equality diff can fire.

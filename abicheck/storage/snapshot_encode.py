@@ -32,7 +32,7 @@ import pathlib
 from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
 
-from ..model import AbiSnapshot
+from ..model import AbiSnapshot, FactStatus
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
 from .enum_codec import encode_platform_enums
@@ -263,7 +263,19 @@ _RETURN_TYPE_IDENTITY_KEY = "return_type_identities_fact"
 
 
 def _drop_uncaptured(entry: dict[str, Any], key: str) -> None:
-    if entry.get(key, ()) is None:
+    """Omit an uncaptured slot fact: ``None``, or a bare ``NOT_COLLECTED``
+    (no value, diagnostics or producer) -- which is exactly what the decoder
+    reads an absent key back as, so omitting it keeps a load/save round trip
+    byte-stable instead of materialising the decoder's answer on re-save."""
+    if key not in entry:
+        return
+    fact = entry[key]
+    if fact is None or (
+        fact.get("status") in (FactStatus.NOT_COLLECTED, FactStatus.NOT_COLLECTED.value)
+        and fact.get("value") is None
+        and not fact.get("diagnostics")
+        and fact.get("producer") is None
+    ):
         del entry[key]
 
 
