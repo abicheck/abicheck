@@ -130,27 +130,16 @@ MUTANTS: tuple[Mutant, ...] = (
         "F5",
         (1340, 1306),
         "F5/cache_key_drops_binary_content.patch",
-        (f"{F5}::test_disk_cache_cold_warm_and_fresh_root_agree",),
+        (f"{F5}::test_disk_cache_rebuilt_binary_in_place_is_not_served_stale",),
         "snapshot_cache._cache_key stops hashing the binary, so two binaries share a warm entry.",
-        harness_gap=(
-            "H5's disk-cache cell never rebuilds a binary in place: its two operands "
-            "also differ in the side's version label, which the key still hashes, so "
-            "a key that ignores binary content keys them apart anyway. A "
-            "same-path/same-label/new-content transform is missing."
-        ),
     ),
     Mutant(
         "cache_key_drops_version",
         "F5",
         (1340, 1306),
         "F5/cache_key_drops_version.patch",
-        (f"{F5}::test_disk_cache_cold_warm_and_fresh_root_agree",),
+        (f"{F5}::test_disk_cache_version_label_alone_keys_apart",),
         "snapshot_cache._cache_key drops the version input, so a warm entry serves the other side.",
-        harness_gap=(
-            "Same redundancy as cache_key_drops_binary_content, the other way round: "
-            "the two operands' contents differ, so a key missing the version label "
-            "still keys them apart. No H5 cell varies exactly one key input."
-        ),
     ),
     Mutant(
         "cache_key_drops_side_identity",
