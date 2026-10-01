@@ -744,3 +744,59 @@ def test_stored_snapshot_vs_live_binary(tmp_path: Path) -> None:
     assert a.verdict == "BREAKING"
     violations = parity_violations(a, b, extra_paths=STORED_VS_LIVE_PATHS)
     assert not violations, "\n".join(violations)
+
+
+# ── stored vs live: every persisted ELF symbol fact survives the round trip ──
+
+
+def _elf_snapshot(version: str, symbols: list[Any]) -> Any:
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.elf_facts import ElfMetadata
+
+    return AbiSnapshot(
+        library="libown.so.1",
+        version=version,
+        elf=ElfMetadata(soname="libown.so.1", symbols=symbols),
+        elf_only_mode=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "origins",
+    [
+        ("libstdc++.so.6", None),
+        (None, "libstdc++.so.6"),
+        ("libgcc_s.so.1", "libc.so.6"),
+    ],
+)
+def test_stored_snapshot_keeps_dependency_origin_findings(
+    origins: tuple[str | None, str | None],
+) -> None:
+    """serialization.persisted_field_not_decoded: a snapshot read back from
+    storage (a cache hit, a saved baseline) must decide what the freshly
+    parsed one decides. ``origin_lib`` was written but never decoded, so the
+    stored route silently lost every dependency-leak finding."""
+    from abicheck.checker import compare
+    from abicheck.model.elf_facts import ElfSymbol
+    from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+    old_origin, new_origin = origins
+    old = _elf_snapshot(
+        "1", [ElfSymbol(name="keep"), ElfSymbol(name="gone", origin_lib=old_origin)]
+    )
+    new = _elf_snapshot(
+        "2", [ElfSymbol(name="keep"), ElfSymbol(name="added", origin_lib=new_origin)]
+    )
+
+    def kinds(o: Any, n: Any) -> list[tuple[str, str]]:
+        return sorted((c.kind.value, c.symbol) for c in compare(o, n).changes)
+
+    live = kinds(old, new)
+    stored = kinds(
+        snapshot_from_dict(snapshot_to_dict(old)),
+        snapshot_from_dict(snapshot_to_dict(new)),
+    )
+    assert stored == live
+    leaked = {s for k, s in live if k == "symbol_leaked_from_dependency_changed"}
+    expected = {s for s, o in (("gone", old_origin), ("added", new_origin)) if o}
+    assert leaked == expected

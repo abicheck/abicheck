@@ -94,6 +94,9 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "editing the test."
         ),
         fixed_by=(1442,),
-        seed_tests=("tests/test_elf_symbol_roundtrip_and_origin.py",),
+        seed_tests=(
+            "tests/test_elf_symbol_roundtrip_and_origin.py",
+            "tests/test_family_f2_route_parity.py",
+        ),
     ),
 )
