@@ -45,11 +45,9 @@ below) was triaged by heading only.
    — step 3 landed as report attribution (2026-10-01); the verdict half of
    step 3 and step 2 (per-member headers, which also fixes the quadratic
    multi-library cost) remain.
-2. [`compare --depth binary` still performs a deep DWARF type
-   walk](#compare-depth-binary-still-performs-a-deep-dwarf-type-walk-the-public-evidence-depth-contract-says-that-rung-skips)
-   — re-verified 2026-10-01: a `struct Point` field addition with no
-   headers still yields `BREAKING` (`type_size_changed`,
-   `type_field_added_compatible`) at `--depth binary`.
+2. ~~`compare --depth binary` still performs a deep DWARF type walk~~ —
+   **closed 2026-10-01** by correcting the docs: `binary` reads the DWARF a
+   binary carries, by design (see the entry, now struck through).
 3. [An `-I` include root makes another library's public headers this
    component's export
    obligations](#an-i-include-root-makes-another-librarys-public-headers-this-components-export-obligations-2026-09-16)
@@ -8311,7 +8309,16 @@ that code and its tests is the durable close; until then the allowlist test
 fails as soon as any of them gains a production caller, so it cannot hide
 live advice.
 
-## `compare --depth binary` still performs a deep DWARF type walk the public evidence-depth contract says that rung skips
+## ~~`compare --depth binary` still performs a deep DWARF type walk the public evidence-depth contract says that rung skips~~ — CLOSED (docs corrected)
+
+> **Closed (2026-10-01) by correcting the documentation, not the code** —
+> the maintainer's ruling on the either/or below. `binary` means L0 symbols +
+> binary metadata + the L1 debug info a binary already carries; it skips the
+> L2 header AST, not DWARF. `docs/use/evidence-depth.md`,
+> `docs/learn/evidence-and-detectability.md` and the `--depth` help text on
+> `compare`/`dump` now say so, and `tests/test_depth_binary_reads_dwarf.py`
+> pins the docs, the help text, and the behaviour on real `gcc -g` binaries
+> so the two cannot drift apart again. The record below is history.
 
 **Reopened 2026-09-11** (Codex review, PR #1220 doc follow-up) after an
 earlier pass at that same PR incorrectly marked this entry CLOSED,
