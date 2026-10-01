@@ -632,6 +632,33 @@ class TestCompareDryRun:
         assert "effective depth: source" in result.output
         assert "inferred" in result.output
 
+    def test_depth_off_with_headers_explains_header_parsing(
+        self, tmp_path: Path
+    ) -> None:
+        # "effective depth: off" next to a non-zero header-TU estimate read
+        # as a contradiction: depth governs L3-L5 only, header parsing is L2.
+        # The receipt must say what "off" covers, and only claim header
+        # parsing when headers were actually given.
+        old = tmp_path / "old.abi.json"
+        new = tmp_path / "new.abi.json"
+        _write_snapshot(old, "1.0")
+        _write_snapshot(new, "2.0")
+        hdr = tmp_path / "a.h"
+        hdr.write_text("int f(void);\n")
+        with_headers = CliRunner().invoke(
+            main, ["compare", str(old), str(new), "--dry-run", "-H", str(hdr)]
+        )
+        assert with_headers.exit_code == 0, with_headers.output
+        assert (
+            "effective depth: off -- no L3-L5 source/build evidence"
+            in with_headers.output
+        )
+        assert "L2 header parsing: independent of depth" in with_headers.output
+        without = CliRunner().invoke(main, ["compare", str(old), str(new), "--dry-run"])
+        assert without.exit_code == 0, without.output
+        assert "effective depth: off -- no L3-L5" in without.output
+        assert "L2 header parsing" not in without.output
+
     def test_dry_run_shows_cost_preview(
         self, tmp_path: Path, source_tree_with_compile_db: Path
     ) -> None:

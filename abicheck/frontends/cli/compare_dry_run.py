@@ -160,6 +160,13 @@ def build_compare_dry_run_result(
         f"requested depth: {depth or '(not given)'}",
         f"effective depth: {effective_depth_label}",
         f"effective collect mode: {collect_mode}",
+        # Depth governs L3-L5 collection only; header parsing is L2 and runs
+        # whenever headers are given, so an "off" depth beside a non-zero
+        # header TU estimate below is not a contradiction -- say so here.
+        "L2 header parsing: independent of depth; runs on every side given "
+        "headers (see the cost preview's header TU count)"
+        if headers or old_headers_only or new_headers_only
+        else None,
         "source scope: target on each side (compare has no PR change seed)"
         if collect_mode in ("source-target", "source-changed", "graph-full")
         else None,

@@ -193,7 +193,7 @@ def _resolve_compare_collect_mode(
             resolve_dump_depth("build", "off"),
             "build (inferred: --build-info old=/new= given, no --depth)",
         )
-    return "off", "off (no --depth, no --sources/--build-info, no source.method)"
+    return "off", "off -- no L3-L5 source/build evidence (no --depth, no --sources/--build-info, no source.method)"  # fmt: skip
 
 
 def _normalize_compare_options(
