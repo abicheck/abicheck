@@ -413,6 +413,27 @@ class TestSubprocessTimeout:
             with pytest.raises(subprocess.TimeoutExpired):
                 DebExtractor().extract(deb_path, out)
 
+    def test_deb_extraction_ar_failure_raises_called_process_error(
+        self, tmp_path: Path
+    ) -> None:
+        """A nonzero ``ar x`` exit raises CalledProcessError, as ``check=True`` did."""
+        from abicheck.package import DebExtractor
+
+        deb_path = tmp_path / "test.deb"
+        deb_path.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "out"
+        out.mkdir()
+
+        failed = subprocess.CompletedProcess(["ar", "x"], 1, b"", b"ar: bad archive")
+        with (
+            mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"),
+            mock.patch("abicheck.package.run_bounded", return_value=failed),
+        ):
+            with pytest.raises(subprocess.CalledProcessError) as excinfo:
+                DebExtractor().extract(deb_path, out)
+        assert excinfo.value.returncode == 1
+        assert excinfo.value.stderr == b"ar: bad archive"
+
     def test_tar_extraction_of_corrupt_archive(self, tmp_path: Path) -> None:
         """Corrupt tar archive must raise a clean error, not crash."""
         tar_path = tmp_path / "corrupt.tar.gz"
