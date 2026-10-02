@@ -982,6 +982,28 @@ same-leaf case reaching only the coverage floor is a recorded known gap
 (`docs/contribute/known-gaps.md`), not a Phase 9 blocker. Phase 9 is
 unblocked.
 
+**9a — the mapping, measured and fixed. Done** (2026-10-02). Every case
+of the labelled FP-rate corpus was run through the `compare` CLI under all
+four spellings. `--contract public` loses no real break: every one keeps its
+legacy exit except the spelling-only same-leaf case (exit 1, the budgeted
+loss), and no internal-noise case scores as a break (exit 1 only where the
+public coverage floor fires — the expected migration difference, since
+legacy scoping never exits 1). `--contract all`, however, was **not** the
+exact `--no-scope-public-headers` alias it is documented as: the legacy
+filter ran at its *default* value ahead of the evaluator, so ten internal
+breaks came out exit 0 instead of 4. Fixed in `checker.compare` (shared by
+the CLI and the typed API): an explicit `all`/`exports` domain disables
+header-origin demotion, which is the `public` domain's question. Pinned by
+`tests/test_contract_legacy_scope_mapping.py`.
+
+**Remaining slices.** 9b deletes `--scope-public-headers`/
+`--no-scope-public-headers` as CLI spellings (exit 64), keeping header
+scoping on internally for a run with no `--contract` — deleting it without
+that would silently flip every no-flag run. 9c gives `--post-manifest` a
+`contract.overlays` config home on the existing `post_manifest` provider;
+9d deletes the option. Retiring `scope.public`/`CompareRequest.scope_public`
+is a separate Python-API decision.
+
 ### Re-homed from `cli-cleanup-phase-two.md`
 
 | Item there | Disposition here |
