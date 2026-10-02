@@ -330,7 +330,7 @@ def test_diff_exit_code_only_on_requested_kinds(tmp_path, fail_on, expected) -> 
 def _registry_ids() -> set[str]:
     import yaml
 
-    doc = yaml.safe_load((ROOT / "docs/contribute/usecase-registry.yaml").read_text())
+    doc = yaml.safe_load((ROOT / "docs/contribute/usecase-registry.yaml").read_text(encoding="utf-8"))
     return {uc["id"] for uc in doc["use_cases"]}
 
 
