@@ -985,6 +985,7 @@ def _run_inline_source_abi(
     """
     if sources is None:
         return None, []
+    from .build_cache import SOURCE_ABI_DISK_CACHE
     from .source_abi import SourceAbiSurface
     from .source_replay import (
         SourceAbiCache,
@@ -1060,7 +1061,13 @@ def _run_inline_source_abi(
     # cold-start cost (eval E4: zstd 48.6 s cold → 3.4 s warm). Wire the cache
     # when a dir is given (CLI/env), so a persisted dir restored across CI runs
     # makes each run start warm. Absent a dir, behaviour is unchanged (no cache).
-    cache = SourceAbiCache(source_abi_cache_dir) if source_abi_cache_dir else None
+    # The central cache wrapper's policy decides whether it may be used at all:
+    # ``ABICHECK_REFERENCE_MODE=1`` re-extracts every TU.
+    cache = (
+        SourceAbiCache(source_abi_cache_dir)
+        if source_abi_cache_dir and SOURCE_ABI_DISK_CACHE.permits()
+        else None
+    )
     started = time.monotonic()
     surface, diagnostics = run_source_replay(
         merged,

@@ -1,0 +1,20 @@
+--- a/abicheck/process_resources.py
++++ b/abicheck/process_resources.py
+@@ -350,8 +350,6 @@
+     then grants no worker thread at all), so every pool runs its tasks
+     inline and the release fan-out takes its sequential member path.
+     """
+-    if reference_mode():
+-        return 1
+     raw = os.environ.get(MAX_THREADS_ENV_VAR, "").strip()
+     try:
+         value = int(raw) if raw else 0
+@@ -371,8 +369,6 @@
+         self.peak = 0
+ 
+     def grant(self, requested: int) -> int:
+-        if reference_mode():
+-            return 0  # inline in the submitting thread: the sequential path
+         cap = max_threads()
+         with self._lock:
+             granted = (

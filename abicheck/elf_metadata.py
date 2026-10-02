@@ -30,7 +30,6 @@ import pickle
 import re
 import stat
 import struct
-import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import IO
@@ -62,6 +61,7 @@ from .model.elf_facts import (
     SymbolBinding as SymbolBinding,
     SymbolType as SymbolType,
 )
+from .model.execution_cache import MemoryCache, request_key
 from .model.fact import sync_present_facts
 
 log = logging.getLogger(__name__)
@@ -101,9 +101,10 @@ from .extract.elf_symbol_tables import (  # noqa: E402
 #: table, which is what inflated the live-at-exit residue. At most
 #: ``_PARSE_MEMO_MAX`` entries -- enough for one compare's two sides plus their
 #: L0 re-resolve, without growing with a release fan-out's member count.
-_PARSE_MEMO: dict[tuple[object, ...], bytes] = {}
 _PARSE_MEMO_MAX = 4
-_PARSE_MEMO_LOCK = threading.Lock()
+_PARSE_MEMO: MemoryCache[bytes] = MemoryCache(
+    "abicheck.elf_metadata.parse", max_entries=_PARSE_MEMO_MAX
+)
 
 
 def parse_elf_metadata(so_path: Path) -> ElfMetadata:
@@ -119,20 +120,20 @@ def parse_elf_metadata(so_path: Path) -> ElfMetadata:
             if not stat.S_ISREG(st.st_mode):
                 log.warning("parse_elf_metadata: not a regular file: %s", so_path)
                 return ElfMetadata()
-            key = (hashlib.file_digest(f, "blake2b").hexdigest(), str(so_path))
+            key = request_key(
+                content=hashlib.file_digest(f, "blake2b").hexdigest(),
+                path=str(so_path),
+            )
             f.seek(0)
-            with _PARSE_MEMO_LOCK:
-                cached = _PARSE_MEMO.get(key)
-            if cached is not None:
-                loaded: ElfMetadata = pickle.loads(cached)
-                return loaded
-            meta = _parse(f, so_path)
-            stored = pickle.dumps(meta, protocol=pickle.HIGHEST_PROTOCOL)
-            with _PARSE_MEMO_LOCK:
-                _PARSE_MEMO[key] = stored
-                while len(_PARSE_MEMO) > _PARSE_MEMO_MAX:
-                    _PARSE_MEMO.pop(next(iter(_PARSE_MEMO)))
-            return meta
+            stored = _PARSE_MEMO.get_or_compute(
+                key,
+                lambda: pickle.dumps(
+                    _parse(f, so_path), protocol=pickle.HIGHEST_PROTOCOL
+                ),
+            )
+            # nosec B301: bytes this function pickled itself, never external input
+            loaded: ElfMetadata = pickle.loads(stored)  # nosec B301
+            return loaded
     except (ELFError, OSError, ValueError) as exc:
         log.warning("parse_elf_metadata: failed to open/parse %s: %s", so_path, exc)
         return ElfMetadata()

@@ -99,9 +99,14 @@ with `__all__` — no logic, no new names that are not owned by a submodule.
 - **Adding a field to `AbiSnapshot` is a storage event.** `storage`/
   `serialization.py` must round-trip it and the schema version must move;
   a field that only exists in memory reads as data loss on reload.
-- **Never add `frozen=True` to a fact class carrying `@cached_property`**
+- **Never add `frozen=True` to a fact class carrying `@memoized_property`**
   (`ElfMetadata`, `PeMetadata`, `MachoMetadata`): the cache needs a
   writable instance `__dict__`.
+- **Every cache goes through `execution_cache.py`/`execution_cache_scoped.py`**
+  (`memoized`, `memoized_property`, `MemoryCache`, `ScopedCache`,
+  `InstanceMemo`, `DiskCache`, ...): they honour `ABICHECK_REFERENCE_MODE=1`
+  and register their counters. A `functools` memo or new module-level mutable
+  state anywhere under `abicheck/` fails `tests/test_module_cache_gate.py`.
 - **Append new fields at the end, keyword-only where a default is needed.**
   These dataclasses are public API; inserting mid-list silently changes what
   every positional caller — including callers this repository cannot see —

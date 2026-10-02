@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import cached_property
 
+from .execution_cache import memoized_property
 from .fact import Fact, bridge_legacy_and_fact
 
 
@@ -47,7 +47,7 @@ class PeExport:
 class PeMetadata:
     """PE metadata from a Windows DLL.
 
-    NOTE: Do NOT add ``frozen=True`` — ``@cached_property`` requires a
+    NOTE: Do NOT add ``frozen=True`` — ``@memoized_property`` requires a
     writable ``__dict__``.
     """
 
@@ -87,7 +87,7 @@ class PeMetadata:
             self.delay_imports, self.delay_imports_fact, None, None
         )
 
-    @cached_property
+    @memoized_property
     def export_map(self) -> dict[str, PeExport]:
         """Name → PeExport mapping (built once, cached on first access)."""
         return {e.name: e for e in self.exports if e.name}

@@ -24,8 +24,9 @@ from abicheck.elf_symbol_filter import (
     exported_symbol_names,
 )
 from abicheck.extract import cpp20_header_prep
-from abicheck.extract.digest_memo import DigestMemo, content_digest
+from abicheck.extract.digest_memo import content_digest
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, SymbolType
+from abicheck.model.execution_cache import MemoryCache, request_key
 from abicheck.model.export_index import (
     RawExportEntry,
     build_raw_export_index_from_elf,
@@ -97,7 +98,7 @@ def test_exported_symbol_names_memo_is_transparent_and_copy_safe(seed: int) -> N
 
 
 def test_digest_memo_is_bounded_lru_and_keyed_by_content() -> None:
-    memo: DigestMemo[int] = DigestMemo(max_entries=3)
+    memo: MemoryCache[int] = MemoryCache("test.digest.lru", max_entries=3)
     calls: list[bytes] = []
 
     def compute(b: bytes) -> int:
@@ -105,10 +106,14 @@ def test_digest_memo_is_bounded_lru_and_keyed_by_content() -> None:
         return len(b)
 
     for b in (b"a", b"bb", b"a", b"ccc", b"dddd"):
-        assert memo.get_or_compute(content_digest(b), lambda b=b: compute(b)) == len(b)
+        assert memo.get_or_compute(
+            request_key(content=content_digest(b)), lambda b=b: compute(b)
+        ) == len(b)
     assert calls == [b"a", b"bb", b"ccc", b"dddd"]  # "a" hit once
     assert len(memo) == 3
-    memo.get_or_compute(content_digest(b"bb"), lambda: compute(b"bb"))  # evicted as LRU
+    memo.get_or_compute(
+        request_key(content=content_digest(b"bb")), lambda: compute(b"bb")
+    )  # evicted as LRU
     assert calls[-1] == b"bb"
     assert content_digest(b"x") != content_digest(b"y")
 
@@ -212,13 +217,15 @@ def test_compare_scopes_the_elf_memos_to_one_call() -> None:
 def test_digest_memo_byte_budget_matches_an_lru_oracle(seed: int) -> None:
     rng = random.Random(seed)
     budget, max_entries = rng.randint(1, 60), rng.randint(1, 8)
-    memo: DigestMemo[bytes] = DigestMemo(max_entries, max_bytes=budget, weigh=len)
+    memo: MemoryCache[bytes] = MemoryCache(
+        "test.digest.budget", max_entries=max_entries, max_bytes=budget, weigh=len
+    )
     oracle: list[tuple[int, bytes]] = []  # LRU order, oldest first
     for _ in range(80):
         key = rng.randint(0, 10)
         value = b"x" * rng.randint(0, 30)
         known = [v for k, v in oracle if k == key]
-        got = memo.get_or_compute(key, lambda value=value: value)
+        got = memo.get_or_compute(request_key(k=key), lambda value=value: value)
         if known:
             assert got == known[0]
             oracle = [e for e in oracle if e[0] != key] + [(key, known[0])]

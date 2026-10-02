@@ -40,21 +40,21 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import threading
 from bisect import bisect_left
-from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
-# Re-exported unchanged for importers that predate the discovery/scanning split
-# (``pattern_facts_files.py``'s own docstring): the file-walk half moved, the
-# public names did not.
 from ..extract.cxx_digit_separator import (
     is_digit_separator as _is_digit_separator,  # noqa: F401  (re-export)
 )
+
+# Re-exported unchanged for importers that predate the discovery/scanning split
+# (``pattern_facts_files.py``'s own docstring): the file-walk half moved, the
+# public names did not.
+from ..model.execution_cache import MemoryCache, reference_mode, request_key
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
 from .pattern_facts_files import (
     _DIRECT_ROOT_LICENCE,
@@ -619,6 +619,9 @@ def _resolve_scan_jobs(n_files: int) -> int:
     """
     import multiprocessing
 
+    if reference_mode():
+        return 1
+
     # A daemonic process may not spawn children — `ProcessPoolExecutor.map`
     # raises ``AssertionError: daemonic processes are not allowed to have
     # children`` before yielding. Never go parallel from one, e.g. when a caller
@@ -656,9 +659,10 @@ def _scan_one_file(path_str: str) -> tuple[list[PatternFact], bool]:
 
 #: Content-digest -> facts memo for :func:`_scan_one_file`. Keyed on a
 #: SHA-256 of the text, never the text itself, so it retains only facts.
-_SCAN_MEMO: OrderedDict[tuple[str, str], tuple[PatternFact, ...]] = OrderedDict()
 _SCAN_MEMO_MAX = 4096
-_SCAN_MEMO_LOCK = threading.Lock()
+_SCAN_MEMO: MemoryCache[tuple[PatternFact, ...]] = MemoryCache(
+    "abicheck.buildsource.pattern_facts.scan", max_entries=_SCAN_MEMO_MAX
+)
 
 
 def _scan_text_memo(text: str, path: str) -> tuple[PatternFact, ...]:
@@ -669,18 +673,11 @@ def _scan_text_memo(text: str, path: str) -> tuple[PatternFact, ...]:
     process re-scanned identical text dozens of times. Keyed on a content
     digest (not a stat), so an in-place edit can never serve stale facts.
     """
-    key = (hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(), path)
-    with _SCAN_MEMO_LOCK:
-        hit = _SCAN_MEMO.get(key)
-        if hit is not None:
-            _SCAN_MEMO.move_to_end(key)
-            return hit
-    facts = tuple(scan_text(text, path=path))
-    with _SCAN_MEMO_LOCK:
-        _SCAN_MEMO[key] = facts
-        while len(_SCAN_MEMO) > _SCAN_MEMO_MAX:
-            _SCAN_MEMO.popitem(last=False)
-    return facts
+    key = request_key(
+        content=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
+        path=path,
+    )
+    return _SCAN_MEMO.get_or_compute(key, lambda: tuple(scan_text(text, path=path)))
 
 
 def _find_pattern_facts_serial(

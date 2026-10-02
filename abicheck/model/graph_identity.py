@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import contextlib
 import re
-import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -36,6 +35,8 @@ from ..name_classification import (
     _quoted_spans,
     strip_anonymous_type_location,
 )
+from .execution_cache import request_key
+from .execution_cache_scoped import SharedScopedCache
 
 # ── decl/type identity normalization (ADR-031/ADR-048) ─────────────────────
 #
@@ -247,17 +248,12 @@ def _normalize_graph_identity(identity: str) -> str:
     """
     if "at" not in identity:
         return identity
-    memo = _NORMALIZE_MEMO_STATE.memo
-    if memo is not None:
-        cached = memo.get(identity)
-        if cached is not None:
-            return cached
-    result = _strip_bare_anonymous_type_location(
-        strip_anonymous_type_location(identity)
+    return _NORMALIZE_MEMO.get_or_compute(
+        request_key(identity=identity),
+        lambda: _strip_bare_anonymous_type_location(
+            strip_anonymous_type_location(identity)
+        ),
     )
-    if memo is not None:
-        memo[identity] = result
-    return result
 
 
 #: Per-scope memo for :func:`_normalize_graph_identity`, live only inside
@@ -268,19 +264,7 @@ def _normalize_graph_identity(identity: str) -> str:
 #: of times. A pure function of its argument, so memoizing cannot change a
 #: result; scoped rather than a module-lifetime cache so nothing is retained
 #: after the load.
-class _NormalizeMemoState:
-    """The memo and its scope depth; a holder rather than module globals so
-    entering and leaving a scope needs no ``global`` rebinding."""
-
-    __slots__ = ("depth", "lock", "memo")
-
-    def __init__(self) -> None:
-        self.memo: dict[str, str] | None = None
-        self.depth = 0
-        self.lock = threading.Lock()
-
-
-_NORMALIZE_MEMO_STATE = _NormalizeMemoState()
+_NORMALIZE_MEMO = SharedScopedCache("abicheck.model.graph_identity.normalize")
 
 
 def checkout_stable_spelling(spelling: str) -> str:
@@ -302,18 +286,8 @@ def identity_normalization_memo() -> Iterator[None]:
     """Memoize :func:`_normalize_graph_identity` for the duration of the
     block (re-entrant and thread-safe; the memo is dropped when the last
     open scope exits)."""
-    state = _NORMALIZE_MEMO_STATE
-    with state.lock:
-        state.depth += 1
-        if state.memo is None:
-            state.memo = {}
-    try:
+    with _NORMALIZE_MEMO.scope():
         yield
-    finally:
-        with state.lock:
-            state.depth -= 1
-            if state.depth == 0:
-                state.memo = None
 
 
 #: ``attrs`` keys carrying a raw declaration/qualified-name spelling that can

@@ -35,7 +35,6 @@ import bisect
 import logging
 import re
 from collections.abc import Mapping
-from functools import lru_cache
 
 from .binary_fingerprint import (
     _MIN_SYMBOL_SIZE,
@@ -55,6 +54,7 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, Function, is_cxx_runtime_library
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolType
+from .model.execution_cache import memoized
 
 _log = logging.getLogger(__name__)
 
@@ -460,7 +460,7 @@ def _return_type_of(s: str) -> str:
     return s[:sp].strip() if sp != -1 else ""
 
 
-@lru_cache(maxsize=65536)
+@memoized(maxsize=65536)
 def _rename_name_parse(name: str) -> tuple[str | None, str, str, str]:
     """Per-name pieces used by :func:`_plausible_rename`, demangled once.
 

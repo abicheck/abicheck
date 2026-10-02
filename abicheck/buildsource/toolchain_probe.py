@@ -75,12 +75,12 @@ import re
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
 from ..deadline import run_bounded
 from ..dumper_toolchain import _tool_identity_metadata
+from ..model.execution_cache import memoized
 from .toolchain_bindings import BindingsFile
 
 #: Schema spelling -> internal label :func:`_probe_compiler_family` returns.
@@ -248,7 +248,7 @@ def _env_family(triple: str) -> str | None:
     return None
 
 
-@lru_cache(maxsize=64)
+@memoized(maxsize=64)
 def _clang_accepts_target(selected_path: str, digest: str, target: str) -> bool | None:
     """Whether a Clang-family *selected_path* actually accepts ``--target=``
     *target* for real compilation — not just echoes it back verbatim.

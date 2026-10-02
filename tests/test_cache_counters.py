@@ -42,7 +42,8 @@ import json
 
 import pytest
 
-from abicheck.compare.spelling_match_cache import cache_statistics, clear_caches
+from abicheck.compare.spelling_cache_statistics import cache_statistics
+from abicheck.compare.spelling_match_cache import clear_caches
 from abicheck.compare.spelling_pattern import compile_spelling_pattern, spelling_matches
 from abicheck.extract.cache_header_scan import reset_header_scan_statistics
 from abicheck.workflows import cache_counters, memory_trace

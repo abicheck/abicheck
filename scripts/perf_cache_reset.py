@@ -85,6 +85,15 @@ def clear_process_caches() -> None:
             except Exception:  # noqa: BLE001 — best-effort cache reset  # nosec B110
                 pass
     try:
+        # Every cache built on the central wrapper (Phase 4 of the
+        # design-hardening plan). Absent from a base revision that predates
+        # it, which still has the lru_cache sweep above.
+        from abicheck.model.execution_cache import clear_all_caches
+
+        clear_all_caches()
+    except Exception:  # noqa: BLE001 — optional on older revisions  # nosec B110
+        pass
+    try:
         from abicheck.demangle import _reset_demangle_batch_cache
 
         _reset_demangle_batch_cache()
