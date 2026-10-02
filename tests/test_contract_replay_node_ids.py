@@ -237,6 +237,17 @@ def test_a_stored_pre_change_context_replays_as_the_old_code_did(mode: str) -> N
     assert _decisions(ctx, changes) == expected
 
 
+#: The one decision a *fresh* collection deliberately answers differently from
+#: the stored fixture: the fixture's ``typedef struct Tag Tag`` was recorded as
+#: an ambiguous name, so a ``Tag`` finding was undecidable under ``exports``.
+#: ``export_surface`` no longer counts a typedef spelled as its own tag as a
+#: collision, so the exported ``use_tag(Tag *)`` now places it in contract.
+#: The stored context keeps its recorded ambiguity, which is why
+#: :func:`test_a_stored_pre_change_context_replays_as_the_old_code_did` still
+#: matches the fixture unchanged -- replay answers from what was recorded.
+_TAG_IDIOM_CORRECTION = {("Tag", "exports"): "IN_CONTRACT"}
+
+
 @pytest.mark.parametrize("mode", MODES)
 def test_a_fresh_context_reevaluates_as_the_old_encoding_did(mode: str) -> None:
     result, changes = _findings(mode)
@@ -244,6 +255,19 @@ def test_a_fresh_context_reevaluates_as_the_old_encoding_did(mode: str) -> None:
         json.loads(json.dumps(persisted_context_to_dict(result.contract_context)))
     )
     expected = json.loads((FIXTURE / f"decisions_{mode}.json").read_text())
+    corrected = 0
+    for change in changes:
+        for (symbol, column), value in _TAG_IDIOM_CORRECTION.items():
+            row = expected.get(finding_key(change, report_finding_id))
+            if change.symbol != symbol or row is None:
+                continue
+            # The run's own recorded decision moves too when the run *was*
+            # collected in the corrected mode.
+            for col in (column, "replayed") if mode == column else (column,):
+                if row.get(col) != value:
+                    row[col] = value
+                    corrected += 1
+    assert corrected >= 1  # the correction is real, not a stale no-op
     assert _decisions(ctx, changes) == expected
 
 

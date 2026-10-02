@@ -1241,6 +1241,14 @@ def compare_release_cmd(
                 library_results
             )
 
+            # Read before the strip below discards every `_`-prefixed key.
+            type_attribution_by_library: dict[str, dict[str, str]] = {
+                str(entry.get("library", "")): dict(attribution)
+                for entry in library_results
+                if isinstance(entry, dict)
+                and isinstance(attribution := entry.get("_type_attribution"), dict)
+            }
+
             # Strip _diff_result from entries and bump verdict for removed libraries.
             worst_verdict = _strip_diff_results_and_adjust_verdict(
                 library_results,
@@ -1258,7 +1266,9 @@ def compare_release_cmd(
             # count, verdict or exit code changes) and assemble the release
             # public-surface section every format then reads.
             release_public_surface_terms = assemble_release_public_surface(
-                release_surface_stage, library_results
+                release_surface_stage,
+                library_results,
+                type_attribution=type_attribution_by_library,
             )
 
             # Build-configuration matrix findings (G2: probe -> compare-release).

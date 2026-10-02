@@ -316,9 +316,21 @@ def glob_header_matches(path: str | None, patterns: Sequence[str]) -> bool:
     header_matches_exclusion`` delegates here so the rule has one owner."""
     if not path or not patterns:
         return False
-    name = path.replace("\\", "/").rsplit("/", 1)[-1]
+    # Separator-independent: a path's separator depends on the OS that
+    # *produced* it (a stored snapshot's `source_header` keeps the dumping
+    # host's spelling), while `fnmatch`'s own normalization depends on the OS
+    # *reading* it -- POSIX normalizes nothing. Matching the `/`-spelled form
+    # of both sides as well makes the answer the same on every host. It only
+    # adds matches where a backslash is present, so a POSIX path matched by a
+    # POSIX pattern is decided exactly as before.
+    posix_path = path.replace("\\", "/")
+    name = posix_path.rsplit("/", 1)[-1]
     return any(
-        fnmatch(name, pat) or fnmatch(path, pat) or fnmatch(path, f"*/{pat}")
+        fnmatch(name, pat)
+        or fnmatch(path, pat)
+        or fnmatch(path, f"*/{pat}")
+        or fnmatch(posix_path, (posix_pat := pat.replace("\\", "/")))
+        or fnmatch(posix_path, f"*/{posix_pat}")
         for pat in patterns
     )
 

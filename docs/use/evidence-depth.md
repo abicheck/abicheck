@@ -186,7 +186,7 @@ abicheck compare old/libfoo.so new/libfoo.so \
 
 | `--depth` | Reaches | Needs |
 |-----------|---------|-------|
-| `binary` | L0/L1 exported symbols + binary metadata + debug-info *presence* (no deep DWARF type walk, no L2 AST) + always-on pattern scan | just the artifact(s) |
+| `binary` | L0 exported symbols + binary metadata + **L1** debug info (DWARF/PDB/BTF/CTF types and layouts) *when the binary carries it* (no L2 AST) + always-on pattern scan | just the artifact(s) |
 | `headers` | + **L2** header AST (the public/internal boundary) | a public-header directory + a C/C++ frontend |
 | `build` | + **L3** build context (flag/toolchain drift) | a compile DB / build dir |
 | `source` | + **L4** source-ABI replay of changed TUs (seeded) or the whole library target (unseeded) + the **L5** graph | sources **and** `clang` (+ a diff seed to scope it to just the changed TUs) |
@@ -197,8 +197,11 @@ abicheck compare old/libfoo.so new/libfoo.so \
   symbols, SONAME, and dependencies, and runs a compiler-free pattern pre-scan.
   Needs only the two artifacts — no source, no build, no compiler. It is the
   deliberate way to **opt out** of source analysis: a fast gate, or when no
-  sources/compile DB are available. It skips the deep DWARF type walk and the L2
-  AST.
+  sources/compile DB are available. It skips the L2 header AST, but it does
+  **not** ignore debug info: when a binary carries DWARF (or PDB/BTF/CTF), its
+  types and layouts are read and compared, so a struct size or field-offset
+  change is still reported at this rung. With no debug info it is the
+  exported-symbol surface alone.
 - **`headers` — the header API surface.** Adds the L2 header AST, which
   establishes the **public/internal boundary** — so an internal-symbol removal
   (compatible) is told apart from a public one (breaking). Needs a public-header
@@ -224,7 +227,7 @@ catches, the cost/implication column is what it asks of you in return.
 
 | `--depth` | What it newly catches (benefit) | Cost & implication | Pin it when |
 |-----------|--------------------------------|--------------------|-------------|
-| `binary` | removed/changed exports, SONAME, dependency & version changes, no-DWARF vtable/RTTI size shifts | cheapest, flat with project size; **no** source-only API changes, and every exported symbol is treated as ABI (public/internal churn not separated) | you only have the two binaries, or want a fast pre-check |
+| `binary` | removed/changed exports, SONAME, dependency & version changes, no-DWARF vtable/RTTI size shifts, and — when the binaries carry DWARF — struct/class layout changes | cheapest, flat with project size; **no** source-only API changes, and every exported symbol is treated as ABI (public/internal churn not separated) | you only have the two binaries, or want a fast pre-check |
 | `headers` | the **public/internal boundary** → separates real API breaks from internal churn; signature / type-layout / enum / `noexcept` changes | still cheap; needs public headers **and** a C/C++ frontend on `PATH`, else it falls back to binary-strict scope and over-reports | you have the public headers — this is the floor for a *trustworthy* verdict |
 | `build` | build-flag / toolchain / `-std` / visibility **drift**; macro-value & include-graph divergence | cheap (~0.3–0.5s more); needs a compile DB / build dir — without one L3 is `not_collected` (reported, not a pass) | the two builds may differ in flags, standard, or visibility |
 | `source` | inline / template / macro / default-argument / `constexpr` **body** changes, **plus** the L5 reachability graph that localizes and scopes findings | **the one cost cliff (L4)** — scales with C++ template depth; needs `--sources` + `clang` + a `--since` seed to stay cheap (unseeded, it replays every TU — the same cost as an amortized whole-library replay) | a per-PR gate that must catch source-body changes or wants per-symbol impact; unseeded, the same rung also serves as the whole-library replay for producing an amortized release baseline |
@@ -550,9 +553,9 @@ depth. `--depth build` adds build-flag/toolchain drift, but only when you also
 give it a build input to read — a compile DB or build dir via
 `--build-info` (or a `--sources` tree); without one, L3 is
 reported `not_collected` and no drift is checked. `--depth binary` stays on the
-exported-symbol surface (L0) plus cheap debug-info *presence* and the always-on
-pattern scan — it skips the deep DWARF type walk, so no compiler, headers, or
-sources are needed. (`--depth headers` is the next rung up: it adds the L2 header
+exported-symbol surface (L0), plus the debug info (L1) a binary already carries,
+and the always-on pattern scan — it never runs a header frontend, so no
+compiler, headers, or sources are needed. (`--depth headers` is the next rung up: it adds the L2 header
 AST, which needs a header directory via `-H`/`--header` and a C/C++ frontend on
 `PATH`.)
 
@@ -562,8 +565,8 @@ AST, which needs a header directory via `-H`/`--header` and a C/C++ frontend on
 abicheck compare old/libfoo.abi.json new/libfoo.so \
   --build-info new=build/compile_commands.json --depth build
 
-# exported symbols + always-on lexical scan only (no DWARF walk, no L2 AST,
-# no L3/L4/L5; no compiler needed)
+# exported symbols + any DWARF the binaries carry + always-on lexical scan
+# (no L2 AST, no L3/L4/L5; no compiler needed)
 abicheck compare old/libfoo.abi.json new/libfoo.so --depth binary
 ```
 

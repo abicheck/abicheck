@@ -92,7 +92,7 @@ def test_no_config_means_no_request(tmp_path: Path) -> None:
     assert ownership_request_from_config(None, tmp_path) is None
 
 
-def test_target_roots_are_header_dirs_and_public_header_dirs_only(
+def test_target_roots_are_every_existing_h_entry_and_public_header_dirs(
     tmp_path: Path,
 ) -> None:
     hdir = tmp_path / "include"
@@ -100,9 +100,39 @@ def test_target_roots_are_header_dirs_and_public_header_dirs_only(
     hfile = hdir / "api.h"
     hfile.write_text("")
     pdir = tmp_path / "pub"
-    request = with_target_roots(None, [hdir, hfile], [pdir])
-    # A -H *file* is not a root; a -H directory and public_header_dirs are.
-    assert request.rules.target_roots == (str(hdir.resolve()), str(pdir.resolve()))
+    missing = tmp_path / "nope.h"
+    request = with_target_roots(None, [hdir, hfile, missing], [pdir])
+    # A -H directory *and* a -H file are roots (a file covers exactly itself),
+    # so a header reached only through `#include` is distinguishable from one
+    # the run declared. A -H entry that does not exist is not a root.
+    assert request.rules.target_roots == (
+        str(hdir.resolve()),
+        str(hfile.resolve()),
+        str(pdir.resolve()),
+    )
+
+
+def test_a_file_root_covers_that_file_and_nothing_beside_it(tmp_path: Path) -> None:
+    from abicheck.extract.ownership import (
+        DeclarationSite,
+        classify,
+        resolve_ownership_rules,
+    )
+
+    inc = tmp_path / "include" / "pvxs"
+    inc.mkdir(parents=True)
+    declared, sibling = inc / "iochooks.h", inc / "version.h"
+    for f in (declared, sibling):
+        f.write_text("")
+    request = with_target_roots(None, [declared], [])
+    rules = resolve_ownership_rules(request.rules, request.project_root or tmp_path)
+
+    def contract(path: Path) -> tuple[str, str]:
+        d = classify(DeclarationSite(path=str(path), qualified_name="pvxs::f"), rules)
+        return d.contract, d.rule_id
+
+    assert contract(declared)[0] == "public"
+    assert contract(sibling) == ("unresolved", "no_root")
 
 
 def test_input_spec_of_carries_the_ownership_request(tmp_path: Path) -> None:

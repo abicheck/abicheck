@@ -557,15 +557,8 @@ Core pipeline (in order of data flow):
      (`INERT_PACK_VALUES`), and a manifest whose `assignments` mapping is
      empty — each is a pack recorded as active configuration that changes
      nothing, which is the single failure all of these guard. `compare`
-     takes all three kinds; `scan --against` now takes all three too (CLI
-     cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's
-     `gate.severity.*` folds onto the real
-     `ResolvedCompareConfig` `resolve_compare_config` already produces
-     (`pack_application.apply_to_compare_config`, the identical function
-     single-pair `compare` uses, called from `cli_scan._resolve_scan_
-     evaluation_config`), since `scan`'s exit code has honored the resolved
-     severity config since the fix that closed the "scan
-     never consults severity" gap below. The directory/package
+     takes all three kinds (`scan --against`, which also took all three,
+     was deleted by ADR-068 Phase 6). The directory/package
      release fan-out (`cli_compare_release.py`) takes all three kinds too,
      since CLI cleanup phase two's "PR B" slice 2 — a `kind: gate` pack's
      `gate.severity.*` folds into the fan-out's own
@@ -595,8 +588,7 @@ Core pipeline (in order of data flow):
      unrelated deferred item — ADR-063 Track 4's 7B ledger entry has the
      full account). PR B's
      other stated goal, the effective-config digest, has already landed for
-     the native compare/release JSON path, the `--stat` JSON summary, and
-     `scan --against` JSON -- non-JSON renderers (Markdown, review, SARIF,
+     the native compare/release JSON path, and the `--stat` JSON summary -- non-JSON renderers (Markdown, review, SARIF,
      JUnit, HTML) and `compat check` don't carry it, see that plan
      section's own PR B note for the exact scope). One review finding
      worth not rediscovering (historical — `--exit-code-scheme` itself is
@@ -694,9 +686,9 @@ Core pipeline (in order of data flow):
      never rewrites a finding's compatibility decision or gate contribution.
      `compare` folds it inside `cli._exit_with_severity_or_verdict` rather
      than at each call site, so a command cannot pick up a compatibility
-     exit and forget the orthogonal one; `cli_scan_baseline.py` folds the
-     same function, since a ledger gating one command and not the other is
-     exactly §6.4's cross-command divergence. `contract.unresolved=warn`
+     exit and forget the orthogonal one; the directory/package release
+     fan-out `max`s the same function across members, since a ledger gating
+     one path and not the other is exactly §6.4's cross-command divergence. `contract.unresolved=warn`
      (D9) zeroes the floor and changes nothing else — the failures stay
      listed and unsuppressible, because accepting incomplete assurance is
      not hiding it. `reporter.py` emits *this* function's answer as
@@ -898,8 +890,9 @@ Core pipeline (in order of data flow):
    - `service.py` — service layer (Python API). One typed request/result pair:
      `CompareRequest` -> `CompareResult` and `DumpRequest`. ADR-068 Phase 4's
      typed-API slice retired `ScanRequest`/`ScanResult` (and `run_scan`/
-     `run_scan_set`) — `service_scan.py` is now the dry-run cost model
-     (`estimate_scan` over one `InputSpec`) plus header expansion, nothing more
+     `run_scan_set`) — `service_scan.py` was then deleted with `scan`
+     itself (ADR-068 Phase 6); the surviving dry-run cost model is
+     `dry_run_estimate.estimate_scan`
    - `service_compare_pipeline.py` — ADR-055 D1: `run_compare_request`'s two
      phases (`resolve_compare_request` / `classify_compare_pair`), split so
      the native `compare` CLI can run its Click-dependent ADR-049
@@ -935,8 +928,7 @@ Core pipeline (in order of data flow):
      (`cli_dump_request.py`) and `--dry-run` renders from
      `resolve_dump_request`'s `ResolvedDumpRequest`. The real **ELF** run now
      executes through `execute_dump_request` too (PR C, landed) — the same
-     shared pipeline `compare`'s implicit-dump operand and `scan`'s
-     candidate resolution already use, with the legacy `-p`/`--compile-db`
+     shared pipeline `compare`'s implicit-dump operand already uses, with the legacy `-p`/`--compile-db`
      auto-match threaded through as an explicit pass-through rather than a
      typed-API field (`execute_dump_request`'s own docstring). PE/Mach-O
      now routes through the identical shared executor too (ADR-063 Phase
@@ -1162,7 +1154,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
 | `doc-count-sync` | ERROR on drift, WARN if anchor moved | Headline counts in docs (ChangeKind count, example-catalog size) match their source of truth (`len(ChangeKind)`, `ground_truth.json`) — this file (`AGENTS.md`) is included in the generic sweep, same as `README.md`/`CLAUDE.md` |
 | `cli-contract` | ERROR | No *unallowlisted* front-end `cli*.py`/`appcompat.py`/`compat/cli.py` module calls a Tier-1 core entry point (`checker.compare`, `dumper.dump`, `service.resolve_input`) directly — it must route through the Tier-2 service (`service.run_compare`/`compare_snapshots`, `service.run_dump`/`service_dump_pipeline.run_dump_request`, `service_input_resolution.resolve_side_snapshot`); ADR-037 D10.1, extended to the latter two per Phase 0 item 2 of `docs/contribute/plans/duplication-and-convergence-assessment.md`. A small set of reviewed, line-pinned legacy exceptions remain permitted via `CLI_CONTRACT_ALLOWLIST` in `scripts/check_ai_readiness.py` — the gate rejects only a *new*, unlisted direct call |
-| `engine-cli-boundary` | ERROR | No engine-layer module (`scan_engine.py`, `service*.py`, `artifact_*.py`, `buildsource/**/*.py`, `workflows/artifact/**/*.py`) imports `click` or a `cli_*` sibling — the CLI is a frontend adapter over the engine, not the reverse. `ENGINE_CLI_BOUNDARY_ALLOWLIST` records today's pre-existing inversions (`scan_engine.py`'s own `click.ClickException`/lazy `cli_scan_baseline`/`cli_scan_helpers` imports, three `service*.py` modules' lazy `cli_*` imports, `buildsource/evidence_policy.py`'s `click`) the same allowlist-and-shrink way `IMPORT_CYCLE_ALLOWLIST` does — a new site outside the allowlist fails outright; closing a listed one is Phase 1 of `docs/contribute/plans/duplication-and-convergence-assessment.md` |
+| `engine-cli-boundary` | ERROR | No engine-layer module (`service*.py`, `artifact_*.py`, `buildsource/**/*.py`, `workflows/artifact/**/*.py`) imports `click` or a `cli_*` sibling — the CLI is a frontend adapter over the engine, not the reverse. `ENGINE_CLI_BOUNDARY_ALLOWLIST` (`scripts/engine_cli_boundary.py`) is now empty — every pre-existing inversion was closed (Phase 1 of `docs/contribute/plans/duplication-and-convergence-assessment.md`, the rest deleted with `scan`) — so any engine-layer `click`/`cli_*` import fails outright |
 | `fact-detector-misuse` | ERROR | ADR-063 Phase 0 (`docs/contribute/plans/one-semantic-pipeline.md`): no direct `==`/`!=` comparison of a `Fact[T]`-typed value (a `<attr>_fact` field access, or a `Fact(...)`/`Fact.<classmethod>(...)` constructor call) anywhere under `abicheck/` — a detector must unwrap via `.status` first, never compare two `Fact[...]`s (or a `Fact[...]` against a bare value) directly, since `Fact[T]` deliberately doesn't override `__eq__` and a direct comparison silently falls back to structural dataclass equality over `status`/`value`/`diagnostics` together. Real, repo-wide AST scan (`scripts/fact_detector_misuse.py` + `fact_detector_misuse_aliases.py`/`fact_detector_misuse_scope.py`), resolving same-function local aliases, annotated parameters, constructor-classmethod aliases, and closure-scope shadowing — not a naive textual match. No baseline: any match is an unconditional error |
 | `fact-field-readers` | ERROR | ADR-063 Phase 0 (`docs/contribute/plans/one-semantic-pipeline.md`): no function outside `EXEMPT_FUNCTIONS` reads a `Fact[T]`-bridged legacy field (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`) directly — via a plain attribute access, a `getattr(obj, "name", ...)` call (including a resolved `getattr`/`builtins` alias, excluding one locally shadowed by a parameter), an `operator.attrgetter(...)` call or a bound/unbound `__getattribute__` call (each through a resolved alias too), an `ast.AugAssign` target (`rec.bases += x`, an implicit read before the write), or a `case RecordType(bases=[]):` structural-pattern match (keyword or positional) — without first consulting its `Fact[...]` sibling's `.status`, which would collapse "confirmed empty/false" and "no evidence" onto the same value. Real, repo-wide AST scan, not a `diff_*.py` glob. `KNOWN_UNMIGRATED_READERS` records every currently-known reader site the same allowlist-and-shrink way `IMPORT_CYCLE_ALLOWLIST` does, keyed by enclosing function, attribute, the read's own outermost containing expression, its own exact source text, and a per-site occurrence rank — a new, unlisted site fails outright |
 | `import-cycle-growth` | ERROR | No *unapproved* strongly-connected-component growth within `abicheck/` — not literally "no import cycles": a large, deliberately-baselined CLI-registration SCC already exists and is allowed (`IMPORT_CYCLE_ALLOWLIST`). The invariant is that no *new* module joins it and no *new* separate SCC forms; extending the allowlist to unblock a fresh cycle needs an ADR or explicit architectural sign-off, not a routine edit (CLAUDE.md "M1-3") |
@@ -1571,9 +1563,9 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme), 7 = evidence-contract error (ADR-037 D5 — a pinned `--depth`/`--source-method` with no source evidence collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module; no comparison ever ran). Like `compare`, it also accepts `--severity-preset` (and `.abicheck.yml`'s `severity:` block); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above — there is no manual scheme selector any more (`--exit-code-scheme`/`exit_code_scheme:` were deleted, CLI cleanup phase two PR G2, ADR-064: the algorithm is purely derived from whether a severity setting is in effect). `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's `gate.severity.<category>` assignments apply the same way an explicit `--severity-preset` does, and cannot override one that was actually given (CLI or `.abicheck.yml`); a pack assigning `gate.exit_code_scheme` is rejected at load time.
-- **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
-  `scan --against` alike:** under `--contract`, the selected
+- `scan` (including `scan --against`) was deleted by ADR-068 Phase 6; its baseline mode is `compare OLD NEW` and its audit mode is `compare --no-baseline NEW`, both covered by the `compare` rows above.
+- **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare`
+  (single-pair and directory/package alike):** under `--contract`, the selected
   domain whose required evidence is incomplete contributes
   **1**, folded with `max` (`contract_coverage_exit.py`). It raises a clean
   `0` to `1` and never lowers a `2`/`4`, and it never rewrites a finding's

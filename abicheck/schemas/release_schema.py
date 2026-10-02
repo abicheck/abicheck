@@ -212,4 +212,10 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       variant-boundary change distinct from captured drift, and a variant
 #:       only one side carries reported as unmatched (never a removal).
 #:       Report-only and additive.
-RELEASE_SCHEMA_VERSION = "1.10"
+#: - ``1.11`` adds ``public_surface_reconciliation.shared_findings[].
+#:       attribution``: for a finding about a type, the reporting members
+#:       partitioned by whether their own export surface reaches it
+#:       (``reaches``/``proven_unreachable``/``unestablished``). Present only
+#:       when at least one member's snapshots carried the type;
+#:       ``affected_libraries`` is unchanged. Report-only and additive.
+RELEASE_SCHEMA_VERSION = "1.11"
