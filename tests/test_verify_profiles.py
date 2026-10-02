@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -855,11 +856,42 @@ class TestUnitTestsPerPlatformTimeout:
 
 # --- ci.yml's test-running jobs: log volume --------------------------------
 
-#: Every ci.yml job that runs the pytest suite. `slow-tests` was a step of
-#: `unit-tests` until it was split into its own concurrently-running job; the
-#: guards below are written over both so the split did not quietly drop the
-#: slow lane's invocations out of their coverage.
-_PYTEST_JOBS = ("unit-tests", "unit-tests-other-os", "slow-tests")
+#: Every ci.yml job that runs the pytest suite inline. `slow-tests` is not
+#: listed: it runs verify.py's `slow`/`slow-perf` steps rather than inline
+#: pytest lines, so the same log-volume guards are applied to those catalog
+#: entries instead (`TestTheSlowLaneHasExactlyOneOwner`).
+_PYTEST_JOBS = ("unit-tests", "unit-tests-other-os")
+_SLOW_STEPS = ("slow", "slow-perf")
+
+
+def _slow_job_run_lines() -> list[str]:
+    pytest.importorskip("yaml")
+    workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
+    return [
+        line.strip()
+        for step in workflow["jobs"]["slow-tests"]["steps"]
+        for line in str(step.get("run", "")).splitlines()
+        if line.strip()
+    ]
+
+
+def _slow_job_verify_invocation() -> list[str]:
+    calls = [
+        shlex.split(line)
+        for line in _slow_job_run_lines()
+        if "scripts/verify.py" in line
+    ]
+    assert len(calls) == 1, f"expected one verify.py call in slow-tests: {calls}"
+    return calls[0]
+
+
+def _slow_job_commands() -> list[str]:
+    """The pytest command each slow step runs, as the CI job runs it."""
+    argv = _slow_job_verify_invocation()
+    junit_dir = argv[argv.index("--junit-dir") + 1]
+    return [
+        " ".join(verify.step_command(_step(name), junit_dir)) for name in _SLOW_STEPS
+    ]
 
 
 class TestUnitTestJobLogVolume:
@@ -954,21 +986,15 @@ class TestUnitTestJobLogVolume:
                 )
 
     def test_the_slow_job_writes_its_own_distinct_result_files(self) -> None:
-        pytest.importorskip("yaml")
-        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
-        paths = [
-            self._junit_path(line.strip())
-            for step in workflow["jobs"]["slow-tests"]["steps"]
-            for line in str(step.get("run", "")).splitlines()
-            if line.strip().startswith("pytest ")
-        ]
-        assert paths, "the slow-tests job writes no JUnit XML"
+        paths = [self._junit_path(c) for c in _slow_job_commands()]
         assert len(set(paths)) == len(paths), f"results would overwrite: {paths}"
         for path in paths:
-            assert path.startswith("test-results-slow"), (
+            assert Path(path).name.startswith("test-results-slow"), (
                 "the slow job's results must be distinguishable from the unit "
                 f"lane's in the uploaded artifacts: {path}"
             )
+        uploads = _read(".github/workflows/ci.yml")
+        assert "path: test-results-slow*.xml" in uploads
 
     def test_the_coverage_table_skips_fully_covered_modules(self) -> None:
         # The shards only collect data; the table is printed once, by the
@@ -1002,19 +1028,35 @@ class TestTheSlowLaneHasExactlyOneOwner:
             if line.strip().startswith("pytest ")
         ]
 
-    def test_the_slow_tests_job_runs_both_slow_invocations(self) -> None:
-        commands = self._job_invocations("slow-tests")
-        parallel = [c for c in commands if '-m "slow"' in c and "-n auto" in c]
-        serial = [
-            c
-            for c in commands
-            if '-m "slow"' in c and "-n auto" not in c and "test_performance.py" in c
-        ]
-        assert parallel, f"the parallel slow lane is not run anywhere: {commands}"
-        assert serial, (
-            "the wall-clock-timed perf tests must still run, and serially "
-            f"(concurrency makes scheduler contention part of the measurement): {commands}"
+    def test_the_slow_tests_job_runs_verify_slow_steps(self) -> None:
+        """The job calls verify.py's catalog, never an inline copy of it."""
+        argv = _slow_job_verify_invocation()
+        only = set(argv[argv.index("--only") + 1].split(","))
+        assert only == set(_SLOW_STEPS), argv
+        assert "--junit-dir" in argv, argv
+        inline = [line for line in _slow_job_run_lines() if line.startswith("pytest")]
+        assert not inline, f"slow-tests must not hand-copy verify.py steps: {inline}"
+
+    def test_the_slow_steps_split_parallel_from_wall_clock_tests(self) -> None:
+        parallel, serial = (_step(n).cmd for n in _SLOW_STEPS)
+        assert "slow" in parallel and "-n" in parallel, parallel
+        assert "-n" not in serial, (
+            "the wall-clock-timed perf tests must run serially "
+            f"(concurrency makes scheduler contention part of the measurement): {serial}"
         )
+        for path in (
+            "tests/test_performance.py",
+            "tests/test_header_scan_deadline_integration.py",
+        ):
+            assert f"--ignore={path}" in parallel
+            assert path in serial
+
+    @pytest.mark.parametrize("name", _SLOW_STEPS)
+    def test_the_slow_steps_keep_the_log_quiet(self, name: str) -> None:
+        cmd = " ".join(_step(name).cmd)
+        assert " -v" not in f" {cmd} "
+        assert " -q" in f" {cmd} "
+        assert "-r fE" in cmd
 
     def test_unit_tests_no_longer_runs_the_slow_lane(self) -> None:
         offenders = [c for c in self._job_invocations("unit-tests") if '-m "slow"' in c]
@@ -1029,3 +1071,13 @@ class TestTheSlowLaneHasExactlyOneOwner:
         commands = self._job_invocations("unit-tests")
         offenders = [c for c in commands if "not slow" not in c]
         assert not offenders, f"unit-tests must exclude the slow marker: {offenders}"
+
+
+def test_junit_dir_names_each_pytest_step_after_itself(tmp_path: Path) -> None:
+    for step in verify.STEPS:
+        cmd = verify.step_command(step, str(tmp_path))
+        if "pytest" in step.cmd:
+            assert cmd[-1] == f"--junitxml={tmp_path / f'test-results-{step.name}.xml'}"
+        else:
+            assert cmd == step.cmd
+        assert verify.step_command(step) == step.cmd

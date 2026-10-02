@@ -182,10 +182,10 @@ def _fact_cell(
 
 
 def _sweep(
-    sites: list[str], statuses_for: Any, config: str
+    sites: list[str], statuses_for: Any, config: str, cases: Any = None
 ) -> set[tuple[str, str, str]]:
     found = set()
-    for case in CORPUS:
+    for case in CORPUS if cases is None else cases:
         for i, site in enumerate(sites):
             for status in statuses_for(i, case):
                 for side in SIDES:
@@ -265,26 +265,46 @@ def test_fact_ablation_oracles(site: str) -> None:
     assert not violations, violations
 
 
-@pytest.mark.slow
-def test_fact_ablation_full_product_default_config() -> None:
-    found = _sweep(sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "default")
-    assert found == set(KNOWN_VIOLATIONS)
+# The three full-product sweeps below are parametrized per corpus case rather
+# than looping over the whole corpus inside one test. Each case's cells are
+# independent, and the assertion is the per-case slice of the same set
+# equality, so the union over cases is exactly the original claim. As three
+# monolithic tests they took ~180-210s each and were the critical path of the
+# xdist-parallel `slow` lane (one worker ran them back to back while the
+# others idled); per case, the 81 units spread across every worker.
+
+
+def _known_violations_for(case: str) -> set[tuple[str, str, str]]:
+    return {cell for cell in KNOWN_VIOLATIONS if cell[0] == case}
 
 
 @pytest.mark.slow
-def test_fact_ablation_contract_exports_config() -> None:
-    found = _sweep(sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "contract_exports")
+@pytest.mark.parametrize("case", list(CORPUS))
+def test_fact_ablation_full_product_default_config(case: str) -> None:
+    found = _sweep(sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "default", [case])
+    assert found == _known_violations_for(case)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case", list(CORPUS))
+def test_fact_ablation_contract_exports_config(case: str) -> None:
+    found = _sweep(
+        sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "contract_exports", [case]
+    )
     # Under contract=exports both known cells are out of the export domain in
     # the full run already (NO_CHANGE), so nothing is left to silence.
     assert found == set()
 
 
 @pytest.mark.slow
-def test_fact_ablation_contract_public_config() -> None:
+@pytest.mark.parametrize("case", list(CORPUS))
+def test_fact_ablation_contract_public_config(case: str) -> None:
     """The domain that reads the header-identifier index and every captured
     ``*.type_identities_fact``: an unknown one must never let a break through
     as clean without a stated gap."""
-    found = _sweep(sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "contract_public")
+    found = _sweep(
+        sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "contract_public", [case]
+    )
     assert found == set()
 
 
