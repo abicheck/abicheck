@@ -267,14 +267,25 @@ def _validate_string_sequence(kind: str, value: Any) -> tuple[str, ...]:
 
 
 def _parse_cxx_std(flags: list[str]) -> int | None:
-    """Extract the C++ standard version from a flag list (``-std=c++20``)."""
-    for f in flags:
-        if f.startswith(_CXX_STD_FLAG):
-            try:
-                return int(f[len(_CXX_STD_FLAG) :])
-            except ValueError:
-                return None
-    return None
+    """The C++ standard a flag list selects, as its two-digit number
+    (``-std=gnu++2a`` -> 20).
+
+    Read the way the compiler reads it -- the last ``-std=``/``--std=``/
+    ``/std:`` wins, GNU and draft spellings included -- through the shared
+    :mod:`abicheck.model.language_standard` owner rather than a private
+    first-match parse.
+    """
+    from .model.language_standard import (
+        language_standard_is_cxx,
+        language_standard_year,
+        last_language_standard,
+    )
+
+    value = last_language_standard(flags)
+    if not language_standard_is_cxx(value):
+        return None
+    year = language_standard_year(value)
+    return None if year is None else year % 100
 
 
 def load_probe_spec(path: str | Path) -> ProbeSpec:

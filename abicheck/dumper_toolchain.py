@@ -49,6 +49,7 @@ from .extract.toolchain_identity import (
     _compiler_family_from_toolchain as _compiler_family_from_toolchain,
 )
 from .model.header_parse_coverage import HEADER_PARSE_EXCLUDED_METADATA
+from .model.language_standard import language_standard_is_cxx, language_standard_year
 from .storage.ast_parse_exclusions import HEADER_PARSE_EXCLUDED_KEY
 
 log = logging.getLogger(__name__)
@@ -408,19 +409,14 @@ def _parser_frontend_context_kind(parser: Any) -> str | None:
 #: so "c++17", "gnu++17", and "/std:c++17" all resolve the same way. Not
 #: exhaustive of every -std= spelling a user could pass — an unrecognized
 #: edition leaves the macro value unset (None) rather than guessing.
-_CPLUSPLUS_MACRO_BY_EDITION: dict[str, str] = {
-    "98": "199711L",
-    "03": "199711L",
-    "11": "201103L",
-    "0x": "201103L",
-    "14": "201402L",
-    "1y": "201402L",
-    "17": "201703L",
-    "1z": "201703L",
-    "20": "202002L",
-    "2a": "202002L",
-    "23": "202302L",
-    "2b": "202302L",
+_CPLUSPLUS_MACRO_BY_YEAR: dict[int, str] = {
+    1998: "199711L",
+    2003: "199711L",
+    2011: "201103L",
+    2014: "201402L",
+    2017: "201703L",
+    2020: "202002L",
+    2023: "202302L",
 }
 
 
@@ -433,8 +429,9 @@ def _cplusplus_macro_for_standard(standard: str | None) -> str | None:
     :func:`_probe_default_language_standard` produces — see its own
     docstring) already carries the literal macro assignment it observed, so
     it is read straight out of that string rather than looked up in
-    :data:`_CPLUSPLUS_MACRO_BY_EDITION`, which only maps a real ``-std=``
-    edition spelling. The marker is checked by *containment*, not
+    :data:`_CPLUSPLUS_MACRO_BY_YEAR` (via
+    :func:`~abicheck.model.language_standard.language_standard_year`), which only
+    maps a real ``-std=`` edition spelling. The marker is checked by *containment*, not
     ``str.startswith`` (Codex review, fresh evidence): when ``lang`` is
     also given, :func:`abicheck._compiler_options.language_standard_field`
     prefixes the probed value with ``"c++:"``/``"c:"``
@@ -446,10 +443,10 @@ def _cplusplus_macro_for_standard(standard: str | None) -> str | None:
         _, _, assignment = standard.partition(_PROBED_STANDARD_PREFIX)
         macro, _, value = assignment.partition("=")
         return value or None if macro == "__cplusplus" else None
-    edition = (
-        standard.rsplit("+", 1)[-1].lower() if "+" in standard else standard.lower()
-    )
-    return _CPLUSPLUS_MACRO_BY_EDITION.get(edition)
+    if not language_standard_is_cxx(standard):
+        return None
+    year = language_standard_year(standard)
+    return None if year is None else _CPLUSPLUS_MACRO_BY_YEAR.get(year)
 
 
 def _combined_option_tokens(

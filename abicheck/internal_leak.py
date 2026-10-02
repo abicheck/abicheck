@@ -44,6 +44,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from abicheck.model.entity_identity import candidate_lookup_keys
+from abicheck.model.symbol_ownership import (
+    DEFAULT_INTERNAL_NAMESPACES as _MODEL_INTERNAL_NAMESPACES,
+)
 
 from .buildsource.call_graph import (
     CALL_KIND_FUNCTION_POINTER,
@@ -75,13 +78,7 @@ _CONFIDENCE_RANK: dict[str, int] = {CONF_HIGH: 2, CONF_REDUCED: 1, CONF_UNKNOWN:
 # Namespace segments that mark a type as "internal" by convention.
 # Matched as a name segment (between ``::``) — substring matches inside an
 # identifier like ``DetailView`` are intentionally not flagged.
-DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = (
-    "detail",
-    "impl",
-    "internal",
-    "__detail",
-    "_impl",
-)
+DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = _MODEL_INTERNAL_NAMESPACES
 
 
 # Change kinds that represent a meaningful change to a type's binary layout
