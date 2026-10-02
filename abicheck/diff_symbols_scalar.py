@@ -27,6 +27,8 @@ The symbol-level public surface re-exports these names back from
 
 from __future__ import annotations
 
+from .model.int_spelling import canonical_int_spelling
+
 # Integer spellings whose width is *fixed* regardless of data model, mapped to
 # (bit-width, is_signed). A name-only change between two spellings with the same
 # representation is not a binary ABI break — storage and calling convention are
@@ -74,37 +76,7 @@ _LONG_UNSIGNED_SPELLINGS = frozenset({"unsigned long", "long unsigned int"})
 _PTR_SIGNED_SPELLINGS = frozenset({"ssize_t", "ptrdiff_t", "intptr_t"})
 _PTR_UNSIGNED_SPELLINGS = frozenset({"size_t", "uintptr_t"})
 
-# The words that make up a C integer built-in's declaration specifiers. A
-# spelling composed *only* of these can be reordered freely by the language
-# (``unsigned long int`` ≡ ``long unsigned int`` ≡ ``unsigned long``), and
-# different toolchains/headers emit different orderings, so they are normalized
-# to one canonical form before lookup. Typedefs (``size_t``) and fixed-width
-# names (``uint32_t``) contain other words and pass through unchanged.
-_INT_SPECIFIER_WORDS = frozenset({"signed", "unsigned", "short", "long", "int", "char"})
-
-
-def _canonical_int_spelling(t: str) -> str:
-    """Canonicalize a bare integer built-in spelling (specifier order and the
-    redundant trailing ``int`` are not significant), or return ``t`` unchanged
-    when it is not a pure specifier spelling (typedef, fixed-width, …)."""
-    words = t.split()
-    if not words or any(w not in _INT_SPECIFIER_WORDS for w in words):
-        return t
-    unsigned = "unsigned" in words
-    if "char" in words:
-        if unsigned:
-            return "unsigned char"
-        if "signed" in words:
-            return "signed char"
-        return t  # bare ``char`` — sign is implementation-defined, leave as-is
-    if "short" in words:
-        return "unsigned short" if unsigned else "short"
-    longs = words.count("long")
-    if longs >= 2:
-        return "unsigned long long" if unsigned else "long long"
-    if longs == 1:
-        return "unsigned long" if unsigned else "long"
-    return "unsigned int" if unsigned else "int"
+_canonical_int_spelling = canonical_int_spelling
 
 
 def _scalar_repr(type_name: str, is_llp64: bool) -> tuple[object, bool] | None:

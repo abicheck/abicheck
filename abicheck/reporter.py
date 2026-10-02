@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
@@ -82,7 +81,6 @@ from .reporter_markdown import (
     _append_suppression_note as _append_suppression_note,
     _build_impact_table as _build_impact_table,
     _build_internal_rtti_note as _build_internal_rtti_note,
-    _build_severity_summary_md as _build_severity_summary_md,
     _finding_id as _finding_id,
     _fmt_size as _fmt_size,
     _footer_lines as _footer_lines,
@@ -113,45 +111,6 @@ from .root_cause_evidence import (
 )
 from .schemas import REPORT_SCHEMA_VERSION
 from .semver import recommend_release_for_report
-
-
-def _effective_severity_label(
-    c: object,
-    kind_sets: tuple[
-        frozenset[ChangeKind],
-        frozenset[ChangeKind],
-        frozenset[ChangeKind],
-        frozenset[ChangeKind],
-    ],
-    *,
-    policy: str | None = None,
-    policy_file: object | None = None,
-) -> str:
-    """Severity label for a change, honouring its A4 ``effective_verdict``.
-
-    The one place the reporter decides a finding's severity bucket: routes
-    through :func:`effective_verdict_for_change` (the same call
-    :func:`_change_to_dict` already makes) so an ADR-027 pattern-aware
-    demotion, *and* a per-change frozen-namespace floor guarding a
-    ``policy_file`` kind-level override, both read consistently with the
-    verdict and exit code. Without *policy_file* here, a leaf-mode root-type
-    change tagged ``frozen_namespace_violation`` could read "compatible" in
-    ``leaf_changes`` while the top-level ``severity`` block (which does pass
-    ``policy_file``) correctly reports it as blocking the gate — a direct,
-    visible contradiction on the same JSON document (Codex review on #549).
-    """
-    kind = getattr(c, "kind", None)
-    if not isinstance(kind, ChangeKind):
-        return "unknown"
-    from .severity import effective_verdict_for_change
-
-    verdict = effective_verdict_for_change(
-        cast(HasKind, c),
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
-    )
-    return _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
 
 
 def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
@@ -1367,7 +1326,7 @@ def prewarm_change_demangling(result: Any) -> None:
     (:func:`resolve_demangled_symbol`), so one batched ``c++filt`` call up
     front is what keeps a host without the in-process ``cxxfilt`` package
     from forking a subprocess per distinct symbol -- the same prewarm
-    ``appcompat_html.py`` already does for its own per-row demangling.
+    ``appcompat_html.py`` (removed) already does for its own per-row demangling.
 
     Called from ``report.build.build_report_document``, not from
     ``to_json`` (Codex review, PR #1284): the document builder is the one
@@ -1462,7 +1421,7 @@ def _change_to_dict(
 
     ``evidence_status_override`` lets a caller assert a stronger epistemic
     status than the finding's own classification implies — e.g.
-    ``appcompat_to_json`` marks every finding it already proved a specific
+    ``appcompat_to_json`` (removed) marks every finding it already proved a specific
     consumer depends on as ``EvidenceStatus.CONSUMER_PROVEN``, regardless of
     the finding's own kind.
 
@@ -1697,291 +1656,6 @@ def _build_severity_json(
         "blocking": gate.blocking,
         "blocking_categories": list(gate.blocking_categories),
     }
-
-
-def _classify_changes_by_kind(
-    changes: list[Change],
-    result: DiffResult,
-) -> tuple[list[Change], list[Change], list[Change], list[Change]]:
-    """Split *changes* into (breaking, source_breaks, risk, compatible) using the
-    effective kind sets (respects PolicyFile overrides) and per-finding A4
-    ``effective_verdict`` overrides (ADR-027), so a demoted opaque/PIMPL layout
-    change lands in the compatible bucket of the text report too.
-
-    Thin wrapper over :meth:`ReportModel.classify` (C2/ADR-036) — the single
-    canonical verdict-axis bucketer shared with the report view-model."""
-    from .report_model import ReportModel
-
-    return ReportModel.classify(changes, result)
-
-
-def appcompat_to_json(result: object, indent: int = 2) -> str:
-    """Render an AppCompatResult as JSON."""
-    verdict = getattr(result, "verdict", None)
-    full_diff = getattr(result, "full_diff", None)
-
-    d: dict[str, object] = {
-        "application": getattr(result, "app_path", ""),
-        "old_library": getattr(result, "old_lib_path", ""),
-        "new_library": getattr(result, "new_lib_path", ""),
-        "verdict": verdict.value if verdict else "UNKNOWN",
-        "symbol_coverage_pct": round(getattr(result, "symbol_coverage", 0.0), 1),
-        "required_symbol_count": getattr(result, "required_symbol_count", 0),
-    }
-
-    missing = getattr(result, "missing_symbols", [])
-    d["missing_symbols"] = list(missing)
-
-    missing_ver = getattr(result, "missing_versions", [])
-    d["missing_versions"] = list(missing_ver)
-
-    breaking = getattr(result, "breaking_for_app", [])
-    appcompat_policy = (
-        getattr(getattr(result, "full_diff", None), "policy", "strict_abi")
-        or "strict_abi"
-    )
-    # Thread the full_diff's PolicyFile/effective kind_sets through, mirroring
-    # to_json's _change_to_dict calls (reporter.py _add_changes_block) —
-    # without them, a per-finding severity here falls back to raw-kind
-    # classification and can contradict full_library_verdict below, which
-    # already honours the PolicyFile via full_diff.verdict.
-    _kind_sets_fn = getattr(full_diff, "_effective_kind_sets", None)
-    appcompat_kind_sets = _kind_sets_fn() if callable(_kind_sets_fn) else None
-    appcompat_policy_file = getattr(full_diff, "policy_file", None)
-    _rc_lookup = root_cause_lookup_for_changes(breaking)
-    _rc_evidence = root_cause_evidence_lookup_for_changes(breaking)
-    d["relevant_changes"] = [
-        _change_to_dict(
-            c,
-            policy=appcompat_policy,
-            kind_sets=appcompat_kind_sets,
-            policy_file=appcompat_policy_file,
-            evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
-            root_cause=_rc_lookup.get(_finding_id(c)),
-            root_cause_evidence=_rc_evidence.get(_finding_id(c)),
-        )
-        for c in breaking
-    ]
-    d["relevant_change_count"] = len(breaking)
-
-    irrelevant = getattr(result, "irrelevant_for_app", [])
-    d["irrelevant_change_count"] = len(irrelevant)
-
-    total = len(breaking) + len(irrelevant)
-    d["total_library_changes"] = total
-
-    if full_diff:
-        d["full_library_verdict"] = full_diff.verdict.value
-        # Traceability: file metadata from the underlying library diff
-        d["old_file"] = _metadata_dict(getattr(full_diff, "old_metadata", None))
-        d["new_file"] = _metadata_dict(getattr(full_diff, "new_metadata", None))
-        # Confidence & evidence
-        conf = getattr(full_diff, "confidence", None)
-        if conf is not None:
-            d["confidence"] = conf.value if hasattr(conf, "value") else str(conf)
-            etier = getattr(full_diff, "evidence_tier", None)
-            if etier is not None:
-                d["evidence_tier"] = (
-                    etier.value if hasattr(etier, "value") else str(etier)
-                )
-            d["evidence_tiers"] = list(getattr(full_diff, "evidence_tiers", []) or [])
-            cov_warns = getattr(full_diff, "coverage_warnings", []) or []
-            if cov_warns:
-                d["coverage_warnings"] = list(cov_warns)
-
-    return json.dumps(d, indent=indent)
-
-
-def appcompat_to_markdown(result: object, *, show_irrelevant: bool = False) -> str:
-    """Render an AppCompatResult as Markdown."""
-    verdict = getattr(result, "verdict", None)
-    v_label = verdict.value if verdict else "UNKNOWN"
-    v_emoji = _VERDICT_EMOJI.get(verdict, "?") if verdict else "?"
-
-    app_path = getattr(result, "app_path", "")
-    old_lib = getattr(result, "old_lib_path", "")
-    new_lib = getattr(result, "new_lib_path", "")
-    required_count = getattr(result, "required_symbol_count", 0)
-    coverage = getattr(result, "symbol_coverage", 0.0)
-    missing = getattr(result, "missing_symbols", [])
-    missing_ver = getattr(result, "missing_versions", [])
-    breaking = getattr(result, "breaking_for_app", [])
-    irrelevant = getattr(result, "irrelevant_for_app", [])
-
-    total_changes = len(breaking) + len(irrelevant)
-
-    lines: list[str] = [
-        "# Application Compatibility Report",
-        "",
-    ]
-
-    lines += _appcompat_header_lines(app_path, old_lib, new_lib, v_emoji, v_label)
-
-    # File metadata (traceability)
-    full_diff = getattr(result, "full_diff", None)
-    old_meta = getattr(full_diff, "old_metadata", None) if full_diff else None
-    new_meta = getattr(full_diff, "new_metadata", None) if full_diff else None
-    if old_meta or new_meta:
-        lines += ["## Library Files", "", "| | Old | New |", "|---|---|---|"]
-        old_path = getattr(old_meta, "path", "—") if old_meta else "—"
-        new_path = getattr(new_meta, "path", "—") if new_meta else "—"
-        old_sha = getattr(old_meta, "sha256", "—")[:12] if old_meta else "—"
-        new_sha = getattr(new_meta, "sha256", "—")[:12] if new_meta else "—"
-        old_size = _fmt_size(old_meta.size_bytes) if old_meta else "—"
-        new_size = _fmt_size(new_meta.size_bytes) if new_meta else "—"
-        lines += [
-            f"| **Path** | `{old_path}` | `{new_path}` |",
-            f"| **SHA-256** | `{old_sha}…` | `{new_sha}…` |",
-            f"| **Size** | {old_size} | {new_size} |",
-            "",
-        ]
-
-    # Confidence info
-    conf = getattr(full_diff, "confidence", None) if full_diff else None
-    if conf is not None:
-        conf_val = conf.value if hasattr(conf, "value") else str(conf)
-        tiers = getattr(full_diff, "evidence_tiers", []) or []
-        tier_str = ", ".join(f"`{t}`" for t in tiers) if tiers else "_none_"
-        policy_val = getattr(full_diff, "policy", None) or "strict_abi"
-        lines += [
-            f"> **Confidence**: {conf_val.upper()} | **Evidence**: {tier_str} | **Policy**: `{policy_val}`",
-            "",
-        ]
-    else:
-        # Still show policy when confidence is absent
-        policy_val = getattr(full_diff, "policy", None) if full_diff else None
-        if policy_val:
-            lines += [f"> **Policy**: `{policy_val}`", ""]
-
-    lines += _appcompat_coverage_lines(required_count, coverage, missing)
-    lines += _appcompat_missing_lines(missing, missing_ver)
-    lines += _appcompat_relevant_lines(breaking, total_changes)
-    lines += _appcompat_irrelevant_lines(irrelevant, show_irrelevant)
-
-    lines += [
-        "---",
-        "_Generated by [abicheck](https://github.com/abicheck/abicheck)_",
-    ]
-    return "\n".join(lines)
-
-
-def _appcompat_header_lines(
-    app_path: str,
-    old_lib: str,
-    new_lib: str,
-    v_emoji: str,
-    v_label: str,
-) -> list[str]:
-    """Build the report header lines for appcompat markdown."""
-    header = [
-        f"**Application:** `{app_path}`",
-        f"**Verdict:** {v_emoji} `{v_label}`",
-        "",
-    ]
-    if old_lib:
-        header.insert(1, f"**Library:** `{old_lib}` → `{new_lib}`")
-        return header
-    header.insert(1, f"**Library:** `{new_lib}`")
-    return header
-
-
-def _appcompat_coverage_lines(
-    required_count: int,
-    coverage: float,
-    missing: list[object],
-) -> list[str]:
-    """Build symbol coverage section lines."""
-    lines = [
-        "## Symbol Coverage",
-        "",
-        f"App requires **{required_count}** library symbols.",
-    ]
-    if missing:
-        lines.append(
-            f"**{len(missing)}** required symbol(s) missing from new version "
-            f"({coverage:.0f}% coverage).",
-        )
-    elif required_count > 0:
-        lines.append(
-            f"All {required_count} required symbols present in new version "
-            f"({coverage:.0f}% coverage).",
-        )
-    lines.append("")
-    return lines
-
-
-def _appcompat_missing_lines(
-    missing: list[object],
-    missing_ver: list[object],
-) -> list[str]:
-    """Build missing symbol/version sections."""
-    lines: list[str] = []
-    if missing:
-        lines += ["## Missing Symbols", ""]
-        lines.append(
-            "These symbols are required by the application but absent from the new library:"
-        )
-        lines.append("")
-        for sym in missing:
-            lines.append(f"- `{sym}`")
-        lines.append("")
-    if missing_ver:
-        lines += ["## Missing Symbol Versions", ""]
-        for ver in missing_ver:
-            lines.append(f"- `{ver}`")
-        lines.append("")
-    return lines
-
-
-def _appcompat_relevant_lines(breaking: list[Change], total_changes: int) -> list[str]:
-    """Build relevant changes section lines."""
-    if breaking:
-        lines: list[str] = [
-            f"## Relevant Changes ({len(breaking)} of {total_changes} total)",
-            "",
-            "These library changes affect symbols your application uses:",
-            "",
-            "| Kind | Symbol | Description |",
-            "|------|--------|-------------|",
-        ]
-        for change in breaking:
-            kind_val = change.kind.value if change.kind else ""
-            lines.append(f"| `{kind_val}` | `{change.symbol}` | {change.description} |")
-        lines.append("")
-        return lines
-    if total_changes > 0:
-        return [
-            f"## Relevant Changes (0 of {total_changes} total)",
-            "",
-            "None of the library's ABI changes affect your application.",
-            "",
-        ]
-    return []
-
-
-def _appcompat_irrelevant_lines(
-    irrelevant: list[Change], show_irrelevant: bool
-) -> list[str]:
-    """Build irrelevant changes section/note lines."""
-    if irrelevant and not show_irrelevant:
-        return [
-            f"_{len(irrelevant)} library ABI change(s) do NOT affect your application. "
-            "Use `--show-irrelevant` to see them._",
-            "",
-        ]
-    if irrelevant and show_irrelevant:
-        lines = [
-            f"## Irrelevant Changes ({len(irrelevant)})",
-            "",
-            "These library changes do NOT affect your application:",
-            "",
-        ]
-        for change in irrelevant:
-            kind_val = change.kind.value if change.kind else ""
-            lines.append(f"- **{kind_val}**: {change.description}")
-        lines.append("")
-        return lines
-    return []
 
 
 # ADR-063 T10: the bundle of per-change helpers report.scoped_gate.

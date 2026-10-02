@@ -60,7 +60,6 @@ from .cli_dump_depth import (
 from .evidence_depth import (
     DEPTH_RANK,
     gated_source_label,
-    reported_depth_label,
 )
 from .workflows.extraction import (
     _manifest_declared_includes,
@@ -121,29 +120,6 @@ def check_dump_debug_format_error(
             f"ELF binaries, not {binary_fmt.upper()}."
         )
     return None
-
-
-def evidence_depth_label(
-    snap: AbiSnapshot,
-    build_source: BuildSourcePack | None = None,
-) -> str:
-    """Report which evidence depth a snapshot *actually* carries (CLI-audit P2).
-
-    The embedded-only defaulting wrapper over
-    :func:`abicheck.evidence_depth.reported_depth_label` -- the *gate*'s rule,
-    not ``depth_label_for``'s -- which owns and documents it. *build_source*,
-    when given, overrides ``snap.build_source`` -- ``compare`` can resolve an
-    out-of-band ``--old/new-sources`` pack that
-    is never attached back to the snapshot object (``_resolve_side_pack``
-    returns it standalone), and without this override a compare run using only
-    out-of-band packs would report the depth of the *unrelated* embedded (or
-    absent) snapshot payload (Codex review). The default is what the plain
-    single-artifact ``dump -o`` case wants; the leaf itself deliberately takes
-    the pack explicitly so no other caller can acquire the default by accident.
-    """
-    return reported_depth_label(
-        snap, snap.build_source if build_source is None else build_source
-    )
 
 
 #: Compatibility alias. The ladder is owned by ``evidence_depth.DEPTH_RANK``,
@@ -218,7 +194,7 @@ def check_requested_depth_satisfied(
 
     Depth-contract (CLAUDE.md / CLI-audit P1): when ``--depth`` is left
     unspecified, degrading to whatever evidence is actually available is
-    fine as long as ``evidence_depth_label`` honestly reports it. But once
+    fine as long as ``reported_depth_label`` honestly reports it. But once
     the user explicitly asks for ``headers``/``build``/``source``, silently
     writing a weaker snapshot is a lie a downstream baseline/CI consumer has
     no way to detect short of re-deriving the depth themselves — so this
@@ -233,19 +209,19 @@ def check_requested_depth_satisfied(
         return
     effective_pack = build_source if build_source is not None else snap.build_source
     # _gated_source_label is called unconditionally, not just when
-    # evidence_depth_label already says "source" -- evidence_depth_label's
+    # reported_depth_label already says "source" -- reported_depth_label's
     # own payload-emptiness check requires *either* L4 *or* L5 to be
     # non-empty, but a zero-match source-only dump (replay parsed TUs, linked
     # nothing because there is no binary to link against, and folded no L5
-    # graph either) leaves both empty, so evidence_depth_label reports "build"
+    # graph either) leaves both empty, so reported_depth_label reports "build"
     # directly -- which would skip the gated recompute entirely and wrongly
     # reject that valid zero-match dump (CodeRabbit review). _gated_source_label
     # is self-contained (it recomputes straight from build_source, not from
-    # evidence_depth_label's verdict) and never returns a *higher* rung than
-    # is justified -- for every other case (evidence_depth_label already
+    # reported_depth_label's verdict) and never returns a *higher* rung than
+    # is justified -- for every other case (reported_depth_label already
     # "source", or genuinely no build_source at all) it reproduces the same
-    # result the old evidence_depth_label-first path did; see its own
-    # docstring for why evidence_depth_label's L4-or-L5 rule is not
+    # result the old reported_depth_label-first path did; see its own
+    # docstring for why reported_depth_label's L4-or-L5 rule is not
     # trustworthy enough for a hard gate on its own.
     effective = _gated_source_label(effective_pack, snap)
     if _DEPTH_RANK.get(effective, 0) < requested_rank:
@@ -264,19 +240,15 @@ def fold_dump_provenance_into_dict(
     depth: str | None,
     snap: AbiSnapshot,
 ) -> tuple[dict[str, Any], str]:
-    """Dict-level counterpart of :func:`fold_dump_provenance_into_json`.
+    """Fold the dump's depth provenance into a snapshot payload.
 
     Same computation, but operating on an already-decoded payload dict
     in-place instead of a serialized JSON string — used by the normal
     `dump` write path (ADR-059) so a 100+ MB snapshot is never
     ``json.loads()``-ed and ``json.dumps()``-ed a second time just to
-    attach this one key. ``fold_dump_provenance_into_json`` below is now a
-    thin backward-compatible wrapper for callers (and tests) that still
-    want the string-in/string-out shape.
+    attach this one key.
 
-    Returns ``(payload, effective_depth)`` — see
-    ``fold_dump_provenance_into_json``'s docstring for the full reasoning
-    behind every field and the ``effective``/``degraded`` semantics.
+    Returns ``(payload, effective_depth)``.
     """
     effective = _gated_source_label(snap.build_source, snap)
     frontend = (
@@ -419,67 +391,11 @@ def write_snapshot_and_report(
     # requested --depth, so an explicit --depth source that collected
     # nothing usable is never silently reported as if it had succeeded.
     # Reuses fold_dump_provenance_into_dict's own returned label (the strict
-    # _gated_source_label, not the plain evidence_depth_label) so this line
+    # _gated_source_label, not the plain reported_depth_label) so this line
     # can never disagree with the JSON's effective_depth for the same dump
     # -- they previously could, on the documented zero-match-source-only
     # case (external review).
     click.echo(f"Resolved evidence depth: {resolved_depth_label}", err=True)
-
-
-def fold_dump_provenance_into_json(
-    text: str,
-    depth: str | None,
-    snap: AbiSnapshot,
-) -> tuple[str, str]:
-    """Record the depth contract this dump actually satisfied (audit finding:
-    "depth/scope provenance incomplete" -- a persisted ``.abi.json``/baseline
-    manifest didn't record ``requested_depth``/``effective_depth``/``frontend``,
-    so a downstream reader had no way to tell how deep it really goes short of
-    re-deriving it themselves, the same problem ``check_requested_depth_
-    satisfied`` already hard-fails on at dump time).
-
-    JSON-only augmentation -- mirrors ``cli_compare_helpers.
-    _fold_evidence_depth_into_json``'s pattern, not a new ``AbiSnapshot``
-    field: informational provenance about *this dump run*, not part of the
-    versioned snapshot schema, so it needs no ``SCHEMA_VERSION`` bump and
-    is silently dropped by ``snapshot_from_dict``'s defensive ``.get()``
-    parsing on any later object round-trip (load → re-save), same as
-    ``compare``'s own JSON-only ``consumer_scope``/``old_evidence_depth``
-    folds. ``degraded`` is always ``False`` when *depth* is non-``None``, by
-    construction: ``check_requested_depth_satisfied`` (called before this,
-    in ``_write_snapshot_output``) already raised if the rank had come up
-    short, so reaching this point means it did not -- recorded anyway so a
-    reader sees a positive "no, this is not weaker than requested" signal
-    rather than an absent field.
-
-    ``effective_depth`` uses ``_gated_source_label``, the same strict
-    recompute ``check_requested_depth_satisfied`` gates on -- not the plain
-    ``evidence_depth_label``. They disagree on exactly the case
-    ``_gated_source_label``'s docstring documents: a zero-match source-only
-    dump (L4 replay genuinely ran but linked nothing, no binary to link
-    against) reports "source" satisfied by the strict gate, but
-    ``evidence_depth_label`` still reports "build" (its own L4-or-L5
-    payload-emptiness check sees both empty). Using the plain label here
-    would serialize ``effective_depth: "build", degraded: true`` for a
-    ``--depth source`` dump the strict gate had just accepted moments
-    earlier in the same call -- self-contradictory (Codex review).
-
-    Returns ``(json_text, effective_depth)`` -- the caller's own "Resolved
-    evidence depth: ..." stderr echo must reuse this exact label rather than
-    recomputing via the plain ``evidence_depth_label``, or the two can
-    disagree on the identical zero-match-source-only case this docstring
-    just described: JSON says "source", stderr says "build", for the same
-    dump (external review).
-    """
-    import json
-
-    effective = _gated_source_label(snap.build_source, snap)
-    try:
-        payload = json.loads(text)
-    except ValueError:
-        return text, effective
-    payload, effective = fold_dump_provenance_into_dict(payload, depth, snap)
-    return json.dumps(payload, indent=2), effective
 
 
 def _l4_source_abi_frontend(snap: AbiSnapshot) -> str | None:

@@ -98,7 +98,7 @@ implementation"). HTML's and Markdown's whole-document closures each retired
 every name left with zero resolvers repo-wide, tests included, once every
 caller moved onto the new `build_*_document`/`ChangeRow`-shaped path (see git
 history); a name with a real surviving caller (e.g. `_abbr_symbol_text`/
-`_changes_table`, `appcompat_html.py`'s) stays.
+`_changes_table`, the former `appcompat_html.py`'s) stays.
 
 ADR-061 Phase 2 item 5 is closed: `scoped_gate.py`'s `apply_scoped_gate`
 folds scoped-gate JSON natively (pre-render), not a render -> parse -> patch

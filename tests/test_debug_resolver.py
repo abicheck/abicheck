@@ -32,7 +32,6 @@ from abicheck.debug_resolver import (
     SplitDwarfResolver,
     _is_valid_build_id,
     extract_build_id,
-    format_data_sources,
     resolve_debug_info,
 )
 
@@ -672,29 +671,6 @@ class TestResolveDebugInfo:
 # ---------------------------------------------------------------------------
 # Tests: format_data_sources
 # ---------------------------------------------------------------------------
-
-
-class TestFormatDataSources:
-    def test_with_artifact(self) -> None:
-        artifact = DebugArtifact(
-            dwarf_path=Path("/debug/libfoo.debug"), source="build-id tree"
-        )
-        output = format_data_sources(Path("/lib/libfoo.so"), artifact, has_headers=True)
-        assert "build-id tree" in output
-        assert "Headers:    available" in output
-
-    def test_no_artifact(self) -> None:
-        output = format_data_sources(Path("/lib/libfoo.so"), None, has_headers=False)
-        assert "symbols-only" in output
-        assert "not provided" in output
-
-    def test_headers_not_provided(self) -> None:
-        output = format_data_sources(Path("/x"), None, has_headers=False)
-        assert "not provided" in output
-
-    def test_headers_available(self) -> None:
-        output = format_data_sources(Path("/x"), None, has_headers=True)
-        assert "available" in output
 
 
 # ---------------------------------------------------------------------------

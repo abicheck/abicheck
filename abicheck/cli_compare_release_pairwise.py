@@ -89,28 +89,6 @@ def _release_owned_crosschecks() -> frozenset[str]:
     return release_level_checks()
 
 
-def _release_job_mem_budget_gib(depth: str | None = None) -> float:
-    """Per-worker RAM budget (GiB) for the release-fan-out memory cap (R3,
-    CLI-audit) -- see :mod:`abicheck.workflows.release_jobs`'s own docstring
-    for the full "why". A thin wrapper (not a direct call site) purely so a
-    test can monkeypatch this module's own name, matching the established
-    ``_l4_*`` wrapper pattern in :mod:`abicheck.buildsource.source_replay`.
-    """
-    from .workflows.release_jobs import release_job_mem_budget_gib
-
-    return release_job_mem_budget_gib(depth)
-
-
-def _release_jobs_mem_cap(depth: str | None = None) -> int | None:
-    """Max release-fan-out workers that fit in available RAM, or ``None``
-    when RAM can't be read -- see :func:`_release_job_mem_budget_gib`'s
-    docstring for why this is a thin wrapper.
-    """
-    from .workflows.release_jobs import release_jobs_mem_cap
-
-    return release_jobs_mem_cap(depth)
-
-
 @dataclass(frozen=True)
 class ReleaseMemberContext:
     """Everything one member's comparison needs, resolved once per release.

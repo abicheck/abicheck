@@ -44,13 +44,11 @@ from ..bundle_models import (
     SymbolSignatureStatus,
     symbol_signature_status,
 )
-from ..model import AbiSnapshot, Visibility
+from ..model import AbiSnapshot
 from ..model.export_index import build_raw_export_index, read_default_export_names
 from ..model.surface_facts import (
-    binary_exported,
-    is_confirmed_true,
+    is_dynamically_exported,
     is_export_table_only_record,
-    is_legacy_derived,
 )
 
 __all__ = [
@@ -291,21 +289,11 @@ def _symbol_was_exported(
     entry = fn if fn is not None else snapshot.variable_map.get(symbol)
     if entry is None:
         return False
-    # The export question is now its own fact (model/surface_facts.py), so a
-    # producer that actually consulted an export table answers it directly
-    # -- no provenance-dependent re-interpretation needed, and in
-    # particular no need to guess for the combination the enum could not
-    # hold (declared, promised, not exported).
-    exported = binary_exported(entry)
-    if not is_legacy_derived(exported):
-        return is_confirmed_true(exported)
-    # A pre-split snapshot: keep this function's own documented reading of
-    # the conflated enum, which is strictly sharper than the bridge's.
-    if entry.visibility is Visibility.PUBLIC:
-        return True
-    if entry.visibility is Visibility.ELF_ONLY:
-        return snapshot.elf_only_mode
-    return False
+    # The export question is its own fact (model/surface_facts.py); the
+    # accessor keeps this function's sharper reading of the pre-split enum.
+    return is_dynamically_exported(
+        entry, export_table_only_snapshot=snapshot.elf_only_mode
+    )
 
 
 def symbol_signature_statuses(

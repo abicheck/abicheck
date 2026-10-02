@@ -34,12 +34,10 @@ from abicheck.compatibility_evaluation_config import (
     EvidenceConfig,
     GateConfig,
     ImmutableIdentity,
-    ScopedGateSelection,
     SurfaceConfig,
-    ValueProvenance,
 )
 from abicheck.compile_context import CompileContext
-from abicheck.contract_relevance_types import ContractMode, SelectorLayer
+from abicheck.contract_relevance_types import ContractMode
 from abicheck.workflows.plan import AnalysisPlan, SidePlan
 from abicheck.workflows.resolved_execution_context import (
     EvidenceView,
@@ -155,269 +153,6 @@ class TestFromPlan:
         assert dict(ctx.compile_contexts) == compile_contexts
 
 
-class TestProvenanceFor:
-    def test_none_when_no_evaluation_config_resolved(self):
-        ctx = ResolvedExecutionContext(operation="compare")
-        assert ctx.provenance_for("contract.mode") is None
-
-    def test_none_when_field_has_no_recorded_provenance(self):
-        ctx = ResolvedExecutionContext(
-            operation="compare", evaluation_config=_evaluation_config()
-        )
-        assert ctx.provenance_for("contract.mode") is None
-
-    def test_delegates_to_the_evaluation_configs_own_provenance_map(self):
-        prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, source_kind="cli_flag")
-        cfg = _evaluation_config(provenance={"contract.mode": prov})
-        ctx = ResolvedExecutionContext(operation="compare", evaluation_config=cfg)
-        assert ctx.provenance_for("contract.mode") is prov
-
-
-class TestResolutionDigest:
-    def test_deterministic_for_equal_inputs(self):
-        plan = _plan()
-        contexts = {"old": CompileContext(gcc_path="/usr/bin/gcc")}
-        a = ResolvedExecutionContext.from_plan(
-            plan,
-            evaluation_config=_evaluation_config(),
-            compile_contexts=dict(contexts),
-        )
-        b = ResolvedExecutionContext.from_plan(
-            plan,
-            evaluation_config=_evaluation_config(),
-            compile_contexts=dict(contexts),
-        )
-        assert a.resolution_digest() == b.resolution_digest()
-
-    def test_changes_when_requested_depth_changes(self):
-        cfg = _evaluation_config()
-        a = ResolvedExecutionContext(
-            operation="compare",
-            evidence=EvidenceView.for_request("headers"),
-            evaluation_config=cfg,
-        )
-        b = ResolvedExecutionContext(
-            operation="compare",
-            evidence=EvidenceView.for_request("source"),
-            evaluation_config=cfg,
-        )
-        assert a.resolution_digest() != b.resolution_digest()
-
-    def test_distinguishes_an_empty_string_requested_depth_from_none(self):
-        """Codex review, PR #1027, sixth round: neither `EvidenceView` nor
-        `AnalysisPlan` rejects an empty-string depth, so
-        `requested_depth=""` is a real, distinct, constructible state from
-        `requested_depth=None` -- a bare `or ""` fallback previously
-        collapsed both onto the identical digest input."""
-        cfg = _evaluation_config()
-        empty_string = ResolvedExecutionContext(
-            operation="compare",
-            evidence=EvidenceView.for_request(""),
-            evaluation_config=cfg,
-        )
-        none = ResolvedExecutionContext(
-            operation="compare",
-            evidence=EvidenceView.for_request(None),
-            evaluation_config=cfg,
-        )
-        assert empty_string.evidence.requested_depth == ""
-        assert none.evidence.requested_depth is None
-        assert empty_string.resolution_digest() != none.resolution_digest()
-
-    def test_scoped_gate_targets_order_does_not_affect_the_digest(self):
-        """Codex review, PR #1027, seventh round: `ScopedGateSelection`'s
-        own docstring says its `targets` order is preserved in the
-        *stored* object but must be sorted by a digest consumer (the same
-        way `effective_config_digest._gate_scope_str()` already does) --
-        two runs selecting the same `--used-by` apps in a different
-        argument order must hash identically."""
-        cfg_ab = _evaluation_config(
-            gate=GateConfig(
-                scope=ScopedGateSelection(kind="used_by", targets=("app_a", "app_b"))
-            )
-        )
-        cfg_ba = _evaluation_config(
-            gate=GateConfig(
-                scope=ScopedGateSelection(kind="used_by", targets=("app_b", "app_a"))
-            )
-        )
-        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ab)
-        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ba)
-        assert a.resolution_digest() == b.resolution_digest()
-
-    def test_scoped_gate_targets_content_difference_still_changes_the_digest(self):
-        cfg_with = _evaluation_config(
-            gate=GateConfig(
-                scope=ScopedGateSelection(kind="used_by", targets=("app_a",))
-            )
-        )
-        cfg_without = _evaluation_config(gate=GateConfig(scope=None))
-        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_with)
-        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_without)
-        assert a.resolution_digest() != b.resolution_digest()
-
-    def test_unaffected_by_effective_depth_alone(self):
-        """`resolution_digest()` fingerprints the resolved *input*
-        (`evidence.requested_depth`), never the post-execution
-        `effective_depth`/`depth_satisfied` -- those are outcomes, not
-        inputs (see module docstring)."""
-        cfg = _evaluation_config()
-        a = ResolvedExecutionContext(
-            operation="compare",
-            evidence=EvidenceView(requested_depth="headers", effective_depth="headers"),
-            evaluation_config=cfg,
-        )
-        b = ResolvedExecutionContext(
-            operation="compare",
-            evidence=EvidenceView(requested_depth="headers", effective_depth="binary"),
-            evaluation_config=cfg,
-        )
-        assert a.resolution_digest() == b.resolution_digest()
-
-    def test_changes_when_evaluation_config_changes(self):
-        a = ResolvedExecutionContext(
-            operation="compare", evaluation_config=_evaluation_config()
-        )
-        b = ResolvedExecutionContext(
-            operation="compare",
-            evaluation_config=_evaluation_config(
-                contract=ContractConfig(mode=ContractMode.EXPORTS)
-            ),
-        )
-        assert a.resolution_digest() != b.resolution_digest()
-
-    def test_changes_when_a_compile_context_changes(self):
-        a = ResolvedExecutionContext(
-            operation="dump",
-            compile_contexts={"old": CompileContext(gcc_path="/usr/bin/gcc-12")},
-        )
-        b = ResolvedExecutionContext(
-            operation="dump",
-            compile_contexts={"old": CompileContext(gcc_path="/usr/bin/gcc-13")},
-        )
-        assert a.resolution_digest() != b.resolution_digest()
-
-    def test_independent_of_compile_contexts_mapping_iteration_order(self):
-        old_ctx = CompileContext(gcc_path="/usr/bin/gcc")
-        new_ctx = CompileContext(gcc_path="/usr/bin/g++")
-        a = ResolvedExecutionContext(
-            operation="compare", compile_contexts={"old": old_ctx, "new": new_ctx}
-        )
-        b = ResolvedExecutionContext(
-            operation="compare", compile_contexts={"new": new_ctx, "old": old_ctx}
-        )
-        assert a.resolution_digest() == b.resolution_digest()
-
-    def test_independent_of_provenance_content_entirely(self):
-        """Codex review, PR #1027, third round: `resolution_digest()`
-        deliberately excludes `CompatibilityEvaluationConfig.provenance`
-        altogether, not merely its insertion order -- the CLI and the typed
-        Python API resolving the identical effective input legitimately
-        produce different provenance (`SelectorLayer.EXPLICIT_CLI` vs.
-        `API_REQUEST`, a different flag vs. field spelling in
-        `source_kind`), and `cross_front_end_differences()` already treats
-        that as no divergence at all. Two configs differing *only* in
-        provenance -- one populated, one empty -- must hash identically."""
-        prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, source_kind="cli_flag")
-        cfg_with_provenance = _evaluation_config(
-            provenance={"contract.mode": prov, "gate.exit_code_scheme": prov}
-        )
-        cfg_without_provenance = _evaluation_config(provenance={})
-        assert cfg_with_provenance != cfg_without_provenance  # sanity: genuinely differ
-        a = ResolvedExecutionContext(
-            operation="compare", evaluation_config=cfg_with_provenance
-        )
-        b = ResolvedExecutionContext(
-            operation="compare", evaluation_config=cfg_without_provenance
-        )
-        assert a.resolution_digest() == b.resolution_digest()
-
-    def test_independent_of_policy_overrides_mapping_insertion_order(self):
-        """Same gap, the other `Mapping`-typed field
-        (`CompatibilityPolicyConfig.overrides`)."""
-        from abicheck.change_registry_types import Verdict
-
-        overrides_ab = {
-            "func_removed": Verdict.BREAKING,
-            "func_added": Verdict.COMPATIBLE,
-        }
-        overrides_ba = {
-            "func_added": Verdict.COMPATIBLE,
-            "func_removed": Verdict.BREAKING,
-        }
-        cfg_ab = _evaluation_config(
-            policy=CompatibilityPolicyConfig(base=_identity(), overrides=overrides_ab)
-        )
-        cfg_ba = _evaluation_config(
-            policy=CompatibilityPolicyConfig(base=_identity(), overrides=overrides_ba)
-        )
-        assert cfg_ab == cfg_ba
-        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ab)
-        b = ResolvedExecutionContext(operation="compare", evaluation_config=cfg_ba)
-        assert a.resolution_digest() == b.resolution_digest()
-
-    def test_compile_context_labels_are_encoded_injectively(self):
-        """Codex review, PR #1027, second round: a hand-rolled
-        ``"\\x1f".join(f"{label}={value!r}" for ...)`` encoding is not
-        injective when *label* is caller-supplied and unrestricted -- a
-        crafted single-entry mapping whose one label itself contains the
-        join delimiter and an ``=``-joined encoding of a real two-entry
-        mapping's first part can reproduce that mapping's own joined
-        string byte-for-byte. Confirms the two distinct mappings this
-        exact construction identifies no longer collide."""
-        from abicheck.workflows.resolved_execution_context import _canonical_repr
-
-        c1 = CompileContext(gcc_path="/usr/bin/gcc")
-        c2 = CompileContext(gcc_path="/usr/bin/g++")
-        two_entries = ResolvedExecutionContext(
-            operation="compare", compile_contexts={"a": c1, "b": c2}
-        )
-        crafted_label = "a=" + _canonical_repr(c1) + "\x1fb"
-        one_entry = ResolvedExecutionContext(
-            operation="compare", compile_contexts={crafted_label: c2}
-        )
-        assert two_entries.resolution_digest() != one_entry.resolution_digest()
-
-    def test_still_changes_when_a_mappings_content_actually_differs(self):
-        """The order-independence fix must not collapse a real difference --
-        only equal mappings should hash equal. Uses `policy.overrides` (a
-        resolved *value*, unlike `provenance`, which the digest now
-        deliberately excludes -- see
-        `test_independent_of_provenance_content_entirely`)."""
-        from abicheck.change_registry_types import Verdict
-
-        cfg_with_override = _evaluation_config(
-            policy=CompatibilityPolicyConfig(
-                base=_identity(), overrides={"func_removed": Verdict.BREAKING}
-            )
-        )
-        cfg_without_override = _evaluation_config(
-            policy=CompatibilityPolicyConfig(base=_identity(), overrides={})
-        )
-        a = ResolvedExecutionContext(
-            operation="compare", evaluation_config=cfg_with_override
-        )
-        b = ResolvedExecutionContext(
-            operation="compare", evaluation_config=cfg_without_override
-        )
-        assert a.resolution_digest() != b.resolution_digest()
-
-    def test_does_not_collide_a_shared_config_across_different_operations(self):
-        """Not a `CompatibilityEvaluationConfig`-only fingerprint -- the
-        composed object's other fields (here, `operation`) must genuinely
-        participate, or two different runs sharing a resolved config would
-        be indistinguishable."""
-        cfg = _evaluation_config()
-        a = ResolvedExecutionContext(operation="compare", evaluation_config=cfg)
-        b = ResolvedExecutionContext(operation="scan", evaluation_config=cfg)
-        assert a.resolution_digest() != b.resolution_digest()
-
-    def test_is_a_sha256_prefixed_string_like_the_effective_config_digest(self):
-        digest = ResolvedExecutionContext(operation="compare").resolution_digest()
-        assert digest.startswith("sha256:")
-        assert len(digest) == len("sha256:") + 64
-
-
 class TestEvidenceView:
     def test_bare_construction_defaults(self):
         evidence = EvidenceView()
@@ -529,17 +264,16 @@ class TestResolvedExecutionContextEvidenceIntegration:
         does not normalize it -- ``service_compare_pipeline.classify_
         compare_pair`` only normalizes ``DiffResult.requested_depth`` later,
         after this context already exists. Without normalizing here too,
-        the mixed-case value both fails to appear in its own
-        ``available_depths`` (the ladder is lower-case) and hashes
-        differently from an equivalent lower-case request in
-        ``resolution_digest()`` (Codex review, PR #1031)."""
+        the mixed-case value fails to appear in its own
+        ``available_depths`` (the ladder is lower-case) and differs from an
+        equivalent lower-case request (Codex review, PR #1031)."""
         plan = _plan(requested_depth="HEADERS")
         ctx = ResolvedExecutionContext.from_plan(plan)
         assert ctx.evidence.requested_depth == "headers"
         assert ctx.evidence.requested_depth in ctx.evidence.available_depths
 
         lower_ctx = ResolvedExecutionContext.from_plan(_plan(requested_depth="headers"))
-        assert ctx.resolution_digest() == lower_ctx.resolution_digest()
+        assert ctx.evidence == lower_ctx.evidence
 
     def test_from_plan_normalized_depth_is_the_from_assurance_fallback(self):
         """The lower-cased plan depth also feeds ``EvidenceView.from_assurance``'s
@@ -629,15 +363,3 @@ class TestResolvedExecutionContextEvidenceIntegration:
         updated = original.with_assurance(not_comparable)
         assert updated.evidence.requested_depth == "build"
         assert updated.evidence.effective_depth is None
-
-    def test_resolution_digest_unaffected_by_a_not_comparable_assurance(self):
-        """The regression this whole fix guards against: attaching a
-        `not_comparable` assurance must not change the resolved-input
-        digest, since the requested depth it carries is unchanged."""
-        from abicheck.analysis_assurance import AnalysisAssurance
-
-        plan = _plan(requested_depth="headers")
-        cfg = _evaluation_config()
-        before = ResolvedExecutionContext.from_plan(plan, evaluation_config=cfg)
-        after = before.with_assurance(AnalysisAssurance(status="not_comparable"))
-        assert before.resolution_digest() == after.resolution_digest()

@@ -31,25 +31,31 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 
 from ..demangle import demangle, demangle_batch
-from ..model import Function, Variable, Visibility
+from ..model import Function, Variable
 from ..model.surface_facts import is_export_table_only_record
 
 
-def elf_only_demangled_name(mangled: str, visibility: Visibility) -> str | None:
+def elf_only_demangled_name(mangled: str, decl: Function | Variable) -> str | None:
     """:data:`Change.demangled_symbol` for an export-table-only declaration.
 
     ``itanium_export_function``/``itanium_export_variable``
     (``extract/export_symbol_identity.py``) set ``Function.name``/
-    ``Variable.name`` to the raw mangled spelling for a ``Visibility.
-    ELF_ONLY`` entity -- there is no header AST to source a pretty name
-    from, unlike every other visibility. So ``description``/``old_value``
-    on a finding about one of these embeds the raw mangled name, not a
-    human-readable one (Codex review, item 8). Returns ``None`` for every
-    other visibility (already demangled at parse time) and whenever
+    ``Variable.name`` to the raw mangled spelling for a record built from the
+    export table alone -- there is no header AST to source a pretty name
+    from. So ``description``/``old_value`` on a finding about one of these
+    embeds the raw mangled name, not a human-readable one (Codex review, item
+    8). Returns ``None`` for every other declaration (already demangled at
+    parse time -- including a header-parsed one the backends mark
+    ``ELF_ONLY`` because its symbol is only in ``.symtab``) and whenever
     :func:`demangle.demangle` itself returns ``None``/the unchanged input
     (not a valid mangled name, or no demangler available).
+
+    Selected by :func:`~abicheck.model.surface_facts.
+    is_export_table_only_record`, the same predicate
+    :func:`prewarm_elf_only_demangling` batches by, so every name this
+    demangles was warmed.
     """
-    if visibility != Visibility.ELF_ONLY:
+    if not is_export_table_only_record(decl):
         return None
     demangled = demangle(mangled)
     return demangled if demangled and demangled != mangled else None

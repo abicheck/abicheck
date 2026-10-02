@@ -120,16 +120,6 @@ class DebugTypeJoin:
     def header(self, node_id: str) -> JoinRecord:
         return self.join.left[node_id]
 
-    def debug_names_joined(self, *states: JoinState) -> frozenset[str]:
-        """Debug-type names with at least one occurrence in one of *states*
-        (default: matched or ambiguous -- the ones that joined a header type)."""
-        wanted = states or (JoinState.MATCHED, JoinState.AMBIGUOUS)
-        return frozenset(
-            self.occurrences[r.subject].name
-            for r in self.join.right.values()
-            if r.state in wanted
-        )
-
 
 def _enum_layout_verdict(en: EnumType, info: EnumInfo) -> bool | None:
     compared = False

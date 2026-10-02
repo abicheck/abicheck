@@ -455,11 +455,11 @@ def test_make_compile_recipe_without_source_skipped():
 def test_collect_evidence_make_dry_run_cli(tmp_path):
     # `collect --from make=<transcript>` is gone (ADR-043 CLI reset); this
     # drives the exact same surviving engine call the deleted command used:
-    # abicheck.cli_buildsource_helpers._run_adapters folds the Make adapter's
+    # tests._build_source_collect._run_adapters folds the Make adapter's
     # output into a BuildEvidence + records the extractor row.
     from abicheck.buildsource.build_evidence import BuildEvidence
     from abicheck.buildsource.model import ExtractorRecord
-    from abicheck.cli_buildsource_helpers import _run_adapters
+    from tests._build_source_collect import _run_adapters
 
     dr = tmp_path / "dry.txt"
     dr.write_text(DRY_RUN)

@@ -913,22 +913,6 @@ class TestInternalLeakReachability:
         paths = _bfs_collect_paths(queue, {}, {}, {"detail"})
         assert "ns::detail::X" in paths
 
-    def test_record_field_value_embedded_helper(self) -> None:
-        # Lines 510-513: field found by-value (True), indirect (False), missing (None).
-        from abicheck.internal_leak import _record_field_is_value_embedded
-
-        rec = _record(
-            "C",
-            "class",
-            fields=[
-                TypeField(name="byval", type="ns::detail::Impl"),
-                TypeField(name="ptr", type="ns::detail::Impl*"),
-            ],
-        )
-        assert _record_field_is_value_embedded(rec, "byval") is True
-        assert _record_field_is_value_embedded(rec, "ptr") is False
-        assert _record_field_is_value_embedded(rec, "missing") is None
-
     def test_path_value_embedding_from_markers(self) -> None:
         # Per-hop model: a field edge with no `indirect:` marker is by-value, so
         # the path is value-propagating; an `indirect:` marker flips it.

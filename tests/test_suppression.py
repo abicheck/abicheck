@@ -425,7 +425,7 @@ def test_member_name_loaded_from_yaml(tmp_path: Path) -> None:
     assert sl.is_suppressed(make_change(ChangeKind.TYPEDEF_REMOVED, "value_type"))
 
 
-def test_rules_by_label_and_repr() -> None:
+def test_labels_and_repr() -> None:
     sl = SuppressionList(
         [
             Suppression(symbol="a", label="x"),
@@ -433,8 +433,8 @@ def test_rules_by_label_and_repr() -> None:
             Suppression(symbol="c", label="y"),
         ]
     )
-    assert len(sl.rules_by_label("x")) == 2
-    assert len(sl.rules_by_label("y")) == 1
+    assert len([r for r in sl._suppressions if r.label == "x"]) == 2
+    assert len([r for r in sl._suppressions if r.label == "y"]) == 1
     assert "SuppressionList(3 rules)" in repr(sl)
 
 

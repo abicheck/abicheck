@@ -50,12 +50,14 @@ import re
 import subprocess
 from typing import Any
 
+from .deadline import run_bounded
+
 _log = logging.getLogger(__name__)
 
 # Whether we have already warned about demangling being unavailable.
 _warned_no_demangler = False
 
-# Set once a subprocess.run() call proves the `c++filt` binary itself isn't
+# Set once a run_bounded() call proves the `c++filt` binary itself isn't
 # installed (FileNotFoundError). Unlike a timeout or a non-zero exit -- both
 # of which the existing FAIL-caching comment below deliberately treats as
 # possibly transient/input-specific and worth retrying -- a missing binary
@@ -207,14 +209,14 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
     if not _cppfilt_binary_confirmed_missing:
         for cmd in _cppfilt_single_commands(canonical):
             try:
-                result = subprocess.run(
+                result = run_bounded(
                     cmd,
                     capture_output=True,
                     text=True,
                     timeout=5,
                 )
                 if result.returncode == 0:
-                    out = result.stdout.strip()
+                    out = str(result.stdout).strip()
                     # Compare against the canonical input, not the original
                     # (possibly Mach-O-prefixed) symbol -- c++filt echoes back
                     # exactly what it was fed on failure, so for a malformed
@@ -398,7 +400,7 @@ def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
             success_set = set()
             canonical_inputs = [_canonical_mangled(s) for s in unresolved]
             try:
-                proc = subprocess.run(
+                proc = run_bounded(
                     cmd,
                     input="\n".join(canonical_inputs),
                     capture_output=True,
@@ -589,7 +591,7 @@ def prewarm_demangle_batch(
     batched call here makes every later per-row call a pure cache hit.
 
     Used only by report-rendering callers (``html_report.py``/
-    ``appcompat_html.py``), so it warms with ``accept_macho_prefix=True`` --
+    ``appcompat_html.py`` (removed)), so it warms with ``accept_macho_prefix=True`` --
     matching :func:`demangle_text`'s own default; see
     :func:`_is_itanium_mangled`'s docstring for why that default doesn't
     extend to :func:`demangle`/:func:`demangle_batch` themselves.

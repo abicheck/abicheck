@@ -1,0 +1,97 @@
+# Real-binary use-case flows for scripts/usecase_paths.py.
+#
+# Each flow is one abicheck command line a user would actually run, tagged
+# with the use case (an id in docs/contribute/usecase-registry.yaml) it
+# exercises. `record --flows` runs every flow against every listed catalog
+# case that has the inputs it needs, under coverage, and records which
+# functions that run executed. Paths are expanded from:
+#
+#   {v1} {v2}     libv1/libv2 built from catalog/cases/<case>/
+#   {h1} {h2}     the case's v1.h / v2.h, or the header in old/ / new/
+#                 (a flow needing them is skipped for a case without one)
+#   {app}         the case's built consumer app (app_v1) (skipped when absent)
+#   {d1} {d2}     ABICC XML descriptors naming {v1}/{h1} and {v2}/{h2},
+#                 written into {out} (needs the headers)
+#   {out}         a per-run scratch directory
+#
+# `exit_codes` lists the exit codes that count as a completed run; anything
+# else is reported as a failed flow, never silently dropped.
+schema_version: 1
+
+# compare: 0/2/4 (+1 severity-aware); compat: 0/1/2.
+exit_codes: [0, 1, 2, 4]
+
+cases:
+  - case01_symbol_removal
+  - case02_param_type_change
+  - case03_compat_addition
+  - case04_no_change
+  - case06_visibility
+  - case07_struct_layout
+  - case08_enum_value_change
+  - case09_cpp_vtable
+  - case13_symbol_versioning
+  - case101_inline_namespace_version_bumped
+  - case14_cpp_class_size
+  - case19_enum_member_removed
+
+flows:
+  - id: compare-headers
+    use_case: UC-WF-compare
+    needs: [h1, h2]
+    argv: [compare, "{v1}", "{v2}", --header, "old={h1}", --header, "new={h2}",
+           -o, "json={out}/report.json", -o, "markdown={out}/report.md"]
+
+  - id: compare-binary-only
+    use_case: UC-PLAT-linux-elf
+    argv: [compare, "{v1}", "{v2}"]
+
+  - id: compare-clang-frontend
+    use_case: UC-ARCH-cpp-library
+    needs: [h1, h2]
+    env: {ABICHECK_AST_FRONTEND: clang}
+    argv: [compare, "{v1}", "{v2}", --header, "old={h1}", --header, "new={h2}",
+           --severity-preset, strict]
+
+  - id: report-sarif
+    use_case: UC-REP-sarif
+    argv: [compare, "{v1}", "{v2}", -o, "sarif={out}/report.sarif"]
+
+  - id: report-junit
+    use_case: UC-REP-junit
+    argv: [compare, "{v1}", "{v2}", -o, "junit={out}/report.xml"]
+
+  - id: report-html
+    use_case: UC-REP-markdown-html
+    argv: [compare, "{v1}", "{v2}", -o, "html={out}/report.html"]
+
+  - id: dump-then-compare
+    use_case: UC-WF-baseline
+    needs: [h1, h2]
+    steps:
+      - [dump, "{v1}", --header, "{h1}", -o, "{out}/v1.json"]
+      - [dump, "{v2}", --header, "{h2}", -o, "{out}/v2.json"]
+      - [compare, "{out}/v1.json", "{out}/v2.json", --contract, public,
+         -o, "review={out}/review.txt"]
+
+  - id: contract-exports
+    use_case: UC-WF-compare
+    argv: [compare, "{v1}", "{v2}", --contract, exports, --policy, sdk_vendor]
+
+  - id: used-by
+    use_case: UC-WF-appcompat
+    needs: [app]
+    argv: [compare, "{v1}", "{v2}", --used-by, "{app}"]
+
+  - id: deps-tree
+    use_case: UC-WF-stack-deps
+    argv: [deps, tree, "{v2}"]
+
+  - id: compat-abicc
+    use_case: UC-WF-abicc-compat
+    needs: [h1, h2]
+    steps:
+      - [compat, dump, -lib, libcase, -dump, "{d1}", -dump-path, "{out}/v1.json"]
+      - [compat, dump, -lib, libcase, -dump, "{d2}", -dump-path, "{out}/v2.json"]
+      - [compat, -lib, libcase, -old, "{out}/v1.json", -new, "{out}/v2.json",
+         -report-path, "{out}/compat.html"]

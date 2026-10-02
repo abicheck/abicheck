@@ -57,7 +57,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any, TypeVar
 
 _T = TypeVar("_T")
 
@@ -175,18 +175,6 @@ def build_evidence_collected_live(*, precaptured: bool, collected_inline: bool) 
     prevent.
     """
     return collected_inline and not precaptured
-
-
-class LiveSourceEvidence(Protocol):
-    """A snapshot-shaped object, as far as the licence is concerned.
-
-    Structural on purpose: this module is a dependency-free leaf, and a real
-    ``AbiSnapshot`` import would point it at ``model`` for three attributes.
-    """
-
-    live_source_evidence: bool
-    from_headers: bool
-    from_headers_inferred: bool
 
 
 def extraction_read_source_inputs(snapshot: Any) -> bool:

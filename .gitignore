@@ -29,6 +29,7 @@ site/
 .gemini/
 .claude/skills/check-abi-compatibility/
 .claude/skills/explain-abi-change/
+.claude/skills/set-up-abi-compatibility-ci/
 /results/
 .pixi/
 

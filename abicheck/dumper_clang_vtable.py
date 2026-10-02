@@ -187,8 +187,9 @@ follow-up, not a drive-by extension of this pass.
 
 from __future__ import annotations
 
-import re
 from typing import Any
+
+from .model.signature_normalization import canonicalize_function_signature_param_type
 
 
 def is_record_definition(node: dict[str, Any]) -> bool:
@@ -243,84 +244,6 @@ _SlotKey = object
 _Signature = tuple[str, tuple[str, ...], bool, str]
 
 
-#: A ``*`` immediately followed by a qualifier word, with NO space in
-#: between -- clang's actual spelling for the FIRST trailing qualifier on a
-#: pointer (confirmed against real clang: ``"int *const"``,
-#: ``"int *volatile"``, ``"int *__restrict"``, never ``"int * const"``). A
-#: SECOND stacked qualifier word IS space-separated from the first
-#: (``"int *const volatile"``, ``"int *const __restrict"``) -- this
-#: asymmetry is why a naive fixed-space trailing-suffix check silently
-#: never matched the single-qualifier case at all (Codex review, fresh
-#: evidence -- a real, deeper bug in an earlier version of this function
-#: that only happened to pass its own tests because they never exercised a
-#: genuine ``"T* const"`` positive-match case end to end). Rather than
-#: special-casing "first word glued, rest space-separated," this pattern
-#: normalizes the asymmetry away up front: inserting a space after every
-#: ``*`` immediately followed by a letter/underscore makes every trailing
-#: qualifier word uniformly space-separated, so one plain trailing-word
-#: strip loop below handles every stacking combination correctly.
-_POINTER_QUALIFIER_GLUE = re.compile(r"\*(?=[A-Za-z_])")
-
-
-def _normalize_param_type(qualtype: str) -> str:
-    """Strip a *top-level* cv/``__restrict`` qualifier from a parameter's
-    spelling, the same normalization the Itanium mangler itself performs on
-    a by-value parameter (confirmed empirically: ``void f(const int)`` and
-    ``void f(int)`` both mangle to the identical ``...fEi`` tail;
-    ``void a(int* const p)``, ``void d(int* volatile p)``, and
-    ``void e(int* __restrict p)`` all mangle without any qualifier marker
-    on the pointer). A *pointee*-level qualifier (``const int *``,
-    ``const int &``) is never top-level and must NOT be stripped --
-    confirmed it DOES survive mangling (``...bEPKi``).
-
-    Two shapes, both confirmed against real clang spellings, after
-    ``_POINTER_QUALIFIER_GLUE`` normalizes away clang's glued-vs-separated
-    inconsistency for the first vs. subsequent trailing qualifier word:
-
-    - a LEADING ``"const "``/``"volatile "`` word applies to a plain
-      (non-pointer, non-reference) value type -- stripped, looping to
-      handle both stacked together (``"const volatile int"``);
-    - a TRAILING ``" const"``/``" volatile"``/``" __restrict"`` word applies
-      to the pointer itself (``"int * const"`` after glue-normalization,
-      ``"int * const __restrict"``) -- looped so a stack of these strips
-      down to the bare pointer, checked by exact suffix so a *nested*
-      one-level-in pointer-to-const-pointer (``"int *const *"``, mangles to
-      ``PKPi`` -- the K survives) is never touched, since that string
-      doesn't end with any of these words at all (the glue regex only
-      matches a ``*`` immediately followed by a letter, not one followed by
-      another ``*``).
-
-    A base declaring ``__restrict`` accepts a derived override that drops
-    it (``__restrict`` is a hint, not part of the type for
-    overload/override purposes), so it's stripped the same as `const`/
-    `volatile` rather than kept as part of the identity.
-
-    Deliberately conservative beyond these two shapes: a type this doesn't
-    fully canonicalize just stays as its own (still internally consistent)
-    key rather than risking a wrong strip -- the goal is base and derived
-    agreeing on a matching key for a genuinely equal signature, not a
-    complete canonical-type printer.
-    """
-    s = _POINTER_QUALIFIER_GLUE.sub("* ", qualtype.strip())
-    changed = True
-    while changed:
-        changed = False
-        for word in (" const", " volatile", " __restrict"):
-            if s.endswith(word):
-                s = s[: -len(word)].rstrip()
-                changed = True
-                break
-    if "*" not in s and "&" not in s:
-        changed = True
-        while changed:
-            changed = False
-            for prefix in ("const ", "volatile "):
-                if s.startswith(prefix):
-                    s = s[len(prefix) :]
-                    changed = True
-    return s
-
-
 def _param_type_spelling(child: dict[str, Any]) -> str:
     """A ``ParmVarDecl``'s type, preferring clang's desugared spelling.
 
@@ -367,7 +290,7 @@ def _method_signature_key(node: dict[str, Any]) -> _Signature | None:
     if not name:
         return None
     params = tuple(
-        _normalize_param_type(_param_type_spelling(child))
+        canonicalize_function_signature_param_type(_param_type_spelling(child))
         for child in node.get("inner", []) or []
         if isinstance(child, dict) and child.get("kind") == "ParmVarDecl"
     )

@@ -1222,31 +1222,6 @@ def compute_severity_summary(
     return _rmd.SeveritySummary(rows=tuple(rows))
 
 
-def _build_severity_summary_md(
-    changes: list[Change],
-    severity_config: SeverityConfig,
-    *,
-    all_changes: list[Change] | None = None,
-    policy: str | None = None,
-    kind_sets: KindSets | None = None,
-    policy_file: object | None = None,
-    scoped_counts: dict[str, int] | None = None,
-    scoped_blocking_categories: tuple[str, ...] | None = None,
-) -> list[str]:
-    return _rmd.render_severity_summary(
-        compute_severity_summary(
-            changes,
-            severity_config,
-            all_changes=all_changes,
-            policy=policy,
-            kind_sets=kind_sets,
-            policy_file=policy_file,
-            scoped_counts=scoped_counts,
-            scoped_blocking_categories=scoped_blocking_categories,
-        )
-    )
-
-
 def _footer_lines() -> list[str]:
     return _rmd.render_footer()
 

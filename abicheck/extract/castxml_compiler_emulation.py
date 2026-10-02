@@ -152,6 +152,45 @@ def _msvc_argument_kept(token: str) -> bool:
     )
 
 
+#: MSVC ``/std:`` values with no identical Clang ``-std=`` spelling.
+_MSVC_TO_CLANG_STD = {"c++latest": "c++2c", "clatest": "c2x"}
+_CLANG_TO_MSVC_STD = {v: k for k, v in _MSVC_TO_CLANG_STD.items()}
+
+
+def _is_msvc_std(token: str) -> bool:
+    return token.lower().startswith(("/std:", "-std:"))
+
+
+def castxml_parser_arguments(arguments: Sequence[str]) -> list[str]:
+    """*arguments* as castxml's own parser must receive them.
+
+    castxml's internal Clang driver is GNU-style in every emulation mode, so
+    an MSVC ``/std:c++17`` on its command line is read as an input *file*
+    ("no such file or directory: '/std:c++17'") and the whole parse fails.
+    The parser gets the equivalent ``-std=``; the MSVC spelling belongs only
+    inside the emulated ``cl`` group, which :func:`emulation_arguments`
+    derives back from it. The one place both the L2 header dump and the L4
+    source replay translate this, so they cannot disagree.
+    """
+    out: list[str] = []
+    for token in arguments:
+        if _is_msvc_std(token):
+            value = token.split(":", 1)[1].lower()
+            out.append("-std=" + _MSVC_TO_CLANG_STD.get(value, value))
+        else:
+            out.append(token)
+    return out
+
+
+def _msvc_std_for_emulation(token: str) -> str | None:
+    """``-std=X`` as the ``/std:`` an emulated ``cl`` understands, or None."""
+    value = token.split("=", 1)[1].lower()
+    if value.startswith("gnu"):
+        value = "c" + value[3:]
+    value = _CLANG_TO_MSVC_STD.get(value, value)
+    return f"/std:{value}" if value.startswith("c") else None
+
+
 def emulation_arguments(
     arguments: Sequence[str], *, cc_bin: str, cc_id: str
 ) -> list[str]:
@@ -175,6 +214,11 @@ def emulation_arguments(
             if _value_flag_kept(cc_id):
                 kept += [token, tokens[index + 1]]
             index += 2
+        elif cc_id == "msvc" and token.startswith("-std="):
+            translated = _msvc_std_for_emulation(token)
+            if translated is not None:
+                kept.append(translated)
+            index += 1
         else:
             if _single_argument_kept(token, cc_id=cc_id, clang_family=clang_family):
                 kept.append(token)

@@ -29,7 +29,10 @@ from ._compiler_options import (
 from .dumper_ast_config_cpp20 import _preprocessed_header_content
 from .dumper_clang import _needs_sycl_host_only
 from .extract.cache_header_scan import iter_cache_header_files
-from .extract.castxml_compiler_emulation import emulated_compiler_command
+from .extract.castxml_compiler_emulation import (
+    castxml_parser_arguments,
+    emulated_compiler_command,
+)
 from .header_utils import drop_include_tokens_duplicating_paths
 
 #: Bumped once (Codex review, fresh evidence, P2): a pre-existing on-disk
@@ -491,6 +494,7 @@ def _build_castxml_command(
         else:
             cmd += ["-x", "c++", "-std=gnu++20"]
 
+    cmd = castxml_parser_arguments(cmd)
     return [
         castxml_bin,
         "--castxml-output=1",

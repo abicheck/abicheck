@@ -26,7 +26,7 @@ from pathlib import Path
 from abicheck.buildsource.adapters import BazelAdapter
 from abicheck.buildsource.build_evidence import BuildEvidence, TargetKind
 from abicheck.buildsource.model import ExtractorRecord
-from abicheck.cli_buildsource_helpers import _run_adapters
+from tests._build_source_collect import _run_adapters
 
 # A configured-target graph: a cc_library with public headers + a deps edge,
 # and a cc_binary with no attributes (exercises the minimal-rule path).
@@ -891,7 +891,7 @@ def test_bazel_live_query_nonzero_exit_diagnostic(monkeypatch, tmp_path):
 #
 # `collect` (and its `--from bazel-cquery=/bazel-aquery=` adapter specs) was
 # deleted in the ADR-043 CLI reset, but the engine it drove is unchanged:
-# `cli_buildsource_helpers._run_adapters` is the exact function the deleted
+# `tests._build_source_collect._run_adapters` is the exact function the deleted
 # Click command called, so these exercise it directly instead of going
 # through a CLI that no longer exists.
 

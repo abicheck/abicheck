@@ -28,7 +28,6 @@ import pytest
 
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.evidence_depth import (
-    depth_label_for,
     gated_source_label,
     reported_depth_label,
 )
@@ -91,7 +90,6 @@ class TestReportedDepthNeverOutrunsTheGate:
     def test_a_header_only_graph_is_not_source_depth(self, tmp_path) -> None:
         snap = _snapshot(from_headers=True)
         pack = _pack(tmp_path, graph=True)
-        assert depth_label_for(snap, pack) == "source"
         assert reported_depth_label(snap, pack) == "headers"
 
 

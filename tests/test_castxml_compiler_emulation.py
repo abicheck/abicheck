@@ -106,7 +106,12 @@ def test_clang_emulation_also_keeps_clang_only_spellings(arguments: list[str]) -
 
 @given(_arguments)
 def test_msvc_emulation_never_receives_gnu_flags(arguments: list[str]) -> None:
-    assert emulation_arguments(arguments, cc_bin="cl.exe", cc_id="msvc") == []
+    # The one GNU flag that reaches `cl` is the language standard, and only
+    # translated to its own `/std:` spelling (castxml's parser always gets
+    # `-std=`; see `castxml_parser_arguments`).
+    kept = emulation_arguments(arguments, cc_bin="cl.exe", cc_id="msvc")
+    assert all(token.startswith("/std:") for token in kept)
+    assert len(kept) <= sum(1 for a in arguments if a.startswith("-std="))
 
 
 @pytest.mark.parametrize(
@@ -436,3 +441,63 @@ def test_each_backend_schema_constant_salts_only_its_own_key(
     )
     assert _cache_key(**kwargs, backend=own) != before[own]
     assert _cache_key(**kwargs, backend=unchanged) == before[unchanged]
+
+
+# ── castxml's parser never sees an MSVC `/std:` (it reads it as a file) ──
+
+_MSVC_STDS = ("c++14", "c++17", "c++20", "c++latest", "c11", "c17")
+
+
+@pytest.mark.parametrize("value", _MSVC_STDS)
+@pytest.mark.parametrize("spelling", ["/std:", "-std:", "/STD:"])
+def test_parser_gets_gnu_std_and_cl_gets_its_own_back(
+    value: str, spelling: str
+) -> None:
+    from abicheck.extract.castxml_compiler_emulation import castxml_parser_arguments
+
+    parser = castxml_parser_arguments(["-x", "c++", spelling + value, "-DFOO"])
+    assert not any(t.lower().startswith(("/std:", "-std:")) for t in parser)
+    assert sum(t.startswith("-std=") for t in parser) == 1
+    # Round trip: what `cl` is emulated with names the same edition.
+    assert emulation_arguments(parser, cc_bin="cl.exe", cc_id="msvc") == [
+        f"/std:{value}"
+    ]
+
+
+@pytest.mark.parametrize("builder", ["l2", "l4"], ids=["header-dump", "source-replay"])
+def test_both_castxml_command_builders_put_no_msvc_std_on_the_parser(builder) -> None:
+    from pathlib import Path
+
+    if builder == "l2":
+        from abicheck.dumper_ast_config import _build_castxml_command
+
+        cmd = _build_castxml_command(
+            "cl.exe",
+            "msvc",
+            [],
+            Path("o.xml"),
+            Path("agg.hpp"),
+            gcc_option_tokens=("/std:c++17",),
+            force_cpp=True,
+        )
+    else:
+        from abicheck.buildsource.build_evidence import CompileUnit
+        from abicheck.buildsource.source_extractors.castxml import (
+            build_castxml_command,
+        )
+
+        cu = CompileUnit(
+            id="cu://a",
+            source="a.cpp",
+            language="CXX",
+            standard="c++17",
+            argv=["cl.exe", "/std:c++17", "/c", "a.cpp"],
+        )
+        cmd = build_castxml_command(
+            cu, Path("a.cpp"), Path("o.xml"), compiler_binary="cl.exe"
+        )
+    group_end = cmd.index(")") if "(" in cmd else cmd.index("--castxml-cc-msvc") + 1
+    parser = cmd[group_end + 1 :]
+    assert "-std=c++17" in parser
+    assert not any(t.lower().startswith(("/std:", "-std:")) for t in parser)
+    assert "/std:c++17" in cmd[:group_end]

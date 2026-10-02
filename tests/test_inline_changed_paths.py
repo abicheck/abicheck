@@ -568,7 +568,6 @@ def test_inline_graph_has_type_edges_when_clang_available(monkeypatch):
 def test_inline_graph_type_pass_marks_role_coverage_matrix(monkeypatch):
     # ADR-046 D3: a confirmed full type-graph pass earns the finer
     # per-(kind, role) extractor_passes keys alongside the family key.
-    from abicheck.buildsource.inline_graph_fold import role_pass_covered
     from abicheck.buildsource.type_graph import TypeEdge
 
     install_fake_l5(
@@ -592,14 +591,6 @@ def test_inline_graph_type_pass_marks_role_coverage_matrix(monkeypatch):
     assert graph.extractor_passes["type_graph:DECL_HAS_TYPE:return"] is True
     assert graph.extractor_passes["type_graph:DECL_HAS_TYPE:param"] is True
     assert graph.extractor_passes["type_graph:DECL_REFERENCES_DECL:ref"] is True
-    # role_pass_covered() reads the finer key directly...
-    assert role_pass_covered(graph, "type_graph", "DECL_HAS_TYPE", "param") is True
-    # ...and falls back to the family-level flag for a role this matrix
-    # doesn't track (e.g. a made-up role) or a made-up pass name.
-    assert (
-        role_pass_covered(graph, "type_graph", "DECL_HAS_TYPE", "made_up_role") is True
-    )
-    assert role_pass_covered(graph, "made_up_pass", "DECL_HAS_TYPE", "param") is False
 
 
 def test_inline_graph_no_type_edges_when_clang_absent(monkeypatch):

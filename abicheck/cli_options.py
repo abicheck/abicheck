@@ -26,7 +26,7 @@ import dataclasses
 import os
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar, overload
+from typing import TYPE_CHECKING, TypeVar, overload
 
 import click
 
@@ -44,7 +44,6 @@ from .frontends.cli.options.params import (
     SIDED_INCLUDE_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_STR_PARAM,
-    SidedChoiceParam,
 )
 from .model.macro_definition import (
     MacroDefinition,
@@ -70,27 +69,10 @@ F = TypeVar("F", bound=Callable[..., object])
 # the Tier-2 service, and the ABICC compat layer are untouched.
 
 
-def split_sided_paths(
-    pairs: Sequence[tuple[str, Path]],
-) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...]]:
-    """Split ``(side, path)`` pairs into ``(both, old_only, new_only)`` tuples.
-
-    Used by ``header`` / ``include`` (the "both-sides + per-side extra" model,
-    where the both bucket is applied to each side and ``old=``/``new=`` add
-    per-side overrides).
-    """
-    both: list[Path] = []
-    old_only: list[Path] = []
-    new_only: list[Path] = []
-    for side, path in pairs:
-        {"both": both, "old": old_only, "new": new_only}[side].append(path)
-    return tuple(both), tuple(old_only), tuple(new_only)
-
-
 def split_sided_include_paths(
     triples: Sequence[tuple[str, Path, str | None]],
 ) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...], dict[Path, str]]:
-    """Like :func:`split_sided_paths`, but for ``--include``'s own
+    """Like :func:`split_sided_paths` (removed), but for ``--include``'s own
     :class:`~abicheck.frontends.cli.options.params.SidedIncludePathParam` triples (ADR-050 D1):
     also collects each entry's optional label into one ``path -> label`` map
     spanning all three buckets.
@@ -819,167 +801,6 @@ def apply_compile_config_env_toggles(
 AST_FRONTENDS: tuple[str, ...] = ("auto", "castxml", "clang", "hybrid")
 
 
-def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]:
-    """L2 header-AST compile context — the cross-toolchain + frontend family.
-
-    A factory (``@compile_context_options()``) because ``--ast-frontend`` is
-    side-aware on ``compare`` and single-valued on ``dump``/``scan``: with
-    *sided_frontend*, it becomes a repeatable ``[old=|new=]FRONTEND`` option
-    (ADR-040 Lever 1's convention, the same one ``--header``/``--include``/
-    ``--version`` follow) and :func:`normalize_sided_options` splits it back
-    into the ``header_backend`` / ``old_header_backend`` /
-    ``new_header_backend`` triple the compare flow already threads. That
-    replaces the separate ``--old-ast-frontend``/``--new-ast-frontend`` pair,
-    which were a third and fourth spelling of one setting on the one command
-    that has two sides.
-
-    The single source of truth for the flags that tell the header frontend how to
-    parse the public headers: ``--ast-frontend`` (which frontend), the cross
-    compiler (``--compiler``/``--compiler-prefix``, plus the deprecated-but-still
-    -functional ``--compiler``/``--compiler-prefix`` aliases), pass-through compiler
-    flags (``--gcc-options``/``--compiler-option``, the latter superseding the
-    deprecated ``--compiler-option``), an alternate ``--sysroot``, and ``--nostdinc``.
-    Shared verbatim by ``dump``, ``scan``, **and** ``compare`` so the three never
-    drift (ADR-037 D3 parity; ADR-035 amendment — ``scan`` must be able to reach a
-    real L2). Decorators apply bottom-up, so the options are listed in reverse of
-    their displayed order. Dest names match the ``dumper.dump`` /
-    :class:`~abicheck.dry_run_estimate.CompileContext` kwargs exactly, except for the
-    ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
-    :func:`resolve_compile_context` maps onto the same ``gcc_*`` fields.
-    """
-
-    def _apply(func: F) -> F:
-        func = click.option(
-            "--frontend-context",
-            "frontend_context",
-            default="host",
-            show_default=True,
-            type=click.Choice(["host", "device"], case_sensitive=False),
-            help="Which AST context the L2 header frontend should target. "
-            "'device' selects the SYCL/DPC++ offload-device AST from a "
-            "DPC++-capable compiler (icx/icpx/dpcpp) invoked with -fsycl; it fails "
-            "loudly if the configured frontend cannot produce a device context. "
-            "Matches a manifest's own frontend_context field for the legacy, "
-            "non-manifest path.",
-        )(func)
-        func = click.option(
-            "--nostdinc/--no-nostdinc",
-            "nostdinc",
-            default=False,
-            help="Do not search the standard system include paths (suppresses the "
-            "castxml/clang system-include auto-detection too). Paired form so an "
-            "explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: "
-            "true` for a one-off run (CLI > config).",
-        )(func)
-        func = click.option(
-            "--sysroot",
-            "sysroot",
-            type=click.Path(path_type=Path),
-            default=None,
-            help="Alternative system root directory for header resolution.",
-        )(func)
-        # ── --compiler/--compiler-prefix/--compiler-option ──────────────────────
-        # The one spelling for the cross-toolchain family. The former
-        # --gcc-path/--gcc-prefix/--gcc-option names were always misleading (each
-        # accepts a Clang cross-compiler binary just as well) and are removed
-        # outright rather than kept as aliases -- carrying two spellings meant a
-        # per-invocation conflict resolver whose only correct answer for the
-        # repeatable --*-option pair was to reject mixing them anyway.
-        # `gcc_path`/`gcc_prefix`/`gcc_option_tokens`/`gcc_options` stay as
-        # internal `CompileContext` field names (also composed from build-context
-        # flags and the castxml/clang command assembly, and serialized into the
-        # run-plan JSON) -- only the user-facing CLI flags are gone.
-        func = click.option(
-            "--compiler-option",
-            "compiler_option_tokens",
-            multiple=True,
-            help="A single extra compiler flag passed to the header frontend verbatim "
-            "(repeatable; not whitespace-split). Use two for a flag + spaced value, "
-            "e.g. --compiler-option=-include --compiler-option='some header.h'.",
-        )(func)
-        func = click.option(
-            "--compiler-prefix",
-            "compiler_prefix",
-            default=None,
-            help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).",
-        )(func)
-        func = click.option(
-            "--compiler",
-            "compiler_path",
-            default=None,
-            help="Path to a GCC/G++ or Clang cross-compiler binary.",
-        )(func)
-        func = click.option(
-            "--allow-unsupported-castxml",
-            is_flag=True,
-            expose_value=False,
-            envvar="ABICHECK_ALLOW_UNSUPPORTED_CASTXML",
-            callback=_enable_unsupported_castxml_for_command,
-            help="Proceed with a CastXML build outside the supported version range "
-            "(castxml_policy.MIN_CASTXML/MAX_CASTXML/MIN_CASTXML_CLANG_MAJOR) instead "
-            "of aborting the scan before headers are parsed. Exploratory-mode-only: "
-            "the resulting snapshot's ast_toolchain_supported is recorded as false "
-            "with ast_toolchain_unsupported_reasons, so it is never mistaken for a "
-            "normal supported scan and cannot become a new strict baseline without a "
-            "further explicit acknowledgment.",
-        )(func)
-        func = click.option(
-            "--allow-ast-frontend-fallback",
-            is_flag=True,
-            expose_value=False,
-            envvar="ABICHECK_ALLOW_AST_FALLBACK",
-            callback=_enable_ast_fallback_for_command,
-            help="Allow auto-selected CastXML to fall back to Clang for a recognized "
-            "toolchain mismatch, an unsupported CastXML release, or a direct-include "
-            "guard. Disabled by default because the frontends can produce materially "
-            "different findings. A non-host --frontend-context (SYCL/DPC++) under an "
-            "auto that resolves to plain castxml (no ABICHECK_AST_FRONTEND pin) "
-            "routes to Clang without this flag, since CastXML has no host/device "
-            "concept to fall back from; a castxml- or hybrid-pinned auto (hybrid "
-            "has no device concept either) still rejects it.",
-        )(func)
-        frontend_kwargs: dict[str, Any] = (
-            {"multiple": True, "type": SidedChoiceParam(AST_FRONTENDS)}
-            if sided_frontend
-            else {
-                "default": "auto",
-                "show_default": True,
-                "type": click.Choice(AST_FRONTENDS, case_sensitive=False),
-            }
-        )
-        func = click.option(
-            "--ast-frontend",
-            "header_backend",
-            **frontend_kwargs,
-            help=(
-                "Scope to one side with an 'old='/'new=' prefix, repeating the "
-                "flag per side (e.g. --ast-frontend old=castxml --ast-frontend "
-                "new=clang) when the old release parses on one frontend and the new "
-                "one needs the other; a bare value applies to both (default: auto). "
-                if sided_frontend
-                else ""
-            )
-            + "C/C++ AST frontend: castxml (default schema reference) "
-            "or clang (-ast-dump=json; for hosts where castxml is absent or its "
-            "bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges "
-            "them (dumper_hybrid.merge_snapshots) — needs both tools installed and "
-            "costs roughly 2x a single-backend dump; never selected by auto. auto "
-            "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never "
-            "changes producer unless --allow-ast-frontend-fallback (or "
-            "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set — except a non-host "
-            "--frontend-context (SYCL/DPC++), which an auto resolving to plain "
-            "castxml (no pin) routes to clang since castxml can't satisfy it at "
-            "all (a castxml- or hybrid-pinned auto still rejects it, since "
-            "hybrid has no device concept either; an explicit clang, or auto "
-            "pinned to clang via ABICHECK_AST_FRONTEND=clang, satisfies it "
-            "directly). "
-            "Env: ABICHECK_AST_FRONTEND.",
-        )(func)
-        return func
-
-    return _apply
-
-
 def compile_config_argv_tokens(
     std: str | None, defines: Iterable[str], options: Iterable[str]
 ) -> list[str]:
@@ -1423,7 +1244,7 @@ def resolve_compile_context(
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
 
-    The single entry point the ``@compile_context_options`` family resolves to
+    The single entry point the compile-context option family resolves to
     (ADR-037 D3): construct a :class:`~abicheck.dry_run_estimate.CompileContext` from
     the decorator's flags, then delegate to :func:`merge_compile_config` with the
     ``--ast-frontend`` / ``--nostdinc`` explicitness read from the Click parameter

@@ -41,7 +41,6 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
     _collect_additions as _collect_additions,
     _collect_force_public_symbols as _collect_force_public_symbols,
     _collect_release_inputs as _collect_release_inputs,
-    _merge_gcc_options as _merge_gcc_options,
     _merge_redundant_changes as _merge_redundant_changes,
     _provenance_timestamp as _provenance_timestamp,
     _version_sort_key as _version_sort_key,
