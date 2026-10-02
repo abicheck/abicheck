@@ -135,24 +135,23 @@ class TestReleaseFanOutStampsResolvedConfig:
                 side_effect=lambda p: (p, None),
             ),
         ):
-            from abicheck.cli_compare_release_pairwise import _run_compare_pair as _rcp
+            from abicheck.cli_compare_release_pairwise import (
+                _run_compare_pair as _rcp,
+                release_parent_request,
+            )
 
             returned = _rcp(
-                old,
-                new,
-                [],
-                [],
-                [],
-                [],
-                "1.0",
-                "2.0",
-                "c++",
-                None,
-                "strict_abi",
-                None,
-                None,
-                None,
-                pack_application=pack_application,
+                release_parent_request(
+                    pack_application,
+                    old_input=old,
+                    new_input=new,
+                    old_version="1.0",
+                    new_version="2.0",
+                    lang="c++",
+                    policy="strict_abi",
+                    include_dependencies=True,
+                ),
+                pack_application,
             )
         assert returned is fake_result
         return fake_diff

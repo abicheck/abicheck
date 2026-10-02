@@ -15,9 +15,7 @@
 
 """compare↔dump L2 compile-context parity + threading (ADR-037 D3 / ADR-035).
 
-The cross-toolchain + frontend family is defined once in
-``cli_options.compile_context_options``; the project ``compile:`` block is
-folded in by the one shared resolver (``cli_options.merge_compile_config`` /
+The project ``compile:`` block is folded in by the one shared resolver (``cli_options.merge_compile_config`` /
 ``resolve_compile_context``). This guards that ``compare``/``dump`` never
 drift in their shared *absence* of the family as real CLI flags (Phase 7b,
 ADR-037 D8.1 -- ``compile.*`` config keys are the only spelling now on
@@ -45,7 +43,6 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_options import compile_context_options
 from abicheck.dry_run_estimate import CompileContext
 from abicheck.frontends.cli.commands.compare import compare_cmd
 from abicheck.frontends.cli.commands.dump import dump_cmd
@@ -959,7 +956,6 @@ def test_merge_compile_config_explicit_auto_beats_config(tmp_path: Path) -> None
 def test_merge_compile_config_explicit_malformed_fails_loud(tmp_path) -> None:
     # An *explicit* --config (build_config not None) that won't parse must fail
     # loudly, not silently drop the compile: settings (Codex review).
-    import click
 
     from abicheck.cli_options import merge_compile_config as _merge_compile_config
 
@@ -1506,52 +1502,6 @@ def test_dump_pe_explicit_gcc_options_no_longer_warns(
     assert getattr(captured["compile"], "gcc_option_tokens") == ("-DPE=1",)
 
 
-def test_fallback_flag_is_scoped_to_one_cli_invocation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
-
-    @click.command()
-    @compile_context_options()
-    def probe(**_kwargs: object) -> None:
-        click.echo(os.environ.get("ABICHECK_ALLOW_AST_FALLBACK", "unset"))
-
-    runner = CliRunner()
-    enabled = runner.invoke(probe, ["--allow-ast-frontend-fallback"])
-    disabled = runner.invoke(probe, [])
-
-    assert enabled.exit_code == 0
-    assert enabled.output.strip() == "1"
-    assert disabled.exit_code == 0
-    assert disabled.output.strip() == "unset"
-    assert "ABICHECK_ALLOW_AST_FALLBACK" not in os.environ
-
-
-def test_allow_unsupported_castxml_flag_is_scoped_to_one_cli_invocation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Mirrors test_fallback_flag_is_scoped_to_one_cli_invocation for the
-    --allow-unsupported-castxml flag (castxml_policy's version-gate override) —
-    previously this had no CLI spelling at all, only its env var (model.py's
-    ast_toolchain_supported docstring documented a CLI flag that didn't exist)."""
-    monkeypatch.delenv("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", raising=False)
-
-    @click.command()
-    @compile_context_options()
-    def probe(**_kwargs: object) -> None:
-        click.echo(os.environ.get("ABICHECK_ALLOW_UNSUPPORTED_CASTXML", "unset"))
-
-    runner = CliRunner()
-    enabled = runner.invoke(probe, ["--allow-unsupported-castxml"])
-    disabled = runner.invoke(probe, [])
-
-    assert enabled.exit_code == 0
-    assert enabled.output.strip() == "1"
-    assert disabled.exit_code == 0
-    assert disabled.output.strip() == "unset"
-    assert "ABICHECK_ALLOW_UNSUPPORTED_CASTXML" not in os.environ
-
-
 # ── --compiler/--compiler-prefix/--compiler-option ───────────────────────────
 #
 # The one cross-toolchain spelling. The former --gcc-path/--gcc-prefix/
@@ -1560,72 +1510,6 @@ def test_allow_unsupported_castxml_flag_is_scoped_to_one_cli_invocation(
 # internal gcc_* fields through the one choke point compare/dump/scan share
 # (resolve_compile_context -- see the module docstring above). This probe
 # command exercises that mapping through the real Click parsing path.
-
-
-@pytest.fixture
-def _compile_context_probe():
-    from abicheck.cli_options import resolve_compile_context
-
-    @click.command()
-    @compile_context_options()
-    @click.pass_context
-    def probe(ctx: click.Context, **kwargs: object) -> None:
-        cc, _includes = resolve_compile_context(
-            ctx,
-            sysroot=kwargs["sysroot"],  # type: ignore[arg-type]
-            nostdinc=kwargs["nostdinc"],  # type: ignore[arg-type]
-            header_backend=kwargs["header_backend"],  # type: ignore[arg-type]
-            includes=(),
-            build_config=None,
-            compiler_path=kwargs["compiler_path"],  # type: ignore[arg-type]
-            compiler_prefix=kwargs["compiler_prefix"],  # type: ignore[arg-type]
-            compiler_option_tokens=kwargs["compiler_option_tokens"],  # type: ignore[arg-type]
-        )
-        click.echo(
-            f"path={cc.gcc_path} prefix={cc.gcc_prefix} tokens={cc.gcc_option_tokens}"
-        )
-
-    return probe
-
-
-def test_compiler_flags_reach_the_compile_context(_compile_context_probe) -> None:
-    result = CliRunner().invoke(
-        _compile_context_probe,
-        ["--compiler", "/usr/bin/clang", "--compiler-prefix", "arm-"],
-    )
-    assert result.exit_code == 0, result.output
-    assert "path=/usr/bin/clang prefix=arm-" in result.output
-
-
-def test_removed_gcc_spellings_are_rejected(_compile_context_probe) -> None:
-    """The legacy aliases are gone outright, not hidden-but-functional: a
-    caller still passing one gets a hard usage error naming the flag rather
-    than a silently-ignored value."""
-    for flag, value in (
-        ("--gcc-path", "/usr/bin/gcc"),
-        ("--gcc-prefix", "aarch64-linux-gnu-"),
-        ("--gcc-option", "-DOLD"),
-    ):
-        result = CliRunner().invoke(_compile_context_probe, [flag, value])
-        assert result.exit_code != 0, (flag, result.output)
-        assert "No such option" in result.output, (flag, result.output)
-
-
-def test_compiler_option_tokens_accumulate_verbatim(_compile_context_probe) -> None:
-    """--compiler-option is repeatable and never whitespace-split, so a flag
-    and its own spaced operand stay adjacent and in order."""
-    result = CliRunner().invoke(
-        _compile_context_probe,
-        ["--compiler-option", "-include", "--compiler-option", "some header.h"],
-    )
-    assert result.exit_code == 0, result.output
-    assert "tokens=('-include', 'some header.h')" in result.output
-
-
-def test_neither_compiler_flag_given_no_crash(_compile_context_probe) -> None:
-    result = CliRunner().invoke(_compile_context_probe, [])
-    assert result.exit_code == 0, result.output
-    assert "path=None prefix=None tokens=()" in result.output
 
 
 def test_inline_source_side_keeps_its_own_configured_frontend(

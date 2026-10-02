@@ -35,8 +35,6 @@ from abicheck.compatibility_evaluation_frontend import (
 )
 from abicheck.compatibility_evaluation_versioning_wiring import (
     VERSIONING_POLICY_FIELD,
-    resolve_versioning_policy,
-    versioning_policy_candidate,
 )
 from abicheck.contract_relevance_types import SelectorLayer
 from abicheck.errors import PolicyError
@@ -169,53 +167,6 @@ class TestPolicyFileParsesVersioning:
         )
         with pytest.raises(PolicyError):
             PolicyFile.load(path)
-
-
-class TestResolveVersioningPolicy:
-    def test_no_policy_file_falls_back_to_built_in_default(self) -> None:
-        policy, prov = resolve_versioning_policy(policy_file=None)
-        assert policy == built_in_default_versioning_policy()
-        assert prov.layer is SelectorLayer.BUILT_IN_DEFAULT
-
-    def test_stated_versioning_resolves_to_explicit_cli(self) -> None:
-        pf = PolicyFile(
-            versioning=VersioningPolicy(enforcement=VersioningEnforcement.BLOCK),
-            versioning_stated=True,
-        )
-        policy, prov = resolve_versioning_policy(policy_file=pf)
-        assert policy.enforcement is VersioningEnforcement.BLOCK
-        assert prov.layer is SelectorLayer.EXPLICIT_CLI
-        assert prov.source_kind == "policy_file"
-
-    def test_unstated_versioning_falls_back_to_default_even_if_populated(
-        self,
-    ) -> None:
-        # A directly-constructed PolicyFile with versioning=... but
-        # versioning_stated=False (the dataclass default) never claims a
-        # statement it never made -- mirrors internal_namespaces' own rule.
-        pf = PolicyFile(
-            versioning=VersioningPolicy(enforcement=VersioningEnforcement.BLOCK)
-        )
-        policy, prov = resolve_versioning_policy(policy_file=pf)
-        assert policy == built_in_default_versioning_policy()
-        assert prov.layer is SelectorLayer.BUILT_IN_DEFAULT
-
-    def test_provenance_records_the_policy_file_source(self) -> None:
-        pf = PolicyFile(
-            versioning=VersioningPolicy(enforcement=VersioningEnforcement.BLOCK),
-            versioning_stated=True,
-            source_path=Path("policy.yml"),
-        )
-        _, prov = resolve_versioning_policy(policy_file=pf)
-        assert prov.path == "policy.yml"
-        assert prov.selected_by[0].option == "--policy"
-
-    def test_candidate_is_none_without_a_stated_versioning_block(self) -> None:
-        assert versioning_policy_candidate(policy_file=None) is None
-        assert (
-            versioning_policy_candidate(policy_file=PolicyFile(versioning_stated=False))
-            is None
-        )
 
 
 class TestFrontendResolvesVersioning:

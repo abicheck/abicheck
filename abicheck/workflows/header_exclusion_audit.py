@@ -80,7 +80,7 @@ def record_achieved_header_exclusions(
     if not (extracted_now and achieved and stamped.dependency_scope == "filtered"):
         return stamped
     # The same roots the dump's own dependency scope honoured
-    # (``dumper_scoping.apply_dependency_scope_to_run_dump_result``).
+    # (``workflows.run_dump_scope.apply_dependency_scope_to_run_dump_result``).
     extra = scope_inputs or {}
     roots = [
         *headers,

@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
 from abicheck.model import RecordType
+from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
 _GPP = "g++"
 

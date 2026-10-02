@@ -672,26 +672,41 @@ def _lib_macho_meta(lib: Path | AbiSnapshot) -> MachoMetadata | None:
 
 
 def _get_new_lib_exports(new_lib: Path | AbiSnapshot) -> set[str]:
-    """Get the set of exported symbol names from the new library."""
+    """Every exported symbol name of the new library, through the shared
+    export-index projections (``model.export_index``).
+
+    Deliberately :func:`~abicheck.model.export_index.all_export_names`, not the
+    default-version-only projection: an application's versioned reference
+    (``foo@LIB_1``) binds to a non-default alias, and ``AppRequirements``
+    records required versions per library, not per symbol, so dropping
+    aliases here would report a still-resolvable symbol as missing. An
+    unread/unrecognised table yields an empty set, which
+    ``_compute_symbol_coverage`` already reads as "no evidence".
+    """
+    from .model.export_index import (
+        all_export_names,
+        build_raw_export_index_from_elf,
+        build_raw_export_index_from_macho,
+        build_raw_export_index_from_pe,
+    )
+
     fmt = _lib_fmt(new_lib)
     if fmt == "elf":
         elf_meta = _lib_elf_meta(new_lib)
-        return {s.name for s in elf_meta.symbols} if elf_meta is not None else set()
-    if fmt == "pe":
+        index = None if elf_meta is None else build_raw_export_index_from_elf(elf_meta)
+    elif fmt == "pe":
         pe_meta = _lib_pe_meta(new_lib)
-        return (
-            {e.name for e in pe_meta.exports if e.name}
-            if pe_meta is not None
-            else set()
-        )
-    if fmt == "macho":
+        index = None if pe_meta is None else build_raw_export_index_from_pe(pe_meta)
+    elif fmt == "macho":
         macho_meta = _lib_macho_meta(new_lib)
-        return (
-            {e.name for e in macho_meta.exports if e.name}
-            if macho_meta is not None
-            else set()
+        index = (
+            None
+            if macho_meta is None
+            else build_raw_export_index_from_macho(macho_meta)
         )
-    return set()
+    else:
+        index = None
+    return set(all_export_names(index)) if index is not None else set()
 
 
 def _get_old_lib_exports_for_scoping(old_lib: Path | AbiSnapshot) -> set[str]:
@@ -1388,10 +1403,10 @@ def check_appcompat(
         public_include_search_dirs=list(_new_inc),
     )
     # ADR-075 D1/D2: record ownership for what this run extracted.
-    from .workflows.ownership_request import classify_extracted
+    from .workflows.snapshot_factory import finish_ownership
 
-    classify_extracted(old_snap, None, list(_old_h), list(_old_inc))
-    classify_extracted(new_snap, None, list(_new_h), list(_new_inc))
+    old_snap = finish_ownership(old_snap, None, list(_old_h), list(_old_inc))
+    new_snap = finish_ownership(new_snap, None, list(_new_h), list(_new_inc))
 
     # Route through the real workflows owner; ADR-037 D1.
     diff = compare_snapshots(

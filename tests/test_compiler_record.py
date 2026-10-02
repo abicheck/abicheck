@@ -32,7 +32,7 @@ from abicheck.buildsource.compiler_record import (
     parse_producer,
 )
 from abicheck.buildsource.model import ExtractorRecord
-from abicheck.cli_buildsource_helpers import _run_adapters
+from tests._build_source_collect import _run_adapters
 
 # ── pure parsers ─────────────────────────────────────────────────────────────
 
@@ -216,7 +216,7 @@ def test_extract_compiler_record_missing_file(tmp_path):
 # ── engine wiring (was `collect --read-compiler-record`) ────────────────────
 #
 # `collect` was deleted in the ADR-043 CLI reset, but the engine it drove is
-# unchanged: `cli_buildsource_helpers._run_adapters` is the exact function the
+# unchanged: `tests._build_source_collect._run_adapters` is the exact function the
 # deleted Click command called for `--read-compiler-record`, so these
 # exercise it directly.
 

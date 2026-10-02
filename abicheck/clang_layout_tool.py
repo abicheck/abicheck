@@ -64,6 +64,7 @@ from pathlib import Path
 from typing import Any
 
 from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
+from .deadline import run_bounded
 from .dumper import (
     _build_clang_header_command,
     _detect_cpp20_headers,
@@ -225,8 +226,11 @@ def run_layout_tool(
         )
         compile_flags = _compile_flags_from_ast_dump_command(full_cmd)
         cmd = [binary, str(agg_path), "--", *compile_flags]
-        return subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False
+        return run_bounded(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
 
     def _run_shimmed(

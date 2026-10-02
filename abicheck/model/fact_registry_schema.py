@@ -228,10 +228,6 @@ class FactRegistry:
     def get(self, fact_id: str) -> FactDefinition | None:
         return self._entries.get(fact_id)
 
-    def for_owner(self, owner: str) -> tuple[FactDefinition, ...]:
-        """Every registered fact declared on dataclass ``owner``, in registration order."""
-        return tuple(e for e in self._entries.values() if e.owner == owner)
-
     @property
     def entries(self) -> dict[str, FactDefinition]:
         return dict(self._entries)

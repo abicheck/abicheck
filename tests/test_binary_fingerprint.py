@@ -34,7 +34,6 @@ from abicheck.diff_symbols import (
     _plausible_rename,
     _return_type_of,
     _strip_template_args,
-    _unqualified_name,
     _unqualified_name_of,
     _unwrap_funcptr_declarator,
 )
@@ -120,63 +119,6 @@ class TestFunctionFingerprint:
 
 
 class TestBinarySummary:
-    def test_differs_from_identical(self) -> None:
-        s = BinarySummary(
-            sections={
-                ".text": SectionSummary(".text", 1000, "aaa"),
-                ".rodata": SectionSummary(".rodata", 200, "bbb"),
-            }
-        )
-        assert s.differs_from(s) == {}
-
-    def test_differs_from_changed(self) -> None:
-        old = BinarySummary(
-            sections={
-                ".text": SectionSummary(".text", 1000, "aaa"),
-                ".rodata": SectionSummary(".rodata", 200, "bbb"),
-            }
-        )
-        new = BinarySummary(
-            sections={
-                ".text": SectionSummary(".text", 1000, "ccc"),
-                ".rodata": SectionSummary(".rodata", 200, "bbb"),
-            }
-        )
-        diffs = old.differs_from(new)
-        assert ".text" in diffs
-        assert ".rodata" not in diffs
-        assert diffs[".text"] == ("aaa", "ccc")
-
-    def test_differs_from_sections_only_in_one(self) -> None:
-        """Sections only in one binary are not reported as diffs."""
-        old = BinarySummary(
-            sections={
-                ".text": SectionSummary(".text", 1000, "aaa"),
-            }
-        )
-        new = BinarySummary(
-            sections={
-                ".text": SectionSummary(".text", 1000, "aaa"),
-                ".data": SectionSummary(".data", 100, "ddd"),
-            }
-        )
-        assert old.differs_from(new) == {}
-
-    def test_differs_from_bss_size_change(self) -> None:
-        """Two .bss sections with same hash but different sizes are flagged."""
-        old = BinarySummary(
-            sections={
-                ".bss": SectionSummary(".bss", 100, "same_hash"),
-            }
-        )
-        new = BinarySummary(
-            sections={
-                ".bss": SectionSummary(".bss", 200, "same_hash"),
-            }
-        )
-        diffs = old.differs_from(new)
-        assert ".bss" in diffs
-
     def test_has_text_present(self) -> None:
         s = BinarySummary(
             sections={
@@ -505,25 +447,6 @@ class TestComputeSectionSummary:
 
 
 class TestUnqualifiedName:
-    @pytest.mark.parametrize(
-        "symbol,expected",
-        [
-            ("add", "add"),  # plain C name
-            ("ns::Class::method", "method"),  # qualified
-            ("ns::Class::method(int, long)", "method"),  # with params
-            ("ns::foo<bar::baz>::run()", "run"),  # '::' inside template args
-            ("ns::make<a::b, c::d>", "make<a::b, c::d>"),  # template args kept
-            ("ns::foo<bar<int>>", "foo<bar<int>>"),  # nested template args kept
-            ("void get<int>()", "get<int>"),  # return type dropped, args kept
-            ("std::ostream::operator<<(int)", "operator<<(int)"),  # operator kept whole
-            ("Widget::operator()(int)", "operator()(int)"),  # call operator
-            ("cooperator_v1", "cooperator_v1"),  # 'operator' substring, not keyword
-            ("myoperator::foo_v1()", "foo_v1"),  # 'operator' inside qualifier
-        ],
-    )
-    def test_extraction(self, symbol: str, expected: str) -> None:
-        assert _unqualified_name(symbol) == expected
-
     @pytest.mark.parametrize(
         "leaf,expected",
         [

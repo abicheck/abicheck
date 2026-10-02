@@ -152,7 +152,6 @@
         "abicheck/dumper_clang_streaming.py",
         "abicheck/dumper_clang_vtable.py",
         "abicheck/dumper_debug.py",
-        "abicheck/dumper_elf_fallback.py",
         "abicheck/dumper_elf_symbols.py",
         "abicheck/dumper_layout_backfill.py",
         "abicheck/dumper_scoping.py",
@@ -191,8 +190,7 @@
         "abicheck/tu_merge_provenance.py",
         "abicheck/type_metadata.py",
         "abicheck/dumper_contract.py",
-        "abicheck/dumper_manifest.py",
-        "abicheck/header_only_dump.py"
+        "abicheck/dumper_manifest.py"
       ]
     },
     "compare": {
@@ -355,6 +353,8 @@
         "abicheck/service_dump_cache.py",
         "abicheck/service_dump_native.py",
         "abicheck/service_dump_native_pe.py",
+        "abicheck/dumper_elf_fallback.py",
+        "abicheck/header_only_dump.py",
         "abicheck/service_dump_pipeline.py",
         "abicheck/service_header_graph_attach.py",
         "abicheck/service_header_scoped.py",
@@ -374,8 +374,6 @@
       ],
       "legacy_paths": [
         "abicheck/annotations.py",
-        "abicheck/annotations_step_summary.py",
-        "abicheck/appcompat_html.py",
         "abicheck/buildsource/check_report_exit_backfill.py",
         "abicheck/buildsource/check_report_run_outcome.py",
         "abicheck/compat/xml_report.py",
@@ -633,10 +631,8 @@
     "analysis_assurance_comparability.py",
     "analysis_assurance_layout.py",
     "annotations.py",
-    "annotations_step_summary.py",
     "appcompat.py",
     "appcompat_consumer_impact.py",
-    "appcompat_html.py",
     "binary_fingerprint.py",
     "binary_utils.py",
     "binder.py",

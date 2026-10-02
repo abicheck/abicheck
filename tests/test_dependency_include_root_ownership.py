@@ -396,7 +396,7 @@ class TestEveryOwnershipSourceAndEntryPointAgrees:
         from abicheck.buildsource import header_graph
 
         dumper_src = pathlib.Path(dumper.__file__).read_text(encoding="utf-8")
-        assert dumper_src.count("apply_provenance(") == 1, (
+        assert dumper_src.count("finish_provenance(") == 1, (
             "dumper must reach declaration provenance through exactly one "
             "call; a second call site is a second place "
             "ownership can be decided"

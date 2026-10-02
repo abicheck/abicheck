@@ -112,11 +112,7 @@ def resolve_bare_token_with_default_path(token: str) -> str | None:
 #: other bare token -- an unrecognized flag's own non-path value included,
 #: no matter which flag -- is left exactly as the pre-existing,
 #: conservative "unrecognized, don't touch it" fallback that module
-#: already uses for everything else. Mirrors
-#: ``source_replay._SOURCE_FILE_SUFFIXES`` (kept as an independent
-#: literal, not a shared import: ``source_replay.py`` already imports
-#: FROM ``_argv.py``, which imports from this module, so a reverse import
-#: would be a cycle) -- keep the two lists in sync if either grows.
+#: already uses for everything else.
 _SOURCE_FILE_OPERAND_SUFFIXES = (
     ".c",
     ".cc",

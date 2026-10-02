@@ -230,7 +230,9 @@ class TestTuMergeContractAttributesFactStaysNotCollected:
         assert merged_fn.contract_attributes is None
         assert merged_fn.contract_attributes_fact.status is FactStatus.NOT_COLLECTED
 
-    def test_one_side_real_value_merges_to_present(self) -> None:
+    def test_one_side_real_value_merges_to_partial(self) -> None:
+        # One TU captured, the other did not: the attributes the uncaptured TU
+        # might carry are unknown, so the merge is PARTIAL (model/evidence_merge).
         f_a = Function(
             name="f",
             mangled="_Z1fi",
@@ -248,5 +250,5 @@ class TestTuMergeContractAttributesFactStaysNotCollected:
         merged = merge_fragments([a, b])
         (merged_fn,) = merged.functions
         assert merged_fn.contract_attributes == ["nodiscard"]
-        assert merged_fn.contract_attributes_fact.status is FactStatus.PRESENT
+        assert merged_fn.contract_attributes_fact.status is FactStatus.PARTIAL
         assert merged_fn.contract_attributes_fact.value == ["nodiscard"]

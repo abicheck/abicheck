@@ -1415,13 +1415,10 @@ class DemoteUnreachableInternalChurn:
         if ctx.old is None:
             return changes
 
-        import fnmatch
-
         from .internal_leak import (
             _LEAK_TRIGGERING_KINDS,
             DEFAULT_INTERNAL_NAMESPACES,
             _root_type_name_for_change,
-            _strip_template_args,
             is_internal_type,
         )
         from .model.change_catalog.kinds import ChangeKind
@@ -1431,22 +1428,22 @@ class DemoteUnreachableInternalChurn:
             self._namespaces or ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES
         )
         frozen = list(ctx.frozen_namespaces)
+        frozen_maps = frozen_qualified_maps(ctx) if frozen else None
 
-        def _is_frozen(type_name: str) -> bool:
+        def _is_frozen(c: Change, root: str) -> bool:
             # A contractually frozen namespace (PolicyFile.frozen_namespaces) is
             # an explicit user declaration that changes there must NOT be
             # downgraded. Keep such a finding in-surface so the later
             # EscalateFrozenNamespaceViolations step can tag it and the verdict
-            # honours the contract, even when it is otherwise unreachable.
-            if not frozen:
+            # honours the contract, even when it is otherwise unreachable --
+            # through the very matcher that step uses, so a finding it would
+            # tag is never demoted first.
+            if frozen_maps is None:
                 return False
-            cand = _strip_template_args(type_name)
-            while True:
-                if any(fnmatch.fnmatchcase(cand, pat) for pat in frozen):
-                    return True
-                if "::" not in cand:
-                    return False
-                cand = cand.rsplit("::", 1)[0]
+            return (
+                match_frozen_namespace(c, frozen, *frozen_maps, extra_names=(root,))
+                is not None
+            )
 
         # Internal types the leak detector confirmed DO leak through public API.
         leaked_types = {
@@ -1461,7 +1458,7 @@ class DemoteUnreachableInternalChurn:
                 c.kind in _LEAK_TRIGGERING_KINDS
                 and is_internal_type(root, namespaces)
                 and root not in leaked_types
-                and not _is_frozen(root)
+                and not _is_frozen(c, root)
             ):
                 c.surface_exclusion_reason = REASON_PRIVATE_INTERNAL_UNREACHABLE
                 ctx.out_of_surface.append(c)
@@ -1563,6 +1560,51 @@ class DetectVersionedSymbolScheme:
         return changes
 
 
+def match_frozen_namespace(
+    c: Change,
+    patterns: list[str],
+    old_qualified: dict[str, str],
+    new_qualified: dict[str, str],
+    *,
+    extra_names: tuple[str | None, ...] = (),
+) -> str | None:
+    """The frozen-namespace pattern any name of *c* falls in, or ``None``.
+
+    Shared by escalation and demotion (``policy.frozen_namespace``). Candidate
+    forms of each name: the raw value, its demangling when Itanium-mangled,
+    and -- for the symbol -- the snapshot-qualified name, the only form that
+    recovers the namespace of an ``extern "C"`` export.
+    """
+    from .demangle import demangle
+    from .diff_filtering import _qualified_name_for_change
+    from .policy.frozen_namespace import frozen_pattern_for
+
+    forms: list[str] = []
+    for name in (c.symbol, c.caused_by_type, c.qualified_name, *extra_names):
+        if not name:
+            continue
+        forms.append(name)
+        if name.startswith("_Z") and (dm := demangle(name)):
+            forms.append(dm)
+        if name == c.symbol and (
+            qual := _qualified_name_for_change(c, old_qualified, new_qualified)
+        ):
+            forms.append(qual)
+    return frozen_pattern_for(forms, patterns)
+
+
+def frozen_qualified_maps(
+    ctx: PipelineContext,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The (old, new) mangled -> qualified maps :func:`match_frozen_namespace` reads."""
+    from .diff_filtering import _qualified_functions_by_mangled
+
+    return (
+        _qualified_functions_by_mangled(ctx.baseline_or_empty),
+        _qualified_functions_by_mangled(ctx.new),
+    )
+
+
 class EscalateFrozenNamespaceViolations:
     """Tag findings whose symbol / caused_by_type lies in a contractually
     frozen namespace (e.g. ``**::detail::r1``).
@@ -1594,66 +1636,6 @@ class EscalateFrozenNamespaceViolations:
 
     name = "escalate_frozen_namespace_violations"
 
-    @staticmethod
-    def _candidate_forms(
-        name: str,
-        c: Change,
-        old_qualified: dict[str, str],
-        new_qualified: dict[str, str],
-    ) -> list[str]:
-        """Collect every plausible C++-qualified form of *name*."""
-        # Imported lazily so this module stays free of import cycles.
-        from .demangle import demangle
-        from .diff_filtering import _qualified_name_for_change
-
-        # The plausible forms are:
-        # 1. the raw value (mangled, demangled, or already qualified);
-        # 2. the demangled form when the raw value looks Itanium-mangled;
-        # 3. the snapshot-recorded qualified name (Function.name), which
-        #    is the only form that recovers the namespace of an
-        #    ``extern "C"`` symbol whose export name is unqualified.
-        forms: list[str] = [name]
-        if name.startswith("_Z"):
-            dm = demangle(name)
-            if dm:
-                forms.append(dm)
-        if name == c.symbol:
-            qual = _qualified_name_for_change(c, old_qualified, new_qualified)
-            if qual:
-                forms.append(qual)
-        return forms
-
-    @classmethod
-    def _match(
-        cls,
-        name: str | None,
-        c: Change,
-        patterns: list[str],
-        old_qualified: dict[str, str],
-        new_qualified: dict[str, str],
-    ) -> str | None:
-        """Return the first frozen-namespace pattern matching *name*, or None."""
-        # Imported lazily so this module stays free of import cycles.
-        import fnmatch
-
-        from .internal_leak import _strip_template_args
-
-        if not name:
-            return None
-        for form in cls._candidate_forms(name, c, old_qualified, new_qualified):
-            # Walk every ancestor prefix so ``**::detail::r1`` matches
-            # both ``ns::detail::r1::foo`` and the deeper
-            # ``ns::detail::r1::sub::foo``.
-            candidate = _strip_template_args(form)
-            while True:
-                for pat in patterns:
-                    if fnmatch.fnmatchcase(candidate, pat):
-                        return pat
-                if "::" not in candidate:
-                    break
-                candidate = candidate.rsplit("::", 1)[0]
-        return None
-
     @classmethod
     def _tag(
         cls,
@@ -1667,11 +1649,7 @@ class EscalateFrozenNamespaceViolations:
             # Already tagged by an earlier step (e.g. internal-leak
             # overlay that synthesised a finding with the field set).
             return
-        pat = (
-            cls._match(c.symbol, c, patterns, old_qualified, new_qualified)
-            or cls._match(c.caused_by_type, c, patterns, old_qualified, new_qualified)
-            or cls._match(c.qualified_name, c, patterns, old_qualified, new_qualified)
-        )
+        pat = match_frozen_namespace(c, patterns, old_qualified, new_qualified)
         if pat is None:
             return
         c.frozen_namespace_violation = pat
@@ -1682,11 +1660,8 @@ class EscalateFrozenNamespaceViolations:
         if not ctx.frozen_namespaces:
             return changes
         # Imported lazily so this module stays free of import cycles.
-        from .diff_filtering import _qualified_functions_by_mangled
-
         patterns = list(ctx.frozen_namespaces)
-        old_qualified = _qualified_functions_by_mangled(ctx.baseline_or_empty)
-        new_qualified = _qualified_functions_by_mangled(ctx.new)
+        old_qualified, new_qualified = frozen_qualified_maps(ctx)
 
         for c in changes:
             self._tag(c, patterns, old_qualified, new_qualified)
@@ -1738,6 +1713,9 @@ class PostProcessingPipeline:
         # where it reads better -- doing that rebound a positional
         # `disposition_ledger` to this parameter (Codex review, PR #1231).
         experimental_namespaces: tuple[str, ...] | None = None,
+        # Design-hardening Phase 2: the OLD-side stand-in when *old* is None,
+        # built by the snapshot factory -- see `PipelineContext.absent_baseline`.
+        absent_baseline: AbiSnapshot | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -1752,6 +1730,7 @@ class PostProcessingPipeline:
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=public_surface_allowlist,
             disposition_ledger=disposition_ledger,
+            absent_baseline=absent_baseline,
         )
         # ``FilterRedundant`` sets ``ctx.kept = kept`` — an *aliasing* contract,
         # not a snapshot: every step from that point on is required to either

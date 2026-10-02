@@ -1264,28 +1264,22 @@ def build_context_for_header(
 
 
 def _std_sort_key(std: str) -> tuple[int, int]:
-    """Numeric sort key for C/C++ standard strings.
+    """Sort key for C/C++ standard strings: ``(is_cxx, publication_year)``.
 
-    Maps standard names to (language, version) tuples for correct ordering.
-    Handles draft names like c++2a, c++2b, c++2c (→ 20, 23, 26).
+    The year comes from :func:`~abicheck.model.language_standard.
+    language_standard_year`, so ``c++98`` orders below ``c++20`` and the
+    draft spellings (``c++1z``, ``c++2a``) order with their release.
+    Unrecognized spellings sort lowest.
     """
-    # Extract the numeric/draft suffix after the last occurrence of c/c++/gnu/gnu++
-    m = re.search(r"(\d+[a-z]?)$", std)
-    if not m:
-        return (0, 0)
-    suffix = m.group(1)
-    is_cpp = "c++" in std or "gnu++" in std
+    from .model.language_standard import (
+        language_standard_is_cxx,
+        language_standard_year,
+    )
 
-    # Map draft names to release numbers
-    draft_map = {"2a": 20, "2b": 23, "2c": 26}
-    if suffix in draft_map:
-        version = draft_map[suffix]
-    elif suffix.isdigit():
-        version = int(suffix)
-    else:
-        version = 0
-
-    return (1 if is_cpp else 0, version)
+    return (
+        1 if language_standard_is_cxx(std) else 0,
+        language_standard_year(std) or 0,
+    )
 
 
 def _filter_entries_by_glob(

@@ -24,12 +24,9 @@ from __future__ import annotations
 import pytest
 
 from abicheck.dump_manifest import (
-    DumpManifest,
     IncludeEntry,
-    TranslationUnit,
     load_manifest,
     parse_manifest,
-    single_tu_manifest,
 )
 from abicheck.errors import ManifestValidationError
 
@@ -316,22 +313,6 @@ def test_load_manifest_reads_file_and_resolves_relative_to_its_own_dir(tmp_path)
     manifest = load_manifest(manifest_dir / "manifest.yaml")
     assert manifest.base_dir == manifest_dir
     assert manifest.roots == (manifest_dir / "include" / "foo.h",)
-
-
-def test_single_tu_manifest_synthesizes_legacy_equivalent(tmp_path):
-    headers = [tmp_path / "foo.h", tmp_path / "bar.h"]
-    includes = [tmp_path / "vendor"]
-    manifest = single_tu_manifest(headers, includes, base_dir=tmp_path)
-    assert isinstance(manifest, DumpManifest)
-    assert manifest.roots == tuple(headers)
-    assert len(manifest.translation_units) == 1
-    tu = manifest.translation_units[0]
-    assert isinstance(tu, TranslationUnit)
-    assert tu.name == "legacy-main"
-    assert tu.forced_includes == tuple(headers)
-    assert tu.includes == (IncludeEntry(path=tmp_path / "vendor"),)
-    assert tu.required is True
-    assert tu.contributes_to_abi is True
 
 
 def test_target_must_be_string_or_null(tmp_path):

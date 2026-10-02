@@ -154,8 +154,7 @@ def _consumer_required_nodes(graph: SourceGraphSummary) -> frozenset[str]:
     """Node ids some consumer in *graph* requires (ADR-057) — the tier-1
     signal :func:`_graph_path_tier` reads.
 
-    The canonical implementation, re-exported as
-    ``impact.consumer_graph.consumer_required_symbol_nodes``: that module
+    Defined here rather than in ``impact/``: that package
     already depends on this one (one-directional), so keeping the definition
     here means the selector never has to import back into ``impact/`` to
     compute its own tier. Empty — and therefore inert — for every graph with

@@ -139,13 +139,13 @@ def _load_descriptor_or_dump(
         CompatDescriptor for XML descriptor files, AbiSnapshot for JSON dumps.
 
     Raises:
-        ValueError: If the file is an ABICC Perl dump (unsupported format).
-    """
-    # ABICC Perl dump support (minimal migration-focused importer)
-    if path.suffix == ".dump":
-        return import_abicc_perl_dump(path)
+        ValueError: If the file is an ABICC XML dump (unsupported format).
 
-    # Heuristic: if the file is JSON, load as a dump
+    Dispatch is by content, never by the ``.dump`` suffix alone: ABICC names
+    its Perl dumps ``ABI.dump``, but ``compat dump -dump-path X.dump`` writes
+    an abicheck JSON snapshot under the same suffix, and both must load.
+    """
+    # Heuristic: if the file is named as JSON, load as a dump
     if path.suffix == ".json":
         return load_snapshot(path)
 
@@ -179,6 +179,11 @@ def _load_descriptor_or_dump(
     # Detect ABICC Perl Data::Dumper format (starts with $VAR1 = { or similar)
     if looks_like_perl_dump(head):
         return import_abicc_perl_dump(path)
+
+    # An abicheck JSON snapshot under a non-JSON name (e.g. the `.dump`
+    # `compat dump -dump-path` was given).
+    if head.lstrip().startswith("{"):
+        return load_snapshot(path)
 
     # Detect ABICC XML dump format (contains <ABI_dump_* or <abi_dump tags)
     if "<ABI_dump" in head or "<abi_dump" in head or "ABI_COMPLIANCE_CHECKER" in head:
@@ -380,8 +385,7 @@ def finish_live_compat_dump(
     its ownership record (ADR-075 D1/D2), which every other front end stamps
     through ``resolve_input``. One function for both live dump sites, so
     neither can do one step and forget the other."""
-    from ..workflows.ownership_request import classify_extracted
+    from ..workflows.snapshot_factory import finish_ownership
 
     snapshot = record_descriptor_skips(snapshot, rules, quiet, header_universe)
-    classify_extracted(snapshot, None, parsed_headers, None)
-    return snapshot
+    return finish_ownership(snapshot, None, parsed_headers, None)

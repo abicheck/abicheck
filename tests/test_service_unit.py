@@ -4968,62 +4968,6 @@ class TestAttachHeaderGraphHashesIncludeSearchTokens:
         assert mock_ast.call_args.kwargs["extra_hash_dirs"] == ()
 
 
-class TestCliNativeBinaryHeaderWiring:
-    """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""
-
-    def test_cli_pe_forwards_headers(self, tmp_path):
-        from abicheck.cli_resolve import _dump_native_binary
-
-        p = tmp_path / "lib.dll"
-        p.write_bytes(b"MZ" + b"\x00" * 100)
-        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
-        with patch(
-            "abicheck.service_dump_native._dump_pe", return_value=snap
-        ) as mock_pe:
-            _dump_native_binary(p, "pe", [Path("api.h")], [Path("inc")], "1.0", "c++")
-        assert mock_pe.call_args.kwargs["headers"] == [Path("api.h")]
-        assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
-
-    def test_cli_macho_forwards_headers(self, tmp_path):
-        from abicheck.cli_resolve import _dump_native_binary
-
-        p = tmp_path / "lib.dylib"
-        p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
-        snap = AbiSnapshot(library="lib", version="1.0", platform="macho")
-        with patch(
-            "abicheck.service_dump_native._dump_macho", return_value=snap
-        ) as mock_macho:
-            _dump_native_binary(p, "macho", [Path("api.h")], [], "1.0", "c++")
-        assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
-
-    def test_cli_pe_wraps_abicheck_error_as_click(self, tmp_path):
-        import click
-
-        from abicheck.cli_resolve import _dump_native_binary
-
-        p = tmp_path / "lib.dll"
-        p.write_bytes(b"MZ" + b"\x00" * 100)
-        with patch(
-            "abicheck.service_dump_native._dump_pe", side_effect=SnapshotError("boom")
-        ):
-            with pytest.raises(click.ClickException, match="boom"):
-                _dump_native_binary(p, "pe", [], [], "1.0", "c++")
-
-    def test_cli_macho_wraps_abicheck_error_as_click(self, tmp_path):
-        import click
-
-        from abicheck.cli_resolve import _dump_native_binary
-
-        p = tmp_path / "lib.dylib"
-        p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
-        with patch(
-            "abicheck.service_dump_native._dump_macho",
-            side_effect=SnapshotError("nope"),
-        ):
-            with pytest.raises(click.ClickException, match="nope"):
-                _dump_native_binary(p, "macho", [], [], "1.0", "c++")
-
-
 # ── _try_attach_numpy_capi_surface() ────────────────────────────────────────
 
 
@@ -5077,7 +5021,7 @@ class TestTryAttachNumpyCapiSurface:
 
 class TestRunDumpDependencyScope:
     """``run_dump`` is built from ``_run_dump_uncached`` via
-    ``dumper_scoping.wrap_run_dump_with_dependency_scope``. Its
+    ``workflows.run_dump_scope.wrap_run_dump_with_dependency_scope``. Its
     ``include_dependencies`` default is ``False`` -- the same value
     ``dump --include-system-declarations`` and
     ``InputSpec.include_dependencies`` carry -- so a Tier-2 caller that omits

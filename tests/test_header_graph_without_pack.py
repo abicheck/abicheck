@@ -28,8 +28,8 @@ from abicheck.buildsource.model import (
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.evidence_depth import (
-    depth_label_for,
     embedded_evidence_pack,
+    reported_depth_label,
     resolve_l5_source_graph,
 )
 from abicheck.model import AbiSnapshot
@@ -114,9 +114,9 @@ class TestBothShapesAnswerAlike:
 
     def test_the_depth_label(self, shape: dict, depth: str | None) -> None:
         retired, current = self._pair(shape, depth)
-        assert depth_label_for(retired, retired.build_source) == depth_label_for(
-            current, current.build_source
-        )
+        assert reported_depth_label(
+            retired, retired.build_source
+        ) == reported_depth_label(current, current.build_source)
 
     def test_layer_presence(self, shape: dict, depth: str | None) -> None:
         retired, current = self._pair(shape, depth)

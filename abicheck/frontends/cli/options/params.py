@@ -25,7 +25,6 @@ every internal caller now imports from here directly.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -250,66 +249,6 @@ class SidedIncludePathParam(click.ParamType):
 SIDED_INCLUDE_PATH_PARAM = SidedIncludePathParam()
 
 
-class LabeledIncludePathParam(click.ParamType):
-    """The ``both:LABEL=PATH`` labeled-include grammar meant for ``dump``'s
-    own ``--include`` (ADR-050 D1) -- built and unit-tested here, but **not
-    yet wired into ``dump_cmd``'s actual ``--include`` option**, which still
-    uses a plain ``click.Path`` (see ``comparability.py``'s module
-    docstring for the tracked gap: a labeled entry passed to ``dump
-    --include`` today is silently parsed as an ordinary unlabeled path, not
-    rejected and not honored). This type recognizes **only** the
-    colon-terminated ``both:LABEL=PATH`` labeled form, not
-    :class:`SidedIncludePathParam`'s full ``old=``/``new=``/``both=`` side
-    grammar -- ``dump`` has a single input, no old/new side concept at all.
-    Designed so that, once wired in, recognizing ``both:LABEL=PATH`` is
-    purely additive: every other value -- bare, or one that happens to
-    literally start with ``old=``/``new=``/``both=`` -- stays an ordinary,
-    unlabeled path exactly as before, with no equals-form side-prefix
-    stripping at all (switching ``dump`` onto :class:`SidedIncludePathParam`
-    wholesale would newly start stripping an ``old=`` prefix on ``dump`` too
-    -- a real behavior change on a flag that never had that ambiguity).
-
-    Returns ``(path, label)`` pairs -- ``label`` is ``None`` for the ordinary
-    unlabeled form::
-
-        --include both:support=path -> (Path("path"), "support")
-        --include old=foo/          -> (Path("old=foo/"), None)  # literal dir
-        --include path               -> (Path("path"), None)
-    """
-
-    name = "labeled-include-path"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._path = click.Path(path_type=Path)
-
-    def convert(self, value: Any, param: Any, ctx: Any) -> tuple[Path, str | None]:
-        s = str(value)
-        prefix = "both:"
-        if s.startswith(prefix):
-            rest = s[len(prefix) :]
-            label, sep, raw = rest.partition("=")
-            if not sep or not label:
-                raise click.BadParameter(
-                    f"{value!r}: a labeled --include requires "
-                    f"'{prefix}LABEL=PATH' (e.g. '{prefix}support=path'), "
-                    "with a non-empty LABEL before '='.",
-                    ctx=ctx,
-                    param=param,
-                )
-            path = cast("Path", self._path.convert(raw, param, ctx))
-            return (path, label)
-        return (cast("Path", self._path.convert(s, param, ctx)), None)
-
-    def get_metavar(self, param: Any, ctx: Any = None) -> str:
-        return "[both:LABEL=]PATH"
-
-
-#: Shared instance intended for ``dump``'s own ``--include`` -- not yet
-#: wired into ``dump_cmd`` (see the class docstring above).
-LABELED_INCLUDE_PATH_PARAM = LabeledIncludePathParam()
-
-
 class SidedStrParam(click.ParamType):
     """Side-aware *string* option (ADR-040 Lever 1) — e.g. ``--version``.
 
@@ -334,47 +273,6 @@ class SidedStrParam(click.ParamType):
 
 #: Shared instance for sided string options (``--version``).
 SIDED_STR_PARAM = SidedStrParam()
-
-
-class SidedChoiceParam(click.ParamType):
-    """Side-aware option drawn from a fixed choice set -- e.g. ``--ast-frontend``.
-
-    :class:`SidedStrParam` with the value half validated against *choices*, so
-    a side-scoped option keeps the ``click.Choice`` error message it had
-    before it grew an ``old=``/``new=`` prefix. A bare value is the base for
-    both sides; ``old=``/``new=`` override one side.
-    """
-
-    name = "sided-choice"
-
-    def __init__(self, choices: Sequence[str], *, case_sensitive: bool = False):
-        self.choices = tuple(choices)
-        self.case_sensitive = case_sensitive
-
-    def convert(self, value: Any, param: Any, ctx: Any) -> tuple[str, str]:
-        s = str(value)
-        side = "both"
-        for candidate in _SIDES:
-            prefix = f"{candidate}="
-            if s.startswith(prefix):
-                side, s = candidate, s[len(prefix) :]
-                break
-        normalized = s if self.case_sensitive else s.lower()
-        allowed = (
-            self.choices
-            if self.case_sensitive
-            else tuple(c.lower() for c in self.choices)
-        )
-        if normalized not in allowed:
-            self.fail(
-                f"{s!r} is not one of {', '.join(repr(c) for c in self.choices)}.",
-                param,
-                ctx,
-            )
-        return (side, normalized)
-
-    def get_metavar(self, param: Any, ctx: Any = None) -> str:
-        return "[old=|new=][" + "|".join(self.choices) + "]"
 
 
 def _load_suppression_and_policy(

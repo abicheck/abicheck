@@ -28,14 +28,12 @@ from abicheck.change_registry_types import Verdict
 from abicheck.compatibility_evaluation_packs import PackKind
 from abicheck.compatibility_evaluation_resolver import PackConflictError
 from abicheck.compatibility_evaluation_wiring import (
-    resolve_internal_namespaces,
     resolve_legacy_contract_mode,
     resolve_policy_pack_overrides,
     resolve_selected_packs,
 )
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.errors import PackManifestError
-from abicheck.policy_file import PolicyFile
 
 
 def _write_pack(path, *, pack_id, kind, assignments_yaml, version=1):
@@ -101,78 +99,6 @@ class TestExplicitFlag:
             scope_public_headers=False, scope_public_headers_is_explicit=True
         )
         assert prov.reference == "no_scope_public_headers"
-
-
-class TestNoPolicyFile:
-    def test_none_policy_file_resolves_to_default_layer(self):
-        namespaces, prov = resolve_internal_namespaces(policy_file=None)
-        assert namespaces == ()
-        assert prov.layer is SelectorLayer.BUILT_IN_DEFAULT
-
-    def test_untouched_default_matches_todays_real_behavior(self):
-        # No --policy at all means no PolicyFile is even constructed --
-        # every consuming step already falls back to its own
-        # DEFAULT_INTERNAL_NAMESPACES today; accepting ADR-049 must not
-        # silently change that.
-        namespaces, _ = resolve_internal_namespaces(policy_file=None)
-        assert namespaces == ()
-
-
-class TestPolicyFileSetsNamespaces:
-    def test_policy_file_with_namespaces_resolves_to_explicit_cli(self):
-        # --policy is a flag the user explicitly passed on this
-        # invocation -- EXPLICIT_CLI tier, not PROJECT_CONFIG (which is for
-        # an implicitly-discovered project file), so it isn't silently
-        # outranked by a lower-precedence-by-mechanism candidate (Codex
-        # review, fresh evidence).
-        pf = PolicyFile(internal_namespaces=["detail", "impl"])
-        namespaces, prov = resolve_internal_namespaces(policy_file=pf)
-        assert namespaces == ("detail", "impl")
-        assert prov.layer is SelectorLayer.EXPLICIT_CLI
-
-    def test_a_document_that_stated_an_empty_list_is_a_real_selection(self):
-        # `internal_namespaces: []` in the file says "this project has none",
-        # which only the loader can distinguish from an absent key -- and the
-        # difference matters, since a pack may fill an unstated field.
-        pf = PolicyFile(internal_namespaces=[], internal_namespaces_stated=True)
-        namespaces, prov = resolve_internal_namespaces(policy_file=pf)
-        assert namespaces == ()
-        assert prov.layer is SelectorLayer.EXPLICIT_CLI
-
-    def test_policy_file_with_empty_list_resolves_to_default_layer(self):
-        # An explicit empty list is indistinguishable, once parsed, from the
-        # key never being set at all -- both must fall through to the
-        # built-in default, not be treated as a real EXPLICIT_CLI selection.
-        pf = PolicyFile(internal_namespaces=[])
-        namespaces, prov = resolve_internal_namespaces(policy_file=pf)
-        assert namespaces == ()
-        assert prov.layer is SelectorLayer.BUILT_IN_DEFAULT
-
-    def test_namespace_order_is_canonicalized(self):
-        # D7: equivalent semantic inputs must resolve to an equivalent
-        # object -- two policy files listing the same set in a different
-        # order must resolve identically, mirroring SurfaceConfig's own
-        # canonicalization of this exact field.
-        pf_a = PolicyFile(internal_namespaces=["impl", "detail"])
-        pf_b = PolicyFile(internal_namespaces=["detail", "impl"])
-        namespaces_a, _ = resolve_internal_namespaces(policy_file=pf_a)
-        namespaces_b, _ = resolve_internal_namespaces(policy_file=pf_b)
-        assert namespaces_a == namespaces_b == ("detail", "impl")
-
-    def test_duplicate_namespaces_are_deduped(self):
-        pf = PolicyFile(internal_namespaces=["detail", "detail", "impl"])
-        namespaces, _ = resolve_internal_namespaces(policy_file=pf)
-        assert namespaces == ("detail", "impl")
-
-    def test_provenance_records_the_policy_file_source(self):
-        from pathlib import Path
-
-        pf = PolicyFile(internal_namespaces=["detail"], source_path=Path("policy.yml"))
-        _, prov = resolve_internal_namespaces(policy_file=pf)
-        assert prov.source_kind == "policy_file"
-        assert prov.path == "policy.yml"
-        assert prov.selected_by[0].option == "--policy"
-        assert prov.selected_by[0].path == "policy.yml"
 
 
 class TestNoPackPaths:

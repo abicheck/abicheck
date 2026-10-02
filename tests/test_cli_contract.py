@@ -1244,6 +1244,7 @@ def test_compare_release_matches_service_run_compare(tmp_path: Path) -> None:
     ``service.run_compare`` — they share the one chokepoint (ADR-037 D1)."""
     from abicheck import service
     from abicheck.cli_compare_release import _run_compare_pair
+    from abicheck.cli_compare_release_pairwise import release_parent_request
 
     old_p = _make_snap_file(tmp_path, "libfoo", "1.0", [_func("foo"), _func("bar")])
     new_p = _make_snap_file(tmp_path, "libfoo", "2.0", [_func("foo")])
@@ -1252,21 +1253,15 @@ def test_compare_release_matches_service_run_compare(tmp_path: Path) -> None:
         old_p, new_p, scope_to_public_surface=True
     ).as_tuple()
     rel_result, _, _ = _run_compare_pair(
-        old_p,
-        new_p,
-        old_headers=[],
-        new_headers=[],
-        old_includes=[],
-        new_includes=[],
-        old_version="",
-        new_version="",
-        lang="c++",
-        suppress=None,
-        policy="strict_abi",
-        policy_file_path=None,
-        old_pdb_path=None,
-        new_pdb_path=None,
-        scope_to_public_surface=True,
+        release_parent_request(
+            old_input=old_p,
+            new_input=new_p,
+            old_version="",
+            new_version="",
+            lang="c++",
+            policy="strict_abi",
+            scope_to_public_surface=True,
+        ),
     ).as_tuple()
 
     assert svc_result.verdict == rel_result.verdict

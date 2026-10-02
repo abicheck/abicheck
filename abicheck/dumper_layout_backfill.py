@@ -39,7 +39,6 @@ from .model.graph_join import JoinState
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
     from .dwarf_unified import DwarfSession
     from .elf_metadata import ElfMetadata
@@ -73,14 +72,11 @@ def dwarf_layout_types_or_empty(
     so_path: Path,
     elf_meta: ElfMetadata,
     dwarf_meta: DwarfMetadata,
-    dwarf_adv: AdvancedDwarfMetadata,
     is_clang_backend: bool,
     *,
     symbols_only: bool,
     debug_presence_only: bool,
     debug_format: str | None,
-    version: str,
-    language_profile: str | None,
     session: DwarfSession | None,
 ) -> list[RecordType]:
     """DWARF-derived ``RecordType``\\ s of *so_path*, for ``backfill_dwarf_layout``.
@@ -102,7 +98,7 @@ def dwarf_layout_types_or_empty(
     BTF/CTF presence flag (for checker compatibility) rather than leaving it
     ``False`` — and no real ``DwarfSession`` is opened for that path either
     (*session* is ``None``). Passing ``session=None`` through to
-    ``build_snapshot_from_dwarf`` would make it open *so_path* itself and
+    ``extract_dwarf_declarations`` would make it open *so_path* itself and
     walk whatever real ``.debug_info`` the binary happens to also carry,
     silently backfilling from the DWARF the user explicitly asked to bypass
     by forcing BTF/CTF — on a binary with both sections present, and the
@@ -117,19 +113,9 @@ def dwarf_layout_types_or_empty(
         or not is_clang_backend
     ):
         return []
-    from .dwarf_snapshot import build_snapshot_from_dwarf
+    from .dwarf_snapshot import extract_dwarf_declarations
 
-    return list(
-        build_snapshot_from_dwarf(
-            so_path,
-            elf_meta,
-            dwarf_meta,
-            dwarf_adv,
-            version=version,
-            language_profile=language_profile,
-            session=session,
-        ).declarations.types
-    )
+    return list(extract_dwarf_declarations(so_path, elf_meta, session=session).types)
 
 
 @dataclass(frozen=True)

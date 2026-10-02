@@ -80,8 +80,6 @@ _INVENTORY: dict[tuple[str, str, str], str] = {
     ("abicheck/appcompat.py", "check_appcompat", "run_dump"): "stamped in check_appcompat",
     ("abicheck/stack_checker.py", "_run_abi_diff", "run_dump"): "no headers: binary-only, nothing to own",
     ("abicheck/probe_harness.py", "_snapshot_object_file", "dump"): "no headers (dwarf_only probe)",
-    ("abicheck/cli_buildsource_helpers.py", "_exported_symbols_from_binary", "run_dump"): "no headers; reads export names only",
-    ("abicheck/cli_resolve.py", "_dump_native_binary", "run_dump"): "no production caller (unit-tested helper)",
     ("abicheck/service_dump_cache.py", "_dump_uncached", "run_dump"): "inner layer of resolve_input",
     ("abicheck/service_dump_native.py", "_dump_elf", "dump"): "inner layer of run_dump",
     ("abicheck/service_dump_native.py", "_run_dump_uncached", "_dump_elf"): "inner layer of run_dump",
@@ -148,7 +146,8 @@ def test_every_snapshot_producer_call_is_classified() -> None:
 @pytest.mark.repo_scan
 def test_stamped_sites_really_call_the_stamp() -> None:
     """A site listed as stamped names the function that stamps it, and that
-    function really calls ``classify_extracted``."""
+    function really calls ``classify_extracted`` (directly, or through the
+    snapshot factory's ``finish_ownership``/``finish_snapshot``)."""
     bodies = {
         n.name: n
         for _, tree in _parsed_sources()
@@ -164,7 +163,15 @@ def test_stamped_sites_really_call_the_stamp() -> None:
             for c in ast.walk(body)
             if isinstance(c, ast.Call)
         }
-        assert "classify_extracted" in called, (module, fn, how)
+        assert (
+            "classify_extracted" in called
+            or "finish_ownership" in called
+            or {
+                "finish_snapshot",
+                "OwnershipInputs",
+            }
+            <= called
+        ), (module, fn, how)
 
 
 def test_appcompat_stamps_both_sides(monkeypatch: pytest.MonkeyPatch) -> None:

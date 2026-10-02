@@ -30,11 +30,12 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder, build_snapshot_from_dwarf
+from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
 from abicheck.dwarf_unified import parse_dwarf
 from abicheck.elf_metadata import parse_elf_metadata
 from abicheck.model import AccessLevel
 from abicheck.model.identity import EntityKind, Namespace
+from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
 _GCC = "gcc"
 

@@ -610,7 +610,7 @@ def test_collect_evidence_include_graph_missing_clang_degrades(
     # L5 graph are both collected (`collect_mode="source-target"`, the `dump
     # --sources` default -- collects L3+L4+L5 regardless of --depth; the
     # deleted `collect --source-abi --source-graph summary` combo used to
-    # exercise the identical cli_buildsource_helpers._collect_source_graph ->
+    # exercise the identical tests._build_source_collect._collect_source_graph ->
     # inline_graph_fold path). A missing clang records a failed extractor row
     # but still writes the pack with the build graph.
     #

@@ -69,7 +69,7 @@ would resolve every name as `Any` for external callers (ADR-061).
 
 `input_resolution.py` is a third shape: the real `resolve_input`
 implementation (plus `detect_binary_format`, `sniff_text_format`,
-`collect_metadata`, `load_env_matrix`, private helpers), moved here from
+`collect_metadata`, private helpers), moved here from
 `service.py` (ADR-061 Phase 4). `service_dump_native` (`run_dump`/`_emit`)
 reaches the baselined CLI-registration SCC via `service_header_graph_attach ->
 service_scan -> service`, and `service` imports this module — a static edge

@@ -62,8 +62,13 @@ from ..model import AbiSnapshot, Function
 from ..serialization import load_snapshot
 from ..service_dump_cache import cached_run_dump
 from .header_exclusion_audit import record_achieved_header_exclusions
-from .ownership_request import classify_extracted
 from .project_package_input import resolve_project_package
+from .snapshot_factory import (
+    OwnershipInputs,
+    SnapshotFinish,
+    finish_snapshot,
+    new_snapshot,
+)
 from .storage import is_project_package_archive
 
 if TYPE_CHECKING:
@@ -277,7 +282,7 @@ def _resolve_symvers(path: Path, version: str) -> AbiSnapshot | None:
     kabi = parse_symvers(text)
     if not kabi.entries:
         return None
-    return AbiSnapshot(library=path.name, version=version, kabi=kabi)
+    return new_snapshot(library=path.name, version=version, kabi=kabi)
 
 
 def _typeinfo_functions(func_protos: dict[str, Any]) -> list[Function]:
@@ -349,7 +354,7 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
                 _logger.warning("raw BTF blob %s has no type records; ignoring", path)
                 return None
             btf_dwarf_meta = btf.to_dwarf_metadata()
-            return AbiSnapshot(
+            return new_snapshot(
                 library=path.name,
                 version=version,
                 dwarf=btf_dwarf_meta,
@@ -372,7 +377,7 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
                 _logger.warning("raw CTF blob %s has no type records; ignoring", path)
                 return None
             ctf_dwarf_meta = ctf.to_dwarf_metadata()
-            return AbiSnapshot(
+            return new_snapshot(
                 library=path.name,
                 version=version,
                 dwarf=ctf_dwarf_meta,
@@ -414,8 +419,13 @@ def resolve_input(
     snapshot = _resolve_input_impl(path, headers, includes, version, lang, **kwargs)
     extracted_now = not is_stored_snapshot_operand(path)
     if extracted_now:  # ADR-075 D1: a loaded snapshot keeps its recorded scope
-        classify_extracted(
-            snapshot, ownership, headers, kwargs.get("public_header_dirs")
+        snapshot = finish_snapshot(
+            snapshot,
+            SnapshotFinish(
+                ownership=OwnershipInputs(
+                    ownership, headers, kwargs.get("public_header_dirs")
+                )
+            ),
         )
     # The *achieved* narrowing, never the request; `headers` is still the
     # unfiltered operand (`_resolve_input_impl` applies the patterns).

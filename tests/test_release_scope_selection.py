@@ -289,7 +289,6 @@ class TestDsoOnlyUnclassifiedIsFailed:
     def test_classification_names_the_unreadable_member(self, tmp_path: Path) -> None:
         from abicheck.workflows.release_package import (
             classify_dso_only_package_map,
-            dso_only_package_map,
             resolve_release_package_map,
         )
 
@@ -303,7 +302,6 @@ class TestDsoOnlyUnclassifiedIsFailed:
         assert set(cls.members) == {"libdso.so"}
         assert set(cls.unclassified) == {"libnoelf.so"}
         assert "ELF metadata" in cls.unclassified["libnoelf.so"]
-        assert dso_only_package_map(resolved) == cls.members
 
     @pytest.mark.parametrize("side", ["old", "new"])
     def test_record_marks_it_failed_and_withholds_the_proof(self, side: str) -> None:

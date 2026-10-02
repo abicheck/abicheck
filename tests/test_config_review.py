@@ -761,7 +761,7 @@ class TestReleaseSeverityPolicyAndGlobal:
     def test_per_library_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a kind
         must not silently drop a frozen-namespace-tagged finding below its raw
-        severity — this is the same floor collect_annotations() now honours
+        severity — this is the same floor annotation_report_entries() now honours
         (via result.policy_file), so the release exit code must match it."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
         from abicheck.cli_compare_release import _compute_release_severity_exit_code
@@ -975,13 +975,10 @@ class TestCompareReleaseParallelOrdering:
 
         import abicheck.cli_compare_release_pairwise as _cr
 
-        monkeypatch.setattr(
-            _cr,
-            "_compare_one_library",
-            lambda key, *a: {"library": key, "key": key},
-        )
+        monkeypatch.setattr(_cr, "_compare_one_library", lambda key, *a: {"key": key})
         keys = ["libc", "liba", "libb"]
         old_map = {k: _P(k) for k in keys}
-        out = _cr._compare_release_parallel(keys, (), old_map, max_workers=4)
+        ctx = _cr.ReleaseMemberContext(_cr.release_parent_request(), old_map, {})
+        out = _cr._compare_release_parallel(keys, ctx, old_map, 4)
         # Deterministic: emitted in matched_keys order, not completion order.
         assert [r["key"] for r in out] == keys

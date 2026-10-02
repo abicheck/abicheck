@@ -38,6 +38,7 @@ from ..model.export_entity_name import (  # noqa: F401 -- re-exported for caller
     _read_decimal_length,
     entity_name_components,
 )
+from ..model.symbol_ownership import INTERNAL_NAMESPACE_NAMES
 from .source_link import (
     _TBB_MALLOC_PROXY_C_SYMBOLS,
     _TBB_MALLOC_PROXY_CPP_SYMBOLS,
@@ -514,11 +515,13 @@ def _account_undocumented_export(symbol: str) -> str:
     return ACCOUNT_UNDECLARED
 
 
-#: Namespace/class component names that mark an internal-implementation surface.
+#: Namespace/class component names that mark an internal-implementation surface:
+#: the one shared vocabulary (``model.symbol_ownership``), so export accounting
+#: and every other internal-namespace check agree on ``__detail``/``_impl`` too.
 #: Matched **exactly** against a whole name component (not a substring): an
 #: ordinary name like ``Simple`` merely *containing* ``impl`` is not internal
 #: (Codex review). The anonymous namespace (``_GLOBAL__N_…``) is handled separately.
-_INTERNAL_NS_NAMES = frozenset({"impl", "internal", "detail"})
+_INTERNAL_NS_NAMES = INTERNAL_NAMESPACE_NAMES
 
 
 def _is_internal_ns_component(name: str) -> bool:

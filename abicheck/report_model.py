@@ -219,16 +219,6 @@ class ReportModel:
         pres = VERDICT_PRESENTATION.get(self.verdict_of(change))
         return pres.severity_label if pres else UNKNOWN_SEVERITY_LABEL
 
-    def is_breaking_boundary(self, change: Change) -> bool:
-        """True if *change* is on the breaking side of the gate (BREAKING/API_BREAK).
-
-        The one classification fact every channel must agree on: a finding here
-        must read as error/failure in SARIF/JUnit and breaking in JSON/text;
-        one not here must never read as error/failure.
-        """
-        pres = VERDICT_PRESENTATION.get(self.verdict_of(change))
-        return pres.breaking_boundary if pres else False
-
     @classmethod
     def from_result(
         cls,

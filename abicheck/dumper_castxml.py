@@ -104,7 +104,6 @@ from .model import (
     Function,
     Param,
     RecordType,
-    TypeField,
     Variable,
     Visibility,
 )
@@ -185,24 +184,8 @@ class _CastxmlParser:
         return self._ctx.virtual_methods_by_class
 
     @property
-    def _source_lines_cache(self) -> dict[str, list[str]]:
-        return self._ctx.source_lines_cache
-
-    @property
-    def _function_els(self) -> list[Element]:
-        return self._ctx.function_els
-
-    @property
     def _variable_els(self) -> list[Element]:
         return self._ctx.variable_els
-
-    @property
-    def _record_els(self) -> list[Element]:
-        return self._ctx.record_els
-
-    @property
-    def _enum_els(self) -> list[Element]:
-        return self._ctx.enum_els
 
     @property
     def _typedef_els(self) -> list[Element]:
@@ -212,30 +195,8 @@ class _CastxmlParser:
     def _type_name_cache(self) -> dict[str, str]:
         return self._ctx.type_name_cache
 
-    @property
-    def _pointer_depth_cache(self) -> dict[str, int]:
-        return self._ctx.pointer_depth_cache
-
-    @property
-    def _vtable_slot_root(self) -> dict[str, int | str]:
-        return self._ctx.vtable_slot_root
-
-    @property
-    def _vtable_slot_extra_roots(self) -> dict[str, list[int | str]]:
-        return self._ctx.vtable_slot_extra_roots
-
     def _resolve(self, id_: str) -> Element | None:
         return self._ctx.resolve(id_)
-
-    def _source_line_has_explicit(
-        self,
-        loc_el: Element | None,
-        declaration_el: Element | None = None,
-    ) -> bool | None:
-        """Fallback for castxml Converter nodes that omit explicit="1"."""
-        return _castxml_location.source_line_has_explicit(
-            self._ctx, loc_el, declaration_el
-        )
 
     # ── type-graph resolution, delegated to extract.headers.castxml.type_resolution ──
     # (ADR-061 D9 "type_resolution.py": entity modules and the still-unmigrated
@@ -247,9 +208,6 @@ class _CastxmlParser:
     def _type_name_uncached(self, id_: str, depth: int = 0) -> str:
         return _castxml_type_resolution.type_name_uncached(self._ctx, id_, depth)
 
-    def _cv_qualifies_pointer_value(self, type_id: str) -> bool:
-        return _castxml_type_resolution.cv_qualifies_pointer_value(self._ctx, type_id)
-
     def _type_alignment_bits(self, id_: str, depth: int = 0) -> int | None:
         return _castxml_type_resolution.type_alignment_bits(self._ctx, id_, depth)
 
@@ -259,14 +217,8 @@ class _CastxmlParser:
     def _is_global_scope(self, el: Any) -> bool:
         return _castxml_type_resolution.is_global_scope(self._ctx, el)
 
-    def _qualified_type_name(self, el: Any, leaf_name: str | None = None) -> str | None:
-        return _castxml_type_resolution.qualified_type_name(self._ctx, el, leaf_name)
-
     def _pointer_depth(self, id_: str, depth: int = 0) -> int:
         return _castxml_type_resolution.pointer_depth(self._ctx, id_, depth)
-
-    def _pointer_depth_uncached(self, id_: str, depth: int = 0) -> int:
-        return _castxml_type_resolution.pointer_depth_uncached(self._ctx, id_, depth)
 
     @staticmethod
     def _access_level(el: Element) -> AccessLevel:
@@ -380,15 +332,6 @@ class _CastxmlParser:
         """Return True if element originates from a compiler built-in pseudo-file."""
         return _castxml_location.is_builtin_element(self._ctx, el)
 
-    def _build_hidden_friend_ids(self) -> dict[str, str]:
-        """Map function ids to the qualified name of their befriending class.
-
-        See :func:`abicheck.extract.headers.castxml.functions.
-        build_hidden_friend_ids` (this method's real home since ADR-061
-        Phase 5 item 1) for the full account.
-        """
-        return _castxml_functions.build_hidden_friend_ids(self._ctx)
-
     # castxml emits non-member operator overloads as <OperatorFunction>
     # (e.g. `bool operator==(const Foo&, const Foo&)` at namespace scope,
     # including hidden friends declared inside a class body). Single source
@@ -416,12 +359,6 @@ class _CastxmlParser:
         :func:`~.extract.headers.castxml.functions.parse_function_params`."""
         return _castxml_functions.parse_function_params(self._ctx, el)
 
-    def _enclosing_class_qualified_name(self, el: Element) -> str:
-        """Fully-qualified name of the class/struct/union enclosing a
-        Constructor/Destructor element *el*. See
-        :func:`~.extract.headers.castxml.functions.enclosing_class_qualified_name`."""
-        return _castxml_functions.enclosing_class_qualified_name(self._ctx, el)
-
     @staticmethod
     def _function_mangled_name(
         el: Element,
@@ -435,32 +372,6 @@ class _CastxmlParser:
         return _castxml_functions.function_mangled_name(
             el, name, ctor_identity_types, raw_mangled, qualified_scope
         )
-
-    def _function_source_location(
-        self, el: Element
-    ) -> tuple[str | None, Element | None]:
-        """Resolve a function element's ``file:line`` source location and
-        Location element. See
-        :func:`~.extract.headers.castxml.functions.function_source_location`."""
-        return _castxml_functions.function_source_location(self._ctx, el)
-
-    def _function_is_explicit(self, el: Element, loc_el: Element | None) -> bool | None:
-        """Determine the tri-state `explicit` specifier for a function
-        element. See
-        :func:`~.extract.headers.castxml.functions.function_is_explicit`."""
-        return _castxml_functions.function_is_explicit(self._ctx, el, loc_el)
-
-    @staticmethod
-    def _function_ref_qualifier(el: Element, mangled: str) -> str:
-        """Derive the &/&& ref-qualifier. See
-        :func:`~.extract.headers.castxml.functions.function_ref_qualifier`."""
-        return _castxml_functions.function_ref_qualifier(el, mangled)
-
-    def _function_exception_spec(self, el: Element) -> str:
-        """Render a function element's dynamic exception specification, if
-        any. See
-        :func:`~.extract.headers.castxml.functions.function_exception_spec`."""
-        return _castxml_functions.function_exception_spec(self._ctx, el)
 
     def _parse_function_element(
         self, el: Element, hidden_friend_owner_by_id: dict[str, str]
@@ -745,9 +656,6 @@ class _CastxmlParser:
     def parse_types(self) -> list[RecordType]:
         return _castxml_records.parse_types(self._ctx)
 
-    def _is_public_record_type(self, el: Any) -> bool:
-        return _castxml_records.is_public_record_type(self._ctx, el)
-
     def _build_record_type(
         self, el: Any, override_name: str | None = None
     ) -> RecordType:
@@ -759,25 +667,6 @@ class _CastxmlParser:
 
     def _optional_int_attr(self, el: Any, attr: str) -> int | None:
         return _castxml_location.optional_int_attr(el, attr)
-
-    def _parse_record_fields(self, el: Any) -> list[TypeField]:
-        """Parse struct/class/union fields. See
-        :func:`~.extract.headers.castxml.records.parse_record_fields`."""
-        return _castxml_records.parse_record_fields(self._ctx, el)
-
-    def _expand_anonymous_field(
-        self, field_el: Any, _depth: int = 0, _outer_offset: int = 0
-    ) -> list[TypeField]:
-        """Flatten anonymous struct/union field into the parent's field
-        list. See
-        :func:`~.extract.headers.castxml.records.expand_anonymous_field`."""
-        return _castxml_records.expand_anonymous_field(
-            self._ctx, field_el, _depth, _outer_offset
-        )
-
-    @staticmethod
-    def _parse_bitfield_bits(bits_raw: str | None) -> tuple[int | None, bool]:
-        return _castxml_records.parse_bitfield_bits(bits_raw)
 
     def _build_vtable(self, class_id: str) -> list[str]:
         return _castxml_records.build_vtable(self._ctx, class_id)
@@ -805,14 +694,6 @@ class _CastxmlParser:
         See
         :func:`~.extract.headers.castxml.records.resolved_override_keys`."""
         return _castxml_records.resolved_override_keys(self._ctx, overrides_id)
-
-    def _vtable_slot_key(
-        self, method_el: Any, mid: str, mangled_name: str
-    ) -> tuple[int | str, list[int | str], int | None]:
-        """``(key, extra_keys, vtable_index)`` for one virtual method
-        declaration. See
-        :func:`~.extract.headers.castxml.records.vtable_slot_key`."""
-        return _castxml_records.vtable_slot_key(self._ctx, method_el, mid, mangled_name)
 
     def parse_enums(self) -> list[EnumType]:
         return _castxml_enums.parse_enums(self._ctx)

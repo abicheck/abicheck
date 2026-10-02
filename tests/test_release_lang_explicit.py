@@ -52,8 +52,8 @@ def test_member_compare_forwards_lang_explicit(
     monkeypatch.setattr("abicheck.service.run_compare", _fake)
     with pytest.raises(RuntimeError):
         pairwise._run_compare_pair(
-            Path("old.so"), Path("new.so"), [], [], [], [], "1", "2", "c++",
-            None, "strict_abi", None, None, None, lang_explicit=explicit,
+            pairwise.release_parent_request(old_input=Path("old.so"), new_input=Path("new.so"),
+                lang="c++", lang_explicit=explicit, include_dependencies=True),
         )  # fmt: skip
     assert seen["lang"] == "c++"
     assert seen["lang_explicit"] is explicit

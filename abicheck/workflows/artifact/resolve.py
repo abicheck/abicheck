@@ -429,7 +429,7 @@ def _seeded_includes_and_compile_context(
     ``build_info`` but no explicit ``includes``, the L2 public-header parse
     cannot see the include dirs the build knows -- the pvxs/EPICS case, a
     public header reaching into a dependency SDK) and
-    ``derive_l2_compile_context`` (folding the build's real compile context
+    ``derive_l2_compile_context`` (removed) (folding the build's real compile context
     -- standard, defines/undefines, include search paths, sysroot, target
     triple -- onto the L2 header-AST invocation, P0.3) -- each independently
     capable of running :func:`~abicheck.buildsource.inline.collect_inline_pack`.
@@ -573,7 +573,7 @@ def _seeded_includes_and_compile_context(
     inferred build dir may hold the generated headers they point at.
 
     May raise :class:`~abicheck.errors.HeaderCompileContextAmbiguousError` —
-    the same fail-closed-on-ambiguity contract ``derive_l2_compile_context``
+    the same fail-closed-on-ambiguity contract ``derive_l2_compile_context`` (removed)
     already had (a genuine ABI-relevant disagreement across compile units is
     never silently resolved by picking one).
     """

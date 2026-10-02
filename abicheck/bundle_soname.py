@@ -11,7 +11,7 @@
 Split out of ``bundle.py`` (a leaf module, no other imports needed) purely to
 keep that file under the AI-readiness file-size hard cap — see
 ``bundle.py``'s own ``_detect_intra_dep_removed``/
-``_detect_unresolved_intra_dependency`` (soname matching) and
+``_detect_unresolved_intra_dependency`` (removed) (soname matching) and
 ``_compute_resolution_graph`` (alias recovery), which are this module's
 only callers, plus :mod:`abicheck.model.bundle_facts` (G38 Phase 2), which uses
 ``filesystem_alias_basenames`` directly to capture real on-disk aliases

@@ -645,17 +645,6 @@ def _no_source_graph(edge_kind: str) -> CoverageRecord:
     )  # fmt: skip
 
 
-def query_edges(
-    evidence: EdgeEvidence,
-    edge_kind: str,
-    subjects: Iterable[str],
-    *,
-    scope: frozenset[str] | None = None,
-) -> Mapping[str, EdgeQueryResult]:
-    """:meth:`EdgeEvidence.query` for many subjects at once."""
-    return {s: evidence.query(edge_kind, s, scope=scope) for s in subjects}
-
-
 # ---------------------------------------------------------------------------
 # The report summary
 # ---------------------------------------------------------------------------

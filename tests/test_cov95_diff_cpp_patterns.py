@@ -11,14 +11,12 @@
 These exercise the internal helpers and edge-case branches that the
 existing ``test_cpp_pattern_detectors.py`` suite does not reach:
 
-* ``_unqualified_function_name`` template-arg stripping loop
 * ``_parent_namespace`` with no ``::``
 * ``_stable_leading_template_args`` degenerate / mismatch branches
 * ``_extract_template_args`` no-match path
 * ``_split_top_level_commas`` nesting
 * tag-rename candidate rejection paths
 * inline-body pimpl helper branches
-* bundle-SONAME directory scanning and best-effort SONAME readers
 
 Pure Python, no external tools — part of the default fast lane.
 """
@@ -37,12 +35,8 @@ from abicheck.diff_cpp_patterns import (
     _inline_accessors_for,
     _last_segment,
     _parent_namespace,
-    _read_elf_soname,
-    _read_soname_best_effort,
     _stable_leading_template_args,
     _symbols_embedding_leaf,
-    _unqualified_function_name,
-    bundle_members_from_directory,
     detect_bundle_soname_skew,
     detect_default_template_arg_changed,
     detect_inline_body_renamed_member,
@@ -90,30 +84,6 @@ def _snap(
         functions=functions or [],
         types=types or [],
     )
-
-
-# ---------------------------------------------------------------------------
-# _unqualified_function_name (lines 145-157)
-# ---------------------------------------------------------------------------
-
-
-class TestUnqualifiedFunctionName:
-    def test_plain_qualified(self) -> None:
-        assert _unqualified_function_name("ns::function") == "function"
-
-    def test_function_template_args_stripped(self) -> None:
-        assert _unqualified_function_name("ns::function<int>") == "function"
-
-    def test_class_template_args_stripped(self) -> None:
-        # The trailing ``::method`` must survive after the class template
-        # args are removed.
-        assert _unqualified_function_name("ns::Class<float, A>::method") == "method"
-
-    def test_nested_template_args(self) -> None:
-        assert _unqualified_function_name("ns::Class<X<int>>::method<Y>") == "method"
-
-    def test_unqualified_with_template(self) -> None:
-        assert _unqualified_function_name("function<int>") == "function"
 
 
 # ---------------------------------------------------------------------------
@@ -678,170 +648,6 @@ class TestBundleSkewBranches:
 
     def test_empty_deltas_returns_empty(self) -> None:
         assert detect_bundle_soname_skew([], []) == []
-
-
-# ---------------------------------------------------------------------------
-# bundle_members_from_directory (964-984)
-# ---------------------------------------------------------------------------
-
-
-class TestBundleMembersFromDirectory:
-    def test_nonexistent_dir_returns_empty(self, tmp_path) -> None:
-        missing = tmp_path / "does_not_exist"
-        assert bundle_members_from_directory(str(missing)) == []
-
-    def test_skips_subdirs_and_non_elf(self, tmp_path) -> None:
-        # A subdirectory (not a file) → skipped at line 969.
-        (tmp_path / "subdir").mkdir()
-        # A non-ELF file (wrong magic) → _read_soname_best_effort None → skip.
-        (tmp_path / "readme.txt").write_bytes(b"not an elf at all")
-        # An ELF-magic file whose parse yields no soname → still skipped.
-        (tmp_path / "libstub.so").write_bytes(b"\x7fELF" + b"\x00" * 60)
-        members = bundle_members_from_directory(str(tmp_path))
-        assert members == []
-
-    def test_constructs_member_from_synthetic_soname(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        # Monkeypatch the SONAME reader so a recognised .so yields a real
-        # SONAME with a major version → BundleMember constructed (977-983).
-        from abicheck import diff_cpp_patterns as mod
-
-        lib = tmp_path / "libfoo.so.3"
-        lib.write_bytes(b"\x7fELF" + b"\x00" * 60)
-
-        def fake_reader(path: str) -> str | None:
-            return "libfoo.so.3" if path.endswith("libfoo.so.3") else None
-
-        monkeypatch.setattr(mod, "_read_soname_best_effort", fake_reader)
-        members = bundle_members_from_directory(str(tmp_path))
-        assert len(members) == 1
-        assert members[0].library == "libfoo.so.3"
-        assert members[0].soname == "libfoo.so.3"
-        assert members[0].soname_major == 3
-
-    def test_vendor_hash_stripped_from_soname(self, tmp_path, monkeypatch) -> None:
-        # G9 remaining half: DT_SONAME is read directly here (unlike the
-        # already-normalized filename half); an auditwheel/delocate hash
-        # suffix on the SONAME itself must be stripped so BundleMember.soname
-        # carries the canonical logical SONAME its field docstring promises.
-        from abicheck import diff_cpp_patterns as mod
-
-        lib = tmp_path / "libfoo_core-a1b2c3d4.so.2"
-        lib.write_bytes(b"\x7fELF" + b"\x00" * 60)
-
-        def fake_reader(path: str) -> str | None:
-            return "libfoo_core-a1b2c3d4.so.2" if path.endswith(".so.2") else None
-
-        monkeypatch.setattr(mod, "_read_soname_best_effort", fake_reader)
-        members = bundle_members_from_directory(str(tmp_path))
-        assert len(members) == 1
-        assert members[0].soname == "libfoo_core.so.2"
-        assert members[0].soname_major == 2
-
-    def test_vendor_hash_stripped_before_major_extraction(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        # Codex review (fresh finding beyond the _members() fix covered by
-        # test_vendor_hash_stripped_from_soname above): a delocate-style
-        # install name puts the content hash *after* the version, e.g.
-        # ``libfoo.2-a1b2c3.dylib``. _extract_soname_major's raw-string regex
-        # requires the SONAME to end in ``.<digit>.dylib``, so on the
-        # unstripped string it returns None and the member used to be
-        # skipped entirely before strip_vendor_hash ever ran. The major must
-        # be extracted from the *stripped* SONAME.
-        from abicheck import diff_cpp_patterns as mod
-
-        lib = tmp_path / "libfoo.2-a1b2c3.dylib"
-        lib.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 60)
-
-        def fake_reader(path: str) -> str | None:
-            return "libfoo.2-a1b2c3.dylib" if path.endswith(".dylib") else None
-
-        monkeypatch.setattr(mod, "_read_soname_best_effort", fake_reader)
-        members = bundle_members_from_directory(str(tmp_path))
-        assert len(members) == 1
-        assert members[0].soname == "libfoo.2.dylib"
-        assert members[0].soname_major == 2
-
-    def test_soname_without_major_skipped(self, tmp_path, monkeypatch) -> None:
-        # SONAME present but no extractable major → line 975-976 continue.
-        from abicheck import diff_cpp_patterns as mod
-
-        lib = tmp_path / "libfoo.so"
-        lib.write_bytes(b"\x7fELF" + b"\x00" * 60)
-        monkeypatch.setattr(mod, "_read_soname_best_effort", lambda p: "libfoo.so")
-        assert bundle_members_from_directory(str(tmp_path)) == []
-
-
-# ---------------------------------------------------------------------------
-# _read_soname_best_effort (990-998) and _read_elf_soname (1004-1014)
-# ---------------------------------------------------------------------------
-
-
-class TestReadSonameBestEffort:
-    def test_nonexistent_path_returns_none(self, tmp_path) -> None:
-        # open() raises OSError → None (line 994).
-        missing = tmp_path / "nope.so"
-        assert _read_soname_best_effort(str(missing)) is None
-
-    def test_non_elf_magic_returns_none(self, tmp_path) -> None:
-        f = tmp_path / "thing.bin"
-        f.write_bytes(b"MZ\x00\x00rest")  # PE magic, not handled → None (998).
-        assert _read_soname_best_effort(str(f)) is None
-
-    def test_elf_magic_delegates_to_elf_reader(self, tmp_path, monkeypatch) -> None:
-        from abicheck import diff_cpp_patterns as mod
-
-        f = tmp_path / "lib.so"
-        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
-        monkeypatch.setattr(mod, "_read_elf_soname", lambda p: "libx.so.5")
-        assert _read_soname_best_effort(str(f)) == "libx.so.5"
-
-
-class TestReadElfSoname:
-    def test_parse_error_returns_none(self, tmp_path, monkeypatch) -> None:
-        # parse_elf_metadata raising → caught, return None (lines 1012-1013).
-        from abicheck import elf_metadata
-
-        f = tmp_path / "lib.so"
-        f.write_bytes(b"\x7fELF" + b"\x00" * 4)
-
-        def boom(_path):
-            raise ValueError("bad elf")
-
-        monkeypatch.setattr(elf_metadata, "parse_elf_metadata", boom)
-        assert _read_elf_soname(str(f)) is None
-
-    def test_returns_soname_from_metadata(self, tmp_path, monkeypatch) -> None:
-        from abicheck import elf_metadata
-
-        class _Meta:
-            soname = "libz.so.1"
-
-        f = tmp_path / "lib.so"
-        f.write_bytes(b"\x7fELF")
-        monkeypatch.setattr(elf_metadata, "parse_elf_metadata", lambda p: _Meta())
-        assert _read_elf_soname(str(f)) == "libz.so.1"
-
-    def test_metadata_none_returns_none(self, tmp_path, monkeypatch) -> None:
-        from abicheck import elf_metadata
-
-        f = tmp_path / "lib.so"
-        f.write_bytes(b"\x7fELF")
-        monkeypatch.setattr(elf_metadata, "parse_elf_metadata", lambda p: None)
-        assert _read_elf_soname(str(f)) is None
-
-    def test_metadata_empty_soname_returns_none(self, tmp_path, monkeypatch) -> None:
-        from abicheck import elf_metadata
-
-        class _Meta:
-            soname = ""
-
-        f = tmp_path / "lib.so"
-        f.write_bytes(b"\x7fELF")
-        monkeypatch.setattr(elf_metadata, "parse_elf_metadata", lambda p: _Meta())
-        assert _read_elf_soname(str(f)) is None
 
 
 # ---------------------------------------------------------------------------

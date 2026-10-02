@@ -364,7 +364,7 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
             # See Change.symbol_binding's docstring - None when not captured.
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
             entity_id=v_old.entity_id,
-            demangled_symbol=_elf_only_demangled_name(mangled, v_old.visibility),
+            demangled_symbol=_elf_only_demangled_name(mangled, v_old),
             # See _check_removed_function's identical stamp.
             surface_facts=surface_fact_summary(v_old),
         )

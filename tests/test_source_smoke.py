@@ -275,7 +275,7 @@ def test_msvc_syntax_mode_uses_cl_flag_syntax(tmp_path, monkeypatch):
         assert kwargs.get("cwd") == str(tmp_path / "work")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(source_smoke_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(source_smoke_module, "run_bounded", _fake_run)
 
     spec = SourceSmokeSpec(
         standard="c++17",
@@ -309,7 +309,7 @@ def test_msvc_link_mode_uses_cl_flag_syntax(tmp_path, monkeypatch):
         seen_cmds.append(cmd)
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(source_smoke_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(source_smoke_module, "run_bounded", _fake_run)
 
     app = "void api();\nint main() { api(); }\n"
     spec = SourceSmokeSpec(

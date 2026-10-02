@@ -57,6 +57,8 @@ SCAN_GLOBS = (
     # Flat-root policy owner of the internal-namespace demotion (#1231); it
     # decides contract membership although it predates the policy/ package.
     "internal_leak*.py",
+    # Owner of the internal-namespace vocabulary every one of those reads.
+    "model/symbol_ownership.py",
 )
 
 _VOCAB_NAME = re.compile(

@@ -587,6 +587,7 @@ def _run_post_processing(
     ``surf_new`` access.
     """
     from .post_processing import DEFAULT_PIPELINE
+    from .workflows.snapshot_factory import absent_baseline
 
     frozen_ns = list(policy_file.frozen_namespaces) if policy_file is not None else []
     internal_ns = _internal_namespaces(policy_file) or None
@@ -604,6 +605,7 @@ def _run_post_processing(
         collapse_versioned_symbols=collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
         disposition_ledger=disposition_ledger,
+        absent_baseline=absent_baseline(new.library) if old is None else None,
     )
     # scoping is "resolved" unless it was requested and had to fall back to the
     # full export table (issue #235: an unconfirmed scope must not read as a
@@ -1217,10 +1219,8 @@ def compare(
     # NumPy C-API compatibility-envelope delta (G26): needs only the two
     # snapshots' own numpy_capi field (no external wheel metadata), so this
     # runs unconditionally — unlike the wheel-metadata cross-check
-    # (check_numpy_metadata_contract), which needs a declared numpy
-    # requirement compare() has no access to and stays a standalone,
-    # programmatic-use function (same "not yet wired into the CLI path"
-    # precedent as G10's package.parse_manylinux_glibc_floor).
+    # (the removed check_numpy_metadata_contract), which needed a declared
+    # numpy requirement compare() has no access to.
     if old is not None:
         from .diff_numpy_capi import diff_numpy_capi_surfaces
 

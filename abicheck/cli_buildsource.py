@@ -33,40 +33,19 @@ import click
 from .buildsource.model import DataLayer
 from .buildsource.pack import BuildSourcePack
 from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stability / tests)
-    _build_coverage as _build_coverage,
-    _collect_source_graph as _collect_source_graph,
-    _detect_coverage_asymmetry as _detect_coverage_asymmetry,
-    _echo_capabilities as _echo_capabilities,
-    _echo_collection_summary as _echo_collection_summary,
-    _echo_compare_side_coverage as _echo_compare_side_coverage,
-    _echo_coverage as _echo_coverage,
-    _enforce_strict_mode as _enforce_strict_mode,
-    _exported_symbols_from_binary as _exported_symbols_from_binary,
     _exported_symbols_from_snapshot as _exported_symbols_from_snapshot,
-    _ingest_graph_backends as _ingest_graph_backends,
-    _intrinsic_coverage as _intrinsic_coverage,
     _is_inputs_pack_dir as _is_inputs_pack_dir,
-    _layer_presence as _layer_presence,
     _load_inputs_pack_or_raise as _load_inputs_pack_or_raise,
     _load_pack_or_raise as _load_pack_or_raise,
-    _merge_attach_combined as _merge_attach_combined,
-    _merge_fold_packs as _merge_fold_packs,
-    _merge_handle_conflicts as _merge_handle_conflicts,
-    _merge_load_snapshots as _merge_load_snapshots,
-    _merge_pick_base as _merge_pick_base,
-    _merge_print_summary as _merge_print_summary,
-    _optional_coverage as _optional_coverage,
     _resolve_side_pack as _resolve_side_pack,
-    _run_adapters as _run_adapters,
-    _run_external_extractors as _run_external_extractors,
     attach_evidence_metrics as attach_evidence_metrics,
     diff_embedded_build_source as diff_embedded_build_source,
-    parse_from_specs as parse_from_specs,
     prepare_embedded_build_source as prepare_embedded_build_source,
     purge_external_outputs as purge_external_outputs,
 )
 from .errors import SnapshotError, ValidationError
 from .evidence_depth import layer_payload_empty
+from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -180,7 +159,6 @@ def dump_source_only(
     honors the same compiler override a binary dump would.
     """
     from .frontends.cli.runtime import _stamp_provenance
-    from .model import AbiSnapshot
     from .workflows.extraction import resolve_source_frontend_clang_bin
 
     if sources is None and build_info is None:
@@ -192,7 +170,7 @@ def dump_source_only(
     # `merge` keeps the artifact side as the base regardless.
     hint = sources if sources is not None else build_info
     library = hint.name if hint is not None else "source"
-    snap = AbiSnapshot(library=library, version=version)
+    snap = new_snapshot(library=library, version=version)
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     _write_snapshot_output(
         snap,
@@ -493,9 +471,9 @@ def _write_snapshot_output(
     # check_requested_depth_satisfied's docstring. Checked last, after every
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
-    from .workflows.extraction import resolve_dependency_scope
+    from .workflows.snapshot_factory import finish_dependency_scope
 
-    snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
+    snap = finish_dependency_scope(snap, include_dependencies, header_roots)
     # ADR-059: one payload dict, one JSON encode -- previously this built a
     # full JSON *string* via snapshot_to_json(), then fold_dump_provenance_
     # into_json() re-parsed and re-serialized that entire string just to

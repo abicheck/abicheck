@@ -36,7 +36,7 @@ disconnected graphs that merely look joined.
 Everything here degrades to "no answer" rather than to a wrong one: with no
 library-side L5 graph (no ``--sources``/``--build-info`` and no header-only
 graph), or with a graph that carries no ``SOURCE_DECL_MAPS_TO_SYMBOL`` edge
-for the symbol in question, :func:`explain_required_symbol` returns ``None``
+for the symbol in question, :func:`explain_required_symbols` yields nothing
 and the finding keeps exactly the wording it had before this module existed.
 Absence of a consumer edge is never evidence of absence of a dependency — the
 same coverage-honesty rule the rest of the graph follows (ADR-031 D9).
@@ -253,22 +253,6 @@ def join_consumer_graph(
     return joined
 
 
-def consumer_required_symbol_nodes(graph: SourceGraphSummary) -> frozenset[str]:
-    """Node ids some consumer in *graph* requires — the set that makes a proof
-    path "consumer-proven" (ADR-046 D6 tier 1, ADR-057).
-
-    Empty for any graph with no consumer facts folded in, which is every graph
-    produced before this module existed and every run without ``--used-by``.
-    Defined in ``buildsource.graph_impact`` (the selector that reads it must
-    not import back into ``impact/`` to compute its own tier) and re-exported
-    here so this module stays the one place a caller looks for the consumer
-    vocabulary.
-    """
-    from ..buildsource.graph_impact import _consumer_required_nodes
-
-    return _consumer_required_nodes(graph)
-
-
 def _node_visibility(node: GraphNode | None) -> str:
     """*node*'s own declared visibility, reading ``resolved`` ahead of
     ``attrs`` — the same order ``graph_impact._node_is_public`` uses, so a
@@ -482,14 +466,3 @@ def explain_required_symbols(
             alternative_entry_paths=[p for p in paths if p is not preferred],
         )
     return out
-
-
-def explain_required_symbol(
-    graph: SourceGraphSummary, symbol: str, *, consumer: str = ""
-) -> ConsumerImpactPath | None:
-    """Single-symbol convenience over :func:`explain_required_symbols`.
-
-    Prefer the batch form when explaining more than one symbol from the same
-    graph — see its docstring for why.
-    """
-    return explain_required_symbols(graph, [symbol], consumer=consumer).get(symbol)

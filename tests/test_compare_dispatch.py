@@ -1378,9 +1378,9 @@ class TestCompareDispatch:
         seen: list[bool] = []
         real_run_compare_pair = cli_compare_release._run_compare_pair
 
-        def _capture(*args: object, **kwargs: object) -> object:
-            seen.append(bool(kwargs.get("include_dependencies")))
-            return real_run_compare_pair(*args, **kwargs)
+        def _capture(request, *args: object, **kwargs: object) -> object:  # type: ignore[no-untyped-def]
+            seen.append(bool(request.include_dependencies))
+            return real_run_compare_pair(request, *args, **kwargs)
 
         monkeypatch.setattr(
             "abicheck.cli_compare_release_pairwise._run_compare_pair", _capture

@@ -48,7 +48,6 @@ from typing import TYPE_CHECKING, Any
 
 from .buildsource.source_inputs import granting_live_source_licence
 from .clang_layout_tool import attach_clang_layout
-from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import (
     AbicheckError,
     SnapshotError,
@@ -75,6 +74,7 @@ from .service_metadata_attach import (
     _try_attach_sycl_metadata,
 )
 from .storage import closure_identity
+from .workflows.run_dump_scope import wrap_run_dump_with_dependency_scope
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -588,9 +588,9 @@ def _apply_native_provenance(
     surface — the exact false-clean result the ELF fix closed, left open on
     these two formats (Codex review, fresh evidence).
     """
-    from .provenance import apply_provenance
+    from .workflows.snapshot_factory import finish_provenance
 
-    return apply_provenance(
+    return finish_provenance(
         snap,
         public_headers,
         public_header_dirs,

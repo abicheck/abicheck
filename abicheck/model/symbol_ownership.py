@@ -36,6 +36,7 @@ from __future__ import annotations
 from ..name_classification import INTERNAL_NAMESPACE_COMPONENTS, is_rtti_symbol
 
 __all__ = [
+    "DEFAULT_INTERNAL_NAMESPACES",
     "INTERNAL_NAMESPACE_NAMES",
     "has_internal_namespace_component",
     "owning_scope_components",
@@ -47,9 +48,17 @@ __all__ = [
 # that already hold *parsed* scope components rather than raw mangled text.
 # Kept in lockstep with INTERNAL_NAMESPACE_COMPONENTS above by
 # ``tests/test_name_classification.py``.
-INTERNAL_NAMESPACE_NAMES: frozenset[str] = frozenset(
-    {"internal", "detail", "impl", "__detail", "_impl"}
+#: The conventional internal-namespace segments, in their documented order --
+#: the one list every "is this name in an internal namespace" check and the
+#: policy default (``internal_leak.DEFAULT_INTERNAL_NAMESPACES``) read.
+DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = (
+    "detail",
+    "impl",
+    "internal",
+    "__detail",
+    "_impl",
 )
+INTERNAL_NAMESPACE_NAMES: frozenset[str] = frozenset(DEFAULT_INTERNAL_NAMESPACES)
 
 
 def _internal_component_in_region(region: str) -> bool:

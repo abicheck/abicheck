@@ -87,6 +87,7 @@ __all__ = [
     "is_binary_exported",
     "is_confirmed_false",
     "is_confirmed_true",
+    "is_dynamically_exported",
     "is_export_confirmed_absent",
     "is_export_table_only_record",
     "is_header_declared",
@@ -95,6 +96,7 @@ __all__ = [
     "is_unknown",
     "public_header_contract_fact",
     "surface_fact_summary",
+    "visibility_label",
 ]
 
 #: Diagnostic stamped on every fact this module derives from the legacy
@@ -365,6 +367,33 @@ def is_export_table_only_record(decl: SurfaceFactBearing) -> bool:
     return not is_header_declared(decl)
 
 
+def is_dynamically_exported(
+    decl: SurfaceFactBearing, *, export_table_only_snapshot: bool
+) -> bool:
+    """Confirmed (c), with the sharper pre-split reading of the legacy enum.
+
+    A producer-set export fact answers directly. A pre-v46 record (no fact,
+    so :func:`binary_exported` derives one from ``Visibility``) cannot use
+    the bridge's reading, which counts ``ELF_ONLY`` as exported: that member
+    means "exported, no header corroboration" only on a snapshot built from
+    the export table alone (``AbiSnapshot.elf_only_mode``). On a
+    header-parsed snapshot both header-AST backends assign ``ELF_ONLY`` to a
+    declaration found in ``.symtab`` but **not** ``.dynsym`` -- declared,
+    not dynamically exported. *export_table_only_snapshot* names which of
+    the two the record came from; ``PUBLIC`` is exported either way and
+    ``HIDDEN`` never is.
+    """
+    exported = binary_exported(decl)
+    if not is_legacy_derived(exported):
+        return is_confirmed_true(exported)
+    vis = getattr(decl, "visibility", Visibility.PUBLIC)
+    if vis is Visibility.PUBLIC:
+        return True
+    if vis is Visibility.ELF_ONLY:
+        return export_table_only_snapshot
+    return False
+
+
 def is_legacy_derived(fact: Fact[bool]) -> bool:
     """Whether *fact* came from this module's legacy ``Visibility`` bridge
     rather than from a producer that observed it.
@@ -524,3 +553,15 @@ def headers_discarded_surface_facts(*, reason: str) -> dict[str, Fact[bool]]:
         "declared_in_headers_fact": Fact.not_collected(reason),
         "in_public_contract_fact": Fact.not_collected(reason),
     }
+
+
+def visibility_label(decl: SurfaceFactBearing) -> str:
+    """The legacy ``Visibility`` value as report text (``"public"``,
+    ``"hidden"``, ``"elf_only"``) -- for a finding's ``old_value``/
+    ``new_value``/description, which have always carried it.
+
+    Display only: no detector may branch on this string. The questions the
+    enum used to answer are the accessors above.
+    """
+    vis: Visibility = getattr(decl, "visibility", Visibility.PUBLIC)
+    return vis.value

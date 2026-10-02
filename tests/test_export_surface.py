@@ -30,7 +30,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
-from abicheck.export_surface import compute_export_surface, observed_export_names
+from abicheck.export_surface import compute_export_surface
 from abicheck.macho_metadata import MachoExport, MachoMetadata
 from abicheck.model import (
     AbiSnapshot,
@@ -66,30 +66,6 @@ def _rec(name, fields=(), bases=(), origin=None):
         bases=list(bases),
         origin=ScopeOrigin.UNKNOWN if origin is None else origin,
     )
-
-
-class TestObservedExportNames:
-    def test_no_binary_metadata_is_none_not_empty(self) -> None:
-        snap = AbiSnapshot(library="l", version="1", functions=[_fn("a", "_Z1av")])
-        assert observed_export_names(snap) is None
-
-    def test_empty_export_table_is_also_none(self) -> None:
-        # An export-table-less parse and a genuinely empty export table are
-        # indistinguishable from the recorded data; claiming "exports
-        # nothing" would let a parse failure prove every entity out of
-        # contract.
-        snap = AbiSnapshot(library="l", version="1", elf=ElfMetadata(symbols=[]))
-        assert observed_export_names(snap) is None
-
-    def test_elf_pe_and_macho_tables_are_unioned(self) -> None:
-        snap = AbiSnapshot(
-            library="l",
-            version="1",
-            elf=ElfMetadata(symbols=[ElfSymbol(name="from_elf")]),
-            pe=PeMetadata(exports=[PeExport(name="from_pe")]),
-            macho=MachoMetadata(exports=[MachoExport(name="from_macho")]),
-        )
-        assert observed_export_names(snap) == {"from_elf", "from_pe", "from_macho"}
 
 
 class TestRoots:

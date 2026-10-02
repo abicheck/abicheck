@@ -291,7 +291,7 @@ class EvidenceStatus(str, Enum):
     - ``CONSUMER_PROVEN`` — not derivable from the finding's own
       classification at all: set explicitly when runtime/``appcompat``
       evidence demonstrates a *specific* consumer actually depends on what
-      changed (see ``reporter.appcompat_to_json``).
+      changed (see ``reporter.appcompat_to_json`` (removed)).
     - ``NOT_CHECKABLE`` — the finding **is** the "missing evidence" signal
       (``ChangeKind.EVIDENCE_REQUIRED_MISSING``, ADR-033 D7), not a break.
     - ``UNATTRIBUTED`` — a kind-level ``ARTIFACT_PROVEN`` classification

@@ -146,11 +146,6 @@ class TestFactRegistry:
         with pytest.raises(ValueError, match="Duplicate"):
             FactRegistry([entry, entry])
 
-    def test_for_owner_filters_by_owner(self) -> None:
-        record_entries = FACT_REGISTRY.for_owner("RecordType")
-        assert record_entries
-        assert all(e.owner == "RecordType" for e in record_entries)
-
     def test_len_counts_entries(self) -> None:
         entry = FactDefinition(
             owner="RecordType",
