@@ -293,3 +293,20 @@ def test_cheap_debug_presence_failed_probe_is_not_absent(monkeypatch, tmp_path):
     assert merge_presence(btf, ctf).status is FactStatus.FAILED
     dwarf_meta, _ = cheap_debug_presence_metadata(so_path)
     assert dwarf_meta.has_dwarf is False
+
+
+@pytest.mark.parametrize("payload", [b"", b"\x7fELF", b"not an elf at all"])
+def test_unreadable_elf_is_failed_not_absent(tmp_path, payload):
+    """Real (unpatched) probes over an unparsable file: FAILED, never PRESENT(False)."""
+    from abicheck import dwarf_presence
+
+    so_path = tmp_path / "broken.so"
+    so_path.write_bytes(payload)
+    for probe in (
+        dwarf_presence._has_btf,
+        dwarf_presence._has_ctf,
+        dwarf_presence._is_kernel_binary,
+        dwarf_presence._has_dwarf,
+    ):
+        fact = probe(so_path)
+        assert fact.status is FactStatus.FAILED, (probe.__name__, fact)

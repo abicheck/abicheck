@@ -105,24 +105,33 @@ def _section_presence_metadata(
     return DwarfMetadata(has_dwarf=present), AdvancedDwarfMetadata(has_dwarf=present)
 
 
-def _has_btf(so_path: Path) -> Fact[bool]:
-    from .btf_metadata import has_btf_section
+def _has_section(so_path: Path, *names: str) -> Fact[bool]:
+    """Whether the ELF file carries any of *names*; a read error is ``FAILED``.
 
-    return _probe(lambda: has_btf_section(so_path), "BTF section")
+    Reads the sections itself rather than through ``btf_metadata.
+    has_btf_section``/``ctf_metadata.has_ctf_section``: those helpers answer
+    ``False`` when the file cannot be read, which here would be a confirmed
+    absence.
+    """
 
-
-def _has_ctf(so_path: Path) -> Fact[bool]:
-    from .ctf_metadata import has_ctf_section
-
-    return _probe(lambda: has_ctf_section(so_path), "CTF section")
-
-
-def _is_kernel_binary(path: Path) -> Fact[bool]:
     def read() -> bool:
         from elftools.elf.elffile import ELFFile
 
-        with open(path, "rb") as f:
+        with open(so_path, "rb") as f:
             elf = ELFFile(f)
-            return elf.get_section_by_name(".modinfo") is not None
+            return any(elf.get_section_by_name(name) is not None for name in names)
 
-    return _probe(read, ".modinfo section")
+    return _probe(read, f"{'/'.join(names)} section")
+
+
+def _has_btf(so_path: Path) -> Fact[bool]:
+    return _has_section(so_path, ".BTF")
+
+
+def _has_ctf(so_path: Path) -> Fact[bool]:
+    # CTF can be in .ctf or .SUNW_ctf (matches ctf_metadata.has_ctf_section).
+    return _has_section(so_path, ".ctf", ".SUNW_ctf")
+
+
+def _is_kernel_binary(path: Path) -> Fact[bool]:
+    return _has_section(path, ".modinfo")
