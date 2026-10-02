@@ -363,9 +363,11 @@ below was checked and recorded.
   the export join deliberately refuses.
 - **x86 PE decoration — closed
   ([#1367](https://github.com/abicheck/abicheck/pull/1367)).**
-  `graph_entity_identity.pe_c_decoration_base` relates `_foo@N`, `@foo@N`,
-  `foo@@N` and `_foo` to `foo` on `IMAGE_FILE_MACHINE_I386` only, never on a
-  C++-mangled name or any other machine; the join applies it like the Mach-O
+  `graph_entity_identity.pe_c_decoration_base` (since design-hardening
+  Phase 3: the `model/name_decoration/pe_x86.py` codec, read through
+  `export_index.pe_decoration_aliases`) relates `_foo@N`, `@foo@N`,
+  `foo@@N` and `_foo` to `foo` on `IMAGE_FILE_MACHINE_I386` (`foo@@N` on
+  every machine since Phase 3), never on a C++-mangled name; the join applies it like the Mach-O
   shift (refused when another declaration owns the spelling, a non-one-to-one
   collapse stays `ambiguous`). `@N` is checked for shape only, not against
   parameter sizes, which L2 does not carry reliably. MinGW i386 `__Z` exports

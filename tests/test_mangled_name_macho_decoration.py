@@ -44,7 +44,9 @@ from hypothesis import given, strategies as st
 from abicheck.model.mangled_name import (
     _itanium_strip_prefix,
     itanium_scope_components,
-    strip_macho_itanium_decoration,
+)
+from abicheck.model.name_decoration.macho import (
+    decode_itanium as strip_macho_itanium_decoration,
 )
 
 

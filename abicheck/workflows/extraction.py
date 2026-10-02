@@ -112,7 +112,7 @@ from ..buildsource.toolchain_bindings import (
     check_profile_bindings_resolve,
     load_bindings_file,
 )
-from ..buildsource.toolchain_probe import check_profile_toolchain_identity
+from ..buildsource.toolchain_probe import check_profile_toolchain_constraints
 from ..clang_layout_tool import attach_clang_layout
 from ..classify import is_supported_compare_input
 from ..compat.abicc_dump_import import (
@@ -193,7 +193,7 @@ __all__ = [
     "build_match_map",
     "build_source_graph",
     "check_profile_bindings_resolve",
-    "check_profile_toolchain_identity",
+    "check_profile_toolchain_constraints",
     "collection_for_ci_mode",
     "dedup_paths_preserve_order",
     "deferred_token_dirs",

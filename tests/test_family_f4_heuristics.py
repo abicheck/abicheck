@@ -96,7 +96,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # 44: the merge with main brought model/symbol_ownership.py into the scan
     # (main made it the vocabulary owner) and main's shared
     # match_frozen_namespace -- both one pre-existing `_Z` mangling check.
-    "grammar": 44,
+    # 41: minus three sites the Phase 3 decoration codecs deleted
+    # (export_join._macho_shifted, the rename parser's ctor/dtor scan).
+    "grammar": 41,
     "own_format": 44,
     "platform": 21,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one

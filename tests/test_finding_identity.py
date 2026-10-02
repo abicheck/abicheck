@@ -34,9 +34,9 @@ from abicheck.finding_identity import (
     resolve_function_identity,
     resolve_symbol_identity,
     resolve_variable_identity,
-    source_relative_identity,
 )
 from abicheck.model import Function, Param, Variable
+from abicheck.model.root_relative_path import RootRelativePath
 
 _ITANIUM_MANGLED = "_Z3fooi"  # foo(int)
 
@@ -479,14 +479,6 @@ class TestStringifyChangeValue:
         assert _stringify_change_value({"a": 1}) == str({"a": 1})
 
 
-class TestSourceRelativeIdentity:
-    def test_combines_file_and_name(self) -> None:
-        assert source_relative_identity("foo.h", "bar") == "foo.h\x1fbar"
-
-    def test_missing_parts_default_to_empty(self) -> None:
-        assert source_relative_identity("", "") == "\x1f"
-
-
 class TestResolveSymbolIdentity:
     def test_real_mangled_name_is_canonical(self) -> None:
         identity = resolve_symbol_identity(mangled=_ITANIUM_MANGLED, name="foo")
@@ -532,7 +524,7 @@ class TestResolveSymbolIdentity:
             mangled="plain_export",
             name=None,
             kind="function",
-            source_location="foo.c:1",
+            source_location=RootRelativePath.parse("foo.c:1"),
         )
         assert "relsrc:foo.c:1\x1fplain_export" in identity.aliases
 
@@ -542,18 +534,20 @@ class TestResolveSymbolIdentity:
         assert identity.primary_id.startswith("synthetic:sha256:")
 
     def test_synthetic_fallback_is_deterministic(self) -> None:
-        a = resolve_symbol_identity(source_location="foo.c:1")
-        b = resolve_symbol_identity(source_location="foo.c:1")
+        a = resolve_symbol_identity(source_location=RootRelativePath.parse("foo.c:1"))
+        b = resolve_symbol_identity(source_location=RootRelativePath.parse("foo.c:1"))
         assert a.primary_id == b.primary_id
 
     def test_synthetic_fallback_distinguishes_different_inputs(self) -> None:
-        a = resolve_symbol_identity(source_location="foo.c:1")
-        b = resolve_symbol_identity(source_location="foo.c:2")
+        a = resolve_symbol_identity(source_location=RootRelativePath.parse("foo.c:1"))
+        b = resolve_symbol_identity(source_location=RootRelativePath.parse("foo.c:2"))
         assert a.primary_id != b.primary_id
 
     def test_source_location_recorded_as_alias_when_mangled(self) -> None:
         identity = resolve_symbol_identity(
-            mangled=_ITANIUM_MANGLED, name="foo", source_location="foo.h:1"
+            mangled=_ITANIUM_MANGLED,
+            name="foo",
+            source_location=RootRelativePath.parse("foo.h:1"),
         )
         assert any(a.startswith("relsrc:") for a in identity.aliases)
 

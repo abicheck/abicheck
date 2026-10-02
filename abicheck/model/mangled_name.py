@@ -41,6 +41,7 @@ from .mangled_name_template_args import (
     read_length_prefixed_name as _read_length_prefixed_name,
     skip_template_args as _skip_template_args,
 )
+from .name_decoration import macho as macho_decoration
 
 _ASCII_DIGITS = "0123456789"
 
@@ -118,45 +119,6 @@ _ITANIUM_OPERATORS = frozenset(
 )
 
 
-def strip_macho_itanium_decoration(mangled: str) -> str:
-    """Strip Darwin/Mach-O's own linker leading-underscore decoration from
-    an otherwise-real Itanium mangled name, when doing so is unambiguous.
-
-    Darwin's linker prepends one leading underscore to *every* global C/C++
-    symbol at the object-file level. For a genuine Itanium mangled name --
-    which always starts with a single ``"_Z"`` -- that decoration produces
-    an unmistakable ``"__Z..."`` shape: no real Itanium mangling ever
-    begins with two underscores, so recognizing and stripping this one is
-    always safe and needs no platform/target-triple confirmation at all
-    (unlike a bare, singly-underscore-prefixed C-linkage name, which IS
-    genuinely ambiguous with a real, distinct ``asm("_foo")`` label --
-    callers that also know the declaration is genuinely ``extern "C"``
-    resolve that narrower case themselves; see
-    ``extract.headers.clang.context.strip_darwin_itanium_decoration``).
-
-    **Known gap, carried here from the two `buildsource` graph copies this
-    replaced** (their own self-review round, fresh evidence): the "always
-    safe" claim above holds for a *compiler-produced* mangled name, not for
-    an explicit GNU ``asm("__Zfake")`` label -- clang reports that literal
-    spelling verbatim on any platform, confirmed empirically, and stripping
-    it corrupts that decl's identity. A caller that joins against a symbol
-    table should try the exact spelling first and fall back to this strip
-    (``buildsource.template_graph._resolve_emitted_symbol`` does);
-    ``call_graph``/``type_graph``'s own joins still call this
-    unconditionally, which is a real, separately-scoped gap in those joins
-    rather than in this function.
-
-    Returns *mangled* unchanged for every other shape. The single canonical
-    home for this specific structural check -- previously duplicated,
-    independently, by :func:`_itanium_strip_prefix` below,
-    ``extract.headers.clang.context.strip_darwin_itanium_decoration``, and
-    ``dumper_hybrid._macho_normalize_mangled`` -- so a Mach-O-target
-    identity fix made in one no longer needs to be separately rediscovered
-    and reapplied in the other two.
-    """
-    return mangled[1:] if mangled.startswith("__Z") else mangled
-
-
 def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
     """Strip ``_Z`` and optional nested-name prefix from a mangled symbol.
 
@@ -171,11 +133,11 @@ def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
     ``mangledName`` is ``"__ZN3lib3addEii"`` on macOS, not the plain
     Itanium ``"_ZN3lib3addEii"``), so a bare ``mangled.startswith("_Z")``
     check rejects every symbol on that platform. Normalized away here
-    (via :func:`strip_macho_itanium_decoration`) before the check, mirroring
+    (via ``name_decoration.macho.decode_itanium``) before the check, mirroring
     ``dumper_clang.py``'s own ``_symbol_candidates()`` de-prefixing
     approach for the identical Mach-O quirk.
     """
-    mangled = strip_macho_itanium_decoration(mangled)
+    mangled = macho_decoration.decode_itanium(mangled)
     if not mangled.startswith("_Z"):
         return None
     s = mangled[2:]
@@ -234,7 +196,7 @@ def _parse_source_name_component(
     # left a real ABI-tagged class template's own "IiE" unconsumed after
     # the tag loop only found "B3tag" first, which made every caller of
     # this component parser -- including :func:`itanium_scope_components`
-    # and :func:`itanium_ctor_dtor_marker_span` -- fail outright on this
+    # and ``name_decoration.itanium_structors.locate`` -- fail outright on this
     # real, non-synthetic case instead of just mis-grouping it.
     while i < n and s[i] == "B":
         tag, j = _read_length_prefixed_name(s, i + 1)
@@ -308,7 +270,7 @@ def _parse_inherited_ctor_component(s: str, i: int) -> tuple[str | None, int]:
 
     Deliberately **not** folded into :func:`_parse_ctor_dtor_component`:
     that function's 2-character span is what
-    ``diff_cxx_rules.itanium_ctor_dtor_marker_span`` returns to callers that
+    ``name_decoration.itanium_structors.locate`` returns to callers that
     derive a *sibling* mangling by rewriting the marker in place
     (``buildsource.template_graph._ctor_dtor_symbol_variants``). ``CI1`` is
     three characters and its trailing base-type encoding is part of the
@@ -467,70 +429,6 @@ def _step_next_component(
         # nesting, rather than attempt to step into that unparsed type.
         return label, new_i, True, False, label
     return label, new_i, not nested, False, label
-
-
-def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
-    """``(start, end)`` indices of *mangled*'s own Itanium ctor/dtor code
-    (``C1``/``C2``/``C3``/``D0``/``D1``/``D2``) -- the exact 2-character
-    span, structurally located the same length-prefix-aware way
-    :func:`itanium_scope_components` walks a nested name, so a class or
-    template-argument name that happens to embed the literal substring
-    ``"C1"``/``"D1"`` is never mistaken for the real marker: each
-    length-prefixed identifier is skipped as one whole unit via
-    :func:`_parse_source_name_component`, never scanned character-by-
-    character for a coincidental match.
-
-    Exists for a caller that needs to locate, not merely recognize, the
-    marker -- e.g. to derive a sibling ctor/dtor mangling (``buildsource.
-    template_graph._ctor_dtor_symbol_variants``, Codex review, fresh
-    evidence): a naive ``"C1E"`` substring search finds ``C1Evil<int>``'s
-    own embedded ``"C1E"`` inside its *class name* first (``_ZN6C1EvilIiE
-    C1Ev``), not the real ctor code that follows it, deriving the
-    genuinely different class ``C2Evil<int>``'s own real constructor
-    mangling by coincidence -- a false positive, not merely a missed one.
-
-    *mangled* need not be pre-normalized for the Mach-O double-underscore
-    prefix -- :func:`_itanium_strip_prefix` strips it on its own local
-    variable only, never mutating the caller's *mangled*, and this
-    function's own offset arithmetic (``offset = len(mangled) -
-    len(s)``) is computed against that same untouched *mangled*, so the
-    returned span is correct relative to whatever prefix form the caller
-    passed in (confirmed empirically: ``__ZN1CC1Ev`` and ``_ZN1CC1Ev``
-    both locate the identical ``"C1"`` text within their own respective
-    strings).
-
-    Returns ``None`` when *mangled* does not carry a ctor/dtor code this
-    parser can locate (a plain function/operator, a non-Itanium or
-    unmangled name, or any other form :func:`itanium_scope_components`
-    itself does not model)."""
-    prefix = _itanium_strip_prefix(mangled)
-    if prefix is None:
-        return None
-    s, nested = prefix
-    if not nested:
-        return None  # a free function's own single component is never a ctor/dtor
-    offset = len(mangled) - len(s)
-    i = 0
-    n = len(s)
-    if s[i : i + 2] == "St":
-        i += 2
-    while i < n:
-        c = s[i]
-        if c == "E":
-            return None  # nested name closed with no ctor/dtor component found
-        if c in _ASCII_DIGITS:
-            _name, new_i, _template_attached, _bare_name = _parse_source_name_component(
-                s, i
-            )
-            if new_i == i:
-                return None  # malformed source name
-            i = new_i
-            continue
-        label, new_i = _parse_ctor_dtor_component(s, i)
-        if label is not None:
-            return offset + i, offset + new_i
-        return None  # an operator or other non-source-name, non-ctor/dtor form
-    return None
 
 
 def itanium_scope_components_with_template_positions(

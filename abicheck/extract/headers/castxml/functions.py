@@ -452,7 +452,7 @@ def parse_function_element(
     # carry Darwin's extra linker-decoration underscore -- see
     # `extract.headers.clang.context.strip_darwin_itanium_decoration`'s
     # docstring) -- confirmed by direct experimentation, not assumed.
-    # Deliberately NOT run through `strip_macho_itanium_decoration` here
+    # Deliberately NOT run through `name_decoration.macho.decode_itanium` here
     # the way the clang backend is: unlike clang's decoration, a castxml
     # `"__Z..."`-shaped mangled name is never platform decoration to begin
     # with, so stripping it unconditionally would corrupt the one real

@@ -946,7 +946,7 @@ def _check_one_overlay(
     return errors
 
 
-def check_profile_toolchain_identity(
+def check_profile_toolchain_constraints(
     profiles: Mapping[str, _HasCompileOverlays], bindings_file: BindingsFile
 ) -> list[str]:
     """Return one human-readable error string per declared

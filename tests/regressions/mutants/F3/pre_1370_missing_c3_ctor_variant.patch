@@ -1,11 +1,11 @@
---- a/abicheck/model/special_member_identity.py
-+++ b/abicheck/model/special_member_identity.py
-@@ -83,7 +83,7 @@
-     "special_member_variant_aliases",
+--- a/abicheck/model/name_decoration/itanium_structors.py
++++ b/abicheck/model/name_decoration/itanium_structors.py
+@@ -53,7 +53,7 @@
+     "sibling_spellings",
  ]
  
--_CTOR_VARIANTS = ("C1", "C2", "C3")
-+_CTOR_VARIANTS = ("C1", "C2")
- _DTOR_VARIANTS = ("D1", "D0", "D2")
- _COMPLETE = {"C": "C1", "D": "D1"}
- _CTOR = "{ctor}"
+-CTOR_VARIANTS = ("C1", "C2", "C3")
++CTOR_VARIANTS = ("C1", "C2")
+ DTOR_VARIANTS = ("D0", "D1", "D2")
+ #: The variants GCC and clang actually emit as exports. ``C3`` (allocating
+ #: constructor) is part of the ABI but not observed emitted in practice, so a

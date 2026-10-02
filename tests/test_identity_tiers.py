@@ -43,7 +43,6 @@ from abicheck.model.identity_stability import entity_id_is_cross_snapshot_stable
 from abicheck.model.identity_tiers import (
     SnapshotLocalIdentity,
     StableEntityId,
-    resolve_identity,
     snapshot_local_identity,
     stable_entity_id,
 )
@@ -263,39 +262,3 @@ class TestSnapshotLocalIdentityPayload:
         assert isinstance(
             snapshot_local_identity(spelling, entity_id), SnapshotLocalIdentity
         )
-
-
-# -- resolve_identity ------------------------------------------------------
-
-
-class TestResolveIdentity:
-    @given(entity_id=_any_entity_id, spelling=_spellings)
-    def test_returns_the_strongest_available_tier(
-        self, entity_id: EntityId, spelling: str
-    ) -> None:
-        resolved = resolve_identity(entity_id=entity_id, spelling=spelling)
-        if entity_id_is_cross_snapshot_stable(entity_id):
-            assert resolved == StableEntityId(entity_id)
-        else:
-            assert resolved == SnapshotLocalIdentity(spelling)
-
-    @given(spelling=_spellings)
-    def test_no_entity_id_always_falls_back_to_the_spelling(
-        self, spelling: str
-    ) -> None:
-        """The DWARF/PE/Mach-O-only case: no backend resolves an
-        ``EntityId`` at all, so every declaration lands in the fallback
-        tier and consumers keep working on exactly the spelling they used
-        before this split existed."""
-        assert resolve_identity(entity_id=None, spelling=spelling) == (
-            SnapshotLocalIdentity(spelling)
-        )
-
-    @given(entity_id=_any_entity_id, spelling=_spellings)
-    def test_is_a_pure_function_of_its_inputs(
-        self, entity_id: EntityId, spelling: str
-    ) -> None:
-        first = resolve_identity(entity_id=entity_id, spelling=spelling)
-        second = resolve_identity(entity_id=entity_id, spelling=spelling)
-        assert first == second
-        assert hash(first) == hash(second)

@@ -111,7 +111,8 @@ from abicheck.model.entity_identity import (
     resolve_identity_for_node,
 )
 
-from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabulary has always been importable from this module
+from ..model.root_relative_path import project_layout_spelling
+from .graph_reconcile_outcome import (
     _OUTCOME_PROSE,
     COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE,
     COORDINATE_EVIDENCE_QUALIFIED_NAME,
@@ -122,9 +123,9 @@ from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabu
     OUTCOME_RECONCILED_UNRESOLVED,
     OUTCOME_RENAMED,
     _classify_outcome,  # noqa: F401  # re-export: imported from here by tests/callers
-    _project_relative_path,
     classify,
     coordinate_evidence,
+    own_file,  # re-exported: the public outcome vocabulary has always been importable from this module
 )
 
 if TYPE_CHECKING:
@@ -242,13 +243,13 @@ def _neighbor_identity(node: GraphNode) -> str:
         path = str(
             node.attrs.get("def_file") or node.attrs.get("file") or node.label or ""
         )
-        return f"{node.kind}:{_project_relative_path(path)}" if path else node.kind
+        return f"{node.kind}:{project_layout_spelling(path)}" if path else node.kind
     ident = resolve_identity_for_node(node)
     if ident.qualified_name:
         return f"{node.kind}:{ident.qualified_name}"
     path = str(node.attrs.get("def_file") or node.attrs.get("file") or "")
     if path:
-        return f"{node.kind}:{_project_relative_path(path)}"
+        return f"{node.kind}:{project_layout_spelling(path)}"
     return node.kind
 
 
@@ -380,7 +381,7 @@ def _declaring_files(
             continue
         label = label_by_id.get(e.src)
         if label:
-            result[e.dst] = _project_relative_path(str(label))
+            result[e.dst] = project_layout_spelling(str(label))
     return result
 
 
@@ -452,8 +453,8 @@ class _Reconciler:
         """
         oid = old_node.id
         new_node = next(n for n in kind_pass.new_list if n.id == new_id)
-        old_declaring = self.old_declaring_files.get(oid, "")
-        new_declaring = self.new_declaring_files.get(new_id, "")
+        old_declaring = self.old_declaring_files.get(oid) or own_file(old_node)
+        new_declaring = self.new_declaring_files.get(new_id) or own_file(new_node)
         classification = classify(
             kind_pass.old_ident[oid],
             kind_pass.new_ident[new_id],

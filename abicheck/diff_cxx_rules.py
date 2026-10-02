@@ -44,7 +44,6 @@ from .model.mangled_name import (
     _itanium_strip_prefix as _itanium_strip_prefix,
     _parse_ctor_dtor_component as _parse_ctor_dtor_component,
     _parse_source_name_component as _parse_source_name_component,
-    itanium_ctor_dtor_marker_span as itanium_ctor_dtor_marker_span,
     itanium_scope_components as itanium_scope_components,
     itanium_scope_components_with_template_positions as itanium_scope_components_with_template_positions,
     msvc_scope_components as msvc_scope_components,

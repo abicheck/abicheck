@@ -23,14 +23,16 @@ the producer recorded none (a C symbol, a headerless PE ordinal placeholder).
 It joins an export when the observed table *contains* that spelling. On a
 Mach-O table only, Phase 1's decoration alias applies: one leading underscore
 more or fewer than the trie's already-stripped name (clang keeps the Darwin
-underscore; ``strip_macho_itanium_decoration`` is the same fact), refused
+underscore; ``model.name_decoration.macho`` owns the fact), refused
 whenever another declaration owns the shifted spelling exactly -- the alias
 exists for one entity spelled two ways, never to hand one declaration's
 export to another. On a PE table, Phase 1's x86 calling-convention alias
-applies the same way (:func:`~abicheck.model.graph_entity_identity.
-pe_c_decoration_base`): an export ``_foo@8``/``@foo@8``/``foo@@8``/``_foo``
-joins the declaration spelled ``foo`` -- only on the machine types that
-decorate (32-bit x86; x64 for ``__vectorcall`` only), never for a
+applies the same way, through the alias table :func:`~abicheck.model.
+export_index.pe_decoration_aliases` builds with the ``name_decoration.
+pe_x86`` codec (this module decodes nothing itself): an export
+``_foo@8``/``@foo@8``/``foo@@8``/``_foo`` joins the declaration spelled
+``foo`` -- only on the machine types that decorate (32-bit x86; every
+machine for ``__vectorcall``), never for a
 C++-mangled name, never on an unknown machine, and refused whenever another
 declaration owns the decorated spelling exactly.
 
@@ -57,13 +59,13 @@ from ..model.export_index import (
     all_export_names,
     build_raw_export_indexes,
     default_versioned_names,
+    pe_decoration_aliases,
     pe_export_ids_with_ordinal_placeholder,
 )
 from ..model.graph_entity_identity import (
     GraphEntityIdentity,
     SnapshotIdentities,
     endpoint_key,
-    pe_c_decoration_base,
 )
 from ..model.graph_join import (
     EXPORT_JOIN,
@@ -73,7 +75,7 @@ from ..model.graph_join import (
     binary_symbol_node_id,
     resolve_join_records,
 )
-from ..model.mangled_name import itanium_ctor_dtor_marker_span
+from ..model.name_decoration import itanium_structors, macho as macho_decoration
 from ..model.snapshot_identity_table import identities_for_snapshot
 
 if TYPE_CHECKING:
@@ -210,30 +212,12 @@ def _variant_spellings(ids: SnapshotIdentities) -> dict[str, set[str]]:
         if not (ident.resolved and ident.aliases):
             continue
         key = endpoint_key(ident)
-        if itanium_ctor_dtor_marker_span(key) is None:
+        if itanium_structors.locate(key) is None:
             continue
         out[ident.node_id] = {
             key,
             *(endpoint_key(GraphEntityIdentity(a, ident.state)) for a in ident.aliases),
         }
-    return out
-
-
-def _macho_shifted(spelling: str) -> tuple[str, ...]:
-    """One leading underscore fewer and one more -- the Mach-O decoration
-    alias Phase 1 records (see this module's docstring)."""
-    shorter = spelling[1:] if spelling.startswith("_") else ""
-    return tuple(c for c in (shorter, "_" + spelling) if c)
-
-
-def _pe_decorated_by_base(snap: AbiSnapshot, names: set[str]) -> dict[str, set[str]]:
-    """Undecorated C name -> the PE export spellings decorating it, on the
-    machine *snap*'s PE header records (``{}`` with none or an unknown one)."""
-    machine = snap.pe.machine if snap.pe is not None else ""
-    out: dict[str, set[str]] = {}
-    for name in names:
-        if base := pe_c_decoration_base(name, machine):
-            out.setdefault(base, set()).add(name)
     return out
 
 
@@ -291,7 +275,7 @@ def _join_exports(snap: AbiSnapshot, ids: SnapshotIdentities) -> ExportJoin:
         for s in node_spellings
         if any(s in names for names in by_platform.values())
     }
-    pe_by_base = _pe_decorated_by_base(snap, by_platform.get("pe", set()))
+    pe_by_base = pe_decoration_aliases(snap, by_platform.get("pe", set()))
     left_cands: dict[str, set[str]] = {}
     right_cands: dict[str, set[str]] = {eid: set() for eid in entries}
     for node, node_spellings in spellings.items():
@@ -303,7 +287,7 @@ def _join_exports(snap: AbiSnapshot, ids: SnapshotIdentities) -> ExportJoin:
                 if platform == "macho":
                     cands.update(
                         binary_symbol_node_id(platform, c)
-                        for c in _macho_shifted(s)
+                        for c in macho_decoration.shifted_spellings(s)
                         if c in names and c not in exact_owners
                     )
                 if platform == "pe":

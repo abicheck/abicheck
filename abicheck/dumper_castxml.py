@@ -390,7 +390,7 @@ class _CastxmlParser:
             # C-mode castxml does not emit a mangled attribute for C-linkage variables
             # (C has no name mangling); fall back to plain name as the symbol key,
             # mirroring the same pattern in parse_functions(). Deliberately NOT
-            # run through `strip_macho_itanium_decoration` (see the identical
+            # run through `name_decoration.macho.decode_itanium` (see the identical
             # comment in `extract.headers.castxml.functions.
             # parse_function_element`): castxml's own `mangled` attribute never
             # carries Darwin's Itanium double-underscore decoration to begin

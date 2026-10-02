@@ -139,11 +139,9 @@ from .model import (
     replace_with_fact_sync,
 )
 from .model.identity import EntityId, EntityKind, with_mangled_name
-from .model.mangled_name import (
-    itanium_scope_components,
-    strip_macho_itanium_decoration,
-)
+from .model.mangled_name import itanium_scope_components
 from .model.mangled_name_template_args import skip_template_args as _skip_template_args
+from .model.name_decoration import macho as macho_decoration
 from .model.occurrence import OccurrenceId
 from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
 from .name_classification import canonicalize_type_name
@@ -205,14 +203,13 @@ def _macho_normalize_mangled(mangled: str) -> str:
     ``_foo``; Itanium ``_Z...`` -> ``__Z...``). The header-AST backends now
     normalize this at the point of origin too, so *mangled* reaching here
     is ordinarily **already** undecorated -- the Itanium half delegates to
-    ``model.mangled_name.strip_macho_itanium_decoration`` (the one
-    canonical ``"__Z..."`` -> ``"_Z..."`` shape check); every other shape,
-    including a bare ``"_foo"`` -> ``"foo"``, is handled below as before.
+    the Mach-O codec (``model.name_decoration.macho``): the ``"__Z..."``
+    Itanium shape first, then the C-linkage ``"_foo"`` -> ``"foo"`` shape.
     """
-    stripped = strip_macho_itanium_decoration(mangled)
+    stripped = macho_decoration.decode_itanium(mangled)
     if stripped != mangled or mangled.startswith("_Z"):
         return stripped
-    return mangled[1:] if mangled.startswith("_") else mangled
+    return macho_decoration.decode_c(mangled) or mangled
 
 
 def _rewrite_semantic_ir_entity_ids(

@@ -55,6 +55,7 @@ from .model import AbiSnapshot, Function, is_cxx_runtime_library
 from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolType
 from .model.execution_cache import memoized
+from .model.name_decoration import itanium_structors
 
 _log = logging.getLogger(__name__)
 
@@ -94,151 +95,6 @@ _RENAME_MIN_SHARED_AFFIX = 3
 # (ordinary identifiers) and ``myoperator::foo`` (operator inside a qualifier)
 # are not mistaken for an operator function name.
 _OPERATOR_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])")
-
-# Itanium constructor/destructor variant codes: ``C1``/``C2``/``C3`` (complete /
-# base / allocating constructor) and ``D0``/``D1``/``D2`` (deleting / complete /
-# base destructor). These variants demangle to the *same* leaf yet are distinct
-# exported symbols. A ``<ctor-dtor-name>`` is a real grammar production — it is
-# NOT a length-prefixed ``<source-name>`` — so it must be located by parsing the
-# nested-name's length-prefixed components, not by substring search (an ordinary
-# identifier such as ``fooC1E`` would otherwise match).
-_CTOR_DTOR_CODE_RE = re.compile(r"^(C[123]|D[012])E")
-
-
-def _ctor_dtor_variant(symbol: str) -> str | None:
-    """Return the Itanium ctor/dtor variant code (e.g. ``C1``) for a mangled
-    name, or None when the symbol is not a constructor/destructor.
-
-    Parses the ``_ZN`` nested-name: skips implicit-object cv/ref qualifiers,
-    consumes the ``<len><identifier>`` ``<source-name>`` components (skipping any
-    balanced ``I…E`` ``<template-args>`` block that follows a templated class
-    name), then checks whether the remainder *begins* with a ``<ctor-dtor-name>``
-    code. This distinguishes a real constructor (``_ZN6WidgetC1Ev`` -> ``C1``,
-    ``_ZN3FooIiEC1Ev`` = ``Foo<int>::Foo()`` -> ``C1``, ``_ZN3FooI3ErrEC1Ev`` =
-    ``Foo<Err>::Foo()`` -> ``C1``) from an ordinary member whose identifier
-    merely contains the characters (``_ZN1A6fooC1EEv`` = ``A::fooC1E()`` ->
-    None). Encodings this simple parser does not model (exotic template
-    arguments) yield None — safe, since the only consequence is not suppressing
-    a (rare) templated-ctor variant pair.
-    """
-    if not symbol.startswith("_ZN"):
-        return None
-    i = 3
-    # Skip implicit-object cv-/ref-qualifiers (K const, V volatile, r restrict,
-    # R lvalue-ref, O rvalue-ref).
-    while i < len(symbol) and symbol[i] in "KVrRO":
-        i += 1
-    # Consume <prefix> components: <source-name> (<decimal-length><identifier>),
-    # each optionally followed by a <template-args> block ``I…E``. A templated
-    # class name (``_ZN3FooIiEC1Ev``) places the args before the ctor/dtor code.
-    while i < len(symbol):
-        if symbol[i].isdigit():
-            i = _skip_source_name(symbol, i)
-            if i < 0:
-                return None  # malformed length — bail out
-        elif symbol[i] == "I":
-            i = _skip_template_args(symbol, i)
-            if i < 0:
-                return None  # unbalanced / unmodeled — bail out
-        elif symbol[i] == "S":
-            # A standard/standard-library substitution can open the prefix, e.g.
-            # ``_ZNSt6vectorIiEC1Ev`` (St = std::) — consume it before the
-            # source-name components so the ctor/dtor code is still found.
-            i = _skip_substitution(symbol, i)
-        elif symbol[i] == "B":
-            # ABI-tag component ``B<source-name>`` on the class name, e.g.
-            # ``_ZN3FooB1xC1Ev`` (Foo[abi:x]). Consume it so the ctor/dtor code
-            # that follows is still reached.
-            i += 1
-            if i < len(symbol) and symbol[i].isdigit():
-                i = _skip_source_name(symbol, i)
-                if i < 0:
-                    return None  # malformed ABI tag — bail out
-            else:
-                break  # not a well-formed ABI tag
-        else:
-            break
-    m = _CTOR_DTOR_CODE_RE.match(symbol[i:])
-    return m.group(1) if m else None
-
-
-def _skip_source_name(symbol: str, i: int) -> int:
-    """Skip an Itanium ``<source-name>`` (``<decimal-length><identifier>``)
-    starting at ``symbol[i]``; return the index past it, or -1 if malformed."""
-    j = i
-    while j < len(symbol) and symbol[j].isdigit():
-        j += 1
-    remaining, length = len(symbol) - j, 0
-    for c in symbol[i:j]:
-        if (length := (length * 10) + (ord(c) - ord("0"))) > remaining:
-            return -1
-    return j + length
-
-
-def _skip_substitution(symbol: str, i: int) -> int:
-    """Skip an Itanium ``<substitution>`` starting at ``symbol[i]`` (an ``S``);
-    return the index past it.
-
-    Handles ``S_``, ``S<seq-id>_`` (seq-id is base-36 ``[0-9A-Z]``), and the
-    special two-character abbreviations (``St`` std, ``Ss`` std::string, ``Sa``,
-    ``Sb``, ``Si``, ``So``, ``Sd``). Consuming it whole keeps any digits in a
-    seq-id from being misread as a ``<source-name>`` length.
-    """
-    n = len(symbol)
-    i += 1  # consume 'S'
-    if i < n and (symbol[i].isdigit() or symbol[i].isupper()):
-        while i < n and symbol[i] != "_":
-            i += 1
-        return i + 1  # consume the closing '_'
-    return i + 1  # special two-char abbreviation (St, Ss, …) or bare 'S_'
-
-
-def _skip_template_args(symbol: str, i: int) -> int:
-    """Skip a balanced Itanium ``<template-args>`` block (``I…E``) starting at
-    ``symbol[i]`` (an ``I``); return the index past the matching ``E``, or -1.
-
-    The block content must be parsed, not merely scanned for ``E``: a
-    length-prefixed ``<source-name>`` argument (``Foo<Err>`` = ``...I3ErrE...``)
-    contains an ``E`` *inside* its identifier that would otherwise close the
-    block early, and an expr-primary literal (``Foo<5>`` = ``...ILi5EE...``)
-    carries its own terminating ``E``. So source-names, substitutions, and
-    literals are consumed whole; only ``I``/``N``/``F`` openers and their ``E``
-    terminators move the nesting depth. Constructs this does not model yield -1.
-    """
-    n = len(symbol)
-    depth = 0
-    while i < n:
-        c = symbol[i]
-        if c.isdigit():
-            # <source-name>: consume the identifier whole so its characters
-            # (which may include E/I/N/F/L) are not read as structure.
-            i = _skip_source_name(symbol, i)
-            if i < 0:
-                return -1
-        elif c == "S":
-            # <substitution>: consume whole so its digits are not mistaken for a
-            # source-name length.
-            i = _skip_substitution(symbol, i)
-        elif c == "L":
-            # <expr-primary> literal: ``L<type><value>E``. Scan to its own
-            # terminating ``E`` literally — its value digits are not lengths.
-            i += 1
-            while i < n and symbol[i] != "E":
-                i += 1
-            if i >= n:
-                return -1
-            i += 1  # consume the literal's 'E'
-        elif c in "INF":
-            depth += 1
-            i += 1
-        elif c == "E":
-            depth -= 1
-            i += 1
-            if depth == 0:
-                return i
-        else:
-            i += 1
-    return -1  # unbalanced
 
 
 def _unwrap_funcptr_declarator(s: str) -> str:
@@ -473,8 +329,9 @@ def _rename_name_parse(name: str) -> tuple[str | None, str, str, str]:
     """
 
     d = demangle(name) or name
+    structor = itanium_structors.decode(name)
     return (
-        _ctor_dtor_variant(name),
+        structor.code if structor is not None else None,
         _unqualified_name_of(d),
         _param_signature_of(d),
         _return_type_of(d),

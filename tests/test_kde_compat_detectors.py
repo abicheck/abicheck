@@ -34,7 +34,6 @@ import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_cxx_rules import (
-    itanium_ctor_dtor_marker_span,
     itanium_qualified_name,
     itanium_scope_components,
     msvc_qualified_name,
@@ -48,6 +47,9 @@ from abicheck.model import (
     Param,
     RecordType,
     Visibility,
+)
+from abicheck.model.name_decoration.itanium_structors import (
+    locate as itanium_ctor_dtor_marker_span,
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────

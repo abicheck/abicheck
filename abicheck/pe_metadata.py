@@ -212,6 +212,9 @@ def _parse(dll_path: Path) -> PeMetadata:
 
         _parse_pe_header_fields(pe, meta)
         _parse_pe_exports(pe, meta)
+        # The one decode of each export's calling-convention decoration
+        # (design-hardening Phase 3); needs the machine read just above.
+        meta.decode_export_names()
         _parse_pe_imports(pe, meta)
         _parse_pe_delay_imports(pe, meta)
         _parse_pe_version_resource(pe, meta)

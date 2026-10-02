@@ -34,7 +34,6 @@ from abicheck.appcompat import (
     _lib_fmt,
     _lib_macho_meta,
     _lib_pe_meta,
-    _normalize_elf_symbol_name,
     _parse_elf_app_requirements,
     _parse_macho_app_requirements,
     _parse_pe_app_requirements,
@@ -54,6 +53,7 @@ from abicheck.checker_policy import (
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.macho_metadata import MachoExport, MachoMetadata
 from abicheck.model import AbiSnapshot
+from abicheck.model.name_decoration import elf_version
 from abicheck.pe_metadata import PeExport, PeMetadata
 
 # ---------------------------------------------------------------------------
@@ -1206,9 +1206,9 @@ class TestGetNewLibExports:
             assert _get_old_lib_exports_for_scoping(f) == set()
 
     def test_normalize_elf_symbol_name(self):
-        assert _normalize_elf_symbol_name("inflate") == "inflate"
-        assert _normalize_elf_symbol_name("inflate@ZLIB_1.2.0") == "inflate"
-        assert _normalize_elf_symbol_name("inflate@@ZLIB_1.2.0") == "inflate"
+        assert elf_version.unversioned_name("inflate") == "inflate"
+        assert elf_version.unversioned_name("inflate@ZLIB_1.2.0") == "inflate"
+        assert elf_version.unversioned_name("inflate@@ZLIB_1.2.0") == "inflate"
 
     def test_pe_exports(self, tmp_path):
         from abicheck.pe_metadata import PeExport, PeMetadata

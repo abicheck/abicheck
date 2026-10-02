@@ -196,7 +196,9 @@ def test_inherited_ctor_marker_span_still_declines_the_form() -> None:
     substitutes it. `CI1` is three characters with a base-type encoding
     attached, so admitting it there would hand that caller a corrupt symbol.
     Scope recovery gains the form; span rewriting deliberately does not."""
-    from abicheck.diff_cxx_rules import itanium_ctor_dtor_marker_span
+    from abicheck.model.name_decoration.itanium_structors import (
+        locate as itanium_ctor_dtor_marker_span,
+    )
 
     assert itanium_ctor_dtor_marker_span("_ZN3api7DerivedCI1NS_4BaseEEi") is None
     assert itanium_ctor_dtor_marker_span("_ZN3api4BaseC1Ei") == (12, 14)

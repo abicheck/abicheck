@@ -118,6 +118,17 @@ def test_distinct_entities_stay_distinct_under_path_transform(
     assert cat.string_collisions(probe, cat.TRANSFORMS_BY_NAME[transform_name]) == []
 
 
+@pytest.mark.parametrize(
+    ("probe_name", "transform_name"),
+    [(p, t.name) for p in sorted(cat._path_probes()) for t in cat.PATH_TRANSFORMS],
+)
+def test_declaring_path_identity_is_root_relative(
+    probe_name: str, transform_name: str
+) -> None:
+    """Phase 3: a path reaches identity only as a ``RootRelativePath``."""
+    assert cat.path_violations(probe_name, cat.TRANSFORMS_BY_NAME[transform_name]) == []
+
+
 def test_path_transforms_are_all_distinct_spellings() -> None:
     spellings = {t.fn(cat.BASE_HEADER) for t in cat.PATH_TRANSFORMS}
     assert len(spellings) == len(cat.PATH_TRANSFORMS)
@@ -162,6 +173,11 @@ def test_the_two_pe_decoders_agree_on_x86(scheme: str) -> None:
     for name in cat.PE_C_NAMES:
         spellings = {d(enc(name, 12)) for d in decs.values()}
         assert spellings == {name}
+
+
+@pytest.mark.parametrize("decoder", sorted(cat.elf_version_decoders()))
+def test_elf_version_codec_joins_and_separates(decoder: str) -> None:
+    assert cat.elf_version_violations(decoder) == []
 
 
 def test_itanium_ctor_dtor_variant_codec_joins_and_separates() -> None:
@@ -423,6 +439,10 @@ _IDENTITY_NAME_RE = re.compile(
 _EXTRA_REGISTERED = {
     "abicheck.extract.export_symbol_identity:msvc_export_function",
     "abicheck.model.special_member_identity:special_member_variant_aliases",
+    "abicheck.model.name_decoration.macho:decode_itanium",
+    "abicheck.model.name_decoration.pe_x86:decode_c_name",
+    "abicheck.model.name_decoration.elf_version:unversioned_name",
+    "abicheck.model.symbol_leaf:symbol_leaf_identifier",
 }
 
 _U = "UNCOVERED: "
@@ -436,65 +456,45 @@ COVERAGE: dict[str, str] = {
     "abicheck.model.graph_entity_identity:type_identity": "string probe x path transforms",
     "abicheck.model.graph_entity_identity:unresolved_identity": "string probe x path transforms",
     "abicheck.model.graph_entity_identity:declaration_identity": "string probe + Mach-O codec; mutant M2",
-    "abicheck.model.graph_entity_identity:pe_c_decoration_base": "x86 PE codec; mutant M5",
+    "abicheck.model.name_decoration.pe_x86:decode_c_name": "x86 PE codec; mutant M5",
+    "abicheck.model.export_index:pe_decoration_aliases": "x86 PE codec (the join's alias table)",
+    "abicheck.model.name_decoration.elf_version:unversioned_name": "ELF version codec",
+    "abicheck.model.symbol_leaf:symbol_leaf_identifier": "ELF version codec",
     "abicheck.model.source_graph:function_decl_identity": "string probe x path transforms",
-    "abicheck.model.mangled_name:strip_macho_itanium_decoration": "Mach-O codec",
+    "abicheck.model.name_decoration.macho:decode_itanium": "Mach-O codec; mutant M2",
     "abicheck.extract.headers.clang.context:strip_darwin_itanium_decoration": "Mach-O codec",
     "abicheck.extract.export_symbol_identity:msvc_export_function": "x86 PE codec",
     "abicheck.model.special_member_identity:special_member_variant_aliases": "ctor/dtor codec; mutant M6",
     "abicheck.finding_identity:resolve_function_identity": "string probe + snapshot level",
     "abicheck.finding_identity:resolve_variable_identity": "snapshot level identity keys",
-    "abicheck.finding_identity:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id)",
+    "abicheck.finding_identity:resolve_change_identity": "snapshot level report finding ids (via report_canonical_finding_id); path probe",
     "abicheck.model.identity:entity_id_for_function": "negative control + castxml dumps; mutant M4",
     "abicheck.model.identity:entity_id_for_variable": "negative control",
     "abicheck.model.identity:entity_id_for_type": "negative control",
     "abicheck.model.identity:entity_id_for_enum": "negative control",
     "abicheck.model.identity:entity_id_for_typedef": "negative control",
     "abicheck.model.identity:entity_id_for_constant": "negative control",
-    # -- not exercised ----------------------------------------------------
-    "abicheck.finding_identity:resolve_symbol_identity": _U
-    + "reached only through resolve_function/variable_identity, which are probed",
-    "abicheck.finding_identity:source_relative_identity": _U
-    + "caller contract: file is already relative; alias only, never a primary key",
-    "abicheck.model.entity_identity:source_relative_identity": _U
-    + "caller contract: file is already relative; alias only (ADR-048 D1)",
-    "abicheck.model.entity_identity:resolve_canonical_identity": _U
-    + "does not normalize its inputs; relies on GraphNode attr normalization upstream -- a relocation cell would need a real L5 graph",
-    "abicheck.model.identity_tiers:resolve_identity": _U
-    + "tier selector over an already-built EntityId; no environment input",
-    "abicheck.model.identity_tiers:snapshot_local_identity": _U
-    + "explicitly snapshot-local by contract (never compared across runs)",
-    "abicheck.model.extraction_scope:extraction_scope_identity": _U
-    + "digest of ExtractionScope.fingerprint; #1330 root spelling covered by castxml symlink/.. cells end to end",
-    "abicheck.model.extraction_scope:snapshot_scope_identity": _U
-    + "as extraction_scope_identity",
-    "abicheck.model.header_exclusion_record:canonical_exclusion_identity": _U
-    + "configuration identity (glob patterns), not an entity key",
-    "abicheck.model.header_exclusion_record:comparison_exclusion_identity": _U
-    + "configuration identity, not an entity key",
-    "abicheck.model.header_exclusion_record:release_exclusion_identity": _U
-    + "configuration identity, not an entity key",
-    "abicheck.buildsource.toolchain_probe:check_profile_toolchain_identity": _U
-    + "toolchain-profile equality check, not an entity key",
-    "abicheck.policy.rule_identity:rule_identity": _U
-    + "policy-rule identity, not an entity key",
-    "abicheck.frontends.action.library_selection:read_elf_identity": _U
-    + "reads an ELF header from disk; Action selection, not an entity key",
-    "abicheck.compatibility_evaluation_frontend:builtin_policy_identity": _U
-    + "configuration identity",
-    "abicheck.compatibility_evaluation_frontend:severity_preset_identity": _U
-    + "configuration identity",
-    "abicheck.workflows.aggregate.reconcile:resolve_report_change_identity": _U
-    + "operates on stored report JSON; needs an aggregate fixture (#1392 release-edge keying not yet celled)",
-    "abicheck.workflows.aggregate.reconcile:resolve_cross_abi_identity": _U
-    + "as resolve_report_change_identity",
-    "abicheck.workflows.release_public_surface:build_side_identity": _U
-    + "release acquisition key; needs a release fan-out fixture (#1392)",
-    "abicheck.compare.template_surface:cpo_identity": _U
-    + "template-surface key over already-extracted names; no path input",
-    "abicheck.compare.template_surface:alias_identity": _U + "as cpo_identity",
-    "abicheck.bundle:stored_capture_identity": _U
-    + "stored bundle capture key; needs bundle-facts fixture",
+    # -- path probes (Phase 3: identity takes a RootRelativePath) ---------
+    "abicheck.model.entity_identity:source_relative_identity": "path probe x path transforms",
+    "abicheck.model.entity_identity:resolve_canonical_identity": "path probe (graph def_file) x path transforms",
+    "abicheck.finding_identity:resolve_symbol_identity": "path probe x path transforms",
+    "abicheck.workflows.aggregate.reconcile:resolve_report_change_identity": "path probe (report entry) x path transforms",
+    # -- environment cells (tests/test_family_f3_identity_cells.py) -------
+    "abicheck.model.identity_tiers:snapshot_local_identity": "cell: decoded spelling joins",
+    "abicheck.model.extraction_scope:extraction_scope_identity": "cell: rule order / rule set",
+    "abicheck.model.extraction_scope:snapshot_scope_identity": "cell: rule order / rule set",
+    "abicheck.model.header_exclusion_record:canonical_exclusion_identity": "cell: order / duplicates",
+    "abicheck.model.header_exclusion_record:comparison_exclusion_identity": "cell: sides",
+    "abicheck.model.header_exclusion_record:release_exclusion_identity": "cell: member order",
+    "abicheck.policy.rule_identity:rule_identity": "cell: prose / separator forgery",
+    "abicheck.compatibility_evaluation_frontend:builtin_policy_identity": "cell: PYTHONHASHSEED",
+    "abicheck.compatibility_evaluation_frontend:severity_preset_identity": "cell: PYTHONHASHSEED / alias",
+    "abicheck.frontends.action.library_selection:read_elf_identity": "cell: path with space / symlinked root",
+    "abicheck.workflows.release_public_surface:build_side_identity": "cell: ./ .. symlinked root",
+    "abicheck.bundle:stored_capture_identity": "cell: relocated package",
+    "abicheck.workflows.aggregate.reconcile:resolve_cross_abi_identity": "cell: Itanium / Mach-O / MSVC spelling",
+    "abicheck.compare.template_surface:alias_identity": "cell: signature / ABI tag",
+    "abicheck.compare.template_surface:cpo_identity": "cell: function vs variable",
 }
 
 
@@ -529,6 +529,9 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
         set(cat.PROBES_BY_NAME)
         | set(cat.macho_decoders())
         | set(cat.pe_decoders())
+        | set(cat.elf_version_decoders())
+        | set(cat._path_probes())
+        | set(cat.ENVIRONMENT_CELLS)
         | {
             "abicheck.model.special_member_identity:special_member_variant_aliases",
             "abicheck.finding_identity:resolve_variable_identity",
@@ -541,7 +544,8 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
     )
     covered = {k for k, v in COVERAGE.items() if not v.startswith(_U)}
     assert covered == registered
-    assert all(len(v) > len(_U) + 10 for v in COVERAGE.values() if v.startswith(_U))
+    # Design-hardening Phase 3 exit: no identity function is left uncovered.
+    assert [k for k, v in COVERAGE.items() if v.startswith(_U)] == []
 
 
 # ---------------------------------------------------------------------------
@@ -565,7 +569,7 @@ def test_mutant_m2_dropped_macho_underscore_strip_is_caught(
 ) -> None:
     """Pre-#1140/#1156: Mach-O ``__Z`` never normalized."""
     dec = "abicheck.model.graph_entity_identity:declaration_identity"
-    monkeypatch.setattr(cat.gei_mod, "strip_macho_itanium_decoration", lambda s: s)
+    monkeypatch.setattr(cat.macho_codec, "decode_itanium", lambda s: s)
     assert any(v.startswith("join:") for v in cat.macho_violations(dec))
 
 
@@ -601,18 +605,28 @@ def test_mutant_m5_stdcall_decoration_not_decoded_is_caught(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pre-#1367: x86 ``_f@N`` left decorated."""
-    monkeypatch.setattr(cat.gei_mod, "_PE_STDCALL_RE", re.compile(r"(?!x)x"))
-    assert (
-        cat.pe_violations(
-            "abicheck.model.graph_entity_identity:pe_c_decoration_base", "stdcall"
-        )
-        != []
-    )
+    monkeypatch.setattr(cat.pe_codec, "_STDCALL_RE", re.compile(r"(?!x)x"))
+    for decoder in cat.pe_decoders():
+        assert cat.pe_violations(decoder, "stdcall") != [], decoder
 
 
 def test_mutant_m6_missing_ctor_variant_is_caught(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pre-#1370: a ctor variant (C3) not joined to its family."""
-    monkeypatch.setattr(cat.smi_mod, "_CTOR_VARIANTS", ("C1", "C2"))
+    from abicheck.model.name_decoration import itanium_structors
+
+    monkeypatch.setattr(itanium_structors, "CTOR_VARIANTS", ("C1", "C2"))
     assert cat.ctor_dtor_violations() != []
+
+
+def test_mutant_m7_checkout_prefix_kept_in_path_identity_is_caught(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 3: the root-relative anchor lost, so a declaring path keeps its
+    checkout prefix (the shape every F3 path fix had to close)."""
+    import abicheck.model.root_relative_path as rrp
+
+    monkeypatch.setattr(rrp, "PROJECT_LAYOUT_MARKERS", frozenset())
+    relocate = cat.TRANSFORMS_BY_NAME["relocate_checkout"]
+    assert any(cat.path_violations(p, relocate) for p in cat._path_probes())

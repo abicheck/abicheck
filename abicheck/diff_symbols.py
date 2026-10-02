@@ -64,12 +64,10 @@ from .diff_symbols_anon_fields import (
     check_anon_fields_for_type,
 )
 from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
-    _CTOR_DTOR_CODE_RE as _CTOR_DTOR_CODE_RE,
     _FUNC_LIKE_TYPES as _FUNC_LIKE_TYPES,
     _OPERATOR_TOKEN_RE as _OPERATOR_TOKEN_RE,
     _RENAME_MIN_SHARED_AFFIX as _RENAME_MIN_SHARED_AFFIX,
     _after_last_top_level_scope as _after_last_top_level_scope,
-    _ctor_dtor_variant as _ctor_dtor_variant,
     _diff_fingerprint_renames as _diff_fingerprint_renames,
     _drop_leading_return_type as _drop_leading_return_type,
     _fingerprints_from_elf as _fingerprints_from_elf,
@@ -81,9 +79,6 @@ from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _return_type_of as _return_type_of,
     _shared_affix_len as _shared_affix_len,
     _should_filter_transitive_runtime_symbols as _should_filter_transitive_runtime_symbols,
-    _skip_source_name as _skip_source_name,
-    _skip_substitution as _skip_substitution,
-    _skip_template_args as _skip_template_args,
     _strip_template_args as _strip_template_args,
     _truncate_at_param_list as _truncate_at_param_list,
     _unqualified_name_of as _unqualified_name_of,

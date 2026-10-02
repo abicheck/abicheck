@@ -30,7 +30,7 @@ destructor) as separate entries.
 
 **The rule.** An exported Itanium ctor/dtor symbol is grouped into its
 *variant family* by substituting its structurally-located variant code
-(:func:`~abicheck.model.mangled_name.itanium_ctor_dtor_marker_span`, never a
+(:func:`~abicheck.model.name_decoration.itanium_structors.decode`, never a
 substring search) with the complete-object code. A placeholder resolves to a
 family when the evidence pairs them one-to-one:
 
@@ -67,7 +67,8 @@ from typing import TYPE_CHECKING
 
 from ..demangle import demangle_batch
 from ..name_classification import canonicalize_type_name
-from .mangled_name import itanium_ctor_dtor_marker_span, itanium_scope_components
+from .mangled_name import itanium_scope_components
+from .name_decoration import itanium_structors
 from .synthetic_key import (
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
@@ -83,9 +84,6 @@ __all__ = [
     "special_member_variant_aliases",
 ]
 
-_CTOR_VARIANTS = ("C1", "C2", "C3")
-_DTOR_VARIANTS = ("D1", "D0", "D2")
-_COMPLETE = {"C": "C1", "D": "D1"}
 _CTOR = "{ctor}"
 _DTOR = "{dtor}"
 _QUALIFIER = re.compile(r"(?:[A-Za-z_]\w*::)+")
@@ -114,15 +112,12 @@ def _family_key(symbol: str) -> tuple[str, str] | None:
     variant, or ``None`` when *symbol* is not one this rule models (an
     inherited ``CI1`` constructor, a GCC-internal ``C4``/``D4`` unified
     variant, anything that is not a ctor/dtor)."""
-    span = itanium_ctor_dtor_marker_span(symbol)
-    if span is None:
+    decoded = itanium_structors.decode(symbol)
+    if decoded is None:
         return None
-    start, end = span
-    code = symbol[start:end]
-    if code not in _CTOR_VARIANTS and code not in _DTOR_VARIANTS:
-        return None
-    marker = _CTOR if code[0] == "C" else _DTOR
-    return marker, symbol[:start] + _COMPLETE[code[0]] + symbol[end:]
+    canonical = itanium_structors.complete_object_spelling(symbol)
+    assert canonical is not None
+    return (_CTOR if decoded.kind == "C" else _DTOR), canonical
 
 
 def _families(export_names: Collection[str]) -> list[_Family]:
@@ -332,13 +327,10 @@ def special_member_variant_aliases(
     """The observed sibling variants of a *real* ctor/dtor linker name
     (clang's ``C1``/``D1``): every other member of its variant family that
     an export table carries. ``()`` for anything else."""
-    key = _family_key(linker_name)
-    if key is None:
-        return ()
-    marker, _canonical = key
-    span = itanium_ctor_dtor_marker_span(linker_name)
-    assert span is not None
-    start, end = span
-    codes = _CTOR_VARIANTS if marker == _CTOR else _DTOR_VARIANTS
-    siblings = (linker_name[:start] + c + linker_name[end:] for c in codes)
-    return tuple(sorted(s for s in siblings if s != linker_name and s in export_names))
+    return tuple(
+        sorted(
+            s
+            for s in itanium_structors.sibling_spellings(linker_name)
+            if s in export_names
+        )
+    )

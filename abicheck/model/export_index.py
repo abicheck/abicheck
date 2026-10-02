@@ -648,3 +648,20 @@ def snapshot_export_table_state(snap: AbiSnapshot) -> ExportTableState:
     platform = getattr(snap, "platform", None)
     ok = read[platform] if platform in read else any(read.values())
     return ExportTableState.READ if ok else ExportTableState.FAILED
+
+
+def pe_decoration_aliases(
+    snap: AbiSnapshot, names: Iterable[str]
+) -> dict[str, frozenset[str]]:
+    """Undecorated C name -> the PE export spellings in *names* that
+    decorate it, read from each export's stored
+    :attr:`~.pe_facts.PeExport.decoded_name` (set once, at extraction or
+    load). Nothing here decodes a spelling (design-hardening Phase 3)."""
+    if snap.pe is None:
+        return {}
+    wanted = set(names)
+    out: dict[str, set[str]] = {}
+    for export in snap.pe.exports:
+        if export.decoded_name and export.name in wanted:
+            out.setdefault(export.decoded_name, set()).add(export.name)
+    return {base: frozenset(spellings) for base, spellings in out.items()}

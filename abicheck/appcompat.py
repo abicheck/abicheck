@@ -47,6 +47,7 @@ from .model.consumer_spec import (
     as_consumer_spec,
     verify_digest,
 )
+from .model.name_decoration import elf_version
 from .model.surface_facts import is_binary_exported
 from .policy.classification import Verdict, compute_verdict
 from .policy.disposition_close import (
@@ -708,16 +709,6 @@ def _get_new_lib_exports(new_lib: Path | AbiSnapshot) -> set[str]:
     return set(all_export_names(index)) if index is not None else set()
 
 
-def _normalize_elf_symbol_name(name: str) -> str:
-    """Normalize ELF symbol name for cross-source matching.
-
-    Strips GNU version suffixes (``@VER`` / ``@@VER``) when present.
-    pyelftools usually returns plain names, but runtime/linker sources may
-    include suffixes, so this keeps matching robust.
-    """
-    return name.split("@", 1)[0]
-
-
 def _get_old_lib_exports_for_scoping(old_lib: Path | AbiSnapshot) -> set[str]:
     """Best-effort export set for the old library (ELF-only).
 
@@ -731,7 +722,7 @@ def _get_old_lib_exports_for_scoping(old_lib: Path | AbiSnapshot) -> set[str]:
         return set()
     if elf_meta is None:
         return set()
-    return {_normalize_elf_symbol_name(s.name) for s in elf_meta.symbols}
+    return {elf_version.unversioned_name(s.name) for s in elf_meta.symbols}
 
 
 def _get_lib_soname(lib: Path | AbiSnapshot) -> str:
@@ -769,7 +760,7 @@ def _scope_app_symbols_to_library(
     # Normalize app symbols to keep matching robust when version suffixes
     # appear in one data source but not the other.
     app_reqs.undefined_symbols = {
-        _normalize_elf_symbol_name(s) for s in app_reqs.undefined_symbols
+        elf_version.unversioned_name(s) for s in app_reqs.undefined_symbols
     }
 
     old_exports = _get_old_lib_exports_for_scoping(old_lib)

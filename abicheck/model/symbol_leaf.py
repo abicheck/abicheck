@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import re
 
+from .name_decoration import elf_version
+
 _C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
@@ -36,7 +38,7 @@ def symbol_leaf_identifier(symbol: str) -> str | None:
     -- template arguments, substitutions, operators, local names -- answers
     ``None``, which keeps the caller's decision unresolved.
     """
-    name = symbol.split("@", 1)[0]
+    name = elf_version.unversioned_name(symbol)
     if not name:
         return None
     if not name.startswith("_Z"):

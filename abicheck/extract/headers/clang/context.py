@@ -53,7 +53,7 @@ from ....dumper_clang_vtable import build_vtable, is_record_definition
 from ....model import AccessLevel, ScopeOrigin, Visibility
 from ....model.export_index import ExportMatch, match_export
 from ....model.identity import ScopePath
-from ....model.mangled_name import strip_macho_itanium_decoration
+from ....model.name_decoration import macho as macho_decoration
 from ....name_classification import strip_anonymous_type_location
 from ....provenance import classify_origin, header_from_location
 from ...surface_fact_producers import header_ast_surface_facts
@@ -432,7 +432,7 @@ def strip_darwin_itanium_decoration(
     ``test_parse_functions_mangled_field_unaffected_off_darwin``: an
     earlier, ungated revision of this strip stripped a literal
     off-Darwin ``"__Z..."`` name too). Delegates to :func:`~abicheck.model.
-    mangled_name.strip_macho_itanium_decoration` for the shape test itself,
+    name_decoration.macho.decode_itanium` for the shape test itself,
     the single canonical home for that structural check (also used by
     ``model.mangled_name``'s own Itanium-scope parsing and
     ``dumper_hybrid._macho_normalize_mangled``) -- but only calls it once
@@ -481,7 +481,7 @@ def strip_darwin_itanium_decoration(
         return mangled
     if has_asm_label:
         return mangled
-    stripped = strip_macho_itanium_decoration(mangled)
+    stripped = macho_decoration.decode_itanium(mangled)
     if stripped != mangled:
         return stripped
     if is_extern_c and name and mangled == "_" + name:

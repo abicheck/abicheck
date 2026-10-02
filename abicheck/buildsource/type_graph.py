@@ -71,7 +71,7 @@ from ..model.graph_facts import (
     GraphNode,
     register_fact,
 )
-from ..model.mangled_name import strip_macho_itanium_decoration
+from ..model.name_decoration import macho as macho_decoration
 from ..model.source_graph import function_decl_identity
 
 if TYPE_CHECKING:
@@ -507,7 +507,7 @@ def _decl_return_type_name(node: dict[str, Any]) -> str:
 
 def _decl_identity(node: dict[str, Any]) -> str:
     """Stable identity for a decl node: mangled name when clang emits one."""
-    return strip_macho_itanium_decoration(
+    return macho_decoration.decode_itanium(
         str(node.get("mangledName") or node.get("name") or "")
     )
 
@@ -1291,7 +1291,7 @@ def _var_decl_ident(node: Any, scope: list[str], name: str) -> str:
     function's docstring for why the qualified-name fallback is load-bearing.
     """
     return function_decl_identity(
-        strip_macho_itanium_decoration(str(node.get("mangledName") or "")),
+        macho_decoration.decode_itanium(str(node.get("mangledName") or "")),
         name,
         "::".join([*scope, name]) if scope else name,
         "",
@@ -1372,7 +1372,7 @@ def _function_decl_ident(node: Any, scope: list[str], name: str) -> str:
         return ""
     type_obj = node.get("type")
     return function_decl_identity(
-        strip_macho_itanium_decoration(str(node.get("mangledName") or "")),
+        macho_decoration.decode_itanium(str(node.get("mangledName") or "")),
         name,
         "::".join([*scope, name]) if scope else name,
         str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else "",

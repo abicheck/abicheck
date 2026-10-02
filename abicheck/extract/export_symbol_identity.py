@@ -54,10 +54,9 @@ Leaf module: depends only on ``model``/``model.identity`` (allowed:
 
 from __future__ import annotations
 
-import re
-
 from ..model import Function, Variable, Visibility
 from ..model.identity import entity_id_for_function, entity_id_for_variable
+from ..model.name_decoration import pe_x86
 from .surface_fact_producers import export_table_surface_facts
 
 __all__ = [
@@ -68,68 +67,13 @@ __all__ = [
     "msvc_export_mangled_name",
 ]
 
-# 32-bit x86 PE/COFF's C-calling-convention export decoration -- distinct
-# from (and orthogonal to) C++ name mangling: __stdcall appends "@N" (N =
-# argument-list size in bytes) to a leading-underscore-prefixed name,
-# __fastcall does the same but with a leading "@" instead of "_", and plain
-# __cdecl gets only the leading underscore. This is *exclusive* to 32-bit
-# x86 (`IMAGE_FILE_MACHINE_I386`) -- x64/ARM/ARM64 PE never decorate a C
-# export at all, so a leading underscore there is part of the real,
-# undecorated source name (Codex review, PR #1015: an x64 `_secret` export
-# is a real, distinct symbol, not a decorated `secret`) and stripping it
-# unconditionally would misclassify it and collide it with an unrelated
-# real `secret` export. A raw export string here is real, observed
-# evidence -- like this module's other builders -- but unlike a mangled
-# name, it is not the identity itself on 32-bit x86: the header-AST
-# producer's own EntityId for the identical declaration carries the
-# undecorated name as its leaf (its own AST read never sees the linker's
-# decoration), so an un-decorated leaf is required there for the two
-# evidence modes to agree, not merely cosmetic.
-_PE_FASTCALL_DECORATION_RE = re.compile(r"^@(.+)@\d+$")
-_PE_STDCALL_DECORATION_RE = re.compile(r"^_(.+)@\d+$")
-
-# __vectorcall's own decoration ("name@@N") is a distinct case: unlike
-# __stdcall/__fastcall/__cdecl above, it applies on *every* PE machine type
-# (x64/ARM64 included, not just 32-bit x86) -- MSVC's argument-passing
-# convention decorates a __vectorcall export with a trailing "@@N" on any
-# architecture. It carries NO leading-underscore prefix on any machine
-# (MSVC "Argument Passing and Naming Conventions"), so a leading "_" is part
-# of the real name and is never stripped: "_f@@8" is function "_f" and
-# "f@@8" is function "f" -- two distinct entities that an optional "_?"
-# prefix used to join. This agrees with
-# ``model.graph_entity_identity.pe_c_decoration_base``, which decodes
-# "_f@@8" as "_f".
-_PE_VECTORCALL_DECORATION_RE = re.compile(r"^(.+)@@\d+$")
-
-
-def _strip_pe_vectorcall_decoration(sym: str) -> str | None:
-    """Undo __vectorcall's ``name@@N`` export decoration (a leading ``_``
-    is part of ``name``, never a prefix).
-    Unlike :func:`_strip_pe_c_decoration`, this applies on every PE machine
-    type. Returns ``None`` (not the unchanged string) when *sym* doesn't
-    match, so a caller can tell "no vectorcall decoration here" apart from
-    "stripped to the same spelling".
-    """
-    match = _PE_VECTORCALL_DECORATION_RE.match(sym)
-    return match.group(1) if match else None
-
-
-def _strip_pe_c_decoration(sym: str) -> str:
-    """Undo 32-bit x86 PE/COFF's __stdcall/__fastcall/__cdecl export
-    decoration -- see this module's own comment above for the "why". Only
-    meaningful for an already-extern-"C"-classified export (a mangled C++
-    name is never decorated this way); leaves anything not matching one of
-    the three shapes unchanged.
-    """
-    match = _PE_FASTCALL_DECORATION_RE.match(sym)
-    if match:
-        return match.group(1)
-    match = _PE_STDCALL_DECORATION_RE.match(sym)
-    if match:
-        return match.group(1)
-    if sym.startswith("_"):
-        return sym[1:]
-    return sym
+# PE/COFF C-calling-convention export decoration is decoded by the one
+# codec, ``model.name_decoration.pe_x86`` (design-hardening Phase 3): it
+# owns which machines decorate (``__cdecl``/``__stdcall``/``__fastcall`` on
+# 32-bit x86 only; ``__vectorcall``'s ``name@@N`` on every machine, never
+# with a leading ``_`` prefix) and the ``@N`` shape check. The *identity*
+# leaf must be undecorated because the header-AST producer's own EntityId
+# for the identical declaration never sees the linker's decoration.
 
 
 def itanium_export_mangled_name(sym: str) -> str | None:
@@ -218,9 +162,10 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
     :func:`msvc_export_mangled_name` for why a bare ``?``-prefix check
     alone misses MinGW/GCC's Itanium-mangled C++ exports -- and, for the
     extern-"C" branch only, undoes 32-bit x86's __stdcall/__fastcall/
-    __cdecl export decoration before building the identity (see
-    :func:`_strip_pe_c_decoration`'s own docstring for why the *identity*,
-    not ``Function.name``/``mangled``, is what must be undecorated here).
+    __cdecl (and every machine's __vectorcall) export decoration before
+    building the identity, through ``model.name_decoration.pe_x86`` -- the
+    *identity*, not ``Function.name``/``mangled``, is what must be
+    undecorated here.
 
     *is_x86_32* -- the caller's own ``PeMetadata.machine ==
     "IMAGE_FILE_MACHINE_I386"`` read -- gates the decoration strip: it is a
@@ -234,21 +179,16 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
     agrees with the header-AST producer's own ``_Z...`` spelling (Codex
     review, PR #1015; confirmed against real GNU binutils/LLVM documentation
     of i686 MinGW's leading-underscore convention). __vectorcall's own
-    decoration is checked independently of *is_x86_32* -- see
-    :func:`_strip_pe_vectorcall_decoration`'s own docstring for why.
+    decoration is decoded independently of *is_x86_32* (it applies on
+    every machine).
     """
     normalized = sym[1:] if (is_x86_32 and sym.startswith("__Z")) else sym
-    is_extern_c = not (normalized.startswith("?") or normalized.startswith("_Z"))
-    if is_extern_c:
-        vectorcall_leaf = _strip_pe_vectorcall_decoration(normalized)
-        if vectorcall_leaf is not None:
-            leaf_name = vectorcall_leaf
-        elif is_x86_32:
-            leaf_name = _strip_pe_c_decoration(sym)
-        else:
-            leaf_name = normalized
-    else:
-        leaf_name = normalized
+    is_extern_c = not pe_x86.is_cxx_mangled(normalized)
+    leaf_name = (
+        pe_x86.decode_c_name(sym, x86_32=is_x86_32) or normalized
+        if is_extern_c
+        else normalized
+    )
     return Function(
         name=sym,
         mangled=sym,

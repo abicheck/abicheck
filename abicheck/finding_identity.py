@@ -78,6 +78,8 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Generic, TypeVar
 
 from .finding_identity_atomic import canonicalize_atomic_slot
+from .model.entity_identity import source_relative_identity
+from .model.root_relative_path import RootRelativePath
 from .model.signature_normalization import canonicalize_function_signature_param_type
 from .name_classification import canonicalize_type_name
 
@@ -583,15 +585,6 @@ def normalized_signature(
     return "sig:" + "\x1f".join(parts)
 
 
-def source_relative_identity(file: str, name: str) -> str:
-    """File + name -- an alias, never a primary key: two distinct entities
-    can legitimately share this pair (an ODR-violating build, or two
-    findings on the same line), so it is not trusted alone as a canonical
-    id.
-    """
-    return f"{file or ''}\x1f{name or ''}"
-
-
 def resolve_symbol_identity(
     *,
     mangled: str | None = None,
@@ -599,7 +592,7 @@ def resolve_symbol_identity(
     qualified_name: str | None = None,
     kind: str = "",
     param_types: tuple[str, ...] = (),
-    source_location: str = "",
+    source_location: RootRelativePath | None = None,
 ) -> FindingIdentity:
     """Resolve the canonical identity for one function/variable declaration
     from whatever facts a producer actually supplied. Never fabricates a
@@ -639,7 +632,7 @@ def resolve_symbol_identity(
     if qn:
         aliases.append(f"qualified:{qn}")
     aliases.append(sig)
-    if source_location:
+    if source_location is not None:
         aliases.append(f"relsrc:{rel}")
 
     if real_mangled:
@@ -728,7 +721,7 @@ def resolve_function_identity(func: Function) -> FindingIdentity:
         qualified_name=func.name,
         kind="function",
         param_types=param_types,
-        source_location=func.source_location or "",
+        source_location=RootRelativePath.from_project_layout(func.source_location),
     )
 
 
@@ -739,7 +732,7 @@ def resolve_variable_identity(var: Variable) -> FindingIdentity:
         name=var.name,
         qualified_name=var.name,
         kind="variable",
-        source_location=var.source_location or "",
+        source_location=RootRelativePath.from_project_layout(var.source_location),
     )
 
 
@@ -1535,7 +1528,14 @@ def resolve_change_identity(
     # `rel`/the `relsrc:` alias/the REDUCED-tier synthetic basis below
     # would still make the supposedly library-level identity change
     # whenever the sampled export's file changes.
-    source_location = None if is_batch else change.source_location
+    # A recorded location reaches identity only root-relative: anchored at
+    # its project layout, never the checkout prefix (design-hardening
+    # Phase 3, F3); an absolute spelling with no layout anchor is dropped.
+    source_location = (
+        None
+        if is_batch
+        else RootRelativePath.from_project_layout(change.source_location)
+    )
     # Same is_batch guard as the three fields above, defensively -- no
     # producer sets entity_id on a batch-shaped Change today.
     entity_id = None if is_batch else change.entity_id
@@ -1569,7 +1569,7 @@ def resolve_change_identity(
         canonicalize_values=canonicalize_values,
     )
     sig = f"sig:{qn}\x1f{discriminator}"
-    rel = source_relative_identity(source_location or "", entity_symbol or "")
+    rel = source_relative_identity(source_location, entity_symbol or "")
 
     real_mangled = None
     if is_symbol_level:
@@ -1590,7 +1590,7 @@ def resolve_change_identity(
     if qualified_name:
         aliases.append(f"qualified:{qualified_name}\x1f{discriminator}")
     aliases.append(sig)
-    if source_location:
+    if source_location is not None:
         aliases.append(f"relsrc:{rel}\x1f{discriminator}")
     if entity_id is not None:
         # ADR-063 Phase 2: first real read of Change.entity_id. Additive

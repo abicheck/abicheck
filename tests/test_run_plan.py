@@ -1691,7 +1691,7 @@ class TestRunPlanGenerateCliToolchainBindings:
     def test_unused_profiles_mismatch_does_not_abort_an_otherwise_valid_plan(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Regression: check_profile_toolchain_identity previously probed
+        # Regression: check_profile_toolchain_constraints previously probed
         # EVERY declared profile, not just the ones the generated plan
         # actually resolved a check for. A bindings file may legitimately be
         # shared across runners (e.g. one committed file naming both a Linux

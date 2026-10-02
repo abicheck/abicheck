@@ -12,8 +12,8 @@ Conventions (the declaration is ``foo``, or the Itanium-mangled ``_Z3fooi``):
 * ``cdecl``      -> ``_foo``    (32-bit x86 only)
 * ``stdcall``    -> ``_foo@8``  (32-bit x86 only)
 * ``fastcall``   -> ``@foo@8``  (32-bit x86 only)
-* ``vectorcall`` -> ``foo@@8``  (32-bit x86 only; MSVC also decorates it on
-  x64, but ``@N`` is never stripped there)
+* ``vectorcall`` -> ``foo@@8``  (every machine: MSVC decorates it on x64 and
+  ARM64 too, and ``name@@N`` cannot spell a C identifier)
 * ``none``       -> ``foo``     (exact spelling; joins everywhere)
 
 A C++-mangled name is never undecorated (MSVC ``?`` names carry their
@@ -58,7 +58,8 @@ _EXPECTED = {
     ("plain", "cdecl"): {"i386": _M, "amd64": _U, "arm64": _U, "unknown": _U},
     ("plain", "stdcall"): {"i386": _M, "amd64": _U, "arm64": _U, "unknown": _U},
     ("plain", "fastcall"): {"i386": _M, "amd64": _U, "arm64": _U, "unknown": _U},
-    ("plain", "vectorcall"): {"i386": _M, "amd64": _U, "arm64": _U, "unknown": _U},
+    # MSVC decorates __vectorcall on every machine (design-hardening Phase 3).
+    ("plain", "vectorcall"): {"i386": _M, "amd64": _M, "arm64": _M, "unknown": _M},
     ("plain", "none"): {"i386": _M, "amd64": _M, "arm64": _M, "unknown": _M},
     ("mangled", "cdecl"): {"i386": _U, "amd64": _U, "arm64": _U, "unknown": _U},
     ("mangled", "stdcall"): {"i386": _U, "amd64": _U, "arm64": _U, "unknown": _U},
