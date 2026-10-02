@@ -452,7 +452,7 @@ def consumer_resolves_via_provider(
     *provider_lib* specifically, not merely "some library in the bundle
     happens to export a same-named symbol."
 
-    Mirrors ``bundle._detect_unresolved_intra_dependency``'s version-aware,
+    Mirrors the former ``bundle._detect_unresolved_intra_dependency``'s version-aware,
     reachability-constrained provider matching (see that function's own
     docstring for the full contract, including the unversioned
     ``is_default`` subtlety) -- narrowed here to check one specific
@@ -470,7 +470,7 @@ def consumer_resolves_via_provider(
     # A single provider library can legitimately export several *versioned*
     # definitions of the same bare symbol name (e.g. compat-symbol pattern
     # `foo@V1` alongside `foo@@V2`) -- check every one of this provider's
-    # own entries (`any`, mirroring `_detect_unresolved_intra_dependency`'s
+    # own entries (`any`, mirroring the former `_detect_unresolved_intra_dependency`'s
     # own matching), not just the first one found (Codex review): picking
     # only the first could test a non-matching V1 entry while the real
     # match is a later V2 one from the same provider.

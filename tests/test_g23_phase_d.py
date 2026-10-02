@@ -394,25 +394,6 @@ class TestSymversParser:
         meta = parse_symvers(text)
         assert set(meta.entries) == {"good"}
 
-    def test_parse_symvers_file(self, tmp_path):
-        from abicheck.symvers_metadata import parse_symvers_file
-
-        p = tmp_path / "Module.symvers"
-        p.write_text("0x9\tksym\tvmlinux\tEXPORT_SYMBOL_GPL\tCORE\n")
-        meta = parse_symvers_file(p)
-        assert meta.entries["ksym"].namespace == "CORE"
-
-    def test_parse_symvers_file_missing_is_empty(self, tmp_path):
-        from abicheck.symvers_metadata import parse_symvers_file
-
-        assert parse_symvers_file(tmp_path / "nope").entries == {}
-
-    def test_parse_symvers_file_directory_is_empty(self, tmp_path):
-        from abicheck.symvers_metadata import parse_symvers_file
-
-        # A non-regular file (directory) yields empty metadata, not a crash.
-        assert parse_symvers_file(tmp_path).entries == {}
-
 
 class TestKabiDiff:
     _OLD = (

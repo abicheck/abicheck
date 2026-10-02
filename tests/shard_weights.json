@@ -121,7 +121,6 @@
   "tests/test_anon_union_fp.py": 0.07,
   "tests/test_api_types.py": 0.43,
   "tests/test_appcompat_examples.py": 1.29,
-  "tests/test_appcompat_html.py": 0.1,
   "tests/test_apt_install_hardening.py": 13.3,
   "tests/test_architecture_check.py": 0.76,
   "tests/test_architecture_conformance.py": 0.02,

@@ -154,22 +154,6 @@ def _layout_signature(rec: RecordType) -> str:
     return f"size={rec.size_bits};align={rec.alignment_bits};fields={fields}"
 
 
-def _public_pointer_only(graph: SurfaceGraph, type_name: str) -> tuple[bool, bool]:
-    """Return (referenced_by_public, only_ever_by_pointer) for *type_name*.
-
-    If a public function names *type_name* by value in a parameter or return
-    position, the type is observable by value.
-
-    One-shot entry point: it builds an index for a single query, so the rule has
-    exactly one implementation rather than a per-record scan kept alongside an
-    index. A caller asking about several records builds the index once itself
-    and calls :func:`_query_public_use`.
-    """
-    return query_public_use(
-        build_public_use_index(graph.snapshot.declarations.functions), type_name
-    )
-
-
 def _record_is_opaque_candidate(rec: RecordType) -> bool:
     """The O(1), record-local half of the OPAQUE_POINTER conditions.
 

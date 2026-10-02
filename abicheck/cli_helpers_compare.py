@@ -67,16 +67,6 @@ def _provenance_timestamp(source_date_epoch: str | None) -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-def _merge_gcc_options(
-    build_context_flags: list[str], gcc_options: str | None
-) -> str | None:
-    """Merge compile-db derived flags with explicit gcc options."""
-    if not build_context_flags:
-        return gcc_options
-    merged = " ".join(build_context_flags)
-    return f"{merged} {gcc_options}" if gcc_options else merged
-
-
 def _pair_wide_dialect_override(
     lang: str,
     old_h: list[Path],
@@ -660,10 +650,8 @@ def fold_l0_hard_removals(
 # scoping passes, the runtime-probe overlay, the worst-wins exit-code and
 # verdict ranking, and the JSON-safe summaries the renderer reads back off
 # ``result``. A pure relocation -- ``cli_compare_helpers`` re-exports every name
-# below, so ``cli_compare_helpers._verdict_exit_code`` (which
-# the retired ``cli_scan_baseline`` imported) and the existing test patch targets keep
-# resolving unchanged, and a bare-name call there still goes through that
-# module's namespace. This module, not a new one, because a *new* module
+# below, so the existing test patch targets keep resolving unchanged, and a
+# bare-name call there still goes through that module's namespace. This module, not a new one, because a *new* module
 # reaching ``service``/``appcompat`` would join the allowlisted CLI
 # import-cycle SCC, which CLAUDE.md "M1-3" forbids extending; this one is
 # already a member.
@@ -741,16 +729,6 @@ def _plugin_contract_summary(result: object) -> dict[str, Any]:
     }
 
 
-def _verdict_exit_code(verdict: object) -> int:
-    """Map a scoped-comparison Verdict to its floor exit code (ADR-043)."""
-    value = getattr(verdict, "value", verdict)
-    if value == "BREAKING":
-        return 4
-    if value == "API_BREAK":
-        return 2
-    return 0
-
-
 _VERDICT_SEVERITY_RANK = {
     "BREAKING": 3,
     "API_BREAK": 2,
@@ -815,7 +793,9 @@ def _scoped_exit_code(
         if has_missing_contract:
             code = max(code, missing_contract_exit_code(sev_config))
         return code
-    return _verdict_exit_code(scoped.verdict)
+    from .workflows.gate import legacy_exit_code
+
+    return legacy_exit_code(scoped.verdict)
 
 
 def _scoped_severity_summary(

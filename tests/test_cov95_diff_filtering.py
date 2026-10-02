@@ -1047,3 +1047,65 @@ def test_build_type_to_funcs_relates_types_to_referencing_functions():
     assert to_funcs["Widget"] == {"use"}
     assert to_mangled["Widget"] == {"_Z3useP6Widget"}
     assert to_funcs["Unused"] == set()
+
+
+def test_opaque_usage_index_matches_per_candidate_oracle():
+    """`_opaque_usage_index` must equal the per-candidate `_is_pointer_only_type` /
+    `_has_public_pointer_factory` oracle it replaced — the AC prefilter only drops
+    pairs that could never match, so the decision is unchanged."""
+    import random
+
+    from abicheck.diff_filtering import _opaque_usage_index
+    from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
+    from tests._opaque_usage_oracle import (
+        _has_public_pointer_factory,
+        _is_pointer_only_type,
+    )
+
+    rng = random.Random(99)
+    names = ["Foo", "Bar", "Ctx", "SSLCtx", "ns::Foo", "Handle", "T"]
+    typestrs = [
+        "Foo *",
+        "Foo",
+        "const Foo &",
+        "ns::Foo",
+        "ns::Foo *",
+        "SSLCtx *",
+        "Ctx",
+        "Bar, Foo",
+        "std::vector<Foo>",
+        "Handle*",
+        "const Ctx &",
+        "T *",
+        "",
+    ]
+    for _ in range(800):
+        funcs = [
+            Function(
+                name=f"f{i}",
+                mangled=f"f{i}",
+                return_type=rng.choice(typestrs),
+                params=[
+                    Param(name="p", type=rng.choice(typestrs))
+                    for _ in range(rng.randint(0, 2))
+                ],
+                visibility=rng.choice([Visibility.PUBLIC, Visibility.HIDDEN]),
+            )
+            for i in range(rng.randint(0, 5))
+        ]
+        varz = [
+            Variable(
+                name=f"v{i}",
+                mangled=f"v{i}",
+                type=rng.choice(typestrs),
+                visibility=rng.choice([Visibility.PUBLIC, Visibility.HIDDEN]),
+            )
+            for i in range(rng.randint(0, 3))
+        ]
+        snap = AbiSnapshot(library="l", version="1", functions=funcs, variables=varz)
+        cands = set(rng.sample(names, rng.randint(0, len(names))))
+        by_value, has_factory = _opaque_usage_index(cands, snap, {}, {})
+        for t in cands:
+            # pointer-only ⟺ not used by value
+            assert (t not in by_value) == _is_pointer_only_type(t, snap, None)
+            assert (t in has_factory) == _has_public_pointer_factory(t, snap, None)

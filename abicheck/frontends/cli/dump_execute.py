@@ -171,8 +171,7 @@ def execute_dump_cli_run(
             unusable -- a ``ValidationError`` from ``execute_dump_request``
             (e.g. no exports matched, an invalid include directory, an
             unreachable requested depth) -- preserving exit 64, the same
-            translation ``cli_resolve._dump_native_binary``'s own docstring
-            documents for the retired ``perform_elf_dump``/
+            translation the former ``cli_resolve._dump_native_binary`` documented for the retired ``perform_elf_dump``/
             ``handle_non_elf_dump`` call sites (Codex review on PR #980:
             this shared executor's own generic ``except`` clause below
               was silently collapsing that distinction to exit 1 for

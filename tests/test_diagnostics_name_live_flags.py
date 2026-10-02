@@ -72,32 +72,13 @@ _SINK_NAMES = frozenset(
 )
 _SINK_SUFFIXES = ("Error", "Exception", "Warning")
 
-#: Functions whose messages are reachable from tests only: each is kept alive
-#: by a test-local re-implementation of a command that was deleted (ADR-043
-#: ``collect``/``merge``; ADR-068 ``scan --artifact-set``). Their flags are
-#: stale by definition, but so is the code -- deleting it is its own change.
+#: Functions whose messages are reachable from tests only (code a deleted
+#: command left behind). Empty: the ``collect``/``merge``/``scan
+#: --artifact-set`` leftovers it used to list were deleted. Add an entry only
+#: for code that is about to be deleted, never as a way to keep it.
 #: :func:`test_allowlisted_functions_have_no_production_caller` keeps this
 #: honest: an entry whose function gains a production caller fails.
-DEAD_CODE_ALLOWLIST: dict[tuple[str, str], str] = {
-    (
-        "abicheck/cli_buildsource_helpers.py",
-        "parse_from_specs",
-    ): "deleted `collect --from`",
-    (
-        "abicheck/cli_buildsource_helpers.py",
-        "_run_adapters",
-    ): "deleted `collect` adapters",
-    (
-        "abicheck/cli_buildsource_helpers.py",
-        "_enforce_strict_mode",
-    ): "deleted `collect --collection-mode`",
-    (
-        "abicheck/cli_buildsource_merge.py",
-        "_merge_handle_conflicts",
-    ): "deleted `merge --on-conflict`",
-    ("abicheck/bundle.py", "discover_artifact_set"): "deleted `scan --artifact-set`",
-    ("abicheck/bundle.py", "audit_bundle"): "deleted `scan --artifact-set`",
-}
+DEAD_CODE_ALLOWLIST: dict[tuple[str, str], str] = {}
 
 
 def _walk_params(cmd: click.Command, out: set[str]) -> None:

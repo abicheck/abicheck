@@ -341,12 +341,6 @@ def _match_target_against_index(
     return matched, providers
 
 
-# Backward-compatibility alias for the original name — some tests and
-# external integrations imported _match_target directly. The new code
-# path is :func:`_match_target_against_index`.
-_match_target = _match_target_against_index
-
-
 def _match_entry(
     entry: ManifestEntry,
     snapshot: BundleSnapshot,
@@ -379,7 +373,7 @@ def _match_entry(
         # full demangled index per target -- deadline_scope() alone
         # doesn't interrupt pure Python work, so without this a small
         # --budget could be exceeded well before run_scan_set's own
-        # elapsed-time check (after audit_bundle returns) ever sees it.
+        # elapsed-time check (after the bundle audit returns) ever sees it.
         deadline.check()
         matched, providers = _match_target_against_index(target, kind, snapshot, index)
         out.append((target, kind, matched, providers))

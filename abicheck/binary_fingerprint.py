@@ -101,23 +101,6 @@ class BinarySummary:
         """Return True if the summary includes a .text section."""
         return ".text" in self.sections
 
-    def differs_from(self, other: BinarySummary) -> dict[str, tuple[str, str]]:
-        """Return sections that differ between self and other.
-
-        Returns dict of section_name → (old_hash, new_hash) for sections
-        present in both but with different content hashes or sizes.
-        Sections only in one binary are not included (they indicate
-        structural changes).
-        """
-        diffs: dict[str, tuple[str, str]] = {}
-        common = set(self.sections) & set(other.sections)
-        for name in sorted(common):
-            old_s = self.sections[name]
-            new_s = other.sections[name]
-            if old_s.content_hash != new_s.content_hash or old_s.size != new_s.size:
-                diffs[name] = (old_s.content_hash, new_s.content_hash)
-        return diffs
-
     @property
     def text_size(self) -> int | None:
         """Return .text section size, or None if absent."""

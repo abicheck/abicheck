@@ -70,6 +70,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .deadline import run_bounded
+
 if TYPE_CHECKING:
     from .model import AbiSnapshot
 
@@ -241,10 +243,23 @@ def _validate_compiler_name(value: Any) -> str:
     return value
 
 
+def _is_recognized_cxx_std_flag(value: str) -> bool:
+    """``-std=gnu++20`` and the other spellings ``_parse_cxx_std`` reads."""
+    from .model.language_standard import (
+        language_standard_is_cxx,
+        language_standard_year,
+    )
+
+    if not value.startswith("-std="):
+        return False
+    std = value.partition("=")[2]
+    return language_standard_is_cxx(std) and language_standard_year(std) is not None
+
+
 def _validate_flag(value: Any) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError("probe spec flags must be non-empty strings")
-    if value.startswith(_CXX_STD_FLAG):
+    if value.startswith(_CXX_STD_FLAG) or _is_recognized_cxx_std_flag(value):
         return value
     if value in _SAFE_FLAG_EXACT:
         return value
@@ -267,14 +282,25 @@ def _validate_string_sequence(kind: str, value: Any) -> tuple[str, ...]:
 
 
 def _parse_cxx_std(flags: list[str]) -> int | None:
-    """Extract the C++ standard version from a flag list (``-std=c++20``)."""
-    for f in flags:
-        if f.startswith(_CXX_STD_FLAG):
-            try:
-                return int(f[len(_CXX_STD_FLAG) :])
-            except ValueError:
-                return None
-    return None
+    """The C++ standard a flag list selects, as its two-digit number
+    (``-std=gnu++2a`` -> 20).
+
+    Read the way the compiler reads it -- the last ``-std=``/``--std=``/
+    ``/std:`` wins, GNU and draft spellings included -- through the shared
+    :mod:`abicheck.model.language_standard` owner rather than a private
+    first-match parse.
+    """
+    from .model.language_standard import (
+        language_standard_is_cxx,
+        language_standard_year,
+        last_language_standard,
+    )
+
+    value = last_language_standard(flags)
+    if not language_standard_is_cxx(value):
+        return None
+    year = language_standard_year(value)
+    return None if year is None else year % 100
 
 
 def load_probe_spec(path: str | Path) -> ProbeSpec:
@@ -365,12 +391,11 @@ def _compile_probe(
         return None, f"compiler {cfg.compiler!r} not found on PATH"
 
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             cmd,
             capture_output=True,
             text=True,
             timeout=60,
-            check=False,
         )
     except subprocess.TimeoutExpired:
         return None, "compilation timed out (60s)"

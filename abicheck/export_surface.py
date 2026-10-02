@@ -217,7 +217,7 @@ def observed_exports_by_platform(snap: AbiSnapshot) -> dict[str, set[str]] | Non
     to it), every PE export with an unnamed ordinal-only one spelled
     ``ordinal:<n>`` exactly as ``dumper._dump_pe`` records it, and every
     Mach-O export. ``None`` when no table carries an entry, which this
-    provider treats as "not captured" (see :func:`observed_export_names`).
+    provider treats as "not captured" (see :func:`observed_export_names` (removed)).
 
     Provenance is kept rather than unioned away because the "is this export
     an ABI-relevant entity or a toolchain artifact" filter is format-specific:
@@ -240,28 +240,6 @@ def observed_exports_by_platform(snap: AbiSnapshot) -> dict[str, set[str]] | Non
 #: no artifact filter is applied to them and every unmatched PE export counts
 #: as unexplained (the conservative direction).
 _ELF_CONVENTION_TABLES: frozenset[str] = frozenset({"elf", "macho"})
-
-
-def observed_export_names(snap: AbiSnapshot) -> set[str] | None:
-    """Linker-symbol names in *snap*'s own export table, or ``None``.
-
-    ``None`` means no export table was captured at all for this snapshot --
-    distinct from an empty set, which would claim "this binary exports
-    nothing." A snapshot carrying platform metadata whose export list is
-    empty is also reported as ``None``: an export-table-less parse and a
-    genuinely empty export table are indistinguishable from the recorded
-    data, and treating the ambiguous case as "exports nothing" would let this
-    provider prove every entity out of contract on a parse failure.
-
-    All three platforms are unioned rather than selected by
-    ``snap.platform``: a snapshot can legitimately carry more than one (e.g.
-    a wheel-derived snapshot with both ELF and Mach-O metadata), and a
-    symbol exported by any of them is a real export root.
-    """
-    tables = observed_exports_by_platform(snap)
-    if tables is None:
-        return None
-    return set().union(*tables.values())
 
 
 def _unexplained_exports(
@@ -1116,7 +1094,7 @@ def _is_tag_self_alias(
 def compute_export_surface(snap: AbiSnapshot) -> ExportSurface:
     """Compute *snap*'s export-rooted ABI surface (ADR-049 ``exports``).
 
-    Roots are the declarations matching :func:`observed_export_names`; the
+    Roots are the declarations matching :func:`observed_export_names` (removed); the
     type set is the transitive raw-graph closure over what those roots
     reference. With no observed export table the returned surface is
     ``resolvable=False`` and otherwise carries only the snapshot's ``all_*``

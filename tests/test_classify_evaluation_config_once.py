@@ -209,4 +209,4 @@ def test_returned_context_reports_the_depth_classification_used(tmp_path):
     assert ctx.requested_depth == result.diff.requested_depth
     same = classify_compare_pair(resolved_under, pair).resolved_execution_context
     assert same.requested_depth == "binary"
-    assert ctx.resolution_digest() != same.resolution_digest()
+    assert ctx.requested_depth != same.requested_depth

@@ -322,7 +322,7 @@ def _emit_lost_invariants(
     # detectors (and is never demoted — see the PIMPL guard), so it needs no
     # separate transition here.
     # One index over NEW's public signature sites, shared by every name in this
-    # loop, instead of one per name: ``_public_pointer_only`` is the one-shot
+    # loop, instead of one per name: ``_public_pointer_only`` (removed) is the one-shot
     # entry point and rebuilds the index on each call, which is pure waste when
     # a caller asks about many records. Built lazily so a run with no
     # OPAQUE_POINTER tag never pays for it.
@@ -369,7 +369,7 @@ def _emit_lost_invariants(
             modulation_rule="lost-opaque-invariant",
             # ADR-044 (Codex review): this finding only exists because `name`
             # was tagged OPAQUE_POINTER in `old_idioms`, which itself requires
-            # `_public_pointer_only` to have found a genuine `Visibility.PUBLIC`
+            # `_public_pointer_only` (removed) to have found a genuine `Visibility.PUBLIC`
             # function referencing it (idioms.py._record_is_opaque_candidate/_opaque_tag) — the same
             # reliable "finding's mere existence already proves the subject is
             # public" signal the other Visibility.PUBLIC-filtered late-detector

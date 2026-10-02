@@ -19,7 +19,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from abicheck.appcompat_html import appcompat_to_html
 from abicheck.checker import LibraryMetadata, Verdict
 from abicheck.checker_policy import ChangeKind, Confidence
 from abicheck.checker_types import Change, DiffResult
@@ -82,45 +81,6 @@ def _main_report_html() -> str:
     return generate_html_report(
         result, lib_name="libtest.so", old_version="1.0", new_version="2.0"
     )
-
-
-def _appcompat_html() -> str:
-    full_diff = SimpleNamespace(
-        verdict=Verdict.BREAKING,
-        policy="strict_abi",
-        old_metadata=SimpleNamespace(
-            path="/old/lib.so", sha256="aa" * 32, size_bytes=4096
-        ),
-        new_metadata=SimpleNamespace(
-            path="/new/lib.so", sha256="bb" * 32, size_bytes=8192
-        ),
-        confidence=SimpleNamespace(value="medium"),
-        evidence_tiers=["elf", "header"],
-        coverage_warnings=[],
-    )
-    result = SimpleNamespace(
-        app_path="/bin/myapp",
-        old_lib_path="/old/lib.so",
-        new_lib_path="/new/lib.so",
-        verdict=Verdict.BREAKING,
-        symbol_coverage=95.0,
-        required_symbol_count=20,
-        missing_symbols=["foo", "bar"],
-        missing_versions=["GLIBC_2.34"],
-        breaking_for_app=[
-            _change(
-                "func_removed",
-                "removed_func",
-                "Public function removed",
-                "removed_func",
-            )
-        ],
-        irrelevant_for_app=[
-            _change("func_added", "added_func", "Function added", "", "added_func")
-        ],
-        full_diff=full_diff,
-    )
-    return appcompat_to_html(result)
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +319,6 @@ _CASES = {
     "main_report_rich.html": _main_report_rich_html,
     "main_report_scoped.html": _main_report_scoped_html,
     "main_report_compat.html": _main_report_compat_html,
-    "appcompat.html": _appcompat_html,
     "stack.html": _stack_html,
 }
 

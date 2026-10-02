@@ -657,22 +657,3 @@ def resolve_debug_info(
 
     _logger.info("No debug info found for %s", binary_path.name)
     return None
-
-
-def format_data_sources(
-    binary_path: Path,
-    artifact: DebugArtifact | None,
-    has_headers: bool,
-) -> str:
-    """Format debug resolution results for --show-data-sources output."""
-    lines = [f"Data sources for {binary_path.name}:"]
-
-    if artifact:
-        lines.append(f"  Debug info: {artifact.description}")
-        lines.append(f"  Resolution: {artifact.source}")
-    else:
-        lines.append("  Debug info: not found (symbols-only mode)")
-
-    lines.append(f"  Headers:    {'available' if has_headers else 'not provided'}")
-
-    return "\n".join(lines)

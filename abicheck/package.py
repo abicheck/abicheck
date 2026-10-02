@@ -50,6 +50,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from .deadline import run_bounded
 from .errors import ExtractionSecurityError, SnapshotError
 
 if TYPE_CHECKING:
@@ -917,13 +918,16 @@ class DebExtractor:
         # ar extract into a staging area
         staging = Path(tempfile.mkdtemp(dir=target_dir, prefix=".deb_staging_"))
         try:
-            subprocess.run(
+            ar_proc = run_bounded(
                 [ar, "x", str(deb_path.resolve())],
                 cwd=str(staging),
-                check=True,
                 capture_output=True,
                 timeout=120,
             )
+            if ar_proc.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    ar_proc.returncode, ar_proc.args, ar_proc.stdout, ar_proc.stderr
+                )
 
             # Find data.tar.* member
             data_tar = None

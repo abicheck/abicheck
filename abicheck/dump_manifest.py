@@ -416,39 +416,3 @@ def load_manifest(path: Path) -> DumpManifest:
     """
     text = path.read_text(encoding="utf-8")
     return parse_manifest(text, base_dir=path.resolve().parent, source=str(path))
-
-
-def single_tu_manifest(
-    headers: list[Path],
-    includes: list[Path],
-    *,
-    base_dir: Path,
-    compiler: str = "c++",
-    name: str = "legacy-main",
-) -> DumpManifest:
-    """Build the internal one-TU manifest a legacy single-header ``dump``/
-    ``compare`` invocation is equivalent to (ADR-050 D3: "all existing
-    single-header/``-H`` CLI invocations construct a single-TU manifest
-    internally... no behavior change for a caller not opting into a
-    manifest file").
-
-    Not used by ``load_manifest`` (a real file always goes through the
-    strict parser above) — this is the synthesis direction, for
-    :mod:`abicheck.dumper_manifest`'s dispatch to represent the legacy path
-    as the manifest path's own one-TU special case rather than a parallel
-    implementation.
-    """
-    return DumpManifest(
-        base_dir=base_dir,
-        compiler=compiler,
-        roots=tuple(headers),
-        translation_units=(
-            TranslationUnit(
-                name=name,
-                forced_includes=tuple(headers),
-                includes=tuple(IncludeEntry(path=p) for p in includes),
-                required=True,
-                contributes_to_abi=True,
-            ),
-        ),
-    )

@@ -3759,7 +3759,7 @@ class TestDebExtractorExtended:
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
             with mock.patch(
-                "abicheck.package.subprocess.run", side_effect=fake_run
+                "abicheck.package.run_bounded", side_effect=fake_run
             ) as mock_run:
                 with mock.patch(
                     "abicheck.package.TarExtractor._safe_extract_zst_tar"
@@ -3790,7 +3790,7 @@ class TestDebExtractorExtended:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
                 with mock.patch(
                     "abicheck.package.TarExtractor._safe_extract_zst_tar"
                 ) as extract_zst:
@@ -3826,7 +3826,7 @@ class TestDebExtractorExtended:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is not None
@@ -3851,7 +3851,7 @@ class TestDebExtractorExtended:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is None
@@ -3880,7 +3880,7 @@ class TestDebExtractorExtended:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is None
@@ -3916,7 +3916,7 @@ class TestDebExtractorExtended:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is None
@@ -3952,7 +3952,7 @@ class TestDebExtractorExtended:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
                 result = DebExtractor().extract(f, out)
 
         assert result.symbols_file is not None
@@ -3991,7 +3991,7 @@ class TestDebExtractorExtended:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
                 DebExtractor().extract(f, out)
 
         assert (out / ".deb_control" / "libevil.so").exists()
@@ -4021,7 +4021,7 @@ class TestDebExtractorExtended:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
                 with mock.patch("abicheck.package.TarExtractor._safe_extract"):
                     DebExtractor().extract(Path("test.deb"), out)
 
@@ -4355,7 +4355,7 @@ class TestDebExtractorNoDataTar:
             return mock.Mock(returncode=0)
 
         with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
-            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+            with mock.patch("abicheck.package.run_bounded", side_effect=fake_run):
                 with pytest.raises(RuntimeError, match="No data.tar"):
                     DebExtractor().extract(f, out)
 

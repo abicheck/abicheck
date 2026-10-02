@@ -75,21 +75,6 @@ def _role_coverage_key(pass_name: str, edge_kind: str, role: str) -> str:
     return f"{pass_name}:{edge_kind}:{role}"
 
 
-def role_pass_covered(
-    graph: SourceGraphSummary, pass_name: str, edge_kind: str, role: str
-) -> bool:
-    """Whether *graph* confirms ``(pass_name, edge_kind, role)`` was examined
-    (ADR-046 D3), falling back to the coarser family-level
-    ``extractor_passes[pass_name]`` flag when no finer key is recorded (a
-    hand-built or pre-D3 graph) — the family key stays the honest fallback
-    for any role this matrix doesn't (yet) break out.
-    """
-    key = _role_coverage_key(pass_name, edge_kind, role)
-    if key in graph.extractor_passes:
-        return graph.extractor_passes[key]
-    return graph.extractor_passes.get(pass_name, False)
-
-
 def _mark_role_coverage(dest: dict[str, bool], pass_name: str) -> None:
     """Set every ``ROLE_COVERAGE_MATRIX`` key for *pass_name* in *dest*
     (``graph.extractor_passes`` or ``graph.narrowed_passes``), alongside the

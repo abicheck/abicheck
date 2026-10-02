@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from .deadline import run_bounded
+
 SmokeMode = Literal["syntax", "link", "run"]
 SmokeExpectation = Literal["success", "failure"]
 
@@ -211,7 +213,7 @@ def run_source_smoke(
             # mode always writes one per source) inside the per-test tmp dir
             # instead of the shared process CWD, where parallel (-n auto)
             # workers running this smoke check concurrently could collide.
-            proc = subprocess.run(
+            proc = run_bounded(
                 cmd,
                 capture_output=True,
                 text=True,
@@ -221,7 +223,7 @@ def run_source_smoke(
             compiled = proc.returncode == 0
             detail = _process_error_detail(proc)
             if compiled and mode == "run":
-                run_proc = subprocess.run(
+                run_proc = run_bounded(
                     [str(exe)],
                     capture_output=True,
                     text=True,

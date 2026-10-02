@@ -17,7 +17,7 @@
 
 ``--header``/``--include`` (and their release/no-baseline/bundle-facts
 equivalents) take a *both-sides* value plus optional ``old=``/``new=``
-additions. :func:`abicheck.cli_options.split_sided_paths` has always
+additions. :func:`abicheck.cli_options.split_sided_paths` (removed) has always
 documented that as "both-sides + per-side extra", but every consumer
 implemented **replacement** -- a side that named anything of its own lost
 the shared roots entirely. A ``--include shared`` holding a dependency

@@ -37,7 +37,6 @@ from abicheck.model.bundle_facts import (
     BundleFacts,
 )
 from abicheck.serialization import bundle_facts_from_dict, bundle_facts_to_dict
-from abicheck.storage.bundle_facts_codec import looks_like_bundle_facts_document
 from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
 
@@ -207,93 +206,3 @@ class TestBundleFactsArtifactTypeDiscriminator:
 
         with pytest.raises(ValueError, match="schema_version"):
             bundle_facts_from_dict(d)
-
-
-class TestLooksLikeBundleFactsDocument:
-    """Two-tier classification: an explicit ``artifact_type`` key is trusted
-    outright (in both the match and mismatch directions) -- shape-based
-    fallback applies only to a true v1 document (``schema_version`` absent,
-    or normalizing -- via the same ``int(...)`` coercion the reader applies
-    -- to exactly ``1``); a document *explicitly* declaring ``schema_version``
-    2+ with no marker gets neither tier (Codex review, fresh evidence)."""
-
-    def test_true_for_a_document_with_the_correct_marker(self) -> None:
-        assert looks_like_bundle_facts_document(
-            {"artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE}
-        )
-
-    def test_false_for_a_wrong_marker_even_with_bundle_facts_shape(self) -> None:
-        # The explicit marker is trusted outright -- a wrong marker is
-        # rejected even though the rest of the document is shaped exactly
-        # like real bundle facts, proving there is no shape fallback once
-        # the key is present.
-        assert not looks_like_bundle_facts_document(
-            {
-                "artifact_type": "something-else",
-                "per_library_snapshots": {},
-            }
-        )
-
-    def test_true_for_a_legacy_v1_document_with_no_marker_key(self) -> None:
-        assert looks_like_bundle_facts_document(
-            {"schema_version": 1, "per_library_snapshots": {}}
-        )
-
-    def test_false_for_an_explicit_null_schema_version(self) -> None:
-        # Codex review, fresh evidence: an explicit `"schema_version": null`
-        # is not the same as the key being absent -- bundle_facts_from_dict
-        # would raise on int(None), so the classifier must not route it
-        # through the "absent, therefore legacy" branch either.
-        assert not looks_like_bundle_facts_document(
-            {"schema_version": None, "per_library_snapshots": {}}
-        )
-
-    def test_true_for_a_string_encoded_v1_version(self) -> None:
-        # Codex review, fresh evidence: must classify identically to the
-        # bare-int-1 case above, matching bundle_facts_from_dict's own
-        # int(...) normalization.
-        assert looks_like_bundle_facts_document(
-            {"schema_version": "1", "per_library_snapshots": {}}
-        )
-
-    def test_true_when_schema_version_is_absent_too(self) -> None:
-        assert looks_like_bundle_facts_document({"per_library_snapshots": {}})
-
-    def test_false_for_schema_version_2_with_no_marker_key(self) -> None:
-        # The exact bypass Codex flagged: a document declaring the current
-        # schema_version but omitting the now-mandatory marker must not
-        # fall through to the v1-only shape fallback just because it also
-        # happens to carry a per_library_snapshots-shaped key.
-        assert not looks_like_bundle_facts_document(
-            {"schema_version": 2, "per_library_snapshots": {}}
-        )
-
-    def test_false_for_a_non_dict_input(self) -> None:
-        assert not looks_like_bundle_facts_document(["not", "a", "dict"])
-        assert not looks_like_bundle_facts_document(None)
-
-    def test_false_for_a_dict_with_neither_key(self) -> None:
-        assert not looks_like_bundle_facts_document({"schema_version": 2})
-
-    def test_false_for_a_non_coercible_schema_version(self) -> None:
-        # A pure classifier over untrusted, already-decoded JSON must not
-        # raise for a schema_version that int(...) can't parse -- it's
-        # simply not eligible for the v1 shape fallback.
-        assert not looks_like_bundle_facts_document(
-            {"schema_version": ["not", "coercible"], "per_library_snapshots": {}}
-        )
-        assert not looks_like_bundle_facts_document(
-            {"schema_version": "not-a-number", "per_library_snapshots": {}}
-        )
-
-    def test_false_for_an_overflowing_schema_version(self) -> None:
-        # Codex review, fresh evidence: a JSON exponent like 1e999 decodes
-        # to float inf (json.loads has no integer overflow limit for
-        # floats), and int(inf) raises OverflowError rather than
-        # TypeError/ValueError -- an exception class the classifier's
-        # except clause didn't originally catch, which would crash a
-        # future operand dispatcher on malformed input instead of routing
-        # it to normal validation.
-        assert not looks_like_bundle_facts_document(
-            {"schema_version": float("inf"), "per_library_snapshots": {}}
-        )

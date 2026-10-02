@@ -22,8 +22,7 @@ See: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-gi
 
 from __future__ import annotations
 
-import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .checker import (
     Change,
@@ -39,8 +38,6 @@ if TYPE_CHECKING:
     from .finding_identity import MissingContractFinding
     from .severity import IssueCategory, KindSets, SeverityConfig
 
-# GitHub caps visible annotations at ~50 per step.
-_MAX_ANNOTATIONS = 50
 
 # GitHub has undocumented limits on annotation message length.
 _MAX_MESSAGE_LENGTH = 200
@@ -53,7 +50,7 @@ _SEVERITY_ORDER = {
 }
 
 #: The inverse of :data:`_SEVERITY_ORDER` -- recovers the level string from
-#: the sort key :func:`collect_annotations` already computes, so
+#: the sort key :func:`_collect_annotations_detailed` already computes, so
 #: :func:`annotation_report_entries` doesn't need a second classification
 #: pass just to re-derive what level a tuple's ``line`` was rendered at.
 _LEVEL_BY_SORT_KEY = {v: k for k, v in _SEVERITY_ORDER.items()}
@@ -123,34 +120,6 @@ def _parse_source_location(loc: str | None) -> tuple[str | None, str | None]:
     return loc, None
 
 
-def _classify_change(
-    kind: ChangeKind,
-    breaking_set: frozenset[ChangeKind],
-    api_break_set: frozenset[ChangeKind],
-    risk_set: frozenset[ChangeKind],
-    compatible_set: frozenset[ChangeKind],
-    annotate_additions: bool,
-) -> str | None:
-    """Return the annotation level for a change, or None to skip it.
-
-    Mapping:
-      BREAKING        → ::error
-      API_BREAK       → ::warning  (title: "API Break")
-      RISK            → ::warning  (title: "Deployment Risk")
-      COMPATIBLE      → ::notice   (only when annotate_additions is True
-                                     AND kind is in compatible_set)
-    """
-    if kind in breaking_set:
-        return "error"
-    if kind in api_break_set:
-        return "warning"
-    if kind in risk_set:
-        return "warning"
-    if annotate_additions and kind in compatible_set:
-        return "notice"
-    return None
-
-
 def _category_for_change_severity(
     change: Change,
     kind_sets: KindSets,
@@ -190,9 +159,8 @@ def _legacy_level_for_category(
 ) -> str | None:
     """Fixed-mapping annotation level, keyed off the *effective* category.
 
-    Mirrors the pre-severity-config behaviour documented on
-    :func:`_classify_change` (BREAKING -> error, API_BREAK/RISK -> warning,
-    COMPATIBLE -> notice iff *annotate_additions*), but is driven by each
+    The pre-severity-config behaviour (BREAKING -> error, API_BREAK/RISK ->
+    warning, COMPATIBLE -> notice iff *annotate_additions*), driven by each
     change's effective verdict (via *category*) rather than raw kind-set
     membership — so a per-finding override (frozen-namespace clamp, A4
     pattern-verdict modulation) is respected even when no SeverityConfig is
@@ -349,17 +317,18 @@ def _collect_annotations_detailed(
     contract demotion below). It is False for a ``notice`` that exists only
     because *annotate_additions* was truthy (an addition/quality-issue, or
     an ``info``-level severity-config category) — the caller had to opt in
-    for this entry to appear at all. :func:`collect_annotations` is the
-    public two-tuple projection of this; :func:`annotation_report_entries`
-    is the one consumer of the third element, since a persisted report has
-    no live ``annotate_additions`` flag to fall back on the way stderr
-    rendering does (Codex review on PR E: without this, a renderer that
+    for this entry to appear at all. :func:`annotation_report_entries` is
+    the one consumer, and persists the third element because a report has
+    no live ``annotate_additions`` flag to fall back on (Codex review on
+    PR E: without this, a renderer that
     drops every ``"notice"`` unless ``annotate-additions`` was requested
     would also hide a contract audit finding the CLI itself always shows).
 
-    See :func:`collect_annotations` for the rest of this function's
-    contract (severity-config vs. legacy level mapping, effective-category
-    classification) — unchanged, just carrying the extra bit through.
+    Without *severity_config*, levels follow the fixed kind-set mapping
+    (:func:`_legacy_level_for_category`); with it, each level mirrors the
+    finding's configured severity (:func:`_annotation_level_for_category`).
+    Both classify through the change's *effective* category, so a
+    per-finding override is never misreported.
 
     Also walks ``diff_result.scoped_only_changes`` (Codex review on PR E),
     the dynamically-attached findings ``--used-by``/``--required-symbol``
@@ -532,41 +501,6 @@ def _collect_annotations_detailed(
     return annotations
 
 
-def collect_annotations(
-    diff_result: DiffResult,
-    *,
-    annotate_additions: bool = False,
-    severity_config: SeverityConfig | None = None,
-) -> list[tuple[int, str]]:
-    """Collect raw annotation tuples (sort_key, line) for a single DiffResult.
-
-    This is the building block for both single-library and multi-library flows.
-    Callers are responsible for sorting, truncating, and emitting.
-
-    Without *severity_config*, annotation levels follow the fixed
-    kind-set mapping (BREAKING → error, API_BREAK/RISK → warning, additions →
-    notice when opted in) — the legacy, verdict-only behaviour. When
-    *severity_config* is supplied, it takes priority: the annotation level
-    mirrors each finding's actually-configured severity so an annotation is
-    never silently absent (or under/over-stated) for a finding that does (or
-    does not) gate CI — see :func:`_annotation_level_for_category`.
-
-    Both branches classify through each change's *effective* category (via
-    :func:`_category_for_change_severity`, which honours
-    ``DiffResult._effective_verdict_for_change`` semantics) rather than raw
-    kind-set membership, so a per-finding override is never misreported —
-    see :func:`_legacy_level_for_category`.
-    """
-    return [
-        (sort_key, line)
-        for sort_key, line, _always_visible in _collect_annotations_detailed(
-            diff_result,
-            annotate_additions=annotate_additions,
-            severity_config=severity_config,
-        )
-    ]
-
-
 def annotation_report_entries(
     diff_result: DiffResult,
     *,
@@ -582,13 +516,10 @@ def annotation_report_entries(
     way it already does for ``exit``/``analysis_assurance``. This is that
     answer for annotations specifically.
 
-    Unlike :func:`collect_annotations` (the stderr-rendering path, gated by
-    a caller-supplied ``annotate``/``annotate_additions`` at call time),
-    this always computes the *superset* -- ``annotate_additions=True`` --
-    reusing the exact same classification and formatting (escaping,
-    truncation, title selection) `collect_annotations`/`_format_annotation`
-    already implement and are already tested, rather than a second,
-    independently-maintained rendering path. A consumer decides at *read*
+    It always computes the *superset* -- ``annotate_additions=True`` --
+    through the one classification and formatting path
+    (:func:`_collect_annotations_detailed`/:func:`_format_annotation`:
+    escaping, truncation, title selection). A consumer decides at *read*
     time whether to include a ``"notice"``-level entry (the
     ``annotate-additions`` question), the same way it already decides
     whether to render at all (the ``annotate`` question) -- this function
@@ -621,83 +552,3 @@ def annotation_report_entries(
         }
         for sort_key, line, always_visible in sorted(detailed, key=lambda item: item[0])
     ]
-
-
-def format_annotations(
-    annotations: list[tuple[int, str]],
-    *,
-    max_annotations: int = _MAX_ANNOTATIONS,
-) -> str:
-    """Sort annotation tuples by severity and format as newline-separated output.
-
-    Args:
-        annotations: List of (sort_key, line) tuples from :func:`collect_annotations`.
-        max_annotations: Maximum number of annotations to emit.
-
-    Returns:
-        A string of newline-separated workflow commands (may be empty).
-    """
-    sorted_annotations = sorted(annotations, key=lambda x: x[0])
-    lines = [line for _, line in sorted_annotations[:max_annotations]]
-    return "\n".join(lines)
-
-
-def emit_github_annotations(
-    diff_result: DiffResult,
-    *,
-    annotate_additions: bool = False,
-    max_annotations: int = _MAX_ANNOTATIONS,
-    severity_config: SeverityConfig | None = None,
-) -> str:
-    """Generate GitHub Actions annotation lines for ABI changes.
-
-    Args:
-        diff_result: The diff result to annotate.
-        annotate_additions: If True, also emit ``::notice`` for additions/compatible changes.
-        max_annotations: Maximum number of annotations to emit (default 50).
-        severity_config: When given, annotation levels follow the configured
-            per-category severity instead of the fixed kind-set mapping (see
-            :func:`collect_annotations`).
-
-    Returns:
-        A string of newline-separated workflow commands (may be empty).
-    """
-    annotations = collect_annotations(
-        diff_result,
-        annotate_additions=annotate_additions,
-        severity_config=severity_config,
-    )
-    return format_annotations(annotations, max_annotations=max_annotations)
-
-
-def is_github_actions() -> bool:
-    """Return True if running inside GitHub Actions."""
-    return os.environ.get("GITHUB_ACTIONS") == "true"
-
-
-# ── Back-compat re-export shim (lazy, to avoid an import cycle) ───────────────
-# `emit_github_step_summary` historically lived here. It moved to
-# :mod:`abicheck.annotations_step_summary` (CLI cleanup phase two, PR E) --
-# see that module's own docstring for why: it was the only import from this
-# module back to ``reporter``, which would have closed an import cycle once
-# ``reporter_contract_blocks.add_annotations`` started importing this
-# module's ``annotation_report_entries``. A *static*
-# `from .annotations_step_summary import emit_github_step_summary` re-export
-# here would reopen that same cycle, so this module-level `__getattr__`
-# (PEP 562) resolves it lazily via `importlib.import_module` -- a runtime
-# call, not a static import edge (Codex review: preserves the historical
-# `from abicheck.annotations import emit_github_step_summary` path for any
-# existing caller instead of a bare `ImportError`). New code should import
-# from `annotations_step_summary` directly, matching
-# `cli_buildsource.py`'s identical `_GRAPH_REEXPORTS` shim.
-_STEP_SUMMARY_REEXPORTS = frozenset({"emit_github_step_summary"})
-
-
-def __getattr__(name: str) -> Any:
-    if name in _STEP_SUMMARY_REEXPORTS:
-        import importlib
-
-        return getattr(
-            importlib.import_module("abicheck.annotations_step_summary"), name
-        )
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

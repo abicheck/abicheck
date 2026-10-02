@@ -583,7 +583,7 @@ INTERNAL_NAMESPACE_SEED_VETO = register_name_heuristic(
     ),
     matcher=is_internal_type,
     helpers=(name_segments,),
-    vocabularies=("abicheck.compare.internal_namespaces:DEFAULT_INTERNAL_NAMESPACES",),
+    vocabularies=("abicheck.model.symbol_ownership:DEFAULT_INTERNAL_NAMESPACES",),
     patterns=(TEMPLATE_ARG_RE,),
 )
 

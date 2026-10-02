@@ -58,7 +58,7 @@ dropped scope:
   ``run_dump``/``dumper.dump()`` into :class:`IncludeDir`'s ``label`` field.
   ``scan --against``'s own separate inline ``--include`` registration and
   ``dump``'s single-input ``--include`` (which needs the narrower
-  ``both:LABEL=PATH``-only ``cli_params.LabeledIncludePathParam``, already
+  ``both:LABEL=PATH``-only ``cli_params.LabeledIncludePathParam`` (removed), already
   built but not yet wired into ``dump_cmd``) do not thread a label yet — a
   labeled entry there is parsed as an ordinary unlabeled path, silently.
   ``compare``'s directory/package (release) fan-out rejects a labeled

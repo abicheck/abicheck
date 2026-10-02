@@ -1908,13 +1908,6 @@ def cross_front_end_differences(
     return differences
 
 
-def cross_front_end_equivalent(
-    a: CompatibilityEvaluationConfig, b: CompatibilityEvaluationConfig
-) -> bool:
-    """``True`` when :func:`cross_front_end_differences` finds nothing."""
-    return not cross_front_end_differences(a, b)
-
-
 #: The tiers whose hops name an input the *caller* stated, as opposed to a
 #: key inside a file the caller pointed at. Only these are checked against a
 #: request type's fields -- see :func:`unstatable_selectors`.

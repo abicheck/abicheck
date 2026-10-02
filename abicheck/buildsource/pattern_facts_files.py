@@ -12,7 +12,7 @@ half that holds this scanner's walk policy (the suffix allowlist, the
 extensionless-header heuristic, the pruned directories, the changed-path join)
 and the licence its direct-root entry points run under.
 
-``pattern_facts.py`` re-exports ``SOURCE_SUFFIXES`` and ``iter_source_files``,
+``pattern_facts.py`` re-exports ``SOURCE_SUFFIXES`` and ``iter_source_files`` (removed),
 so existing importers of either are unaffected.
 """
 
@@ -65,7 +65,7 @@ _PRUNED_DIR_SEGMENTS: frozenset[str] = frozenset(
 )
 
 #: Licence for the **direct-root** entry points (:func:`find_pattern_facts`,
-#: :func:`iter_source_files`). A caller that hands this module concrete paths
+#: :func:`iter_source_files` (removed)). A caller that hands this module concrete paths
 #: is naming inputs it means *right now* -- a ``scan -H include/`` invocation,
 #: a compile DB just produced by this build. That is live extraction, so the
 #: filesystem may be read. The deny-by-default rule this licence is the
@@ -80,19 +80,6 @@ _DIRECT_ROOT_LICENCE: SourceReadLicence = SourceReadLicence.live_extraction()
 #: several MB each) or VCS blobs — never headers. Files with a known C/C++
 #: suffix are *not* capped (a real ``dnnl.hpp`` is legitimately large).
 _EXTENSIONLESS_MAX_BYTES = 256 * 1024
-
-
-def _looks_binary(path: Path) -> bool:
-    """Heuristic: a NUL byte in the first 8 KiB marks a non-text (binary) file.
-
-    Unreadable files are treated as binary so they fall out of the scan set
-    (``find_pattern_facts`` would skip them anyway).
-    """
-    try:
-        with open(path, "rb") as fh:
-            return b"\x00" in fh.read(8192)
-    except OSError:
-        return True
 
 
 def _extensionless_is_text(path: Path) -> bool | None:
@@ -140,54 +127,6 @@ def classify_walked_file(path: Path) -> SourceInputDisposition | None:
     return SourceInputDisposition.SELECTED if is_text else None
 
 
-def _is_scannable(path: Path) -> bool:
-    """True if a directory-walked file should be lexically scanned.
-
-    Known C/C++ suffixes are always scannable. **Extensionless** files are
-    accepted too — many C++ libraries ship extensionless public headers
-    (``include/mylib/Core``), and the D2 scope is "changed + public headers", not
-    "files with a C/C++ extension" — but only when they are small *text* files:
-    an oversized or binary extensionless file is build/test data or a VCS blob,
-    not a header, and scanning it is pure cost with no ABI signal (ADR-035 D2;
-    the pre-scan is advisory, so a missed exotic giant header is harmless).
-    Files with a different, explicit extension (``.md``, ``.txt``, ``.bin``) are
-    skipped.
-    """
-    suffix = path.suffix.lower()
-    if suffix in SOURCE_SUFFIXES:
-        return True
-    if suffix != "":
-        return False
-    try:
-        if path.stat().st_size > _EXTENSIONLESS_MAX_BYTES:
-            return False
-    except OSError:
-        return False
-    return not _looks_binary(path)
-
-
-def iter_source_files(
-    roots: Iterable[str | Path],
-    changed_paths: Iterable[str] | None = None,
-) -> list[Path]:
-    """Collect C/C++ source/header files under ``roots`` (files or directories).
-
-    A ``root`` that is a **file** is honored regardless of suffix — the caller
-    pointed at it directly. A ``root`` that is a **directory** is walked (with
-    VCS metadata dirs pruned, see :data:`_PRUNED_DIR_SEGMENTS`) and filtered by
-    :func:`_is_scannable` (known suffixes + small text extensionless headers).
-    When ``changed_paths`` is given, the result is intersected with it (by
-    suffix-matching the path tail), implementing the ADR-035 D2 "changed +
-    public" scope: callers pass public roots and the PR's changed paths. The
-    walk is deterministic (sorted) for reproducible reports.
-    """
-    return [
-        Path(i.path)
-        for i in resolve_expected_source_inputs(roots, changed_paths).inputs
-        if i.disposition is SourceInputDisposition.SELECTED
-    ]
-
-
 def resolve_expected_source_inputs(
     roots: Iterable[str | Path],
     changed_paths: Iterable[str] | None = None,
@@ -196,7 +135,7 @@ def resolve_expected_source_inputs(
 ) -> SourceInputSet:
     """Account for every declared root, using this scanner's own walk policy.
 
-    The expected-input counterpart of :func:`iter_source_files`: that returns
+    The expected-input counterpart of :func:`iter_source_files` (removed): that returns
     only the survivors, this the disposition of every root, so a caller can
     tell "scanned and found nothing" from "the root is gone".
     """

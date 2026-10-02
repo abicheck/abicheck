@@ -1,13 +1,11 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
-"""Coverage for `pack_io.py`/`cli_buildsource_merge.py` paths the ADR-061
+"""Coverage for `pack_io.py` paths the ADR-061
 Phase 5 BuildSourcePack storage/model split moved but that no existing test
 happened to exercise: `verify_integrity()` (zero call sites anywhere, so
 never covered even as a `BuildSourcePack` method before the split), a raw
 file under a pack's `normalized/` directory contributing to its content
-hash, `load()`'s malformed-JSON rejection, and `_merge_attach_combined()`
-actually completing (existing tests reach it only via a `merge` scenario
-whose combined pack ends up `None`)."""
+hash, and `load()`'s malformed-JSON rejection."""
 
 from __future__ import annotations
 
@@ -17,8 +15,6 @@ from abicheck.buildsource import BuildEvidence, pack_io
 from abicheck.buildsource.build_evidence import CompileUnit
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
-from abicheck.cli_buildsource_merge import _merge_attach_combined
-from abicheck.model import AbiSnapshot
 
 
 def test_verify_integrity_true_for_untampered_pack(tmp_path):
@@ -95,20 +91,3 @@ def test_load_rejects_manifest_that_is_not_a_json_object(tmp_path):
     (pack_dir / pack_io.MANIFEST_NAME).write_text("[1, 2, 3]", encoding="utf-8")
     with pytest.raises(ValueError, match="must contain a JSON object"):
         pack_io.load(pack_dir)
-
-
-def test_merge_attach_combined_stamps_a_real_build_source_ref(tmp_path):
-    """Existing `merge` CLI tests reach `_merge_attach_combined` only through
-    scenarios whose combined pack is `None` (nothing to attach); this
-    exercises the actual attach path directly."""
-    combined = BuildSourcePack.empty(tmp_path / "combined")
-    combined.build_evidence = BuildEvidence(
-        compile_units=[CompileUnit(id="cu://a", source="a.cpp")]
-    )
-    base = AbiSnapshot(library="libfoo.so", version="1")
-    output = tmp_path / "out.json"
-    _merge_attach_combined(combined, base, output)
-    assert base.build_source is combined
-    assert base.build_source_pack is not None
-    assert base.build_source_pack.content_hash.startswith("sha256:")
-    assert base.build_source_pack.path_hint == str(output)

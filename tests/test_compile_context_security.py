@@ -174,27 +174,23 @@ def test_resolve_compile_context_end_to_end_distrusts_a_resolved_autodiscovered_
     attacker-controlled ``compile.compiler`` in that auto-discovered
     ``.abicheck.yml`` would select the executable used for header
     extraction (Codex review, fresh evidence -- real finding on PR #1154)."""
-    from abicheck.cli_options import compile_context_options, resolve_compile_context
+    from abicheck.cli_options import resolve_compile_context
 
     cfg = tmp_path / "auto-discovered.yml"
     cfg.write_text("compile:\n  compiler: /tmp/evil-compiler\n", encoding="utf-8")
 
     @click.command()
-    @compile_context_options()
     @click.pass_context
-    def probe(ctx: click.Context, **kwargs: object) -> None:
+    def probe(ctx: click.Context) -> None:
         cc, _includes = resolve_compile_context(
             ctx,
-            sysroot=kwargs["sysroot"],  # type: ignore[arg-type]
-            nostdinc=kwargs["nostdinc"],  # type: ignore[arg-type]
-            header_backend=kwargs["header_backend"],  # type: ignore[arg-type]
+            sysroot=None,
+            nostdinc=False,
+            header_backend="auto",
             includes=(),
             # The vulnerable shape: an already-resolved, non-None path
             # from the caller's own discovery, not the raw CLI --config.
             build_config=cfg,
-            compiler_path=kwargs["compiler_path"],  # type: ignore[arg-type]
-            compiler_prefix=kwargs["compiler_prefix"],  # type: ignore[arg-type]
-            compiler_option_tokens=kwargs["compiler_option_tokens"],  # type: ignore[arg-type]
             config_explicit=False,
         )
         click.echo(f"path={cc.gcc_path} prefix={cc.gcc_prefix}")

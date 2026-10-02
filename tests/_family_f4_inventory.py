@@ -62,6 +62,8 @@ SCAN_GLOBS = (
     "post_processing*.py",
     "surface.py",
     "export_surface*.py",
+    # Owner of the internal-namespace vocabulary every one of those reads.
+    "model/symbol_ownership.py",
 )
 
 _VOCAB_NAME = re.compile(

@@ -509,7 +509,7 @@ def parse_wheel_architecture_claim(filename: str) -> str | None:
     return _platform_machine_from_wheel_filename(filename)
 
 
-# G26: a wheel's *.dist-info/METADATA declares its runtime dependencies — the "declared" side of the NumPy C-API compatibility-envelope check (the binary-evidence "required" side comes from numpy_capi.py). Mirrors parse_manylinux_glibc_floor's role for G10: a pure function callers wire in programmatically (see diff_numpy_capi.check_numpy_metadata_contract).
+# G26: a wheel's *.dist-info/METADATA declares its runtime dependencies — the "declared" side of the NumPy C-API compatibility-envelope check (the binary-evidence "required" side comes from numpy_capi.py). Mirrors parse_manylinux_glibc_floor's role for G10: a pure function callers wire in programmatically (diff_numpy_capi.check_numpy_metadata_contract, which wired it, has been removed).
 
 #: A real METADATA file is ordinarily a few KB even with a long dependency list; this bounds how much a single wheel's METADATA member is allowed to decompress to, so a malicious wheel can't zip-bomb this scan (a small compressed member declaring a tiny size that in fact decompresses to gigabytes) (CodeRabbit review).
 _MAX_METADATA_SIZE = 1_048_576

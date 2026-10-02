@@ -29,6 +29,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from ..model.symbol_ownership import DEFAULT_INTERNAL_NAMESPACES
+
 __all__ = [
     "DEFAULT_INTERNAL_NAMESPACES",
     "TEMPLATE_ARG_RE",
@@ -37,17 +39,9 @@ __all__ = [
     "strip_template_args",
 ]
 
-# Namespace segments that mark a type as "internal" by convention.
-# Matched as a name segment (between ``::``) — substring matches inside an
-# identifier like ``DetailView`` are intentionally not flagged.
-DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = (
-    "detail",
-    "impl",
-    "internal",
-    "__detail",
-    "_impl",
-)
-
+# The conventional internal-namespace segments. ``model.symbol_ownership``
+# owns the list (it also backs the mangled-name ownership checks), so the
+# vocabulary has one definition; this module owns the qualified-name matcher.
 # Splits a qualified C++ name into namespace segments, ignoring template
 # argument lists. ``acme::lib::detail::pimpl<X>`` →
 # ``["acme", "lib", "detail", "pimpl"]``.

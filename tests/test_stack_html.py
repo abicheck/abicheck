@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from abicheck.stack_checker import StackCheckResult, StackVerdict
-from abicheck.stack_html import stack_to_html, write_stack_html
+from abicheck.stack_html import stack_to_html
 
 
 def _node(soname: str, depth: int = 0, path: str = "", reason: str = "") -> object:
@@ -407,11 +407,3 @@ def test_html_tree_skips_dangling_edge_target() -> None:
     out = stack_to_html(_result_with_graph(graph))
     assert "app" in out
     assert "ghost.so" not in out
-
-
-def test_write_stack_html_writes_file(tmp_path) -> None:
-    out_path = tmp_path / "stack.html"
-    write_stack_html(_stack_result(), out_path)
-    written = out_path.read_text(encoding="utf-8")
-    assert written.startswith("<!DOCTYPE html>")
-    assert "/bin/myapp" in written

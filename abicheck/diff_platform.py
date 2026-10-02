@@ -23,6 +23,10 @@ from .compare.debug_type_scope import debug_layout_scope
 from .compare.edge_query import export_table_covered
 from .compare.enum_sentinel import is_confirmed_enum_sentinel
 from .compare.naming_conventions import INLINE_NAMESPACE_MOVE, _strip_inline_ns
+from .compare.platform_export_delta import (
+    both_export_tables_read as _both_export_tables_read,
+    declared_export_names as _declared_export_names,
+)
 from .detector_registry import registry
 from .diff_helpers import _normalize_type_name, make_change
 from .diff_platform_elf_dynamic import (
@@ -234,12 +238,12 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # decorate differently on ``name``/``mangled`` than on the export table.
     # Union both so this "already represented by the function model" guard
     # actually fires for either shape (Codex review, case83 investigation).
-    old_fn_names = {f.name for f in old.declarations.functions if f.name} | {
-        f.mangled for f in old.declarations.functions if f.mangled
-    }
-    new_fn_names = {f.name for f in new.declarations.functions if f.name} | {
-        f.mangled for f in new.declarations.functions if f.mangled
-    }
+    old_fn_names = _declared_export_names(old)
+    new_fn_names = _declared_export_names(new)
+    if not _both_export_tables_read(old, new, "pe"):
+        # An unread table (default/parse-failed block) proves no export
+        # absent: diffing it read every export as removed (or added).
+        old_ids = new_ids = set()
 
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY
@@ -588,12 +592,10 @@ def _diff_macho_exports(
     # See the matching comment in _diff_pe(): union both the demangled display
     # name and the link-time mangled symbol so this guard matches a real
     # Mach-O export string for either a plain-C or a name-mangled C++ symbol.
-    old_fn_names = {f.name for f in old.declarations.functions if f.name} | {
-        f.mangled for f in old.declarations.functions if f.mangled
-    }
-    new_fn_names = {f.name for f in new.declarations.functions if f.name} | {
-        f.mangled for f in new.declarations.functions if f.mangled
-    }
+    old_fn_names = _declared_export_names(old)
+    new_fn_names = _declared_export_names(new)
+    if not _both_export_tables_read(old, new, "macho"):
+        return changes  # see _diff_pe: an unread table proves nothing absent
 
     removed_kind = (
         ChangeKind.FUNC_REMOVED_ELF_ONLY

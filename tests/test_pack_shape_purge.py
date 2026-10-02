@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """``purge_external_outputs``'s return-value contract, and
-``cli_buildsource_helpers._purge_and_record``'s escalation of a purge
+``tests._build_source_collect._purge_and_record``'s escalation of a purge
 failure to an unconditional abort.
 
 The bug class (CodeRabbit review, PR #974): a real removal failure (a
@@ -49,7 +49,7 @@ import pytest
 from abicheck.buildsource.build_evidence import BuildEvidence
 from abicheck.buildsource.model import ExtractorRecord
 from abicheck.buildsource.pack_shape import purge_external_outputs
-from abicheck.cli_buildsource_helpers import _purge_and_record
+from tests._build_source_collect import _purge_and_record
 
 
 def _manifest(name: str, *output_paths: str) -> SimpleNamespace:

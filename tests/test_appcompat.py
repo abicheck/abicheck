@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -56,7 +55,6 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.macho_metadata import MachoExport, MachoMetadata
 from abicheck.model import AbiSnapshot
 from abicheck.pe_metadata import PeExport, PeMetadata
-from abicheck.reporter import appcompat_to_json, appcompat_to_markdown
 
 # ---------------------------------------------------------------------------
 # Unit tests: AppRequirements / AppCompatResult data structures
@@ -423,170 +421,6 @@ class TestComputeAppcompatVerdictExcludesResolved:
         )
         assert verdict == Verdict.NO_CHANGE
 
-
-# ---------------------------------------------------------------------------
-# Unit tests: reporters
-# ---------------------------------------------------------------------------
-
-
-class TestAppCompatReporters:
-    def _make_result(
-        self,
-        *,
-        missing=None,
-        breaking=None,
-        irrelevant=None,
-        verdict=None,
-        policy_file=None,
-    ):
-        return AppCompatResult(
-            app_path="/usr/bin/myapp",
-            old_lib_path="libfoo.so.1",
-            new_lib_path="libfoo.so.2",
-            required_symbols={"foo_init", "foo_process", "foo_cleanup"},
-            required_symbol_count=3,
-            breaking_for_app=breaking or [],
-            irrelevant_for_app=irrelevant or [],
-            missing_symbols=missing or [],
-            missing_versions=[],
-            full_diff=DiffResult(
-                old_version="1.0",
-                new_version="2.0",
-                library="libfoo",
-                policy_file=policy_file,
-            ),
-            verdict=verdict or Verdict.COMPATIBLE,
-            symbol_coverage=100.0,
-        )
-
-    def test_markdown_compatible(self):
-        result = self._make_result()
-        md = appcompat_to_markdown(result)
-        assert "# Application Compatibility Report" in md
-        assert "COMPATIBLE" in md
-        assert "/usr/bin/myapp" in md
-
-    def test_markdown_with_missing_symbols(self):
-        result = self._make_result(
-            missing=["foo_init"],
-            verdict=Verdict.BREAKING,
-        )
-        md = appcompat_to_markdown(result)
-        assert "Missing Symbols" in md
-        assert "foo_init" in md
-
-    def test_markdown_with_relevant_changes(self):
-        change = Change(
-            kind=ChangeKind.FUNC_PARAMS_CHANGED,
-            symbol="foo_process",
-            description="parameter type changed",
-        )
-        result = self._make_result(breaking=[change])
-        md = appcompat_to_markdown(result)
-        assert "Relevant Changes" in md
-        assert "foo_process" in md
-
-    def test_markdown_show_irrelevant(self):
-        change = Change(
-            kind=ChangeKind.FUNC_ADDED,
-            symbol="bar_new",
-            description="function added: bar_new",
-        )
-        result = self._make_result(irrelevant=[change])
-        md = appcompat_to_markdown(result, show_irrelevant=True)
-        assert "Irrelevant Changes" in md
-        assert "bar_new" in md
-
-    def test_markdown_hide_irrelevant_default(self):
-        change = Change(
-            kind=ChangeKind.FUNC_ADDED,
-            symbol="bar_new",
-            description="function added",
-        )
-        result = self._make_result(irrelevant=[change])
-        md = appcompat_to_markdown(result)
-        assert "--show-irrelevant" in md
-
-    def test_json_output(self):
-        result = self._make_result()
-        j = appcompat_to_json(result)
-        data = json.loads(j)
-        assert data["verdict"] == "COMPATIBLE"
-        assert data["application"] == "/usr/bin/myapp"
-        assert data["required_symbol_count"] == 3
-
-    def test_json_with_missing(self):
-        result = self._make_result(
-            missing=["foo_init"],
-            verdict=Verdict.BREAKING,
-        )
-        j = appcompat_to_json(result)
-        data = json.loads(j)
-        assert data["verdict"] == "BREAKING"
-        assert "foo_init" in data["missing_symbols"]
-
-    def test_json_with_relevant_changes(self):
-        change = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="foo_init",
-            description="Function removed",
-        )
-        result = self._make_result(breaking=[change])
-        j = appcompat_to_json(result)
-        data = json.loads(j)
-        assert data["relevant_change_count"] == 1
-        assert data["relevant_changes"][0]["symbol"] == "foo_init"
-
-    def test_json_relevant_changes_are_consumer_proven(self):
-        # A finding surfaced via appcompat is runtime-demonstrated — this app
-        # actually depends on the changed symbol — so it reads consumer_proven
-        # regardless of what its kind's own verdict would otherwise imply.
-        change = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="foo_init",
-            description="Function removed",
-        )
-        result = self._make_result(breaking=[change])
-        data = json.loads(appcompat_to_json(result))
-        assert data["relevant_changes"][0]["evidence_status"] == "consumer_proven"
-
-    def test_json_relevant_change_severity_honours_policy_file_override(self):
-        """A PolicyFile override on full_diff must be reflected in each
-        relevant_changes[].severity — verified defect: appcompat_to_json
-        never threaded kind_sets/policy_file into _change_to_dict, so a
-        finding's severity here could contradict full_library_verdict
-        (which does honour the override via full_diff.verdict/policy_file)."""
-        from abicheck.policy_file import PolicyFile
-
-        change = Change(
-            kind=ChangeKind.FUNC_REMOVED,
-            symbol="foo_init",
-            description="removed",
-        )
-        pf = PolicyFile(overrides={ChangeKind.FUNC_REMOVED: Verdict.COMPATIBLE})
-        result = self._make_result(breaking=[change], policy_file=pf)
-        data = json.loads(appcompat_to_json(result))
-        assert data["relevant_changes"][0]["severity"] == "compatible"
-
-    def test_markdown_weak_mode(self):
-        result = AppCompatResult(
-            app_path="/usr/bin/myapp",
-            old_lib_path="",
-            new_lib_path="libfoo.so.2",
-            required_symbols={"foo_init"},
-            required_symbol_count=1,
-            verdict=Verdict.COMPATIBLE,
-            symbol_coverage=100.0,
-        )
-        md = appcompat_to_markdown(result)
-        assert "libfoo.so.2" in md
-        # Weak mode: no old lib shown with arrow
-        assert "→" not in md
-
-
-# ---------------------------------------------------------------------------
-# CLI smoke test
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Integration-ish: _is_relevant_to_app with realistic change sets
@@ -2096,71 +1930,6 @@ class TestCheckAgainst:
 
         assert result.verdict == Verdict.COMPATIBLE
         assert result.symbol_coverage == 100.0
-
-
-# ---------------------------------------------------------------------------
-# Reporter edge cases
-# ---------------------------------------------------------------------------
-
-
-class TestReporterEdgeCases:
-    def test_json_missing_versions(self):
-        result = AppCompatResult(
-            app_path="/usr/bin/myapp",
-            old_lib_path="old.so",
-            new_lib_path="new.so",
-            missing_versions=["FOO_1.0"],
-            verdict=Verdict.BREAKING,
-        )
-        j = appcompat_to_json(result)
-        data = json.loads(j)
-        assert "FOO_1.0" in data["missing_versions"]
-
-    def test_markdown_missing_versions(self):
-        result = AppCompatResult(
-            app_path="/usr/bin/myapp",
-            old_lib_path="old.so",
-            new_lib_path="new.so",
-            missing_versions=["FOO_1.0"],
-            verdict=Verdict.BREAKING,
-        )
-        md = appcompat_to_markdown(result)
-        assert "Missing Symbol Versions" in md
-        assert "FOO_1.0" in md
-
-    def test_json_full_diff_verdict(self):
-        result = AppCompatResult(
-            app_path="/usr/bin/myapp",
-            old_lib_path="old.so",
-            new_lib_path="new.so",
-            full_diff=DiffResult(
-                old_version="1",
-                new_version="2",
-                library="libfoo",
-                verdict=Verdict.BREAKING,
-            ),
-            verdict=Verdict.COMPATIBLE,
-        )
-        j = appcompat_to_json(result)
-        data = json.loads(j)
-        assert data["full_library_verdict"] == "BREAKING"
-
-    def test_markdown_no_changes_message(self):
-        change = Change(
-            kind=ChangeKind.FUNC_ADDED,
-            symbol="x",
-            description="added",
-        )
-        result = AppCompatResult(
-            app_path="/usr/bin/myapp",
-            old_lib_path="old.so",
-            new_lib_path="new.so",
-            irrelevant_for_app=[change],
-            verdict=Verdict.COMPATIBLE,
-        )
-        md = appcompat_to_markdown(result)
-        assert "0 of 1 total" in md
-        assert "do NOT affect" in md
 
 
 # ---------------------------------------------------------------------------

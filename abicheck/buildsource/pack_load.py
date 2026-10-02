@@ -37,11 +37,24 @@ from .pack import BuildSourcePack
 
 
 def load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:
-    """Load a classic :class:`BuildSourcePack`, or raise ``SnapshotError``."""
+    """Load a classic :class:`BuildSourcePack`, or raise ``SnapshotError``.
+
+    A pack whose on-disk normalized payloads no longer match the digests its
+    manifest recorded (edited or partially copied after it was written) is
+    rejected rather than trusted: its ``content_hash`` would still claim the
+    recorded content (:func:`pack_io.verify_integrity`, ADR-028 Phase 5).
+    """
     try:
-        return pack_io.load(evidence_dir)
+        pack = pack_io.load(evidence_dir)
     except (FileNotFoundError, ValueError) as exc:
         raise SnapshotError(f"Invalid evidence pack at {evidence_dir}: {exc}") from exc
+    if not pack_io.verify_integrity(pack):
+        raise SnapshotError(
+            f"Invalid evidence pack at {evidence_dir}: its normalized payloads do "
+            "not match the digests recorded in its manifest (edited or partially "
+            "copied after it was written); re-collect the pack"
+        )
+    return pack
 
 
 def load_inputs_pack_or_raise(

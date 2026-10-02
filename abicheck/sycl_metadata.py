@@ -76,31 +76,6 @@ _UR_SYMBOL_RE = re.compile(r"^ur[A-Z]\w+$")
 _PI_PLUGIN_NAME_RE = re.compile(r"^libpi_(\w+)\.so")
 _UR_PLUGIN_NAME_RE = re.compile(r"^libur_adapter_(\w+)\.so")
 
-# Well-known PI entry points that must be present for a valid PI plugin.
-PI_REQUIRED_ENTRYPOINTS: frozenset[str] = frozenset(
-    {
-        "piPluginInit",
-        "piPlatformsGet",
-        "piPlatformGetInfo",
-        "piDevicesGet",
-        "piDeviceGetInfo",
-        "piContextCreate",
-        "piContextRelease",
-        "piQueueCreate",
-        "piQueueRelease",
-        "piMemBufferCreate",
-        "piMemRelease",
-        "piProgramCreate",
-        "piProgramBuild",
-        "piProgramRelease",
-        "piKernelCreate",
-        "piKernelRelease",
-        "piEnqueueKernelLaunch",
-        "piEventsWait",
-        "piEventRelease",
-    }
-)
-
 # The validity-marker entry point for each of the two UR export shapes
 # (module docstring): the older per-verb-symbol generation, and the current
 # function-pointer-table-getter generation. A UR plugin is valid if EITHER
@@ -108,35 +83,6 @@ PI_REQUIRED_ENTRYPOINTS: frozenset[str] = frozenset(
 # currently-shipping generation as "not a valid UR adapter".
 _UR_LEGACY_ENTRYPOINT = "urAdapterGet"
 _UR_TABLE_ENTRYPOINT = "urGetAdapterProcAddrTable"
-
-# Well-known UR entry points that must be present for a valid *legacy*
-# (per-verb-symbol) UR adapter -- does not apply to the current
-# function-pointer-table generation, which exports none of these directly
-# (see module docstring).
-UR_REQUIRED_ENTRYPOINTS: frozenset[str] = frozenset(
-    {
-        "urAdapterGet",
-        "urAdapterRelease",
-        "urPlatformGet",
-        "urPlatformGetInfo",
-        "urDeviceGet",
-        "urDeviceGetInfo",
-        "urContextCreate",
-        "urContextRelease",
-        "urQueueCreate",
-        "urQueueRelease",
-        "urMemBufferCreate",
-        "urMemRelease",
-        "urProgramCreateWithIL",
-        "urProgramBuild",
-        "urProgramRelease",
-        "urKernelCreate",
-        "urKernelRelease",
-        "urEnqueueKernelLaunch",
-        "urEventWait",
-        "urEventRelease",
-    }
-)
 
 # Backend type detection from plugin library name.
 _BACKEND_MAP: dict[str, str] = {

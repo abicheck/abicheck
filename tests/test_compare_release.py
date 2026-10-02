@@ -21,7 +21,6 @@ from abicheck.cli_helpers_compare import (
     _version_sort_key,
     strip_vendor_hash,
 )
-from abicheck.cli_resolve import _is_supported_compare_input
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -31,6 +30,9 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.serialization import snapshot_to_json
+from abicheck.workflows.extraction import (
+    is_supported_compare_input as _is_supported_compare_input,
+)
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -902,36 +904,6 @@ class TestReleaseFindingsDisplayCap:
 
         assert MAX_RELEASE_FINDINGS_PER_LIBRARY == _MAX_RELEASE_FINDINGS_PER_LIBRARY
         assert MAX_RELEASE_FINDINGS_PER_LIBRARY != 999
-
-
-class TestAccumulateReleaseKindCounts:
-    def test_empty_kinds_and_no_existing_entry_is_a_no_op(self) -> None:
-        """The `if counter:` guard must skip setting the field at all when
-        there is nothing to accumulate -- a real branch, since every other
-        call site always passes at least one cut kind."""
-        from abicheck.cli_compare_release_matrix import (
-            _accumulate_release_kind_counts,
-        )
-
-        entry: dict[str, object] = {}
-        _accumulate_release_kind_counts(entry, "findings_truncated_kinds", [])
-        assert "findings_truncated_kinds" not in entry
-
-    def test_accumulates_onto_an_existing_running_dict(self) -> None:
-        """A second call must add to (never replace) a prior call's counts,
-        and the result is always sorted by kind name."""
-        from abicheck.cli_compare_release_matrix import (
-            _accumulate_release_kind_counts,
-        )
-
-        entry: dict[str, object] = {"findings_truncated_kinds": {"func_removed": 2}}
-        _accumulate_release_kind_counts(
-            entry, "findings_truncated_kinds", ["var_removed", "func_removed"]
-        )
-        assert entry["findings_truncated_kinds"] == {
-            "func_removed": 3,
-            "var_removed": 1,
-        }
 
 
 class TestBundleFactsOutStrandedLibraryWarning:

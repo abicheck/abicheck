@@ -76,7 +76,6 @@ from .dumper_castxml import (
 from .errors import TuMergeError
 from .model import (
     EnumType,
-    Fact,
     Function,
     Param,
     RecordType,
@@ -86,6 +85,7 @@ from .model import (
 )
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
 from .model.declaration_headers import HeaderAttributedMap, declaring_header_set
+from .model.evidence_merge import merged_capture_fact
 from .provenance import build_public_set
 from .tu_fragment import MergedTuFragments, TuFragment, entity_key
 from .tu_merge_provenance import (
@@ -1314,17 +1314,13 @@ def _merge_functions(
         params=merged_params,
         deprecated=deprecated,
         contract_attributes=contract_attributes,
-        # `replace_with_fact_sync`'s own blanket "derive Fact.present(value)"
-        # rule is wrong here specifically when the merge left
-        # `contract_attributes` at `None`: per `_merge_contract_attributes`'s
-        # own docstring, `None` means "neither side captured this", not
-        # "confirmed no attributes" -- so the merged fact must stay
-        # NOT_COLLECTED, never a fabricated PRESENT(None) (Codex review, PR
-        # #982).
-        contract_attributes_fact=(
-            Fact.not_collected()
-            if contract_attributes is None
-            else Fact.present(contract_attributes)
+        # `None` on a side is "not captured": none captured stays
+        # NOT_COLLECTED (PR #982), some captured is PARTIAL (evidence_merge).
+        contract_attributes_fact=merged_capture_fact(
+            "captured by only some translation units",
+            contract_attributes,
+            base.contract_attributes,
+            other.contract_attributes,
         ),
     )
 

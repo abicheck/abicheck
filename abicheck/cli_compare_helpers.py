@@ -57,7 +57,6 @@ from .cli_helpers_compare import (
     _require_used_by_binary_evidence as _require_used_by_binary_evidence,
     _scoped_exit_code as _scoped_exit_code,
     _scoped_severity_summary as _scoped_severity_summary,
-    _verdict_exit_code as _verdict_exit_code,
     _verdict_severity_rank as _verdict_severity_rank,
     _warn_ignored_flags,
     fold_l0_hard_removals,

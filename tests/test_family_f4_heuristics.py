@@ -93,10 +93,15 @@ UNCATEGORIZED_CEILING = 0
 #: mangling, C++ keywords, ``std::``).
 EXEMPTION_CEILINGS: dict[str, int] = {
     "spelling": 65,
-    "grammar": 43,
+    # 44: the merge with main brought model/symbol_ownership.py into the scan
+    # (main made it the vocabulary owner) and main's shared
+    # match_frozen_namespace -- both one pre-existing `_Z` mangling check.
+    "grammar": 44,
     "own_format": 44,
     "platform": 21,
-    "user_rule": 11,
+    # 9: main replaced the two fnmatch frozen-namespace matchers with one
+    # policy.frozen_namespace helper.
+    "user_rule": 9,
     "sniff": 5,
 }
 
@@ -121,7 +126,7 @@ def test_inventory_is_derived_and_nontrivial() -> None:
         "abicheck.compare.enum_sentinel::<module>::vocab:_SENTINEL_TAIL_TOKENS",
         "abicheck.diff_serialization::<module>::vocab:_TAG_SUFFIX_PATTERNS",
         "abicheck.diff_namespaces::<module>::vocab:DEFAULT_EXPERIMENTAL_NAMESPACES",
-        "abicheck.compare.internal_namespaces::<module>::vocab:DEFAULT_INTERNAL_NAMESPACES",
+        "abicheck.model.symbol_ownership::<module>::vocab:DEFAULT_INTERNAL_NAMESPACES",
     ):
         assert needle in inventory
 

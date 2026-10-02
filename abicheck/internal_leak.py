@@ -335,9 +335,7 @@ def _layout_proven_invisible(fact_input: tuple[str, AbiSnapshot, AbiSnapshot]) -
     return layout_proven_invisible(*fact_input)
 
 
-_INTERNAL_VOCABULARY = (
-    "abicheck.compare.internal_namespaces:DEFAULT_INTERNAL_NAMESPACES"
-)
+_INTERNAL_VOCABULARY = "abicheck.model.symbol_ownership:DEFAULT_INTERNAL_NAMESPACES"
 
 #: Design-hardening Phase 5: the name only nominates the pointer-only
 #: leniency; proven-invisible layout confirms it (decision 2A).
@@ -1104,66 +1102,6 @@ def _format_path(path: list[str]) -> str:
     not shown.
     """
     return " → ".join(s for s in path if not s.startswith("indirect:"))
-
-
-def _field_is_indirect(fld_type: str) -> bool:
-    """Return True if *fld_type* is a pointer, reference, or smart-pointer wrapper.
-
-    Indirect fields don't embed by value, so layout changes don't
-    directly propagate through them.
-    """
-    # Only a TOP-LEVEL pointer / reference / smart-pointer wrapper counts —
-    # collapse template args first so a pointer buried in an unrelated argument
-    # (e.g. ``std::pair<ns::detail::Impl, int*>``, whose ``Impl`` is a by-value
-    # member) is NOT mistaken for indirection (Codex review). Per the maintainer
-    # decision, suppression only fires on the unambiguous pimpl shape; any nested
-    # / mixed spelling keeps the finding.
-    no_targs = _strip_template_args(fld_type)  # collapse <...> (drops nested *)
-    if "*" in no_targs or "&" in no_targs:  # top-level pointer / reference only
-        return True
-    outer = _strip_decorators(no_targs)
-    if (
-        "unique_ptr" in outer
-        or "uniq_ptr" in outer  # libstdc++ internals: std::__uniq_ptr_impl
-        or "shared_ptr" in outer
-        or "weak_ptr" in outer
-    ):
-        return True
-    # ``pimpl`` only as an alias-*template* usage (``pimpl<T>`` = the oneDAL
-    # smart-pointer alias, case80) — NOT a by-value struct literally named
-    # ``Pimpl``, which embeds its layout and must stay a leak.
-    return "pimpl<" in _strip_decorators(fld_type).lower()
-
-
-def _typedef_target_is_indirect(
-    name: str, typedefs: dict[str, str], _seen: frozenset[str] = frozenset()
-) -> bool:
-    """Return True if alias *name* resolves (transitively) to a pointer / smart
-    pointer — e.g. ``using Handle = ns::detail::Impl*;`` (Codex review). Without
-    this, a pointer-typedef field reads as by-value and surfaces a spurious leak.
-    """
-    if name in _seen:
-        return False
-    target = typedefs.get(name)
-    if not target:
-        return False
-    if _field_is_indirect(target):
-        return True
-    return _typedef_target_is_indirect(
-        _strip_decorators(target), typedefs, _seen | {name}
-    )
-
-
-def _record_field_is_value_embedded(rec: RecordType, field_name: str) -> bool | None:
-    """Check whether *field_name* in *rec* is embedded by value.
-
-    Returns True if embedded-by-value, False if indirect, None if the field
-    is not found in *rec*.
-    """
-    for fld in rec.fields:
-        if fld.name == field_name:
-            return not _field_is_indirect(fld.type)
-    return None
 
 
 def _path_has_indirection(path: list[str], snap: AbiSnapshot | None = None) -> bool:
