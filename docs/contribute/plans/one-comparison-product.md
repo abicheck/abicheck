@@ -79,10 +79,8 @@ Re-checked against the tree with Click introspection and the contract gates:
   `docs/reference/cli-reference.md` is in sync.
 - **A new subcommand this table did not list:** `project capture-variants`
   (7 options, storage-format-v2 A1.6). It is now in §4.5.
-- **Per-option rulings cover only `compare` and `dump`.** Nothing rules
-  `aggregate` or `project` options flag by flag (`aggregate
-  --analysis-context`, all of `capture-variants`). This is an open item in
-  the [Phase 7 table](#phase-7l-external-cli-audit-2026-09-12-reconciled).
+- **Per-option rulings covered only `compare` and `dump`.** Closed
+  2026-10-02 by slice 7s (which also found `deps` unruled).
 - **Phase 9's blockers moved.** The template-instantiated-parameter seed
   mismatch had already been closed, but this plan and the plans index still
   listed it. The `ambiguous_namespaced_leaf` identity gap is closed by
@@ -890,6 +888,22 @@ treating `"0"` as disable — **fixed over the class**: `abicheck/env_flags.py`
 is the one boolean parser and registry (bug class
 `config.env_flag_value_domain`). `compat`'s options stay frozen (D7).
 
+**7s — per-option rulings for every command. Done** (2026-10-02).
+`rulings.py` now rules every visible option of `aggregate`, the four
+`project` subcommands and both `deps` subcommands (keyed by command path,
+e.g. `"project plan"`), in addition to `compare`/`dump`. All 35 are keeps;
+none duplicates a config key. Notable reasons: `--toolchain-bindings` is a
+trust-boundary operand that a `.abicheck.yml` key would hand to the
+untrusted config it validates; `aggregate --discovered-only` is 7q's
+explicit no-inventory declaration, not a gate-disabling hatch (there is no
+gate without a manifest); `project plan --project` is runtime provenance a
+config copied into a fork would misstate. `compat` is excluded on purpose
+(D7: frozen ABICC spellings). `tests/test_config_rebalance.py` closes the
+table's *domain*, not only its rows: it walks the real Click tree and fails
+on any option-bearing command with no ruling table — the gap that let these
+commands go unruled after 7k, and that the earlier open-item note (which
+missed `deps`) did not catch either.
+
 **What remains in Phase 7.** Nothing executable. Every remaining item is
 gated on a named prerequisite or owned elsewhere — this table is the
 authoritative open list:
@@ -906,7 +920,6 @@ authoritative open list:
 | `dump --compression`, `--dry-run`→`--plan`, `--used-by-manifest`→`--used-by @FILE` | declined with a measurement (7k/7l) |
 | `compare --env-matrix` → `deployment:`, `dump --build-target` → `build.targets` | tracked follow-ups in `rulings.py` (need a new config key / caller rewiring) |
 | Per-library scope ledger and suppression audit in release human output | missing feature left by 7o (machine projections unaffected) |
-| Per-option rulings for `aggregate` and `project` (`aggregate --analysis-context`, `project capture-variants`' 7 options) | `rulings.py` and its bijection test cover only `compare`/`dump`; extend them, or record that the exclusion is deliberate |
 
 ### Phase 8 — `deps` convergence (ADR-068 D6) — done
 

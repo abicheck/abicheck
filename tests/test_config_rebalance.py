@@ -26,6 +26,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import click
 import pytest
 import yaml
 from click.testing import CliRunner
@@ -629,9 +630,42 @@ class TestFlagBudget:
     @pytest.mark.parametrize("command", sorted(RULINGS_BY_COMMAND))
     def test_the_budget_is_exactly_the_ruled_set(self, command: str) -> None:
         """No slack, by construction: the ceiling *is* the ruled set's size."""
-        budget = {"compare": COMPARE_FLAG_BUDGET, "dump": DUMP_FLAG_BUDGET}[command]
+        budget = {"compare": COMPARE_FLAG_BUDGET, "dump": DUMP_FLAG_BUDGET}.get(
+            command, len(RULINGS_BY_COMMAND[command])
+        )
         assert budget == len(RULINGS_BY_COMMAND[command])
-        assert count_visible_options(main.commands[command]) == budget
+        assert count_visible_options(_resolve_command(command)) == budget
+
+    def test_every_option_bearing_command_is_ruled(self) -> None:
+        """The table's *domain* is closed too, not only each table's rows.
+
+        The bijection above is per listed command, so a command missing
+        from ``RULINGS_BY_COMMAND`` altogether escaped it -- which is how
+        ``aggregate``, the ``project`` subcommands and ``deps`` went
+        unruled after Phase 7k. Walk the real Click tree instead of a list:
+        every leaf command with a visible option must be ruled, except
+        ``compat``, whose ABICC spellings are frozen (ADR-068 D7).
+        """
+        leaves: set[str] = set()
+
+        def walk(cmd: click.Command, path: tuple[str, ...]) -> None:
+            if isinstance(cmd, click.Group):
+                for name, sub in cmd.commands.items():
+                    walk(sub, (*path, name))
+            elif _visible_canonical_flags_of(cmd):
+                leaves.add(" ".join(path))
+
+        for name, cmd in main.commands.items():
+            if name != "compat":
+                walk(cmd, (name,))
+        assert leaves - RULINGS_BY_COMMAND.keys() == set(), (
+            f"commands with visible options but no ruling table: "
+            f"{sorted(leaves - RULINGS_BY_COMMAND.keys())}"
+        )
+        assert RULINGS_BY_COMMAND.keys() - leaves == set(), (
+            f"ruling tables for commands that no longer exist: "
+            f"{sorted(RULINGS_BY_COMMAND.keys() - leaves)}"
+        )
 
     @pytest.mark.parametrize("command", sorted(RULINGS_BY_COMMAND))
     def test_every_ruling_is_substantive(self, command: str) -> None:
@@ -688,11 +722,26 @@ def _keep_stub() -> OptionRuling:
     return OptionRuling("per_run_operand", "stub rationale, long enough to pass")
 
 
+def _resolve_command(command: str) -> click.Command:
+    """``"project plan"`` → the ``plan`` subcommand of ``project``."""
+    cmd: click.Command = main
+    for part in command.split():
+        assert isinstance(cmd, click.Group), (
+            f"{command!r}: {part!r} has no parent group"
+        )
+        cmd = cmd.commands[part]
+    return cmd
+
+
 def _visible_canonical_flags(command: str) -> set[str]:
+    return _visible_canonical_flags_of(_resolve_command(command))
+
+
+def _visible_canonical_flags_of(cmd: click.Command) -> set[str]:
     """Each visible option's canonical (longest) spelling, help meta aside."""
     return {
         max(p.opts, key=len)
-        for p in main.commands[command].params
+        for p in cmd.params
         if getattr(p, "param_type_name", None) == "option"
         and not getattr(p, "hidden", False)
         and getattr(p, "name", None) not in _HELP_META_OPTION_NAMES
