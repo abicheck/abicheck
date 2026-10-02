@@ -1,6 +1,7 @@
-name: Examples Validation (nightly cross-platform)
+name: Examples Validation (weekly cross-platform)
 
-# Scheduled / on-demand only — never gates a PR. Extends the blocking Ubuntu
+# Weekly / on-demand only (the filename keeps "nightly" because tests and
+# scripts reference the path) — never gates a PR. Extends the blocking Ubuntu
 # examples lane (examples-validation.yml) across the producers and ABIs the
 # recommendations call out: AArch64 (calling-convention / alignment / return-ABI
 # differences invisible on x86_64) and macOS arm64 Mach-O.
@@ -11,12 +12,28 @@ name: Examples Validation (nightly cross-platform)
 # `cross-platform-e2e` lane (MinGW gcc + ABICHECK_MIN_EXECUTED=5, castxml-free),
 # which runs on every PR — a nightly duplicate would add no real coverage.
 on:
+  # Weekly, not daily (lean-up 2026-10-02). Measured, not guessed: of the 91
+  # scheduled runs from 2026-06-14 to 2026-10-02 this lane was red for 80,
+  # including every run since 2026-07-13, and no failure was acted on between two consecutive
+  # nights -- the AArch64 gaps it reports (case80/case126 CastXML `_Float128`,
+  # case171 DF_STATIC_TLS) persisted for weeks. Its findings are architecture
+  # facts that change at the pace of runner images and toolchain pins, not
+  # per commit, so a daily re-statement added runner-hours, not signal. Weekly
+  # matches every other scheduled sweep in .github/workflows/; Wednesday 04:23
+  # UTC keeps it off the Monday cluster (mutation, perf, python-compat, ...).
+  # Use workflow_dispatch to re-check a fix immediately.
   schedule:
-    - cron: "23 4 * * *"
+    - cron: "23 4 * * 3"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# A dispatch racing the schedule (or a second dispatch) on the same ref would
+# validate the same commit twice on the scarce arm64/macOS runner pools.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   linux-aarch64:
@@ -41,21 +58,47 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Validate examples (full catalog)
+      # Both artifact variants, each split in two (tests/example_shards.py's
+      # round-robin assignment, the same one examples-validation.yml's PR
+      # shards use), run as four concurrent processes on the runner's 4 vCPUs.
+      # validate_examples.py is a single sequential process and every
+      # invocation works in its own TemporaryDirectory, so this is the same
+      # case set with the same verdicts -- verified locally: 208/208 per-case
+      # status/verdict/kinds identical to the serial runs, wall 1266s -> 419s.
+      # The two variants used to run back to back (~9.5 + ~9.2 min on gcc).
+      #
+      # ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: repository-owned fixtures only, as
+      # in examples-validation.yml; without it the 13 source_smoke cases'
+      # run-mode silently SKIPs on these architectures.
+      - name: Validate examples (debug-headers gate + stripped-headers FP guard)
+        env:
+          ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
         run: |
-          mkdir -p results
-          PYTHONPATH=. python tests/validate_examples.py --toolchain ${{ matrix.toolchain }} --json \
-            > results/validate_examples-aarch64-${{ matrix.toolchain }}.json
-          cp results/validate_examples-aarch64-${{ matrix.toolchain }}.json results/validate_examples.json
-          python tests/check_validate_results.py
-      - name: Stripped FP guard (AArch64)
-        if: always()
-        run: |
-          set +e
-          PYTHONPATH=. python tests/validate_examples.py --toolchain ${{ matrix.toolchain }} \
-            --artifact-variant stripped-headers --json > results/validate_examples-aarch64-stripped.json
-          set -e
-          python tests/check_stripped_fp.py results/validate_examples-aarch64-stripped.json
+          mkdir -p results/shards
+          tc=${{ matrix.toolchain }}
+          for variant in debug-headers stripped-headers; do
+            for shard in 1 2; do
+              # Assign first, then use: an empty list would mean "whole catalog".
+              cases="$(python tests/example_shards.py list --shard "$shard" --of 2)"
+              [ -n "$cases" ] || { echo "::error::shard $shard/2 resolved to no cases"; exit 1; }
+              # stdout is the JSON artifact; a non-zero exit is judged by the
+              # checkers below from the recorded per-case statuses.
+              PYTHONPATH=. python tests/validate_examples.py $cases --toolchain "$tc" \
+                --artifact-variant "$variant" --json \
+                > "results/shards/$variant-$shard.json" 2> "results/shards/$variant-$shard.log" &
+            done
+          done
+          wait
+          for variant in debug-headers stripped-headers; do
+            echo "::group::$variant diagnostics"; cat results/shards/$variant-*.log; echo "::endgroup::"
+            python tests/example_shards.py merge results/shards/$variant-1.json results/shards/$variant-2.json \
+              --out "results/validate_examples-aarch64-$tc-$variant.json"
+          done
+          rc=0
+          cp "results/validate_examples-aarch64-$tc-debug-headers.json" results/validate_examples.json
+          python tests/check_validate_results.py || rc=1
+          python tests/check_stripped_fp.py "results/validate_examples-aarch64-$tc-stripped-headers.json" || rc=1
+          exit $rc
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -79,6 +122,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Validate examples (platform-filtered to macos)
+        env:
+          ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
         run: |
           mkdir -p results
           PYTHONPATH=. python tests/validate_examples.py --json \
