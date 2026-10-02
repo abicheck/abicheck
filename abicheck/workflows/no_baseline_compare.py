@@ -406,7 +406,7 @@ def run_no_baseline_compare(
     policy_file: PolicyFile | None = None,
     scope_to_public_surface: bool = True,
     force_public_symbols: set[str] | None = None,
-    pattern_verdicts: bool = False,
+    pattern_verdicts: bool = True,
     collapse_versioned_symbols: bool = False,
     contract_evaluation: bool = False,
     contract_mode: str | None = None,

@@ -1559,32 +1559,6 @@ class TestPublicModePostManifestOverlay:
         assert decisions[0].relevance is ContractRelevance.IN_CONTRACT
 
 
-class TestNeverEmitsUnknownUnproven:
-    """The module's central safety rule (see its docstring): no code path
-    constructs UNKNOWN_UNPROVEN, ever."""
-
-    def test_source_never_constructs_unknown_unproven(self) -> None:
-        # The module docstring *discusses* UNKNOWN_UNPROVEN (to explain why
-        # it's avoided) -- what must never appear is executable code that
-        # references the enum member, so this walks the AST rather than
-        # grepping raw source text (which would also match the docstring).
-        import ast
-        import inspect
-
-        import abicheck.contract_evaluation as mod
-
-        tree = ast.parse(inspect.getsource(mod))
-        module_docstring = ast.get_docstring(tree)
-        body_without_docstring = tree.body[1:] if module_docstring else tree.body
-        names = {
-            node.attr
-            for stmt in body_without_docstring
-            for node in ast.walk(stmt)
-            if isinstance(node, ast.Attribute)
-        }
-        assert "UNKNOWN_UNPROVEN" not in names
-
-
 class TestContractEvaluationDecisionValidation:
     def test_unknown_reason_code_rejected(self) -> None:
         with pytest.raises(ValueError):

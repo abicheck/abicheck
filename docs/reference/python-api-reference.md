@@ -23,7 +23,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `scope_public` | `bool` | `True` |
 | `force_public_symbols` | `frozenset[str] \| None` | `None` |
 | `public_surface_allowlist` | `frozenset[str] \| None` | `None` |
-| `pattern_verdicts` | `bool` | `False` |
+| `pattern_verdicts` | `bool` | `True` |
 | `enable_debuginfod` | `bool` | `False` |
 | `debuginfod_url` | `str \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
@@ -284,7 +284,7 @@ Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 | `scope_to_public_surface` | `bool` | `True` |
 | `force_public_symbols` | `set[str] \| None` | `None` |
 | `extra_changes` | `list[Change] \| None` | `None` |
-| `pattern_verdicts` | `bool` | `False` |
+| `pattern_verdicts` | `bool` | `True` |
 | `collapse_versioned_symbols` | `bool` | `False` |
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
@@ -434,7 +434,7 @@ Compare two ABI inputs and return the classified diff result.
 | `enable_debuginfod` | `bool` | `False` |
 | `scope_to_public_surface` | `bool` | `True` |
 | `force_public_symbols` | `set[str] \| None` | `None` |
-| `pattern_verdicts` | `bool` | `False` |
+| `pattern_verdicts` | `bool` | `True` |
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
 | `debuginfod_url` | `str \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |

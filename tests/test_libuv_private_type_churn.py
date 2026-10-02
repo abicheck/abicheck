@@ -65,9 +65,9 @@ def test_param_rename_is_source_level_not_binary_breaking():
     )
     r = compare(old, new)
     assert ChangeKind.PARAM_RENAMED in {c.kind for c in r.changes}
-    # Source-level break, not a hard binary ABI break.
-    assert r.verdict == Verdict.API_BREAK
-    assert r.verdict != Verdict.BREAKING
+    # Neither a binary break nor a C/C++ source break (no named arguments):
+    # a risk, reported for bindings/documentation tooling.
+    assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 def test_private_struct_field_pointee_const_change_is_neutral():

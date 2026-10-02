@@ -87,6 +87,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..contract_relevance_types import (
     ContractMode,
+    ContractRelevance,
     EvidenceCompleteness,
     EvidenceProviderStatus,
 )
@@ -282,7 +283,48 @@ def coverage_failures_for_context(ctx: Any) -> tuple[CoverageFailure, ...]:
     mode = getattr(contract, "mode", None)
     if evidence is None or mode is None:
         return ()
-    return coverage_failures(evidence, mode)
+    failures = coverage_failures(evidence, mode)
+    if failures:
+        return failures
+    return unresolved_finding_failures(getattr(ctx, "decision_receipt", None), mode)
+
+
+#: The pseudo-provider an unresolved finding is attributed to. Not an
+#: evidence provider: the providers all closed, yet the finding's membership
+#: still could not be decided (catalog case97: the only declaration sits in
+#: a preprocessor branch the parse did not take).
+UNRESOLVED_FINDING_PROVIDER = "finding_relevance"
+
+
+def unresolved_finding_failures(
+    receipt: Any, mode: ContractMode | str
+) -> tuple[CoverageFailure, ...]:
+    """One failure per finding the selected domain left ``UNKNOWN_UNRESOLVED``.
+
+    Section 7's matrix gives such a finding exit ``1`` (case97 under
+    ``public``: ``UNKNOWN_UNRESOLVED``/1). Without this, a run whose every
+    provider closed but whose finding stayed unresolved read clean: the
+    finding is not scored by policy, and the provider ledger was empty.
+    Consulted only when no provider failure exists -- a provider failure
+    already explains the unresolved findings it causes and already floors
+    the exit.
+    """
+    relevance = getattr(receipt, "relevance_by_finding", None) or {}
+    resolved = ContractMode(mode) if not isinstance(mode, ContractMode) else mode
+    return tuple(
+        CoverageFailure(
+            provider=UNRESOLVED_FINDING_PROVIDER,
+            side="both",
+            record_id=finding_id,
+            reason="finding_unresolved",
+            status="available",
+            completeness="complete",
+            mode=resolved.value,
+        )
+        for finding_id, rel in sorted(relevance.items())
+        if rel is ContractRelevance.UNKNOWN_UNRESOLVED
+        or rel == ContractRelevance.UNKNOWN_UNRESOLVED.value
+    )
 
 
 def coverage_exit_contribution(failures: Sequence[CoverageFailure]) -> int:

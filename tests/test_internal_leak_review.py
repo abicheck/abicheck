@@ -28,6 +28,8 @@ function's signature leads to an internal type) is still detected.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
@@ -46,6 +48,7 @@ from abicheck.model import (
     TypeField,
     Visibility,
 )
+from abicheck.model.vocabulary import ScopeOrigin
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -98,6 +101,29 @@ def _struct_layout(
 # ---------------------------------------------------------------------------
 # _build_type_map flag
 # ---------------------------------------------------------------------------
+
+
+def _privatize(*snaps: AbiSnapshot) -> None:
+    """Stamp every internal-namespace record as defined in a private header:
+    the structural proof pointer-only leniency requires (decision 2A)."""
+    from abicheck.internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+    from abicheck.model.vocabulary import ScopeOrigin
+
+    for snap in snaps:
+        for rec in snap.declarations.types:
+            if is_internal_type(rec.name, DEFAULT_INTERNAL_NAMESPACES):
+                rec.origin = ScopeOrigin.PRIVATE_HEADER
+
+
+def _privatized(build):  # type: ignore[no-untyped-def]
+    """Wrap a snapshot builder so its result is :func:`_privatize`-d."""
+
+    def wrapped(*args, **kwargs):  # type: ignore[no-untyped-def]
+        snap = build(*args, **kwargs)
+        _privatize(snap)
+        return snap
+
+    return wrapped
 
 
 class TestBuildTypeMapFlag:
@@ -363,6 +389,7 @@ class TestPointerMediatedLayoutLeakSuppressed:
                 description="count: int -> std::atomic<int>",
             )
         ]
+        _privatize(old, new)
         leaks = detect_internal_leaks(changes, old, new)
         assert leaks == [], (
             "a layout change to a type embedded by value below a unique_ptr does "
@@ -413,6 +440,7 @@ class TestPointerMediatedLayoutLeakSuppressed:
                 ],
             )
 
+        _snap = _privatized(_snap)
         leaks = detect_internal_leaks(
             [
                 Change(
@@ -618,6 +646,7 @@ class TestPointerMediatedLayoutLeakSuppressed:
                 typedefs={"Handle": "ns::detail::Impl*"},
             )
 
+        _snap = _privatized(_snap)
         leaks = detect_internal_leaks(
             [
                 Change(
@@ -714,6 +743,7 @@ class TestPointerMediatedLayoutLeakSuppressed:
                 ],
             )
 
+        _snap = _privatized(_snap)
         leaks = detect_internal_leaks(
             [
                 Change(
@@ -754,6 +784,7 @@ class TestPointerMediatedLayoutLeakSuppressed:
                 ],
             )
 
+        _snap = _privatized(_snap)
         leaks = detect_internal_leaks(
             [
                 Change(
@@ -849,6 +880,7 @@ class TestPointerMediatedLayoutLeakSuppressed:
                 ],
             )
 
+        _snap = _privatized(_snap)
         leaks = detect_internal_leaks(
             [
                 Change(
@@ -932,6 +964,7 @@ class TestPointerMediatedLayoutLeakSuppressed:
                 ],
             )
 
+        _snap = _privatized(_snap)
         leaks = detect_internal_leaks(
             [
                 Change(
@@ -980,3 +1013,133 @@ class TestPointerMediatedLayoutLeakSuppressed:
             _snap(64),
         )
         assert len(leaks) == 1, f"a by-value return must leak (got: {leaks})"
+
+
+class TestPointerOnlyLeniencyNeedsStructuralProof:
+    """Decision 2A: pointer-only leniency is earned by a structural fact (the
+    layout is invisible to consumers), never by the namespace's name alone.
+
+    Exhaustive over each side's record state (absent, every ``ScopeOrigin``,
+    opaque or not) and three internal namespace spellings. The oracle is
+    stated independently of ``policy.layout_visibility.layout_proven_invisible``: suppressed iff at
+    least one side carries the record and every carried record is opaque or
+    defined in a private header.
+    """
+
+    _STATES: tuple[tuple[str, ScopeOrigin | None, bool], ...] = (
+        ("absent", None, False),
+        *((f"{o.value}", o, False) for o in ScopeOrigin),
+        *((f"{o.value}+opaque", o, True) for o in ScopeOrigin),
+    )
+
+    @staticmethod
+    def _side(
+        qname: str, size: int, state: tuple[str, ScopeOrigin | None, bool]
+    ) -> AbiSnapshot:
+        _label, origin, opaque = state
+        types = [
+            RecordType(
+                name="Public",
+                kind="class",
+                fields=[TypeField(name="impl_", type=f"{qname}*")],
+            )
+        ]
+        if origin is not None:
+            types.append(
+                RecordType(
+                    name=qname,
+                    kind="struct",
+                    size_bits=size,
+                    origin=origin,
+                    is_opaque=opaque,
+                )
+            )
+        return AbiSnapshot(
+            library="lib.so",
+            version="1",
+            functions=[
+                Function(
+                    name="make",
+                    mangled="make",
+                    return_type="Public*",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=types,
+        )
+
+    @staticmethod
+    def _expected_suppressed(states) -> bool:  # type: ignore[no-untyped-def]
+        present = [(o, opq) for _l, o, opq in states if o is not None]
+        return bool(present) and all(
+            opq or o is ScopeOrigin.PRIVATE_HEADER for o, opq in present
+        )
+
+    @pytest.mark.parametrize("ns", ["detail", "impl", "internal"])
+    def test_matrix(self, ns: str) -> None:
+        qname = f"ns::{ns}::Impl"
+        disagreements: list[str] = []
+        suppressed_seen = fired_seen = False
+        for so in self._STATES:
+            for sn in self._STATES:
+                old = self._side(qname, 64, so)
+                new = self._side(qname, 128, sn)
+                change = Change(
+                    kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol=qname,
+                    description="size",
+                )
+                leaks = detect_internal_leaks([change], old, new)
+                suppressed = leaks == []
+                expected = self._expected_suppressed((so, sn))
+                suppressed_seen |= expected
+                fired_seen |= not expected
+                if suppressed != expected:
+                    disagreements.append(f"{so[0]} -> {sn[0]}: suppressed={suppressed}")
+        # Vacuity guard: the oracle must exercise both outcomes.
+        assert suppressed_seen and fired_seen
+        assert disagreements == []
+
+
+def test_unresolved_bare_name_record_needs_proof_too() -> None:
+    """An old record carrying only a bare name (qualified identity unknown)
+    may be the leaked type: a private-header NEW record alone is no proof."""
+    qname = "ns::detail::Impl"
+
+    def side(size: int, rec: RecordType) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="lib.so",
+            version="1",
+            functions=[
+                Function(
+                    name="make",
+                    mangled="make",
+                    return_type="Public*",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[TypeField(name="impl_", type=f"{qname}*")],
+                ),
+                rec,
+            ],
+        )
+
+    old = side(64, RecordType(name="Impl", kind="struct", size_bits=64))
+    new = side(
+        128,
+        RecordType(
+            name=qname,
+            kind="struct",
+            size_bits=128,
+            origin=ScopeOrigin.PRIVATE_HEADER,
+        ),
+    )
+    change = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol=qname, description="size")
+    assert old.declarations.types[1].qualified_name is None
+    assert detect_internal_leaks([change], old, new) != []

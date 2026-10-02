@@ -308,7 +308,11 @@ def plan_release_workers(
     import os
 
     from ..model.performance import current_performance_profile, tuning_for
-    from ..process_resources import available_mem_gib, python_parallelism
+    from ..process_resources import (
+        available_mem_gib,
+        max_threads,
+        python_parallelism,
+    )
     from .release_admission import MemoryAdmission
 
     if jobs <= 0 and tuning_for(current_performance_profile()).sequential_members:
@@ -344,4 +348,12 @@ def plan_release_workers(
         # *jobs* is an instruction and is not capped here.
         parallel = python_parallelism()
         effective, pool = min(effective, parallel), min(pool, parallel)
+    # The process-wide thread budget bounds every pool, an explicit *jobs*
+    # included. Applying it here, rather than only when the pool borrows its
+    # threads, keeps the plan honest: a budget of 1 selects the sequential
+    # member path itself instead of a pooled dispatch that happens to run
+    # one worker.
+    cap = max_threads()
+    if cap is not None:
+        effective, pool = min(effective, cap), min(pool, cap)
     return ReleaseWorkerPlan(effective, clamped_from, budget, pool, admission)

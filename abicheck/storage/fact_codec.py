@@ -25,6 +25,7 @@ concern out of `serialization.py`'s neighbours.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -47,6 +48,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
     _MIN_SCHEMA_VERSION_FOR_ENUMTYPE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_HEADER_IDENTIFIERS_FACT,
     _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT,
     _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS,
     _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT,
@@ -218,6 +220,7 @@ def encode_fact_fields(d: dict[str, Any]) -> None:
     # AbiSnapshot's own case-(b) field -- a single top-level key, not
     # nested in a list like the four declaration dataclasses above.
     _encode_one(d.get("ast_resolved_standard_fact"))
+    _encode_one(d.get("public_header_identifiers_fact"))  # v54
     elf_dict = d.get("elf")
     if elf_dict is not None:
         for fact_key in _ELF_FACT_KEYS:
@@ -620,7 +623,21 @@ def decode_snapshot_facts(d: dict[str, Any], schema_version: int) -> dict[str, A
             schema_version,
             min_schema_version=_MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
         ),
+        "public_header_identifiers_fact": _with_frozenset_value(
+            decode_fact(
+                d.get("public_header_identifiers_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_HEADER_IDENTIFIERS_FACT,
+            )
+        ),
     }
+
+
+def _with_frozenset_value(fact: Fact[Any] | None) -> Fact[Any] | None:
+    """The identifier set round-trips through JSON as a sorted list."""
+    if fact is None or not isinstance(fact.value, list):
+        return fact
+    return dataclasses.replace(fact, value=frozenset(fact.value))
 
 
 def decode_fact_with_legacy_presence(

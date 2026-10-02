@@ -15,7 +15,9 @@ from pathlib import Path
 
 SCHEMA_VERSION = "component_suites.v1"
 ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_OUTPUT = ROOT / "skills-src" / "evaluation" / "validation" / "data" / "component_suites.json"
+DEFAULT_OUTPUT = (
+    ROOT / "skills-src" / "evaluation" / "validation" / "data" / "component_suites.json"
+)
 
 SUITES: dict[str, dict[str, object]] = {
     "elf-symbol-surface": {
@@ -102,11 +104,15 @@ def platform_tag() -> str:
 
 def optional_dependency_blocker(test_path: str) -> str | None:
     """Return a blocker reason for optional dependencies needed by a test."""
-    if test_path in {
-        "tests/test_pe_metadata_unit.py",
-        "tests/test_pdb_metadata.py",
-        "tests/test_pdb_parser.py",
-    } and importlib.util.find_spec("pefile") is None:
+    if (
+        test_path
+        in {
+            "tests/test_pe_metadata_unit.py",
+            "tests/test_pdb_metadata.py",
+            "tests/test_pdb_parser.py",
+        }
+        and importlib.util.find_spec("pefile") is None
+    ):
         return "missing Python dependency: pefile"
     return None
 
@@ -226,10 +232,7 @@ def run_suite(name: str, *, dry_run: bool, pytest_args: list[str]) -> dict[str, 
             exit_code=124,
             seconds=time.time() - start,
             stdout=exc.stdout or "",
-            stderr=(
-                f"pytest timed out after {exc.timeout}s\n"
-                f"{exc.stderr or ''}"
-            ),
+            stderr=(f"pytest timed out after {exc.timeout}s\n{exc.stderr or ''}"),
             blockers=[f"pytest timed out after {exc.timeout}s"],
         )
     status = "passed" if proc.returncode == 0 else "failed"

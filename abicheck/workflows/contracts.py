@@ -132,7 +132,9 @@ class CompareRequest:
     # outside it (e.g. private `__pp_*` kernel churn) are demoted. None = not
     # manifest-scoped.
     public_surface_allowlist: frozenset[str] | None = None
-    pattern_verdicts: bool = False
+    # On by default, matching the CLI (ADR-068 D4 made pattern verdicts
+    # unconditional there); pass False to score raw detector output.
+    pattern_verdicts: bool = True
     enable_debuginfod: bool = False
     # Override debuginfod server URL (only meaningful with enable_debuginfod);
     # None uses the resolver's default server list / DEBUGINFOD_URLS env var.

@@ -833,7 +833,7 @@ def run_compare(
     enable_debuginfod: bool = False,
     scope_to_public_surface: bool = True,
     force_public_symbols: set[str] | None = None,
-    pattern_verdicts: bool = False,
+    pattern_verdicts: bool = True,
     public_surface_allowlist: set[str] | None = None,
     debuginfod_url: str | None = None,
     diagnostic_comparison: bool = False,

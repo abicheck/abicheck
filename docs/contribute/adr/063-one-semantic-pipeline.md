@@ -400,6 +400,33 @@ generalization, with `storage/` re-exporting it rather than `model/`
 importing from `storage/`; this decision does not introduce a second
 vocabulary, and the implementation plan states the exact relocation.
 
+**Amendment (2026-10-01, accepted): a header-text identifier index closes
+the `public` domain for undeclared exports (snapshot schema v55).** ADR-049's
+closed-world rule (`public-contract-default` plan §4.2) forbids
+`UNKNOWN_UNPROVEN` unless the declared domain was searched completely, and
+names the trap: an active-AST parse cannot see a declaration inside an
+inactive `#if` branch (catalog case97). The header parse alone therefore
+never proves "the headers do not declare this symbol". The new fact is
+`AbiSnapshot.public_header_identifiers_fact` (a `Fact[frozenset[str]]`,
+bridged to the plain `public_header_identifiers` field and registered in the
+fact registry): every identifier token in the raw text of the snapshot's
+public header set (comments stripped, every preprocessor branch included),
+captured at dump time by `extract/public_header_identifiers.py`. It is
+`PRESENT` only when every header was read; otherwise it says why --
+`NOT_COLLECTED` (no public header set), `FAILED` (a named header missing or
+unreadable) or `UNSUPPORTED` (a header uses the `##` token-paste operator,
+so a pasted name cannot be found by token search). Only the `Fact` is
+persisted, and a pre-v55 snapshot loads it as `NOT_COLLECTED`. The contract
+evaluator
+may return `UNKNOWN_UNPROVEN`/`closed_domain_no_commitment` for the
+appearance or disappearance of an export only the export table knew, and
+only under an explicit `--contract public`, when the authoritative side's
+header search is complete *and* that side's index is `PRESENT` *and* the
+symbol's leaf identifier is absent from it. Without `--contract`, nothing
+changes: catalog case182 (an undeclared export's removal is still a break)
+stays BREAKING. Making `public` the default stays gated on the
+public-contract-default plan's Phase 7.
+
 ### D3 — `EntityId`/`OccurrenceId` as the one identity primitive
 
 Generalize ADR-062's occurrence-preserving identity model and ADR-046/048's

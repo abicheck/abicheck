@@ -38,16 +38,10 @@ that mode, never approximated from the header surface: silently answering an
 export-domain question with header-derived evidence would misrepresent the
 mode rather than implement it.
 
-Deliberately conservative: this evaluator **never emits**
-:data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNPROVEN`.
-That value means "the declared evidence domain was searched completely and
-found no commitment" (ADR-049's ``closed_domain_no_commitment`` reason) -- a
-closed-world completeness claim this module has no way to verify with today's
-evidence providers (there is no per-domain "did we search everything" signal,
-only ``PublicSurface.resolvable``/``has_provenance`` and
-``ExportSurface.resolvable``/``has_typed_roots``). Every case that would
-otherwise need ``UNKNOWN_UNPROVEN`` is downgraded to the weaker,
-honestly-hedged
+Deliberately conservative: ``UNKNOWN_UNPROVEN`` (``closed_domain_no_commitment``)
+comes only from :mod:`abicheck.policy.contract_closed_domain`'s proof (``public``:
+an export the complete header domain's raw text never spells); every other such
+case is downgraded to the weaker, honestly-hedged
 :data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNRESOLVED`
 with reason ``required_evidence_incomplete`` instead.
 
@@ -75,6 +69,10 @@ from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .model import ScopeOrigin
 from .model.change_catalog.kinds import ChangeKind
 from .policy.classification import ADDITION_KINDS
+from .policy.contract_closed_domain import (
+    SURFACE_METRIC_KIND_SLUGS,
+    closed_domain_decision,
+)
 from .policy.finding_type_candidates import (
     qualified_type_candidates as _qualified_type_candidates,
     type_candidates as _type_candidates,
@@ -291,8 +289,8 @@ _NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
     }
 )
 
-_NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
-    k.value for k in _NOT_APPLICABLE_KINDS
+_NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = (
+    frozenset(k.value for k in _NOT_APPLICABLE_KINDS) | SURFACE_METRIC_KIND_SLUGS
 )
 
 
@@ -1388,6 +1386,8 @@ def _surface_classification_decision(
     earlier authority has declined to settle the finding and both the
     authoritative surface and the finding's identity have resolved.
     """
+    if closed := closed_domain_decision(change, surf_old, surf_new):
+        return ContractEvaluationDecision(*closed)
     if unions is None:
         unions = surface_unions(surf_old, surf_new)
     in_surface, reason = classify_change_surface(

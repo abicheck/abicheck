@@ -532,7 +532,11 @@ class TestParamRenamed:
         renames = [c for c in result.changes if c.kind == ChangeKind.PARAM_RENAMED]
         assert len(renames) == 2
 
-    def test_param_renamed_is_source_break(self) -> None:
+    def test_param_renamed_is_a_risk_natively_and_a_source_break_in_compat(
+        self,
+    ) -> None:
+        from abicheck.compat._helpers import apply_abicc_source_level_parity
+
         old = _snap(
             from_headers=True,
             functions=[_func("f", "_Z1fi", params=[Param("count", "int")])],
@@ -542,7 +546,9 @@ class TestParamRenamed:
             functions=[_func("f", "_Z1fi", params=[Param("n", "int")])],
         )
         result = compare(old, new)
-        assert result.verdict == Verdict.API_BREAK
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        # ABICC parity: compat reports it as a source-level problem.
+        assert apply_abicc_source_level_parity(result).verdict == Verdict.API_BREAK
 
     def test_dwarf_only_param_rename_is_not_source_break(self) -> None:
         old = _snap(
@@ -1062,7 +1068,10 @@ class TestClassification:
         assert ChangeKind.ENUM_MEMBER_RENAMED in _API_BREAK_KINDS
         assert ChangeKind.PARAM_DEFAULT_VALUE_REMOVED in _API_BREAK_KINDS
         assert ChangeKind.FIELD_RENAMED in _API_BREAK_KINDS
-        assert ChangeKind.PARAM_RENAMED in _API_BREAK_KINDS
+        # A parameter rename is a risk natively (no named arguments in C or
+        # C++); `abicheck compat` reports it as a source problem for ABICC
+        # parity (compat._helpers.ABICC_SOURCE_LEVEL_KINDS).
+        assert ChangeKind.PARAM_RENAMED not in _API_BREAK_KINDS
         assert ChangeKind.METHOD_ACCESS_CHANGED in _API_BREAK_KINDS
         assert ChangeKind.FIELD_ACCESS_CHANGED in _API_BREAK_KINDS
 

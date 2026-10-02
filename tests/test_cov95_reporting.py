@@ -109,6 +109,18 @@ def _grouped_findings(doc: dict) -> list[dict]:
     return [f for group in doc.get("root_causes", []) for f in group["findings"]]
 
 
+def _privatize(*snaps: AbiSnapshot) -> None:
+    """Stamp every internal-namespace record as defined in a private header:
+    the structural proof pointer-only leniency requires (decision 2A)."""
+    from abicheck.internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+    from abicheck.model.vocabulary import ScopeOrigin
+
+    for snap in snaps:
+        for rec in snap.declarations.types:
+            if is_internal_type(rec.name, DEFAULT_INTERNAL_NAMESPACES):
+                rec.origin = ScopeOrigin.PRIVATE_HEADER
+
+
 class _AllSuppression:
     """Duck-typed suppression: suppresses every change."""
 
@@ -967,6 +979,7 @@ class TestInternalLeakReachability:
             ],
         )
         changes = [_change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Impl", "size")]
+        _privatize(old, new)
         leaks = detect_internal_leaks(changes, old, new)
         assert leaks == []
 

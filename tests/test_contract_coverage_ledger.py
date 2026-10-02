@@ -338,14 +338,16 @@ class TestReportIntegration:
         the compatibility one.
 
         On this pair the selected `exports` domain cannot resolve the removal
-        (ADR-049 D1), so compatibility policy does not score it and the
-        verdict is `NO_CHANGE`. That is the *relevance* axis doing its work
+        (ADR-049 D1), so compatibility policy does not score it: the verdict
+        is `COMPATIBLE`, carried only by the whole-surface
+        `public_surface_shrank` metric, which is `NOT_APPLICABLE` (no contract
+        entity) and therefore scored. That is the *relevance* axis doing its work
         before policy; the ledger's own job is the independent `1`, and what
         it must not do is rewrite the finding, its kind, or its decision.
         """
         report = self._report(tmp_path, "exports")
         assert report["contract_coverage_exit_contribution"] == 1
-        assert report["verdict"] == "NO_CHANGE"
+        assert report["verdict"] == "COMPATIBLE"
         # The detector fact is conserved and still says what it is.
         removals = [c for c in report["changes"] if c["kind"] == "func_removed"]
         assert removals, report["changes"]
@@ -684,3 +686,89 @@ class TestCoverageFailuresValidateAgainstTheSchema:
         declared = schema["properties"]["contract_coverage_failures"]["items"]
         assert emitted == set(declared["required"])
         assert emitted == set(declared["properties"])
+
+
+class TestUnresolvedFindingsReachTheLedger:
+    """A domain whose providers all closed can still leave a finding
+    ``UNKNOWN_UNRESOLVED`` (catalog case97: the only declaration sits in an
+    untaken ``#ifdef`` branch). Section 7 gives that finding exit 1; before
+    this the ledger was empty and the run read clean.
+
+    Exhaustive over every relevance mix of up to three findings, both closing
+    modes, and closed/failed providers. Oracle, stated independently: with a
+    provider failure the ledger is exactly the provider failures; otherwise
+    it holds one ``finding_relevance`` entry per unresolved finding, and the
+    exit contribution is 1 iff the ledger is non-empty.
+    """
+
+    @staticmethod
+    def _ctx(mode: ContractMode, provider_failed: bool, relevance: dict):  # type: ignore[no-untyped-def]
+        from types import SimpleNamespace
+
+        from abicheck.contract_evidence import DecisionReceiptBlock
+
+        provider = next(iter(REQUIRED_PROVIDERS[mode]))
+        status = (
+            EvidenceProviderStatus.FAILED
+            if provider_failed
+            else EvidenceProviderStatus.AVAILABLE
+        )
+        return SimpleNamespace(
+            contract_evidence=_block(_record(provider, "old", status=status)),
+            evaluation_context=SimpleNamespace(
+                resolved_config=SimpleNamespace(
+                    contract=SimpleNamespace(mode=mode.value, unresolved=None)
+                )
+            ),
+            decision_receipt=DecisionReceiptBlock(relevance_by_finding=relevance),
+        )
+
+    def test_matrix(self) -> None:
+        import itertools
+
+        from abicheck.contract_relevance_types import ContractRelevance
+        from abicheck.policy.contract_coverage_exit import coverage_exit_for_context
+
+        values = list(ContractRelevance)
+        disagreements: list[str] = []
+        saw_unresolved_entry = saw_clean = False
+        for mode in (ContractMode.PUBLIC, ContractMode.EXPORTS):
+            for provider_failed in (False, True):
+                for n in range(4):
+                    for combo in itertools.product(values, repeat=n):
+                        relevance = {f"f{i}": r for i, r in enumerate(combo)}
+                        ctx = self._ctx(mode, provider_failed, relevance)
+                        ledger = coverage_failures_for_context(ctx)
+                        unresolved = sorted(
+                            k
+                            for k, r in relevance.items()
+                            if r is ContractRelevance.UNKNOWN_UNRESOLVED
+                        )
+                        if provider_failed:
+                            expected = [("provider", "provider_failed")]
+                            got = [("provider", f.reason) for f in ledger]
+                        else:
+                            expected = [(k, "finding_unresolved") for k in unresolved]
+                            got = [(f.record_id, f.reason) for f in ledger]
+                        saw_unresolved_entry |= bool(unresolved) and not provider_failed
+                        saw_clean |= not ledger
+                        exit_ = coverage_exit_for_context(ctx)
+                        if got != expected or exit_ != (1 if expected else 0):
+                            disagreements.append(
+                                f"{mode.value} failed={provider_failed} {combo}: {got} exit={exit_}"
+                            )
+        assert saw_unresolved_entry and saw_clean  # vacuity guard
+        assert disagreements == []
+
+    def test_warn_accepts_unresolved_findings_but_keeps_them_listed(self) -> None:
+        from abicheck.contract_relevance_types import ContractRelevance
+        from abicheck.policy.contract_coverage_exit import coverage_exit_for_context
+
+        ctx = self._ctx(
+            ContractMode.PUBLIC,
+            False,
+            {"f": ContractRelevance.UNKNOWN_UNRESOLVED},
+        )
+        ctx.evaluation_context.resolved_config.contract.unresolved = "warn"
+        assert len(coverage_failures_for_context(ctx)) == 1
+        assert coverage_exit_for_context(ctx) == 0

@@ -4,7 +4,9 @@
 (`tests/regressions/families.py`, enforced by
 `tests/test_regressions_families.py`) and harnesses H1, H2, H3 and H5
 (`tests/test_family_f{1,2,3,5}_*.py`). Second round: H4, H6 and H7 landed too. Not landed: the merge-quiescence
-gate (a repository setting, not code). Extends
+gate (a repository setting, not code). The implementation-side follow-up — making these families
+unrepresentable rather than only detected — is sequenced in
+[Design hardening from defect families](design-hardening-from-defect-families.md). Extends
 [bug-class regression testing](bug-class-regression-testing.md) (its Phases
 0–9 and `tests/regressions/manifest*.py` stay as they are).
 

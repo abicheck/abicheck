@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.debug_type_scope import debug_layout_scope
 from .compare.edge_query import export_table_covered
-from .compare.enum_sentinel import is_sentinel_enum_member
+from .compare.enum_sentinel import holds_enum_maximum, is_sentinel_enum_member
 from .detector_registry import registry
 from .diff_helpers import _normalize_type_name, make_change
 from .diff_platform_elf_dynamic import (
@@ -1864,6 +1864,8 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
                 kind = (
                     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED
                     if is_sentinel_enum_member(mname)
+                    and holds_enum_maximum(mname, old_e.members)
+                    and holds_enum_maximum(mname, new_e.members)
                     else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
                 )
                 changes.append(

@@ -45,7 +45,11 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "34"
+_SNAPSHOT_CACHE_VERSION: str = "35"
+# v35: header-derived snapshots now carry public_header_identifiers (schema
+# v55, extract/public_header_identifiers.py). The key also folds in the
+# snapshot schema version from this version on, so the next schema bump
+# invalidates the cache without a hand bump here.
 # v34: castxml-dumped snapshots now carry each type slot's resolved record/enum
 # identities (Function.return_type_identities_fact, Param/Variable/TypeField.
 # type_identities_fact; snapshot schema v54). A v33 entry was dumped without them
@@ -496,7 +500,19 @@ def _cache_key(
     h.update(lang.encode())
     h.update(extra.encode())
     h.update(_SNAPSHOT_CACHE_VERSION.encode())
+    # The snapshot schema version too, automatically: a schema bump means a
+    # new field or encoding, and an entry cached before it was written
+    # without that field -- loading it back would present "not captured" as
+    # this build's answer. Folding it in closes that whole class instead of
+    # relying on a hand bump of _SNAPSHOT_CACHE_VERSION for each field.
+    h.update(f"schema={_snapshot_schema_version()}".encode())
     return h.hexdigest()
+
+
+def _snapshot_schema_version() -> int:
+    from .storage.snapshot_schema_versions import SCHEMA_VERSION
+
+    return SCHEMA_VERSION
 
 
 def lookup(

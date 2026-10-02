@@ -84,26 +84,7 @@ UNCOVERED_CEILINGS: dict[str, int] = {
     "sniff": 5,
 }
 
-KNOWN_VIOLATIONS: dict[str, frozenset[str]] = {
-    "sentinel.fp.mid_list_max_name": frozenset(
-        {
-            "sentinel.fp.mid_list_max_name: missing ('enum_member_value_changed', 'E::E_MAX')",
-            "sentinel.fp.mid_list_max_name: unexpected enum_last_member_value_changed",
-            "sentinel.fp.mid_list_max_name: verdict COMPATIBLE_WITH_RISK (breaking=True)",
-        }
-    ),
-    **{
-        f"internal_ns.fp.reached_by_pointer_{ns}": frozenset(
-            {
-                f"internal_ns.fp.reached_by_pointer_{ns}: missing ('type_field_type_changed', 'ns::{ns}::Cfg')",
-                f"internal_ns.fp.reached_by_pointer_{ns}: verdict NO_CHANGE (breaking=True)",
-                f"internal_ns.fp.reached_by_pointer_{ns}: verdict NO_CHANGE differs from "
-                "structurally identical ns::priv::Cfg (BREAKING) -- decided by the name",
-            }
-        )
-        for ns in ("detail", "impl")
-    },
-}
+KNOWN_VIOLATIONS: dict[str, frozenset[str]] = {}
 _KNOWN_BUG_REASON = (
     "F4 real finding: a name-shape heuristic decides this finding with no "
     "structural confirmation (see module docstring)"

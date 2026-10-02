@@ -68,6 +68,12 @@ _MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS = 35
 # ast_resolved_standard_fact sibling started being persisted at.
 _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS = 36
 
+# ADR-063 2026-10-01 amendment: the schema_version AbiSnapshot's
+# public_header_identifiers_fact started being persisted at. Written only when
+# it carries evidence, so a missing key at or above it decodes as
+# not_collected -- which is exactly what an evidence-free one was.
+_MIN_SCHEMA_VERSION_FOR_HEADER_IDENTIFIERS_FACT = 55
+
 # ADR-063 Phase 5 (eighth batch): the schema_version TypeField's own
 # case-(a) is_const_fact/is_volatile_fact/is_mutable_fact siblings started
 # being persisted at.

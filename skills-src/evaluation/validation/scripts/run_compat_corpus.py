@@ -110,6 +110,18 @@ def validate_corpus(doc: Any) -> list[str]:
             errors.append(f"{name}: expected_break_kinds must be a list")
         elif kinds and p.get("expected") != "BREAKING":
             errors.append(f"{name}: expected_break_kinds on a COMPATIBLE pair")
+        rules = p.get("suppressions", [])
+        if not isinstance(rules, list):
+            errors.append(f"{name}: suppressions must be a list")
+            rules = []
+        for i_rule, rule in enumerate(rules):
+            if not isinstance(rule, dict) or not all(
+                isinstance(rule.get(k), str) and rule.get(k, "").strip()
+                for k in ("reason", "source")
+            ):
+                errors.append(
+                    f"{name}: suppressions[{i_rule}] needs a reason and a cited source"
+                )
         if name in seen:
             errors.append(f"{name}: duplicate pair id")
         seen.add(name)
@@ -310,6 +322,44 @@ def render_summary(
 # --------------------------------------------------------------------------
 
 
+def evidence_args(entry: dict, work: Path) -> list[str]:
+    """The evidence a maintainer would supply for this pair.
+
+    Each package's own public headers (its ``include/`` tree) with
+    ``--contract public`` when both sides ship one -- the realistic workflow,
+    and the one that can tell an accidental export from a declared API --
+    plus the pair's cited suppressions, written to a suppression file.
+    """
+    args: list[str] = []
+    old_inc, new_inc = work / "old" / "include", work / "new" / "include"
+    if old_inc.is_dir() and new_inc.is_dir():
+        args += [
+            "--header",
+            f"old={old_inc}",
+            "--header",
+            f"new={new_inc}",
+            "--contract",
+            "public",
+        ]
+    rules = entry.get("suppressions") or []
+    if rules:
+        sup = work / "suppressions.yaml"
+        sup.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "suppressions": [
+                        {k: v for k, v in r.items() if k != "source"} for r in rules
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        args += ["--suppress", str(sup)]
+    return args
+
+
 def run_pair(entry: dict, work: Path, subdir: str = "linux-64") -> dict:
     """Fetch, extract and compare every shared object common to both builds."""
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -333,9 +383,15 @@ def run_pair(entry: dict, work: Path, subdir: str = "linux-64") -> dict:
     except Exception as exc:  # noqa: BLE001 -- any fetch/extract failure is "not evaluated"
         result["error"] = f"fetch/extract failed: {exc}"
         return result
+    extra = evidence_args(entry, work)
+    result["evidence"] = list(extra)
     for name in sorted(set(sides["old"]) & set(sides["new"])):
         report = ch.run_abicheck(
-            sides["old"][name], sides["new"][name], entry["old_ver"], entry["new_ver"]
+            sides["old"][name],
+            sides["new"][name],
+            entry["old_ver"],
+            entry["new_ver"],
+            extra,
         )
         result["libraries"][name] = (
             summarize_report(report)

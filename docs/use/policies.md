@@ -83,7 +83,6 @@ since SDK consumers typically use stable binary interfaces, not source-level nam
 |-------------|-------------|
 | `enum_member_renamed` | Enum member name changed (value unchanged) |
 | `field_renamed` | Struct/class field name changed |
-| `param_renamed` | Function parameter name changed |
 | `method_access_changed` | Method access level changed |
 | `field_access_changed` | Field access level changed |
 | `source_level_kind_changed` | `struct` ↔ `class` keyword (binary-identical) |

@@ -124,6 +124,8 @@ from abicheck.model import Fact, FactStatus
 #: Sites the harness cannot ablate yet. Shrink-only: see
 #: ``test_uncovered_is_shrink_only``.
 UNCOVERED: dict[str, str] = {
+    "AbiSnapshot.public_header_identifiers": "public_header_identifiers is closed-domain evidence read only under --contract public; the H1 corpus compares without --contract, so ablating it changes nothing observable (covered by tests/test_public_header_identifiers.py)",
+    "AbiSnapshot.public_header_identifiers_fact": "public_header_identifiers is closed-domain evidence read only under --contract public; the H1 corpus compares without --contract, so ablating it changes nothing observable (covered by tests/test_public_header_identifiers.py)",
     "Function.return_type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
     "Param.type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
     "TypeField.type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",

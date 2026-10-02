@@ -731,6 +731,11 @@ def _public_header_status(
     return (EvidenceProviderStatus.AVAILABLE, EvidenceCompleteness.COMPLETE, None)
 
 
+def public_header_search_is_complete(surf: PublicSurface) -> bool:
+    """The ``public_header`` record's ``completeness`` for *surf*, as a bool."""
+    return _public_header_status(surf)[1] is EvidenceCompleteness.COMPLETE
+
+
 def _export_table_status(
     exports: ExportSurface,
 ) -> tuple[EvidenceProviderStatus, EvidenceCompleteness, str | None]:

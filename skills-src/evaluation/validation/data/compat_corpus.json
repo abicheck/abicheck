@@ -140,7 +140,15 @@
       "expected_break_kinds": [],
       "ground_truth_source": "data/manifest.json[pair=Z1_zstd_minor].expectation",
       "ground_truth_note": "minor within libzstd.so.1",
-      "prior_observation": "data/results.json: 1 libraries, 0 breaking findings in the recorded run_matrix.v2 run"
+      "prior_observation": "data/results.json: 1 libraries, 0 breaking findings in the recorded run_matrix.v2 run",
+      "suppressions": [
+        {
+          "symbol": "ZSTD_cParameter::ZSTD_c_experimentalParam6",
+          "change_kind": "enum_member_removed",
+          "reason": "zstd excludes experimental parameter values from its stability promise. zstd.h: \"note : never ever use experimentalParam? names directly; also, the enums values themselves are unstable and can still change.\" 1.5.6 promoted this one to the stable ZSTD_c_targetCBlockSize=130.",
+          "source": "zstd 1.5.7 lib/zstd.h, enum ZSTD_cParameter (\"/* was ZSTD_c_experimentalParam6=1003; is now ZSTD_c_targetCBlockSize */\")"
+        }
+      ]
     },
     {
       "pair": "X1_libxml2_patch",

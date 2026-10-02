@@ -82,9 +82,10 @@ class TestApplyStrict:
 
     def test_api_mode_promotes_api_break(self):
         # mode='api': API_BREAK should still be promoted to BREAKING.
-        # Use PARAM_RENAMED which is in _API_BREAK_KINDS (not BREAKING),
-        # so the fixture accurately represents an API_BREAK scenario.
-        r = _result(Verdict.API_BREAK, [ChangeKind.PARAM_RENAMED])
+        # Use a kind the catalog itself classifies as API_BREAK (not
+        # BREAKING), so the fixture accurately represents an API_BREAK
+        # scenario without relying on compat's ABICC overlay.
+        r = _result(Verdict.API_BREAK, [ChangeKind.ENUM_MEMBER_RENAMED])
         result = _apply_strict(r, mode="api")
         assert result.verdict == Verdict.BREAKING
 
@@ -309,8 +310,23 @@ class TestKindSets:
     def test_soname_in_binary_only(self):
         assert ChangeKind.SONAME_CHANGED in _BINARY_ONLY_KINDS
 
-    def test_param_renamed_in_api_break(self):
-        assert ChangeKind.PARAM_RENAMED in _API_BREAK_KINDS
+    def test_param_renamed_is_source_level_in_compat_only(self):
+        # Native compare classifies a parameter rename as a risk (neither C
+        # nor C++ has named arguments); `abicheck compat` keeps ABICC's
+        # source-level classification through its own overlay.
+        from abicheck.compat._helpers import (
+            _API_BREAK_KINDS as _COMPAT_SOURCE_KINDS,
+            ABICC_SOURCE_LEVEL_KINDS,
+            apply_abicc_source_level_parity,
+        )
+
+        assert ChangeKind.PARAM_RENAMED not in _API_BREAK_KINDS
+        assert ChangeKind.PARAM_RENAMED in ABICC_SOURCE_LEVEL_KINDS
+        assert ChangeKind.PARAM_RENAMED in _COMPAT_SOURCE_KINDS
+        r = _result(Verdict.COMPATIBLE_WITH_RISK, [ChangeKind.PARAM_RENAMED])
+        assert apply_abicc_source_level_parity(r).verdict == Verdict.API_BREAK
+        # -source keeps it (a source problem); -binary drops it.
+        assert _filter_source_only(r).verdict == Verdict.API_BREAK
 
     def test_filter_source_only_source_break_verdict(self):
         """_filter_source_only: API_BREAK_KINDS changes → correct verdict + filtering."""

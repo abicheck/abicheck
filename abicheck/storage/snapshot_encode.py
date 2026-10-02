@@ -454,6 +454,14 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     encode_surface_graph(converted, snap)  # storage/surface_graph_codec.py
     encode_semantic_ir(converted, snap)  # storage/semantic_ir_codec.py (v38)
     encode_extraction_scope(converted, snap)  # storage/extraction_scope_codec.py (v52)
+    # v54: only the Fact is persisted (its value carries the identifiers; the
+    # legacy field is rebuilt from it on load), and an evidence-free
+    # not_collected one is omitted, so a snapshot without the index encodes
+    # exactly as v53.
+    converted.pop("public_header_identifiers", None)
+    phi = snap.public_header_identifiers_fact
+    if phi is None or (phi.status.value == "not_collected" and not phi.diagnostics):
+        converted.pop("public_header_identifiers_fact", None)
 
     # Embed schema version for forward-compatibility.
     # Placed at top level so loaders can inspect it without parsing the full snapshot.

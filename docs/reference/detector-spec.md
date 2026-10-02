@@ -216,7 +216,7 @@ One row per `ChangeKind` (410 total). Columns fuse the verdict partition (`check
 | `param_default_value_removed` | api_break | `API_BREAK` | `warning` | L2 | `param_default_value_removed` | [case123](examples/case123_default_argument_removed.md), [case32](examples/case32_param_defaults.md) |
 | `param_lost_va_list` | quality | `COMPATIBLE` | `warning` | unspecified | `param_lost_va_list` | — |
 | `param_pointer_level_changed` | breaking | `BREAKING` | `error` | L1 | `param_pointer_level_changed` | [case33](examples/case33_pointer_level.md) |
-| `param_renamed` | api_break | `API_BREAK` | `warning` | unspecified | `param_renamed` | — |
+| `param_renamed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `param_renamed` | — |
 | `param_restrict_changed` | quality | `COMPATIBLE` | `warning` | L2 | `param_restrict_changed` | [case207](examples/case207_pointer_parameter_gained_restrict.md) |
 | `pe_forwarder_changed` | breaking | `BREAKING` | `error` | L0 | `pe_forwarder_changed` | — |
 | `pe_hardening_improved` | quality | `COMPATIBLE` | `warning` | L0 | `pe_hardening_improved` | — |

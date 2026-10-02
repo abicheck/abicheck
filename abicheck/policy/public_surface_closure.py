@@ -114,6 +114,7 @@ from ..model.surface_facts import in_public_surface
 from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..model.vocabulary import ScopeOrigin
 from .captured_type_identities import captured_identity_seeds, field_identities
+from .header_identifier_evidence import present_header_identifiers
 from .header_origin_evidence import collect_header_origin_unknown_types
 from .public_surface import (
     _DEMOTE_ORIGINS,
@@ -693,6 +694,7 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     construction (and its associated evidence-merge cost) in the way.
     """
     surface = PublicSurface()
+    surface.header_identifiers = present_header_identifiers(snap)
     refs = referenced_identifiers_by_node(snap)
 
     # Build the type universe and name -> record / enum indexes for closure walks.

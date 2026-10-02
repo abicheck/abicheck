@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 54,
+  "schema_version": 55,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -61,7 +61,7 @@ maps are verbatim; each `payload` is elided.)*
 
 | Key | Meaning |
 |---|---|
-| `schema_version` | The **document's** version — one integer, currently **`54`**. Top-level so a loader can read it without parsing the rest. |
+| `schema_version` | The **document's** version — one integer, currently **`55`**. Top-level so a loader can read it without parsing the rest. |
 | `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
 
@@ -123,7 +123,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`54`**. See
+The current value is **`55`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -341,6 +341,13 @@ for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
 
+(v55) `public_header_identifiers_fact` — every identifier token the public
+header set's raw text spells, every preprocessor branch included (comments and
+literals stripped). `--contract public` reads it to tell "no public header
+names this export" from "the parsed branches did not declare it". An
+evidence-free `not_collected` fact is omitted on write; an absent key loads as
+`not_collected`, on a pre-v55 snapshot as on a current one.
+
 (v54) Each type slot's resolved identity: `Function.return_type_identities_fact`
 and `Param`/`Variable`/`TypeField.type_identities_fact`, each a `Fact` holding
 the qualified names of the records/enums the slot resolves to. A slot's own
@@ -465,7 +472,7 @@ model rather than against either physical layout. Optional keys are omitted or `
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `54`). |
+| `schema_version` | int | Snapshot format version (currently `55`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -539,6 +546,8 @@ gets backfilled, only report on it.
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `frontend_context_kind` | string \| null | `null` | Which AST pass (`"host"` or `"device"`) this header-AST snapshot's clang backend selected via `--frontend-context` (`sycl_context.py`). `null` on any non-SYCL/DPC++ invocation and on any pre-v17 snapshot. |
+
+| `public_header_identifiers_fact` | object \| absent | absent | v55. A `Fact`: `status`, `value` (sorted identifier list when `present`), `diagnostics`, `producer` (`"public_header_text"`). `failed` when a named header is missing or unreadable, `unsupported` when a header uses `##` token pasting. |
 
 ### Extraction scope and ownership (schema v52)
 
@@ -622,7 +631,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare -o json=-`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `54`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `55`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

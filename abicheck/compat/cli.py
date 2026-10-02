@@ -32,7 +32,6 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 import click
 
-from ..checker import compare
 from ..dumper import dump
 from ..errors import ProfileMismatchError, ScopeMismatchError
 from ..html_report import write_html_report
@@ -75,6 +74,7 @@ from ._helpers import (  # noqa: F401
     _setup_logging as _setup_logging,
     _warn_stub_flags as _warn_stub_flags,
     _write_affected_list as _write_affected_list,
+    compare_for_compat as compare,
 )
 from .descriptor import CompatDescriptor, parse_descriptor
 from .descriptor_expansion import (  # noqa: F401

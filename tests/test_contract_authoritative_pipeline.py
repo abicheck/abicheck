@@ -523,17 +523,17 @@ class TestCompareKeepsWhatItDoesNotScore:
     def test_an_excluded_finding_is_still_itemized(self, tmp_path: Path) -> None:
         report = self._scan(tmp_path, "--contract", "exports")
         assert report["summary"]["breaking"] == 0
-        # `public_surface_shrank` (ADR-027 Phase 5's surface-metric roll-up,
-        # unconditional at the shared `compare_snapshots` Tier-2 chokepoint)
-        # joins `func_removed`: both are excluded facts the export scope
-        # proves out of contract.
+        # `public_surface_shrank` (ADR-027 Phase 5's surface-metric roll-up)
+        # names no contract entity, so it is NOT_APPLICABLE and scored; only
+        # `func_removed` is an excluded fact the export scope cannot decide.
         entries = [
             f
             for f in report["changes"]
             if f.get("compatibility_evaluation_status") == "NOT_EVALUATED"
         ]
-        assert len(entries) == 2
-        assert {f["kind"] for f in entries} == {"func_removed", "public_surface_shrank"}
+        assert {f["kind"] for f in entries} == {"func_removed"}
+        shrank = [f for f in report["changes"] if f["kind"] == "public_surface_shrank"]
+        assert all(f["contract_relevance"] == "NOT_APPLICABLE" for f in shrank)
         # ...with the reason it did not gate, which is what makes the row
         # actionable rather than merely present.
         assert all(f["contract_relevance"] == "UNKNOWN_UNRESOLVED" for f in entries)

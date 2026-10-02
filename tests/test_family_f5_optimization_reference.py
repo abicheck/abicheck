@@ -727,3 +727,71 @@ def test_catalog_dwarf_memo_bypass_and_threads(
         reference = _run(*args)
     assert ref.calls
     _assert_same(optimized, reference, f"catalog.dwarf[{case}]")
+
+
+# ── (d') disk cache: vary exactly one key input ─────────────────────────────
+#
+# The cold/warm cell above runs the same operands twice, and its two
+# operands differ in *several* key inputs at once, so a key that drops any
+# single input still keys them apart (the H7 survivors
+# cache_key_drops_binary_content / cache_key_drops_version). Each cell here
+# changes exactly one input between a cold run and a warm run in the *same*
+# root, and requires the warm run to equal a run on a fresh root. Engagement:
+# the unchanged side must hit and the changed side must miss.
+
+
+def _warm_vs_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    prime: tuple[str, ...],
+    probe: tuple[str, ...],
+    before_probe: Callable[[], None] = lambda: None,
+) -> tuple[str, str, DiskCacheSpy]:
+    with monkeypatch.context() as mp:
+        DiskCacheSpy().install(mp, tmp_path / "shared")
+        _run(*prime)
+    before_probe()
+    warm_spy = DiskCacheSpy()
+    with monkeypatch.context() as mp:
+        warm_spy.install(mp, tmp_path / "shared")
+        warm = _run(*probe)
+    with monkeypatch.context() as mp:
+        DiskCacheSpy().install(mp, tmp_path / "fresh")
+        fresh = _run(*probe)
+    return warm, fresh, warm_spy
+
+
+def test_disk_cache_rebuilt_binary_in_place_is_not_served_stale(
+    monkeypatch: pytest.MonkeyPatch, binaries: tuple[Path, Path], tmp_path: Path
+) -> None:
+    v1, v2 = binaries
+    slot = tmp_path / "slot"
+    slot.mkdir()
+    old = slot / "libold.so"
+    shutil.copyfile(v1, old)
+    args = (str(old), str(v2))
+    warm, fresh, spy = _warm_vs_fresh(
+        monkeypatch,
+        tmp_path,
+        args,
+        args,
+        before_probe=lambda: shutil.copyfile(v2, old),  # same path, same label
+    )
+    assert spy.hits >= 1 and spy.misses >= 1, spy
+    _assert_same(warm, fresh, "disk.rebuilt_in_place")
+
+
+def test_disk_cache_version_label_alone_keys_apart(
+    monkeypatch: pytest.MonkeyPatch, binaries: tuple[Path, Path], tmp_path: Path
+) -> None:
+    v1, v2 = binaries
+    base = (str(v1), str(v2), "--version", "new=2.0")
+    warm, fresh, spy = _warm_vs_fresh(
+        monkeypatch,
+        tmp_path,
+        (*base, "--version", "old=1.0"),
+        (*base, "--version", "old=9.0"),
+    )
+    assert spy.hits >= 1 and spy.misses >= 1, spy
+    assert "9.0" in fresh, "the version label does not reach the report"
+    _assert_same(warm, fresh, "disk.version_label")

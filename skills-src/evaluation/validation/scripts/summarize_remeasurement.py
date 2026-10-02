@@ -28,7 +28,9 @@ def load_json(path: Path) -> Any:
 
 def count_values(records: list[dict[str, Any]], field: str) -> dict[str, int]:
     """Count stringified values for a field across records."""
-    return dict(sorted(Counter(str(record.get(field, "")) for record in records).items()))
+    return dict(
+        sorted(Counter(str(record.get(field, "")) for record in records).items())
+    )
 
 
 def count_first_value(
@@ -36,8 +38,7 @@ def count_first_value(
 ) -> dict[str, int]:
     """Count a primary field with fallback support for older artifacts."""
     values = [
-        str(record.get(primary) or record.get(fallback) or "")
-        for record in records
+        str(record.get(primary) or record.get(fallback) or "") for record in records
     ]
     return dict(sorted(Counter(values).items()))
 

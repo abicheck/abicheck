@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..checker import DiffResult
+    from ..model import AbiSnapshot
     from ..suppression import SuppressionList
 
 
@@ -153,9 +154,62 @@ def _build_internal_suppression(
     return SuppressionList(suppressions=rules)
 
 
-# API_BREAK-only ChangeKinds (source API breaks, not binary ABI breaks).
-# Keep this aligned with checker policy as single source of truth.
-_API_BREAK_KINDS: frozenset[ChangeKind] = frozenset(_POLICY_API_BREAK_KINDS)
+#: Kinds abi-compliance-checker counts as source-level problems although
+#: abicheck's own catalog places them lower. ``abicheck compat`` is a drop-in
+#: for ABICC, so it reports them as API breaks; native ``compare`` keeps the
+#: catalog's classification. ``param_renamed``: ABICC's ``Parameter_Rename``
+#: is a source problem; abicheck classifies it as a risk because neither C
+#: nor C++ has named arguments.
+ABICC_SOURCE_LEVEL_KINDS: frozenset[ChangeKind] = frozenset({ChangeKind.PARAM_RENAMED})
+
+# Source-only ChangeKinds as compat sees them (excluded in -binary mode): the
+# catalog's API_BREAK set plus the ABICC source-level overlay above.
+_API_BREAK_KINDS: frozenset[ChangeKind] = (
+    frozenset(_POLICY_API_BREAK_KINDS) | ABICC_SOURCE_LEVEL_KINDS
+)
+
+
+def compare_for_compat(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    suppression: SuppressionList | None = None,
+    policy: str = "strict_abi",
+) -> DiffResult:
+    """``checker.compare``, then :func:`apply_abicc_source_level_parity`.
+
+    ``compat.cli`` imports this as its ``compare``, so every comparison the
+    ABICC wrapper runs carries ABICC's source-level classification.
+    """
+    from ..checker import compare  # noqa: PLC0415
+
+    return apply_abicc_source_level_parity(
+        compare(old, new, suppression=suppression, policy=policy)
+    )
+
+
+def apply_abicc_source_level_parity(result: DiffResult) -> DiffResult:
+    """Score :data:`ABICC_SOURCE_LEVEL_KINDS` findings as API breaks, in place.
+
+    Uses the per-finding ``effective_verdict`` override, which
+    ``policy.classification.effective_category`` honours everywhere a verdict
+    is computed, so merging, folding and the ``-source``/``-binary`` filters
+    stay consistent with the stamped category. Returns *result* with its
+    verdict recomputed.
+    """
+    from ..checker import Verdict  # noqa: PLC0415
+
+    stamped = False
+    for change in result.changes:
+        if change.kind in ABICC_SOURCE_LEVEL_KINDS and not isinstance(
+            getattr(change, "effective_verdict", None), Verdict
+        ):
+            change.effective_verdict = Verdict.API_BREAK
+            stamped = True
+    if stamped:
+        result.verdict = _compute_verdict(result.changes, policy=result.policy)
+    return result
+
 
 # ELF/binary-only ChangeKinds (excluded in -source mode)
 _BINARY_ONLY_KINDS: frozenset[ChangeKind] = frozenset(

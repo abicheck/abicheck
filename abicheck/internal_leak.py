@@ -56,6 +56,7 @@ from .impact.engine import assess_change
 from .model.change_catalog.kinds import ChangeKind
 from .model.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
 from .policy.evidence_status import ReachabilityState
+from .policy.layout_visibility import layout_proven_invisible
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType
@@ -1392,7 +1393,8 @@ def detect_internal_leaks(
         # with no paths contributes nothing.
         side_paths = [(p, old) for p in old_pl] + [(p, new) for p in new_pl]
         identity_or_vtable = any(c.kind in _IDENTITY_VTABLE_KINDS for c in triggers)
-        # P2 (UXL field run): an internal type reached **only** behind a pointer
+        # P2 (UXL field run), narrowed by decision 2A of the design-hardening
+        # plan: an internal type reached **only** behind a pointer
         # (per-hop ``indirect:`` markers recorded at enqueue) whose change is pure
         # layout is not consumer-visible — the public holder embeds only the
         # pointer, not the changed layout. Suppress when every path on *both*
@@ -1400,11 +1402,18 @@ def detect_internal_leaks(
         # (vtable dispatch / RTTI / base-subobject still propagate through a
         # pointer). Any value/inheritance path — in either snapshot — keeps the
         # finding (a by-value member, or a just-embedded type, carries the layout).
+        # The leniency needs a structural fact, not the namespace's name: the
+        # layout must be proven invisible to consumers (see
+        # policy.layout_visibility). Unknown visibility keeps the finding.
         value_prop = any(_path_is_value_propagating(p, s) for p, s in side_paths)
         all_indirect = bool(side_paths) and all(
             _path_has_indirection(p) for p, _ in side_paths
         )
-        if all_indirect and not identity_or_vtable:
+        if (
+            all_indirect
+            and not identity_or_vtable
+            and layout_proven_invisible(tname, old, new)
+        ):
             continue
         out.append(
             _build_leak_change(

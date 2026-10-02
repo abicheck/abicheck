@@ -249,6 +249,14 @@ class AbiSnapshot:
     )
     # v52 (ADR-075): ownership rules; None = unrecorded, never "full".
     extraction_scope: ExtractionScope | None = field(default=None, kw_only=True)
+    # v55 (ADR-063 2026-10-01 amendment): every identifier token the public
+    # header set's raw text spells, every preprocessor branch included
+    # (`extract/public_header_identifiers.py`). None = not captured or not
+    # vouched for -- never "the headers spell nothing".
+    public_header_identifiers: frozenset[str] | None = field(default=None, kw_only=True)
+    public_header_identifiers_fact: Fact[frozenset[str] | None] | None = field(
+        default=None, kw_only=True
+    )
 
     # G28 Phase 3 — per-fact producer provenance for a "hybrid" snapshot only
     # (empty for every ordinary single-backend snapshot; ``ast_producer`` alone
@@ -517,6 +525,14 @@ class AbiSnapshot:
         self.ast_resolved_standard, self.ast_resolved_standard_fact = (
             bridge_legacy_and_fact(
                 self.ast_resolved_standard, self.ast_resolved_standard_fact, None, None
+            )
+        )
+        self.public_header_identifiers, self.public_header_identifiers_fact = (
+            bridge_legacy_and_fact(
+                self.public_header_identifiers,
+                self.public_header_identifiers_fact,
+                None,
+                None,
             )
         )
         __import__("importlib").import_module(

@@ -51,6 +51,8 @@ from .extract.path_aliases import (
     segments,
     source_header_alias_segments,
 )
+from .extract.path_segments import _contiguous_subsequence, _suffix_match
+from .extract.public_header_identifiers import stamp_public_header_identifiers
 from .extract.public_root_ownership import compile_only_roots, retain_owning_roots
 from .model import AbiSnapshot, Fact, ScopeOrigin
 from .model.surface_facts import (
@@ -111,20 +113,6 @@ def header_from_location(source_location: str | None) -> str | None:
     if not source_location:
         return None
     return _LINE_COL_SUFFIX.sub("", source_location) or None
-
-
-def _contiguous_subsequence(needle: tuple[str, ...], hay: tuple[str, ...]) -> bool:
-    """True if *needle* appears as a contiguous run inside *hay*."""
-    n = len(needle)
-    if n == 0:
-        return False
-    return any(hay[i : i + n] == needle for i in range(len(hay) - n + 1))
-
-
-def _suffix_match(needle: tuple[str, ...], hay: tuple[str, ...]) -> bool:
-    """True if *hay* ends with the segments of *needle* (a path-suffix match)."""
-    n = len(needle)
-    return 0 < n <= len(hay) and hay[-n:] == needle
 
 
 def _matches_public(
@@ -707,6 +695,8 @@ def apply_provenance(
     decls = snapshot.declarations
     for decl in chain(decls.functions, decls.variables, decls.types, decls.enums):
         tag(decl)
+    if have_set:  # ADR-063 2026-10-01: raw-text index, every #if branch
+        stamp_public_header_identifiers(snapshot, public_headers, public_header_dirs)
     return snapshot
 
 

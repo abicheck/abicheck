@@ -20,8 +20,13 @@
 > rather than serialized as bare tag names (D2.4 intent), so no schema bump was
 > required; A3 uses ELF exported-symbol membership as the consumer public-surface
 > proxy (the bundle path carries ELF metadata, not full type graphs).
-> **Still deferred by design:** flipping `--pattern-verdicts` to default-on,
-> which the ADR gates on FP-rate + parity stability across a release cycle.
+> **Default-on, by ADR-068:** the deferral this ADR recorded (flipping
+> `--pattern-verdicts` to default-on, gated on FP-rate + parity stability) was
+> settled by [ADR-068](068-one-comparison-product-and-scan-retirement.md) D4,
+> which removed the flag and runs pattern verdicts unconditionally on the CLI.
+> The typed API (`CompareRequest.pattern_verdicts`, `service.run_compare`,
+> `compare_snapshots`) follows the same default since 2026-10-01; passing
+> `False` still yields raw detector output.
 
 > **Relationship to the L5 graph (ADR-031/ADR-041).** This ADR's substrate
 > (`surface_graph.py`) is a header/declaration-graph view built from a single

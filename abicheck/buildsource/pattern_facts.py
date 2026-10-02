@@ -49,6 +49,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+# Re-exported unchanged for importers that predate the discovery/scanning split
+# (``pattern_facts_files.py``'s own docstring): the file-walk half moved, the
+# public names did not.
+from ..extract.cxx_digit_separator import (
+    is_digit_separator as _is_digit_separator,  # noqa: F401  (re-export)
+)
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
 from .pattern_facts_files import (
     _DIRECT_ROOT_LICENCE,
@@ -56,17 +62,12 @@ from .pattern_facts_files import (
     iter_source_files as iter_source_files,
     resolve_expected_source_inputs,
 )
-
-# Re-exported unchanged for importers that predate the discovery/scanning split
-# (``pattern_facts_files.py``'s own docstring): the file-walk half moved, the
-# public names did not.
 from .pattern_facts_lexer import (
     _blank_comments_and_strings as _blank_comments_and_strings,
     _blank_scan_block_comment as _blank_scan_block_comment,
     _blank_scan_code as _blank_scan_code,
     _blank_scan_line_comment as _blank_scan_line_comment,
     _blank_scan_literal as _blank_scan_literal,
-    _is_digit_separator as _is_digit_separator,
     _raw_string_end as _raw_string_end,
 )
 from .source_inputs import (
