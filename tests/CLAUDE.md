@@ -57,6 +57,11 @@ CI's `pr` profile.
   coupling could introduce (`only_mutate` modules import each other). Split
   out once `test_mutation_run_scoping.py` itself grew past the architecture
   gate's 1200-line test-file cap.
+  `test_mutation_scope.py` covers `scripts/mutation_scope.py`: function-level
+  run scoping (property: the executed scope always contains every mutant the
+  diff-scoped gate reads, decoded by `split_mutant_key` rather than the
+  encoder under test), shard partitioning, the baseline-part merge, and one
+  real `slow` mutmut run checking the patterns and the empty-scope abort.
 - `test_canonical_finding_id_completeness.py` — every `ChangeKind` must be
   classified for canonical identity, so an omission cannot be silent the way
   the #753 -> #759 escape was. Pins both directions: a declared type-bearing

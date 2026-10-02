@@ -75,6 +75,9 @@ jobs:
       require_baseline: ${{ steps.decide.outputs.require_baseline }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The pyproject step compares against the merge base.
+          fetch-depth: 0
       - name: Detect changes to mutated modules (PR only)
         id: changed
         if: github.event_name == 'pull_request'
@@ -112,7 +115,14 @@ jobs:
               - 'scripts/mutation_results.py'
               - 'scripts/check_mutation_score.py'
               - 'tests/test_mutation_results.py'
+              - 'scripts/mutation_scope.py'
+              - 'tests/test_mutation_scope.py'
               - '.github/workflows/mutation.yml'
+            # pyproject.toml is a candidate only: most edits (a dependency
+            # pin, another tool's config) change nothing this lane measures.
+            # The `pyproject` step below starts the lane only when
+            # [tool.mutmut] or [tool.pytest] actually changed.
+            pyproject:
               - 'pyproject.toml'
             # The mutated modules' own tests, kept as their own filter so the
             # run below can tell "a detector test changed" from "the lane's
@@ -153,9 +163,18 @@ jobs:
               - 'tests/test_snapshot_encode*.py'
               - 'tests/test_snapshot_decode_declarations*.py'
               - 'tests/test_snapshot_reliability_flags*.py'
+      - name: Did the mutation-relevant pyproject config change?
+        id: pyproject
+        if: github.event_name == 'pull_request' && steps.changed.outputs.pyproject == 'true'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          relevant=$(python3 scripts/mutation_scope.py pyproject-changed --base-ref "origin/$BASE_REF")
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
       - name: Decide whether to run
         id: decide
         env:
+          PYPROJECT_RELEVANT: ${{ steps.pyproject.outputs.relevant }}
           MATCHED: ${{ steps.changed.outputs.mutated }}
           MATCHED_TESTS: ${{ steps.changed.outputs.mutated_tests }}
           LABELLED: ${{ contains(github.event.pull_request.labels.*.name, 'mutation') }}
@@ -165,7 +184,7 @@ jobs:
             echo "require_baseline=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ "$MATCHED" = "true" ] || [ "$MATCHED_TESTS" = "true" ] || [ "$LABELLED" = "true" ]; then
+          if [ "$MATCHED" = "true" ] || [ "$MATCHED_TESTS" = "true" ] || [ "$LABELLED" = "true" ] || [ "$PYPROJECT_RELEVANT" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -188,10 +207,24 @@ jobs:
           fi
 
   mutmut:
-    name: mutmut (detector core)
+    # One job per shard. A run that must measure the whole population (the
+    # weekly drift run, a baseline recording, a PR that cannot be scoped)
+    # splits only_mutate into SHARD_COUNT disjoint module sets
+    # (`check_mutation_score.py --shard`); the per-module drift gate is per
+    # module by construction, so each shard gates its own modules exactly as
+    # one job would, in a fraction of the wall-clock time. A diff-scoped PR
+    # run is small and is not split: shard 1 runs it, the others exit at once.
+    name: mutmut shard ${{ matrix.shard }}/4
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      SHARD: ${{ matrix.shard }}/4
+      SHARD_INDEX: ${{ matrix.shard }}
     # The full baseline took just over two hours when this was first set to
     # 240 minutes (2x headroom over that). `only_mutate` has grown since
     # (identity, suppression and serialization joined diff_*/checker_policy),
@@ -209,7 +242,10 @@ jobs:
     # the run across multiple scheduled invocations is the real fix, not a
     # bigger number). The "Flag a cancelled or incomplete run" step below
     # already turns a repeat of this into a loud, greppable step-summary
-    # warning rather than a silent gap.
+    # warning rather than a silent gap. Since the run is split across the
+    # shard matrix above, each job carries roughly a quarter of the mutants
+    # (plus mutmut's one traced pass over the suite, which every shard pays);
+    # the ceiling is kept as a backstop, not as the expected duration.
     timeout-minutes: 355
     steps:
       - uses: actions/checkout@v6
@@ -231,6 +267,8 @@ jobs:
           # change to this repository.
           pip install -e ".[dev]" 'mutmut>=3.7,<4'
       - name: Verify the parser against a real mutmut run
+        # Once, not per shard: it measures the parser, not this commit's mutants.
+        if: matrix.shard == 1
         # This job is the only CI lane with mutmut installed, and every pytest
         # selector in the repo (including this workflow's own
         # pytest_add_cli_args) excludes `slow` — so without an explicit step
@@ -243,8 +281,8 @@ jobs:
         # fails unless a test actually ran, so a skipif that starts matching
         # cannot quietly turn this green with zero work done.
         env:
-          ABICHECK_MIN_EXECUTED: '1'
-        run: python -m pytest tests/test_mutation_results.py -m slow -q
+          ABICHECK_MIN_EXECUTED: '2'
+        run: python -m pytest tests/test_mutation_results.py tests/test_mutation_scope.py -m slow -q
 
       - name: Run mutation testing (diff-scoped)
         if: github.event_name == 'pull_request'
@@ -267,8 +305,12 @@ jobs:
           if [ "$REQUIRE_BASELINE" = "true" ]; then
             require="--require-baseline"
           fi
+          # --scope-run-to-functions: with no baseline recorded, only the
+          # mutants of the functions this branch changed are executed, which
+          # is everything --diff-scoped reads (see mutation_scope.py).
           python scripts/check_mutation_score.py --run --diff-scoped \
-            --scope-run-to-diff \
+            --scope-run-to-diff --scope-run-to-functions \
+            --shard "$SHARD" \
             --base-ref "origin/$BASE_REF" \
             $require \
             --json mutation-receipt.json
@@ -280,6 +322,7 @@ jobs:
         # lane instead (Codex review).
         run: |
           python scripts/check_mutation_score.py --run --require-baseline \
+            --shard "$SHARD" \
             --json mutation-receipt.json
       - name: Run mutation testing (record baseline)
         if: github.event_name == 'workflow_dispatch'
@@ -287,11 +330,14 @@ jobs:
           WRITE_BASELINE: ${{ inputs.write_baseline }}
         run: |
           if [ "$WRITE_BASELINE" = "true" ]; then
-            python scripts/check_mutation_score.py --run --write-baseline
-            echo '--- mutation-baseline.json ---'
-            cat mutation-baseline.json
+            # One part per shard; the `gate` job merges them and refuses a
+            # set that does not partition only_mutate exactly.
+            python scripts/check_mutation_score.py --run --write-baseline \
+              --shard "$SHARD" \
+              --baseline-file "mutation-baseline.part-$SHARD_INDEX.json"
           else
-            python scripts/check_mutation_score.py --run --json mutation-receipt.json
+            python scripts/check_mutation_score.py --run --shard "$SHARD" \
+              --json mutation-receipt.json
           fi
       - name: Save mutmut results
         if: always()
@@ -300,11 +346,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: mutmut-results
+          name: mutmut-results-${{ matrix.shard }}
           path: |
             mutmut-results.txt
             mutation-receipt.json
-            mutation-baseline.json
+            mutation-baseline.part-*.json
           if-no-files-found: ignore
       - name: Flag a cancelled or incomplete run
         # A cancelled scheduled run leaves the per-module baseline drift
@@ -334,3 +380,40 @@ jobs:
               echo "(workflow_dispatch) if that gap matters before then."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  gate:
+    # The single status the shards roll up into, under the check name this
+    # lane has always reported. Skipped (like the shards) when resolve decided
+    # not to run; otherwise green only when every shard succeeded.
+    name: mutmut (detector core)
+    needs: [resolve, mutmut]
+    if: always() && needs.resolve.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Every shard must have passed
+        env:
+          SHARDS: ${{ needs.mutmut.result }}
+        run: |
+          echo "shards: $SHARDS"
+          [ "$SHARDS" = "success" ]
+      - uses: actions/checkout@v6
+        if: github.event_name == 'workflow_dispatch' && inputs.write_baseline
+      - uses: actions/download-artifact@v8
+        if: github.event_name == 'workflow_dispatch' && inputs.write_baseline
+        with:
+          pattern: mutmut-results-*
+          path: parts
+          merge-multiple: true
+      - name: Merge the per-shard baselines
+        if: github.event_name == 'workflow_dispatch' && inputs.write_baseline
+        run: |
+          python3 scripts/mutation_scope.py merge-baselines \
+            parts/mutation-baseline.part-*.json --out mutation-baseline.json
+          echo '--- mutation-baseline.json ---'
+          cat mutation-baseline.json
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'workflow_dispatch' && inputs.write_baseline
+        with:
+          name: mutation-baseline
+          path: mutation-baseline.json
