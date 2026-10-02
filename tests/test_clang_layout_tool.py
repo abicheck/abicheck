@@ -255,7 +255,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_system_includes",
                 return_value=(),
             ),
-            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
+            patch("abicheck.clang_layout_tool.run_bounded", side_effect=_fake_run),
         ):
             result = run_layout_tool("/path/to/tool", [header], [])
 
@@ -296,7 +296,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_system_includes",
                 return_value=("/usr/include/probed-libstdcxx",),
             ) as mock_probe,
-            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
+            patch("abicheck.clang_layout_tool.run_bounded", side_effect=_fake_run),
         ):
             run_layout_tool("/path/to/tool", [header], [], gcc_options="--sysroot=/x")
 
@@ -349,7 +349,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_system_includes",
                 return_value=(),
             ),
-            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
+            patch("abicheck.clang_layout_tool.run_bounded", side_effect=_fake_run),
         ):
             result = run_layout_tool("/path/to/tool", [header], [])
 
@@ -403,7 +403,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_system_includes",
                 return_value=(),
             ),
-            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
+            patch("abicheck.clang_layout_tool.run_bounded", side_effect=_fake_run),
         ):
             result = run_layout_tool("/path/to/tool", [h_ok, h_bad], [])
 

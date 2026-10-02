@@ -36,13 +36,23 @@ ALLOWED_GROUP_MANAGERS: dict[str, str] = {
     "scripts/perf_receipt.py": "stdlib-only perf harness measuring another product revision",
 }
 
-#: Trees where every child process must go through deadline.run_bounded /
-#: supervised_popen (Phase 6's scope: extraction-side call sites).
-SUPERVISED_ONLY = (
-    "abicheck/buildsource",
-    "abicheck/extract",
-    "abicheck/dumper_toolchain.py",
-)
+#: Every child process under ``abicheck/`` goes through deadline.run_bounded /
+#: supervised_popen; these are the reviewed exceptions, by file.
+DIRECT_CALL_ALLOWLIST: dict[str, str] = {
+    # abicheck-cc runs the user's own compiler command as a transparent
+    # wrapper: it must inherit the terminal, signals and process group, and
+    # must never be time-bounded.
+    "abicheck/cc_wrapper.py": "transparent compiler passthrough",
+    # Streaming zstd / rpm2cpio|cpio pipelines: each owns a size-bounded
+    # reader and its own wall-clock deadline, and no child spawns
+    # grandchildren; moving them onto supervised_popen is a separate slice.
+    "abicheck/package.py": "streaming decompression pipelines with their own deadline",
+    # ADR-061 migrated layers may not import the unclassified root
+    # ``deadline`` module (architecture/dispositions.yaml); both are short
+    # git queries with their own timeout and no grandchildren.
+    "abicheck/frontends/cli/runtime.py": "frontends cannot import unclassified deadline yet",
+    "abicheck/workflows/changed_paths.py": "workflows cannot import unclassified deadline yet",
+}
 
 _DIRECT_CALLS = {"run", "Popen", "call", "check_call", "check_output"}
 
@@ -109,14 +119,21 @@ def test_allowlist_entries_still_need_their_exception() -> None:
 
 
 @pytest.mark.repo_scan
-def test_extraction_trees_have_no_direct_subprocess_calls() -> None:
+def test_no_direct_subprocess_calls_outside_the_supervisor() -> None:
     offenders = []
-    for path in _py_files(*SUPERVISED_ONLY):
+    for path in _py_files("abicheck"):
+        rel = path.relative_to(REPO).as_posix()
+        if rel == SUPERVISOR or rel in DIRECT_CALL_ALLOWLIST:
+            continue
         for line in _direct_subprocess_calls(
             ast.parse(path.read_text(encoding="utf-8"))
         ):
-            offenders.append(f"{path.relative_to(REPO).as_posix()}:{line}")
+            offenders.append(f"{rel}:{line}")
     assert offenders == [], f"use abicheck.deadline.run_bounded: {offenders}"
+    for rel in DIRECT_CALL_ALLOWLIST:
+        assert _direct_subprocess_calls(
+            ast.parse((REPO / rel).read_text(encoding="utf-8"))
+        ), f"{rel} no longer calls subprocess directly; drop its allowlist entry"
 
 
 def test_gate_detectors_see_each_spelling() -> None:

@@ -70,6 +70,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .deadline import run_bounded
+
 if TYPE_CHECKING:
     from .model import AbiSnapshot
 
@@ -365,12 +367,11 @@ def _compile_probe(
         return None, f"compiler {cfg.compiler!r} not found on PATH"
 
     try:
-        proc = subprocess.run(
+        proc = run_bounded(
             cmd,
             capture_output=True,
             text=True,
             timeout=60,
-            check=False,
         )
     except subprocess.TimeoutExpired:
         return None, "compilation timed out (60s)"
