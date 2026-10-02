@@ -34,6 +34,10 @@ _INT_SPECIFIER_RUN_RE = re.compile(
     r"(?<![\w:])(?:(?:signed|unsigned|short|long|int|char)\b\s*)+(?![\w:])"
 )
 
+_QUALIFIERS = frozenset({"const", "volatile", "restrict", "__restrict", "__restrict__"})
+_IDENT_BEFORE_RE = re.compile(r"([A-Za-z_]\w*)\s*$")
+_IDENT_AFTER_RE = re.compile(r"\s*([A-Za-z_]\w*)")
+
 
 def canonical_int_spelling(t: str) -> str:
     """Canonicalize a bare integer built-in spelling (specifier order and the
@@ -62,10 +66,21 @@ def canonical_int_spelling(t: str) -> str:
 def canonical_int_runs(text: str) -> str:
     """Apply :func:`canonical_int_spelling` to every maximal run of integer
     specifier words inside a larger spelling (``long unsigned int const *``,
-    ``vector<short int>``)."""
+    ``vector<short int>``).
+
+    A run that sits next to another type name (``unsigned __int128``,
+    ``unsigned _BitInt(8)``) is a modifier of that type, not a complete
+    integer spelling, and is left alone; cv-qualifiers do not count.
+    """
 
     def _sub(m: re.Match[str]) -> str:
         run = m.group(0)
+        before = _IDENT_BEFORE_RE.search(text, 0, m.start())
+        after = _IDENT_AFTER_RE.match(text, m.end())
+        if (before and before.group(1) not in _QUALIFIERS) or (
+            after and after.group(1) not in _QUALIFIERS
+        ):
+            return run
         trail = run[len(run.rstrip()) :]
         return canonical_int_spelling(run.strip()) + trail
 

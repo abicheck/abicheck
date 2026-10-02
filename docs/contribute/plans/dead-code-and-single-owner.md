@@ -18,7 +18,7 @@ a fixpoint, and by comparing the competing implementations directly.
   `.github/` or `pyproject.toml`, and not documented as Python API in
   `docs/use`, `docs/reference` or `docs/learn`. A test-only caller does not
   make code live.
-- Documented API, test hooks and explicitly planned primitives are kept until
+- Documented API (including API an accepted ADR or plan names), test hooks and explicitly planned primitives are kept until
   a decision says otherwise.
 - A test that used a removed function as an independent oracle keeps it as
   test code; it is never just deleted.
@@ -86,5 +86,11 @@ code only tests reach.
    `storage/identity.group_by_entity`,
    `contract_replay.replay_original_decisions`): check against ADR-063 and
    ADR-049 and either wire or delete.
-5. `impact/use_cases.build_use_case_graph`/`join_use_case_graph`: tie to a
+5. Named as API by an accepted ADR or plan, kept for now:
+   `workflows.input_resolution.load_env_matrix` (ADR-068's migration path for
+   the retired `env_matrix_path`) and
+   `bundle_multibuild.coverage_regression_findings` (G38's only constructor of
+   `BUNDLE_VARIANT_COVERAGE_REGRESSED`). Either wire them or amend the
+   ADR/plan in the same change that deletes them.
+6. `impact/use_cases.build_use_case_graph`/`join_use_case_graph`: tie to a
    tracked item or delete.

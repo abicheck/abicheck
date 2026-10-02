@@ -24,9 +24,11 @@ from hypothesis import given, settings, strategies as st
 
 from abicheck.bundle_multibuild import (
     VariantOutcome,
+    coverage_regression_findings,
     pair_variants,
     variant_fingerprint,
 )
+from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot
 from abicheck.model.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
 
@@ -248,6 +250,42 @@ class TestPairVariants:
         second = pair_variants(dict(reversed(old.items())), dict(reversed(new.items())))
         assert [c.fingerprint for c in first] == [c.fingerprint for c in second]
         assert [c.fingerprint for c in first] == sorted(c.fingerprint for c in first)
+
+
+# ---------------------------------------------------------------------------
+# coverage_regression_findings
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageRegressionFindings:
+    def test_only_old_only_comparisons_produce_findings(self):
+        comparisons = pair_variants(
+            {
+                "cpu": _facts("fp-cpu", ("libcore.so",)),
+                "dpc": _facts("fp-dpc", ("libcore_dpc.so",)),
+            },
+            {"cpu": _facts("fp-cpu", ("libcore.so",))},
+        )
+        findings = coverage_regression_findings(comparisons)
+        assert len(findings) == 1
+        (finding,) = findings
+        assert finding.kind is ChangeKind.BUNDLE_VARIANT_COVERAGE_REGRESSED
+        assert finding.symbol == "dpc"
+        assert finding.affected_libraries == ["libcore_dpc.so"]
+        assert finding.old_value == "fp-dpc"
+
+    def test_paired_and_new_only_produce_no_findings(self):
+        comparisons = pair_variants(
+            {"cpu": _facts("fp-cpu")},
+            {"cpu": _facts("fp-cpu"), "dpc": _facts("fp-dpc")},
+        )
+        assert coverage_regression_findings(comparisons) == []
+
+    def test_no_variants_missing_produces_no_findings(self):
+        comparisons = pair_variants(
+            {"cpu": _facts("fp-cpu")}, {"cpu": _facts("fp-cpu")}
+        )
+        assert coverage_regression_findings(comparisons) == []
 
 
 # ---------------------------------------------------------------------------

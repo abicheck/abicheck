@@ -164,3 +164,17 @@ def test_a_pack_edited_after_it_was_written_is_rejected(tmp_path, edit) -> None:
     payload.write_text(json.dumps(edit(json.loads(payload.read_text()))))
     with pytest.raises(SnapshotError, match="do not match the digests"):
         load_pack_or_raise(root)
+
+
+# A specifier run that modifies another builtin is not a complete integer
+# spelling; folding it would invent `unsigned int __int128`.
+_EXTENDED = ("__int128", "_BitInt(8)", "__int128_t", "char16_t", "wchar_t")
+
+
+@pytest.mark.parametrize("context", _CONTEXTS)
+@pytest.mark.parametrize("prefix", ["unsigned", "signed", "long", "unsigned long"])
+@pytest.mark.parametrize("base", _EXTENDED)
+def test_a_modifier_of_an_extended_builtin_is_untouched(context, prefix, base) -> None:
+    spelling = context.format(f"{prefix} {base}")
+    got = canonicalize_type_name(spelling)
+    assert f"{prefix} {base}" in got, (spelling, got)

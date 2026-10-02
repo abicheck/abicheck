@@ -51,11 +51,13 @@ compared, not *how*.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
+from .bundle_models import BundleFinding
 from .model.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
+from .model.change_catalog.kinds import ChangeKind
 
 
 def variant_fingerprint(
@@ -303,3 +305,46 @@ def pair_variants(
             )
         )
     return results
+
+
+def coverage_regression_findings(
+    comparisons: Iterable[VariantComparison],
+) -> list[BundleFinding]:
+    """Render every ``OLD_ONLY`` comparison as a
+    ``BUNDLE_VARIANT_COVERAGE_REGRESSED`` finding.
+
+    A ``NEW_ONLY`` comparison (coverage expansion) and a ``PAIRED`` one
+    (ordinary per-variant diff, handled by the caller's own comparison, not
+    by this module) never produce a finding here -- this function is
+    intentionally the only place ``ChangeKind.BUNDLE_VARIANT_COVERAGE_
+    REGRESSED`` is constructed, so "which outcomes become findings" has one
+    answer.
+    """
+    findings: list[BundleFinding] = []
+    for comparison in comparisons:
+        if comparison.outcome is not VariantOutcome.OLD_ONLY:
+            continue
+        old_facts = comparison.old_facts
+        assert old_facts is not None  # OLD_ONLY always carries old_facts
+        libraries: Sequence[str] = sorted(old_facts.per_library_snapshots)
+        label = comparison.old_label or comparison.fingerprint
+        detail = (
+            f"{len(libraries)} librar{'y' if len(libraries) == 1 else 'ies'} "
+            f"in this variant: {', '.join(libraries)}"
+            if libraries
+            else "no libraries recorded for this variant"
+        )
+        findings.append(
+            BundleFinding(
+                kind=ChangeKind.BUNDLE_VARIANT_COVERAGE_REGRESSED,
+                symbol=label,
+                description=(
+                    f"Build variant '{label}' present in the old release has "
+                    f"no matching variant in the new release ({detail})."
+                ),
+                affected_libraries=list(libraries),
+                old_value=comparison.fingerprint,
+                new_value=None,
+            )
+        )
+    return findings

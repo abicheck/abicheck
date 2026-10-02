@@ -241,10 +241,23 @@ def _validate_compiler_name(value: Any) -> str:
     return value
 
 
+def _is_recognized_cxx_std_flag(value: str) -> bool:
+    """``-std=gnu++20`` and the other spellings ``_parse_cxx_std`` reads."""
+    from .model.language_standard import (
+        language_standard_is_cxx,
+        language_standard_year,
+    )
+
+    if not value.startswith("-std="):
+        return False
+    std = value.partition("=")[2]
+    return language_standard_is_cxx(std) and language_standard_year(std) is not None
+
+
 def _validate_flag(value: Any) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError("probe spec flags must be non-empty strings")
-    if value.startswith(_CXX_STD_FLAG):
+    if value.startswith(_CXX_STD_FLAG) or _is_recognized_cxx_std_flag(value):
         return value
     if value in _SAFE_FLAG_EXACT:
         return value

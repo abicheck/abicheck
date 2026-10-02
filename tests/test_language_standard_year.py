@@ -20,7 +20,7 @@ import pytest
 from abicheck.build_context import _std_sort_key
 from abicheck.dumper_toolchain import _cplusplus_macro_for_standard
 from abicheck.model.language_standard import language_standard_year
-from abicheck.probe_harness import _parse_cxx_std
+from abicheck.probe_harness import _parse_cxx_std, parse_probe_spec
 
 # edition year -> every spelling GCC/Clang accept for it.
 _CXX_EDITIONS: dict[int, tuple[str, ...]] = {
@@ -111,3 +111,34 @@ def test_cplusplus_macro_agrees_across_spellings_of_one_edition() -> None:
             for dialect in ("c++", "gnu++")
         }
         assert len(macros) == 1, (editions, macros)
+
+
+@pytest.mark.parametrize(("year", "spelling"), list(_cxx_spellings()))
+def test_a_probe_spec_accepts_every_spelling_it_can_read(
+    year: int, spelling: str
+) -> None:
+    """The flag allowlist ran before the reader and rejected ``gnu++20``."""
+    if ":" in spelling:
+        return
+    spec = parse_probe_spec(
+        {
+            "name": "t",
+            "configurations": [
+                {"id": "c", "compiler": "g++", "flags": [f"-std={spelling}"]}
+            ],
+            "probes": [{"name": "p", "body": "int main() {}"}],
+        }
+    )
+    assert spec.configurations[0].cxx_std == year % 100
+
+
+@pytest.mark.parametrize("flag", ["-std=c11", "-std=gnu11", "-std=foo", "-std="])
+def test_a_probe_spec_still_rejects_non_cxx_std_flags(flag: str) -> None:
+    with pytest.raises(ValueError, match="disallowed"):
+        parse_probe_spec(
+            {
+                "name": "t",
+                "configurations": [{"id": "c", "compiler": "g++", "flags": [flag]}],
+                "probes": [{"name": "p", "body": "int main() {}"}],
+            }
+        )

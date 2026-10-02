@@ -1143,6 +1143,71 @@ class TestEnvironmentMatrixRuntimeFloors:
         assert result_declared.exit_code == 4, result_declared.output
 
 
+class TestLoadEnvMatrix:
+    """Tier-2 loader: identical error text across front-ends (service layer)."""
+
+    def test_none_path_returns_none(self) -> None:
+        from abicheck.service import load_env_matrix
+
+        assert load_env_matrix(None) is None
+
+    def test_valid_yaml_loads(self, tmp_path) -> None:
+        from abicheck.service import load_env_matrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text('runtime_floors:\n  GLIBC: "2.28"\n')
+        matrix = load_env_matrix(p)
+        assert matrix is not None
+        assert matrix.runtime_floors == {"GLIBC": "2.28"}
+
+    def test_malformed_yaml_raises_validation_error(self, tmp_path) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import load_env_matrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text("runtime_floors: [unclosed\n  GLIBC: {")
+        with pytest.raises(ValidationError, match="Invalid environment matrix"):
+            load_env_matrix(p)
+
+    def test_bad_shape_raises_validation_error(self, tmp_path) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import load_env_matrix
+
+        p = tmp_path / "env.yaml"
+        p.write_text("runtime_floors:\n  GLIBC: latest\n")
+        with pytest.raises(ValidationError, match="dotted numeric"):
+            load_env_matrix(p)
+
+    def test_missing_file_raises_validation_error(self, tmp_path) -> None:
+        from abicheck.errors import ValidationError
+        from abicheck.service import load_env_matrix
+
+        with pytest.raises(ValidationError, match="Cannot read environment matrix"):
+            load_env_matrix(tmp_path / "nope.yaml")
+
+    def test_compare_request_carries_a_resolved_matrix_not_a_path(
+        self, tmp_path
+    ) -> None:
+        """ADR-020b / ADR-068 D5: the CLI's former `--env-matrix FILE` flag
+        was demoted to `.abicheck.yml`'s `deployment:` config key, and
+        `CompareRequest.env_matrix` carries an already-*resolved*
+        `EnvironmentMatrix`, not a path a caller could typo. Round-trips
+        through `validate()` cleanly since there is no file to be missing
+        any more. The former `env_matrix_path` alternative is retired; see
+        `test_api_types.py::TestCompareRequestEnvMatrix` for that contract."""
+        from abicheck.environment_matrix import EnvironmentMatrix
+        from abicheck.service import CompareRequest, InputSpec
+
+        req = CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+            env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"}),
+        )
+        assert req.env_matrix is not None
+        assert req.env_matrix.runtime_floors == {"GLIBC": "2.28"}
+        assert req.validation_errors() == []
+
+
 # ── DT_RELR drift ────────────────────────────────────────────────────────────
 
 

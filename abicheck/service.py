@@ -62,7 +62,8 @@ from .workflows.contracts import (
 # attribute access (`service.resolve_input(...)`) or a fresh per-call
 # import, so `monkeypatch.setattr(service, "resolve_input", ...)` and
 # `from abicheck.service import resolve_input` both keep resolving exactly
-# as before this split. Names not in `__all__` (the private helpers) are re-exported via an explicit self-alias so a static
+# as before this split. Names not in `__all__` (the private helpers plus
+# `load_env_matrix`) are re-exported via an explicit self-alias so a static
 # checker doesn't flag them as unused -- existing tests patch/import them
 # directly off `abicheck.service` (some) and off
 # `abicheck.workflows.input_resolution` (the ones that need to influence a
@@ -73,6 +74,7 @@ from .workflows.input_resolution import (
     _typeinfo_functions as _typeinfo_functions,
     collect_metadata,
     detect_binary_format,
+    load_env_matrix as load_env_matrix,
     resolve_input,
     sniff_text_format,
 )
