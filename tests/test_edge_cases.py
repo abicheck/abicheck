@@ -408,7 +408,7 @@ class TestSubprocessTimeout:
         out = tmp_path / "out"
         out.mkdir()
 
-        with mock.patch("abicheck.package.subprocess.run") as mock_run:
+        with mock.patch("abicheck.package.run_bounded") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="ar", timeout=120)
             with pytest.raises(subprocess.TimeoutExpired):
                 DebExtractor().extract(deb_path, out)
