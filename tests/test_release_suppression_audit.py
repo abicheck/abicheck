@@ -199,3 +199,55 @@ def test_renderer_covers_expiry_lists_and_skips_empty_members() -> None:
     assert "liba.so" in md
     assert "libb.so" not in md and "libc.so" not in md
     assert _release_md_suppression_audit(libs[1:]) == []
+
+
+def test_renderer_keeps_symbols_mangled_when_demangling_is_off() -> None:
+    from abicheck.report.render_release_markdown import _release_md_suppression_audit
+
+    libs: list[dict[str, object]] = [
+        {
+            "library": "liba.so",
+            "suppression_audit": {
+                "total_rules": 1,
+                "stale_rules": [],
+                "high_risk_matches": [
+                    {
+                        "rule": "r (symbol=_Z3foov)",
+                        "kind": "func_removed",
+                        "symbol": "_Z3foov",
+                    }
+                ],
+                "expired_rules": [],
+                "near_expiry_rules": [],
+            },
+        }
+    ]
+    off = "\n".join(_release_md_suppression_audit(libs, demangle=False))
+    on = "\n".join(_release_md_suppression_audit(libs, demangle=True))
+    assert "suppressed func_removed: _Z3foov" in off
+    assert "suppressed func_removed: foo()" in on
+    # The rule label is never demangled.
+    assert "`r (symbol=_Z3foov)`" in off and "`r (symbol=_Z3foov)`" in on
+
+
+def test_finish_appends_the_audit_with_and_without_demangling() -> None:
+    from abicheck.report.render_release_markdown import finish_release_markdown
+
+    libs: list[dict[str, object]] = [
+        {
+            "library": "liba.so",
+            "suppression_audit": {
+                "total_rules": 1,
+                "stale_rules": ["_Z3foov"],
+                "high_risk_matches": [],
+                "expired_rules": [],
+                "near_expiry_rules": [],
+            },
+        }
+    ]
+    for demangle in (False, True):
+        md = finish_release_markdown("# Doc `_Z3barv`", libs, demangle=demangle)
+        assert md.startswith("# Doc")
+        assert md.rstrip().endswith("- `_Z3foov`")  # label verbatim either way
+        assert ("bar()" in md) is demangle
+    assert finish_release_markdown("x", [{"library": "l"}], demangle=False) == "x"
