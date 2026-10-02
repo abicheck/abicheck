@@ -305,6 +305,8 @@ def acquire_header_graph_ast(
     """
     from .buildsource.header_graph_ast_projection import (
         HeaderGraphAstProjection,
+        merge_header_graph_ast_projections,
+        parse_header_groups_bisecting,
         project_header_graph_ast,
     )
     from .buildsource.header_graph_ast_stream import (
@@ -441,6 +443,7 @@ def acquire_header_graph_ast(
         return projection
 
     ast_failure: str | None = None
+    projection_from_groups: HeaderGraphAstProjection | None = None
     try:
         resolved_headers = expand_header_inputs(headers)
         if resolved_headers:
@@ -547,6 +550,54 @@ def acquire_header_graph_ast(
             ast_failure,
         )
         memory_trace.mark("dump.header_graph.clang_ast:failed")
+        if len(resolved_headers) > 1:
+            # One header the frontend rejects (a SYCL header needing a flag
+            # this host parse lacks, say) must not cost every other header
+            # its call/reference edges. Re-parse in halves and keep each
+            # group that succeeds; only the headers that fail on their own
+            # are lost, and the pass stays marked degraded below.
+            def _parse_group(group: list[Path]) -> HeaderGraphAstProjection:
+                # Same scope as the batch parse above: the call-graph reader
+                # needs the dependency declarations a prune would collapse.
+                with suppress_streaming_prune():
+                    tree, _kind, _force = _clang_header_dump(
+                        group,
+                        eff_includes,
+                        compiler="cc" if _is_c else "c++",
+                        gcc_path=cc.gcc_path,
+                        gcc_prefix=cc.gcc_prefix,
+                        gcc_options=cc.gcc_options,
+                        gcc_option_tokens=eff_tokens,
+                        sysroot=cc.sysroot,
+                        nostdinc=cc.nostdinc,
+                        lang=lang,
+                        extra_hash_dirs=deferred_dirs,
+                        frontend_context=cc.frontend_context,
+                        memoize=False,
+                    )
+                return project_header_graph_ast(tree)
+
+            with memory_trace.phase("dump.header_graph.clang_ast_bisect"):
+                parts, failed = parse_header_groups_bisecting(
+                    resolved_headers,
+                    _parse_group,
+                    (SnapshotError, ValidationError, *_MALFORMED_AST_ERRORS),
+                )
+            if parts:
+                projection_from_groups = merge_header_graph_ast_projections(parts)
+            names = ", ".join(p.name for p in failed[:5])
+            more = ", ..." if len(failed) > 5 else ""
+            recovered = (
+                "the rest were parsed separately"
+                if parts
+                else "no header could be recovered"
+            )
+            ast_failure = (
+                f"clang AST parse failed for {len(failed)} of "
+                f"{len(resolved_headers)} header(s) ({names}{more}); "
+                f"{recovered}: {ast_failure}"
+            )
+            _log.warning("header graph: %s", ast_failure)
     # Reduce the AST to the four compact projections the graph builder
     # actually reads, then drop the tree BEFORE the graph is allocated, so
     # the two are never resident together.
@@ -573,7 +624,11 @@ def acquire_header_graph_ast(
     # tree in the same order (`project_header_graph_ast`),
     # `DECL_CALLS_DECL` included.
     projection: HeaderGraphAstProjection | None = None
-    if derived_projection.used:
+    if projection_from_groups is not None:
+        # The whole-tree parse failed and the per-group re-parse above
+        # recovered what it could; no whole tree exists to project.
+        projection = projection_from_groups
+    elif derived_projection.used:
         # No tree was ever built: the projection came either straight off a
         # sidecar (warm) or from streaming the AST document itself (cold).
         # `ast_root` holds the cache layer's own marker rather than a tree,

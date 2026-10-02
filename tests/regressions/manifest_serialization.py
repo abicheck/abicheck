@@ -80,4 +80,23 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_str_enum_downcast_walk.py",
         ),
     ),
+    BugClass(
+        id="serialization.persisted_field_not_decoded",
+        invariant=(
+            "Every field a snapshot encoder writes for a persisted fact "
+            "dataclass must be read back by its decoder: a hand-written "
+            "decoder that names fields one by one silently drops any field "
+            "it forgets, and nothing fails, because the default value "
+            "(often None) is a legal reading. Here a dropped "
+            "ElfSymbol.origin_lib erased every dependency-leak finding on "
+            "a cache hit. The test derives the field list from "
+            "dataclasses.fields, so a field added later is covered without "
+            "editing the test."
+        ),
+        fixed_by=(1442,),
+        seed_tests=(
+            "tests/test_elf_symbol_roundtrip_and_origin.py",
+            "tests/test_family_f2_route_parity.py",
+        ),
+    ),
 )

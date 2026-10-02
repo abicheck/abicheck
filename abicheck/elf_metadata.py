@@ -54,6 +54,7 @@ from .extract.elf_symbol_versions import (
     decode_versym,
     symbols_of,
 )
+from .extract.mangled_foreign_template_args import has_foreign_template_argument
 from .model.elf_facts import (
     ElfImport as ElfImport,
     ElfMetadata as ElfMetadata,
@@ -1030,6 +1031,12 @@ def _guess_symbol_origin(name: str, needed_libs: list[str]) -> str | None:
 
     if _is_libmvec_vector_symbol(name):
         return "libmvec.so.1"
+
+    # A std template instantiated over one of this library's own types
+    # (``std::_Sp_counted_deleter<dnnl_stream*, ...>``) is emitted by this
+    # library, not exported by the C++ runtime -- which never saw the type.
+    if has_foreign_template_argument(name):
+        return None
 
     for prefixes, finder_fn, default in _ORIGIN_PREFIX_TABLE:
         if name.startswith(prefixes):

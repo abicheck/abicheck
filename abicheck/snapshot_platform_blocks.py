@@ -77,6 +77,7 @@ def elf_from_dict(elf: dict[str, Any], schema_version: int) -> Any:
             is_default=s.get("is_default", True),
             visibility=s.get("visibility", "default"),
             value_alignment=s.get("value_alignment", 0),
+            origin_lib=s.get("origin_lib"),
         )
         for s in elf.get("symbols", [])
     ]
