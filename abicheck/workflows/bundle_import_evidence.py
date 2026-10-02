@@ -91,7 +91,7 @@ def import_existed_in_old(
     outward-edge rule -- a candidate that now fails to load could come back
     ``NO_CHANGE`` (Codex review). The callers already skip a weak *NEW*
     consumer before reaching here (``bundle_detectors``/
-    ``bundle_unresolved_audit``), so this only has to answer for OLD.
+    ``bundle_unresolved_audit`` (removed)), so this only has to answer for OLD.
     """
     return any(
         entry.library == consumer.library
@@ -112,7 +112,7 @@ def extra_needed_all_system(
     The shared primitive behind both unresolved-import detectors'
     "this import is satisfied from outside the bundle" suppression
     (``bundle_detectors._detect_intra_dep_removed`` and its audit-mode
-    sibling ``_detect_unresolved_intra_dependency``). Extracted because
+    sibling ``_detect_unresolved_intra_dependency`` (removed)). Extracted because
     both hand-rolled it, and both hand-rolled the *same bug*.
 
     **The empty case is vacuously true, and that is the whole point.** Both
@@ -133,7 +133,7 @@ def extra_needed_all_system(
     use it alone: a symbol a *sibling* used to provide can be dropped by the
     same refactor that left the consumer needing libc, and this function
     cannot see that. ``_detect_intra_dep_removed`` pairs it with the OLD
-    side's own provider evidence; ``_detect_unresolved_intra_dependency``,
+    side's own provider evidence; ``_detect_unresolved_intra_dependency`` (removed),
     which has no OLD side, pairs it with a ``not intra_needed`` requirement.
 
     And the two callers deliberately differ on the empty case, which is why

@@ -70,7 +70,6 @@ from .cli_compare_release_matrix import (
     _finalize_release_output,
     _prepare_compare_release_inputs as _prepare_compare_release_inputs,  # re-exported, direct tests still call it
     _release_finding_dicts as _release_finding_dicts,
-    _release_gating_buckets as _release_gating_buckets,
     _strip_diff_results_and_adjust_verdict,
     _validate_suppression_early,
     _write_release_summary_file as _write_release_summary_file,

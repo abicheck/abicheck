@@ -761,7 +761,7 @@ class TestReleaseSeverityPolicyAndGlobal:
     def test_per_library_honours_frozen_namespace_floor(self):
         """Codex review on #549: a policy-file override that demotes a kind
         must not silently drop a frozen-namespace-tagged finding below its raw
-        severity — this is the same floor collect_annotations() now honours
+        severity — this is the same floor annotation_report_entries() now honours
         (via result.policy_file), so the release exit code must match it."""
         from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
         from abicheck.cli_compare_release import _compute_release_severity_exit_code

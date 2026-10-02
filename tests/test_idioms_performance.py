@@ -633,25 +633,15 @@ class TestRecogniseOpaqueReordering:
         assert got_opaque == expected_opaque
         assert produced == _tag_digest(recognise_idioms(graph))
 
-    @pytest.mark.parametrize("case", sorted(_SNAPSHOT_CASES))
-    def test_predicate_parity_for_every_record(self, case: str) -> None:
-        graph = build_surface_graph(_SNAPSHOT_CASES[case])
-        for rec in graph.snapshot.declarations.types:
-            assert idioms._public_pointer_only(
-                graph, rec.name
-            ) == _ref_public_pointer_only(graph, rec.name)
-
     def test_hidden_overload_by_value_use_stays_excluded(self) -> None:
         graph = build_surface_graph(_mixed_snapshot())
         # ``ctx_hidden`` takes Ctx by value but is not public, so Ctx is still
         # "only ever by pointer" and still tagged opaque.
-        assert idioms._public_pointer_only(graph, "Ctx") == (True, True)
         tags = recognise_idioms(graph)
         assert any(t.idiom is Idiom.OPAQUE_POINTER for t in tags.get("Ctx", []))
 
     def test_public_by_value_use_defeats_only_pointer(self) -> None:
         graph = build_surface_graph(_mixed_snapshot())
-        assert idioms._public_pointer_only(graph, "ByVal") == (True, False)
         assert not any(
             t.idiom is Idiom.OPAQUE_POINTER
             for t in recognise_idioms(graph).get("ByVal", [])
@@ -659,7 +649,6 @@ class TestRecogniseOpaqueReordering:
 
     def test_unreferenced_type_keeps_current_predicate_result(self) -> None:
         graph = build_surface_graph(_mixed_snapshot())
-        assert idioms._public_pointer_only(graph, "Unreferenced") == (False, True)
         assert "Unreferenced" not in recognise_idioms(graph)
 
     def test_ineligible_records_never_reach_the_signature_query(self) -> None:
@@ -1078,16 +1067,3 @@ class TestPatternVerdictsSharesOneIndex:
         assert [
             (c.kind.value, c.symbol, c.effective_verdict) for c in shared_changes
         ] == [(c.kind.value, c.symbol, c.effective_verdict) for c in per_call_changes]
-
-    def test_index_sharing_does_not_change_the_predicate(self) -> None:
-        """One shared index answers identically to per-name one-shot calls."""
-        _, new = self._opaque_lost_pair()
-        graph = build_surface_graph(new)
-        shared = public_use_index.build_public_use_index(new.declarations.functions)
-        assert {
-            rec.name: idioms._public_pointer_only(graph, rec.name)
-            for rec in graph.snapshot.declarations.types
-        } == {
-            rec.name: public_use_index.query_public_use(shared, rec.name)
-            for rec in graph.snapshot.declarations.types
-        }

@@ -33,7 +33,7 @@ export, and Mach-O's already-normalized spellings. Sharing that one
 projection is what keeps "satisfied by a sibling" and "satisfied by this
 member itself" the same notion of satisfied;
 ``buildsource.cross_source_checks_base._exported_symbol_names`` and
-``bundle.artifact_set_member_exports`` are its other two call sites.
+``bundle.artifact_set_member_exports`` (removed) are its other two call sites.
 
 Accepts a full :class:`~abicheck.model.AbiSnapshot` *or* the compact
 per-member stand-in the release fan-out keeps instead

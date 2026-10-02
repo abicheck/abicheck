@@ -1378,7 +1378,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # A genuinely new bad cycle would pull in a module *outside* this SCC and so
         # would not be a subset — still flagged.
         #
-        # ADR-037 D3 adds `cli_options`: the shared `@compile_context_options`
+        # ADR-037 D3 adds `cli_options`: the shared compile-context option
         # decorator's one resolver (`merge_compile_config`/`resolve_compile_context`,
         # shared by compare/dump/scan) reaches `CompileContext` in `dry_run_estimate` via
         # a *function-local* `from .dry_run_estimate import CompileContext`; `dry_run_estimate`

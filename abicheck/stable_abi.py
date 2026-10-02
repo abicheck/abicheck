@@ -106,19 +106,6 @@ def is_cpython_symbol(name: str) -> bool:
     return name.startswith(_CPYTHON_PREFIXES)
 
 
-def is_private_symbol(name: str) -> bool:
-    """True if *name* is outside the stable ABI by construction — a violation.
-
-    Covers CPython *private* (``_Py*``) and *unstable* (``PyUnstable_*``, PEP
-    689) API. A ``_Py``-prefixed symbol counts ONLY when absent from the
-    authoritative stable set: the ``abi_only`` symbols the Limited-API macros
-    route to (``_Py_Dealloc``, ``_PyObject_GC_New``, ``_PyArg_*_SizeT``,
-    ``_Py_NoneStruct``, …) are ``_Py``-prefixed but stable, so they are not
-    flagged. ``PyUnstable_*`` is never in the stable set.
-    """
-    return name.startswith(_PRIVATE_PREFIXES) and name not in STABLE_ABI_SYMBOLS
-
-
 def is_nonstable_cpython_import(name: str) -> bool:
     """True if *name* is a CPython symbol that is NOT in the Stable ABI.
 

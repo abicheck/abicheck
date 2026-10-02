@@ -796,7 +796,7 @@ def canonicalize_type_name(name: str) -> str:
        but only when the base type contains no angle brackets (templates).
     3. Normalise pointer/reference sigil spacing to a single leading space
        (``int*`` and ``int *`` both become ``int *``).
-    4. Final whitespace cleanup.
+    4. Integer specifier order (``model.int_spelling``), whitespace cleanup.
 
     This prevents false positives from dumpers that emit different
     elaborated-type-specifier forms, or different pointer/reference sigil
@@ -853,8 +853,9 @@ def canonicalize_type_name(name: str) -> str:
     # 3. Normalise pointer/reference sigil spacing (same technique already
     #    used by _strip_cv_qualifiers below).
     result = _PTR_REF_SIGIL_RE.sub(r" \1", result)
-    # 4. Final cleanup.
-    result = _MULTI_SPACE_RE.sub(" ", result)
+    from .model.int_spelling import canonical_int_runs as _ints
+
+    result = _MULTI_SPACE_RE.sub(" ", _ints(result))
     return result.strip()
 
 

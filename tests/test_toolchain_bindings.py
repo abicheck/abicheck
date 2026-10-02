@@ -29,7 +29,6 @@ from abicheck.buildsource.toolchain_bindings import (
     BindingsFileError,
     check_profile_bindings_resolve,
     load_bindings_file,
-    resolve_binding,
 )
 
 
@@ -154,29 +153,6 @@ class TestLoadBindingsFile:
         decoy.write_text(f"schema: {BINDINGS_SCHEMA}\nbindings:\n  gcc14: /decoy\n")
         with pytest.raises(BindingsFileError, match="cannot read"):
             load_bindings_file(tmp_path / "real-bindings.yml")
-
-
-class TestResolveBinding:
-    def test_resolves_known_id(self) -> None:
-        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={"gcc14": "/usr/bin/g++-14"})
-        assert resolve_binding(bf, "gcc14") == "/usr/bin/g++-14"
-
-    def test_unknown_id_raises_with_available_list(self) -> None:
-        bf = BindingsFile(
-            schema=BINDINGS_SCHEMA,
-            bindings={"gcc14": "/usr/bin/g++-14", "clang20": "/usr/bin/clang++-20"},
-        )
-        with pytest.raises(BindingsFileError) as exc_info:
-            resolve_binding(bf, "msvc194")
-        message = str(exc_info.value)
-        assert "msvc194" in message
-        assert "gcc14" in message
-        assert "clang20" in message
-
-    def test_unknown_id_on_empty_bindings_says_none_declared(self) -> None:
-        bf = BindingsFile(schema=BINDINGS_SCHEMA, bindings={})
-        with pytest.raises(BindingsFileError, match=r"\(none declared\)"):
-            resolve_binding(bf, "gcc14")
 
 
 @dataclass

@@ -253,7 +253,6 @@ def test_classify(
 def test_stable_abi_singleton_data_symbols_are_not_private(name: str) -> None:
     # The ABI-only structs behind Py_None/Py_True/Py_False are `_Py`-prefixed but
     # part of the Limited API — they must not be flagged as private violations.
-    assert stable_abi.is_private_symbol(name) is False
     status, _ = stable_abi.classify(name, (3, 9))
     assert status is StableAbiStatus.STABLE
 

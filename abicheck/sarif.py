@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import hashlib
 from importlib.metadata import version as _pkg_version
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from abicheck.checker import Change, ChangeKind, DiffResult
@@ -983,7 +982,7 @@ def to_sarif(
                 relevant_ids=relevant_ids,
                 # Codex review: proven by the real consumer's own import
                 # table/execution, not an artifact-level library diff --
-                # mirrors reporter.appcompat_to_json's own override for this
+                # mirrors reporter.the former appcompat_to_json's override for this
                 # exact finding shape.
                 evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
                 root_cause=_root_cause_for(
@@ -1349,8 +1348,3 @@ def to_sarif_str(
         ),
         indent=indent,
     )
-
-
-def write_sarif(result: DiffResult, path: Path) -> None:
-    """Write SARIF output to *path*."""
-    path.write_text(to_sarif_str(result), encoding="utf-8")

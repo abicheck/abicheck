@@ -36,7 +36,6 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
     _collect_additions as _collect_additions,
     _collect_force_public_symbols as _collect_force_public_symbols,
     _collect_release_inputs as _collect_release_inputs,
-    _merge_gcc_options as _merge_gcc_options,
     _merge_redundant_changes as _merge_redundant_changes,
     _provenance_timestamp as _provenance_timestamp,
     _version_sort_key as _version_sort_key,
@@ -565,7 +564,7 @@ def _embed_inline_source_side(
 # Two-sided header/include/version family (ADR-037 D3). Phase 7 (ADR-037
 # D8.1): --ast-frontend/--compiler*/--sysroot/--nostdinc/--frontend-context/
 # --lang are gone from `compare`'s CLI (compile: config only); `scan` keeps
-# the unreduced `compile_context_options()` decorator unchanged.
+# the unreduced compile-context decorator unchanged.
 @two_sided_input_options
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @export_options(

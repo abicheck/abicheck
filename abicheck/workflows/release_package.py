@@ -472,7 +472,7 @@ class DsoOnlyClassification:
 
 
 def classify_dso_only_package_map(pkg_map: dict[str, Path]) -> DsoOnlyClassification:
-    """`dso_only_package_map`, also reporting the members it could not classify."""
+    """Map a package to its DSO-only members, also reporting those it could not classify."""
     from ..bundle import _stored_elf_metadata
     from ..package import _has_shared_object_name
     from ..project_snapshot_store import read_artifact_ref, read_manifest_summary
@@ -503,36 +503,6 @@ def classify_dso_only_package_map(pkg_map: dict[str, Path]) -> DsoOnlyClassifica
             continue
         members[key] = sub_dir
     return DsoOnlyClassification(members, unclassified)
-
-
-def dso_only_package_map(pkg_map: dict[str, Path]) -> dict[str, Path]:
-    """*pkg_map* (a `resolve_release_package_map` result), restricted to
-    members whose materialized `ArtifactRef.kind` is `"elf"` and whose
-    stored `ElfMetadata` reads as a real shared object -- `--dso-only`'s
-    stored-side counterpart to `package._is_elf_shared_object` filtering a
-    live directory's discovered files (Codex review: checking `kind` alone
-    admitted a PIE/application executable, since `import_v1` derives
-    `"elf"` for both alike).
-
-    `ElfMetadata` carries no `e_type`, so a traditional non-PIE `ET_EXEC`
-    can't be told apart from a real DSO by `is_pie` alone (fresh evidence,
-    a second Codex round): `is_pie` alone only rejects a *PIE* executable.
-    Mirrors the live predicate's own remaining two cases instead: no
-    `PT_INTERP` (`ElfMetadata.interpreter` empty) is a real shared object
-    outright; `PT_INTERP` present but not PIE is ambiguous (an ordinary
-    executable, or a deliberately-invocable distro DSO like `libc.so.6`)
-    and falls back to the identical filename heuristic
-    (`package._has_shared_object_name`) the live path applies for that
-    same ambiguous case.
-
-    A sub-package whose own kind or ELF metadata cannot be determined is
-    *excluded* here too -- `--dso-only`'s whole contract is "only compare
-    what is confirmed to be a DSO", so uncertainty must not silently widen
-    it -- but :func:`classify_dso_only_package_map` names it, and a release
-    caller must use that form so the exclusion is recorded as a failure
-    rather than read as the member's absence.
-    """
-    return classify_dso_only_package_map(pkg_map).members
 
 
 def dso_only_filter_pair(

@@ -296,25 +296,6 @@ def _find_root_inner(fh: Any, buf: bytearray) -> bool:
             return False
 
 
-def _next_nonspace(fh: Any, buf: bytearray, pos: int) -> bytes:
-    """The next non-whitespace byte at or after *pos*, reading more as needed.
-
-    ``b""`` at end of input. Used to tell a `"inner"` *key* (followed by a
-    colon) from a `"inner"` *value* (not), which is what makes the
-    duplicate-key check below precise rather than a substring guess.
-    """
-    while True:
-        while pos < len(buf):
-            char = bytes(buf[pos : pos + 1])
-            if not char.isspace():
-                return char
-            pos += 1
-        chunk = fh.read(_CHUNK)
-        if not chunk:
-            return b""
-        buf.extend(chunk)
-
-
 #: How much of the document after the ``inner`` array this will read in
 #: order to validate it. clang puts ``inner`` last, so the tail is a closing
 #: brace and a newline; a document with megabytes after it is not one this

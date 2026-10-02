@@ -241,7 +241,7 @@ def load_inputs_manifest(root: Path | str) -> InputsManifest:
     :class:`~.pack.BuildSourcePack` directory, which uses a different manifest
     schema entirely) — without this check, ``InputsManifest.from_dict()``'s
     forward-compat ``kind`` default would silently accept it as a Flow-2 pack,
-    letting a write path like :func:`~.inputs_emit.compact_inputs_pack`
+    letting a write path like :func:`~.inputs_emit.compact_inputs_pack` (removed)
     corrupt an unrelated directory's manifest (Codex review, P2).
     """
     root = Path(root)
@@ -283,7 +283,7 @@ def _iter_source_fact_files(
     # sweep the pack's own manifest.json into the "*.json" glob below as if
     # it were a (harmless-looking, empty) TU record: SourceAbiTu.from_dict()
     # never raises for it (none of its keys match SourceAbiTu's fields), so
-    # it reads as silently valid. compact_inputs_pack's default
+    # it reads as silently valid. the former compact_inputs_pack's default
     # remove_originals=True then deletes it as a merged "original" --
     # destroying the pack's own manifest (Codex review, P2, reproduced
     # empirically: is_inputs_pack() returned False immediately after
@@ -319,7 +319,7 @@ def _iter_source_fact_files(
             # appended (rather than silently accepted): this leaves
             # len(files) == before below, which fires the existing
             # "resolved to no readable fact files" diagnostic and makes
-            # compact_inputs_pack fail closed instead of unlinking the
+            # the former compact_inputs_pack fail closed instead of unlinking the
             # pack's own manifest (Codex review, P2, reproduced
             # empirically).
             if target.resolve() != manifest_path_resolved:
@@ -456,7 +456,7 @@ def read_source_fact_files(
 
     The per-file half of :func:`read_source_facts`, split out so a caller
     that needs to control file resolution/order itself — e.g.
-    :func:`~.inputs_emit.compact_inputs_pack` reading a stale prior-
+    :func:`~.inputs_emit.compact_inputs_pack` (removed) reading a stale prior-
     compaction output separately from fresh per-TU files so it can prefer
     the fresher record for a duplicate ``tu_id`` — reuses the same parsing
     without re-deriving the file list (Codex review, P2).
@@ -501,7 +501,7 @@ def read_source_facts(
     once from the now-stale prior-compaction record, once from the fresh
     rebuild — and either misreport it as a pack-integrity duplicate or fold
     both the stale and fresh facts into one surface. Apply the same
-    prior-vs-fresh supersession :func:`~.inputs_emit.compact_inputs_pack`
+    prior-vs-fresh supersession :func:`~.inputs_emit.compact_inputs_pack` (removed)
     applies at compaction time: a fresh record for a ``tu_id`` drops the
     prior compaction's record for that same ``tu_id``; prior records for
     TUs not since rebuilt are still carried forward (Codex review, P2).
@@ -510,7 +510,7 @@ def read_source_facts(
     manifest = manifest or load_inputs_manifest(root)
     sink = diagnostics if diagnostics is not None else []
     # Captured before ANY discovery/read step below (mirrors
-    # compact_inputs_pack's before_diag_count) -- _iter_source_fact_files()
+    # the former compact_inputs_pack's before_diag_count) -- _iter_source_fact_files()
     # itself can append a diagnostic (an explicitly-named source_facts entry
     # that resolves to no readable files, or an escaping/unsafe path) for
     # what may well be one of the *fresh* per-TU entries below. If that
@@ -543,7 +543,7 @@ def read_source_facts(
     # diagnostic and no indication that specific TU's facts may now be wrong
     # (Codex review, P2, reproduced empirically). So a lossy fresh read
     # invalidates ALL prior-compaction carry-forward for this read, not just
-    # the one TU we cannot identify -- matching compact_inputs_pack's own
+    # the one TU we cannot identify -- matching the former compact_inputs_pack's
     # all-or-nothing fail-closed rule for a lossy read, rather than guessing
     # which subset of prior records might still be safe.
     fresh_tus = read_source_fact_files(fresh_files, diagnostics=sink)

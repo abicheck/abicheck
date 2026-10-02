@@ -31,10 +31,6 @@ break even though the symbol name is unchanged.
 
 from __future__ import annotations
 
-import os
-import stat
-from pathlib import Path
-
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.symvers_metadata import KabiEntry`` spelling keeps resolving.
@@ -91,16 +87,3 @@ def looks_like_symvers(text: str) -> bool:
         if raw.strip() and not raw.lstrip().startswith("#"):
             return False
     return False
-
-
-def parse_symvers_file(path: Path) -> KabiMetadata:
-    """Read and parse a ``Module.symvers`` file (empty metadata on error)."""
-    try:
-        with open(path, "rb") as f:
-            st = os.fstat(f.fileno())
-            if not stat.S_ISREG(st.st_mode):
-                return KabiMetadata()
-            text = f.read().decode("utf-8", "replace")
-    except OSError:
-        return KabiMetadata()
-    return parse_symvers(text)

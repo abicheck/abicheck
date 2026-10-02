@@ -41,7 +41,6 @@ Implemented detectors:
 
 from __future__ import annotations
 
-import os
 import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
@@ -171,35 +170,6 @@ def _has_sycl_queue_first_param(
         return False
     (qname,) = qnames
     return bool(qname and _SYCL_QUEUE_PARAM_RE.search(qname))
-
-
-def _unqualified_function_name(name: str) -> str:
-    """Return the unqualified function name from a (possibly qualified)
-    demangled name, dropping any template args on either the function
-    itself or its enclosing class.
-
-    Examples:
-
-    * ``ns::function``                       → ``function``
-    * ``ns::function<int>``                  → ``function``
-    * ``ns::Class<float, A>::method``        → ``method``
-    * ``ns::Class<X>::method<Y>``            → ``method``
-    """
-    # Drop template-arg groups at top level so the trailing ``::xxx`` is
-    # not chopped off by a naive ``split("<")``.
-    depth = 0
-    out: list[str] = []
-    for ch in name:
-        if ch == "<":
-            depth += 1
-            continue
-        if ch == ">":
-            depth -= 1
-            continue
-        if depth == 0:
-            out.append(ch)
-    cleaned = "".join(out)
-    return _last_segment(cleaned)
 
 
 def detect_sycl_overload_set_removal(
@@ -1306,72 +1276,3 @@ def detect_bundle_soname_skew(
             affected_symbols=stayed_list,
         )
     ]
-
-
-def bundle_members_from_directory(directory: str) -> list[BundleMember]:
-    """Convenience: scan *directory* for ELF/Mach-O/PE shared libraries
-    and return :class:`BundleMember` entries.
-
-    Uses ``abicheck.binary_utils`` to read SONAME / install-name / dll
-    name. Only callable when the directory exists; designed for use
-    from CLI integrations (e.g. ``compare-release``).
-    """
-    members: list[BundleMember] = []
-    if not os.path.isdir(directory):
-        return members
-    for name in sorted(os.listdir(directory)):
-        full = os.path.join(directory, name)
-        if not os.path.isfile(full):
-            continue
-        soname = _read_soname_best_effort(full)
-        if not soname:
-            continue
-        # G9 (remaining half): normalize the DT_SONAME the same way `.library`
-        # (the filename) already is via _cohort_key, so BundleMember.soname
-        # always carries the canonical logical SONAME regardless of an
-        # auditwheel/delocate content-hash suffix. Strip *before* extracting
-        # the major version too — a hashed install name (e.g.
-        # ``libfoo.2-a1b2c3.dylib``) otherwise fails major extraction on the
-        # raw string and the member is skipped entirely (Codex review).
-        soname = strip_vendor_hash(soname)
-        major = _extract_soname_major(soname)
-        if major is None:
-            continue
-        members.append(
-            BundleMember(
-                library=name,
-                soname=soname,
-                soname_major=major,
-            )
-        )
-    return members
-
-
-def _read_soname_best_effort(path: str) -> str | None:
-    """Read DT_SONAME (ELF) / LC_ID_DYLIB (Mach-O). Best-effort: returns
-    ``None`` if the file isn't a recognised shared library."""
-    try:
-        with open(path, "rb") as fh:
-            magic = fh.read(4)
-    except OSError:
-        return None
-    if magic == b"\x7fELF":
-        return _read_elf_soname(path)
-    # Mach-O / PE support deferred — current case84 example is Linux-only.
-    return None
-
-
-def _read_elf_soname(path: str) -> str | None:
-    """Minimal ELF DT_SONAME reader using ``abicheck.elf_metadata`` when
-    available; falls back to ``None``."""
-    try:
-        from pathlib import Path
-
-        from .elf_metadata import parse_elf_metadata
-    except ImportError:
-        return None
-    try:
-        meta = parse_elf_metadata(Path(path))
-    except Exception:  # noqa: BLE001 — defensive: tolerate any parse error
-        return None
-    return meta.soname or None if meta is not None else None

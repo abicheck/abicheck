@@ -212,129 +212,6 @@ def derive_l2_include_dirs(
         return [], []
 
 
-def derive_l2_compile_context(
-    headers: list[Path] | tuple[Path, ...],
-    build_info: Path | None,
-    sources: Path | None,
-    build_config: Path | None = None,
-    *,
-    build_query: str | None = None,
-    build_compile_db: str | None = None,
-    build_targets: tuple[str, ...] = (),
-    allow_inferred_build_query: bool = True,
-    explicit: CompileContext | None = None,
-    lang: str | None = None,
-    lang_explicit: bool = False,
-    build_config_explicit: bool = True,
-) -> tuple[CompileContext | None, list[Callable[[], None]]]:
-    """Best-effort L2 :class:`CompileContext` derived from the build's L3
-    ``CompileUnit`` facts (P0.3).
-
-    *explicit* is the caller's own already-supplied L2 context (typically
-    ``evidence.compile``) — forwarded to :func:`~abicheck.buildsource.
-    header_compile_context.resolve_header_compile_context` unchanged, so a
-    field it already pins (e.g. an explicit ``-std=c++20``) excuses a
-    same-field-only disagreement across the matched compile units instead of
-    failing closed on it (Finding 3; see that function's own docstring).
-
-    *lang*/*lang_explicit* (``discussion_r3787398644``, Codex review):
-    forwarded unchanged to :func:`~abicheck.buildsource.
-    header_compile_context.resolve_header_compile_context` — the same
-    additive, default-``None``/``False`` threading pattern as *explicit*
-    above, so a caller's explicitly-forced parse language (e.g.
-    ``DumpRequest(lang="c++", lang_explicit=True)``) suppresses a matched
-    compile unit's own derived ``-std=`` when its language family conflicts,
-    rather than forwarding a C-family standard into a forced-C++ parse (see
-    that function's own docstring for the confirmed repro).
-
-    Sibling of :func:`derive_l2_include_dirs`, sharing its exact pack-
-    resolution precedence (explicit ``--build-info``/``--sources`` pack ->
-    trusted ``--config`` (or a programmatic ``build_query``) -> ``build.compile_db`` ->
-    auto-discovered ``compile_commands.json`` -> the inferred build-system
-    query) via the same :func:`abicheck.buildsource.inline.collect_inline_pack`
-    call — kept as an independent call (rather than folded into
-    :func:`derive_l2_include_dirs`'s own single call) so this function's
-    return shape stays additive and every existing
-    ``derive_l2_include_dirs``/``seed_l2_includes`` caller and test is
-    unaffected; ``derive_l2_include_dirs`` already runs the identical
-    collection once per side for its own include-dir seeding, so a caller
-    using both pays for the L3 collection twice per side — an accepted,
-    documented cost (the collection itself is already re-run a third time by
-    ``embed_build_source`` later in the same pipeline for L3-L5 embedding, so
-    this is not a new class of repeated work).
-
-    Returns ``(context, cleanups)`` — ``context`` is ``None`` when there is
-    nothing to apply (mirrors :func:`derive_l2_include_dirs`'s ``[]``
-    degrade); the *cleanups* are the temp-build-dir thunks an inferred build
-    query may have appended, to be run only after the L2 parse has consumed
-    the derived context (same contract as ``derive_l2_include_dirs``).
-
-    Propagates :class:`~abicheck.errors.HeaderCompileContextAmbiguousError`
-    (P0.3's fail-closed multi-context case) rather than swallowing it — unlike
-    every other failure mode here (missing/malformed compile DB, no build
-    system, ...), which stays best-effort and degrades silently, a genuine
-    ABI-relevant disagreement across compile units must never be resolved by
-    silently guessing. This function drains any accumulated *cleanups* itself
-    before re-raising on that path (mirroring every other failure branch
-    here) — a function that both re-raises and returns a value has no channel
-    to hand the exception a value along with it, so the caller receives none
-    and has nothing left to run.
-    """
-    from ..errors import HeaderCompileContextAmbiguousError, ValidationError
-    from .header_compile_context import resolve_header_compile_context
-
-    if (sources is None and build_info is None) or not headers:
-        return None, []
-    cleanups: list[Callable[[], None]] = []
-    try:
-        # Pack resolution stays inside this protected section for the same
-        # reason as derive_l2_include_dirs's own copy of this comment: a
-        # corrupt/unreadable pack must degrade best-effort, not raise
-        # (Codex review).
-        args = _resolve_l2_seed_pack_args(
-            build_config,
-            sources,
-            build_info,
-            build_query,
-            build_compile_db,
-            build_targets,
-            build_config_explicit=build_config_explicit,
-        )
-        if args is None:
-            return None, []
-        pack = collect_inline_pack(
-            sources=args.sources,
-            build_info=args.build_info,
-            build_config=args.build_config,
-            build_config_trusted_for_query=args.build_config_trusted_for_query,
-            compile_db_explicit=args.compile_db_explicit,
-            allow_inferred_build_query=allow_inferred_build_query,
-            base_build=args.base_build,
-            layers=("L3",),
-            defer_cleanup=cleanups,
-        )
-        build_evidence = pack.build_evidence if pack is not None else None
-        resolution = resolve_header_compile_context(
-            build_evidence,
-            list(headers),
-            explicit=explicit,
-            lang=lang,
-            lang_explicit=lang_explicit,
-        )
-        if resolution.context is None:
-            _run_cleanups(cleanups)
-            return None, []
-        return resolution.context, cleanups
-    except (HeaderCompileContextAmbiguousError, ValidationError):
-        # P0.3's fail-closed case, or a deliberate usage error (ADR-063
-        # Phase 4) -- release any temp build dir, then propagate.
-        _run_cleanups(cleanups)
-        raise
-    except Exception:  # noqa: BLE001 -- best-effort, mirrors derive_l2_include_dirs
-        _run_cleanups(cleanups)
-        return None, []
-
-
 def _merge_l3_compile_context(
     explicit: CompileContext | None, derived: CompileContext | None
 ) -> CompileContext | None:
@@ -370,7 +247,7 @@ def _merge_l3_compile_context(
     ``gcc_option_tokens``) it came through.
 
     Moved here from ``service_input_resolution.py`` (P0.3 dump-path fold):
-    that module already imports :func:`derive_l2_compile_context` from this
+    that module already imports :func:`derive_l2_compile_context` (removed) from this
     one, so this function living there too would have closed a
     ``l2_seed -> service_input_resolution -> cli_dump_helpers -> l2_seed``
     import cycle once ``cli_dump_helpers`` needed it directly (AGENTS.md
@@ -681,7 +558,7 @@ def seed_includes_and_fold_compile_context(
     cleanups: list[Callable[[], None]] = []
     try:
         # Pack resolution stays inside this protected section, mirroring
-        # derive_l2_include_dirs's/derive_l2_compile_context's own identical
+        # derive_l2_include_dirs's/the former derive_l2_compile_context's identical
         # comment: a corrupt/unreadable pack must degrade best-effort, not
         # raise (Codex review) -- an earlier revision of this function had it
         # outside the try, which reintroduced exactly that regression.

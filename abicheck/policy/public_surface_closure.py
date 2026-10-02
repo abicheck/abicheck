@@ -111,6 +111,7 @@ from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.edge_coverage import EdgeAnswer
 from ..model.graph_join import EDGE_KIND_EXPORTS
 from ..model.surface_facts import in_public_surface
+from ..model.symbol_ownership import DEFAULT_INTERNAL_NAMESPACES
 from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..model.vocabulary import ScopeOrigin
 from .captured_type_identities import captured_identity_seeds, field_identities
@@ -561,25 +562,14 @@ def _walk_exact_type_closure(
                 queue.append(ident)
 
 
-# ── Leaf-local duplicate of internal_leak.is_internal_type ─────────────────
+# ── Leaf-local copy of internal_leak.is_internal_type's *matcher* ─────────
 # Needed for exactly one purpose below: `_record_is_confirmed_public_seed`'s
-# "not an internal-namespace type" condition. Duplicated rather than
-# imported from `internal_leak.py` -- that module is itself unclassified in
-# `architecture/modules.yaml` (imports real `extract`-layer `buildsource.*`
-# modules a strictly-enforced `policy/` package member may not depend on;
-# `surface.py`'s own pre-migration call to the same function got away with
-# it only because `surface.py` is a `legacy_paths` entry, exempt from this
-# repo's `unclassified-import`/`dependency-direction` enforcement the way a
-# real `abicheck/policy/*.py` file is not). Matches the same "leaf-safe
-# duplicate" precedent already used for `_type_identifiers` in
-# ``public_surface.py``.
-_DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = (
-    "detail",
-    "impl",
-    "internal",
-    "__detail",
-    "_impl",
-)
+# "not an internal-namespace type" condition. The matcher is local because
+# `internal_leak.py` is unclassified in `architecture/modules.yaml` and a
+# `policy/` module may not import it; the namespace *list* is not copied --
+# it comes from `model.symbol_ownership`, the same owner `internal_leak`
+# reads, so the two cannot drift apart.
+_DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = DEFAULT_INTERNAL_NAMESPACES
 _TEMPLATE_ARG_RE = re.compile(r"<[^<>]*>")
 
 

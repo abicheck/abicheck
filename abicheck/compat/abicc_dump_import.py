@@ -282,9 +282,11 @@ def _extract_record_types(type_map: dict[str, dict[str, object]]) -> list[Record
 
 
 def is_abicc_perl_dump_file(path: Path) -> bool:
-    """Return True if path looks like an ABICC Perl Data::Dumper dump."""
-    if path.suffix == ".dump":
-        return True
+    """Return True if path's content is an ABICC Perl Data::Dumper dump.
+
+    Content, not the ``.dump`` suffix: ``compat dump -dump-path X.dump``
+    writes an abicheck JSON snapshot under that same suffix.
+    """
     try:
         head = path.read_text(encoding="utf-8", errors="replace")[:512]
     except OSError:

@@ -680,14 +680,13 @@ class TestDemanglingIsIdempotentAndReachesEveryHumanPath:
         assert "bar() [_Z3barv]" in md
         assert "bar() [bar()" not in md, "demangled twice"
 
-    def test_the_two_bypassing_human_paths_ask_for_demangling(self):
-        """`compat/cli.py` and `annotations_step_summary.py` never reach
-        `service_render`, so nothing else would apply it for them."""
+    def test_the_bypassing_human_path_asks_for_demangling(self):
+        """`compat/cli.py` never reaches `service_render`, so nothing else
+        would apply it for it."""
         import pathlib
 
-        for rel in ("compat/cli.py", "annotations_step_summary.py"):
-            src = pathlib.Path("abicheck", rel).read_text(encoding="utf-8")
-            assert "demangle=True" in src, rel
+        src = pathlib.Path("abicheck", "compat/cli.py").read_text(encoding="utf-8")
+        assert "demangle=True" in src
 
 
 class TestThePatternModulationLedgerRendersWhatTheProducerWrites:

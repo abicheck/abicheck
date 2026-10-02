@@ -44,7 +44,7 @@ from .model.change_catalog.kinds import ChangeKind
 from .policy.classification import API_BREAK_KINDS, BREAKING_KINDS, Verdict
 from .policy.evidence_status import ReachabilityState
 from .policy.rule_identity import rule_identity
-from .policy.selectors import _TYPE_CHANGE_KINDS, SelectorSet
+from .policy.selectors import SelectorSet
 from .suppression_yaml import parse_finding_id, raw_finding_ids_by_index
 
 # Keys allowed in a suppression entry — unknown keys are rejected
@@ -845,10 +845,6 @@ class SuppressionList:
         """Return all rules that have passed their expiry date."""
         return [s for s in self._suppressions if s.is_expired(today)]
 
-    def rules_by_label(self, label: str) -> list[Suppression]:
-        """Return all rules with the given label."""
-        return [s for s in self._suppressions if s.label == label]
-
     def rule_identities(self) -> tuple[str, ...]:
         """One canonical, machine-facing identity string per loaded rule.
 
@@ -1075,59 +1071,3 @@ class SuppressionAudit:
         if not self.has_issues:
             lines.append("  ✓ No issues found")
         return "\n".join(lines)
-
-
-def suggest_suppressions(
-    changes: list[dict[str, object]],
-    *,
-    expiry_days: int = 180,
-    today: date | None = None,
-) -> str:
-    """Generate candidate suppression rules as YAML from a list of change dicts.
-
-    *changes* is a list of change dictionaries as found in the ``"changes"``
-    key of a JSON diff result (each must have ``"kind"`` and ``"symbol"``).
-
-    Returns a YAML string with ``# TODO`` comments for unreviewed rules.
-    """
-    check_date = today or date.today()
-    expires_date = check_date + timedelta(days=expiry_days)
-    expires_str = expires_date.isoformat()
-
-    lines: list[str] = [
-        "# Auto-generated suppression candidates from abicheck compare",
-        "# Review each rule and add a justification before using",
-        "version: 1",
-        "suppressions:",
-    ]
-
-    for change in changes:
-        raw_kind = change.get("kind")
-        raw_symbol = change.get("symbol")
-        if raw_kind is None or raw_symbol is None:
-            continue
-        kind = str(raw_kind)
-        symbol = str(raw_symbol)
-        if not kind or not symbol:
-            continue
-
-        # Use type_pattern for type-level changes, symbol for symbol-level
-        if kind in _TYPE_CHANGE_KINDS:
-            # Strip member suffix (e.g. "Color::GREEN" → "Color") so the
-            # generated rule matches Suppression.matches() semantics.
-            type_name = symbol.rsplit("::", 1)[0] if "::" in symbol else symbol
-            lines.append(f"  - type_pattern: {_yaml_quote(type_name)}")
-        else:
-            lines.append(f"  - symbol: {_yaml_quote(symbol)}")
-        lines.append(f"    change_kind: {_yaml_quote(kind)}")
-        lines.append('    reason: ""  # TODO: add justification')
-        lines.append(f"    expires: {_yaml_quote(expires_str)}")
-        lines.append("")
-
-    return "\n".join(lines) + "\n"
-
-
-def _yaml_quote(value: str) -> str:
-    """Quote a string for safe YAML output, escaping special characters."""
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'

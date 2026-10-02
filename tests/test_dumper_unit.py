@@ -936,18 +936,6 @@ class TestCastxmlParserTypeName:
         p = _CastxmlParser(root, set(), set())
         assert p._type_name("t3") == "int*"
 
-    def test_cv_qualifies_pointer_value_empty_id_is_false(self):
-        ft = _fund_type("t1", "int")
-        root = _xml_root(ft)
-        p = _CastxmlParser(root, set(), set())
-        assert p._cv_qualifies_pointer_value("") is False
-
-    def test_cv_qualifies_pointer_value_unresolvable_id_is_false(self):
-        ft = _fund_type("t1", "int")
-        root = _xml_root(ft)
-        p = _CastxmlParser(root, set(), set())
-        assert p._cv_qualifies_pointer_value("does-not-exist") is False
-
     def test_struct_type(self):
         s = Element("Struct", id="t1", name="Point")
         root = _xml_root(s)
@@ -1930,7 +1918,7 @@ class TestCastxmlParserVtable:
         types = p.parse_types()
         c_t = next(t for t in types if t.name == "C")
         assert c_t.vtable == ["_ZN1C3fooEv"]
-        assert p._vtable_slot_root == {}
+        assert p._ctx.vtable_slot_root == {}
 
 
 class TestCastxmlParserEnums:

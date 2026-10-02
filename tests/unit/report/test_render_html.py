@@ -791,11 +791,9 @@ def test_html_compatibility_metrics_reuse_the_envelope_s_findings() -> None:
 
 def test_html_compat_changes_table_empty_and_populated() -> None:
     """``render_compat_changes_table`` -- the ABICC-style table renderer --
-    has no caller left in ``html_report.py`` after the ReportDocument
-    closure (unlike ``render_changes_table``, still reached via
-    ``_changes_table`` for ``appcompat_html.py``); test it directly at both
-    its ``rows`` boundary cases, same as ``render_changes_table`` gets via
-    the golden HTML suite."""
+    is reached only through the ReportDocument renderer; test it directly
+    at both its ``rows`` boundary cases, same as ``render_changes_table``
+    gets via the golden HTML suite."""
     from abicheck.report.render_html import ChangeRow, render_compat_changes_table
 
     assert render_compat_changes_table(()) == "<p>No changes.</p>"
@@ -825,10 +823,9 @@ def test_html_compat_changes_table_empty_and_populated() -> None:
 
 
 def test_render_changes_table_empty_rows() -> None:
-    """``render_changes_table(())`` -- reachable via ``_changes_table`` when
-    ``appcompat_html.py`` passes an empty bucket -- has no coverage from any
-    higher-level HTML test, since `_build_sections_data` only ever calls it
-    with a non-empty bucket."""
+    """``render_changes_table(())`` has no coverage from any higher-level
+    HTML test, since `_build_sections_data` only ever calls it with a
+    non-empty bucket."""
     from abicheck.report.render_html import render_changes_table
 
     assert (

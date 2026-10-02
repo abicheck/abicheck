@@ -76,8 +76,11 @@ import abicheck.internal_leak as internal_leak_mod
 #: register the new heuristic with its structural fact and cells instead.
 UNCOVERED_CEILINGS: dict[str, int] = {
     "spelling": 60,
-    "grammar": 39,
-    "convention": 34,
+    # 40, not 39: model/symbol_ownership.py joined SCAN_GLOBS when it became
+    # the internal-namespace vocabulary owner, bringing one pre-existing
+    # `_Z` mangled-prefix check into view -- a wider scan, not a new site.
+    "grammar": 40,
+    "convention": 31,
     "own_format": 30,
     "platform": 17,
     "user_rule": 8,
@@ -101,7 +104,7 @@ def test_inventory_is_derived_and_nontrivial() -> None:
         "abicheck.compare.enum_sentinel::<module>::vocab:_SENTINEL_TAIL_TOKENS",
         "abicheck.diff_serialization::<module>::vocab:_TAG_SUFFIX_PATTERNS",
         "abicheck.diff_namespaces::<module>::vocab:DEFAULT_EXPERIMENTAL_NAMESPACES",
-        "abicheck.internal_leak::<module>::vocab:DEFAULT_INTERNAL_NAMESPACES",
+        "abicheck.model.symbol_ownership::<module>::vocab:DEFAULT_INTERNAL_NAMESPACES",
     ):
         assert needle in inventory
 

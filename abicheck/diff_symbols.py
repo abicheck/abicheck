@@ -85,7 +85,6 @@ from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _skip_template_args as _skip_template_args,
     _strip_template_args as _strip_template_args,
     _truncate_at_param_list as _truncate_at_param_list,
-    _unqualified_name as _unqualified_name,
     _unqualified_name_of as _unqualified_name_of,
     _unwrap_funcptr_declarator as _unwrap_funcptr_declarator,
     emit_namespace_move_batches as emit_namespace_move_batches,
@@ -155,7 +154,6 @@ from .model.surface_facts import (
     surface_fact_summary,
     visibility_label,
 )
-from .name_classification import is_local_rtti_symbol
 
 # The public ABI surface is asked as a question now, not matched against a
 # set of enum members: `is_abi_visible` holds for an entity the binary
@@ -200,17 +198,6 @@ def _is_stripped_symbols_only(snap: AbiSnapshot) -> bool:
     if dwarf is not None and (dwarf.structs or dwarf.enums):
         return False
     return bool(snap.declarations.functions or snap.declarations.variables)
-
-
-def _is_local_type_rtti(mangled: str) -> bool:
-    """True for typeinfo/vtable symbols of a function-local type (e.g. a lambda).
-
-    Regression: RD2-4 (validation) — protobuf patch releases churn
-    ``_ZTIZN…EUl…E_`` / ``_ZTSZN…`` typeinfo symbols for anonymous lambdas nested
-    in ``Printer::WithDefs/WithVars``; they were scored as public ``var_removed``
-    and drove a false ``BREAKING`` verdict on an ABI-compatible bump.
-    """
-    return is_local_rtti_symbol(mangled)
 
 
 def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:

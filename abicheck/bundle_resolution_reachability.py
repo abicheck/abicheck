@@ -40,7 +40,7 @@ def reachable_intra_libraries(snapshot: BundleSnapshot, root: str) -> set[str]:
     Returns every library transitively reachable from ``root`` through the
     bundle's own resolution graph (i.e. what would actually be loaded when
     ``root`` is loaded) -- not including ``root`` itself. Used by
-    ``bundle._detect_unresolved_intra_dependency``/``_detect_intra_dep_
+    ``bundle._detect_unresolved_intra_dependency`` (removed)/``_detect_intra_dep_
     removed`` and by :func:`abicheck.bundle_signature_evidence.
     find_unverified_signature_findings` so a symbol is only considered
     resolved (or previously reached) by a provider the consumer can

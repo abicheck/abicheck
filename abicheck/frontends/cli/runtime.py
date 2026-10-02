@@ -59,7 +59,6 @@ from ...cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli 
     _collect_additions as _collect_additions,
     _collect_force_public_symbols as _collect_force_public_symbols,
     _collect_release_inputs as _collect_release_inputs,
-    _merge_gcc_options as _merge_gcc_options,
     _merge_redundant_changes as _merge_redundant_changes,
     _provenance_timestamp as _provenance_timestamp,
     _version_sort_key as _version_sort_key,
@@ -775,9 +774,7 @@ def _finalize_compare_result(
     # against action/run.sh's own, richer, INPUT_ADD_JOB_SUMMARY-gated job
     # summary (or writes one even when a caller explicitly set
     # add-job-summary: false). The CLI no longer writes a step summary on
-    # its own at all -- annotations_step_summary.emit_github_step_summary
-    # stays available as a public primitive for a caller invoking the CLI
-    # directly outside the composite Action to call itself.
+    # its own at all; the Action owns the job summary.
 
 
 # ── ADR-037 D7: input-type dispatch for `compare` ────────────────────────────

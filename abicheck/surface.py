@@ -383,19 +383,6 @@ def scope_note_coverage_warnings(notes: Iterable[str]) -> list[str]:
     return []
 
 
-def change_in_public_surface(
-    change: Change,
-    surf_old: PublicSurface,
-    surf_new: PublicSurface,
-) -> bool:
-    """Return ``True`` if *change* concerns the public ABI surface.
-
-    Thin boolean wrapper over :func:`classify_change_surface` for callers
-    that only need the in/out decision.
-    """
-    return classify_change_surface(change, surf_old, surf_new)[0]
-
-
 # Exclusion reasons recorded on the surface ledger (ADR-024 §D5.1).
 # ``private-header`` / ``system-header`` are provenance-driven and only fire
 # when the snapshot was dumped with a public-header set (Phase 1, ADR-015 v6);

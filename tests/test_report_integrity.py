@@ -139,6 +139,13 @@ def test_pr_comment_buckets_cover_canonical_labels() -> None:
 # ── Per-change consistency across native channels ────────────────────────────
 
 
+def _on_breaking_side(model: ReportModel, change: Change) -> bool:
+    """Whether *change* sits on the breaking side of the gate -- the one fact
+    every channel must agree on (``VERDICT_PRESENTATION``'s own flag)."""
+    pres = VERDICT_PRESENTATION.get(model.verdict_of(change))
+    return pres.breaking_boundary if pres else False
+
+
 def test_native_channels_agree_on_breaking_boundary() -> None:
     # The cross-channel invariant is the *breaking boundary*, not identical
     # vocabulary: channels may use finer levels (SARIF marks additions
@@ -151,7 +158,7 @@ def test_native_channels_agree_on_breaking_boundary() -> None:
     kind_sets = result._effective_kind_sets()
 
     for ch in model.changes:
-        breaking = model.is_breaking_boundary(ch)
+        breaking = _on_breaking_side(model, ch)
 
         # JSON severity label is exactly the verdict axis.
         assert (model.severity_label(ch) in ("breaking", "api_break")) == breaking
@@ -208,7 +215,7 @@ def test_a4_override_propagates_across_channels() -> None:
     model = ReportModel.from_result(result)
     assert model.verdict_of(demoted) == Verdict.COMPATIBLE
     assert model.severity_label(demoted) == "compatible"
-    assert model.is_breaking_boundary(demoted) is False
+    assert _on_breaking_side(model, demoted) is False
     # Override propagates to every native channel: not error, not failure.
     assert sarif_severity(demoted, result) == "note"
     kind_sets = result._effective_kind_sets()
@@ -255,7 +262,7 @@ def test_policy_file_override_propagates_across_channels() -> None:
     result.policy_file = PolicyFile(overrides={breaking.kind: Verdict.COMPATIBLE})
     model = ReportModel.from_result(result)
     assert model.verdict_of(breaking) == Verdict.COMPATIBLE
-    assert model.is_breaking_boundary(breaking) is False
+    assert _on_breaking_side(model, breaking) is False
     assert sarif_severity(breaking, result) == "note"
     kind_sets = result._effective_kind_sets()
     assert _is_failure(breaking, result, kind_sets) is False
@@ -264,7 +271,7 @@ def test_policy_file_override_propagates_across_channels() -> None:
     result.policy_file = PolicyFile(overrides={compatible.kind: Verdict.BREAKING})
     model = ReportModel.from_result(result)
     assert model.verdict_of(compatible) == Verdict.BREAKING
-    assert model.is_breaking_boundary(compatible) is True
+    assert _on_breaking_side(model, compatible) is True
     assert sarif_severity(compatible, result) == "error"
     kind_sets = result._effective_kind_sets()
     assert _is_failure(compatible, result, kind_sets) is True

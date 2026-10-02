@@ -37,8 +37,10 @@ import pytest
 
 from abicheck.dumper_clang import _ClangAstParser
 from abicheck.dumper_clang_vtable import (
-    _normalize_param_type,
     _top_level_param_list_close,
+)
+from abicheck.model.signature_normalization import (
+    canonicalize_function_signature_param_type as key,
 )
 from tests._dumper_clang_vtable_helpers import (
     _base,
@@ -552,7 +554,7 @@ def test_non_virtual_method_stays_non_virtual() -> None:
     [
         # Real clang spelling has NO space between "*" and the FIRST
         # trailing qualifier word -- confirmed against real clang builds.
-        # An earlier version of _normalize_param_type assumed a leading
+        # An earlier version of the parameter normalizer assumed a leading
         # space on every trailing qualifier and so never matched ANY of
         # these single-qualifier pointer cases at all (Codex review, fresh
         # evidence -- caught while investigating the __restrict finding
@@ -587,7 +589,7 @@ def test_non_virtual_method_stays_non_virtual() -> None:
 def test_normalize_param_type_matches_real_clang_spellings(
     qualtype: str, expected: str
 ) -> None:
-    assert _normalize_param_type(qualtype) == expected
+    assert key(qualtype) == key(expected)  # one canonicalizer keys overrides
 
 
 def test_pointer_itself_const_override_recognized_with_no_restrict() -> None:
