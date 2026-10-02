@@ -55,3 +55,16 @@
 - **An evidence pack edited after it was written is rejected** by
   `--build-info`/`--sources` instead of being attached under its old content
   hash.
+- **castxml no longer fails on an MSVC compile unit's language standard.**
+  Both the header dump and the source replay put MSVC's `/std:c++NN` on
+  castxml's command line, which castxml's GNU-style driver reads as an input
+  file. castxml now gets `-std=` and only the emulated `cl` gets `/std:`.
+- **A frozen-namespace finding is never demoted before it can be escalated.**
+  The demotion of unreachable internal churn checked only the root type name,
+  while the frozen-namespace escalation also checks the symbol, the causing
+  type and the qualified name; both now use one matcher.
+- **A project entity that mentions `std::` is no longer classified as the
+  standard library** in source-graph reachability and export accounting.
+- **A C++ override taking an array (`int[]`) or a callback with a `const`
+  by-value parameter is recognised** in the clang vtable path, which now keys
+  parameters through the same signature canonicalizer as overload identity.

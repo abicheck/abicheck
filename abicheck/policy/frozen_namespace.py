@@ -25,18 +25,10 @@ forms and ask :func:`frozen_pattern_for`.
 
 from __future__ import annotations
 
-import fnmatch
-import re
 from collections.abc import Iterable, Sequence
 
-_TEMPLATE_ARGS_RE = re.compile(r"<[^<>]*>")
-
-
-def _strip_template_args(name: str) -> str:
-    prev = None
-    while prev != name:
-        prev, name = name, _TEMPLATE_ARGS_RE.sub("", name)
-    return name
+from .public_surface_closure import _strip_template_args
+from .selectors_namespace_glob import _compile_glob
 
 
 def frozen_pattern_for(forms: Iterable[str], patterns: Sequence[str]) -> str | None:
@@ -50,7 +42,8 @@ def frozen_pattern_for(forms: Iterable[str], patterns: Sequence[str]) -> str | N
         candidate = _strip_template_args(form)
         while True:
             for pat in patterns:
-                if fnmatch.fnmatchcase(candidate, pat):
+                rx = _compile_glob(pat, "frozen_namespaces")
+                if rx is not None and rx.match(candidate):
                     return pat
             if "::" not in candidate:
                 break
