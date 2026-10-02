@@ -1661,7 +1661,11 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
 
     changes = emit_prefix_batch_rename(
-        PREFIX_RENAME.apply(removed, added=added, old_map=old_map, new_map=new_map),
+        [
+            pair
+            for pair in find_prefix_rename_pairs(removed, added, old_map, new_map)
+            if PREFIX_RENAME.confirmed(pair, (pair, removed, added))
+        ],
         old_map,
     )
     changes.extend(

@@ -1155,6 +1155,19 @@ OPAQUE_HANDLE_USAGE = register_name_heuristic(
     "opaque_handle_usage",
     owner=__name__,
     effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=(
+        "STRUCT_ALIGNMENT_CHANGED",
+        "STRUCT_FIELD_OFFSET_CHANGED",
+        "STRUCT_FIELD_REMOVED",
+        "STRUCT_FIELD_TYPE_CHANGED",
+        "STRUCT_SIZE_CHANGED",
+        "TYPE_BASE_CHANGED",
+        "TYPE_FIELD_OFFSET_CHANGED",
+        "TYPE_FIELD_REMOVED",
+        "TYPE_FIELD_TYPE_CHANGED",
+        "TYPE_SIZE_CHANGED",
+        "TYPE_VTABLE_CHANGED",
+    ),
     description=(
         "a type spelled only as T* in public signatures, with a T* factory, "
         "is an opaque handle whose size change is not consumer-visible"

@@ -143,6 +143,7 @@ ENUM_SENTINEL = register_name_heuristic(
     "enum_sentinel",
     owner=__name__,
     effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=("ENUM_MEMBER_VALUE_CHANGED",),
     description=(
         "an end-of-list enum member name (*_LAST/*_MAX/*_COUNT/NUM_*) demotes "
         "its value change to a risk"

@@ -37,6 +37,7 @@ import re
 from collections.abc import Mapping
 from types import ModuleType
 
+from ..model.change_catalog.kinds import ChangeKind
 from ..model.name_heuristics import (
     NameHeuristic,
     SeverityRaisingNameHeuristic,
@@ -66,6 +67,8 @@ HEURISTIC_OWNER_MODULES: tuple[str, ...] = (
 )
 
 Registered = NameHeuristic | SeverityRaisingNameHeuristic
+
+_KIND_NAMES = frozenset(k.name for k in ChangeKind)
 
 
 def name_heuristic_registry() -> Mapping[str, Registered]:
@@ -120,6 +123,12 @@ def registry_problems(registry: Mapping[str, Registered] | None = None) -> list[
                 )
         if not all(isinstance(p, re.Pattern) for p in h.patterns):
             problems.append(f"{hid}: a pattern is not compiled")
+        declared = (
+            h.raises if isinstance(h, SeverityRaisingNameHeuristic) else h.lowers_from
+        )
+        unknown = sorted(set(declared) - _KIND_NAMES)
+        if unknown:
+            problems.append(f"{hid}: declares unknown ChangeKind name(s) {unknown}")
         if isinstance(h, SeverityRaisingNameHeuristic):
             if not callable(h.fact.check):
                 problems.append(f"{hid}: severity-raising fact is not callable")

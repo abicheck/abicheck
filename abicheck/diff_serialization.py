@@ -31,7 +31,6 @@ compatibility with existing tests; new code should import from here.
 
 from __future__ import annotations
 
-import functools
 from typing import TYPE_CHECKING, NamedTuple
 
 from .checker_types import Change
@@ -103,7 +102,6 @@ _TAG_TYPE_TOKEN_TAILS: tuple[tuple[str, ...], ...] = (
 )
 
 
-@functools.lru_cache(maxsize=4096)
 def _enum_type_is_tag_registry(enum_name: str) -> bool:
     """Whether an enum *type* name is strong evidence of a tag-id registry.
 
@@ -141,6 +139,7 @@ def _value_changed(fact_input: tuple[str, str]) -> bool:
 SERIALIZATION_TAG = register_severity_raising_heuristic(
     "serialization_tag",
     owner=__name__,
+    raises=("SERIALIZATION_TAG_CHANGED",),
     description=(
         "a *_tag_id/*_serialization_tag constant, or a member of a "
         "SerializationTag/TagId enum, is a persisted class id"
@@ -313,8 +312,11 @@ def detect_serialization_tag_changes(
                 for n, e in new_vals.items()
                 if e.value == old_val
                 and n != name
-                and SERIALIZATION_TAG.matcher(e.member or n, enum_type=e.enum_type)
-                and not _end_marker_on_both_sides(old, new, old_vals.get(n), e)
+                # A swap partner is itself a tag whose value moved: the same
+                # name-and-fact question, never the name alone.
+                and n in old_vals
+                and _is_tag(n, old_vals[n], e.value)
+                and not _end_marker_on_both_sides(old, new, old_vals[n], e)
             ),
             None,
         )

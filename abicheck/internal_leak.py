@@ -362,6 +362,7 @@ INTERNAL_NAMESPACE = register_name_heuristic(
 INTERNAL_TYPE_LEAK = register_severity_raising_heuristic(
     "internal_type_leak",
     owner=__name__,
+    raises=("INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API",),
     description=(
         "a changed internal-namespace type is reported as leaking through "
         "the public API"

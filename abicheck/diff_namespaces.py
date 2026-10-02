@@ -64,7 +64,12 @@ from .compare.qualified_name_normalization import (
 )
 from .diff_helpers import make_change
 from .diff_templates import _strip_param_signature
-from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic
+from .model.name_heuristics import (
+    NameHeuristicEffect,
+    StructuralFact,
+    register_name_heuristic,
+    register_severity_raising_heuristic,
+)
 from .model.surface_facts import in_source_declaration_index
 
 if TYPE_CHECKING:
@@ -155,6 +160,27 @@ EXPERIMENTAL_NAMESPACE = register_name_heuristic(
     matcher=_has_experimental_segment,
     helpers=(_strip_experimental, _split_experimental),
     vocabularies=("DEFAULT_EXPERIMENTAL_NAMESPACES",),
+)
+
+
+def _no_replacement(fact_input: tuple[list[str], list[str], bool]) -> bool:
+    new_exp, new_stable, still_linked = fact_input
+    return not new_exp and not new_stable and not still_linked
+
+
+#: Registered severity-raising heuristic: ``experimental_removed_without_
+#: replacement`` (API_BREAK) needs the structural fact that NEW carries no
+#: declaration under the key, experimental or stable, and the symbol is not
+#: still linked under another spelling or promoted.
+EXPERIMENTAL_REMOVAL = register_severity_raising_heuristic(
+    "experimental_removal",
+    owner=__name__,
+    fact=StructuralFact(
+        "compare.namespaces.removed_without_replacement", _no_replacement
+    ),
+    raises=("EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT",),
+    description="a declaration removed from an experimental::/preview:: namespace",
+    matcher=_has_experimental_segment,
 )
 
 
@@ -1086,6 +1112,12 @@ def _findings_for(
             still_linked=still_linked or promoted,
         )
         if event is None:
+            continue
+        if event == "removed" and not EXPERIMENTAL_REMOVAL.confirmed(
+            _segments(old_exp[0]),
+            (new_exp, new_stable, still_linked or promoted),
+            experimental_namespaces=experimental_namespaces,
+        ):
             continue
         out.append(
             _emit_experimental_change(

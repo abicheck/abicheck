@@ -66,6 +66,12 @@ RESERVED_FIELD = register_name_heuristic(
     "reserved_field",
     owner=__name__,
     effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=(
+        "FIELD_RENAMED",
+        "STRUCT_FIELD_REMOVED",
+        "TYPE_FIELD_REMOVED",
+        "TYPE_FIELD_TYPE_CHANGED",
+    ),
     description="a reserved/pad/spare/unused field name marks a layout placeholder",
     matcher=_is_reserved_field_name,
     patterns=(_RESERVED_FIELD_RE,),

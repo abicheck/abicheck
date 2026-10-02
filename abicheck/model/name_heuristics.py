@@ -55,6 +55,7 @@ __all__ = [
     "StructuralFact",
     "register_name_heuristic",
     "register_severity_raising_heuristic",
+    "heuristic_callables",
     "registered_name_heuristics",
 ]
 
@@ -172,10 +173,6 @@ class _Registered:
         self.patterns = patterns
 
     @property
-    def matcher(self) -> Callable[..., object]:
-        return self._matcher
-
-    @property
     def effect_name(self) -> str:
         raise NotImplementedError
 
@@ -183,10 +180,24 @@ class _Registered:
         return f"{type(self).__name__}({self.id!r}, owner={self.owner!r})"
 
 
+def heuristic_callables(
+    h: NameHeuristic | SeverityRaisingNameHeuristic,
+) -> tuple[Callable[..., object], ...]:
+    """The matcher and helpers that implement *h*'s spelling check.
+
+    Introspection only -- for the catalogue and the H4 site resolver, which
+    map source sites to the heuristic that owns them. Detector code must not
+    call these: a severity-raising heuristic is consulted only through
+    :meth:`SeverityRaisingNameHeuristic.confirmed`, and the gate
+    (``tests/test_family_f4_heuristics.py``) fails on any other caller.
+    """
+    return (h._matcher, *h.helpers)
+
+
 class NameHeuristic(_Registered):
     """A spelling-based classifier that may only lower or route to review."""
 
-    __slots__ = ("confirmed_by", "effect")
+    __slots__ = ("confirmed_by", "effect", "lowers_from")
 
     def __init__(
         self,
@@ -194,6 +205,7 @@ class NameHeuristic(_Registered):
         *,
         effect: NameHeuristicEffect,
         confirmed_by: StructuralFact | None,
+        lowers_from: tuple[str, ...] = (),
         **kw: Any,
     ) -> None:
         if not isinstance(effect, NameHeuristicEffect):
@@ -209,6 +221,9 @@ class NameHeuristic(_Registered):
         super().__init__(id, **kw)
         self.effect = effect
         self.confirmed_by = confirmed_by
+        #: ``ChangeKind`` member names this heuristic may *demote*: the
+        #: breaking kinds a call site emits when the name does not match.
+        self.lowers_from = tuple(lowers_from)
 
     @property
     def effect_name(self) -> str:
@@ -237,15 +252,23 @@ class SeverityRaisingNameHeuristic(_Registered):
     decides. There is intentionally no name-only query.
     """
 
-    __slots__ = ("fact",)
+    __slots__ = ("fact", "raises")
 
-    def __init__(self, id: str, *, fact: StructuralFact, **kw: Any) -> None:
+    def __init__(
+        self, id: str, *, fact: StructuralFact, raises: tuple[str, ...], **kw: Any
+    ) -> None:
         if not isinstance(fact, StructuralFact):
             raise TypeError(
                 f"severity-raising heuristic {id!r} must name a StructuralFact"
             )
+        if not raises or not all(isinstance(k, str) and k for k in raises):
+            raise ValueError(
+                f"severity-raising heuristic {id!r} must name the ChangeKind(s) it raises"
+            )
         super().__init__(id, **kw)
         self.fact = fact
+        #: ``ChangeKind`` member names whose emission this heuristic gates.
+        self.raises = tuple(raises)
 
     @property
     def effect_name(self) -> str:
@@ -275,6 +298,7 @@ def register_name_heuristic(
     description: str,
     matcher: Callable[..., object],
     confirmed_by: StructuralFact | None = None,
+    lowers_from: tuple[str, ...] = (),
     helpers: tuple[Callable[..., object], ...] = (),
     vocabularies: tuple[str, ...] = (),
     patterns: tuple[re.Pattern[str], ...] = (),
@@ -288,6 +312,7 @@ def register_name_heuristic(
         owner=owner,
         effect=effect,
         confirmed_by=confirmed_by,
+        lowers_from=lowers_from,
         description=description,
         matcher=matcher,
         helpers=helpers,
@@ -303,6 +328,7 @@ def register_severity_raising_heuristic(
     *,
     owner: str,
     fact: StructuralFact,
+    raises: tuple[str, ...],
     description: str,
     matcher: Callable[..., object],
     helpers: tuple[Callable[..., object], ...] = (),
@@ -310,11 +336,14 @@ def register_severity_raising_heuristic(
     patterns: tuple[re.Pattern[str], ...] = (),
 ) -> SeverityRaisingNameHeuristic:
     """Register a name-nominated classifier that can raise severity; *fact*
-    is required and decides every use."""
+    is required and decides every use, and *raises* names the ``ChangeKind``
+    members whose emission it gates (the H4 gate checks every such emission
+    is reachable only through :meth:`SeverityRaisingNameHeuristic.confirmed`)."""
     h = SeverityRaisingNameHeuristic(
         id,
         owner=owner,
         fact=fact,
+        raises=raises,
         description=description,
         matcher=matcher,
         helpers=helpers,

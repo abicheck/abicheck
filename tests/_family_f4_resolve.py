@@ -35,6 +35,7 @@ from typing import Any
 
 from _family_f4_inventory import _short
 
+from abicheck.model.name_heuristics import heuristic_callables
 from abicheck.policy.name_heuristics import name_heuristic_registry
 
 
@@ -47,7 +48,7 @@ def resolve_site(site: str, registry: Mapping[str, Any] | None = None) -> str | 
     module, qual, rest = site.split("::", 2)
     kind, _, pattern = rest.partition(":")
     for hid, h in sorted(reg.items()):
-        funcs = [_qual(f) for f in (h.matcher, *h.helpers)]
+        funcs = [_qual(f) for f in heuristic_callables(h)]
         if kind == "vocab":
             for ref in h.vocabularies:
                 vm, _, vn = ref.rpartition(":")

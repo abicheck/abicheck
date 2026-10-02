@@ -48,10 +48,12 @@ cells. There is no strict xfail: the #1411 sentinel and #1231
 from __future__ import annotations
 
 import collections
+import re
 
 import pytest
 from _family_f4_harness import CELLS, _scope_path_for_mutant, oracle_violations
-from _family_f4_inventory import heuristic_site_inventory, scanned_files
+from _family_f4_inventory import PKG, heuristic_site_inventory, scanned_files
+from _family_f4_raise_scan import raise_violations, raising_declarations_reached
 from _family_f4_registry import COVERED, EXEMPTION_REASONS, HEURISTICS
 from _family_f4_resolve import resolve_site
 
@@ -63,6 +65,7 @@ from abicheck.model.name_heuristics import (
     LazyFactInput,
     NameHeuristicEffect,
     StructuralFact,
+    heuristic_callables,
     register_name_heuristic,
     register_severity_raising_heuristic,
 )
@@ -84,12 +87,16 @@ UNCATEGORIZED_CEILING = 0
 #: Shrink-only ceilings on the exemption rows, per category. Lower a number
 #: when a row is deleted or registered; never raise one to admit a new
 #: naming-convention site -- register it at runtime instead.
+#: Raised once, in the same PR that widened the scan to post_processing*,
+#: surface.py and export_surface*.py: the 16 sites it found are all
+#: non-heuristic (ChangeKind-value prefixes, frozen-namespace user globs,
+#: mangling, C++ keywords, ``std::``).
 EXEMPTION_CEILINGS: dict[str, int] = {
-    "spelling": 63,
-    "grammar": 42,
-    "own_format": 35,
-    "platform": 19,
-    "user_rule": 9,
+    "spelling": 65,
+    "grammar": 43,
+    "own_format": 44,
+    "platform": 21,
+    "user_rule": 11,
     "sniff": 5,
 }
 
@@ -148,18 +155,30 @@ def test_registry_has_no_stale_rows() -> None:
 
 @pytest.mark.repo_scan
 def test_every_registered_heuristic_owns_a_site() -> None:
+    registry = name_heuristic_registry()
     owned = set(_resolved().values())
-    # A matcher that tokenizes through a shared helper owns no site of its
-    # own; it is still registered (and still routed), so list it explicitly.
-    shares_helpers = {
-        "internal_type_leak",
-        "internal_namespace_seed_veto",
-        "pimpl_renamed_member",
+    owning_callables = {
+        f
+        for hid in owned
+        if hid in registry
+        for f in heuristic_callables(registry[hid])
     }
-    phantom = set(name_heuristic_registry()) - owned - shares_helpers
+    #: Spelling checks the AST inventory cannot see (no regex/affix/vocab).
+    uninventoried = {
+        "bundle_soname_cohort": "the cohort stem is name.split('.', 1)[0]",
+    }
+    phantom = {
+        hid
+        for hid, h in registry.items()
+        if hid not in owned
+        and not set(heuristic_callables(h)) & owning_callables
+        and hid not in uninventoried
+    }
     assert not phantom, f"registered heuristics that own no inventoried site: {phantom}"
+    assert set(uninventoried) <= set(registry)
 
 
+@pytest.mark.repo_scan
 def test_exemption_rows_are_well_formed() -> None:
     bad = {k: v for k, v in HEURISTICS.items() if v not in EXEMPTION_REASONS}
     assert not bad, f"rows naming no exemption category: {bad}"
@@ -198,6 +217,66 @@ def test_covered_heuristics_are_registered_and_name_cells() -> None:
         assert not missing, f"{name}: unknown cells {missing}"
         referenced.update(cells)
     assert referenced == set(CELLS), f"orphan cells: {set(CELLS) - referenced}"
+
+
+# --------------------------------------------------------------------------
+# No name reaches a breaking finding except through a declared path
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.repo_scan
+def test_no_name_heuristic_reaches_an_undeclared_breaking_kind() -> None:
+    """Every BREAKING/API_BREAK kind reachable from a function that consults
+    a registered handle is either one a lowering handle there declares it
+    demotes (``lowers_from``), or one a severity-raising handle confirmed in
+    the same reach declares it gates (``raises``)."""
+    violations = raise_violations(dict(name_heuristic_registry()))
+    assert not violations, (
+        "a name heuristic can reach a breaking finding with no structural "
+        "fact: register it through register_severity_raising_heuristic "
+        "(raises=...) and gate the emission on .confirmed(), or declare the "
+        f"kind in lowers_from if the name only demotes it: {violations}"
+    )
+
+
+@pytest.mark.repo_scan
+def test_scan_reports_a_lowering_handle_that_stops_declaring_its_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Negative control: without its declaration, reserved_field's
+    # neighbouring FIELD_RENAMED emission is a violation.
+    registry = dict(name_heuristic_registry())
+    monkeypatch.setattr(registry["reserved_field"], "lowers_from", ())
+    assert any("FIELD_RENAMED" in v for v in raise_violations(registry))
+
+
+@pytest.mark.repo_scan
+def test_raising_declarations_are_live() -> None:
+    reached = raising_declarations_reached()
+    stale = {
+        hid: sorted(set(h.raises) - reached.get(hid, set()))
+        for hid, h in severity_raising_heuristics().items()
+        if set(h.raises) - reached.get(hid, set())
+    }
+    assert not stale, f"raises= kinds no .confirmed() call can reach: {stale}"
+
+
+@pytest.mark.repo_scan
+def test_detectors_never_touch_heuristic_internals() -> None:
+    """The name-only check behind a handle is reachable only from the
+    registry's own modules and this harness."""
+    allowed = {
+        PKG / "model" / "name_heuristics.py",
+        PKG / "policy" / "name_heuristics.py",
+    }
+    offenders = []
+    for path in sorted(PKG.rglob("*.py")):
+        if path in allowed or "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"\._matcher\b|\bheuristic_callables\b", text):
+            offenders.append(str(path.relative_to(PKG.parent)))
+    assert not offenders, offenders
 
 
 # --------------------------------------------------------------------------
@@ -242,6 +321,7 @@ def test_raising_registration_requires_a_structural_fact(fact: object) -> None:
             "probe_raise",
             owner="abicheck.probe",
             fact=fact,  # type: ignore[arg-type]
+            raises=("FUNC_REMOVED",),
             description="probe",
             matcher=bool,
         )
@@ -259,6 +339,7 @@ def test_raising_handle_is_name_and_fact() -> None:
         "probe_truth_table",
         owner="abicheck.probe",
         fact=StructuralFact("compare.probe.holds", bool),
+        raises=("FUNC_REMOVED",),
         description="probe",
         matcher=lambda name: name.startswith("x"),
     )
@@ -275,6 +356,7 @@ def test_lazy_fact_input_is_built_only_after_the_name_nominates() -> None:
         "probe_lazy",
         owner="abicheck.probe",
         fact=StructuralFact("compare.probe.holds", bool),
+        raises=("FUNC_REMOVED",),
         description="probe",
         matcher=lambda name: name.startswith("x"),
     )

@@ -50,9 +50,12 @@ from typing import TYPE_CHECKING
 
 from .checker_types import Change
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
+    BUNDLE_SONAME_COHORT,
     CPU_DISPATCH_ISA,
     PIMPL_RENAMED_MEMBER,
+    SYCL_OVERLOAD_REMOVAL,
     SYCL_QUEUE_OVERLOAD,
+    _cohort_key,
     _has_sycl_queue_first_param as _has_sycl_queue_first_param,
     _isa_token_in_symbol as _isa_token_in_symbol,
 )
@@ -218,10 +221,8 @@ def detect_sycl_overload_set_removal(
     # already uses.
     by_entity: dict[str, list[Function]] = defaultdict(list)
     for fn in old_funcs:
-        if fn.mangled in new_mangled:
-            continue
-        if not SYCL_QUEUE_OVERLOAD.matches(
-            fn, type_qualified_index=type_qualified_index
+        if not SYCL_OVERLOAD_REMOVAL.confirmed(
+            fn, (fn.mangled, new_mangled), type_qualified_index=type_qualified_index
         ):
             continue
         by_entity[_callable_stem(fn.name)].append(fn)
@@ -1160,22 +1161,6 @@ def _extract_soname_major(soname: str) -> int | None:
     return None
 
 
-def _cohort_key(library: str) -> str:
-    """Strip version-y suffixes to derive a cohort key for clustering.
-
-    Vendor-hash-stripped first: an auditwheel/delocate-vendored library's
-    filename carries a content hash that changes on every rebuild
-    (``libfoo-a1b2c3d4.so.1``), which would otherwise put the same logical
-    library into a different cohort every build and silently drop it from
-    skew analysis instead of pairing it (see
-    ``diff_platform_elf_dynamic._diff_elf_dynamic_section``).
-    """
-    name = strip_vendor_hash(library)
-    # Drop everything from the first dot onwards: libfoo_core.so.2
-    # -> libfoo_core.
-    return name.split(".", 1)[0]
-
-
 def detect_bundle_soname_skew(
     old_members: list[BundleMember],
     new_members: list[BundleMember],
@@ -1201,7 +1186,9 @@ def detect_bundle_soname_skew(
         if cohort_prefix and not ckey.startswith(cohort_prefix):
             continue
         new_member = new_by_cohort.get(ckey)
-        if new_member is None:
+        if new_member is None or not BUNDLE_SONAME_COHORT.confirmed(
+            (m.library, new_member.library), (m.soname, new_member.soname)
+        ):
             continue
         old_maj = m.soname_major
         new_maj = new_member.soname_major

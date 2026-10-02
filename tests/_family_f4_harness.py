@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from _family_f1_harness import Side, _enum, _fn, _rec, _snapshot
 
 from abicheck.checker import Verdict, compare
+from abicheck.diff_cpp_patterns import BundleMember, detect_bundle_soname_skew
 from abicheck.model import AbiSnapshot, AccessLevel, ScopeOrigin
 
 _BROKEN = frozenset({Verdict.BREAKING, Verdict.API_BREAK})
@@ -44,11 +45,14 @@ _BROKEN = frozenset({Verdict.BREAKING, Verdict.API_BREAK})
 
 @dataclass(frozen=True)
 class Cell:
-    build: Callable[[], tuple[AbiSnapshot, AbiSnapshot]]
+    build: Callable[[], tuple[AbiSnapshot, AbiSnapshot]] | None = None
     must: frozenset[tuple[str, str]] = frozenset()
     must_not_kinds: frozenset[str] = frozenset()
     breaking: bool | None = None
     notes: str = field(default="", compare=False)
+    #: A detector outside ``compare()`` (bundle-level): returns its findings
+    #: as raw ``(kind, symbol)`` pairs; ``build``/``breaking`` are unused.
+    direct: Callable[[], frozenset[tuple[str, str]]] | None = None
 
 
 def _pair(old: Side, new: Side) -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -123,6 +127,49 @@ def _pimpl_rename(
         )
 
     return lambda: _pair(side("count"), side("n_count"))
+
+
+def _c_symbols(
+    old: tuple[str, ...], new: tuple[str, ...]
+) -> Callable[[], tuple[AbiSnapshot, AbiSnapshot]]:
+    """Unmangled C exports (``mangled == name``)."""
+
+    def side(names: tuple[str, ...]) -> Side:
+        fns = (dataclasses.replace(_fn(n), mangled=n) for n in names)
+        return Side(functions=(_fn("foo"), *fns))
+
+    return lambda: _pair(side(old), side(new))
+
+
+def _sycl_family(first_param: str, *, removed: bool = True):  # type: ignore[no-untyped-def]
+    old = (
+        ("ns::a", (first_param,)),
+        ("ns::a", ()),
+        ("ns::b", (first_param,)),
+        ("ns::b", ()),
+    )
+    new = (("ns::a", ()), ("ns::b", ())) if removed else old
+    return _fn_pair(old, new)
+
+
+def _bundle(
+    old: tuple[tuple[str, str], ...], new: tuple[tuple[str, str], ...]
+) -> Callable[[], frozenset[tuple[str, str]]]:
+    """``(filename, DT_SONAME)`` members; an empty SONAME means unread."""
+
+    def members(spec: tuple[tuple[str, str], ...]) -> list[BundleMember]:
+        return [
+            BundleMember(
+                library=lib, soname=so, soname_major=int(lib.rsplit(".", 1)[1])
+            )
+            for lib, so in spec
+        ]
+
+    def run() -> frozenset[tuple[str, str]]:
+        found = detect_bundle_soname_skew(members(old), members(new))
+        return frozenset((c.kind.value, c.symbol) for c in found)
+
+    return run
 
 
 def _reached_by_value(qname: str) -> Callable[[], tuple[AbiSnapshot, AbiSnapshot]]:
@@ -353,6 +400,76 @@ CELLS: dict[str, Cell] = {
         must=frozenset({("field_renamed", "ns::details::Impl")}),
         must_not_kinds=frozenset({"inline_body_references_renamed_member"}),
     ),
+    "prefix_rename.control.prefixed": Cell(
+        _c_symbols(("init", "shutdown"), ("mylib_init", "mylib_shutdown")),
+        must=frozenset({("symbol_renamed_batch", "batch_rename:mylib_*")}),
+        breaking=True,
+    ),
+    "prefix_rename.fp.old_names_kept": Cell(
+        _c_symbols(
+            ("init", "shutdown"), ("init", "shutdown", "mylib_init", "mylib_shutdown")
+        ),
+        must_not_kinds=frozenset({"symbol_renamed_batch", "func_removed"}),
+        breaking=False,
+        notes="prefixed names pair by spelling, but nothing left the surface",
+    ),
+    "prefix_rename.fn.suffixed": Cell(
+        _c_symbols(("init", "shutdown"), ("init_v2", "shutdown_v2")),
+        must=frozenset({("func_removed", "init"), ("func_removed", "shutdown")}),
+        must_not_kinds=frozenset({"symbol_renamed_batch"}),
+        breaking=True,
+    ),
+    "sycl.control.family_removed": Cell(
+        _sycl_family("sycl::queue&"),
+        must=frozenset({("sycl_overload_set_removed", "<sycl_overload_family>")}),
+        breaking=True,
+    ),
+    "sycl.fp.family_kept": Cell(
+        _sycl_family("sycl::queue&", removed=False),
+        must_not_kinds=frozenset({"sycl_overload_set_removed"}),
+        breaking=False,
+        notes="sycl::queue overloads by spelling, but none was removed",
+    ),
+    "sycl.fn.near_miss_queue": Cell(
+        _sycl_family("mylib::queue&"),
+        must_not_kinds=frozenset({"sycl_overload_set_removed"}),
+        breaking=True,
+    ),
+    "bundle.control.skew": Cell(
+        direct=_bundle(
+            (
+                ("libfoo_core.so.1", "libfoo_core.so.1"),
+                ("libfoo_io.so.1", "libfoo_io.so.1"),
+            ),
+            (
+                ("libfoo_core.so.2", "libfoo_core.so.2"),
+                ("libfoo_io.so.1", "libfoo_io.so.1"),
+            ),
+        ),
+        must=frozenset({("bundle_soname_skew", "<bundle>")}),
+    ),
+    "bundle.fp.soname_unread": Cell(
+        direct=_bundle(
+            (("libfoo_core.so.1", ""), ("libfoo_io.so.1", "libfoo_io.so.1")),
+            (("libfoo_core.so.2", ""), ("libfoo_io.so.1", "libfoo_io.so.1")),
+        ),
+        must_not_kinds=frozenset({"bundle_soname_skew"}),
+        notes="filenames pair the cohort, but one side's DT_SONAME was never read",
+    ),
+    "bundle.fn.lockstep_bump": Cell(
+        direct=_bundle(
+            (
+                ("libfoo_core.so.1", "libfoo_core.so.1"),
+                ("libfoo_io.so.1", "libfoo_io.so.1"),
+            ),
+            (
+                ("libfoo_core.so.2", "libfoo_core.so.2"),
+                ("libfoo_io.so.2", "libfoo_io.so.2"),
+            ),
+        ),
+        must_not_kinds=frozenset({"bundle_soname_skew"}),
+        notes="every member bumped together: no skew",
+    ),
     "internal_leak.control.reached_by_value": Cell(
         _reached_by_value("ns::detail::Cfg"),
         must=frozenset({("internal_type_leaks_via_public_api", "ns::detail::Cfg")}),
@@ -379,7 +496,10 @@ NEUTRAL_TWIN: dict[str, str] = {
 }
 
 
-def run_cell(cell: Cell) -> tuple[Verdict, frozenset[tuple[str, str]]]:
+def run_cell(cell: Cell) -> tuple[Verdict | None, frozenset[tuple[str, str]]]:
+    if cell.direct is not None:
+        return None, cell.direct()
+    assert cell.build is not None
     old, new = cell.build()
     r = compare(old, new)
     return r.verdict, frozenset((c.kind.value, c.symbol) for c in r.changes)
@@ -391,7 +511,11 @@ def oracle_violations(cell_id: str, cell: Cell) -> list[str]:
     out = [f"{cell_id}: missing {k}" for k in sorted(cell.must - found)]
     kinds = {k for k, _ in found}
     out += [f"{cell_id}: unexpected {k}" for k in sorted(cell.must_not_kinds & kinds)]
-    if cell.breaking is not None and (verdict in _BROKEN) != cell.breaking:
+    if (
+        cell.breaking is not None
+        and verdict is not None
+        and (verdict in _BROKEN) != cell.breaking
+    ):
         out.append(f"{cell_id}: verdict {verdict.value} (breaking={cell.breaking})")
     twin = NEUTRAL_TWIN.get(cell_id)
     if twin is not None:

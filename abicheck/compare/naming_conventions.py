@@ -34,6 +34,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from ..diff_symbols_renames import find_prefix_rename_pairs
+from ..model.binary_naming import strip_vendor_hash
 from ..model.name_heuristics import (
     NameHeuristicEffect,
     StructuralFact,
@@ -121,6 +122,7 @@ def _symbol_replaced_in_export_table(
 INLINE_NAMESPACE_MOVE = register_severity_raising_heuristic(
     "inline_namespace_move",
     owner=__name__,
+    raises=("INLINE_NAMESPACE_MOVED",),
     description="two exports whose names differ only by a ::vN::/::__N:: segment moved",
     matcher=_differ_only_by_inline_namespace,
     helpers=(_strip_inline_ns,),
@@ -181,6 +183,7 @@ def _public_instantiation_removed(
 INTERNAL_TEMPLATE_LEAK = register_severity_raising_heuristic(
     "internal_template_leak",
     owner=__name__,
+    raises=("INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API",),
     description=(
         "a template in a detail::/impl::/internal:: namespace instantiated in "
         "the public export table"
@@ -248,6 +251,24 @@ SYCL_QUEUE_OVERLOAD = register_name_heuristic(
     description="a first parameter spelled sycl::queue marks a DPC++ overload family",
     matcher=_has_sycl_queue_first_param,
     patterns=(_SYCL_QUEUE_PARAM_RE,),
+)
+
+
+def _left_export_table(fact_input: tuple[str, set[str]]) -> bool:
+    mangled, new_mangled = fact_input
+    return mangled not in new_mangled
+
+
+#: The same spelling, as a removal: a ``sycl_overload_set_removed`` (BREAKING)
+#: member must have left NEW's public surface. The review-only handle above
+#: stays for the surviving-sibling guard, which can only suppress the finding.
+SYCL_OVERLOAD_REMOVAL = register_severity_raising_heuristic(
+    "sycl_overload_removal",
+    owner=__name__,
+    fact=StructuralFact("compare.export_table.symbol_removed", _left_export_table),
+    raises=("SYCL_OVERLOAD_SET_REMOVED",),
+    description="a removed overload whose first parameter is sycl::queue",
+    matcher=_has_sycl_queue_first_param,
 )
 
 
@@ -409,6 +430,7 @@ TYPEDEF_VERSION_STAMP = register_name_heuristic(
     "typedef_version_stamp",
     owner=__name__,
     effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=("TYPEDEF_REMOVED", "TYPEDEF_BASE_CHANGED"),
     description=(
         "a *_version_N_N_N typedef is a compile-time version sentinel, not "
         "part of the binary ABI"
@@ -422,15 +444,27 @@ TYPEDEF_VERSION_STAMP = register_name_heuristic(
 )
 
 
-#: Registered name heuristic (design-hardening Phase 5): a shared name suffix
-#: only *routes to review* -- it groups removals that are each still
-#: reported into one ``symbol_renamed_batch`` finding of the same severity.
-PREFIX_RENAME = register_name_heuristic(
+def _is_prefix_rename_pair(pair: tuple[str, str]) -> bool:
+    old_name, new_name = pair
+    return len(new_name) > len(old_name) and new_name.endswith(old_name)
+
+
+def _pair_replaced(fact_input: tuple[tuple[str, str], set[str], set[str]]) -> bool:
+    (old_name, new_name), removed, added = fact_input
+    return old_name in removed and new_name in added
+
+
+#: From diff_symbols_renames. A shared name suffix nominates a rename pair;
+#: ``symbol_renamed_batch`` (BREAKING) counts it only when the old name left
+#: the public surface and the new one entered it.
+PREFIX_RENAME = register_severity_raising_heuristic(
     "prefix_rename",
     owner=__name__,
-    effect=NameHeuristicEffect.ROUTE_TO_REVIEW,
+    fact=StructuralFact("compare.export_table.pair_replaced", _pair_replaced),
+    raises=("SYMBOL_RENAMED_BATCH",),
     description="an added name equal to a removed one plus a prepended prefix is a rename",
-    matcher=find_prefix_rename_pairs,
+    matcher=_is_prefix_rename_pair,
+    helpers=(find_prefix_rename_pairs,),
 )
 
 
@@ -445,10 +479,52 @@ def _holder_with_inline_accessors(fact_input: tuple[object, object]) -> bool:
 PIMPL_RENAMED_MEMBER = register_severity_raising_heuristic(
     "pimpl_renamed_member",
     owner=__name__,
+    raises=("INLINE_BODY_REFERENCES_RENAMED_MEMBER",),
     description="a member renamed inside a detail::/impl:: type behind a public pimpl",
     matcher=is_internal_type,
     fact=StructuralFact(
         "compare.cpp_patterns.public_pimpl_holder_has_inline_accessor",
         _holder_with_inline_accessors,
     ),
+)
+
+
+def _cohort_key(library: str) -> str:
+    """Strip version-y suffixes to derive a cohort key for clustering.
+
+    Vendor-hash-stripped first: an auditwheel/delocate-vendored library's
+    filename carries a content hash that changes on every rebuild
+    (``libfoo-a1b2c3d4.so.1``), which would otherwise put the same logical
+    library into a different cohort every build and silently drop it from
+    skew analysis instead of pairing it (see
+    ``diff_platform_elf_dynamic._diff_elf_dynamic_section``).
+    """
+    name = strip_vendor_hash(library)
+    # Drop everything from the first dot onwards: libfoo_core.so.2
+    # -> libfoo_core.
+    return name.split(".", 1)[0]
+
+
+def _same_cohort(libraries: tuple[str, str]) -> bool:
+    old_lib, new_lib = libraries
+    return _cohort_key(old_lib) == _cohort_key(new_lib)
+
+
+def _soname_read_on_both_sides(sonames: tuple[str, str]) -> bool:
+    return all(bool(s) for s in sonames)
+
+
+#: From diff_cpp_patterns. The filename cohort only pairs OLD and NEW
+#: members; ``bundle_soname_skew`` (BREAKING) compares majors read from each
+#: binary's own DT_SONAME, so a pair counts only when both were read.
+BUNDLE_SONAME_COHORT = register_severity_raising_heuristic(
+    "bundle_soname_cohort",
+    owner=__name__,
+    fact=StructuralFact(
+        "compare.bundle.soname_read_on_both_sides", _soname_read_on_both_sides
+    ),
+    raises=("BUNDLE_SONAME_SKEW",),
+    description="libraries whose filenames share a cohort stem are one library across releases",
+    matcher=_same_cohort,
+    helpers=(_cohort_key,),
 )
