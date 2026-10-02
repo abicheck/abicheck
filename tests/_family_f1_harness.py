@@ -36,7 +36,7 @@ import importlib
 import pkgutil
 import re
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,6 +45,7 @@ from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.extract.export_table_read import finish_binary_snapshot
+from abicheck.extract.semantic_normalizer import normalize_header_ast
 from abicheck.extract.surface_fact_producers import header_ast_surface_facts
 from abicheck.model import (
     AbiSnapshot,
@@ -62,6 +63,14 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.model.declaration_store import DECLARATION_KINDS
+from abicheck.model.extraction_scope import EntityOwnership
+from abicheck.model.identity import (
+    entity_id_for_enum,
+    entity_id_for_function,
+    entity_id_for_type,
+    entity_id_for_variable,
+)
+from abicheck.model.semantic_ir import SemanticIR
 from abicheck.policy.contract_coverage_exit import coverage_exit_floor
 
 # --------------------------------------------------------------------------
@@ -160,11 +169,39 @@ _EXPORTED_DECL_FACTS: dict[str, Any] = header_ast_surface_facts(
     exported=True, producer="castxml"
 )
 
+#: A real producer's classification (ADR-075), so every declaration's
+#: ``ownership_fact`` is PRESENT in the full-evidence baseline and H1 ablates it.
+_OWNED = Fact.present(EntityOwnership("target", "public", "corpus"))
+
+#: Header-AST facts a castxml/clang producer captures for every function, set
+#: to ordinary "captured, nothing special" values so each is PRESENT in the
+#: baseline and H1's ablation of it is not a swap of one unknown for another.
+_CAPTURED_FUNCTION_FACTS: dict[str, Any] = {
+    "contract_attributes": [],
+    "exception_spec": "",
+    "is_override": False,
+    "is_hidden_friend": False,
+    "hidden_friend_owner_fact": Fact.present(None),
+    "is_compiler_generated": False,
+    "ownership_fact": _OWNED,
+}
+
+
+#: Every record/enum the corpus declares. A castxml producer records which of
+#: them each type slot resolves to (``*.type_identities_fact``, schema v54).
+_CORPUS_TYPE_NAMES = ("Point", "Base", "Derived", "Handle", "Color")
+
+
+def _ids(type_: str) -> Fact[tuple[str, ...]]:
+    bare = type_.replace("*", "").replace("const", "").strip()
+    return Fact.present((bare,) if bare in _CORPUS_TYPE_NAMES else ())
+
 
 def _param(name: str, type_: str = "int") -> Param:
     return Param(
         name=name,
         type=type_,
+        type_identities_fact=_ids(type_),
         kind=ParamKind.VALUE,
         is_va_list=False,
         is_restrict=False,
@@ -178,6 +215,7 @@ def _fn(
         name=name,
         mangled=f"_Z{len(name)}{name}{'i' * len(params) or 'v'}",
         return_type=ret,
+        return_type_identities_fact=_ids(ret),
         params=[_param(f"a{i}", t) for i, t in enumerate(params)],
         visibility=Visibility.PUBLIC,
         is_variadic=False,
@@ -185,7 +223,7 @@ def _fn(
         deprecated=None,
         source_header="/inc/x.h",
         elf_binding_fact=Fact.present(SymbolBinding.GLOBAL),
-        **{**_EXPORTED_DECL_FACTS, **kw},
+        **{**_EXPORTED_DECL_FACTS, **_CAPTURED_FUNCTION_FACTS, **kw},
     )
 
 
@@ -194,11 +232,14 @@ def _var(name: str, type_: str = "int") -> Variable:
         name=name,
         mangled=f"_ZL{len(name)}{name}",
         type=type_,
+        type_identities_fact=_ids(type_),
         visibility=Visibility.PUBLIC,
         access=AccessLevel.PUBLIC,
         source_header="/inc/x.h",
         deprecated=None,
         elf_binding_fact=Fact.present(SymbolBinding.GLOBAL),
+        alignment_bits=32,
+        ownership_fact=_OWNED,
         **_EXPORTED_DECL_FACTS,
     )
 
@@ -207,6 +248,7 @@ def _field(name: str, type_: str, off: int) -> TypeField:
     return TypeField(
         name=name,
         type=type_,
+        type_identities_fact=_ids(type_),
         offset_bits=off,
         is_const=False,
         is_volatile=False,
@@ -241,6 +283,7 @@ def _rec(
         qualified_name=name,
         source_header="/inc/x.h",
         deprecated=None,
+        ownership_fact=_OWNED,
     )
 
 
@@ -253,6 +296,7 @@ def _enum(name: str, members: tuple[tuple[str, int], ...]) -> EnumType:
         qualified_name=name,
         source_header="/inc/x.h",
         deprecated=None,
+        ownership_fact=_OWNED,
     )
 
 
@@ -313,7 +357,53 @@ class Side:
     enums: tuple[EnumType, ...] = ()
 
 
+def _with_entity_ids(side: Side) -> Side:
+    """Each declaration's ``entity_id`` as a header-AST backend assigns it, so
+    the snapshot can carry the normalizer's ``SemanticIR`` (ADR-063 Phase 6)."""
+    return Side(
+        functions=tuple(
+            dataclasses.replace(
+                f,
+                entity_id=entity_id_for_function(
+                    (),
+                    f.name,
+                    mangled_name=f.mangled,
+                    param_types=tuple(p.type for p in f.params),
+                ),
+            )
+            for f in side.functions
+        ),
+        variables=tuple(
+            dataclasses.replace(
+                v, entity_id=entity_id_for_variable((), v.name, mangled_name=v.mangled)
+            )
+            for v in side.variables
+        ),
+        types=tuple(
+            dataclasses.replace(t, entity_id=entity_id_for_type((), t.name))
+            for t in side.types
+        ),
+        enums=tuple(
+            dataclasses.replace(e, entity_id=entity_id_for_enum((), e.name))
+            for e in side.enums
+        ),
+    )
+
+
+def _semantic_ir(side: Side) -> SemanticIR:
+    return normalize_header_ast(
+        types=side.types,
+        enums=side.enums,
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=side.functions,
+        variables=side.variables,
+    )
+
+
 def _snapshot(version: str, side: Side) -> AbiSnapshot:
+    side = _with_entity_ids(side)
     funcs, vars_ = list(side.functions), list(side.variables)
     # The builders' real shared tail stamps the export-read facts
     # (binary_exported / elf_binding) from the ELF table, so the full-evidence
@@ -331,8 +421,25 @@ def _snapshot(version: str, side: Side) -> AbiSnapshot:
             from_headers=True,
             platform="elf",
             ast_resolved_standard_fact=Fact.present("c++17"),
+            public_header_identifiers=_header_identifiers(side),
+            semantic_ir=_semantic_ir(side),
         )
     )
+
+
+def _header_identifiers(side: Side) -> frozenset[str]:
+    """Every identifier the side's public header would spell -- what
+    ``extract/public_header_identifiers`` records from the raw header text."""
+    names: set[str] = set()
+    for decl in (*side.functions, *side.variables):
+        names.add(decl.name)
+    for rec in side.types:
+        names.add(rec.name)
+        names.update(f.name for f in rec.fields)
+    for en in side.enums:
+        names.add(en.name)
+        names.update(m.name for m in en.members)
+    return frozenset(names)
 
 
 def _handle(
@@ -453,8 +560,13 @@ def _rewrite(obj: Any, cls: type, fname: str, value: Any, hits: list[int]) -> An
         return [_rewrite(x, cls, fname, value, hits) for x in obj]
     if isinstance(obj, tuple):
         return tuple(_rewrite(x, cls, fname, value, hits) for x in obj)
-    if isinstance(obj, dict):
-        return {k: _rewrite(v, cls, fname, value, hits) for k, v in obj.items()}
+    if isinstance(obj, Mapping):
+        # Any mapping, not just ``dict``: ``SemanticIR.occurrences`` is a
+        # ``FrozenMapping``. Rebuilt in its own type only when a value changed.
+        items = {k: _rewrite(v, cls, fname, value, hits) for k, v in obj.items()}
+        if all(items[k] is v for k, v in obj.items()):
+            return obj
+        return items if isinstance(obj, dict) else type(obj)(items)
     if not (dataclasses.is_dataclass(obj) and not isinstance(obj, type)) or isinstance(
         obj, Fact
     ):
@@ -501,7 +613,7 @@ def present_fact_count(snap: AbiSnapshot, site: tuple[type, str]) -> int:
             for x in obj:
                 walk(x)
             return
-        if isinstance(obj, dict):
+        if isinstance(obj, Mapping):
             for x in obj.values():
                 walk(x)
             return
@@ -561,6 +673,25 @@ def _unread_export_table(s: AbiSnapshot) -> AbiSnapshot | None:
     return finish_binary_snapshot(s)
 
 
+def _no_canonical_ir(s: AbiSnapshot) -> AbiSnapshot | None:
+    if s.semantic_ir is None or not s.semantic_ir.canonical:
+        return None
+    return dataclasses.replace(s, semantic_ir=None)
+
+
+def _unscanned_identifiers(
+    fact: Fact[frozenset[str] | None],
+) -> Callable[[AbiSnapshot], AbiSnapshot | None]:
+    def op(s: AbiSnapshot) -> AbiSnapshot | None:
+        if s.public_header_identifiers is None:
+            return None
+        return dataclasses.replace(
+            s, public_header_identifiers=None, public_header_identifiers_fact=fact
+        )
+
+    return op
+
+
 #: Container ablations: "missing" (container never captured) plus, for the
 #: export table, "returns empty" and "read failed". Keyed by inventory site.
 #: A silently *truncated* table is deliberately absent: the model carries no
@@ -577,6 +708,16 @@ CONTAINER_ABLATIONS: dict[
         "unread_export_table": _unread_export_table,
     },
     "AbiSnapshot.dwarf": {"missing": _drop("dwarf")},
+    # The canonical IR was never built (a DWARF-only/PE-only extraction, a
+    # pre-v38 snapshot): the declarations stay, the occurrences go.
+    "AbiSnapshot.semantic_ir": {"missing": _no_canonical_ir},
+    # The header-identifier index (schema v55): never scanned, or the scan
+    # failed. Either must leave an undeclared export UNKNOWN_UNRESOLVED, never
+    # "searched completely, no commitment".
+    "AbiSnapshot.public_header_identifiers": {
+        "missing": _unscanned_identifiers(Fact.not_collected()),
+        "read_failed": _unscanned_identifiers(Fact.failed("header unreadable")),
+    },
 }
 
 
@@ -619,6 +760,9 @@ class Outcome:
 CONFIGS: dict[str, dict[str, Any]] = {
     "default": {},
     "contract_exports": {"contract_evaluation": True, "contract_mode": "exports"},
+    # The domain that reads the header-identifier index and the captured
+    # type identities (closed-domain decisions, the exact closure walk).
+    "contract_public": {"contract_evaluation": True, "contract_mode": "public"},
 }
 
 
@@ -663,6 +807,29 @@ def gap_stated(full: Outcome, ablated: Outcome) -> bool:
     )
 
 
+#: The same layout observation reported by two layers: the DWARF layout
+#: detector's kind and the header-layer kind for one record. With the header
+#: layer's evidence unknown (e.g. ``CanonicalEntity.size_bits``) the header
+#: detector stands down and the DWARF one reports the change instead -- the
+#: break is kept, not fabricated. Spelled out here, not imported from the
+#: pipeline's dedup table, so the oracle does not reuse what it checks.
+_SAME_OBSERVATION: dict[str, str] = {
+    "struct_size_changed": "type_size_changed",
+    "struct_alignment_changed": "type_alignment_changed",
+    "struct_field_offset_changed": "type_field_offset_changed",
+    "struct_field_removed": "type_field_removed",
+    "struct_field_type_changed": "type_field_type_changed",
+}
+
+
+def _fabricated(full: Outcome, ablated: Outcome) -> list[tuple[str, str]]:
+    return sorted(
+        (kind, symbol)
+        for kind, symbol in ablated.breaking - full.breaking
+        if (_SAME_OBSERVATION.get(kind), symbol) not in full.breaking
+    )
+
+
 def oracle_violations(case: str, full: Outcome, ablated: Outcome) -> list[str]:
     """Check the three F1 oracles; return human-readable violations."""
     out = []
@@ -674,7 +841,7 @@ def oracle_violations(case: str, full: Outcome, ablated: Outcome) -> list[str]:
         out.append(
             f"(a) silent clean: {full.verdict.value} -> {ablated.verdict.value} with no stated gap"
         )
-    extra = ablated.breaking - full.breaking
+    extra = _fabricated(full, ablated)
     if extra:
         out.append(f"(b) fabricated BREAKING findings: {sorted(extra)}")
     if case == "identical" and ablated.verdict in _BROKEN:
