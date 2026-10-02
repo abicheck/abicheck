@@ -100,6 +100,7 @@ from .extract.surface_fact_producers import header_ast_surface_facts
 from .model import (
     AccessLevel,
     EnumType,
+    Fact,
     Function,
     Param,
     RecordType,
@@ -605,6 +606,12 @@ class _CastxmlParser:
                     # == "1"` read for the same XML attribute castxml emits
                     # on a Variable element too (confirmed empirically).
                     is_static=el.get("static") == "1",
+                    # Schema v54 -- see Param.type_identities_fact.
+                    type_identities_fact=Fact.present(
+                        _castxml_type_resolution.type_identities(
+                            self._ctx, el.get("type", "")
+                        )
+                    ),
                     # ADR-063 Phase 2 -- see symbol_is_bare_name above.
                     entity_id=entity_id_for_variable(
                         self._scope_path(el),

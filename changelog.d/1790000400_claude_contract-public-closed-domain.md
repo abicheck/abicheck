@@ -8,7 +8,7 @@
   `UNKNOWN_UNRESOLVED`. A declaration inside an inactive `#if` branch keeps
   it unresolved (catalog case97), and without `--contract` nothing changes
   (catalog case182 stays BREAKING).
-- Snapshot schema v54: header-derived snapshots carry
+- Snapshot schema v55: header-derived snapshots carry
   `public_header_identifiers_fact`, the identifier tokens of the public
   header set's raw text (comments stripped, every `#if` branch included),
   with a stated reason when it could not be captured (no header set, an

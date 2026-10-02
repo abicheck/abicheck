@@ -149,6 +149,77 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
     return el.get("name", tag)
 
 
+#: Wrapper nodes whose referent is the same entity a slot names: walking
+#: through them changes the spelling (``*``/``&``/``const``/``[N]``/an alias
+#: name), never *which* record or enum is meant.
+_IDENTITY_TRANSPARENT_TAGS = frozenset(
+    {
+        "PointerType",
+        "ReferenceType",
+        "RValueReferenceType",
+        "CvQualifiedType",
+        "ElaboratedType",
+        "ArrayType",
+        "Typedef",
+        "AtomicType",
+    }
+)
+
+
+def type_identities(ctx: CastxmlParserContext, id_: str) -> tuple[str, ...]:
+    """The exact identity of the record/enum a type slot resolves to.
+
+    ``type_name`` renders a slot as its bare source spelling -- ``Cache *``
+    -- which cannot say *which* ``Cache`` when ``ns1::Cache`` and
+    ``ns2::Cache`` both exist. castxml's type graph already answers that:
+    the slot's id leads, through pointer/reference/cv/array/typedef wrapper
+    nodes, to one concrete ``Struct``/``Class``/``Union``/``Enumeration``
+    element, whose qualified name is computed by the same
+    :func:`qualified_type_name` the record/enum parsers stamp on
+    ``RecordType.qualified_name``/``EnumType.qualified_name`` -- so the
+    identity matches that model entry exactly, by construction.
+
+    Returns ``()`` when the slot names no record/enum (a fundamental type,
+    a function type, an unresolved id, the depth cap), which is a captured
+    answer, distinct from the ``None`` a backend that never looked records.
+    A global-scope record has no qualified name; its bare name *is* its
+    identity, matching ``_record_exact_identities``'s ``qualified_name or
+    name``. An anonymous record reached through a ``typedef`` takes the
+    nearest crossed alias's name -- the ``override_name`` ``records.
+    parse_types`` builds that record under (``typedef struct { ... } Foo``);
+    with no alias crossed it has no stable name, and yields nothing rather
+    than a location-bearing placeholder. Should the two ever pick different
+    aliases of one anonymous body, the identity names no record and the
+    consumer simply finds nothing to confirm -- a miss, never a wrong match.
+
+    Deliberately does not descend into template arguments: an
+    instantiation's own element is the identity this slot names; its
+    arguments are reached through that record's own fields and bases, which
+    carry identities of their own.
+    """
+    cur = ctx.resolve(id_) if id_ else None
+    alias = ""
+    for _ in range(16):
+        if cur is None:
+            return ()
+        tag = cur.tag
+        if tag in _IDENTITY_TRANSPARENT_TAGS:
+            if tag == "Typedef":
+                alias = cur.get("name", "")
+            inner = cur.get("type", "")
+            cur = ctx.resolve(inner) if inner else None
+            continue
+        if tag in ("Struct", "Class", "Union", "Enumeration"):
+            leaf = _strip_anonymous_type_location(cur.get("name", ""))
+            if not leaf and tag != "Enumeration":
+                leaf = alias
+            if not leaf:
+                return ()
+            return (qualified_type_name(ctx, cur, leaf_name=leaf) or leaf,)
+        return ()
+    return ()
+
+
 def cv_qualifies_pointer_value(ctx: CastxmlParserContext, type_id: str) -> bool:
     """True if a ``CvQualifiedType`` wrapping *type_id* qualifies a
     pointer/reference VALUE rather than pointee data.

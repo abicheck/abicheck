@@ -75,9 +75,9 @@ fallback) stays there -- it touches no AST at all.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from ..model import ScopeOrigin
 from ..model.graph_facts import (
@@ -101,6 +101,8 @@ from .type_graph import (
     index_declared_type_files,
     parse_clang_ast_types,
 )
+
+_H = TypeVar("_H")
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
@@ -167,6 +169,75 @@ def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjecti
         entity_files=entity_files,
         special_member_names=frozenset(special),
     )
+
+
+def merge_header_graph_ast_projections(
+    parts: Sequence[HeaderGraphAstProjection],
+) -> HeaderGraphAstProjection:
+    """Union the projections of several header subsets' separate parses.
+
+    Used when a whole-tree parse fails and the headers are re-parsed in
+    smaller groups: each group's projection is complete *for that group*, so
+    their union is the graph a single parse of every group that succeeded
+    would have produced. Index maps keep the first declaring file (header
+    order), and edges are de-duplicated preserving first occurrence, so the
+    result is deterministic and independent of how often a shared header was
+    re-read across groups.
+    """
+    type_files: dict[str, str] = {}
+    entity_files: dict[str, str] = {}
+    type_edges: dict[TypeEdge, None] = {}
+    call_edges: dict[CallEdge, None] = {}
+    special: set[str] = set()
+    for part in parts:
+        for name, path in part.type_files.items():
+            type_files.setdefault(name, path)
+        for name, path in part.entity_files.items():
+            entity_files.setdefault(name, path)
+        type_edges.update(dict.fromkeys(part.type_edges))
+        call_edges.update(dict.fromkeys(part.call_edges))
+        special.update(part.special_member_names)
+    return HeaderGraphAstProjection(
+        type_files=type_files,
+        type_edges=list(type_edges),
+        call_edges=list(call_edges),
+        entity_files=entity_files,
+        special_member_names=frozenset(special),
+    )
+
+
+def parse_header_groups_bisecting(
+    headers: Sequence[_H],
+    parse: Callable[[list[_H]], HeaderGraphAstProjection],
+    errors: tuple[type[BaseException], ...],
+) -> tuple[list[HeaderGraphAstProjection], list[_H]]:
+    """Parse *headers* in groups, halving any group whose parse raises.
+
+    Returns ``(projections of every group that parsed, headers that failed
+    alone)``. The whole list is assumed to have failed already, so it is
+    split before the first attempt. Cost is ``O(f * log n)`` parses for
+    ``f`` failing headers, never one parse per header unless every header
+    fails.
+    """
+    parts: list[HeaderGraphAstProjection] = []
+    failed: list[_H] = []
+    pending: list[list[_H]] = []
+    items = list(headers)
+    if len(items) <= 1:
+        return parts, items
+    mid = len(items) // 2
+    pending = [items[:mid], items[mid:]]
+    while pending:
+        group = pending.pop(0)
+        try:
+            parts.append(parse(group))
+        except errors:
+            if len(group) == 1:
+                failed.append(group[0])
+            else:
+                half = len(group) // 2
+                pending[:0] = [group[:half], group[half:]]
+    return parts, failed
 
 
 def _seed_ast_type_nodes(

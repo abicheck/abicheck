@@ -30,6 +30,66 @@ looked like the obvious fix and wasn't.
 
 ---
 
+## Triage (2026-10-01) — what is still open, and in what order
+
+A re-evaluation of this page against `main` at `556b878`. Entries below
+were re-checked by reproducing them on small purpose-built libraries where
+that was possible; the long pre-2026-09 bullet list (the first section
+below) was triaged by heading only.
+
+**Priority order for the open correctness gaps** (maintainer ruling,
+2026-10-01):
+
+1. [A directory `compare`'s `-H`/`--header` set is applied to every
+   member](#a-directory-compares-h-header-set-is-applied-to-every-member-so-header-derived-findings-are-reported-against-libraries-they-do-not-belong-to-steps-1-and-the-export-obligation-half-closed-2026-09-17-steps-23-open)
+   — step 3 landed as report attribution (2026-10-01); the verdict half of
+   step 3 and step 2 (per-member headers, which also fixes the quadratic
+   multi-library cost) remain.
+2. ~~`compare --depth binary` still performs a deep DWARF type walk~~ —
+   **closed 2026-10-01** by correcting the docs: `binary` reads the DWARF a
+   binary carries, by design (see the entry, now struck through).
+3. [An `-I` include root makes another library's public headers this
+   component's export
+   obligations](#an-i-include-root-makes-another-librarys-public-headers-this-components-export-obligations-2026-09-16)
+   — narrowed 2026-10-01 (LOW confidence, "not established"); three
+   follow-ups listed in the entry.
+4. Header exclusion. **`dump` stamping** — already fixed, now pinned by a
+   test (entry struck through). **Path-shaped patterns** — fixed 2026-10-01
+   (entry struck through). Still open: [`--exclude-header` vs.
+   `--dump-manifest`](#-exclude-header-cannot-narrow-a-dump-manifest-dump)
+   — the combination is honestly *rejected* today; what remains is a
+   manifest-schema feature (an exclusion expressed in the manifest), not a
+   correctness defect.
+5. ~~`effective_depth` reports `source` for a `--depth headers` dump~~ —
+   already fixed 2026-09-17 (re-verified 2026-10-01); the entry's heading
+   now says so.
+
+Next, unranked: one-sided detectors carry no candidate-side marker and no
+gate enforces one (see the re-verified status on
+[`compare --no-baseline` crashes on any real ELF shared
+library](#compare-no-baseline-crashes-on-any-real-elf-shared-library)), and
+[`--severity-preset strict` gating on informational reconciliation
+outcomes](#an-informational-no-material-change-reconciliation-outcome-gates-the-build-under-severity-preset-strict-2026-09-12).
+
+**No longer applicable — kept for history, do not re-attempt.** `scan`,
+`scan --against`, `scan_engine.py`, `cli_scan*.py`, `service_scan.py` and
+`scan_abi3_resolve.py` were deleted by ADR-068 Phase 6. Every entry whose
+defect lives *only* in that code is moot; where an entry used `scan` merely
+as an oracle for a `compare` defect (the `--depth binary` entry is the
+worked example) the `compare` defect stands on its own. The Action's
+`mode: scan` is now a hard error with a migration message
+(`action/run.sh`), which closes "The Action's `mode: scan` still routes
+several request shapes to the legacy `scan` CLI". Entries already struck
+through or marked CLOSED/fixed/superseded in their own heading or first
+paragraph are likewise history only.
+
+**Negative results — keep as-is.** Digest/save amplification, the clang
+AST memory peak (both 2026-09-19 entries), the release future map, and the
+m1360 performance round record approaches measured *not* to help; their
+value is stopping a re-attempt.
+
+---
+
 ## Known gaps — acknowledged remaining work
 
 - **A `kind: bundle` check still cannot run at `depth: headers`: only the
@@ -7737,6 +7797,10 @@ compare report's identity -- see that field's own note in
 
 ### The Action's `mode: scan` still routes several request shapes to the legacy `scan` CLI
 
+> **Closed (2026-10-01 triage).** `mode: scan` is now a hard error with a
+> migration message in `action/run.sh`; nothing routes to the deleted
+> `scan` CLI any more. The per-condition record below is history.
+
 Found while closing ADR-068's baseline cross-source authority divergence
 (see the ADR's 2026-09-09 amendment,
 [`plans/one-comparison-product.md`](plans/one-comparison-product.md) Phase
@@ -8250,7 +8314,16 @@ that code and its tests is the durable close; until then the allowlist test
 fails as soon as any of them gains a production caller, so it cannot hide
 live advice.
 
-## `compare --depth binary` still performs a deep DWARF type walk the public evidence-depth contract says that rung skips
+## ~~`compare --depth binary` still performs a deep DWARF type walk the public evidence-depth contract says that rung skips~~ — CLOSED (docs corrected)
+
+> **Closed (2026-10-01) by correcting the documentation, not the code** —
+> the maintainer's ruling on the either/or below. `binary` means L0 symbols +
+> binary metadata + the L1 debug info a binary already carries; it skips the
+> L2 header AST, not DWARF. `docs/use/evidence-depth.md`,
+> `docs/learn/evidence-and-detectability.md` and the `--depth` help text on
+> `compare`/`dump` now say so, and `tests/test_depth_binary_reads_dwarf.py`
+> pins the docs, the help text, and the behaviour on real `gcc -g` binaries
+> so the two cannot drift apart again. The record below is history.
 
 **Reopened 2026-09-11** (Codex review, PR #1220 doc follow-up) after an
 earlier pass at that same PR incorrectly marked this entry CLOSED,
@@ -8457,6 +8530,29 @@ silently. It is also why that file's own patch coverage will not reach
 reaching past the public entry point, which this repo's own
 third-party-boundary rule refuses.
 
+**Update (2026-10-01): step 3 landed as attribution, not yet as a
+verdict change.** `workflows/release_member_attribution.py` computes each
+member's export surfaces and `policy/member_type_attribution.py` answers,
+per type finding, `reaches`/`proven_unreachable`/`unestablished`; the
+release fold attaches that partition to each product-level finding
+(`shared_findings[].attribution`, release schema 1.11). On the example
+below, `Widget` is now `reaches: libfoo.so`, `unestablished: libbar.so` —
+libbar's only export has no declaration, so its reach cannot be decided,
+and saying so is the honest answer. What remains open:
+
+- **Member verdicts and counts still include unreached findings.**
+  `libbar.so` above is still `BREAKING` on `Widget`. Excluding a
+  `proven_unreachable` finding from a member's own verdict is the policy
+  half; it was deliberately not bundled with the report half, because it
+  changes exit codes and `--contract exports` already offers that scoping
+  explicitly per member.
+- **Step 2 (a per-member header operand) is still open**, and with it the
+  quadratic cost: every member still parses the union header set.
+- Making this work exposed an `export_surface` defect that was its own
+  bug: the C tag idiom `typedef struct X {...} X;` was flagged as an
+  ambiguous name, so every such type was undecidable under
+  `--contract exports` too. Fixed in the same change.
+
 The original entry follows, unchanged.
 
 
@@ -8570,6 +8666,18 @@ bug class in `tests/regressions/manifest.py`'s report sibling
 class sees them without re-deriving the grep.
 
 ## `compare --no-baseline` crashes on any real ELF shared library
+
+> **Status re-verified (2026-10-01): the crash no longer reproduces, the
+> defect class remains.** `compare --no-baseline` exits 0 on the system
+> `libm.so.6` and on a stripped library whose exports trip
+> `_looks_internal` (`internal_helper`, `detail_impl`). But on that same
+> library the audit reports `changes: []` and no verdict, while
+> `compare libv.so libv.so` reports `visibility_leak` — so the one-sided
+> finding is now silently absent from the audit instead of crashing it,
+> and a self-comparison still yields a "comparison" finding.
+> `_diff_visibility_leak` still opens with `del new` and still emits an
+> unmarked `make_change(...)`; the fix shape below (enumerate the
+> `new`-ignoring detectors, mark them, gate it) is unchanged.
 
 Auditing a real ELF shared library raises an **uncaught**
 `NoBaselineInvariantError` — a Python traceback, not a diagnostic — from a
@@ -9740,6 +9848,34 @@ closed in the same pass as that one.
 
 ## An `-I` include root makes another library's public headers this component's export obligations (2026-09-16)
 
+> **Update (2026-10-01): the PVXS case is narrowed, per the maintainer's
+> ruling.** Recording the declared `-H` set turned out to need no
+> `SCHEMA_VERSION` bump: ADR-075's `extraction_scope.ownership_rules.
+> target_roots` (schema v52) already persists the run's target roots. It
+> took only `-H` *directories*, so a run naming files recorded no root and
+> every declaration read `unresolved`/`no_root` alike.
+> `workflows.ownership_request.with_target_roots` now makes every existing
+> `-H` entry a root (a file covers exactly itself). A declaration no root
+> covers -- reached only through `#include` and an `-I` root -- is still
+> reported as `public_not_exported`, but at LOW confidence and worded as
+> *not established* (`buildsource/export_obligation_ownership.py`), and the
+> check's coverage detail counts them. The declared header's own missing
+> exports keep HIGH confidence (the positive control), and a `-H`
+> *directory* declares everything under it, so nothing changes there.
+> `tests/test_include_root_export_obligation.py` pins both, with the
+> reported-symbol set checked against the fixture's undefined declarations
+> so nothing can be dropped.
+>
+> **Still open.** (1) Per-finding `confidence` is not on the JSON wire
+> format, so a JSON reader sees the narrowing only in the description and
+> the check detail, not as a field. (2) The release surface's obligations
+> (`policy.release_contract_reconciliation`) do not apply the narrowing;
+> in a multi-member release the union of exports satisfies a sibling's
+> declarations anyway, but a declaration *no* member exports is still
+> reported at full strength. (3) An umbrella header (`-H foo.h` including
+> the library's own `foo/bar.h`) now gets LOW-confidence findings for
+> `bar.h` -- the accepted cost; pass the directory as `-H` to declare it.
+
 > **Partially closed (2026-09-16).** An `-I` root now widens public
 > provenance only where the run's own *declared* public headers live
 > underneath it (`extract/public_root_ownership.py`, applied by
@@ -9857,7 +9993,17 @@ in a header that *is* in `-H` and genuinely absent from the binary must still
 report. A suppression rule or a per-project carve-out is explicitly not the
 answer.
 
-## The native `dump` CLI does not stamp `excluded_header_patterns` on the snapshot it writes (2026-09-16)
+## ~~The native `dump` CLI does not stamp `excluded_header_patterns` on the snapshot it writes (2026-09-16)~~ — CLOSED
+
+> **Closed (re-verified 2026-10-01).** No longer reproduces: `dump` now
+> executes through `workflows.input_resolution.resolve_input`, whose wrapper
+> stamps the *achieved* patterns (`record_achieved_header_exclusions`). The
+> 2026-09-16 measurement below predates that. An earlier triage misread the
+> sectioned snapshot envelope as "not stamped"; read it through
+> `load_snapshot`. `tests/test_dump_records_header_exclusions.py` now pins the
+> stamp through the `dump` CLI and the comparability gate it feeds (a `dump`
+> baseline vs a `compare` candidate, across symmetric and asymmetric
+> exclusion sets). The record below is history.
 
 **Measured, not inferred** (2026-09-16, while wiring
 `scope.exclude_headers` through `dump`): a snapshot written by
@@ -9903,7 +10049,25 @@ candidate rests on both commands *resolving* the same rules, which is why
 that wiring is load-bearing, not a convenience on top of a gate that would
 otherwise have caught the divergence.
 
-## An `--exclude-header` pattern spelled as a path matches nothing on Windows (2026-09-16)
+## ~~An `--exclude-header` pattern spelled as a path matches nothing on Windows (2026-09-16)~~ — FIXED
+
+> **Fixed (2026-10-01), and the premise was partly wrong.** `fnmatch` applies
+> `os.path.normcase` to both sides, and on Windows that already turns `/` into
+> `\`, so a forward-slash pattern against a *live* Windows path did match. The
+> real defect was elsewhere and host-dependent: a stored snapshot's
+> `source_header` keeps the *dumping* host's separators, while normalization
+> depends on the *reading* host -- POSIX normalizes nothing, so a
+> Windows-dumped `C:\inc\fftw\fftw3.h` read on Linux never matched
+> `fftw/*` (and a backslash pattern never matched a Linux path).
+> `model.header_exclusion_record.glob_header_matches` now also matches the
+> `/`-spelled form of both sides. It only *adds* matches where a backslash is
+> present, so every POSIX path/POSIX pattern pair is decided exactly as before
+> -- the migration concern below does not arise for any input that already
+> matched. `tests/test_header_exclusion_separator_invariance.py` states it as
+> invariants over generated spellings on both simulated hosts, against the
+> previous rule as oracle; the `skipif(win32)` in
+> `tests/test_header_exclusion_primitives.py` is removed. The record below is
+> history.
 
 `extract/header_exclusions.apply_header_exclusions` tries each pattern against
 three spellings of a header: the bare name (`fftw3.h`), the full path
@@ -9926,7 +10090,7 @@ normalization that alters matching also alters run identity, and a baseline
 dumped before it would stop being comparable against a candidate dumped
 after. That is a migration, not a one-line `as_posix()`.
 
-## `effective_depth` reports `source` for a `--depth headers` dump whose only L5 is the header-only graph (2026-09-16)
+## ~~`effective_depth` reports `source` for a `--depth headers` dump whose only L5 is the header-only graph (2026-09-16)~~ — FIXED (2026-09-17)
 
 Same PVXS run as the entry above: `dump --depth headers` produced a snapshot
 whose `compare` reported `L5 source graph summary: present` on both sides and
@@ -10800,3 +10964,36 @@ open: no gate stops another helper under `tests/` or `scripts/` from
 `pytest_runtest_protocol` hookwrapper, per-worker timestamps to name the
 overlapping test) is not wired into CI. The `TMPDIR=$RUNNER_TEMP` step stays:
 it is cheap isolation and would contain the next such helper.
+
+## The clang JSON header backend records no resolved type identities, so a same-leaf record stays `UNKNOWN_UNRESOLVED` under `--contract public` (2026-10-01)
+
+Schema v54 closed `public-contract-default.md` Phase 6's
+`ambiguous_namespaced_leaf` defect at extraction. castxml resolves every
+type slot to one element of its type graph, and
+`extract/headers/castxml/type_resolution.type_identities` records that
+element's qualified name (`Function.return_type_identities`,
+`Param`/`Variable`/`TypeField.type_identities`). The exact public-surface
+walk and the contract evaluator then know that `api()` returning the bare
+`Cache *` reaches `ns1::Cache`, not `ns2::Cache`.
+
+**What is still open:** the clang backend (`--ast-frontend clang`) writes
+those fields as `None`, meaning not captured. `clang -ast-dump=json` gives a
+declaration's type only as a `qualType` string (`"Cache *"`), with no
+reference to the declaration it names, so the JSON carries no identity to
+record. Reconstructing one from C++ name lookup (enclosing namespaces plus
+using-directives) would be a heuristic. That is exactly the kind of guess
+the exact walk exists to refuse, so it was not attempted. DWARF-sourced
+snapshots and every pre-v54 baseline are in the same position. For all of
+them the answer is the pre-v54 one: a break on a record whose leaf another
+record shares stays `UNKNOWN_UNRESOLVED` under `--contract public`. It
+raises the coverage floor (exit 1), not the ABI gate.
+`scripts/check_fp_rate.py`'s `ambiguous_namespaced_leaf_spelling_only` case
+pins that shape as the one explained `public` loss in
+`scripts/measure_contract_shadow.py`.
+
+**What would close it:** a clang-side source of declaration references. The
+optional facts plugin (`contrib/abicheck-clang-plugin`) runs inside clang's
+semantic analysis and could emit the same per-slot identity. DWARF's
+`DW_AT_type` references a DIE whose scope chain is known, so the DWARF
+snapshot path could populate the fields too. Either is additive: the
+consumer side already reads the fields from any producer.

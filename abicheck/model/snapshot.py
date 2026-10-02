@@ -249,7 +249,7 @@ class AbiSnapshot:
     )
     # v52 (ADR-075): ownership rules; None = unrecorded, never "full".
     extraction_scope: ExtractionScope | None = field(default=None, kw_only=True)
-    # v54 (ADR-063 2026-10-01 amendment): every identifier token the public
+    # v55 (ADR-063 2026-10-01 amendment): every identifier token the public
     # header set's raw text spells, every preprocessor branch included
     # (`extract/public_header_identifiers.py`). None = not captured or not
     # vouched for -- never "the headers spell nothing".

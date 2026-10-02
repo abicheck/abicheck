@@ -97,11 +97,31 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "taking its address links and runs with no library at all. "
             "Where the encoding cannot answer (a non-Itanium spelling, an "
             "unmodelled production), the fallback's answer is 'unknown', "
-            "never a confident negative."
+            "never a confident negative. The same holds for *which* record "
+            "a type slot names: `api()` spelled `Cache *` with "
+            "`ns1::Cache` and `ns2::Cache` both declared is answered by the "
+            "header backend's type graph (schema v54 slot identities), not "
+            "by the bare spelling; a slot with no captured identity leaves "
+            "the contract decision unresolved rather than confirming either "
+            "same-leaf record."
         ),
         fixed_by=(1308,),
-        seed_tests=("tests/test_export_reconciliation_and_obligations.py",),
+        seed_tests=(
+            "tests/test_export_reconciliation_and_obligations.py",
+            "tests/test_contract_type_identities.py",
+        ),
         known_gaps=(
+            KnownGap(
+                description=(
+                    "The clang JSON header backend records no slot "
+                    "identities -- its `qualType` carries no declaration "
+                    "reference -- so under `--ast-frontend clang` (and for "
+                    "DWARF or pre-v54 snapshots) a same-leaf record's break "
+                    "stays UNKNOWN_UNRESOLVED and only raises the coverage "
+                    "floor."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
             KnownGap(
                 description=(
                     "Covers the export-obligation call sites (function and "

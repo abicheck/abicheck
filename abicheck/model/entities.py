@@ -105,6 +105,10 @@ class TypeField:
     is_mutable_fact: Fact[bool] | None = field(default=None, kw_only=True)
     default_fact: Fact[str | None] | None = field(default=None, kw_only=True)
     deprecated_fact: Fact[str | None] | None = field(default=None, kw_only=True)
+    # See ``model.declarations.Param.type_identities_fact`` (schema v54).
+    type_identities_fact: Fact[tuple[str, ...]] | None = field(
+        default=None, kw_only=True, compare=False
+    )
 
     def __post_init__(self) -> None:
         self.is_const, self.is_const_fact = bridge_legacy_and_fact(

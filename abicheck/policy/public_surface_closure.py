@@ -107,13 +107,14 @@ from ..compare.surface_graph import (
     referenced_identifiers_by_node,
 )
 from ..diff_cxx_rules import owner_class_of
-from ..model.availability import FactStatus
 from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.edge_coverage import EdgeAnswer
 from ..model.graph_join import EDGE_KIND_EXPORTS
 from ..model.surface_facts import in_public_surface
 from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..model.vocabulary import ScopeOrigin
+from .captured_type_identities import captured_identity_seeds, field_identities
+from .header_identifier_evidence import present_header_identifiers
 from .header_origin_evidence import collect_header_origin_unknown_types
 from .public_surface import (
     _DEMOTE_ORIGINS,
@@ -552,7 +553,10 @@ def _walk_exact_type_closure(
             surface, rec_node, record_by_name, enum_by_name
         )
         rec_node_id = refs.node_id(rec_node)
-        for ident in _referenced_identifiers_for_record(refs, rec_node_id, rec_node):
+        for ident in (
+            *_referenced_identifiers_for_record(refs, rec_node_id, rec_node),
+            *field_identities(rec_node),
+        ):
             if ident not in seen:
                 queue.append(ident)
 
@@ -660,15 +664,6 @@ def _extend_unknown_origin_through_closure(
     surface.header_origin_unknown_types |= scratch.public_types - surface.public_types
 
 
-def _present_header_identifiers(snap: AbiSnapshot) -> frozenset[str] | None:
-    """The raw-header-text identifier index, only when its Fact is present --
-    a not-collected, failed or unsupported scan is unknown, never empty."""
-    fact = snap.public_header_identifiers_fact
-    if fact is None or fact.status is not FactStatus.PRESENT:
-        return None
-    return frozenset(fact.value or ())
-
-
 def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     """Computes *snap*'s public-ABI surface from
     :func:`~abicheck.compare.surface_graph.referenced_identifiers_by_node`
@@ -699,7 +694,7 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     construction (and its associated evidence-merge cost) in the way.
     """
     surface = PublicSurface()
-    surface.header_identifiers = _present_header_identifiers(snap)
+    surface.header_identifiers = present_header_identifiers(snap)
     refs = referenced_identifiers_by_node(snap)
 
     # Build the type universe and name -> record / enum indexes for closure walks.
@@ -763,7 +758,12 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     # Separate, ambiguity-vetoing closure -- see its own docstring for why
     # this can't be folded into the walk above.
     _walk_exact_type_closure(
-        refs, snap, surface, record_by_name, enum_by_name, seed_types
+        refs,
+        snap,
+        surface,
+        record_by_name,
+        enum_by_name,
+        seed_types | captured_identity_seeds(snap),
     )
     return surface
 

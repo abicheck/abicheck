@@ -26,7 +26,6 @@ module is what states what each primitive promises, with no toolchain.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
@@ -234,16 +233,6 @@ class TestApplyHeaderExclusionsIsUnchangedWithoutPatterns:
         assert apply_header_exclusions(headers, ["b.h"]) == [Path("/inc/a.h")]
         assert apply_header_exclusions(headers, ["nothing.h"]) == headers
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason=(
-            "the path-shaped spellings are POSIX-shaped: apply_header_exclusions "
-            "matches against str(path), which is backslash-separated on Windows, "
-            "so a forward-slash pattern matches nothing there. Pre-existing "
-            "behaviour of the primitive, not of this test -- see "
-            "docs/contribute/known-gaps.md"
-        ),
-    )
     @pytest.mark.parametrize(
         ("pattern", "kept"),
         [

@@ -67,6 +67,90 @@ def _document(rnd: random.Random, depth: int = 0) -> object:
     )
 
 
+def _wide_document(rnd: random.Random, depth: int = 0) -> object:
+    """Like `_document`, but with wide containers, so the batching path --
+    batch growth, halving, a large child descended into mid-container -- is
+    reached under the shrunken knobs below."""
+    if depth >= 3:
+        return rnd.choice([1, "leaf", None, True, 2.5, "", "ünï\n", {}, []])
+    width = rnd.choice([0, 1, 2, 5, 9, 17, 40])
+    if rnd.random() < 0.5:
+        return {f"k{i}": _wide_document(rnd, depth + 1) for i in range(width)}
+    return [_wide_document(rnd, depth + 1) for _ in range(width)]
+
+
+class TestBatchingIsByteIdentical:
+    """The batch encoder against ``json.dumps`` with every knob shrunk, so a
+    generated document exercises batch splitting, doubling, halving on an
+    oversized fragment, and descending into a wide child -- paths the
+    production sizes only reach on very large documents."""
+
+    @pytest.mark.parametrize(
+        ("target", "initial", "descend"),
+        [(1, 1, 1), (16, 1, 3), (64, 2, 8), (256, 4, 4), (4096, 64, 1024)],
+    )
+    @pytest.mark.parametrize("seed", range(4))
+    def test_generated_wide_documents(
+        self, monkeypatch, target: int, initial: int, descend: int, seed: int
+    ) -> None:
+        from abicheck.storage import json_stream
+
+        monkeypatch.setattr(json_stream, "_TARGET_FRAGMENT_CHARS", target)
+        monkeypatch.setattr(json_stream, "_INITIAL_BATCH", initial)
+        monkeypatch.setattr(json_stream, "_DESCEND_LEN", descend)
+        rnd = random.Random(seed)
+        mismatches = []
+        for _ in range(60):
+            doc = _wide_document(rnd)
+            got = join_json_indented(doc)
+            want = json.dumps(doc, indent=2)
+            if got != want:
+                mismatches.append((doc, got, want))
+        assert mismatches == []
+
+    def test_a_lazy_map_inside_a_batched_container_is_still_streamed(
+        self, monkeypatch
+    ) -> None:
+        # A LazyItems two levels down cannot be handed to json.dumps; the
+        # batch narrows until it stands alone and is then streamed -- each
+        # member produced once, the result identical to the eager document.
+        from abicheck.storage import json_stream
+
+        monkeypatch.setattr(json_stream, "_INITIAL_BATCH", 8)
+        seen: list[str] = []
+
+        def produce(key: str) -> object:
+            seen.append(key)
+            return {"v": key}
+
+        lazy = [{"x": i} for i in range(5)] + [
+            {"m": LazyItems(keys=["a", "b"], produce=produce)}
+        ]
+        eager = [{"x": i} for i in range(5)] + [
+            {"m": {"a": {"v": "a"}, "b": {"v": "b"}}}
+        ]
+        assert join_json_indented(lazy) == json.dumps(eager, indent=2)
+        assert seen == ["a", "b"]
+
+    def test_whole_encoding_stops_at_the_shallow_depth(self) -> None:
+        # Narrow containers are encoded whole only down to _SHALLOW_DEPTH
+        # levels; anything deeper is descended into, which is what bounds
+        # both the probe and the fragment a narrow-but-deep document makes.
+        from abicheck.storage import json_stream
+
+        shallow = {"a": {"b": 1}}
+        deep: object = 1
+        for _ in range(json_stream._SHALLOW_DEPTH + 1):
+            deep = {"k": deep}
+        assert len(list(iter_json_indented(shallow))) == 1
+        assert len(list(iter_json_indented(deep))) > 1
+        assert join_json_indented(deep) == json.dumps(deep, indent=2)
+
+    def test_an_unserializable_value_still_raises(self) -> None:
+        with pytest.raises(TypeError):
+            join_json_indented([{"ok": 1}] * 3 + [object()])
+
+
 class TestDifferentialAgainstJsonDumps:
     @pytest.mark.parametrize("seed", range(8))
     def test_generated_documents_encode_identically(self, seed: int) -> None:
@@ -125,41 +209,40 @@ class TestDifferentialAgainstJsonDumps:
             assert join_json_indented(doc) == json.dumps(doc, indent=2)
 
     def test_a_large_non_str_keyed_dict_is_delegated_too(self) -> None:
-        """The delegation the size bound would otherwise skip past.
+        """The delegation the size rules would otherwise skip past.
 
-        A *small* non-str-keyed dict is delegated by the size check before
-        the key check is reached, so that branch was covered only by
-        accident. Past the bound the key check is the one that has to
-        catch it -- and if it did not, the encoder would descend and
-        re-derive ``json``'s own key coercion, which is what it must never
-        do.
+        A *small* non-str-keyed dict would be delegated whole anyway, so
+        that branch was covered only by accident. Past the descend bound the
+        key check is the one that has to catch it -- and if it did not, the
+        encoder would batch or descend and re-derive ``json``'s own key
+        coercion, which is what it must never do.
         """
-        from abicheck.storage.json_stream import _DELEGATE_NODE_LIMIT
+        from abicheck.storage.json_stream import _DESCEND_LEN
 
-        doc = {"outer": {i: list(range(3)) for i in range(_DELEGATE_NODE_LIMIT)}}
+        doc = {"outer": {i: list(range(3)) for i in range(_DESCEND_LEN * 4)}}
         assert join_json_indented(doc) == json.dumps(doc, indent=2)
 
-    def test_the_oracle_is_not_vacuous(self) -> None:
+    def test_the_oracle_is_not_vacuous(self, monkeypatch) -> None:
         """Guard the comparison itself.
 
         If ``join_json_indented`` were accidentally ``json.dumps``, every
-        test above would pass while testing nothing. It is not: past the
-        delegation bound the encoder yields many fragments, which a single
-        ``dumps`` call cannot.
+        test above would pass while testing nothing. It is not: once a
+        container is wider than one batch the encoder yields many fragments,
+        which a single ``dumps`` call cannot -- shown here with the fragment
+        target shrunk so a modest document already spans many batches.
 
         The small-document case is the *other* half of the contract and is
-        asserted here too: below the bound it deliberately delegates whole,
-        because splitting small objects buys no memory and costs real time.
+        asserted here too: a small container is delegated whole, because
+        splitting small objects buys no memory and costs real time.
         """
-        from abicheck.storage.json_stream import _DELEGATE_NODE_LIMIT
+        from abicheck.storage import json_stream
 
-        big = {"a": list(range(_DELEGATE_NODE_LIMIT + 10))}
+        monkeypatch.setattr(json_stream, "_TARGET_FRAGMENT_CHARS", 256)
+        big = {"a": list(range(json_stream._DESCEND_LEN * 400))}
         assert len(list(iter_json_indented(big))) > 100
         assert join_json_indented(big) == json.dumps(big, indent=2)
         assert len(list(iter_json_indented({"a": [1, 2], "b": {"c": 3}}))) == 1
 
-
-class TestLazyItems:
     def test_a_lazy_member_map_matches_its_eager_equivalent(self) -> None:
         eager = {"head": 1, "members": {"x": {"v": 1}, "y": {"v": 2}}, "tail": [3]}
         lazy = {

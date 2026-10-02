@@ -45,11 +45,23 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "33"
-# v33: header-derived snapshots now carry public_header_identifiers (schema
-# v54, extract/public_header_identifiers.py). The key also folds in the
+_SNAPSHOT_CACHE_VERSION: str = "35"
+# v35: header-derived snapshots now carry public_header_identifiers (schema
+# v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump
 # invalidates the cache without a hand bump here.
+# v34: castxml-dumped snapshots now carry each type slot's resolved record/enum
+# identities (Function.return_type_identities_fact, Param/Variable/TypeField.
+# type_identities_fact; snapshot schema v54). A v33 entry was dumped without them
+# under identical key inputs, and serving it silently drops the evidence the
+# `public` contract domain confirms a same-leaf record's break with -- found
+# on a directory `compare --contract public` that kept losing a break the
+# single-pair run had just caught.
+# v33: ElfSymbol.origin_lib is now read back from a stored snapshot (it was
+# written but dropped on decode), and a std template instantiated over one of
+# the library's own types is no longer attributed to the C++ runtime
+# (extract/mangled_foreign_template_args.py). A v32 entry carries origins
+# computed by the old heuristic, so it is invalidated rather than served.
 # v32: castxml's emulated compiler now receives the run's language standard,
 # sysroot, target and feature-macro flags (extract/castxml_compiler_emulation.py).
 # Before, `--castxml-cc-gnu g++ -std=c++20` parsed with g++'s *default*
@@ -585,6 +597,11 @@ def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
             cache_file,
             compression=SnapshotCompression.ZSTD.value,
             zstd_level=ZSTD_LEVEL_CACHE,
+            # Streamed: a cache entry is private and any read failure is
+            # already a miss, so the declared-size cross-check a one-shot
+            # zstd frame carries buys nothing here, while holding the whole
+            # JSON text and its bytes cost ~0.5 GiB on a large snapshot.
+            zstd_content_size=False,
         )
         legacy_file = _CACHE_DIR / f"{key}.json"
         if legacy_file.exists():

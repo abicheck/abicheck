@@ -66,7 +66,7 @@ PLATFORM_FACTS: list[FactDefinition] = [
         reportable=False,
         lifecycle=FactLifecycle.CONSUMED,
         consumed_by=(
-            "abicheck.policy.public_surface_closure:_present_header_identifiers",
+            "abicheck.policy.header_identifier_evidence:present_header_identifiers",
         ),
         notes=(
             "Every identifier token the public header set's raw text "

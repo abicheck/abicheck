@@ -32,8 +32,9 @@ import pathlib
 from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
 
-from ..model import AbiSnapshot
+from ..model import AbiSnapshot, FactStatus
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
+from .acyclic_json import gc_paused
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
 from .enum_codec import encode_platform_enums
 from .extraction_scope_codec import encode_extraction_scope
@@ -174,7 +175,65 @@ def _encode_value(obj: Any) -> Any:
     return copy.deepcopy(obj)
 
 
-def _encode_dataclass_skipping(obj: Any, skip: frozenset[str]) -> dict[str, Any]:
+#: ``type -> its persisted field names in sorted order``, the
+#: write-path counterpart of :data:`_FIELD_NAMES`.
+_SORTED_FIELD_NAMES: dict[type, tuple[str, ...] | None] = {}
+
+
+def _sorted_field_names(cls: type) -> tuple[str, ...] | None:
+    try:
+        return _SORTED_FIELD_NAMES[cls]
+    except KeyError:
+        names = _dataclass_field_names(cls)
+        ordered = tuple(sorted(names)) if names is not None else None
+        _SORTED_FIELD_NAMES[cls] = ordered
+        return ordered
+
+
+def _encode_value_sorted(obj: Any) -> Any:
+    """:func:`_encode_value` in the shape the storage layer canonicalizes to:
+    a dataclass's fields in sorted key order and a plain tuple as a list.
+
+    Same values as :func:`_encode_value` and the same detachment; only key
+    order and the sequence type differ, and both are exactly what
+    `canonical.canonical_form` rewrites. Used by :func:`snapshot_to_json`,
+    whose document is canonicalized next: emitting the canonical shape here
+    lets that step reuse the tree (`canonical.canonical_form_shared`) where
+    it used to rebuild nearly every dict of it. Plain ``dict`` values keep
+    their own key order -- the canonicalizer sorts the few that need it.
+    """
+    cls = type(obj)
+    if cls in _IMMUTABLE_LEAF_TYPES:
+        return obj
+    names = _sorted_field_names(cls)
+    if names is not None:
+        return {
+            name: v
+            if type(v := getattr(obj, name)) in _LEAF
+            else _encode_value_sorted(v)
+            for name in names
+        }
+    if isinstance(obj, enum.Enum):
+        return obj
+    if isinstance(obj, (set, frozenset)):
+        return sorted(obj)
+    if isinstance(obj, dict):
+        return {
+            k: v if type(v) in _LEAF else _encode_value_sorted(v)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, tuple):
+        if hasattr(obj, "_fields"):
+            return type(obj)(*[_encode_value_sorted(v) for v in obj])
+        return [v if type(v) in _LEAF else _encode_value_sorted(v) for v in obj]
+    if isinstance(obj, list):
+        return [v if type(v) in _LEAF else _encode_value_sorted(v) for v in obj]
+    return copy.deepcopy(obj)
+
+
+def _encode_dataclass_skipping(
+    obj: Any, skip: frozenset[str], encode: Any = _encode_value
+) -> dict[str, Any]:
     """:func:`_encode_value` over *obj*'s fields, omitting the names in *skip*.
 
     Omission happens at the point of the walk, which is what lets
@@ -187,7 +246,7 @@ def _encode_dataclass_skipping(obj: Any, skip: frozenset[str]) -> dict[str, Any]
     reader in a thread this one never knew about.
     """
     return {
-        f.name: _encode_value(getattr(obj, f.name))
+        f.name: encode(getattr(obj, f.name))
         for f in dataclass_fields(obj)
         if f.name not in skip
     }
@@ -252,14 +311,55 @@ _DECLARATION_KEY_ANCHORS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def _with_declarations(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
+#: Schema v54's per-slot resolved type identities, written only when a
+#: producer captured them: ``None`` ("not captured") is the default for every
+#: producer but castxml, so omitting it keeps a snapshot from any other
+#: producer -- and every digest over one -- byte-identical to v53. The decoder
+#: reads the missing key as ``NOT_COLLECTED`` (``fact_codec.
+#: validated_identities``).
+_TYPE_IDENTITY_KEY = "type_identities_fact"
+_RETURN_TYPE_IDENTITY_KEY = "return_type_identities_fact"
+
+
+def _drop_uncaptured(entry: dict[str, Any], key: str) -> None:
+    """Omit an uncaptured slot fact: ``None``, or a bare ``NOT_COLLECTED``
+    (no value, diagnostics or producer) -- which is exactly what the decoder
+    reads an absent key back as, so omitting it keeps a load/save round trip
+    byte-stable instead of materialising the decoder's answer on re-save."""
+    if key not in entry:
+        return
+    fact = entry[key]
+    if fact is None or (
+        fact.get("status") in (FactStatus.NOT_COLLECTED, FactStatus.NOT_COLLECTED.value)
+        and fact.get("value") is None
+        and not fact.get("diagnostics")
+        and fact.get("producer") is None
+    ):
+        del entry[key]
+
+
+def _drop_uncaptured_type_identities(d: dict[str, Any]) -> None:
+    for fn in d.get("functions", ()):
+        _drop_uncaptured(fn, _RETURN_TYPE_IDENTITY_KEY)
+        for param in fn.get("params", ()):
+            _drop_uncaptured(param, _TYPE_IDENTITY_KEY)
+    for var in d.get("variables", ()):
+        _drop_uncaptured(var, _TYPE_IDENTITY_KEY)
+    for rec in d.get("types", ()):
+        for fld in rec.get("fields", ()):
+            _drop_uncaptured(fld, _TYPE_IDENTITY_KEY)
+
+
+def _with_declarations(
+    d: dict[str, Any], snap: AbiSnapshot, encode: Any = _encode_value
+) -> dict[str, Any]:
     decls = snap.declarations
     after = {anchor: kinds for anchor, kinds in _DECLARATION_KEY_ANCHORS}
     out: dict[str, Any] = {}
     for key, value in d.items():
         out[key] = value
         for kind in after.get(key, ()):
-            out[kind] = _encode_value(getattr(decls, kind))
+            out[kind] = encode(getattr(decls, kind))
     return out
 
 
@@ -284,8 +384,15 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     clears a field on the caller's object, so serializing a snapshot another
     thread is concurrently reading is safe.
     """
+    return _snapshot_to_dict(snap, _encode_value)
+
+
+def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
+    """`snapshot_to_dict`, walking the model with *encode* --
+    :func:`_encode_value`, or :func:`_encode_value_sorted` for a document
+    the write path canonicalizes next."""
     d = _with_declarations(
-        _encode_dataclass_skipping(snap, _SNAPSHOT_SKIP_FIELDS), snap
+        _encode_dataclass_skipping(snap, _SNAPSHOT_SKIP_FIELDS, encode), snap, encode
     )
     # Runtime-only provenance qualifier — never persisted.
     d.pop("from_headers_inferred", None)
@@ -308,6 +415,7 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
     _drop_unobserved_odr_conflicts(d)
+    _drop_uncaptured_type_identities(d)
 
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)
@@ -371,11 +479,32 @@ def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
     # programmatic manipulation); only the JSON-file boundary changes.
     # `snapshot_from_dict` transparently unwraps either shape, so an older
     # flat `.abi.json` a prior build wrote stays fully readable.
-    return json.dumps(
-        to_sectioned_document(
-            snapshot_to_dict(snap), max_known_schema_version=SCHEMA_VERSION
-        ),
-        indent=indent,
+    # The encoded document is a fresh tree of millions of containers that is
+    # serialized and dropped; the cyclic collector re-traversing it while it
+    # is built frees nothing (`acyclic_json.gc_paused`). Lists from the
+    # sorted encoder are always GC-tracked, unlike tuples of scalars, so
+    # without the pause that encoder would pay for the canonical shape here.
+    with gc_paused():
+        return _sectioned_json(snap, indent)
+
+
+def _sectioned_json(snap: AbiSnapshot, indent: int) -> str:
+    return json.dumps(sectioned_document_for_write(snap), indent=indent)
+
+
+def sectioned_document_for_write(snap: AbiSnapshot) -> dict[str, Any]:
+    """The single-file sectioned document a snapshot write serializes --
+    `snapshot_to_json`'s document before ``json.dumps``, for a writer that
+    streams it instead (`snapshot_codec.write_snapshot`).
+
+    Built from the canonical-shape encoder and packaged sharing its
+    structure, so the result must be serialized and dropped, never mutated
+    or kept; run it under `acyclic_json.gc_paused` for the same reason
+    `snapshot_to_json` does."""
+    return to_sectioned_document(
+        _snapshot_to_dict(snap, _encode_value_sorted),
+        max_known_schema_version=SCHEMA_VERSION,
+        document_encoded_here=True,
     )
 
 

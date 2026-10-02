@@ -346,8 +346,9 @@ def build_source_dump_options(func: F) -> F:
         type=DEPTH_PARAM,
         default=None,
         help="Evidence-depth dial (same vocabulary as `compare --depth`): "
-        "binary=symbols only, headers=+header AST (default), build=+build "
-        "context, source=+source replay & call graph.",
+        "binary=symbols + binary metadata + DWARF types when present, "
+        "headers=+header AST (default), build=+build context, source=+source "
+        "replay & call graph.",
     )(func)
     func = click.option(
         "--config",
@@ -412,8 +413,9 @@ def evidence_options(func: F) -> F:
         "depth",
         type=DEPTH_PARAM,
         default=None,
-        help="Evidence-depth dial: binary=symbols only, headers=+header AST "
-        "(default), build=+build context, source=+source replay & call graph. "
+        help="Evidence-depth dial: binary=symbols + binary metadata + DWARF "
+        "types when present, headers=+header AST (default), build=+build "
+        "context, source=+source replay & call graph. "
         "Deeper-than-headers needs --sources or --build-info.",
     )(func)
     func = click.option(

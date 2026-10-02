@@ -65,6 +65,7 @@ from .type_resolution import (
     pointer_depth,
     resolve_cv_restrict,
     top_level_param_kind,
+    type_identities,
     type_name,
 )
 
@@ -278,6 +279,7 @@ def parse_function_params(
                     is_restrict=p_restrict,
                     # CastXML never determines va_list-ness at all -- UNSUPPORTED says so plainly, stronger than the omission bridge's NOT_COLLECTED ("not this time" vs. "never from this producer").
                     is_va_list_fact=Fact.unsupported(),
+                    type_identities_fact=Fact.present(type_identities(ctx, p_type_id)),
                 )
             )
             ctor_identity_types.append(ctor_param_identity_type(ctx, p_type_id))
@@ -605,6 +607,9 @@ def parse_function_element(
         name=name,
         mangled=mangled,
         return_type=ret_type,
+        return_type_identities_fact=Fact.present(
+            type_identities(ctx, ret_id) if ret_id else ()
+        ),
         params=params,
         visibility=visibility_,
         **header_ast_surface_facts(

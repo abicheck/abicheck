@@ -160,6 +160,7 @@ _F1 = (
     "registry.kind_completeness",
 )
 _F2 = (
+    "serialization.persisted_field_not_decoded",
     "cardinality.member_request_drops_scalar_field",
     "config.front_end_default_divergence",
     "config.propagation_completeness",

@@ -72,7 +72,7 @@ _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS = 36
 # public_header_identifiers_fact started being persisted at. Written only when
 # it carries evidence, so a missing key at or above it decodes as
 # not_collected -- which is exactly what an evidence-free one was.
-_MIN_SCHEMA_VERSION_FOR_HEADER_IDENTIFIERS_FACT = 54
+_MIN_SCHEMA_VERSION_FOR_HEADER_IDENTIFIERS_FACT = 55
 
 # ADR-063 Phase 5 (eighth batch): the schema_version TypeField's own
 # case-(a) is_const_fact/is_volatile_fact/is_mutable_fact siblings started
@@ -119,3 +119,10 @@ _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT = 45
 # the stored ``visibility`` value (marked ``PARTIAL``) instead of reading a
 # missing key as a confirmed negative.
 _MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS = 46
+
+# Schema v54: ``Function.return_type_identities_fact`` and
+# ``Param``/``Variable``/``TypeField.type_identities_fact`` -- each type slot's
+# resolved record/enum identities. Written only when captured (castxml), so at
+# or above this a missing key reads as ``NOT_COLLECTED`` (the clang JSON
+# backend, DWARF); below it as ``None`` (the document predates the field).
+_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS = 54

@@ -482,4 +482,20 @@ TYPE_FACTS: list[FactDefinition] = [
             "Owner/contract/rule id from the declaring file, stamped once by extract.ownership_stamp after the parse (so both header backends, identically) and persisted as model.extraction_scope's interned table. No legacy scalar sibling; unset is unclassified (a pre-v52 snapshot), never a guessed owner. Read only through model.extraction_scope.ownership_of."
         ),
     ),
+    _E(
+        owner="TypeField",
+        field="type_identities",
+        value_type="tuple[str, ...]",
+        producing_backends=("castxml",),
+        persisted=True,
+        identity_relevant=False,
+        comparable=False,
+        suppressible=False,
+        reportable=False,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.policy.captured_type_identities:field_identities",),
+        notes=(
+            "Schema v54: the exact qualified names of the records/enums the header backend resolved this type slot to, through pointer/reference/cv/array/typedef layers -- the slot's own spelling is the bare source text and cannot say which of two same-leaf records it names. castxml only: clang's JSON qualType carries no declaration reference, so a clang/DWARF/pre-v54 slot is NOT_COLLECTED. Only PRESENT feeds the exact public-surface walk (policy/captured_type_identities.present_identities)."
+        ),
+    ),
 ]

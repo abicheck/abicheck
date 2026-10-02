@@ -401,7 +401,7 @@ importing from `storage/`; this decision does not introduce a second
 vocabulary, and the implementation plan states the exact relocation.
 
 **Amendment (2026-10-01, accepted): a header-text identifier index closes
-the `public` domain for undeclared exports (snapshot schema v54).** ADR-049's
+the `public` domain for undeclared exports (snapshot schema v55).** ADR-049's
 closed-world rule (`public-contract-default` plan §4.2) forbids
 `UNKNOWN_UNPROVEN` unless the declared domain was searched completely, and
 names the trap: an active-AST parse cannot see a declaration inside an
@@ -416,7 +416,7 @@ captured at dump time by `extract/public_header_identifiers.py`. It is
 `NOT_COLLECTED` (no public header set), `FAILED` (a named header missing or
 unreadable) or `UNSUPPORTED` (a header uses the `##` token-paste operator,
 so a pasted name cannot be found by token search). Only the `Fact` is
-persisted, and a pre-v54 snapshot loads it as `NOT_COLLECTED`. The contract
+persisted, and a pre-v55 snapshot loads it as `NOT_COLLECTED`. The contract
 evaluator
 may return `UNKNOWN_UNPROVEN`/`closed_domain_no_commitment` for the
 appearance or disappearance of an export only the export table knew, and

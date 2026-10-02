@@ -523,7 +523,7 @@ class LayoutSection(_SparseSectionMixin):
             "excluded_header_matching",
             "extraction_scope",
             "public_header_identifiers",
-        "public_header_identifiers_fact",
+            "public_header_identifiers_fact",
         }
     )
     #: `.dwarf_layout_coherence`/`.scope_fallback`/`.dependency_scope` are
