@@ -361,7 +361,9 @@ def _scan_source_side(entry: dict, which: str, tag: str) -> tuple[Path, dict, fl
     snap = SNAP_DIR / f"{lib}_src_{which}.json"
     secs, p = _dump_sources(tree, compile_db, snap, binary=binary, headers=headers)
     if p.returncode or not snap.exists():
-        raise RuntimeError(f"dump --sources failed ({which}): {(p.stderr or '')[-200:]}")
+        # The head of stderr names the cause; the tail is often a remedy hint.
+        err = (p.stderr or "").strip()
+        raise RuntimeError(f"dump --sources failed ({which}): {err[:300]} ... {err[-300:]}")
     cov = _source_coverage(_load_build_source(snap))
     return snap, cov, round(time.time() - t0 + secs, 2)
 

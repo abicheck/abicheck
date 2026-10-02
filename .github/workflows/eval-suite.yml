@@ -144,6 +144,10 @@ jobs:
         with:
           packages: git cmake clang
 
+      # The dump passes the library's public headers (-H), which runs the L2
+      # header parse -- CastXML, the default header backend.
+      - uses: ./.github/actions/setup-castxml
+
       - name: Install abicheck + source-tier toolchain
         run: |
           python -m pip install --upgrade pip
