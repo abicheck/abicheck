@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from _family_f1_harness import Side, _enum, _fn, _rec, _snapshot
 
 from abicheck.checker import Verdict, compare
-from abicheck.model import AbiSnapshot, ScopeOrigin
+from abicheck.model import AbiSnapshot, AccessLevel, ScopeOrigin
 
 _BROKEN = frozenset({Verdict.BREAKING, Verdict.API_BREAK})
 
@@ -92,6 +92,56 @@ def _reached_by_pointer(qname: str) -> Callable[[], tuple[AbiSnapshot, AbiSnapsh
             functions=(_fn("foo"), _fn("use", "void", (f"{qname}*",))),
             types=(_record(qname, (("x", ftype),)),),
         )
+
+    return lambda: _pair(side("int"), side("long"))
+
+
+def _pimpl_rename(
+    impl: str, *, accessor: bool = True
+) -> Callable[[], tuple[AbiSnapshot, AbiSnapshot]]:
+    """Public ``api::Desc`` holds a pimpl to *impl*, whose member is renamed;
+    *accessor* adds an inline public accessor on ``api::Desc``."""
+
+    def side(member: str) -> Side:
+        fns = [_fn("foo")]
+        if accessor:
+            fns.append(
+                _fn(
+                    "api::Desc::get",
+                    "int",
+                    (),
+                    is_inline=True,
+                    access=AccessLevel.PUBLIC,
+                )
+            )
+        return Side(
+            functions=tuple(fns),
+            types=(
+                _record("api::Desc", (("pimpl", f"{impl}*"),)),
+                _record(impl, ((member, "int"),)),
+            ),
+        )
+
+    return lambda: _pair(side("count"), side("n_count"))
+
+
+def _reached_by_value(qname: str) -> Callable[[], tuple[AbiSnapshot, AbiSnapshot]]:
+    """*qname* is a by-value parameter of an exported public function."""
+
+    def side(ftype: str) -> Side:
+        return Side(
+            functions=(_fn("foo"), _fn("use", "void", (qname,))),
+            types=(_record(qname, (("x", ftype),)),),
+        )
+
+    return lambda: _pair(side("int"), side("long"))
+
+
+def _unreachable(qname: str) -> Callable[[], tuple[AbiSnapshot, AbiSnapshot]]:
+    """*qname* changes, but no public signature names it."""
+
+    def side(ftype: str) -> Side:
+        return Side(functions=(_fn("foo"),), types=(_record(qname, (("x", ftype),)),))
 
     return lambda: _pair(side("int"), side("long"))
 
@@ -238,6 +288,86 @@ CELLS: dict[str, Cell] = {
     "internal_ns.control.header_seed_vetoed": Cell(
         _header_seed("ns::detail::H"),
         breaking=False,
+    ),
+    # -- Phase 5: severity-raising heuristics added with the runtime registry
+    "inline_ns.control.moved": Cell(
+        _fn_pair(
+            (("ns::v1::f", ("int",)), ("ns::v1::g", ("int",))),
+            (("ns::v2::f", ("int",)), ("ns::v2::g", ("int",))),
+        ),
+        must=frozenset({("inline_namespace_moved", "__inline_namespace_move")}),
+        breaking=True,
+    ),
+    "inline_ns.fp.added_beside_old": Cell(
+        _fn_pair(
+            (("ns::v1::f", ("int",)), ("ns::v1::g", ("int",))),
+            (
+                ("ns::v1::f", ("int",)),
+                ("ns::v1::g", ("int",)),
+                ("ns::v2::f", ("int",)),
+                ("ns::v2::g", ("int",)),
+            ),
+        ),
+        must_not_kinds=frozenset({"inline_namespace_moved", "func_removed"}),
+        notes="vN pairs by name, but nothing left the export table: no move",
+    ),
+    "inline_ns.fn.segment_near_miss": Cell(
+        _fn_pair(
+            (("ns::version1::f", ("int",)), ("ns::version1::g", ("int",))),
+            (("ns::version2::f", ("int",)), ("ns::version2::g", ("int",))),
+        ),
+        must=frozenset({("func_removed", "_Z15ns::version1::fi")}),
+        must_not_kinds=frozenset({"inline_namespace_moved"}),
+        breaking=True,
+    ),
+    "internal_template.control.instantiation_removed": Cell(
+        _fn_pair((("ns::detail::tpl<int>", ("int",)),), ()),
+        must=frozenset({("internal_template_leaks_via_public_api", "ns::detail::tpl")}),
+        breaking=True,
+    ),
+    "internal_template.fp.instantiation_added": Cell(
+        _fn_pair((), (("ns::detail::tpl<int>", ("int",)),)),
+        must_not_kinds=frozenset({"internal_template_leaks_via_public_api"}),
+        breaking=False,
+        notes="an added instantiation cannot break an already-linked consumer",
+    ),
+    "internal_template.fn.segment_near_miss": Cell(
+        _fn_pair((("ns::details::tpl<int>", ("int",)),), ()),
+        must=frozenset({("func_removed", "_Z21ns::details::tpl<int>i")}),
+        must_not_kinds=frozenset({"internal_template_leaks_via_public_api"}),
+        breaking=True,
+    ),
+    "pimpl.control.inline_accessor": Cell(
+        _pimpl_rename("ns::detail::Impl"),
+        must=frozenset({("inline_body_references_renamed_member", "api::Desc")}),
+        breaking=True,
+    ),
+    "pimpl.fp.no_inline_accessor": Cell(
+        _pimpl_rename("ns::detail::Impl", accessor=False),
+        must=frozenset({("field_renamed", "ns::detail::Impl")}),
+        must_not_kinds=frozenset({"inline_body_references_renamed_member"}),
+        notes="internal by name, but no inline accessor can bake in the old name",
+    ),
+    "pimpl.fn.segment_near_miss": Cell(
+        _pimpl_rename("ns::details::Impl"),
+        must=frozenset({("field_renamed", "ns::details::Impl")}),
+        must_not_kinds=frozenset({"inline_body_references_renamed_member"}),
+    ),
+    "internal_leak.control.reached_by_value": Cell(
+        _reached_by_value("ns::detail::Cfg"),
+        must=frozenset({("internal_type_leaks_via_public_api", "ns::detail::Cfg")}),
+        breaking=True,
+    ),
+    "internal_leak.fp.unreachable": Cell(
+        _unreachable("ns::detail::Cfg"),
+        must_not_kinds=frozenset({"internal_type_leaks_via_public_api"}),
+        notes="internal by name, but no public signature reaches it",
+    ),
+    "internal_leak.fn.segment_near_miss": Cell(
+        _reached_by_value("ns::detailed::Cfg"),
+        must=frozenset({("type_field_type_changed", "ns::detailed::Cfg")}),
+        must_not_kinds=frozenset({"internal_type_leaks_via_public_api"}),
+        breaking=True,
     ),
 }
 

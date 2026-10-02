@@ -26,6 +26,11 @@ from __future__ import annotations
 from typing import Any
 
 from .checker_types import Change
+from .compare.naming_conventions import (  # noqa: F401 -- re-exported
+    _INTERNAL_NAME_PATTERNS as _INTERNAL_NAME_PATTERNS,
+    ELF_INTERNAL_SYMBOL_NAME,
+    _looks_internal as _looks_internal,
+)
 from .diff_helpers import make_change
 from .diff_symbols import _should_filter_transitive_runtime_symbols
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
@@ -33,25 +38,6 @@ from .model import AbiSnapshot
 from .model.binary_naming import strip_vendor_hash
 from .model.change_catalog.kinds import ChangeKind
 from .model.surface_facts import is_export_table_only_record
-
-_INTERNAL_NAME_PATTERNS = (
-    "internal",
-    "helper",
-    "_impl",
-    "detail",
-    "private",
-    "__",
-    "_priv",
-    "_int_",
-    "_do_",
-    "_handle_",
-)
-
-
-def _looks_internal(name: str) -> bool:
-    """Heuristic: True if symbol name looks like internal implementation detail."""
-    lower = name.lower()
-    return any(pat in lower for pat in _INTERNAL_NAME_PATTERNS)
 
 
 def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
@@ -70,7 +56,7 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 f.name,
                 filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
             )
-            and _looks_internal(f.name)
+            and ELF_INTERNAL_SYMBOL_NAME.matches(f.name)
         )
     ]
     if not leaked:

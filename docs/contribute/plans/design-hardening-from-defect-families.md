@@ -175,6 +175,26 @@ runtime registry; H4 stays the oracle.
 - Exit: H4's 193 uncategorized sites shrink below an agreed ceiling, and every
   site that can raise severity is registered.
 
+#### Phase 5 status (2026-10-02)
+
+**Agreed ceiling:** 0 *uncategorized* sites. "Uncategorized" means an H4
+inventory site that is neither a runtime-registered heuristic nor an
+exemption row stating why it is not a naming convention. The 193 figure
+counted every non-covered row; 159 of those were already exemptions
+(mangling grammar, C++ spelling, abicheck's own key formats, user rules,
+format sniffs, platform-defined names), and the real backlog was the 34
+`convention` rows. That category no longer exists.
+
+| Item | Status |
+|---|---|
+| Runtime registry | **Landed.** `abicheck/model/name_heuristics.py` is the registration API (in `model` because `compare`-layer detectors may import only `model`); `abicheck/policy/name_heuristics.py` owns the catalogue (`HEURISTIC_OWNER_MODULES`, `name_heuristic_registry()`, `registry_problems()`). `NameHeuristicEffect` has only `lower_confidence` and `route_to_review`. The only way to register a heuristic that raises severity is `register_severity_raising_heuristic`, which requires a `StructuralFact` (a dotted id plus a callable). Its handle has no name-only query: `confirmed(name, fact_input)` is the name **and** the fact. |
+| Every heuristic routed through the registry | **Landed.** 19 registered, 5 of them severity-raising: `serialization_tag` (`compare.serialization_tag.value_changed`), `internal_type_leak` (`policy.internal_leak.public_signature_reaches_type`), `internal_template_leak` (`compare.templates.public_instantiation_removed`), `inline_namespace_move` (`compare.export_table.symbol_replaced`), and `pimpl_renamed_member` (`compare.cpp_patterns.public_pimpl_holder_has_inline_accessor`). `pimpl_renamed_member` was found during this phase: `inline_body_references_renamed_member` (BREAKING) was nominated by `is_internal_type` outside the H4 scan. The lowering ones carry a confirming fact where one exists, for example `enum_sentinel` → `compare.enum_sentinel.holds_enum_maximum` and `internal_namespace` → `policy.layout_visibility.layout_proven_invisible`. The inline checks are deleted. The duplicate internal-namespace vocabulary in `policy/public_surface_closure.py` and the copy in `internal_leak.py` are now one matcher in `compare/internal_namespaces.py`. Seven legacy detectors' conventions moved to `compare/naming_conventions.py`, so no debt baseline was raised. The dead `_is_pointer_only_type`/`_has_public_pointer_factory` path in `diff_filtering.py` is deleted. `post_processing*`/`surface.py` call the registered handle too. |
+| Gate | **Landed.** `tests/test_family_f4_heuristics.py` (`repo_scan`): every inventory site resolves to a registered heuristic (`tests/_family_f4_resolve.py`, derived from the live registry) or has an exemption row. The uncategorized remainder must be ≤ `UNCATEGORIZED_CEILING = 0`. Exemption counts are shrink-only per category. Every severity-raising heuristic must have FP/FN/control cells. The tests also prove the API cannot express "raise" without a fact. |
+| Uncategorized below the ceiling | **Met: 34 → 0.** 23 `convention` sites now resolve to registered heuristics. 15 were reclassified after reading them as non-heuristic: `{ctor}`/`{dtor}`/placeholder keys → `own_format`; the spelling-pattern matcher and `auto`/lambda return markers → `spelling`; GCC `[abi:]` tags and `_ZTV`/`_ZTI` prefixes → `grammar`; the `std::` namespace → `platform`; the caller's `cohort_prefix` → `user_rule`. Exemptions: spelling 63, grammar 42, own_format 35, platform 19, user_rule 9, sniff 5. |
+| H4 has no strict xfail | **Met.** `KNOWN_VIOLATIONS` and the xfail test are gone. 12 new oracle cells cover the new severity-raising heuristics. |
+| Gates | FP-rate 0/0, tier accuracy OK. No `examples/` verdict changed. |
+| Not done | `bundle_soname_skew` (BREAKING) groups libraries by a filename cohort key (`split(".")`). The H4 scan does not see that site, so it is not registered; it is the next candidate. `sycl_queue_overload`, `prefix_rename` and `experimental_namespace` are registered as `route_to_review` because each adds a grouping/explanatory finding beside removals that are already reported at the same or higher severity. |
+
 ### Phase 6 — One subprocess supervisor; structured output only
 
 Owner of the design: the structured-output half finishes

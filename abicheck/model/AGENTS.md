@@ -23,6 +23,14 @@ whose name sounds policy/report-shaped* — the catalog itself is exactly the
 kind of "what is this fact" (which `ChangeKind` defaults to which verdict,
 under which override) D1 already assigns here.
 
+**`name_heuristics.py` is a registration API, not a classifier.** It holds
+the types (`NameHeuristicEffect`, `StructuralFact`, the two handle classes)
+and the registration functions for spelling-based classifiers
+(design-hardening Phase 5). It lives here only because the `compare`-layer
+detectors that register may import nothing but `model`. The matchers stay with
+their detectors, and the catalogue and its validation live in
+`policy/name_heuristics.py`.
+
 **A second deliberate, ADR-063 D7-sanctioned exception: `fact_registry.py`.**
 D7 names `abicheck/model/fact_registry.py` explicitly as the fact/capability
 registry's home, and its `FactDefinition.producing_backends` field names

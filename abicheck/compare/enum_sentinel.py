@@ -10,7 +10,13 @@ recognizer used by ``diff_types``, ``diff_platform`` and
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+
+from ..model.name_heuristics import (
+    NameHeuristicEffect,
+    StructuralFact,
+    register_name_heuristic,
+)
 
 # Sentinel detection is name-nominated and structure-confirmed. The name alone
 # never decides: a member is a sentinel only when it *also* holds the maximum
@@ -123,6 +129,38 @@ def holds_enum_maximum(member_name: str, values: Mapping[str, int]) -> bool:
     )
 
 
+def _holds_maximum_on_every_side(
+    fact_input: tuple[str, Sequence[Mapping[str, int]]],
+) -> bool:
+    member_name, sides = fact_input
+    return all(holds_enum_maximum(member_name, side) for side in sides)
+
+
+#: Registered name heuristic (design-hardening Phase 5): the end-of-list name
+#: only *lowers* a value change to ``enum_last_member_value_changed``, and
+#: only when ``holds_enum_maximum`` confirms it on every compared side.
+ENUM_SENTINEL = register_name_heuristic(
+    "enum_sentinel",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    description=(
+        "an end-of-list enum member name (*_LAST/*_MAX/*_COUNT/NUM_*) demotes "
+        "its value change to a risk"
+    ),
+    matcher=is_sentinel_enum_member,
+    helpers=(identifier_tokens,),
+    confirmed_by=StructuralFact(
+        "compare.enum_sentinel.holds_enum_maximum", _holds_maximum_on_every_side
+    ),
+    vocabularies=(
+        "_SENTINEL_TAIL_TOKENS",
+        "_SENTINEL_TAIL_PAIRS",
+        "_SENTINEL_LEAD_TOKENS",
+    ),
+    patterns=(_CAMEL_BOUNDARY_RE, _TOKEN_SPLIT_RE),
+)
+
+
 def is_confirmed_enum_sentinel(
     member_name: str,
     *sides: Mapping[str, int],
@@ -134,6 +172,4 @@ def is_confirmed_enum_sentinel(
     value in each snapshot it is compared across. Name evidence alone never
     demotes a finding.
     """
-    return is_sentinel_enum_member(member_name) and all(
-        holds_enum_maximum(member_name, side) for side in sides
-    )
+    return ENUM_SENTINEL.confirmed(member_name, (member_name, sides))

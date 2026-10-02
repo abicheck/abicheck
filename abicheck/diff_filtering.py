@@ -43,6 +43,7 @@ from .diff_symbols import _public_functions
 from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
+from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic
 from .model.surface_facts import is_abi_visible
 
 # Back-compat aliases: the ADR-063 Phase 2/10 migrations moved the
@@ -901,7 +902,9 @@ def _classify_root_pass(
         if c.kind in _DERIVED_CHANGE_KINDS:
             type_name = _root_type_name(c)
             other_roots = {k: v for k, v in root_types.items() if k != type_name}
-            matched_root = _match_root_type(c, other_roots, compiled_patterns)
+            matched_root = ROOT_TYPE_REFERENCE.apply(
+                c, root_types=other_roots, compiled_patterns=compiled_patterns
+            )
             if matched_root is not None:
                 _mark_as_redundant(c, matched_root, root_types, redundant)
                 # Remove this root so derived changes won't point at a
@@ -928,7 +931,9 @@ def _classify_derived_pass(
             kept.append(c)
             continue
         # Check if this change references a (kept) root type
-        matched_root = _match_root_type(c, root_types, compiled_patterns)
+        matched_root = ROOT_TYPE_REFERENCE.apply(
+            c, root_types=root_types, compiled_patterns=compiled_patterns
+        )
         if matched_root is not None:
             _mark_as_redundant(c, matched_root, root_types, redundant)
         else:
@@ -1039,88 +1044,6 @@ def _type_used_by_value(type_str: str, bare_re: re.Pattern[str]) -> bool:
     return False
 
 
-def _public_function_uses_type_by_value(
-    snap: AbiSnapshot, bare_re: re.Pattern[str]
-) -> bool:
-    """True if any PUBLIC function uses the type (matched by *bare_re*) by value."""
-    for f in snap.declarations.functions:
-        if not is_abi_visible(f):
-            continue
-        if _type_used_by_value(f.return_type, bare_re):
-            return True
-        for p in f.params:
-            if _type_used_by_value(p.type, bare_re):
-                return True
-    return False
-
-
-def _public_variable_uses_type_by_value(
-    snap: AbiSnapshot, bare_re: re.Pattern[str]
-) -> bool:
-    """True if any PUBLIC variable uses the type (matched by *bare_re*) by value."""
-    for v in snap.declarations.variables:
-        if not is_abi_visible(v):
-            continue
-        if _type_used_by_value(v.type, bare_re):
-            return True
-    return False
-
-
-def _is_pointer_only_type(
-    type_name: str,
-    snap: AbiSnapshot,
-    _re_cache: dict[str, re.Pattern[str]] | None = None,
-) -> bool:
-    """Return True if all PUBLIC API functions/variables use this type via pointer only.
-
-    A type is pointer-only (opaque-handle pattern) when every function param/return
-    that references it uses a raw pointer (`T*`) — never a bare by-value or reference
-    (`T`, `T&`) occurrence.  References are treated as non-opaque usage because a
-    caller could still hold the referent by value.
-
-    Uses pre-compiled word-boundary regex to avoid substring false-positives.
-    *_re_cache* can supply a shared regex cache to avoid recompilation across calls.
-    """
-    if _re_cache is not None and type_name in _re_cache:
-        bare_re = _re_cache[type_name]
-    else:
-        bare_re = re.compile(r"\b" + re.escape(type_name) + r"\b")
-        if _re_cache is not None:
-            _re_cache[type_name] = bare_re
-
-    if _public_function_uses_type_by_value(
-        snap, bare_re
-    ) or _public_variable_uses_type_by_value(snap, bare_re):
-        return False
-    return True
-
-
-def _has_public_pointer_factory(
-    type_name: str,
-    snap: AbiSnapshot,
-    _factory_re_cache: dict[str, re.Pattern[str]] | None = None,
-) -> bool:
-    """True if snapshot has at least one PUBLIC function returning exactly ``type_name*``.
-
-    Uses word-boundary regex to avoid substring false-positives such as
-    ``type_name="Context"`` matching ``SSLContext*``.
-    """
-    # Match: optional const/volatile, then word-boundary type name, then `*`
-    if _factory_re_cache is not None and type_name in _factory_re_cache:
-        factory_re = _factory_re_cache[type_name]
-    else:
-        factory_re = re.compile(r"\b" + re.escape(type_name) + r"\s*\*")
-        if _factory_re_cache is not None:
-            _factory_re_cache[type_name] = factory_re
-    for f in snap.declarations.functions:
-        if not is_abi_visible(f):
-            continue
-        rt = f.return_type or ""
-        if factory_re.search(rt) and "&" not in rt:
-            return True
-    return False
-
-
 def _cached_bare_re(name: str, cache: dict[str, re.Pattern[str]]) -> re.Pattern[str]:
     """Return (and memoize in ``cache``) the word-boundary regex for ``name``."""
     r = cache.get(name)
@@ -1179,8 +1102,8 @@ def _opaque_usage_index(
 ) -> tuple[set[str], set[str]]:
     """Single pass over the public surface → ``(used_by_value, has_pointer_factory)``.
 
-    ``_filter_opaque_size_changes`` previously called ``_is_pointer_only_type`` and
-    ``_has_public_pointer_factory`` *per candidate*, each rescanning every public
+    ``_filter_opaque_size_changes`` previously called a pointer-only and a
+    pointer-factory check *per candidate*, each rescanning every public
     function/variable with a word-boundary regex — O(candidates × functions) with
     a regex per pair (``type_churn`` n=4000: ~3.2 M regex searches). This walks the
     surface once and uses an Aho-Corasick prefilter (:class:`_SubstringMatcher`)
@@ -1209,6 +1132,36 @@ def _opaque_usage_index(
         _record_by_value_uses(v.type, ac, bare_re_cache, used_by_value)
 
     return used_by_value, has_factory
+
+
+#: Registered name heuristics (design-hardening Phase 5). Both search a type
+#: string for a declared type's *spelling* (word-boundary match), never its
+#: identity, so both may only *lower*: one folds a derived finding into the
+#: root-type change it mentions, the other drops an opaque handle's size
+#: change. #1218 names the structural replacement (type identity and real
+#: signature edges); until then they stay registered and lowering-only.
+ROOT_TYPE_REFERENCE = register_name_heuristic(
+    "root_type_reference",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    description=(
+        "a derived finding whose old/new spelling names a changed root type "
+        "is folded into that root change"
+    ),
+    matcher=_match_root_type,
+    helpers=(_compile_root_patterns,),
+)
+OPAQUE_HANDLE_USAGE = register_name_heuristic(
+    "opaque_handle_usage",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    description=(
+        "a type spelled only as T* in public signatures, with a T* factory, "
+        "is an opaque handle whose size change is not consumer-visible"
+    ),
+    matcher=_opaque_usage_index,
+    helpers=(_cached_bare_re, _cached_factory_re),
+)
 
 
 def _filter_opaque_size_changes(
@@ -1265,11 +1218,17 @@ def _filter_opaque_size_changes(
     # each candidate's patterns compile once across both snapshots.
     _bare_re_cache: dict[str, re.Pattern[str]] = {}
     _factory_re_cache: dict[str, re.Pattern[str]] = {}
-    old_byval, old_factory = _opaque_usage_index(
-        candidates, old, _bare_re_cache, _factory_re_cache
+    old_byval, old_factory = OPAQUE_HANDLE_USAGE.apply(
+        candidates,
+        snap=old,
+        bare_re_cache=_bare_re_cache,
+        factory_re_cache=_factory_re_cache,
     )
-    new_byval, new_factory = _opaque_usage_index(
-        candidates, new, _bare_re_cache, _factory_re_cache
+    new_byval, new_factory = OPAQUE_HANDLE_USAGE.apply(
+        candidates,
+        snap=new,
+        bare_re_cache=_bare_re_cache,
+        factory_re_cache=_factory_re_cache,
     )
     opaque_types: set[str] = {
         t

@@ -97,10 +97,14 @@ full accounting of what remains open.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from ..compare.edge_query import UNIT_HEADERS, EdgeEvidence
+from ..compare.internal_namespaces import (
+    TEMPLATE_ARG_RE,
+    is_internal_type,
+    name_segments,
+)
 from ..compare.surface_graph import (
     ReferencedIdentifiers,
     fact_list,
@@ -110,6 +114,7 @@ from ..diff_cxx_rules import owner_class_of
 from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.edge_coverage import EdgeAnswer
 from ..model.graph_join import EDGE_KIND_EXPORTS
+from ..model.name_heuristics import NameHeuristicEffect, register_name_heuristic
 from ..model.surface_facts import in_public_surface
 from ..model.type_identifiers import type_identifiers as _type_identifiers
 from ..model.vocabulary import ScopeOrigin
@@ -561,51 +566,26 @@ def _walk_exact_type_closure(
                 queue.append(ident)
 
 
-# ── Leaf-local duplicate of internal_leak.is_internal_type ─────────────────
-# Needed for exactly one purpose below: `_record_is_confirmed_public_seed`'s
-# "not an internal-namespace type" condition. Duplicated rather than
-# imported from `internal_leak.py` -- that module is itself unclassified in
-# `architecture/modules.yaml` (imports real `extract`-layer `buildsource.*`
-# modules a strictly-enforced `policy/` package member may not depend on;
-# `surface.py`'s own pre-migration call to the same function got away with
-# it only because `surface.py` is a `legacy_paths` entry, exempt from this
-# repo's `unclassified-import`/`dependency-direction` enforcement the way a
-# real `abicheck/policy/*.py` file is not). Matches the same "leaf-safe
-# duplicate" precedent already used for `_type_identifiers` in
-# ``public_surface.py``.
-_DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = (
-    "detail",
-    "impl",
-    "internal",
-    "__detail",
-    "_impl",
+#: Registered name heuristic (design-hardening Phase 5): the internal-namespace
+#: convention may only *veto* a type that would otherwise be seeded into the
+#: public surface by header origin alone. It never removes a type that a
+#: public signature reaches -- reachability seeds those independently -- so
+#: it can only lower what is claimed public. The matcher is the one
+#: ``compare.internal_namespaces`` owns; this module used to carry a
+#: leaf-local duplicate of its vocabulary.
+INTERNAL_NAMESPACE_SEED_VETO = register_name_heuristic(
+    "internal_namespace_seed_veto",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    description=(
+        "a detail::/impl::/internal:: segment vetoes seeding a type into the "
+        "public surface by header origin alone"
+    ),
+    matcher=is_internal_type,
+    helpers=(name_segments,),
+    vocabularies=("abicheck.compare.internal_namespaces:DEFAULT_INTERNAL_NAMESPACES",),
+    patterns=(TEMPLATE_ARG_RE,),
 )
-_TEMPLATE_ARG_RE = re.compile(r"<[^<>]*>")
-
-
-def _strip_template_args(name: str) -> str:
-    """Collapse balanced ``<...>`` template arg lists out of *name*."""
-    prev = None
-    cur = name
-    while cur != prev:
-        prev = cur
-        cur = _TEMPLATE_ARG_RE.sub("", cur)
-    return cur
-
-
-def _name_segments(name: str) -> list[str]:
-    """Return ``::``-separated identifier segments of *name*, with template
-    arguments stripped first."""
-    if not name:
-        return []
-    stripped = _strip_template_args(name)
-    return [seg.strip() for seg in stripped.split("::") if seg.strip()]
-
-
-def _is_internal_type(name: str) -> bool:
-    """Return True if *name* lives in one of ``_DEFAULT_INTERNAL_NAMESPACES``
-    (segment-based match, case-sensitive)."""
-    return any(seg in _DEFAULT_INTERNAL_NAMESPACES for seg in _name_segments(name))
 
 
 def _record_exact_identities(snap: AbiSnapshot) -> set[str]:
@@ -640,7 +620,7 @@ def _record_is_confirmed_public_seed(
     return bool(
         rec.source_header
         and rec.origin is ScopeOrigin.PUBLIC_HEADER
-        and not _is_internal_type(qname)
+        and not INTERNAL_NAMESPACE_SEED_VETO.matches(qname)
         and not _record_nested_in_known_record(qname, record_identities)
     )
 
@@ -729,7 +709,7 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
         snap,
         surface,
         lambda q: (
-            not _is_internal_type(q)
+            not INTERNAL_NAMESPACE_SEED_VETO.matches(q)
             and not _record_nested_in_known_record(q, record_identities)
         ),
     )

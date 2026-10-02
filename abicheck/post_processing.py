@@ -1357,8 +1357,8 @@ class DetectInternalLeaks:
         if ctx.old is None:
             return changes
 
+        from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
         from .internal_leak import (
-            DEFAULT_INTERNAL_NAMESPACES,
             detect_call_graph_leaks,
             detect_internal_leaks,
         )
@@ -1417,12 +1417,14 @@ class DemoteUnreachableInternalChurn:
 
         import fnmatch
 
+        from .compare.internal_namespaces import (
+            DEFAULT_INTERNAL_NAMESPACES,
+            strip_template_args as _strip_template_args,
+        )
         from .internal_leak import (
             _LEAK_TRIGGERING_KINDS,
-            DEFAULT_INTERNAL_NAMESPACES,
+            INTERNAL_NAMESPACE,
             _root_type_name_for_change,
-            _strip_template_args,
-            is_internal_type,
         )
         from .model.change_catalog.kinds import ChangeKind
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
@@ -1459,7 +1461,7 @@ class DemoteUnreachableInternalChurn:
             root = _root_type_name_for_change(c)
             if (
                 c.kind in _LEAK_TRIGGERING_KINDS
-                and is_internal_type(root, namespaces)
+                and INTERNAL_NAMESPACE.matches(root, internal_namespaces=namespaces)
                 and root not in leaked_types
                 and not _is_frozen(root)
             ):
@@ -1636,7 +1638,9 @@ class EscalateFrozenNamespaceViolations:
         # Imported lazily so this module stays free of import cycles.
         import fnmatch
 
-        from .internal_leak import _strip_template_args
+        from .compare.internal_namespaces import (
+            strip_template_args as _strip_template_args,
+        )
 
         if not name:
             return None

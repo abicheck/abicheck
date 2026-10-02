@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-import re
-
 from abicheck.checker_policy import ChangeKind, Confidence, EvidenceTier
 from abicheck.checker_types import (
     SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER,
@@ -35,10 +33,7 @@ from abicheck.diff_filtering import (
     _filter_reserved_field_renames,
     _find_by_value_types,
     _find_opaque_types,
-    _has_public_pointer_factory,
     _is_impl_source,
-    _public_function_uses_type_by_value,
-    _public_variable_uses_type_by_value,
     _safe_index,
 )
 from abicheck.model import (
@@ -172,88 +167,6 @@ def test_enrich_affected_symbols_no_type_changes_noop():
     changes = [Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="d")]
     _enrich_affected_symbols(changes, old)
     assert changes[0].affected_symbols is None
-
-
-# ── _public_function_uses_type_by_value — non-public skip (539) ──────────────
-
-
-def test_public_function_uses_type_by_value_skips_hidden():
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        functions=[
-            _fn("hidden", "hidden", return_type="Handle", visibility=Visibility.HIDDEN),
-        ]
-    )
-    assert _public_function_uses_type_by_value(snap, bare) is False
-
-
-def test_public_function_uses_type_by_value_param_match():
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        functions=[
-            _fn("f", "f", return_type="void", params=[Param(name="h", type="Handle")]),
-        ]
-    )
-    assert _public_function_uses_type_by_value(snap, bare) is True
-
-
-# ── _public_variable_uses_type_by_value — skip + match (551-554) ─────────────
-
-
-def test_public_variable_uses_type_by_value_skips_hidden():
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        variables=[
-            Variable(
-                name="g", mangled="g", type="Handle", visibility=Visibility.HIDDEN
-            ),
-        ]
-    )
-    assert _public_variable_uses_type_by_value(snap, bare) is False
-
-
-def test_public_variable_uses_type_by_value_matches():
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        variables=[
-            Variable(name="g", mangled="g", type="Handle"),
-        ]
-    )
-    assert _public_variable_uses_type_by_value(snap, bare) is True
-
-
-def test_public_variable_uses_type_by_value_loop_continues_on_nonmatch():
-    # First public variable does not use the type by value (pointer) → loop
-    # continues to the next variable (covers the 553->550 loop-back branch).
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        variables=[
-            Variable(name="p", mangled="p", type="Handle*"),
-            Variable(name="g", mangled="g", type="Handle"),
-        ]
-    )
-    assert _public_variable_uses_type_by_value(snap, bare) is True
-
-
-# ── _has_public_pointer_factory — non-public skip (602) ──────────────────────
-
-
-def test_has_public_pointer_factory_skips_hidden():
-    snap = _snap(
-        functions=[
-            _fn("make", "make", return_type="Handle*", visibility=Visibility.HIDDEN),
-        ]
-    )
-    assert _has_public_pointer_factory("Handle", snap) is False
-
-
-def test_has_public_pointer_factory_true_for_public():
-    snap = _snap(
-        functions=[
-            _fn("make", "make", return_type="Handle *"),
-        ]
-    )
-    assert _has_public_pointer_factory("Handle", snap) is True
 
 
 # ── _filter_reserved_field_renames — namespace-prefix continue (737) ─────────
@@ -1134,65 +1047,3 @@ def test_build_type_to_funcs_relates_types_to_referencing_functions():
     assert to_funcs["Widget"] == {"use"}
     assert to_mangled["Widget"] == {"_Z3useP6Widget"}
     assert to_funcs["Unused"] == set()
-
-
-def test_opaque_usage_index_matches_per_candidate_oracle():
-    """`_opaque_usage_index` must equal the per-candidate `_is_pointer_only_type` /
-    `_has_public_pointer_factory` oracle it replaced — the AC prefilter only drops
-    pairs that could never match, so the decision is unchanged."""
-    import random
-
-    from abicheck.diff_filtering import (
-        _has_public_pointer_factory,
-        _is_pointer_only_type,
-        _opaque_usage_index,
-    )
-    from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
-
-    rng = random.Random(99)
-    names = ["Foo", "Bar", "Ctx", "SSLCtx", "ns::Foo", "Handle", "T"]
-    typestrs = [
-        "Foo *",
-        "Foo",
-        "const Foo &",
-        "ns::Foo",
-        "ns::Foo *",
-        "SSLCtx *",
-        "Ctx",
-        "Bar, Foo",
-        "std::vector<Foo>",
-        "Handle*",
-        "const Ctx &",
-        "T *",
-        "",
-    ]
-    for _ in range(800):
-        funcs = [
-            Function(
-                name=f"f{i}",
-                mangled=f"f{i}",
-                return_type=rng.choice(typestrs),
-                params=[
-                    Param(name="p", type=rng.choice(typestrs))
-                    for _ in range(rng.randint(0, 2))
-                ],
-                visibility=rng.choice([Visibility.PUBLIC, Visibility.HIDDEN]),
-            )
-            for i in range(rng.randint(0, 5))
-        ]
-        varz = [
-            Variable(
-                name=f"v{i}",
-                mangled=f"v{i}",
-                type=rng.choice(typestrs),
-                visibility=rng.choice([Visibility.PUBLIC, Visibility.HIDDEN]),
-            )
-            for i in range(rng.randint(0, 3))
-        ]
-        snap = AbiSnapshot(library="l", version="1", functions=funcs, variables=varz)
-        cands = set(rng.sample(names, rng.randint(0, len(names))))
-        by_value, has_factory = _opaque_usage_index(cands, snap, {}, {})
-        for t in cands:
-            # pointer-only ⟺ not used by value
-            assert (t not in by_value) == _is_pointer_only_type(t, snap, None)
-            assert (t in has_factory) == _has_public_pointer_factory(t, snap, None)

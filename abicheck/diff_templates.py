@@ -50,6 +50,10 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
+from .compare.naming_conventions import (
+    _INTERNAL_TEMPLATE_NAMESPACES as _INTERNAL_TEMPLATE_NAMESPACES,
+    INTERNAL_TEMPLATE_LEAK,
+)
 from .compare.template_surface import (
     cpo_identity as _cpo_id,
     mask_operator_symbols,
@@ -69,23 +73,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
-
-def _is_internal_segment(name: str, internal_segments: tuple[str, ...]) -> bool:
-    """Return True if any ``::`` segment of ``name`` (template args
-    stripped) matches one of ``internal_segments`` exactly."""
-    bare = _strip_template_args(name)
-    return any(s in bare.split("::") for s in internal_segments)
-
-
-_INTERNAL_TEMPLATE_NAMESPACES: tuple[str, ...] = (
-    "detail",
-    "impl",
-    "internal",
-    "__detail",
-    "_impl",
-    "__internal",
-)
 
 
 # A Function whose demangled name contains ``<...>`` is (in Itanium /
@@ -570,20 +557,17 @@ def _callable_identity_name(
     return _strip_param_signature(_canonical_identity_name(name, mangled, demangled))
 
 
-def _internal_template_stems(
+def _template_stems(
     funcs: list[Function],
-    internal_namespaces: tuple[str, ...],
     demangled: dict[str, str],
 ) -> set[str]:
-    """Return template stems that live in one of *internal_namespaces*."""
+    """Return the template-args-stripped stem of every template
+    instantiation in *funcs*, whatever namespace it lives in."""
     out: set[str] = set()
     for f in funcs:
         qname = _callable_identity_name(f.name, f.mangled, demangled)
-        if not _looks_like_template_instantiation(qname):
-            continue
-        stem = _strip_template_args(qname)
-        if _is_internal_segment(stem, internal_namespaces):
-            out.add(stem)
+        if _looks_like_template_instantiation(qname):
+            out.add(_strip_template_args(qname))
     return out
 
 
@@ -677,33 +661,19 @@ def detect_internal_template_leaks(
     # unchanged between old and new resolves to byte-identical canonical
     # text on both sides regardless of demangle_batch's own dict-ordering.
     demangled = _batch_demangle_for_identity(old_funcs + new_funcs)
-    internal_stems = _internal_template_stems(
-        old_funcs, internal_namespaces, demangled
-    ) | _internal_template_stems(new_funcs, internal_namespaces, demangled)
-    if not internal_stems:
-        return []
-
     old_by_stem = _functions_by_stem(old_funcs, demangled)
     new_by_stem = _functions_by_stem(new_funcs, demangled)
 
     changes: list[Change] = []
-    for stem in sorted(internal_stems):
+    for stem in sorted(
+        _template_stems(old_funcs, demangled) | _template_stems(new_funcs, demangled)
+    ):
         old_sigs = _instantiation_set(old_by_stem.get(stem, []), demangled)
         new_sigs = _instantiation_set(new_by_stem.get(stem, []), demangled)
-        if old_sigs == new_sigs:
-            continue
-        # Direction matters: a (name, signature) pair that existed in OLD but
-        # is absent from NEW means a consumer TU that already resolved and
-        # linked against that mangled instantiation now has nothing to link
-        # against — that's the real "must rebuild every consumer" break this
-        # kind exists to report. A pair present only in NEW (a *new*
-        # instantiation the library started emitting, with every previously
-        # existing one still there unchanged) adds a symbol a consumer could
-        # not already be depending on; it cannot break an already-linked
-        # consumer, so it is not reported here.
-        if not (old_sigs - new_sigs):
-            continue
-        changes.append(_leak_change(stem, old_sigs, new_sigs))
+        if INTERNAL_TEMPLATE_LEAK.confirmed(
+            stem, (old_sigs, new_sigs), internal_namespaces=internal_namespaces
+        ):
+            changes.append(_leak_change(stem, old_sigs, new_sigs))
     return changes
 
 

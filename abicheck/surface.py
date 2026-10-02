@@ -988,9 +988,13 @@ def _classify_type_level(
     # from unreferenced public-header types). Deferring to it guarantees a real
     # leak is never silently dropped here; a genuinely-unreachable internal type
     # is simply left for normal handling.
-    from .internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+    from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
+    from .internal_leak import INTERNAL_NAMESPACE
 
-    if any(is_internal_type(c, DEFAULT_INTERNAL_NAMESPACES) for c in candidates):
+    if any(
+        INTERNAL_NAMESPACE.matches(c, internal_namespaces=DEFAULT_INTERNAL_NAMESPACES)
+        for c in candidates
+    ):
         return True, None
 
     known = {c for c in candidates if c in all_types}

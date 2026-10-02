@@ -49,6 +49,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .checker_types import Change
+from .compare.naming_conventions import (  # noqa: F401 -- re-exported
+    CPU_DISPATCH_ISA,
+    PIMPL_RENAMED_MEMBER,
+    SYCL_QUEUE_OVERLOAD,
+    _has_sycl_queue_first_param as _has_sycl_queue_first_param,
+    _isa_token_in_symbol as _isa_token_in_symbol,
+)
 from .compare.template_surface import (
     qualified_declaration_name as _qualified_function_name,
     reconciled_abi_visible_functions,
@@ -70,7 +77,6 @@ from .diff_helpers import (
 from .diff_serialization import (  # noqa: F401
     _TAG_EXACT_LEAVES,
     _TAG_SUFFIX_PATTERNS,
-    _collect_tag_constants,
     _looks_like_serialization_tag,
     detect_serialization_tag_changes,
 )
@@ -134,43 +140,6 @@ def _parent_namespace(qualified_name: str) -> str:
 # ---------------------------------------------------------------------------
 # case82 — SYCL overload set removed
 # ---------------------------------------------------------------------------
-
-_SYCL_QUEUE_PARAM_RE = re.compile(r"\bsycl\s*::\s*queue\b")
-
-
-def _strip_param_decorators(type_str: str) -> str:
-    """Reduce a param type spelling to its bare base identifier for a
-    type-map lookup: drop ``const``/``volatile`` and trailing pointer/
-    reference markers (``queue&`` -> ``queue``)."""
-    s = re.sub(r"\bconst\b|\bvolatile\b", "", type_str or "")
-    return s.strip().rstrip("*&").strip()
-
-
-def _has_sycl_queue_first_param(
-    fn: Function, type_qualified_index: Mapping[str, set[str | None]] | None = None
-) -> bool:
-    if not fn.params:
-        return False
-    first = fn.params[0]
-    type_str = first.type or ""
-    if _SYCL_QUEUE_PARAM_RE.search(type_str):
-        return True
-    if type_qualified_index is None:
-        return False
-    # castxml never namespace-qualifies a Struct/Class/Union spelling in a
-    # param type (RecordType.name itself stays bare — see its docstring in
-    # model.py), so a real ``sycl::queue&`` param shows up here as the bare
-    # ``queue&``. Fall back to the RecordType's qualified_name (when the
-    # dumper recovered one) before giving up (case82) — but only when the
-    # bare name unambiguously names one distinct type across both snapshots;
-    # an ambiguous bare name (multiple distinct qualified names, e.g. both
-    # ``mylib::queue`` and ``sycl::queue``) can't be resolved from the type
-    # alone and must not guess.
-    qnames = type_qualified_index.get(_strip_param_decorators(type_str))
-    if not qnames or len(qnames) != 1:
-        return False
-    (qname,) = qnames
-    return bool(qname and _SYCL_QUEUE_PARAM_RE.search(qname))
 
 
 def _unqualified_function_name(name: str) -> str:
@@ -251,7 +220,9 @@ def detect_sycl_overload_set_removal(
     for fn in old_funcs:
         if fn.mangled in new_mangled:
             continue
-        if not _has_sycl_queue_first_param(fn, type_qualified_index):
+        if not SYCL_QUEUE_OVERLOAD.matches(
+            fn, type_qualified_index=type_qualified_index
+        ):
             continue
         by_entity[_callable_stem(fn.name)].append(fn)
     # Surviving non-SYCL siblings give us confidence that the family
@@ -259,7 +230,9 @@ def detect_sycl_overload_set_removal(
     # whole algorithm was deleted. Use the same qualified key.
     surviving_non_sycl: set[str] = set()
     for fn in new_funcs:
-        if not _has_sycl_queue_first_param(fn, type_qualified_index):
+        if not SYCL_QUEUE_OVERLOAD.matches(
+            fn, type_qualified_index=type_qualified_index
+        ):
             surviving_non_sycl.add(_callable_stem(fn.name))
     findings: list[Change] = []
     suppressed: set[str] = set()
@@ -304,45 +277,6 @@ def detect_sycl_overload_set_removal(
 # case83 — CPU dispatch ISA dropped
 # ---------------------------------------------------------------------------
 
-# Ordered most-specific to least-specific so that ``avx512`` wins over
-# ``avx`` and ``sse42`` over ``sse``.
-_ISA_TOKENS: tuple[str, ...] = (
-    "avx512",
-    "avx2",
-    "avx",
-    "sse42",
-    "sse41",
-    "sse2",
-    "sse",
-    "neon",
-    "sve",
-    "scalar",
-    "generic",
-)
-
-
-def _isa_token_in_symbol(symbol_name: str) -> str | None:
-    """Find the most specific ISA token in *symbol_name*.
-
-    Looks for ``_<token>_``, trailing ``_<token>``, or ``_<token>@`` (the
-    identifier/signature boundary in a raw MSVC-decorated export string, e.g.
-    ``?kmeans_compute_avx512@mylib@@YAHH@Z`` — needed when matching directly
-    against a PE/Mach-O export table rather than a demangled ``Function.name``;
-    see :func:`_build_removed_by_isa_from_raw_exports`). Case-insensitive.
-    Returns the canonical lowercase token or ``None``.
-    """
-    if not symbol_name:
-        return None
-    lowered = symbol_name.lower()
-    for token in _ISA_TOKENS:
-        if (
-            f"_{token}_" in lowered
-            or f"_{token}@" in lowered
-            or lowered.endswith(f"_{token}")
-        ):
-            return token
-    return None
-
 
 def _isa_strip_token(symbol_name: str, token: str) -> str:
     """Remove the ISA token from *symbol_name* to get the algorithm stem."""
@@ -365,7 +299,7 @@ def _build_removed_by_isa(
     for fn in old_functions:
         if fn.mangled in new_mangled:
             continue
-        token = _isa_token_in_symbol(fn.name) or _isa_token_in_symbol(fn.mangled)
+        token = CPU_DISPATCH_ISA.apply(fn.name) or CPU_DISPATCH_ISA.apply(fn.mangled)
         if token is None:
             continue
         stem = _isa_strip_token(fn.name, token)
@@ -377,7 +311,7 @@ def _build_all_surviving_stems(new_functions: Iterable[Function]) -> set[str]:
     """Return the union of algorithm stems that still exist under any ISA in the new snapshot."""
     surviving_stems_by_isa: dict[str, set[str]] = defaultdict(set)
     for fn in new_functions:
-        token = _isa_token_in_symbol(fn.name) or _isa_token_in_symbol(fn.mangled)
+        token = CPU_DISPATCH_ISA.apply(fn.name) or CPU_DISPATCH_ISA.apply(fn.mangled)
         if token is None:
             continue
         surviving_stems_by_isa[token].add(_isa_strip_token(fn.name, token))
@@ -418,7 +352,7 @@ def _build_removed_by_isa_from_raw_exports(
     """
     removed_by_isa: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for eid in sorted(old_ids - new_ids):
-        token = _isa_token_in_symbol(eid)
+        token = CPU_DISPATCH_ISA.apply(eid)
         if token is None:
             continue
         stem = _isa_strip_token(eid, token)
@@ -430,7 +364,7 @@ def _build_all_surviving_stems_from_raw_exports(new_ids: set[str]) -> set[str]:
     """Raw-export-table counterpart of :func:`_build_all_surviving_stems`."""
     surviving_stems_by_isa: dict[str, set[str]] = defaultdict(set)
     for eid in new_ids:
-        token = _isa_token_in_symbol(eid)
+        token = CPU_DISPATCH_ISA.apply(eid)
         if token is None:
             continue
         surviving_stems_by_isa[token].add(_isa_strip_token(eid, token))
@@ -893,15 +827,12 @@ def _collect_field_rename_candidates(
     unqualified), so ``is_internal_type`` never matched and no candidate was
     ever collected — this detector never actually fired (case89).
     """
-    from .internal_leak import is_internal_type  # local import: cycle-free
-
+    del namespaces  # the name is checked at emission (PIMPL_RENAMED_MEMBER)
     candidates: list[tuple[str, str, str]] = []
     for ch in changes:
         if ch.kind != ChangeKind.FIELD_RENAMED:
             continue
         record_name = ch.symbol
-        if not is_internal_type(record_name, namespaces):
-            continue
         if ch.old_value and ch.new_value:
             candidates.append((record_name, str(ch.old_value), str(ch.new_value)))
     return candidates
@@ -917,8 +848,7 @@ def _collect_paired_field_candidates(
     Covers the case where the AST emitter doesn't produce a FIELD_RENAMED
     but does produce paired field deltas (a "modernize naming" refactor).
     """
-    from .internal_leak import is_internal_type  # local import: cycle-free
-
+    del namespaces  # the name is checked at emission (PIMPL_RENAMED_MEMBER)
     by_internal: dict[str, tuple[list[str], list[str]]] = defaultdict(lambda: ([], []))
     for ch in changes:
         if ch.kind not in (ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.TYPE_FIELD_ADDED):
@@ -927,8 +857,6 @@ def _collect_paired_field_candidates(
         if "::" not in ch.symbol:
             continue
         rec, fld = ch.symbol.rsplit("::", 1)
-        if not is_internal_type(rec, namespaces):
-            continue
         removed_list, added_list = by_internal[rec]
         if ch.kind == ChangeKind.TYPE_FIELD_REMOVED:
             removed_list.append(fld)
@@ -966,10 +894,12 @@ def _emit_inline_body_findings(
             public_holders = _find_public_pimpl_holders(
                 old_types.values(), internal_type, namespaces
             )
-        if not public_holders:
-            continue
         inline_funcs = _inline_accessors_for(old_functions, public_holders)
-        if not inline_funcs:
+        if not PIMPL_RENAMED_MEMBER.confirmed(
+            internal_type,
+            (public_holders, inline_funcs),
+            internal_namespaces=namespaces,
+        ):
             continue
         for holder in sorted(public_holders):
             key = (holder, internal_type, old_field)
@@ -1037,13 +967,13 @@ def _find_public_pimpl_holders(
 ) -> set[str]:
     """Return names of *public* record types that hold a pimpl pointing
     at *internal_type_name*."""
-    from .internal_leak import is_internal_type
+    from .internal_leak import INTERNAL_NAMESPACE
 
     found: set[str] = set()
     leaf = _last_segment(internal_type_name)
     for t in types:
         name = getattr(t, "name", "")
-        if is_internal_type(name, namespaces):
+        if INTERNAL_NAMESPACE.matches(name, internal_namespaces=namespaces):
             continue
         fields = getattr(t, "fields", None) or []
         for fld in fields:

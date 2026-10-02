@@ -52,9 +52,22 @@ from .buildsource.call_graph import (
 )
 from .change_registry import unanimous_entity_for
 from .checker_types import Change
+from .compare.internal_namespaces import (
+    DEFAULT_INTERNAL_NAMESPACES,
+    TEMPLATE_ARG_RE,
+    is_internal_type,
+    name_segments,
+    strip_template_args as _strip_template_args,
+)
 from .impact.engine import assess_change
 from .model.change_catalog.kinds import ChangeKind
 from .model.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
+from .model.name_heuristics import (
+    NameHeuristicEffect,
+    StructuralFact,
+    register_name_heuristic,
+    register_severity_raising_heuristic,
+)
 from .policy.evidence_status import ReachabilityState
 from .policy.layout_visibility import layout_proven_invisible
 
@@ -71,18 +84,6 @@ _CONFIDENCE_RANK: dict[str, int] = {CONF_HIGH: 2, CONF_REDUCED: 1, CONF_UNKNOWN:
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-
-# Namespace segments that mark a type as "internal" by convention.
-# Matched as a name segment (between ``::``) — substring matches inside an
-# identifier like ``DetailView`` are intentionally not flagged.
-DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = (
-    "detail",
-    "impl",
-    "internal",
-    "__detail",
-    "_impl",
-)
-
 
 # Change kinds that represent a meaningful change to a type's binary layout
 # or identity. If a *change of one of these kinds* applies to an internal
@@ -120,27 +121,6 @@ _LEAK_TRIGGERING_KINDS: frozenset[ChangeKind] = frozenset(
 )
 
 
-# Splits a qualified C++ name into namespace segments, ignoring template
-# argument lists. ``acme::lib::detail::pimpl<X>`` →
-# ``["acme", "lib", "detail", "pimpl"]``.
-_TEMPLATE_ARG_RE = re.compile(r"<[^<>]*>")
-
-
-def _strip_template_args(name: str) -> str:
-    """Collapse balanced ``<...>`` template arg lists out of *name*.
-
-    Handles one level of nesting iteratively. Used only for splitting the
-    name into ``::``-separated segments, not for canonicalisation.
-    """
-    prev = None
-    cur = name
-    # Iteratively strip innermost <...> until stable (handles nesting).
-    while cur != prev:
-        prev = cur
-        cur = _TEMPLATE_ARG_RE.sub("", cur)
-    return cur
-
-
 def _strip_signature_params(name: str) -> str:
     """Truncate a demangled C++ function signature at its own parameter list.
 
@@ -161,42 +141,6 @@ def _strip_signature_params(name: str) -> str:
         elif ch == ")":
             depth -= 1
     return name
-
-
-def _name_segments(name: str) -> list[str]:
-    """Return ``::``-separated identifier segments of *name*.
-
-    Template arguments are stripped first so that
-    ``acme::lib::detail::pimpl<Foo<int>>`` yields
-    ``["acme", "lib", "detail", "pimpl"]``.
-    """
-    if not name:
-        return []
-    stripped = _strip_template_args(name)
-    return [seg.strip() for seg in stripped.split("::") if seg.strip()]
-
-
-def is_internal_type(
-    name: str,
-    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
-) -> bool:
-    """Return True if *name* lives in one of the *internal_namespaces*.
-
-    The check is segment-based: a segment matches exactly (case-sensitive)
-    one of *internal_namespaces*. Template arguments are stripped first.
-
-    Examples (with default namespaces)::
-
-        is_internal_type("acme::lib::detail::impl") -> True
-        is_internal_type("acme::lib::detail::pimpl<X>") -> True
-        is_internal_type("std::__detail::node") -> True
-        is_internal_type("MyClass") -> False
-        is_internal_type("Details") -> False   # not a segment match
-    """
-    needles = set(internal_namespaces)
-    if not needles:
-        return False
-    return any(seg in needles for seg in _name_segments(name))
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +318,62 @@ def _typename_is_internal(
     return is_internal_type(qname, internal_namespaces)
 
 
+def _internal_subject(
+    name: str,
+    *,
+    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
+    qualified_index: dict[str, set[str | None]] | None = None,
+) -> bool:
+    """The internal-namespace spelling check, with the qualified-name
+    fallback of :func:`_typename_is_internal` when an index is given."""
+    if qualified_index is None:
+        return is_internal_type(name, internal_namespaces)
+    return _typename_is_internal(name, qualified_index, internal_namespaces)
+
+
+def _layout_proven_invisible(fact_input: tuple[str, AbiSnapshot, AbiSnapshot]) -> bool:
+    return layout_proven_invisible(*fact_input)
+
+
+_INTERNAL_VOCABULARY = (
+    "abicheck.compare.internal_namespaces:DEFAULT_INTERNAL_NAMESPACES"
+)
+
+#: Design-hardening Phase 5: the name only nominates the pointer-only
+#: leniency; proven-invisible layout confirms it (decision 2A).
+INTERNAL_NAMESPACE = register_name_heuristic(
+    "internal_namespace",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    description=(
+        "a detail::/impl::/internal:: segment marks a type as implementation "
+        "detail, eligible for the pointer-only layout leniency"
+    ),
+    matcher=_internal_subject,
+    helpers=(is_internal_type, name_segments, _typename_is_internal),
+    confirmed_by=StructuralFact(
+        "policy.layout_visibility.layout_proven_invisible", _layout_proven_invisible
+    ),
+    vocabularies=(_INTERNAL_VOCABULARY,),
+    patterns=(TEMPLATE_ARG_RE,),
+)
+
+#: The name nominates a BREAKING leak finding; a public reachability path decides.
+INTERNAL_TYPE_LEAK = register_severity_raising_heuristic(
+    "internal_type_leak",
+    owner=__name__,
+    description=(
+        "a changed internal-namespace type is reported as leaking through "
+        "the public API"
+    ),
+    matcher=_internal_subject,
+    helpers=(is_internal_type, name_segments, _typename_is_internal),
+    fact=StructuralFact("policy.internal_leak.public_signature_reaches_type", bool),
+    vocabularies=(_INTERNAL_VOCABULARY,),
+    patterns=(TEMPLATE_ARG_RE,),
+)
+
+
 def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
     """Build a type-name → RecordType map for *snap*.
 
@@ -546,8 +546,8 @@ def _seed_queue_from_public_types(
     if is_dwarf_fallback:
         return
     for seed_name in type_map:
-        if seed_name and not _typename_is_internal(
-            seed_name, qualified_index, internal_set
+        if seed_name and not INTERNAL_NAMESPACE.matches(
+            seed_name, internal_namespaces=internal_set, qualified_index=qualified_index
         ):
             queue.append((seed_name, [f"type:{seed_name}"]))
 
@@ -640,14 +640,20 @@ def _bfs_collect_paths(
             # Still record the leak if this typename is internal — paths
             # vary by entry point, but the *first* recorded one is enough
             # for user-facing reporting.
-            if _typename_is_internal(typename, qualified_index, internal_set):
+            if INTERNAL_NAMESPACE.matches(
+                typename,
+                internal_namespaces=internal_set,
+                qualified_index=qualified_index,
+            ):
                 paths[typename].append(list(path + [typename]))
             continue
         visited.add(key)
 
         _enqueue_typedef_targets(typename, typedefs or {}, path, queue)
 
-        if _typename_is_internal(typename, qualified_index, internal_set):
+        if INTERNAL_NAMESPACE.matches(
+            typename, internal_namespaces=internal_set, qualified_index=qualified_index
+        ):
             paths[typename].append(list(path + [typename]))
 
         rec = type_map.get(typename)
@@ -1055,10 +1061,10 @@ def compute_call_graph_leak_paths(
                 # review, fresh evidence). Strip the signature's own
                 # parameter list before classifying.
                 lookup_name = _strip_signature_params(demangle(name) or name)
-            if not is_internal_type(lookup_name, internal_set):
-                continue
             path_edges = _reconstruct_path(came_from, entry, target)
-            if not path_edges:
+            if path_edges is None or not INTERNAL_TYPE_LEAK.confirmed(
+                lookup_name, path_edges, internal_namespaces=internal_set
+            ):
                 continue
             formatted = _format_dependency_path(graph, path_edges)
             if target in degraded:
@@ -1240,7 +1246,9 @@ def _collect_internal_changes(
         # ``symbol`` may be e.g. "ns::detail::Impl::field" — peel the field
         # qualifier so we look up the type itself.
         type_name = _root_type_name_for_change(c)
-        if _typename_is_internal(type_name, qualified_index, internal_set):
+        if INTERNAL_NAMESPACE.matches(
+            type_name, internal_namespaces=internal_set, qualified_index=qualified_index
+        ):
             internal_changes[type_name].append(c)
     return internal_changes
 
@@ -1381,7 +1389,12 @@ def detect_internal_leaks(
         old_pl = old_paths.get(tname, [])
         new_pl = new_paths.get(tname, [])
         paths = _merge_leak_paths(tname, old_paths, new_paths)
-        if not paths:
+        if not INTERNAL_TYPE_LEAK.confirmed(
+            tname,
+            paths,
+            internal_namespaces=internal_set,
+            qualified_index=merged_qualified_index,
+        ):
             # Internal type changed but not reachable from public API in
             # either snapshot — this is the "truly private" case; skip.
             continue
@@ -1412,7 +1425,12 @@ def detect_internal_leaks(
         if (
             all_indirect
             and not identity_or_vtable
-            and layout_proven_invisible(tname, old, new)
+            and INTERNAL_NAMESPACE.confirmed(
+                tname,
+                (tname, old, new),
+                internal_namespaces=internal_set,
+                qualified_index=merged_qualified_index,
+            )
         ):
             continue
         out.append(

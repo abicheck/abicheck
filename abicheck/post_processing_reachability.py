@@ -208,16 +208,16 @@ class MarkReachability:
             """
             c.impact_assessment = assess_change(c)
 
+        from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
         from .internal_leak import (
             _IDENTITY_VTABLE_KINDS,
-            DEFAULT_INTERNAL_NAMESPACES,
+            INTERNAL_NAMESPACE,
             _format_path,
             _path_has_indirection,
             _path_is_value_propagating,
             _root_type_name_for_change,
             compute_call_graph_leak_paths,
             compute_leak_paths,
-            is_internal_type,
             select_preferred_path,
         )
         from .model import ScopeOrigin
@@ -633,14 +633,20 @@ class MarkReachability:
                     qualified_name_by_bare.get(root) if enum_owner is None else None
                 )
                 subject_is_internal = (
-                    is_internal_type(internal_check_subject, namespaces)
+                    INTERNAL_NAMESPACE.matches(
+                        internal_check_subject, internal_namespaces=namespaces
+                    )
                     or (
                         c.qualified_name is not None
-                        and is_internal_type(c.qualified_name, namespaces)
+                        and INTERNAL_NAMESPACE.matches(
+                            c.qualified_name, internal_namespaces=namespaces
+                        )
                     )
                     or (
                         type_qualified_name is not None
-                        and is_internal_type(type_qualified_name, namespaces)
+                        and INTERNAL_NAMESPACE.matches(
+                            type_qualified_name, internal_namespaces=namespaces
+                        )
                     )
                 )
                 layout_domain = root in reachable_types or (
