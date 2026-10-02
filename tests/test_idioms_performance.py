@@ -343,7 +343,9 @@ class TestStripPtrCacheBounds:
 
         original = type_spelling._strip_ptr_memo
         unlocked: list[str] = []
-        probe: MemoryCache[str] = MemoryCache("test.strip_ptr.lock", max_entries=4)
+        probe: MemoryCache[str] = MemoryCache(
+            "test.strip_ptr.lock", max_entries=4, field="spelling"
+        )
 
         class _LockAssertingDict(OrderedDict):
             def _check(self, op: str) -> None:
@@ -407,7 +409,7 @@ class TestStripPtrCacheBounds:
 
         original = type_spelling._strip_ptr_memo
         type_spelling._strip_ptr_memo = MemoryCache(
-            "test.strip_ptr.concurrent", max_entries=8
+            "test.strip_ptr.concurrent", max_entries=8, field="spelling"
         )
         errors: list[BaseException] = []
         wrong: list[tuple[str, str, str]] = []

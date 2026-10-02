@@ -251,6 +251,8 @@ class MemoryCache(Generic[_V]):
     * ``keep=`` decides whether a computed value may be stored (a degraded
       result is returned but not remembered).
     * *copy* is applied to every value handed out, for values a caller owns.
+    * *field* names the single input a one-input cache is keyed on; its keys
+      are then that input's values.
     """
 
     def __init__(
@@ -261,8 +263,13 @@ class MemoryCache(Generic[_V]):
         max_bytes: int | None = None,
         weigh: Callable[[_V], int] | None = None,
         copy: Callable[[_V], _V] | None = None,
+        field: str | None = None,
     ) -> None:
         self.name = name
+        #: When set, the request identity is this one named input and callers
+        #: pass its value directly (no :class:`RequestKey` built per lookup on
+        #: a hot path); otherwise every key must come from :func:`request_key`.
+        self.field = field
         self._max = max_entries
         self._max_bytes = max_bytes
         self._weigh = weigh
@@ -273,12 +280,16 @@ class MemoryCache(Generic[_V]):
         self._lock = threading.Lock()
         self.stats = register_cache(name, "memory", self.clear)
 
+    def _check_key(self, key: Hashable) -> None:
+        if self.field is None and not isinstance(key, RequestKey):
+            raise TypeError(f"{self.name}: cache keys are built by request_key()")
+
     def _out(self, value: _V) -> _V:
         return self._copy(value) if self._copy is not None else value
 
     def get_or_compute(
         self,
-        key: RequestKey,
+        key: Hashable,
         compute: Callable[[], _V],
         *,
         witness: Callable[[], Hashable] | None = None,
@@ -294,8 +305,7 @@ class MemoryCache(Generic[_V]):
         taken now equals the stored one. A witness that comes back ``None``
         means "could not be verified", and such a value is never stored.
         """
-        if not isinstance(key, RequestKey):
-            raise TypeError(f"{self.name}: cache keys are built by request_key()")
+        self._check_key(key)
         if reference_mode():
             self.stats.bypasses += 1
             return compute()
@@ -334,7 +344,7 @@ class MemoryCache(Generic[_V]):
 
     def _fresh_hit(
         self,
-        key: RequestKey,
+        key: Hashable,
         witness: Callable[[], Hashable] | None,
         still_fresh: Callable[[Any], bool] | None,
     ) -> Any:
@@ -361,7 +371,7 @@ class MemoryCache(Generic[_V]):
 
     def _compute_and_store(
         self,
-        key: RequestKey,
+        key: Hashable,
         compute: Callable[[], _V],
         witness: Callable[[], Hashable] | None,
         witness_of: Callable[[_V], Hashable] | None,
@@ -376,28 +386,61 @@ class MemoryCache(Generic[_V]):
             self._store(key, value, seen)
         return value
 
-    def peek(self, key: RequestKey, default: Any = None) -> Any:
+    def peek(self, key: Hashable, default: Any = None) -> Any:
         """The stored value for *key* (no freshness check), else *default*.
 
         For a cache that is *filled* by a batch producer and *read* point by
-        point; reference mode always reports a miss.
+        point, often hundreds of thousands of times per comparison: the read
+        takes no lock and does not refresh recency (eviction stays in
+        insertion order for entries only ever peeked). Reference mode always
+        reports a miss.
         """
-        if reference_mode():
+        if (_ENV_DATA is None or _ENV_DATA.get(_ENV_KEY)) and reference_mode():
             self.stats.bypasses += 1
             return default
-        with self._lock:
-            hit = self._entries.get(key)
-            if hit is None:
-                self.stats.misses += 1
-                return default
-            self._entries.move_to_end(key)
-            self.stats.hits += 1
+        hit = self._entries.get(key)
+        if hit is None:
+            self.stats.misses += 1
+            return default
+        self.stats.hits += 1
         return self._out(hit[0])
 
-    def put(self, key: RequestKey, value: _V) -> None:
+    def raw_get(self) -> Callable[[Hashable], Any]:
+        """The storage's own ``get``: ``key -> (value, weight, witness) | None``.
+
+        No switch, no counters, no copy: only for a hot loop that has itself
+        just checked :func:`reference_mode` (and treats a hit as a miss when it
+        is set) -- ``demangle``'s per-symbol lookup, ~10^5 per comparison.
+        Stays valid across :meth:`clear`.
+        """
+        return self._entries.get
+
+    def reader(self, default: Any = None) -> Callable[[Hashable], Any]:
+        """A bound, stats-free :meth:`peek` for a lookup in a hot loop.
+
+        Same answers as :meth:`peek` (reference mode still always misses),
+        minus the counters and the method dispatch: for a cache consulted
+        hundreds of thousands of times per comparison, where each lookup must
+        cost about what a plain ``dict`` membership test did. Stays valid
+        across :meth:`clear`.
+        """
+        entries_get = self._entries.get
+        env_get = _ENV_DATA.get if _ENV_DATA is not None else None
+        copy = self._copy
+
+        def read(key: Hashable) -> Any:
+            if (env_get is None or env_get(_ENV_KEY)) and reference_mode():
+                return default
+            hit = entries_get(key)
+            if hit is None:
+                return default
+            return copy(hit[0]) if copy is not None else hit[0]
+
+        return read
+
+    def put(self, key: Hashable, value: _V) -> None:
         """Store *value* for *key* unconditionally (a no-op in reference mode)."""
-        if not isinstance(key, RequestKey):
-            raise TypeError(f"{self.name}: cache keys are built by request_key()")
+        self._check_key(key)
         if reference_mode():
             self.stats.bypasses += 1
             return
@@ -579,6 +622,16 @@ def _memoize(
         1 for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
     )
     simple = positional == len(params)
+    # No ``*args``/``**kwargs``: every call binds to one value per parameter,
+    # so the key is the value tuple in signature order. A call passing just
+    # the positional parameters takes the keyword-only ones' defaults without
+    # binding (``inspect.Signature.bind`` costs ~10 us).
+    fixed = all(p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD) for p in params)
+    kw_defaults: tuple[Any, ...] | None = tuple(
+        p.default for p in params if p.kind == p.KEYWORD_ONLY
+    )
+    if any(p.default is p.empty for p in params if p.kind == p.KEYWORD_ONLY):
+        kw_defaults = None
     lock = threading.Lock()
     entries: dict[Hashable, tuple[Any, Hashable]] = {}
     env_get = _ENV_DATA.get if _ENV_DATA is not None else None
@@ -586,11 +639,14 @@ def _memoize(
     def key_of(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Hashable:
         # The request identity is the bound argument list in signature
         # order; the common all-positional call needs no binding at all.
-        if not kwargs and simple and len(args) == positional:
-            return args
+        if not kwargs and len(args) == positional:
+            if simple:
+                return args
+            if fixed and kw_defaults is not None:
+                return args + kw_defaults
         bound = sig.bind(*args, **kwargs)
         bound.apply_defaults()
-        if simple:  # the same shape the fast path builds
+        if fixed:  # the same shape the fast paths build
             return tuple(bound.arguments.values())
         return tuple(bound.arguments.items())
 
@@ -610,10 +666,7 @@ def _memoize(
         if (env_get(_ENV_KEY) if env_get is not None else True) and reference_mode():
             stats.bypasses += 1
             return fn(*args, **kwargs)
-        if not kwargs and simple and len(args) == positional:
-            key: Hashable = args
-        else:
-            key = key_of(args, kwargs)
+        key: Hashable = key_of(args, kwargs)
         seen = witness(*args, **kwargs) if witness is not None else None
         entry = entries.get(key, _MISSING)
         if entry is not _MISSING:

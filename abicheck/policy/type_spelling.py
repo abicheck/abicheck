@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 from typing import cast
 
-from ..model.execution_cache import MemoryCache, request_key
+from ..model.execution_cache import MemoryCache
 
 _POINTER_RE = re.compile(r"[*&]")
 
@@ -84,7 +84,9 @@ def strip_ptr_uncached(type_str: str) -> str:
 # so the ``move_to_end`` race a hand-written ``OrderedDict`` memo had (a hit's
 # key evicted by another worker between the two steps) cannot recur here.
 _strip_ptr_memo: MemoryCache[str] = MemoryCache(
-    "abicheck.policy.type_spelling.strip_ptr", max_entries=STRIP_PTR_CACHE_MAXSIZE
+    "abicheck.policy.type_spelling.strip_ptr",
+    max_entries=STRIP_PTR_CACHE_MAXSIZE,
+    field="spelling",
 )
 
 
@@ -99,7 +101,7 @@ def strip_ptr(type_str: str) -> str:
     if len(type_str) > STRIP_PTR_CACHE_MAX_INPUT:
         return strip_ptr_uncached(type_str)
     return _strip_ptr_memo.get_or_compute(
-        request_key(spelling=type_str), lambda: strip_ptr_uncached(type_str)
+        type_str, lambda: strip_ptr_uncached(type_str)
     )
 
 
@@ -114,8 +116,7 @@ def strip_ptr_cache_entries() -> tuple[tuple[str, str], ...]:
     keys = _strip_ptr_memo.keys()
     values = _strip_ptr_memo.values()
     return tuple(
-        (cast("str", key.fields()["spelling"]), value)
-        for key, value in zip(keys, values, strict=False)
+        (cast("str", key), value) for key, value in zip(keys, values, strict=False)
     )
 
 

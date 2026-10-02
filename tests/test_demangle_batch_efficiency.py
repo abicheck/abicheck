@@ -192,7 +192,7 @@ class TestCacheEvictionIsIncremental:
         dm._batch_cache_record_ok("_ZN3newEv", "new()")
         assert len(dm._BATCH_CACHE_OK) == dm._BATCH_CACHE_MAX
         assert oldest not in dm._BATCH_CACHE_OK
-        assert dm._BATCH_CACHE_OK.peek(dm.request_key(mangled="_ZN3newEv")) == "new()"
+        assert dm._BATCH_CACHE_OK.peek("_ZN3newEv") == "new()"
 
     def test_the_failure_cache_evicts_the_same_way(self) -> None:
         """Both caches, not just the one the incident was noticed on."""
@@ -202,7 +202,7 @@ class TestCacheEvictionIsIncremental:
         dm._batch_cache_record_fail("_Zbad_new")
         assert len(dm._BATCH_CACHE_FAIL) == dm._BATCH_CACHE_MAX
         assert oldest not in dm._BATCH_CACHE_FAIL
-        assert dm.request_key(mangled="_Zbad_new") in dm._BATCH_CACHE_FAIL
+        assert "_Zbad_new" in dm._BATCH_CACHE_FAIL
 
     def test_the_cache_stays_full_across_an_oversized_working_set(self) -> None:
         """Past the bound, retention plateaus at the bound rather than sawtoothing.
@@ -238,10 +238,7 @@ class TestCacheEvictionIsIncremental:
             dm._batch_cache_record_ok(f"_ZN5extra{i}Ev", f"extra{i}()")
         for key in newest_before:
             assert key in dm._BATCH_CACHE_OK
-        assert all(
-            dm.request_key(mangled=f"_ZN5extra{i}Ev") in dm._BATCH_CACHE_OK
-            for i in range(100)
-        )
+        assert all(f"_ZN5extra{i}Ev" in dm._BATCH_CACHE_OK for i in range(100))
 
     def test_re_recording_an_existing_key_never_evicts(self) -> None:
         """An update is not an insertion.
@@ -254,7 +251,7 @@ class TestCacheEvictionIsIncremental:
         self._fill_ok(dm._BATCH_CACHE_MAX)
         oldest = dm._BATCH_CACHE_OK.keys()[0]
         hot_key = dm._BATCH_CACHE_OK.keys()[-1]
-        hot = hot_key.fields()["mangled"]
+        hot = hot_key
         for _ in range(50):
             dm._batch_cache_record_ok(hot, dm._BATCH_CACHE_OK.peek(hot_key))
         assert len(dm._BATCH_CACHE_OK) == dm._BATCH_CACHE_MAX

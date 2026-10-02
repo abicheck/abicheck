@@ -1,9 +1,9 @@
 --- a/abicheck/model/execution_cache.py
 +++ b/abicheck/model/execution_cache.py
-@@ -296,9 +296,6 @@
+@@ -306,9 +306,6 @@
+         means "could not be verified", and such a value is never stored.
          """
-         if not isinstance(key, RequestKey):
-             raise TypeError(f"{self.name}: cache keys are built by request_key()")
+         self._check_key(key)
 -        if reference_mode():
 -            self.stats.bypasses += 1
 -            return compute()

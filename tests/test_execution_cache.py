@@ -261,6 +261,31 @@ def test_memoized_keys_on_the_bound_arguments() -> None:
     assert f.__wrapped__(4) == 42  # type: ignore[attr-defined]
 
 
+def test_memoized_keyword_only_defaults_join_the_positional_call() -> None:
+    """``demangle(sym)`` and ``demangle(sym, accept_macho_prefix=False)`` are
+    one request; the fast path must build the same key binding would."""
+    calls: list[tuple[str, bool]] = []
+
+    @memoized
+    def f(s: str, *, flag: bool = False) -> str:
+        calls.append((s, flag))
+        return f"{s}:{flag}"
+
+    assert f("a") == f("a", flag=False) == f(s="a") == "a:False"
+    assert f("a", flag=True) == "a:True"
+    assert calls == [("a", False), ("a", True)]
+
+
+def test_memory_cache_single_field_and_readers(monkeypatch: pytest.MonkeyPatch) -> None:
+    cache: MemoryCache[str] = MemoryCache("test.ec.field", field="name")
+    cache.put("k", "v")
+    read = cache.reader("miss")
+    assert cache.peek("k") == "v" and read("k") == "v" and read("x") == "miss"
+    assert cache.raw_get()("k")[0] == "v"
+    monkeypatch.setenv(REFERENCE_MODE_ENV_VAR, "1")
+    assert read("k") == "miss" and cache.peek("k", "miss") == "miss"
+
+
 @pytest.mark.parametrize("seed", range(10))
 def test_memoized_is_transparent_under_both_modes_and_lru_bound(
     monkeypatch: pytest.MonkeyPatch, seed: int

@@ -47,9 +47,10 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
+from collections.abc import Callable
 from typing import Any, cast
 
-from .model.execution_cache import MemoryCache, memoized, request_key
+from .model.execution_cache import MemoryCache, memoized, reference_mode
 
 _log = logging.getLogger(__name__)
 
@@ -284,32 +285,44 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
 # left).
 _BATCH_CACHE_MAX = 65536
 _BATCH_CACHE_OK: MemoryCache[str] = MemoryCache(
-    "abicheck.demangle.batch_ok", max_entries=_BATCH_CACHE_MAX
+    "abicheck.demangle.batch_ok", max_entries=_BATCH_CACHE_MAX, field="mangled"
 )
 _BATCH_CACHE_FAIL: MemoryCache[bool] = MemoryCache(
-    "abicheck.demangle.batch_fail", max_entries=_BATCH_CACHE_MAX
+    "abicheck.demangle.batch_fail", max_entries=_BATCH_CACHE_MAX, field="mangled"
 )
 _UNCACHED: Any = object()
+
+
+# Read on every demangle of a comparison (~10^5 per run): the stats-free reader.
+def _never_cached(_mangled: str) -> None:
+    return None
+
+
+_ok_get = _BATCH_CACHE_OK.raw_get()
+_fail_get = _BATCH_CACHE_FAIL.raw_get()
 
 
 def _batch_cached(mangled: str) -> str | None:
     """The cached answer for *mangled*: its demangling, ``None`` for a known
     failure, or :data:`_UNCACHED`."""
-    key = request_key(mangled=mangled)
-    hit = _BATCH_CACHE_OK.peek(key, _UNCACHED)
-    if hit is not _UNCACHED:
-        return cast("str", hit)
-    if _BATCH_CACHE_FAIL.peek(key, _UNCACHED) is not _UNCACHED:
+    if reference_mode():
+        _BATCH_CACHE_OK.stats.bypasses += 1
+        _BATCH_CACHE_FAIL.stats.bypasses += 1
+        return cast("str | None", _UNCACHED)
+    hit = _ok_get(mangled)
+    if hit is not None:
+        return cast("str", hit[0])
+    if _fail_get(mangled) is not None:
         return None
     return cast("str | None", _UNCACHED)
 
 
 def _batch_cache_record_ok(mangled: str, demangled: str) -> None:
-    _BATCH_CACHE_OK.put(request_key(mangled=mangled), demangled)
+    _BATCH_CACHE_OK.put(mangled, demangled)
 
 
 def _batch_cache_record_fail(mangled: str) -> None:
-    _BATCH_CACHE_FAIL.put(request_key(mangled=mangled), True)
+    _BATCH_CACHE_FAIL.put(mangled, True)
 
 
 def _batch_phase1_cache(cpp_syms: list[str]) -> tuple[dict[str, str], list[str]]:
@@ -329,17 +342,26 @@ def _batch_phase1_cache(cpp_syms: list[str]) -> tuple[dict[str, str], list[str]]
     result: dict[str, str] = {}
     uncached: list[str] = []
     seen: set[str] = set()
+    # The switch is read once per batch, not per name (``_batch_cached``
+    # inlined): a batch is ~10^5 names on a large library.
+    if reference_mode():
+        _BATCH_CACHE_OK.stats.bypasses += 1
+        _BATCH_CACHE_FAIL.stats.bypasses += 1
+        ok_get: Callable[[str], Any] = _never_cached
+        fail_get: Callable[[str], Any] = _never_cached
+    else:
+        ok_get, fail_get = _ok_get, _fail_get
     for s in cpp_syms:
         if s in seen:
             continue
-        cached = _batch_cached(s)
-        if cached is not _UNCACHED:
-            if cached is not None:  # a known failure is skipped silently
-                result[s] = cached
+        hit = ok_get(s)
+        if hit is not None:
+            result[s] = hit[0]
             continue
-        if s not in seen:
-            seen.add(s)
-            uncached.append(s)
+        if fail_get(s) is not None:
+            continue  # a known failure is skipped silently
+        seen.add(s)
+        uncached.append(s)
     return result, uncached
 
 
@@ -489,9 +511,17 @@ def demangle_one_batched(symbol: str) -> str | None:
     """
     if not symbol or not _is_itanium_mangled(symbol):
         return None
-    cached = _batch_cached(symbol)
-    if cached is not _UNCACHED:
-        return cached
+    # ``_batch_cached`` inlined: this runs once per name per comparison
+    # (~10^5), and the extra call was measurable in the scaling benchmark.
+    if not reference_mode():
+        hit = _ok_get(symbol)
+        if hit is not None:
+            return cast("str", hit[0])
+        if _fail_get(symbol) is not None:
+            return None
+    else:
+        _BATCH_CACHE_OK.stats.bypasses += 1
+        _BATCH_CACHE_FAIL.stats.bypasses += 1
     return demangle_batch([symbol]).get(symbol)
 
 
