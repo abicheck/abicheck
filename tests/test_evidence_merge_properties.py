@@ -34,6 +34,7 @@ from abicheck.model.evidence_merge import (
     is_completed_read,
     merge_collection,
     merge_presence,
+    merged_capture_fact,
     presence_in,
 )
 from abicheck.model.fact import Fact
@@ -227,3 +228,46 @@ class TestCollectionProperties:
         both_read = merge_collection(read, Fact.present(frozenset()))
         assert both_read.status is S.PRESENT
         assert presence_in(both_read, "b").value is False
+
+
+class TestMergedCaptureFact:
+    """``merged_capture_fact``: the cross-TU ``contract_attributes`` merge."""
+
+    @pytest.mark.parametrize(
+        ("captures", "status"),
+        [
+            ((None, None), S.NOT_COLLECTED),
+            ((["a"], None), S.PARTIAL),
+            ((None, []), S.PARTIAL),
+            ((["a"], []), S.PRESENT),
+            (([], []), S.PRESENT),
+        ],
+    )
+    def test_status_follows_merge_collection(
+        self, captures: tuple[list[str] | None, ...], status: FactStatus
+    ) -> None:
+        merged = None if all(c is None for c in captures) else ["a"]
+        fact = merged_capture_fact("some", merged, *captures)
+        assert fact.status is status
+        assert fact.value == (merged if status is not S.NOT_COLLECTED else None)
+
+    def test_tu_merge_marks_one_sided_capture_partial(self) -> None:
+        from abicheck.model import Function
+        from abicheck.tu_merge import _merge_functions
+
+        captured = Function(
+            name="f", mangled="f", return_type="int", contract_attributes=["nodiscard"]
+        )
+        uncaptured = Function(
+            name="f", mangled="f", return_type="int", contract_attributes=None
+        )
+        merged = _merge_functions(
+            captured, uncaptured, header_segs=[], dir_segs=[], have_public_set=False
+        )
+        assert merged is not None and merged.contract_attributes_fact is not None
+        assert merged.contract_attributes_fact.status is S.PARTIAL
+        both = _merge_functions(
+            captured, captured, header_segs=[], dir_segs=[], have_public_set=False
+        )
+        assert both is not None and both.contract_attributes_fact is not None
+        assert both.contract_attributes_fact.status is S.PRESENT

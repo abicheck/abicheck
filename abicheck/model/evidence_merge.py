@@ -62,6 +62,7 @@ from .fact import Fact
 
 __all__ = [
     "is_completed_read",
+    "merged_capture_fact",
     "merge_collection",
     "merge_presence",
     "presence_in",
@@ -179,3 +180,29 @@ def presence_in(collection: Fact[frozenset[T]], item: T) -> Fact[bool]:
     return Fact._make(
         collection.status, None, collection.diagnostics, collection.producer
     )
+
+
+def merged_capture_fact(
+    partial_diagnostic: str,
+    merged: list[T] | None,
+    *captures: list[T] | None,
+) -> Fact[list[T]]:
+    """The fact for a value merged from optional captures (``None`` = not
+    captured), status by :func:`merge_collection`.
+
+    *merged* is the caller's own merged value (it may validate or filter the
+    union); this decides only how much of it is established: every capture
+    read gives ``PRESENT``, some read gives ``PARTIAL`` (stamped with
+    *partial_diagnostic*), none read gives ``NOT_COLLECTED``.
+    """
+    status = merge_collection(
+        *(
+            Fact.not_collected() if c is None else Fact.present(frozenset(c))
+            for c in captures
+        )
+    ).status
+    if merged is None or status not in (FactStatus.PRESENT, FactStatus.PARTIAL):
+        return Fact.not_collected()
+    if status is FactStatus.PARTIAL:
+        return Fact.partial(merged, partial_diagnostic)
+    return Fact.present(merged)
