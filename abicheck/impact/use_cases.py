@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Declared business/runtime use cases, promoted to graph facts (G29 Phase 4
-slice 2, an amendment to ADR-057).
+"""Declared business/runtime use cases (G29 Phase 4 slice 2, an amendment
+to ADR-057).
 
 ``abicheck.impact.consumer_graph`` (slice 1) joins a real ``--used-by``
 binary's *symbol-level* requirements onto the library's own graph. This
@@ -46,23 +46,20 @@ any *report-schema* ``Change.affected_use_cases`` field or
 (G29 Phase 6 — that needs its own schema bump and FP-gate examples, not a
 drive-by extension here).
 
-:func:`explain_use_case_impact` (G29 Phase 4, added alongside the
-``project validate-use-cases --against-new`` CLI mode, both now retired) is a narrower, real
-step past graph-building alone: given a real two-snapshot diff's changed
-symbols, it answers *which declared use case(s)' own entrypoints reach
-each one* — but it is a **read-only report view**, not a `Change`
-mutation. It constructs no new node/edge, sets no field on any `Change`
-object, and is invisible to `compare`'s own report schema/exit code; a
-caller renders its answer directly (today, only the CLI command above
-does). This is the same "enrichment lives outside the object being
-enriched" shape :mod:`abicheck.impact.engine`'s `assess_change` already
-uses for `ImpactAssessment` — just without even a cached field on `Change`,
+:func:`explain_use_case_impact` (G29 Phase 4) answers, for a real
+two-snapshot diff's changed symbols, *which declared use case(s)' own
+entrypoints reach each one*. It is a **read-only report view**, not a
+`Change` mutation: it constructs no node/edge and sets no field on any
+`Change`; ``compare --use-cases`` renders its answer as the report's
+``use_case_impact`` section (:mod:`abicheck.impact.use_case_impact`). This
+is the same "enrichment lives outside the object being enriched" shape
+:mod:`abicheck.impact.engine`'s `assess_change` already uses for
+`ImpactAssessment` — just without even a cached field on `Change`,
 since nothing in this slice re-reads the answer more than once per run.
 """
 
 from __future__ import annotations
 
-import copy
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,11 +67,8 @@ from typing import TYPE_CHECKING, Any
 
 from ..errors import UseCaseManifestError
 from ..model.graph_facts import (
-    CONF_HIGH,
-    CONF_UNKNOWN,
     USE_CASE_EDGE_KINDS as USE_CASE_EDGE_KINDS,
     USE_CASE_NODE_KINDS as USE_CASE_NODE_KINDS,
-    GraphEdge,
     GraphNode,
 )
 from ..model.yaml_strict import load_strict_yaml
@@ -87,24 +81,6 @@ if TYPE_CHECKING:
 # — see the comment there for why they live in a leaf rather than beside this
 # producer.
 
-#: ``provenance`` tag every node/edge this module creates carries, so a
-#: declared-use-case fact is distinguishable from a build-evidence,
-#: replay, or consumer (ADR-057 slice 1) one in the ADR-046 D2 merge
-#: (``GraphFact.producer``).
-USE_CASE_PROVENANCE = "declared_use_case"
-
-
-def use_case_node_id(name: str) -> str:
-    """Node id for a declared use case. Mirrors the ``<scheme>://<name>``
-    convention every other id helper in this package/``source_graph.py``
-    uses."""
-    return f"use_case://{name}"
-
-
-def test_case_node_id(name: str) -> str:
-    """Node id for a declared test case."""
-    return f"test_case://{name}"
-
 
 @dataclass(frozen=True)
 class UseCaseDefinition:
@@ -113,9 +89,10 @@ class UseCaseDefinition:
     ``entrypoints``/``tests`` are free-form labels from the manifest author's
     own vocabulary — a symbol name, a qualified declaration name, or any
     other string a human chose to write there. Only ``entrypoints`` is ever
-    matched against the library graph (:func:`build_use_case_graph`);
-    ``tests`` are recorded as-is, since there is no graph node kind for an
-    external test identifier to resolve against.
+    matched against the library graph (:func:`resolve_use_case_entrypoints`,
+    :func:`explain_use_case_impact`); ``tests`` are recorded as-is, since
+    there is no graph node kind for an external test identifier to resolve
+    against.
     """
 
     use_case: str
@@ -286,8 +263,8 @@ def _public_entry_index(library_graph: SourceGraphSummary) -> dict[str, str]:
     share one display label with no such mapping between them, and silently
     picking an arbitrary one of them would hand a manifest's
     ``entrypoints: [foo]`` a wrong-but-confident answer instead of the
-    "degrade to no answer" this module otherwise guarantees
-    (:func:`build_use_case_graph`). An id also always wins over a label —
+    "degrade to no answer" this module otherwise guarantees. An id also
+    always wins over a label —
     built as a separate pass, an ambiguous or colliding label can never
     shadow an exact id already registered.
 
@@ -371,14 +348,12 @@ class UseCaseResolution:
     """Per-use-case entrypoint resolution against a real library graph —
     the read view :func:`resolve_use_case_entrypoints` returns.
 
-    Deliberately a *report*, not a graph: ``build_use_case_graph`` already
-    silently skips an unresolvable ``entrypoints`` value by design (this
-    module's own "absence, never a wrong answer" discipline — see its
-    docstring), which is correct for graph construction but leaves a
-    manifest author with zero visibility into *which* of their declared
-    entrypoints actually matched anything. This dataclass is that missing
-    visibility, for a caller (``project validate``) that wants to
-    report it without changing what the graph itself records.
+    Impact attribution (:func:`explain_use_case_impact`) silently skips an
+    unresolvable ``entrypoints`` value by design (this module's own
+    "absence, never a wrong answer" discipline — see its docstring), which
+    leaves a manifest author with no visibility into *which* of their
+    declared entrypoints actually matched anything. This dataclass is that
+    visibility, for a caller (``project validate``) that reports it.
     """
 
     use_case: str
@@ -391,15 +366,13 @@ def resolve_use_case_entrypoints(
     definitions: list[UseCaseDefinition], library_graph: SourceGraphSummary
 ) -> list[UseCaseResolution]:
     """Resolve every definition's ``entrypoints`` against *library_graph*,
-    reporting which matched and which didn't — a read-only companion to
-    :func:`build_use_case_graph`, not a replacement for it.
+    reporting which matched and which didn't.
 
     Reuses :func:`_public_entry_index` (the exact same resolution
-    :func:`build_use_case_graph` performs) so this can never disagree with
-    what the graph actually ends up recording — a manifest entrypoint this
-    function reports as resolved is guaranteed to be exactly the set
-    :func:`build_use_case_graph` would silently keep, and one reported
-    unresolved is exactly the set it would silently skip. Order preserved
+    :func:`explain_use_case_impact` performs) so the two can never disagree:
+    a manifest entrypoint this function reports as resolved is exactly one
+    that function walks from, and one reported unresolved is exactly one it
+    skips. Order preserved
     from *definitions*; a use case's own ``resolved_entrypoints``/
     ``unresolved_entrypoints`` preserve the manifest's declared order too
     (not sorted), so a report reads in the same order the manifest author
@@ -419,242 +392,6 @@ def resolve_use_case_entrypoints(
             )
         )
     return resolutions
-
-
-def build_use_case_graph(
-    definitions: list[UseCaseDefinition], library_graph: SourceGraphSummary
-) -> SourceGraphSummary:
-    """Promote *definitions* to ``use_case``/``test_case`` graph facts,
-    joined onto *library_graph*'s own public-entry nodes.
-
-    An ``entrypoints`` value that cannot be resolved against
-    *library_graph* (see :func:`_public_entry_index`) is silently skipped —
-    no node, no edge, no error — the same "absence, never a wrong answer"
-    discipline :mod:`abicheck.impact.consumer_graph` already follows for an
-    unresolvable required symbol. A use case with none of its declared
-    entrypoints resolved still gets its own ``use_case`` node (and its
-    ``test_case`` nodes/edges, which never depend on entrypoint
-    resolution) — only the ``USE_CASE_USES_ENTRY`` edges are conditional.
-
-    A resolved entrypoint also gets a same-id placeholder node registered
-    alongside its edge (kind copied from the real library node) — mirroring
-    :func:`abicheck.impact.consumer_graph.build_consumer_graph`'s identical
-    pattern for its ``binary_symbol`` targets. Without it, only an *edge*
-    would point at the library node and the join (:func:`join_use_case_graph`)
-    would never actually deposit a ``USE_CASE_PROVENANCE`` fact onto the
-    shared node — the merge (ADR-046 D2) only happens on a node/edge
-    registration, not implicitly because an edge names an id.
-
-    Deliberately registered at ``CONF_UNKNOWN``, not ``CONF_HIGH`` (Codex
-    review, fresh evidence): ``SourceGraphSummary.add_node``'s ADR-046 D2
-    merge doesn't keep ``attrs``/``provenance``/``confidence`` per-producer —
-    ``provenance``/``confidence`` are each set from the single
-    highest-*precedence* fact across every producer that ever registered the
-    node (``ensure_facts_and_resolve``'s ``top = min(entity.facts, key=
-    _precedence_key)``), and precedence ranks confidence first. A
-    ``kythe``/``codeql``-sourced or indirectly-resolved ``call_graph``
-    fallback node carries no ``consumer_compiled_body`` attr and is exactly
-    ``CONF_REDUCED`` — lower than this module's placeholder would be at
-    ``CONF_HIGH`` — which would let a use-case reference *win* that node's
-    ``provenance`` outright. `source_graph.is_consumer_compiled_node`` falls
-    back to reading ``provenance`` exactly when no ``consumer_compiled_body``
-    attr is present, so a provenance flip from a real "unproven body" signal
-    to ``declared_use_case`` (not itself one of the three provenances that
-    signal excludes) would flip that predicate from correctly conservative
-    (``False``) to wrongly permissive (``True``) — letting a later
-    consumer-impact call-graph traversal walk straight through an out-of-line
-    body it was never proven to reach, and report a false impact path.
-    ``CONF_UNKNOWN`` is the lowest rank (:data:`~abicheck.buildsource.
-    graph_facts._CONFIDENCE_RANK`), so this placeholder can never outrank
-    *any* real evidence the target node already carries — it only ever wins
-    when the target has no competing fact at all, which cannot happen here
-    (:func:`_public_entry_index` only ever resolves an id/label already
-    present in *library_graph*).
-
-    Every ``test_case`` named in ``tests`` gets its own node and a
-    ``TEST_COVERS_USE_CASE`` edge onto its use case, unconditionally: unlike
-    an entrypoint, a test identifier has no corresponding node kind in the
-    library graph to resolve against, so there is nothing to fail to
-    resolve.
-    """
-    from ..model.source_graph import SourceGraphSummary
-
-    entries = _public_entry_index(library_graph)
-    node_by_id = {n.id: n for n in library_graph.nodes}
-    graph = SourceGraphSummary()
-    for definition in definitions:
-        uc_id = use_case_node_id(definition.use_case)
-        graph.add_node(
-            GraphNode(
-                id=uc_id,
-                kind="use_case",
-                label=definition.use_case,
-                provenance=USE_CASE_PROVENANCE,
-                confidence=CONF_HIGH,
-            )
-        )
-        for entry_name in definition.entrypoints:
-            target = entries.get(entry_name)
-            if target is None:
-                continue
-            target_kind = node_by_id[target].kind
-            graph.add_node(
-                GraphNode(
-                    id=target,
-                    kind=target_kind,
-                    provenance=USE_CASE_PROVENANCE,
-                    confidence=CONF_UNKNOWN,
-                )
-            )
-            graph.add_edge(
-                GraphEdge(
-                    src=uc_id,
-                    dst=target,
-                    kind="USE_CASE_USES_ENTRY",
-                    provenance=USE_CASE_PROVENANCE,
-                    confidence=CONF_HIGH,
-                )
-            )
-        for test_name in definition.tests:
-            test_id = test_case_node_id(test_name)
-            graph.add_node(
-                GraphNode(
-                    id=test_id,
-                    kind="test_case",
-                    label=test_name,
-                    provenance=USE_CASE_PROVENANCE,
-                    confidence=CONF_HIGH,
-                )
-            )
-            graph.add_edge(
-                GraphEdge(
-                    src=test_id,
-                    dst=uc_id,
-                    kind="TEST_COVERS_USE_CASE",
-                    provenance=USE_CASE_PROVENANCE,
-                    confidence=CONF_HIGH,
-                )
-            )
-    return graph
-
-
-def join_use_case_graph(
-    library_graph: SourceGraphSummary, use_cases: SourceGraphSummary
-) -> SourceGraphSummary:
-    """Fold *use_cases*'s nodes/edges into a **deep copy** of *library_graph*.
-
-    Mirrors :func:`abicheck.impact.consumer_graph.join_consumer_graph`
-    exactly, including the reasoning: a shallow re-registration of the
-    library graph's own :class:`~abicheck.model.graph_facts.GraphNode`
-    objects would work today (nothing here mutates a node's `attrs`
-    directly), but ``SourceGraphSummary.add_node`` merges into the *stored*
-    object in place (ADR-046 D2) — the library graph is read off an
-    ``AbiSnapshot``'s embedded pack and is shared with every other consumer
-    of that snapshot (``internal_leak``'s walks, ``source_graph_findings``'
-    diff, and now also :mod:`abicheck.impact.consumer_graph`'s own join). A
-    shallow fold would leak one project's declared-use-case facts onto the
-    library graph's own public-entry nodes, corrupting every unrelated
-    analysis of the same run — exactly the failure mode the consumer-graph
-    join's own regression test guards against. Deep-copying first keeps this
-    join's blast radius confined to its own returned graph.
-
-    Within the copy, that same ADR-046 D2 merge performs the join itself: a
-    node the library graph already has (a ``binary_symbol`` or public
-    ``source_decl``) and this module's edge also names ends up as **one**
-    node/edge carrying both producers' facts — there is nothing else to
-    "join" beyond registering into the same store.
-
-    ``coverage``/``extractor_passes``/``narrowed_passes``/``degraded_passes``
-    are carried over from *library_graph* unchanged, for the identical
-    reason ``join_consumer_graph`` keeps them unchanged: a declared use case
-    is not a source-extraction pass, and rewriting those flags would make
-    the library's own coverage honesty describe a pass that never ran.
-    Deliberately not :meth:`~abicheck.model.source_graph.SourceGraphSummary.finalize`\\ d
-    either, for the same transient-graph reason.
-
-    Restores every already-existing node's own ``provenance``/``confidence``
-    to their pre-join value afterward (Codex review, fresh evidence — a
-    residual gap in the earlier ``CONF_UNKNOWN`` placeholder-confidence fix):
-    ``ensure_facts_and_resolve``'s ADR-046 D2 merge picks **one** globally
-    winning fact for a node's ``provenance``/``confidence`` via a full
-    precedence order (confidence rank first, then producer name as a
-    tiebreak) — there is no way to mark a fact as "never eligible to win",
-    so no confidence level :func:`build_use_case_graph`'s coalescing
-    placeholder could choose is safe against *every* real producer's own
-    confidence/name combination. ``CONF_UNKNOWN`` (the lowest rank) stops a
-    higher-confidence real fact from ever losing to it, but a real fact that
-    is *also* ``CONF_UNKNOWN`` (e.g. a loaded or hand-built graph whose node
-    omitted a confidence) ties on rank, and the producer-name tiebreak alone
-    can still pick ``"declared_use_case"`` over a real producer whose name
-    sorts later (``"kythe"``, ``"codeql"``, …) — the same
-    ``is_consumer_compiled_node()`` provenance-fallback risk the earlier fix
-    closed for the confidence-ordering case, reopened for the tied case.
-    Restoring the pre-join value afterward is correct regardless of
-    ordering, rather than attempting to out-rank every possible producer
-    name — this module's own ``facts`` contribution (what
-    :func:`join_use_case_graph`'s own docstring above and its regression
-    test check) is untouched, only the single summary ``provenance``/
-    ``confidence`` fields are reset to what the library graph already
-    resolved before this join ran.
-
-    **Known residual gap** (Codex review, fresh evidence): this restoration
-    only patches the *already-resolved* ``provenance``/``confidence``
-    fields on the graph this function returns — the risky
-    ``declared_use_case``/``CONF_UNKNOWN`` fact itself is still sitting in
-    ``node.facts`` (deliberately; that is the join's whole point). Nothing
-    in the current codebase re-runs ``ensure_facts_and_resolve`` on this
-    specific returned graph afterward (confirmed: :func:`join_use_case_graph`
-    has no other caller today — this module isn't wired into any real
-    ``compare``/report pipeline yet, per this file's own module docstring),
-    so this fix is correct for every real code path that exists right now.
-    But a *future* caller that merges this joined graph's nodes into another
-    graph via :meth:`~abicheck.model.source_graph.SourceGraphSummary.add_node`
-    again, or round-trips it through ``to_dict()``/``from_dict()``, would
-    re-trigger the same tied-confidence provenance risk this function just
-    fixed, since both recompute ``provenance``/``confidence`` fresh from the
-    unchanged ``facts`` list. Closing that residual gap for real needs a
-    change to the shared merge precedence itself (a way to mark a
-    :class:`~abicheck.model.graph_facts.GraphFact` as never eligible
-    to win the "top" pick in ``graph_facts._precedence_key``/
-    ``ensure_facts_and_resolve``) — every graph producer in the codebase
-    shares that one precedence function, so this is a scoped design
-    decision of its own, not a drive-by fix bundled into this module's join.
-    Whoever wires :func:`join_use_case_graph`'s result into a real pipeline
-    that might re-merge or re-serialize it must close this gap first.
-
-    Clears the copied ``graph_id`` before returning (Codex review, fresh
-    evidence): unlike :func:`~abicheck.impact.consumer_graph.join_consumer_graph`
-    — whose result never leaves ``appcompat.py``'s own in-memory analysis —
-    this function is the module's *documented public Python API* (see
-    ``docs/contribute/use-case-impact.md``), so a caller following that doc and
-    calling ``joined.to_dict()`` on the result is a real, reachable path,
-    not a hypothetical future pipeline. ``library_graph`` may already carry
-    a non-empty ``graph_id`` from its own :meth:`~abicheck.model.source_graph.SourceGraphSummary.finalize`;
-    left untouched, the deep copy would inherit that same id even though the
-    node/edge content just changed, and ``to_dict()`` only recomputes an id
-    when the stored value is empty — silently describing this join's
-    different content under the library graph's own unrelated id, which
-    could corrupt a content-addressed cache or an identity comparison keyed
-    on it. Clearing (rather than eagerly recomputing via
-    :meth:`~abicheck.model.source_graph.SourceGraphSummary.compute_graph_id`)
-    matches this function's own choice to leave the rest of ``finalize()``'s
-    output (``coverage``/etc.) untouched — the join result is still not
-    :meth:`~abicheck.model.source_graph.SourceGraphSummary.finalize`\\ d,
-    so an empty id is the honest "not finalized" signal a caller who does
-    want one can resolve via ``compute_graph_id()``/``finalize()`` itself.
-    """
-    original = {n.id: (n.provenance, n.confidence) for n in library_graph.nodes}
-    joined = copy.deepcopy(library_graph)
-    for node in use_cases.nodes:
-        joined.add_node(copy.deepcopy(node))
-    for edge in use_cases.edges:
-        joined.add_edge(copy.deepcopy(edge))
-    for node in joined.nodes:
-        restore = original.get(node.id)
-        if restore is not None:
-            node.provenance, node.confidence = restore
-    joined.graph_id = ""
-    return joined
 
 
 def explain_use_case_impact(
@@ -677,10 +414,9 @@ def explain_use_case_impact(
     *specific* use case's own surface does, and attributing a change to
     every use case whenever *any* public entry reaches it would make the
     field meaningless (every use case would show every public-reachable
-    change). No :func:`join_use_case_graph` fold is needed for this walk:
-    entrypoint resolution reads only :func:`_public_entry_index` against the
-    plain library graph, the identical resolution :func:`build_use_case_graph`
-    and :func:`resolve_use_case_entrypoints` already perform.
+    change). Entrypoint resolution reads only :func:`_public_entry_index`
+    against the plain library graph, the identical resolution
+    :func:`resolve_use_case_entrypoints` performs.
 
     Returns ``{symbol: (use_case_name, ...)}`` for exactly the symbols this
     manifest's own entrypoints can be shown to reach — a symbol absent from
@@ -717,12 +453,11 @@ def explain_use_case_impact(
     # use case exactly one list entry -- `parse_use_case_manifest` never
     # rejects a repeated `use_case` name (the duplicate-key check is per
     # *mapping*, and each entry is a separate list item, not a mapping
-    # key), and `build_use_case_graph` already merges every entry sharing
-    # a name onto the *same* `use_case` graph node, registering a
-    # `USE_CASE_USES_ENTRY` edge for each entry's own entrypoints. A plain
-    # `use_case_entries[name] = ids` assignment here disagreed with that
-    # graph it claims to mirror: the later entry's entrypoint set would
-    # silently replace the earlier one's, so a change reachable only
+    # key), so every entry sharing a name is one use case whose entrypoints
+    # are the union of its entries'. A plain
+    # `use_case_entries[name] = ids` assignment here would let the later
+    # entry's entrypoint set silently replace the earlier one's, so a
+    # change reachable only
     # through an earlier entry's entrypoints would never be attributed.
     use_case_entries: dict[str, set[str]] = {}
     for definition in definitions:

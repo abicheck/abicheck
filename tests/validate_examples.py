@@ -40,11 +40,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from abicheck.source_smoke import SourceSmokeSpec, run_source_smoke
-
 REPO_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_DIR / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent))  # source_smoke lives beside this
 import example_catalog  # noqa: E402
+from source_smoke import SourceSmokeSpec, run_source_smoke  # noqa: E402
 
 EXAMPLES_DIR = (
     example_catalog.CASES_DIR

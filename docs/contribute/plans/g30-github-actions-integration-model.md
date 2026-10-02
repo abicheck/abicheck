@@ -2444,8 +2444,8 @@ that item's job, not a rediscovered gap.
 fixture is not yet met and is downgraded here rather than overclaimed.**
 `update-main-baseline.yml` computes `<key-prefix>-<profile-id>-<head-sha>`
 once per run (`abicheck.buildsource.baseline_publish.accepted_main_cache_key`
-is this format's pure-Python mirror, cross-checked against the workflow's
-own literal bash template by `tests/test_publish_baseline_workflows.py`),
+owns this format and the workflow's "Compute cache key" step calls it,
+executed against the real step by `tests/test_publish_baseline_workflows.py`),
 restores the newest previous entry via `restore-keys:
 <key-prefix>-<profile-id>-` (`accepted_main_cache_restore_prefix`) into a
 freshness-comparison staging directory, feeds its `manifest.json` (when one

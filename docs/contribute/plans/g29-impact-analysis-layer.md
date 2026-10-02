@@ -668,7 +668,8 @@ decisions.
   malformed document via `UseCaseManifestError`, silent skip on one
   unresolvable entrypoint), `build_use_case_graph`/`join_use_case_graph`
   (deep-copy join, mirroring `consumer_graph`'s slice 1 API/discipline
-  exactly). Only `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` are populated;
+  exactly; *removed 2026-10 as never called — `dead-code-and-single-owner.md`
+  Stage C*). Only `USE_CASE_USES_ENTRY`/`TEST_COVERS_USE_CASE` were populated;
   `TRACE_OBSERVED_ENTRY`/`TRACE_OBSERVED_EDGE` stay reserved — **runtime-trace
   ingestion itself is still not implemented**. **Done** (this pass): the
   manifest's first CLI front door, `abicheck project validate-use-cases
@@ -1795,7 +1796,9 @@ the existing `type_graph.py` walk.
    nodes and the previously schema-only `ARCHIVE_CONTAINS_OBJECT`/
    `OBJECT_DEFINES_SYMBOL` edges, so a removed-symbol finding can localize
    to "`cache_dispatch.o` in `libinternal_dispatch.a`" via
-   `archive_graph.defining_members`. Needs no compiler (unlike items 1-5
+   `defining_members` (now in `model/source_graph_query.py`), which
+   `localize_symbol` (`graph explain`) reports as
+   `defined_in_archive_members`. Needs no compiler (unlike items 1-5
    above), so it runs whenever an archive link input is present, gated only
    on finding and reading the archive on disk — never on clang. An
    `OBJECT_DEFINES_SYMBOL` edge only ever joins onto a `binary_symbol` node

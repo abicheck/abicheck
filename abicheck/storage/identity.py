@@ -55,7 +55,7 @@ module gives them somewhere honest to land.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -443,23 +443,3 @@ class OccurrenceSet:
             )
         )
         return result
-
-
-def group_by_entity(
-    occurrences: Sequence[OccurrenceId],
-) -> dict[EntityId, tuple[OccurrenceId, ...]]:
-    """Group occurrences by entity, preserving every one.
-
-    Takes a `Sequence`, so `row_sequence` is the right guard here where
-    `OccurrenceSet.extend` needs the weaker `item_iterable` — the contract
-    differs, not the caution. This had the same empty-scalar gap `extend`
-    did (`group_by_entity("")` returned `{}`) and was not reported; it came
-    out of re-checking the claim that finding falsified.
-
-    A convenience over :class:`OccurrenceSet` for callers that already hold a
-    complete sequence. Deliberately returns tuples rather than single values
-    so that no call site can be written as if grouping produced a winner.
-    """
-    result = OccurrenceSet()
-    result.extend(_row_sequence(occurrences, "occurrences"))
-    return {entity: result.occurrences_of(entity) for entity in result.entities()}

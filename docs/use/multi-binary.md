@@ -90,8 +90,7 @@ docstring describes. `bundle_analysis.analyze_bundle()` (the shared
 orchestrator both a live comparison and a stored-facts comparison route
 through) accepts and forwards the same parameter. The **stored
 `BundleFacts` Python-API driver** — `bundle_facts.compare_bundle_from_facts()`,
-`bundle_side_input.compare_bundle_sides()`/
-`compare_release_against_bundle_facts()` — resolves and threads a real
+`bundle_side_input.compare_release_against_bundle_facts()` — resolves and threads a real
 `policy_file` through to it, and so does the CLI's directory/package
 `compare-release` fan-out: `pack_application.resolve_bundle_policy_file()`
 resolves it (called from `cli_compare_release.py`), and
@@ -181,16 +180,6 @@ Closing that narrower residual (re-running suppression against the
 out-of-surface ledger specifically) is tracked as a known gap, not
 attempted as part of this fix — see the G38 plan doc's own Phase 14 entry.
 
-**The whole-product baseline compare (`abicheck/product_baseline.py`'s
-`compare_product_directories`) has no suppression mechanism at all, for
-either kind of finding.** Its function signature carries no `suppress`
-parameter, and it calls the per-library `run_compare()` unconditionally
-unsuppressed — so the starvation effect described above is specific to the
-directory/package CLI fan-out (and any caller manually constructing already-
-suppressed `DiffResult`s for `compare_bundle()`/`compare_bundle_from_facts()`
-itself); a `compare_product_directories()` caller has no suppression lever
-of any kind, upstream or direct.
-
 For the remaining, **graph-native** kinds
 (`bundle_intra_dep_removed`, `bundle_library_removed`/`_added`, version
 drift, SONAME skew, manifest enforcement), there is no per-library `Change`
@@ -225,21 +214,8 @@ consumption at all — a manifest promising a since-removed symbol produces
 `bundle_manifest_instantiation_removed` even if no sibling in the bundle ever
 imported it.
 
-The whole-product baseline compare (`abicheck/product_baseline.py`'s
-`compare_product_directories`) goes further still: it calls `compare_bundle()`
-for its intra-bundle analysis, but then unconditionally reports **every**
-library present in the old product and absent from the new one as
-`bundle_library_removed` (and the symmetric case as `bundle_library_added`),
-with no sibling-consumption check at all — by design, since a whole-product
-compatibility gate must not silently return `NO_CHANGE` for a release that
-dropped its only public library and had no internal consumer to notice. So
-the consumption gate on `bundle_library_removed` described above applies to
-`compare_bundle()`/the directory-package `compare` CLI flow specifically, not
-to the whole-product baseline API.
-
 An *unconsumed*, *unmanifested* internal export removal (within a single
-`compare_bundle()` call, outside the whole-product baseline's own
-unconditional library-level fallback) is the
+`compare_bundle()` call) is the
 one case that falls through to the ordinary per-library `func_removed`,
 governed by the usual public-surface/suppression rules, unaffected by the
 bundle layer.
