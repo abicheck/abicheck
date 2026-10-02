@@ -107,10 +107,10 @@ def _strip_experimental(
     re-run the helper to peel additional layers if needed.
     """
     segs = _segments(qualified)
+    # A registered helper of EXPERIMENTAL_NAMESPACE (the per-segment form of
+    # its matcher), so the membership test stays inline here.
     for i, s in enumerate(segs):
-        if EXPERIMENTAL_NAMESPACE.matches(
-            (s,), experimental_namespaces=experimental_namespaces
-        ):
+        if s in experimental_namespaces:
             return "::".join(segs[:i] + segs[i + 1 :]), s
     return qualified, None
 

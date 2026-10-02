@@ -60,6 +60,7 @@ import abicheck.diff_serialization as diff_serialization_mod
 import abicheck.internal_leak as internal_leak_mod
 from abicheck.compare.enum_sentinel import ENUM_SENTINEL
 from abicheck.model.name_heuristics import (
+    LazyFactInput,
     NameHeuristicEffect,
     StructuralFact,
     register_name_heuristic,
@@ -265,6 +266,22 @@ def test_raising_handle_is_name_and_fact() -> None:
     for name in ("x1", "y1"):
         for fact in (True, False):
             assert h.confirmed(name, fact) is (name == "x1" and fact)
+
+
+@pytest.mark.usefixtures("isolated_registry")
+def test_lazy_fact_input_is_built_only_after_the_name_nominates() -> None:
+    built: list[str] = []
+    h = register_severity_raising_heuristic(
+        "probe_lazy",
+        owner="abicheck.probe",
+        fact=StructuralFact("compare.probe.holds", bool),
+        description="probe",
+        matcher=lambda name: name.startswith("x"),
+    )
+    for name in ("y1", "x1"):
+        lazy = LazyFactInput(lambda name=name: built.append(name) or True)
+        assert h.confirmed(name, lazy) is (name == "x1")
+    assert built == ["x1"]
 
 
 @pytest.mark.usefixtures("isolated_registry")

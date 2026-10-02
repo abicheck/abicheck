@@ -31,8 +31,8 @@ compatibility with existing tests; new code should import from here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import functools
+from typing import TYPE_CHECKING, NamedTuple
 
 from .checker_types import Change
 from .compare.enum_sentinel import identifier_tokens, is_confirmed_enum_sentinel
@@ -103,6 +103,7 @@ _TAG_TYPE_TOKEN_TAILS: tuple[tuple[str, ...], ...] = (
 )
 
 
+@functools.lru_cache(maxsize=4096)
 def _enum_type_is_tag_registry(enum_name: str) -> bool:
     """Whether an enum *type* name is strong evidence of a tag-id registry.
 
@@ -151,8 +152,7 @@ SERIALIZATION_TAG = register_severity_raising_heuristic(
 )
 
 
-@dataclass(frozen=True)
-class _Valued:
+class _Valued(NamedTuple):
     value: str
     entity: str
     enum_type: str | None = None
@@ -238,7 +238,11 @@ def detect_serialization_tag_changes(
     findings: list[Change] = []
     for name, old_entry in old_vals.items():
         new_entry = new_vals.get(name)
-        if new_entry is None or not _is_tag(name, old_entry, new_entry.value):
+        # Unchanged values are the common case and can never be confirmed:
+        # skip them before the (costlier) spelling check runs.
+        if new_entry is None or new_entry.value == old_entry.value:
+            continue
+        if not _is_tag(name, old_entry, new_entry.value):
             continue
         # An end-of-list marker (``*_last``, ``LastSymbol``, ``*_count``) is
         # not a persisted id: its value moves whenever a member is added, and

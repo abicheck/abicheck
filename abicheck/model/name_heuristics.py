@@ -48,6 +48,7 @@ from enum import Enum
 from typing import Any
 
 __all__ = [
+    "LazyFactInput",
     "NameHeuristic",
     "NameHeuristicEffect",
     "SeverityRaisingNameHeuristic",
@@ -99,10 +100,35 @@ class StructuralFact:
         self.check = check
 
     def holds(self, fact_input: Any) -> bool:
+        if isinstance(fact_input, LazyFactInput):
+            fact_input = fact_input.value()
         return bool(self.check(fact_input))
 
     def __repr__(self) -> str:
         return f"StructuralFact({self.id!r})"
+
+
+class LazyFactInput:
+    """A fact input computed only if the name nominates the subject.
+
+    Lets a call site keep the cheap spelling check first without consulting
+    the name on its own: ``confirmed(name, LazyFactInput(build))`` evaluates
+    *build* once, after the matcher, and :meth:`value` returns the cached
+    result for the caller to reuse.
+    """
+
+    __slots__ = ("_build", "_done", "_value")
+
+    def __init__(self, build: Callable[[], Any]) -> None:
+        self._build = build
+        self._done = False
+        self._value: Any = None
+
+    def value(self) -> Any:
+        if not self._done:
+            self._value = self._build()
+            self._done = True
+        return self._value
 
 
 class _Registered:

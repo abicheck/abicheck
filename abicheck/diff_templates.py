@@ -65,6 +65,7 @@ from .compare.template_surface import (
 )
 from .diff_helpers import make_change
 from .model.graph_identity import _normalize_graph_identity
+from .model.name_heuristics import LazyFactInput
 from .model.surface_facts import is_public_export
 
 if TYPE_CHECKING:
@@ -603,6 +604,20 @@ def _instantiation_set(
     }
 
 
+def _sig_pair(
+    stem: str,
+    old_by_stem: dict[str, list[Function]],
+    new_by_stem: dict[str, list[Function]],
+    demangled: dict[str, str],
+) -> tuple[
+    set[tuple[str, tuple[str, int, str]]], set[tuple[str, tuple[str, int, str]]]
+]:
+    return (
+        _instantiation_set(old_by_stem.get(stem, []), demangled),
+        _instantiation_set(new_by_stem.get(stem, []), demangled),
+    )
+
+
 def _leak_change(
     stem: str,
     old_sigs: set[tuple[str, tuple[str, int, str]]],
@@ -668,12 +683,13 @@ def detect_internal_template_leaks(
     for stem in sorted(
         _template_stems(old_funcs, demangled) | _template_stems(new_funcs, demangled)
     ):
-        old_sigs = _instantiation_set(old_by_stem.get(stem, []), demangled)
-        new_sigs = _instantiation_set(new_by_stem.get(stem, []), demangled)
+        sigs = LazyFactInput(
+            partial(_sig_pair, stem, old_by_stem, new_by_stem, demangled)
+        )
         if INTERNAL_TEMPLATE_LEAK.confirmed(
-            stem, (old_sigs, new_sigs), internal_namespaces=internal_namespaces
+            stem, sigs, internal_namespaces=internal_namespaces
         ):
-            changes.append(_leak_change(stem, old_sigs, new_sigs))
+            changes.append(_leak_change(stem, *sigs.value()))
     return changes
 
 
