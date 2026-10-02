@@ -65,6 +65,10 @@ def encode_platform_enums(d: dict[str, Any]) -> None:
                 if isinstance(exp["sym_type"], str)
                 else exp["sym_type"].value
             )
+            # Written only when the export is decorated, so an undecorated
+            # table encodes exactly as before the field existed.
+            if not exp.get("decoded_name"):
+                exp.pop("decoded_name", None)
 
     if d.get("macho"):
         for exp in d["macho"].get("exports", []):

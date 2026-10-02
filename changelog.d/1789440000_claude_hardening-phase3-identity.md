@@ -10,7 +10,10 @@
   disagreed are now one: a `__vectorcall` export (`name@@N`) joins its
   declaration on every machine, not only on 32-bit x86, and a stdcall/fastcall
   `@N` that is not a whole number of 4-byte slots is no longer decoded on the
-  export-table-only path either.
+  export-table-only path either. The PE extractor now stores each export's
+  decoded C name in the snapshot (`PeExport.decoded_name`, written only
+  for a decorated export); a snapshot written before this decodes it once
+  when loaded.
 - **A path reaches an identity key only root-relative.** Identity functions
   take a `RootRelativePath` (`abicheck/model/root_relative_path.py`) instead
   of a string, so an absolute path is a type error there. A recorded

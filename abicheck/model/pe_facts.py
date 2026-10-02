@@ -25,6 +25,7 @@ from enum import Enum
 from functools import cached_property
 
 from .fact import Fact, bridge_legacy_and_fact
+from .name_decoration import pe_x86
 
 
 class PeSymbolType(str, Enum):
@@ -41,6 +42,13 @@ class PeExport:
     ordinal: int = 0
     sym_type: PeSymbolType = PeSymbolType.EXPORTED
     forwarder: str = ""  # e.g. "NTDLL.RtlAllocateHeap" for forwarded exports
+    #: The undecorated C name this export's calling-convention decoration
+    #: spells (``_f@8`` -> ``f``; ``name_decoration.pe_x86``), ``""`` when it
+    #: carries none. Set once, at extraction (or, for a snapshot written
+    #: before it was stored, when :class:`PeMetadata` is built); matching
+    #: code reads it and never decodes a spelling itself. ``None`` only
+    #: until :meth:`PeMetadata.decode_export_names` runs.
+    decoded_name: str | None = None
 
 
 @dataclass
@@ -86,6 +94,16 @@ class PeMetadata:
         self.delay_imports, self.delay_imports_fact = bridge_legacy_and_fact(
             self.delay_imports, self.delay_imports_fact, None, None
         )
+        self.decode_export_names()
+
+    def decode_export_names(self) -> None:
+        """Fill every export's :attr:`PeExport.decoded_name` not yet set,
+        for this image's machine (only ``__vectorcall`` decodes off 32-bit
+        x86). Idempotent; a stored value is never re-derived."""
+        x86_32 = self.machine == pe_x86.PE_MACHINE_I386
+        for export in self.exports:
+            if export.decoded_name is None:
+                export.decoded_name = pe_x86.decode_c_name(export.name, x86_32=x86_32)
 
     @cached_property
     def export_map(self) -> dict[str, PeExport]:

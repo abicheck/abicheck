@@ -70,7 +70,7 @@ from abicheck.model import (
     TypeField,
     Variable,
 )
-from abicheck.model.pe_facts import PeMetadata
+from abicheck.model.pe_facts import PeExport, PeMetadata
 
 # ---------------------------------------------------------------------------
 # must_not_change: path-spelling transforms (string level)
@@ -463,7 +463,11 @@ PE_SCHEMES: dict[str, Callable[[str, int], str]] = {
 
 def _pe_alias_decoder(spelling: str) -> str:
     """The join's alias table, read back as a decoder over one export."""
-    snap = AbiSnapshot(library="libx.dll", version="1", pe=PeMetadata(machine=I386))
+    snap = AbiSnapshot(
+        library="libx.dll",
+        version="1",
+        pe=PeMetadata(machine=I386, exports=[PeExport(name=spelling)]),
+    )
     table = export_index_mod.pe_decoration_aliases(snap, [spelling])
     return next((b for b, raw in table.items() if spelling in raw), "")
 

@@ -368,3 +368,48 @@ def test_project_layout_comparison_key_never_reads_unknown_as_same(a, b) -> None
     pa, pb = "/x/" + "/".join(a), "/x/" + "/".join(b)
     assert (project_layout_spelling(pa) == project_layout_spelling(pb)) == (a == b)
     assert project_layout_spelling(pa) != ""
+
+
+# -- PE decoded names are stored, not re-derived -------------------------------
+
+
+@given(name=c_identifiers, conv=conventions, b=arg_bytes, x86=st.booleans())
+def test_pe_decoded_name_round_trips_through_a_stored_snapshot(
+    name, conv, b, x86
+) -> None:
+    """The extractor's decoded name survives save/load unchanged, an
+    undecorated export stores nothing, and a legacy document without the
+    field is decoded once on load to the same answer."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.pe_facts import PeExport, PeMetadata
+    from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+    spelled = _ORACLE[conv](name, b)
+    machine = pe_x86.PE_MACHINE_I386 if x86 else "IMAGE_FILE_MACHINE_AMD64"
+    pe = PeMetadata(machine=machine, exports=[PeExport(name=spelled)])
+    want = pe_x86.decode_c_name(spelled, x86_32=x86)
+    assert pe.exports[0].decoded_name == want
+
+    doc = snapshot_to_dict(AbiSnapshot(library="l.dll", version="1", pe=pe))
+    (stored,) = doc["pe"]["exports"]
+    assert stored.get("decoded_name", "") == want
+    assert ("decoded_name" in stored) == bool(want)
+    assert snapshot_from_dict(doc).pe.exports[0].decoded_name == want
+
+    stored.pop("decoded_name", None)  # a document written before the field
+    assert snapshot_from_dict(doc).pe.exports[0].decoded_name == want
+
+
+def test_pe_stored_decoded_name_is_authoritative() -> None:
+    """A stored value is never re-derived: the join reads what extraction
+    recorded, even where the codec would now answer differently."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.model.export_index import pe_decoration_aliases
+    from abicheck.model.pe_facts import PeExport, PeMetadata
+
+    pe = PeMetadata(
+        machine=pe_x86.PE_MACHINE_I386,
+        exports=[PeExport(name="_f@8", decoded_name="recorded")],
+    )
+    snap = AbiSnapshot(library="l.dll", version="1", pe=pe)
+    assert pe_decoration_aliases(snap, ["_f@8"]) == {"recorded": frozenset({"_f@8"})}
