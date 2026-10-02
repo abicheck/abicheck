@@ -76,6 +76,8 @@ types, so `from abicheck.elf_metadata import ElfMetadata` still resolves.
 | An L5 `GraphNode`/`GraphEdge` field, or the ADR-046 fact-merge machinery | `graph_facts.py` |
 | An L5 confidence label or `*_NODE_KINDS`/`*_EDGE_KINDS` family vocabulary set | `graph_vocabulary.py` |
 | A decl/type node-id normalization rule | `graph_identity.py` |
+| Decoding/encoding a platform name decoration (Mach-O `_`, PE calling convention, Itanium ctor/dtor variant, ELF `@VER`) | `name_decoration/` (one codec per decoration; extraction applies it, matching code never strips a decoration itself) |
+| A path that can reach an identity key | `root_relative_path.py` (`RootRelativePath`; identity functions take it, never a raw `str`) |
 | A `EntityResolver`/canonical-identity resolution rule | `entity_resolver.py`, `entity_identity.py` |
 | An already-built L5 graph node/edge public/internal/consumer-compiled classification predicate | `source_graph_query.py` |
 | A canonical, backend-independent IR field or canonicalization rule (ADR-063 Phase 6) | `semantic_ir.py` |

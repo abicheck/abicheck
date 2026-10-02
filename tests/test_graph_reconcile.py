@@ -292,10 +292,10 @@ def test_project_relative_path_normalizes_windows_separators() -> None:
     would never be split at all -- the project-root-marker search would
     never find "include" and would compare the raw (checkout-root-
     dependent) path instead."""
-    from abicheck.buildsource.graph_reconcile import _project_relative_path
+    from abicheck.model.root_relative_path import project_layout_spelling
 
-    old = _project_relative_path(r"C:\old\include\api.h")
-    new = _project_relative_path(r"D:\new\include\api.h")
+    old = project_layout_spelling(r"C:\old\include\api.h")
+    new = project_layout_spelling(r"D:\new\include\api.h")
     assert old == new == "include/api.h"
 
 

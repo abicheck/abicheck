@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING
 from .comparison_memo import comparison_memoized
 from .export_index import snapshot_export_names
 from .graph_entity_identity import SnapshotIdentities, snapshot_identities
-from .mangled_name import itanium_ctor_dtor_marker_span
+from .name_decoration import itanium_structors
 
 if TYPE_CHECKING:
     from .snapshot import AbiSnapshot
@@ -71,7 +71,7 @@ def ast_special_member_names(keys: Iterable[str]) -> frozenset[str]:
     out: set[str] = set()
     for key in keys:
         name = key[len(_DECL_PREFIX) :] if key.startswith(_DECL_PREFIX) else key
-        if itanium_ctor_dtor_marker_span(name) is not None:
+        if itanium_structors.locate(name) is not None:
             out.add(name)
     return frozenset(out)
 

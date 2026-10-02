@@ -63,6 +63,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Literal, cast
 
+from .name_decoration import pe_x86
+
 if TYPE_CHECKING:
     from .elf_facts import ElfMetadata
     from .macho_facts import MachoMetadata
@@ -640,3 +642,19 @@ def snapshot_export_table_state(snap: AbiSnapshot) -> ExportTableState:
     platform = getattr(snap, "platform", None)
     ok = read[platform] if platform in read else any(read.values())
     return ExportTableState.READ if ok else ExportTableState.FAILED
+
+
+def pe_decoration_aliases(
+    snap: AbiSnapshot, names: Iterable[str]
+) -> dict[str, frozenset[str]]:
+    """Undecorated C name -> the PE export spellings in *names* that
+    decorate it, decoded by ``name_decoration.pe_x86`` for the machine
+    *snap*'s PE header records (only ``__vectorcall`` decodes off 32-bit
+    x86 or on an unknown machine). A join reads this table and never
+    decodes a spelling itself (design-hardening plan Phase 3)."""
+    x86_32 = snap.pe is not None and snap.pe.machine == pe_x86.PE_MACHINE_I386
+    out: dict[str, set[str]] = {}
+    for name in names:
+        if base := pe_x86.decode_c_name(name, x86_32=x86_32):
+            out.setdefault(base, set()).add(name)
+    return {base: frozenset(spellings) for base, spellings in out.items()}

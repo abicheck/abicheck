@@ -50,10 +50,13 @@ import abicheck.checker as checker_mod
 import abicheck.extract.export_symbol_identity as export_ident_mod
 import abicheck.extract.headers.clang.context as clang_ctx_mod
 import abicheck.finding_identity as finding_mod
+import abicheck.model.export_index as export_index_mod
 import abicheck.model.graph_entity_identity as gei_mod
 import abicheck.model.graph_identity as gid_mod
 import abicheck.model.identity as ident_mod
-import abicheck.model.mangled_name as mangled_mod
+import abicheck.model.name_decoration.elf_version as elf_codec
+import abicheck.model.name_decoration.macho as macho_codec
+import abicheck.model.name_decoration.pe_x86 as pe_codec
 import abicheck.model.source_graph as sg_mod
 import abicheck.model.special_member_identity as smi_mod
 import abicheck.name_classification as nc_mod
@@ -67,6 +70,7 @@ from abicheck.model import (
     TypeField,
     Variable,
 )
+from abicheck.model.pe_facts import PeMetadata
 
 # ---------------------------------------------------------------------------
 # must_not_change: path-spelling transforms (string level)
@@ -262,6 +266,116 @@ def string_collisions(probe: Probe, transform: Transform) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Path probes: a declaring path -> key (design-hardening Phase 3)
+# ---------------------------------------------------------------------------
+#
+# Each probe takes the *recorded* path string (the transform's output) the
+# way production receives it, so the probe covers the root-relative
+# constructor (``RootRelativePath``) together with the identity function.
+# Every probe is keyed so the path really reaches its result (REDUCED tier
+# or the alias itself): a probe that ignored the path would pass vacuously,
+# which the negative control (a different header stays distinct) rules out.
+
+OTHER_HEADER = f"{BASE_ROOT}/inc/other.h"
+
+
+def _report_entry(path: str) -> dict[str, Any]:
+    return {
+        "kind": "func_removed",
+        "symbol": "",
+        "description": "removed",
+        "source_location": f"{path}:3",
+    }
+
+
+def _path_probes() -> dict[str, Callable[[str], str]]:
+    from abicheck.checker_types import Change
+    from abicheck.model.change_catalog.kinds import ChangeKind
+    from abicheck.model.entity_identity import (
+        resolve_identity_for_node,
+        source_relative_identity,
+    )
+    from abicheck.model.graph_facts import GraphNode
+    from abicheck.model.root_relative_path import RootRelativePath
+    from abicheck.workflows.aggregate import reconcile as agg
+
+    def rel(path: str) -> RootRelativePath | None:
+        return RootRelativePath.from_project_layout(path)
+
+    return {
+        "abicheck.model.entity_identity:source_relative_identity": (
+            lambda p: source_relative_identity(rel(p), "lib", "run")
+        ),
+        # Production boundary: an L5 graph node's recorded ``def_file``.
+        "abicheck.model.entity_identity:resolve_canonical_identity": (
+            lambda p: (
+                resolve_identity_for_node(
+                    GraphNode(
+                        id="n", kind="record_type", label="", attrs={"def_file": p}
+                    )
+                ).primary_id
+            )
+        ),
+        "abicheck.finding_identity:resolve_symbol_identity": (
+            lambda p: (
+                finding_mod.resolve_symbol_identity(
+                    kind="function", source_location=rel(f"{p}:3")
+                ).primary_id
+            )
+        ),
+        "abicheck.finding_identity:resolve_change_identity": (
+            lambda p: (
+                finding_mod.resolve_change_identity(
+                    Change(
+                        kind=ChangeKind.FUNC_REMOVED,
+                        symbol="",
+                        description="removed",
+                        source_location=f"{p}:3",
+                    )
+                ).primary_id
+            )
+        ),
+        "abicheck.workflows.aggregate.reconcile:resolve_report_change_identity": (
+            lambda p: agg.resolve_report_change_identity(_report_entry(p)).primary_id
+        ),
+    }
+
+
+def path_violations(probe_name: str, transform: Transform) -> list[str]:
+    key = _path_probes()[probe_name]
+    out = []
+    before, after = key(BASE_HEADER), key(transform.fn(BASE_HEADER))
+    if before != after:
+        out.append(f"{BASE_HEADER!r}: {before!r} != {after!r}")
+    other = key(transform.fn(OTHER_HEADER))
+    if other == after:
+        out.append(f"negative control: api.h and other.h both keyed {after!r}")
+    return out
+
+
+#: Identity functions celled in ``tests/test_family_f3_identity_cells.py``
+#: (one ``test_cell_<function>`` each) -- configuration, storage and
+#: report keys whose environment contract is not a declaring path.
+ENVIRONMENT_CELLS: tuple[str, ...] = (
+    "abicheck.model.identity_tiers:snapshot_local_identity",
+    "abicheck.model.extraction_scope:extraction_scope_identity",
+    "abicheck.model.extraction_scope:snapshot_scope_identity",
+    "abicheck.model.header_exclusion_record:canonical_exclusion_identity",
+    "abicheck.model.header_exclusion_record:comparison_exclusion_identity",
+    "abicheck.model.header_exclusion_record:release_exclusion_identity",
+    "abicheck.policy.rule_identity:rule_identity",
+    "abicheck.compatibility_evaluation_frontend:builtin_policy_identity",
+    "abicheck.compatibility_evaluation_frontend:severity_preset_identity",
+    "abicheck.frontends.action.library_selection:read_elf_identity",
+    "abicheck.workflows.release_public_surface:build_side_identity",
+    "abicheck.bundle:stored_capture_identity",
+    "abicheck.workflows.aggregate.reconcile:resolve_cross_abi_identity",
+    "abicheck.compare.template_surface:alias_identity",
+    "abicheck.compare.template_surface:cpo_identity",
+)
+
+
+# ---------------------------------------------------------------------------
 # codec: Mach-O leading underscore
 # ---------------------------------------------------------------------------
 
@@ -283,10 +397,8 @@ def macho_encode(name: str) -> str:
 def macho_decoders() -> dict[str, Callable[[str, str, bool], str]]:
     """decoder(linker_spelling, plain_name, is_extern_c) -> identity key."""
     return {
-        "abicheck.model.mangled_name:strip_macho_itanium_decoration": (
-            lambda s, _plain, c: (
-                s if c else mangled_mod.strip_macho_itanium_decoration(s)
-            )
+        "abicheck.model.name_decoration.macho:decode_itanium": (
+            lambda s, _plain, c: s if c else macho_codec.decode_itanium(s)
         ),
         "abicheck.model.graph_entity_identity:declaration_identity": (
             lambda s, plain, _c: (
@@ -319,7 +431,7 @@ def macho_violations(decoder_name: str) -> list[str]:
     """
     dec = macho_decoders()[decoder_name]
     corpus = _macho_corpus()
-    if decoder_name.endswith("strip_macho_itanium_decoration"):
+    if decoder_name.endswith("decode_itanium"):
         corpus = [c for c in corpus if not c[2]]
     out: list[str] = []
     decoded: dict[str, str] = {}
@@ -349,11 +461,19 @@ PE_SCHEMES: dict[str, Callable[[str, int], str]] = {
 }
 
 
+def _pe_alias_decoder(spelling: str) -> str:
+    """The join's alias table, read back as a decoder over one export."""
+    snap = AbiSnapshot(library="libx.dll", version="1", pe=PeMetadata(machine=I386))
+    table = export_index_mod.pe_decoration_aliases(snap, [spelling])
+    return next((b for b, raw in table.items() if spelling in raw), "")
+
+
 def pe_decoders() -> dict[str, Callable[[str], str]]:
     return {
-        "abicheck.model.graph_entity_identity:pe_c_decoration_base": (
-            lambda s: gei_mod.pe_c_decoration_base(s, I386)
+        "abicheck.model.name_decoration.pe_x86:decode_c_name": (
+            lambda s: pe_codec.decode_c_name(s, x86_32=True)
         ),
+        "abicheck.model.export_index:pe_decoration_aliases": _pe_alias_decoder,
         "abicheck.extract.export_symbol_identity:msvc_export_function": (
             lambda s: (
                 export_ident_mod.msvc_export_function(
@@ -371,12 +491,12 @@ def pe_violations(decoder_name: str, scheme: str) -> list[str]:
     seen: dict[str, str] = {}
     for name in PE_C_NAMES:
         for arg_bytes in (0, 8):
-            got = dec(enc(name, arg_bytes))
+            got = dec(enc(name, arg_bytes)) or enc(name, arg_bytes)
             if got != name:
                 out.append(
                     f"join: {scheme} {enc(name, arg_bytes)!r} -> {got!r}, want {name!r}"
                 )
-        key = dec(enc(name, 8))
+        key = dec(enc(name, 8)) or enc(name, 8)
         if key in seen and seen[key] != name:
             out.append(f"collision: {name!r} and {seen[key]!r} -> {key!r}")
         seen[key] = name
@@ -394,12 +514,12 @@ def pe_x64_collisions() -> list[str]:
         if a == b:
             out.append(f"msvc_export_function: {enc('f')!r} and {enc('_f')!r} -> {a}")
         pa, pb = (
-            gei_mod.pe_c_decoration_base(enc("f"), AMD64),
-            gei_mod.pe_c_decoration_base(enc("_f"), AMD64),
+            pe_codec.decode_c_name(enc("f"), x86_32=False) or enc("f"),
+            pe_codec.decode_c_name(enc("_f"), x86_32=False) or enc("_f"),
         )
-        if pa and pa == pb:
+        if pa == pb:
             out.append(
-                f"pe_c_decoration_base: {enc('f')!r} and {enc('_f')!r} -> {pa!r}"
+                f"pe_x86.decode_c_name: {enc('f')!r} and {enc('_f')!r} -> {pa!r}"
             )
     return out
 
@@ -430,6 +550,46 @@ def ctor_dtor_violations() -> list[str]:
                 out.append(
                     f"{label}: {sym!r} joined {sorted(joined)}, want {sorted(fam)}"
                 )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# codec: ELF symbol-version suffixes
+# ---------------------------------------------------------------------------
+
+# Distinct leaves: the leaf parser deliberately joins overloads.
+ELF_NAMES = ("inflate", "inflate_", "_Z3addii", "_ZN2ns3subEv")
+ELF_SUFFIXES: dict[str, Callable[[str], str]] = {
+    "unversioned": lambda n: n,
+    "default": lambda n: f"{n}@@LIB_1.2",
+    "hidden": lambda n: f"{n}@LIB_1.0",
+}
+
+
+def elf_version_decoders() -> dict[str, Callable[[str], str | None]]:
+    from abicheck.model.symbol_leaf import symbol_leaf_identifier
+
+    return {
+        "abicheck.model.name_decoration.elf_version:unversioned_name": (
+            elf_codec.unversioned_name
+        ),
+        # The leaf parser keys a header lookup off the unversioned name.
+        "abicheck.model.symbol_leaf:symbol_leaf_identifier": symbol_leaf_identifier,
+    }
+
+
+def elf_version_violations(decoder_name: str) -> list[str]:
+    dec = elf_version_decoders()[decoder_name]
+    out: list[str] = []
+    seen: dict[object, str] = {}
+    for name in ELF_NAMES:
+        keys = {label: dec(enc(name)) for label, enc in ELF_SUFFIXES.items()}
+        if len(set(keys.values())) != 1:
+            out.append(f"join: {name!r} -> {keys}")
+        key = keys["default"]
+        if key is not None and key in seen and seen[key] != name:
+            out.append(f"collision: {name!r} and {seen[key]!r} -> {key!r}")
+        seen[key] = name
     return out
 
 

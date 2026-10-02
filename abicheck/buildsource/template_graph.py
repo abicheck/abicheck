@@ -203,7 +203,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Any
 
-from .. import diff_cxx_rules
+from ..model.name_decoration import itanium_structors
 from .template_graph_value_decls import (
     arg_label_spelling,
     disambiguated_specialization_qname,
@@ -1046,57 +1046,6 @@ def _has_unresolved_decl_argument(
     )
 
 
-#: Additional Itanium ctor/dtor manglings implied by the one clang's AST
-#: reports -- see :func:`_ctor_dtor_symbol_variants`. clang's ``mangledName``
-#: on a ``CXXConstructorDecl``/``CXXDestructorDecl`` is always the complete-
-#: object variant (``C1``/``D1``), never the sibling(s), verified empirically
-#: (real clang output for both a trivial and a parameterized/virtual case
-#: only ever reports ``C1``/``D1``).  ``C3`` (the allocating constructor) is
-#: omitted -- not observed emitted by clang/GCC in practice, unlike ``C1``/
-#: ``C2`` which are always both present for any non-trivial constructor.
-_CTOR_SIBLING_CODES = ("C2",)
-_DTOR_SIBLING_CODES = ("D0", "D2")
-
-
-def _ctor_dtor_symbol_variants(mangled: str, *, is_ctor: bool) -> tuple[str, ...]:
-    """The sibling Itanium ctor/dtor manglings ``mangled`` (clang's reported
-    ``C1``/``D1`` complete-object variant) implies -- Codex review, verified
-    empirically against real clang + compiled-object output: a real Mach-O/
-    ELF binary commonly exports ``C1``/``C2`` (and, for a virtual
-    destructor, ``D0``/``D1``/``D2``) as **separate** symbol-table entries,
-    not aliases collapsed to one, while clang's AST ``mangledName`` only
-    ever reports the ``C1``/``D1`` spelling -- so an instantiated ctor/dtor
-    that legitimately emits (say) a ``C2`` export previously had no way to
-    join that export's ``binary_symbol`` node at all.
-
-    Locates the real ctor/dtor code via :func:`~abicheck.diff_cxx_rules.
-    itanium_ctor_dtor_marker_span`'s structural (length-prefix-aware) walk
-    and substitutes each sibling code in its place -- **not** a naive
-    substring search (Codex review, second round, a real bug in an earlier
-    revision): a class named ``C1Evil<int>`` mangles to
-    ``_ZN6C1EvilIiEC1Ev``, and a bare ``"C1E"`` text search finds the
-    *class name*'s own embedded ``"C1E"`` first, deriving
-    ``_ZN6C2EvilIiEC1Ev`` -- a false positive (the genuinely different
-    class ``C2Evil<int>``'s own real ctor mangling, if exported) rather
-    than merely a missed one, since the join-only-onto-an-existing-node
-    safety net doesn't save a corrupted string that coincidentally *is* a
-    real symbol. ``mangled`` does not need pre-normalizing for the Mach-O
-    double-underscore prefix -- ``itanium_ctor_dtor_marker_span`` handles
-    an unnormalized ``__Z...`` input correctly, and its own caller
-    (``_member_symbols``) passes clang's raw spelling through unmodified
-    anyway -- see :func:`_normalize_mangled` for why.
-
-    Returns ``()`` when the marker parser doesn't recognize *mangled* as a
-    ctor/dtor mangling at all (an unmangled or non-Itanium name, or a form
-    outside what that structural parser models)."""
-    span = diff_cxx_rules.itanium_ctor_dtor_marker_span(mangled)
-    if span is None:
-        return ()
-    start, end = span
-    codes = _CTOR_SIBLING_CODES if is_ctor else _DTOR_SIBLING_CODES
-    return tuple(mangled[:start] + code + mangled[end:] for code in codes)
-
-
 def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
     """A class-template instantiation's own emitted member symbols --
     ``node`` is the full-content ``ClassTemplateSpecializationDecl``, and
@@ -1116,7 +1065,7 @@ def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
 
     A constructor/destructor child additionally contributes its sibling
     Itanium manglings (``C2``, and for a destructor ``D0``/``D2``) -- see
-    :func:`_ctor_dtor_symbol_variants`.
+    ``model.name_decoration.itanium_structors.sibling_spellings``.
 
     Returns clang's own, **unmodified** ``mangledName`` spelling -- no
     Mach-O double-underscore stripping here (Codex review): eager
@@ -1133,8 +1082,8 @@ def _member_symbols(node: dict[str, Any]) -> tuple[str, ...]:
                 symbols.append(mangled)
                 if kind in ("CXXConstructorDecl", "CXXDestructorDecl"):
                     symbols.extend(
-                        _ctor_dtor_symbol_variants(
-                            mangled, is_ctor=kind == "CXXConstructorDecl"
+                        itanium_structors.sibling_spellings(
+                            mangled, only=itanium_structors.EMITTED_VARIANTS
                         )
                     )
     return tuple(symbols)

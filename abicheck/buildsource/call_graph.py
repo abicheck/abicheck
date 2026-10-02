@@ -49,7 +49,7 @@ from ..model.graph_facts import (
     GraphEdge,
     GraphNode,
 )
-from ..model.mangled_name import strip_macho_itanium_decoration
+from ..model.name_decoration import macho as macho_decoration
 from ..model.source_graph import function_decl_identity
 from .call_decl_record import (
     _OVERRIDE_MARKER_KINDS,
@@ -174,7 +174,7 @@ class CallEdge:
 def _identity(node: dict[str, Any]) -> str:
     """Stable callee/caller identity: the mangled name when clang emits one
     (encodes the full signature, keeps overloads distinct), else the name."""
-    return strip_macho_itanium_decoration(
+    return macho_decoration.decode_itanium(
         str(node.get("mangledName") or node.get("name") or "")
     )
 
@@ -200,7 +200,7 @@ def _function_identity(node: dict[str, Any], scope: list[str]) -> str:
     type_obj = node.get("type")
     type_qual = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
     return function_decl_identity(
-        strip_macho_itanium_decoration(str(node.get("mangledName") or "")),
+        macho_decoration.decode_itanium(str(node.get("mangledName") or "")),
         name,
         qualified_name,
         type_qual,

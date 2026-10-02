@@ -198,7 +198,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
-from ..model.mangled_name import strip_macho_itanium_decoration
+from ..model.name_decoration import macho as macho_decoration
 from .preprocessor_facts import _DEFINE_RE
 from .type_graph import (
     _FUNCTION_DECL_KINDS,
@@ -302,7 +302,7 @@ def _var_decl_identity(node: dict[str, Any], scope: list[str], name: str) -> str
     from ..model.source_graph import function_decl_identity
 
     return function_decl_identity(
-        strip_macho_itanium_decoration(str(node.get("mangledName") or "")),
+        macho_decoration.decode_itanium(str(node.get("mangledName") or "")),
         name,
         "::".join([*scope, name]) if scope else name,
         "",

@@ -76,7 +76,7 @@ import abicheck.internal_leak as internal_leak_mod
 #: register the new heuristic with its structural fact and cells instead.
 UNCOVERED_CEILINGS: dict[str, int] = {
     "spelling": 60,
-    "grammar": 39,
+    "grammar": 36,
     "convention": 34,
     "own_format": 30,
     "platform": 17,

@@ -76,7 +76,7 @@ from .workflows.extraction import (
     BindingsFile,
     BindingsFileError,
     check_profile_bindings_resolve,
-    check_profile_toolchain_identity,
+    check_profile_toolchain_constraints,
     load_bindings_file,
 )
 from .workflows.history import HistoryError, run_history_request
@@ -285,7 +285,7 @@ def _validate_project_config(
             check_profile_bindings_resolve(parsed.profiles, bindings_file)
         )
         report.errors.extend(
-            check_profile_toolchain_identity(parsed.profiles, bindings_file)
+            check_profile_toolchain_constraints(parsed.profiles, bindings_file)
         )
 
     text = "\n".join(_report_lines(f"project validation: {config}", report))
@@ -605,7 +605,9 @@ def project_plan_cmd(
             if profile_id in used_profile_ids
         }
         binding_errors.extend(
-            check_profile_toolchain_identity(used_profiles, bindings_file_for_identity)
+            check_profile_toolchain_constraints(
+                used_profiles, bindings_file_for_identity
+            )
         )
 
     report.errors.extend(binding_errors)

@@ -111,6 +111,7 @@ from abicheck.model.entity_identity import (
     resolve_identity_for_node,
 )
 
+from ..model.root_relative_path import project_layout_spelling
 from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabulary has always been importable from this module
     _OUTCOME_PROSE,
     COORDINATE_EVIDENCE_PARTIAL_DECLARING_FILE,
@@ -122,7 +123,6 @@ from .graph_reconcile_outcome import (  # re-exported: the public outcome vocabu
     OUTCOME_RECONCILED_UNRESOLVED,
     OUTCOME_RENAMED,
     _classify_outcome,  # noqa: F401  # re-export: imported from here by tests/callers
-    _project_relative_path,
     classify,
     coordinate_evidence,
 )
@@ -242,13 +242,13 @@ def _neighbor_identity(node: GraphNode) -> str:
         path = str(
             node.attrs.get("def_file") or node.attrs.get("file") or node.label or ""
         )
-        return f"{node.kind}:{_project_relative_path(path)}" if path else node.kind
+        return f"{node.kind}:{project_layout_spelling(path)}" if path else node.kind
     ident = resolve_identity_for_node(node)
     if ident.qualified_name:
         return f"{node.kind}:{ident.qualified_name}"
     path = str(node.attrs.get("def_file") or node.attrs.get("file") or "")
     if path:
-        return f"{node.kind}:{_project_relative_path(path)}"
+        return f"{node.kind}:{project_layout_spelling(path)}"
     return node.kind
 
 
@@ -380,7 +380,7 @@ def _declaring_files(
             continue
         label = label_by_id.get(e.src)
         if label:
-            result[e.dst] = _project_relative_path(str(label))
+            result[e.dst] = project_layout_spelling(str(label))
     return result
 
 

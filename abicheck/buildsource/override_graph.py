@@ -129,7 +129,7 @@ from ..model.graph_facts import (
     GraphNode,
     _decl_node_id,
 )
-from ..model.mangled_name import strip_macho_itanium_decoration
+from ..model.name_decoration import macho as macho_decoration
 from ..model.source_graph import function_decl_identity
 from .type_graph import EDGE_TYPE_INHERITS, parse_clang_ast_types
 
@@ -238,7 +238,7 @@ def _method_info(node: dict[str, Any], scope: list[str]) -> _MethodInfo | None:
     # override edge's decl:// node never joins the call/type graph's own
     # node for the SAME method (all of them now normalize through the one
     # model-owned helper), leaving it a disconnected duplicate on Darwin.
-    mangled = strip_macho_itanium_decoration(str(node.get("mangledName") or ""))
+    mangled = macho_decoration.decode_itanium(str(node.get("mangledName") or ""))
     type_obj = node.get("type")
     type_qual = str(type_obj.get("qualType", "")) if isinstance(type_obj, dict) else ""
     qualified_name = "::".join([*scope, name]) if scope else name

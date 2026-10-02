@@ -588,7 +588,7 @@ class TestCheckProfileToolchainIdentity:
         profiles = {
             "p1": _FakeProfile(id="p1", compile=_FakeCompileSpec(compiler_family="gcc"))
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_no_family_or_version_declared_is_skipped(
         self, monkeypatch: pytest.MonkeyPatch
@@ -598,7 +598,7 @@ class TestCheckProfileToolchainIdentity:
         profiles = {
             "p1": _FakeProfile(id="p1", compile=_FakeCompileSpec(binding="gcc14"))
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_unresolvable_binding_is_skipped_here(
         self, monkeypatch: pytest.MonkeyPatch
@@ -612,7 +612,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_family="gcc", binding="gcc14"),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_declared_msvc_family_against_a_resolved_gcc_is_an_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -634,7 +634,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_family="msvc", binding="msvc14"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "resolved to family 'gnu'" in errors[0]
 
@@ -652,7 +652,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_msvc_binding_is_never_probed_even_without_a_declared_family(
         self, monkeypatch: pytest.MonkeyPatch
@@ -679,7 +679,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_declared_gcc_family_against_a_resolved_cl_exe_is_an_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -708,7 +708,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_family="gcc", binding="msvc14"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "could not be probed" in errors[0]
 
@@ -736,7 +736,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_family="gcc", binding="gcc14"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "could not be determined" in errors[0]
 
@@ -764,7 +764,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_family="clang", binding="clang1"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "could not be determined" in errors[0]
 
@@ -793,7 +793,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_version=">=3", binding="cm"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "cannot be verified to be a compiler at all" in errors[0]
 
@@ -814,7 +814,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_version=">=13", binding="gcc14"),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_matching_family_and_version_yields_no_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -832,7 +832,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_declared_icx_family_and_version_against_a_real_intel_binding_yields_no_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -866,7 +866,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_declared_icc_family_against_a_real_classic_intel_binding_yields_no_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -896,7 +896,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_gcc_mingw_binding_against_a_clang_style_declared_target_yields_no_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -930,7 +930,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_gcc_arm_binding_against_a_declared_armv7a_target_yields_no_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -964,7 +964,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_generic_alias_binding_matching_gcc_yields_no_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -987,7 +987,7 @@ class TestCheckProfileToolchainIdentity:
                 id="p1", compile=_FakeCompileSpec(compiler_family="gcc", binding="cc1")
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_mismatched_family_yields_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1003,7 +1003,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_family="clang", binding="gcc14"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "p1.compile.compiler_family" in errors[0]
         assert "clang" in errors[0]
@@ -1025,7 +1025,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "p1.compile.compiler_version" in errors[0]
 
@@ -1041,7 +1041,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_family="gcc", binding="gcc14"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "could not be probed" in errors[0]
 
@@ -1069,7 +1069,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_family="gcc", binding="gcc14"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "could not be probed" in errors[0]
 
@@ -1093,7 +1093,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="x86_64-linux-gnu", binding="gcc14"),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_target_architecture_alias_is_reconciled(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1115,7 +1115,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="arm64-linux-gnu", binding="gcc14"),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_mismatched_target_architecture_yields_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1142,7 +1142,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "p1.compile.target" in errors[0]
         assert "aarch64" in errors[0]
@@ -1173,7 +1173,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "p1.compile.target" in errors[0]
         assert "windows" in errors[0]
@@ -1196,7 +1196,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="x86_64-linux-gnu", binding="gcc14"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "cannot be verified" in errors[0]
 
@@ -1219,7 +1219,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 2
         assert any(
             "compiler_family" in e and "could not be determined" in e for e in errors
@@ -1240,7 +1240,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="x86_64-linux-gnu", binding="weird14"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "could not be determined" in errors[0]
 
@@ -1269,7 +1269,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="aarch64-linux-gnu", binding="clang18"),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_musl_vs_gnu_environment_mismatch_is_an_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1294,7 +1294,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="x86_64-linux-gnu", binding="musl14"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "environment" in errors[0]
         assert "musl" in errors[0]
@@ -1327,7 +1327,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "environment" in errors[0]
 
@@ -1361,7 +1361,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "p1.compile.target" in errors[0]
         assert "OS" in errors[0]
@@ -1392,7 +1392,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "p1.compile.target" in errors[0]
         assert "environment" in errors[0]
@@ -1422,7 +1422,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_both_sides_unrecognized_and_differing_suffix_is_an_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1452,7 +1452,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "unrecognized target suffix" in errors[0]
 
@@ -1485,7 +1485,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_unknown_vendor_normalization_does_not_mask_a_real_suffix_mismatch(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1512,7 +1512,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "unrecognized target suffix" in errors[0]
         assert "'none-eabi'" in errors[0]
@@ -1542,7 +1542,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="not-a-real-target", binding="clang18"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "p1.compile.target" in errors[0]
 
@@ -1567,7 +1567,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="aarch64-linux-gnu", binding="clang18"),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_clang_target_probe_that_cannot_run_is_an_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1596,7 +1596,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="aarch64-linux-gnu", binding="clang18"),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "p1.compile.target" in errors[0]
         assert "could not be probed" in errors[0]
@@ -1626,7 +1626,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(target="aarch64-linux-gnu", binding="clang18"),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_version_only_declared_checks_without_a_family(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1642,7 +1642,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_version=">=13,<14", binding="gcc14"),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_unparseable_version_constraint_is_reported(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1660,7 +1660,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "compiler_version" in errors[0]
         assert "invalid version constraint" in errors[0]
@@ -1682,7 +1682,7 @@ class TestCheckProfileToolchainIdentity:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "consumer_compile" in errors[0]
 
@@ -1710,7 +1710,7 @@ class TestCheckProfileToolchainIdentity:
                 compile=_FakeCompileSpec(compiler_family="gcc", binding="clang18"),
             ),
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1
         assert "bad" in errors[0]
 
@@ -1743,7 +1743,7 @@ class TestCheckProfileToolchainIdentityRealCompiler:
                 compile=_FakeCompileSpec(compiler_family=declared, binding="gcc-real"),
             )
         }
-        assert tp.check_profile_toolchain_identity(profiles, bf) == []
+        assert tp.check_profile_toolchain_constraints(profiles, bf) == []
 
     def test_real_gcc_binding_rejects_wrong_family(self) -> None:
         gcc_path = shutil.which("gcc")
@@ -1763,5 +1763,5 @@ class TestCheckProfileToolchainIdentityRealCompiler:
                 ),
             )
         }
-        errors = tp.check_profile_toolchain_identity(profiles, bf)
+        errors = tp.check_profile_toolchain_constraints(profiles, bf)
         assert len(errors) == 1

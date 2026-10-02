@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..model.mangled_name import strip_macho_itanium_decoration
+from ..model.name_decoration import macho as macho_decoration
 
 __all__ = ["collect_special_member_names"]
 
@@ -48,7 +48,7 @@ def collect_special_member_names(node: Any, out: set[str]) -> None:
             if cur.get("kind") in _SPECIAL_MEMBER_KINDS:
                 mangled = cur.get("mangledName")
                 if isinstance(mangled, str) and mangled.startswith(("_Z", "__Z")):
-                    out.add(strip_macho_itanium_decoration(mangled))
+                    out.add(macho_decoration.decode_itanium(mangled))
             inner = cur.get("inner")
             if isinstance(inner, list):
                 stack.extend(inner)

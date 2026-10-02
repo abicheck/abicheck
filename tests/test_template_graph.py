@@ -176,26 +176,35 @@ def test_parses_explicit_instantiation_detached_from_its_template_decl() -> None
 
 
 def test_ctor_dtor_symbol_variants_match_real_compiled_binary_exports() -> None:
-    """``_ctor_dtor_symbol_variants`` -- verified against real clang AST +
+    """``itanium_structors.sibling_spellings`` -- verified against real clang AST +
     real compiled-object ``nm`` output (Codex review, fresh evidence):
     clang's AST only ever reports the ``C1``/``D1`` complete-object
     mangling, but the compiled binary separately exports ``C2`` alongside
     every ``C1``, and ``D0``/``D2`` alongside every (virtual) ``D1``."""
-    from abicheck.buildsource.template_graph import _ctor_dtor_symbol_variants
+    from abicheck.model.name_decoration.itanium_structors import (
+        EMITTED_VARIANTS,
+        sibling_spellings,
+    )
 
-    assert _ctor_dtor_symbol_variants("_ZN3BoxIiEC1Ev", is_ctor=True) == (
+    # The producer derives only what compilers emit (no C3).
+    assert sibling_spellings("_ZN3BoxIiEC1Ev", only=EMITTED_VARIANTS) == (
         "_ZN3BoxIiEC2Ev",
     )
-    assert _ctor_dtor_symbol_variants("_ZN3BoxIiEC1Eii", is_ctor=True) == (
-        "_ZN3BoxIiEC2Eii",
+    assert sibling_spellings("_ZN3BoxIiEC1Ev") == (
+        "_ZN3BoxIiEC2Ev",
+        "_ZN3BoxIiEC3Ev",
     )
-    assert _ctor_dtor_symbol_variants("_ZN3BoxIiED1Ev", is_ctor=False) == (
+    assert sibling_spellings("_ZN3BoxIiEC1Eii") == (
+        "_ZN3BoxIiEC2Eii",
+        "_ZN3BoxIiEC3Eii",
+    )
+    assert sibling_spellings("_ZN3BoxIiED1Ev") == (
         "_ZN3BoxIiED0Ev",
         "_ZN3BoxIiED2Ev",
     )
     # No marker found (not a ctor/dtor-shaped mangling) -- degrades to no
     # derived variants rather than guessing.
-    assert _ctor_dtor_symbol_variants("_ZN3BoxIiE5valueE", is_ctor=True) == ()
+    assert sibling_spellings("_ZN3BoxIiE5valueE") == ()
 
 
 def test_ctor_dtor_symbol_variants_does_not_mistake_class_name_for_the_marker() -> None:
@@ -210,10 +219,11 @@ def test_ctor_dtor_symbol_variants_does_not_mistake_class_name_for_the_marker() 
     structural (length-prefix-aware) locator must skip the whole
     ``6C1Evil`` identifier as one unit and correctly derive this class's
     own ``C2`` sibling instead."""
-    from abicheck.buildsource.template_graph import _ctor_dtor_symbol_variants
+    from abicheck.model.name_decoration.itanium_structors import sibling_spellings
 
-    assert _ctor_dtor_symbol_variants("_ZN6C1EvilIiEC1Ev", is_ctor=True) == (
+    assert sibling_spellings("_ZN6C1EvilIiEC1Ev") == (
         "_ZN6C1EvilIiEC2Ev",
+        "_ZN6C1EvilIiEC3Ev",
     )
 
 

@@ -75,7 +75,6 @@ __all__ = [
     "ResolvedIdentity",
     "SnapshotLocalIdentity",
     "StableEntityId",
-    "resolve_identity",
     "snapshot_local_identity",
     "stable_entity_id",
 ]
@@ -182,28 +181,10 @@ def snapshot_local_identity(
 
     Accepts an ``EntityId`` that is perfectly stable, deliberately: a caller
     that wants the stable tier asks for it explicitly via
-    :func:`stable_entity_id` or :func:`resolve_identity`. Silently upgrading
+    :func:`stable_entity_id`. Silently upgrading
     here would make the returned tier depend on the input's shape rather
     than on what the caller asked for, and a consumer's precedence order
     (which tier it consults first) is exactly the decision this module
     refuses to make on its behalf.
     """
     return SnapshotLocalIdentity(spelling=spelling, entity_id=entity_id)
-
-
-def resolve_identity(*, entity_id: EntityId | None, spelling: str) -> ResolvedIdentity:
-    """The best tier available for one declaration: :class:`StableEntityId`
-    when *entity_id* passes the stability gate, else
-    :class:`SnapshotLocalIdentity` keyed on *spelling*.
-
-    Use this where a consumer holds exactly one identity per declaration and
-    wants the strongest one available. Where a consumer needs *both* tiers
-    for one declaration (an index that must answer a spelling-keyed lookup
-    from a producer that resolved no ``EntityId``, as well as an
-    identity-keyed one), build them separately -- this function returns one,
-    on purpose, so "which tier is this?" always has a single answer.
-    """
-    stable = stable_entity_id(entity_id)
-    if stable is not None:
-        return stable
-    return snapshot_local_identity(spelling, entity_id)

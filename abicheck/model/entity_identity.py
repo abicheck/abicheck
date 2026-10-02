@@ -60,6 +60,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..demangle import demangle as _demangle
+from .root_relative_path import RootRelativePath
 
 if TYPE_CHECKING:
     # GraphNode's real home is graph_facts.py (source_graph.py only
@@ -158,13 +159,17 @@ def normalized_signature(
     return "sig:" + "\x1f".join(parts)
 
 
-def source_relative_identity(file: str, scope: str, name: str) -> str:
-    """File + enclosing scope + name — an alias, never a primary key
-    (ADR-048 D1): two distinct entities can legitimately share this triple
-    across an ODR-violating build or a macro-generated declaration, so it is
-    not trusted alone as a canonical id.
+def source_relative_identity(file: RootRelativePath | None, *components: str) -> str:
+    """Root-relative file + entity components (scope and name, or a name
+    alone) — an alias, never a primary key (ADR-048 D1): two distinct
+    entities can legitimately share it across an ODR-violating build or a
+    macro-generated declaration, so it is not trusted alone as a canonical
+    id. *file* is a :class:`~.root_relative_path.RootRelativePath`, so an
+    absolute (environment-specific) spelling cannot reach the key.
     """
-    return f"{file or ''}\x1f{scope or ''}\x1f{name or ''}"
+    return "\x1f".join(
+        (file.posix if file is not None else "", *(c or "" for c in components))
+    )
 
 
 def resolve_canonical_identity(
@@ -175,7 +180,7 @@ def resolve_canonical_identity(
     qualified_name: str | None = None,
     kind: str = "",
     param_types: tuple[str, ...] = (),
-    file: str = "",
+    file: RootRelativePath | None = None,
     scope: str = "",
 ) -> CanonicalIdentity:
     """Resolve the canonical identity for one entity from whatever facts a
@@ -195,7 +200,7 @@ def resolve_canonical_identity(
     if qn:
         aliases.append(f"qualified:{qn}")
     aliases.append(sig)
-    if file:
+    if file is not None:
         aliases.append(f"relsrc:{rel}")
 
     if usr:
@@ -226,7 +231,16 @@ def resolve_canonical_identity(
     # (IDENTITY_TIER_REDUCED, "synthetic:" prefix) — used only when nothing
     # else is available at all.
     basis = "\x1f".join(
-        str(x) for x in (mangled_name, name, qualified_name, kind, file, scope) if x
+        str(x)
+        for x in (
+            mangled_name,
+            name,
+            qualified_name,
+            kind,
+            file.posix if file is not None else "",
+            scope,
+        )
+        if x
     )
     digest = hashlib.sha256(f"synthetic\x00{basis}".encode()).hexdigest()[:32]
     synthetic = f"synthetic:sha256:{digest}"
@@ -260,7 +274,11 @@ def resolve_identity_for_node(node: GraphNode) -> CanonicalIdentity:
         param_types=tuple(attrs.get("param_types", ()))
         if attrs.get("param_types")
         else (),
-        file=str(attrs.get("def_file") or attrs.get("file") or ""),
+        # A graph attr records a path with no root: anchored at its project
+        # layout, never the checkout prefix (design-hardening Phase 3, F3).
+        file=RootRelativePath.from_project_layout(
+            str(attrs.get("def_file") or attrs.get("file") or "")
+        ),
         scope=str(attrs.get("scope") or ""),
     )
 

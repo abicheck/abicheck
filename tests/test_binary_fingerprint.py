@@ -28,7 +28,6 @@ from abicheck.binary_fingerprint import (
 )
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_symbols import (
-    _ctor_dtor_variant,
     _fingerprints_from_elf,
     _match_declarator_group,
     _param_signature_of,
@@ -617,68 +616,14 @@ class TestPlausibleRename:
         assert _plausible_rename("_ZN6WidgetC1Ev", "_ZN6WidgetC2Ev") is False
         assert _plausible_rename("_ZN6WidgetD1Ev", "_ZN6WidgetD0Ev") is False
 
-    def test_free_function_with_ctor_like_name_not_a_ctor_variant(self) -> None:
-        # A free function whose identifier merely contains 'C1E'/'C2E'
-        # (_Z6fooC1Ev = fooC1E()) is NOT a constructor variant — it is a
-        # non-nested (_Z, not _ZN) mangling, so the variant guard must not fire.
-        # (Asserted on _ctor_dtor_variant directly so the check is independent
-        # of demangler availability; a real ctor IS a nested _ZN name.)
-        assert _ctor_dtor_variant("_Z6fooC1Ev") is None
-        assert _ctor_dtor_variant("_Z6fooC2Ev") is None
-        assert _ctor_dtor_variant("_ZN6WidgetC1Ev") == "C1"
-        # A nested MEMBER named fooC1E (_ZN1A6fooC1EEv = A::fooC1E()) is also not
-        # a constructor — the length-prefix parser must not be fooled by the
-        # 'C1E' substring inside the source-name component.
-        assert _ctor_dtor_variant("_ZN1A6fooC1EEv") is None
-        assert _ctor_dtor_variant("_ZN1A6fooC2EEv") is None
-        # Namespaced constructor is still detected.
-        assert _ctor_dtor_variant("_ZN2ns6WidgetC1Ev") == "C1"
-
-    def test_templated_class_ctor_variant_detected(self) -> None:
-        # A templated class places its <template-args> (I…E) between the class
-        # name and the ctor/dtor code; the parser must skip the balanced block.
-        # _ZN3FooIiEC1Ev = Foo<int>::Foo().
-        assert _ctor_dtor_variant("_ZN3FooIiEC1Ev") == "C1"
-        assert _ctor_dtor_variant("_ZN3FooIiEC2Ev") == "C2"
-        assert _ctor_dtor_variant("_ZN3FooIiED1Ev") == "D1"
-        # Nested template args and non-type (literal) params still balance.
-        assert _ctor_dtor_variant("_ZN3FooIN2ns1XEEC1Ev") == "C1"
-        assert _ctor_dtor_variant("_ZN3FooILi5EEC1Ev") == "C1"
-        # A class-type template argument whose identifier *contains* 'E'
-        # (Foo<Err> = _ZN3FooI3ErrEC1Ev): the 'E' inside the 3-char source-name
-        # 'Err' must not close the template-args block early.
-        assert _ctor_dtor_variant("_ZN3FooI3ErrEC1Ev") == "C1"
-        assert _ctor_dtor_variant("_ZN3FooI3ErrEC2Ev") == "C2"
-        # Substitution and special-substitution template arguments balance too.
-        assert _ctor_dtor_variant("_ZN3FooIS_EC1Ev") == "C1"
-        assert _ctor_dtor_variant("_ZN3FooISsEC1Ev") == "C1"
-
-    def test_std_substitution_prefix_ctor_variant_detected(self) -> None:
-        # A standard-substitution abbreviation can open the prefix: St = std::,
-        # so std::vector<int>::vector() = _ZNSt6vectorIiEC1Ev. The variant code
-        # must still be found after consuming the substitution.
-        assert _ctor_dtor_variant("_ZNSt6vectorIiEC1Ev") == "C1"
-        assert _ctor_dtor_variant("_ZNSt6vectorIiEC2Ev") == "C2"
-        assert _ctor_dtor_variant("_ZNSsC1Ev") == "C1"  # Ss = std::string
-        # A non-ctor std:: member is still not a variant.
-        assert _ctor_dtor_variant("_ZNSt6vectorIiE3fooEv") is None
-        # C1 vs C2 of a std container are distinct ABI symbols, not a rename.
+    def test_std_substitution_prefix_ctor_variant_pair_rejected(self) -> None:
+        # C1 vs C2 of a std container are distinct ABI symbols, not a rename
+        # (the variant parser itself: tests/test_name_decoration_codecs.py).
         assert _plausible_rename("_ZNSt6vectorIiEC1Ev", "_ZNSt6vectorIiEC2Ev") is False
 
-    def test_abi_tag_prefix_ctor_variant_detected(self) -> None:
-        # An ABI-tag component B<source-name> sits on the class name before the
-        # ctor/dtor code: Foo[abi:x]::Foo() = _ZN3FooB1xC1Ev. The variant must
-        # still be found after consuming the tag, so C1/C2 are not a rename.
-        assert _ctor_dtor_variant("_ZN3FooB1xC1Ev") == "C1"
-        assert _ctor_dtor_variant("_ZN3FooB1xC2Ev") == "C2"
+    def test_abi_tag_prefix_ctor_variant_pair_rejected(self) -> None:
+        # Foo[abi:x]::Foo() C1/C2 are not a rename.
         assert _plausible_rename("_ZN3FooB1xC1Ev", "_ZN3FooB1xC2Ev") is False
-
-    def test_overlong_source_name_length_is_malformed_not_crash(self) -> None:
-        # Snapshot / ELF symbol names are untrusted input.  A malformed nested
-        # name with a huge decimal source-name length must safely under-detect
-        # instead of feeding the whole digit run to int() and aborting diffing.
-        assert _ctor_dtor_variant("_ZN" + ("9" * 5000)) is None
-        assert _ctor_dtor_variant("_ZN9999999999FooC1Ev") is None
 
     def test_return_type_only_template_change_rejected(self) -> None:
         # Function templates encode the return type in the ABI symbol, so a
@@ -765,16 +710,6 @@ class TestPlausibleRename:
         # so the test is independent of c++filt/cxxfilt availability (raw _Z
         # names without a demangler fall to the conservative exact-only gate).
         assert _plausible_rename("A::A()", "ns::A::A()") is True
-
-    def test_ctor_dtor_variant_malformed_symbols_yield_none(self) -> None:
-        # Defensive bail-outs: a malformed nested-name must never raise or
-        # mis-report; it yields None (no suppression — the safe direction).
-        assert _ctor_dtor_variant("_ZN99FooC1Ev") is None  # length overruns
-        assert _ctor_dtor_variant("_ZN3FooIiC1Ev") is None  # template never closed
-        assert _ctor_dtor_variant("_ZN3FooI") is None  # truncated at 'I'
-        assert _ctor_dtor_variant("_ZN3FooILiC1Ev") is None  # L-literal never closed
-        assert _ctor_dtor_variant("_ZNK1A3fooEv") is None  # const member, not a ctor
-        assert _ctor_dtor_variant("not_mangled") is None  # not an _ZN name
 
     def test_operator_substring_not_treated_as_operator(self) -> None:
         # Identifiers that merely contain 'operator' are ordinary names and

@@ -27,7 +27,9 @@ from abicheck.model.entity_identity import (
     normalize_mangled_name,
     resolve_canonical_identity,
     resolve_identity_for_node,
+    source_relative_identity,
 )
+from abicheck.model.root_relative_path import RootRelativePath
 
 
 def test_tier1_usr_wins_over_everything_else() -> None:
@@ -106,14 +108,18 @@ def test_tier4_source_relative_is_alias_not_primary() -> None:
     # so source-relative identity never becomes primary_id here -- it is
     # always an alias (scope doc tier 4: "additional alias, not a primary
     # key"), recorded on every identity that has a file.
-    ident = resolve_canonical_identity(name="anon", file="a.h", scope="ns::detail")
+    ident = resolve_canonical_identity(
+        name="anon", file=RootRelativePath.parse("a.h"), scope="ns::detail"
+    )
     assert ident.tier == IDENTITY_TIER_NORMALIZED
     assert ident.source_relative == "a.h\x1fns::detail\x1fanon"
     assert f"relsrc:{ident.source_relative}" in ident.aliases
 
 
 def test_source_relative_alias_present_even_when_synthetic_tier() -> None:
-    ident = resolve_canonical_identity(file="a.h", scope="ns::detail")
+    ident = resolve_canonical_identity(
+        file=RootRelativePath.parse("a.h"), scope="ns::detail"
+    )
     assert ident.tier == IDENTITY_TIER_REDUCED
     assert ident.primary_id.startswith("synthetic:")
     assert any(a.startswith("relsrc:") for a in ident.aliases)
@@ -162,3 +168,16 @@ def test_candidate_lookup_keys_generalizes_ad_hoc_key_set() -> None:
 def test_candidate_lookup_keys_handles_no_primary() -> None:
     keys = candidate_lookup_keys(None, "a", "b")
     assert keys == {"a", "b"}
+
+
+# Moved from tests/test_finding_identity.py: finding identity's own copy
+# was deleted in favour of this one (design-hardening Phase 3).
+class TestSourceRelativeIdentity:
+    def test_combines_file_and_name(self) -> None:
+        assert (
+            source_relative_identity(RootRelativePath.parse("foo.h"), "bar")
+            == "foo.h\x1fbar"
+        )
+
+    def test_missing_parts_default_to_empty(self) -> None:
+        assert source_relative_identity(None, "") == "\x1f"

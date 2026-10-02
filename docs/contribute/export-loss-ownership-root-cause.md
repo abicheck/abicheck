@@ -94,7 +94,8 @@ the *base* first here; the owner is the derived class.
 - `model/mangled_name.py` parses `CI<n>` (owner = derived class) and gains
   `itanium_special_member_owner`, which reports the owner path, whether it
   carries template arguments, and whether the ctor is inheriting.
-  `diff_cxx_rules.itanium_ctor_dtor_marker_span` deliberately still declines
+  `diff_cxx_rules.itanium_ctor_dtor_marker_span` (now
+  `model/name_decoration/itanium_structors.locate`) deliberately still declines
   the form: its callers rewrite a 2-character marker in place, and `CI1` is
   three characters with a base-type encoding attached.
 - `compare/export_owner_resolution.py` owns the join, with explicit
