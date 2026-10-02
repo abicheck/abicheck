@@ -505,11 +505,9 @@ class TargetScope:
 
 def l3_coverage_fields(merged: BuildEvidence) -> dict[str, Any]:
     """The P0.2 root-target-scoping ``LayerCoverage`` kwargs for *merged*'s
-    L3_build row, plus a ``detail_suffix`` prose fragment -- one shared
-    implementation for the two call sites that build an L3_build row
-    (``cli_buildsource_helpers._build_coverage`` and ``inline.
-    build_inline_coverage``) so they cannot independently drift on this
-    P0.2 field set. All five fields default empty/``None`` (and
+    L3_build row, plus a ``detail_suffix`` prose fragment -- the shared
+    implementation behind ``inline.build_inline_coverage``'s L3_build row,
+    so no caller re-derives this P0.2 field set. All five fields default empty/``None`` (and
     ``detail_suffix`` to ``""``) when *merged* carries no ``target_scope``
     or an empty ``requested`` list -- the "no scoping requested" case.
     """

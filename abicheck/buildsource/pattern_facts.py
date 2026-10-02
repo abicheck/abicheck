@@ -59,7 +59,6 @@ from .model import CoverageStatus, LayerConfidence, LayerCoverage
 from .pattern_facts_files import (
     _DIRECT_ROOT_LICENCE,
     SOURCE_SUFFIXES as SOURCE_SUFFIXES,
-    iter_source_files as iter_source_files,
     resolve_expected_source_inputs,
 )
 from .pattern_facts_lexer import (
@@ -737,7 +736,7 @@ def find_pattern_facts(
 
     Large trees fan out across processes (see :func:`_resolve_scan_jobs`); the
     result is **identical** to the serial path — files are scanned in the
-    deterministic sorted order from :func:`iter_source_files` and facts are
+    deterministic sorted order from :func:`iter_source_files` (removed) and facts are
     concatenated in that order. Any executor failure falls back to serial so a
     constrained sandbox never turns a scan into an error.
     """

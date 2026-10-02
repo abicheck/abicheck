@@ -15,7 +15,7 @@
 """Bundle cross-library change detectors (split from :mod:`abicheck.bundle`).
 
 Implements the individual ``_detect_*`` finding-producers
-:func:`abicheck.bundle.compare_bundle`/:func:`abicheck.bundle.audit_bundle`
+:func:`abicheck.bundle.compare_bundle`/:func:`abicheck.bundle.audit_bundle` (removed)
 orchestrate that don't belong to the manifest-drift/SONAME-skew cluster:
 structural (library added/removed), intra-dependency-removed,
 intra-dependency-unresolved (the audit-mode sibling of intra-dependency-
@@ -350,7 +350,7 @@ def _detect_duplicate_providers(new: BundleSnapshot) -> list[BundleFinding]:
     every real multi-library set for no ownership reason at all.
 
     **Known, deliberately-deferred gap:** no L4 symbol reconciliation
-    (same gap as :func:`~abicheck.bundle.artifact_set_member_exports`, see
+    (same gap as :func:`~abicheck.bundle.artifact_set_member_exports` (removed), see
     ``docs/contribute/known-gaps.md``) -- two raw exports spelling one
     declaration under different mangling variants could misread as two
     single-provider symbols rather than one duplicate, or vice versa.

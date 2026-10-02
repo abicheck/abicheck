@@ -47,6 +47,7 @@ from ..model.surface_facts import (
     is_export_confirmed_absent,
     is_legacy_derived,
     surface_fact_summary,
+    visibility_label,
 )
 from ..model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
 from .edge_query import ObservedExportTable
@@ -200,8 +201,8 @@ def check_export_gained(mangled: str, f_old: Function, f_new: Function) -> list[
                 f"Function now exported by the binary while its declaration "
                 f"remains present: {f_new.name}"
             ),
-            old_value=f_old.visibility.value,
-            new_value=f_new.visibility.value,
+            old_value=visibility_label(f_old),
+            new_value=visibility_label(f_new),
             symbol_binding=f_new.elf_binding.value if f_new.elf_binding else None,
             entity_id=f_new.entity_id or f_old.entity_id,
             surface_facts=surface_fact_summary(f_new),
@@ -229,8 +230,8 @@ def check_variable_export_gained(
                 f"Variable now exported by the binary while its declaration "
                 f"remains present: {v_new.name}"
             ),
-            old_value=v_old.visibility.value,
-            new_value=v_new.visibility.value,
+            old_value=visibility_label(v_old),
+            new_value=visibility_label(v_new),
             symbol_binding=v_new.elf_binding.value if v_new.elf_binding else None,
             entity_id=v_new.entity_id or v_old.entity_id,
             surface_facts=surface_fact_summary(v_new),
@@ -270,8 +271,8 @@ def check_export_lost(mangled: str, f_old: Function, f_new: Function) -> list[Ch
                 f"Function no longer exported by the binary, but its "
                 f"declaration remains present: {f_old.name}"
             ),
-            old_value=f_old.visibility.value,
-            new_value=f_new.visibility.value,
+            old_value=visibility_label(f_old),
+            new_value=visibility_label(f_new),
             symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
             entity_id=f_old.entity_id or f_new.entity_id,
             surface_facts=surface_fact_summary(f_new),
@@ -304,8 +305,8 @@ def check_variable_export_lost(
                 f"Variable no longer exported by the binary, but its "
                 f"declaration remains present: {v_old.name}"
             ),
-            old_value=v_old.visibility.value,
-            new_value=v_new.visibility.value,
+            old_value=visibility_label(v_old),
+            new_value=visibility_label(v_new),
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
             entity_id=v_old.entity_id or v_new.entity_id,
             surface_facts=surface_fact_summary(v_new),

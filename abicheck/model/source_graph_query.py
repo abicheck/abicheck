@@ -42,6 +42,8 @@ was not asked at the time and is exactly what unblocks ``extract``.
 
 from __future__ import annotations
 
+import re
+
 from .graph_facts import GraphNode
 from .source_graph import SourceGraphSummary
 
@@ -97,14 +99,42 @@ _SYSTEM_NAME_PREFIXES = (
     "_Zda",
     "__",
 )
-_SYSTEM_NAME_SUBSTRINGS = ("std::", "__gnu_cxx::", "__cxxabiv")
+_SYSTEM_SCOPES = ("std::", "__gnu_cxx::", "__cxxabiv")
+_TEMPLATE_ARGS_RE = re.compile(r"<[^<>]*>")
+
+
+def owning_name(name: str) -> str:
+    """The entity part of a demangled or qualified spelling: template
+    arguments, parameter list, return type and a leading ``::`` removed, so
+    ``std::string mylib::f(std::vector<int>)`` -> ``mylib::f``."""
+    prev = None
+    while prev != name:
+        prev, name = name, _TEMPLATE_ARGS_RE.sub("", name)
+    name = name.split("(", 1)[0].strip()
+    if " " in name:
+        name = name.rsplit(" ", 1)[1]
+    return name.lstrip("*&").removeprefix("::")
+
+
+def is_stdlib_owned_name(name: str) -> bool:
+    """Whether the entity *name* spells is owned by the standard library or
+    compiler runtime (``std::``, ``__gnu_cxx::``, ``__cxxabiv1::``).
+
+    Ownership, not mention: ``mylib::Wrapper<std::string>`` and
+    ``mylib::f(std::string)`` are the project's own entities. The one rule
+    ``looks_like_system_name`` and ``source_link``'s stdlib-export
+    classification share.
+    """
+    return owning_name(name).startswith(_SYSTEM_SCOPES)
 
 
 def looks_like_system_name(name: str) -> bool:
     """Whether *name* is a standard-library / compiler-internal decl spelling."""
-    if name.startswith(_SYSTEM_NAME_PREFIXES):
+    if name.startswith("_Z") and name.startswith(_SYSTEM_NAME_PREFIXES):
         return True
-    return any(sub in name for sub in _SYSTEM_NAME_SUBSTRINGS)
+    # Reserved identifiers (``__foo``) and stdlib scopes, judged on the entity
+    # itself rather than on a return type or argument it mentions.
+    return owning_name(name).startswith(("__", *_SYSTEM_SCOPES))
 
 
 def decl_declaring_files(graph: SourceGraphSummary) -> dict[str, str]:

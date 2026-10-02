@@ -2044,7 +2044,7 @@
           }
         }
       },
-      "$comment": "annotations.annotation_report_entries is the one function that builds this array; cli._maybe_emit_annotations's stderr rendering (collect_annotations/format_annotations) shares the identical classification and formatting, so the two cannot disagree."
+      "$comment": "annotations.annotation_report_entries is the one function that builds this array."
     },
     "exit": {
       "type": "object",

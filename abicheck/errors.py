@@ -444,10 +444,6 @@ class UseCaseManifestError(AbicheckError, ValueError):
     """
 
 
-class ReportError(AbicheckError):
-    """Error during report generation."""
-
-
 class SemanticIrAuthorityError(SnapshotError):
     """Raised when an ``AbiSnapshot``'s real ``SemanticIR`` disagrees with a
     legacy sidecar identity the same producer wrote for the same

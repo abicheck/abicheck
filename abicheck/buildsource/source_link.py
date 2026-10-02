@@ -30,6 +30,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..model.source_graph_query import is_stdlib_owned_name
 from . import ctor_export_match
 from .fact_set import fact_set_rollup_is_inconsistent, rollup_coverage, rollup_fact_set
 from .source_abi import SourceAbiSurface, SourceAbiTu, SourceEntity
@@ -1004,34 +1005,30 @@ def _strip_synthesized_descriptor(demangled: str) -> str:
 
 def _is_stdlib_export(sym: str, demangled: str) -> bool:
     base = _strip_synthesized_descriptor(demangled)
-    return (
-        base.startswith("std::")
-        or base.startswith("__gnu_cxx::")
-        or sym.startswith(
-            (
-                "_ZSt",
-                "_ZNSt",
-                "_ZNKSt",
-                "_ZTVSt",
-                "_ZTISt",
-                "_ZTSSt",
-                # RTTI/VTT for *nested* std types mangle as ``_ZT?NSt...`` (the
-                # top-level ``_ZT?St...`` forms above only catch ``std::`` at the
-                # outermost level); these back up the demangled check above when
-                # the demangler is unavailable. Guard variables have too many
-                # mangled shapes (``_ZGVN...``/``_ZGVZN...``/``_ZGVZNK...``) to
-                # enumerate reliably, so they ride the demangled ``guard variable
-                # for std::...`` path above.
-                "_ZTVNSt",
-                "_ZTINSt",
-                "_ZTSNSt",
-                "_ZTTNSt",
-                "_ZN9__gnu_cxx",
-                "_ZNK9__gnu_cxx",
-                "_ZTVN9__gnu_cxx",
-                "_ZTIN9__gnu_cxx",
-                "_ZTSN9__gnu_cxx",
-            )
+    return is_stdlib_owned_name(base) or sym.startswith(
+        (
+            "_ZSt",
+            "_ZNSt",
+            "_ZNKSt",
+            "_ZTVSt",
+            "_ZTISt",
+            "_ZTSSt",
+            # RTTI/VTT for *nested* std types mangle as ``_ZT?NSt...`` (the
+            # top-level ``_ZT?St...`` forms above only catch ``std::`` at the
+            # outermost level); these back up the demangled check above when
+            # the demangler is unavailable. Guard variables have too many
+            # mangled shapes (``_ZGVN...``/``_ZGVZN...``/``_ZGVZNK...``) to
+            # enumerate reliably, so they ride the demangled ``guard variable
+            # for std::...`` path above.
+            "_ZTVNSt",
+            "_ZTINSt",
+            "_ZTSNSt",
+            "_ZTTNSt",
+            "_ZN9__gnu_cxx",
+            "_ZNK9__gnu_cxx",
+            "_ZTVN9__gnu_cxx",
+            "_ZTIN9__gnu_cxx",
+            "_ZTSN9__gnu_cxx",
         )
     )
 

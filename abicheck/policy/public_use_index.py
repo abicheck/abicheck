@@ -45,7 +45,7 @@ def _is_pointer(type_str: str) -> bool:
 
 
 class PublicUseIndex(NamedTuple):
-    """The inverse of ``idioms._public_pointer_only``, built once per recognition.
+    """The inverse of ``idioms._public_pointer_only`` (removed), built once per recognition.
 
     The predicate asks, per record, "does any public signature site name this
     type, and is every such use by pointer?" -- records x sites of work. These

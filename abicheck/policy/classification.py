@@ -583,7 +583,7 @@ def evidence_status_for_change(change: HasKind) -> EvidenceStatus | None:
     ``CONSUMER_PROVEN`` (appcompat/runtime-demonstrated) is never returned
     here: it isn't derivable from a finding's own classification at all, so
     callers that reclassify a finding via consumer evidence
-    (``reporter.appcompat_to_json``) set it explicitly instead.
+    (``reporter.appcompat_to_json`` (removed)) set it explicitly instead.
     """
     kind = getattr(change, "kind", None)
     if kind == ChangeKind.EVIDENCE_REQUIRED_MISSING:

@@ -279,15 +279,6 @@ class TestMissingFamilies:
 
         assert ledger.missing_families(["binary", "layout"]) == ()
 
-    def test_comparable_families_matches_the_predicate(self) -> None:
-        ledger = AvailabilityLedger()
-        for name, status in zip(
-            ("f0", "f1", "f2", "f3", "f4", "f5"), _STATUSES, strict=True
-        ):
-            ledger.declare(name, FactAvailability(status))
-
-        assert ledger.comparable_families() == frozenset({"f0", "f1"})
-
 
 class TestNarrowingMergesIdentifyingFieldsPerField:
     """Codex review: whole-record selection lost information both ways.

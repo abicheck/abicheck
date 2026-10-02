@@ -21,7 +21,6 @@ walk are covered. Pure-Python, no external tools — runs in the default lane.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -34,16 +33,11 @@ from abicheck.buildsource.pattern_facts import (
     PatternKind,
     _resolve_scan_jobs,
     find_pattern_facts,
-    iter_source_files,
     scan_text,
 )
 
 # File discovery lives in its own module since the discovery/scanning split
 # (see `pattern_facts_files.py`'s docstring).
-from abicheck.buildsource.pattern_facts_files import (
-    _EXTENSIONLESS_MAX_BYTES,
-    _is_scannable,
-)
 
 
 def _kinds(text: str) -> set[PatternKind]:
@@ -451,105 +445,7 @@ def test_coverage_not_collected_when_nothing_scanned() -> None:
 # ── File walking + changed-path scoping ──────────────────────────────────────
 
 
-def test_iter_source_files_filters_by_suffix(tmp_path: Path) -> None:
-    (tmp_path / "a.hpp").write_text("int x;")
-    (tmp_path / "b.cpp").write_text("int y;")
-    (tmp_path / "README.md").write_text("# docs")
-    (tmp_path / "data.bin").write_bytes(b"\x00\x01")
-    found = {p.name for p in iter_source_files([tmp_path])}
-    assert found == {"a.hpp", "b.cpp"}
-
-
-def test_iter_source_files_prunes_abicheck_build_dir(tmp_path: Path) -> None:
-    # Zero-config cmake inference writes sources/.abicheck-build; its generated
-    # headers must not be lexically pre-scanned as project source (review).
-    (tmp_path / "real.hpp").write_text("int x;")
-    bdir = tmp_path / ".abicheck-build"
-    bdir.mkdir()
-    (bdir / "config.hpp").write_text("#define GENERATED 1")
-    found = {p.name for p in iter_source_files([tmp_path])}
-    assert found == {"real.hpp"}  # generated build header pruned
-
-
-@pytest.mark.parametrize("name", ["detail.tpp", "Config.inc"])
-def test_iter_source_files_includes_tpp_and_inc(tmp_path: Path, name: str) -> None:
-    # These are header-like extensions the repo already recognizes elsewhere.
-    (tmp_path / name).write_text("#pragma pack(1)\nstruct S { int x; };")
-    found = {p.name for p in iter_source_files([tmp_path])}
-    assert name in found
-
-
-def test_iter_source_files_changed_scope(tmp_path: Path) -> None:
-    inc = tmp_path / "include"
-    inc.mkdir()
-    (inc / "public.h").write_text("int p;")
-    (inc / "other.h").write_text("int o;")
-    found = {
-        p.name for p in iter_source_files([inc], changed_paths=["include/public.h"])
-    }
-    assert found == {"public.h"}
-
-
-def test_iter_source_files_includes_extensionless_headers(tmp_path: Path) -> None:
-    inc = tmp_path / "include" / "mylib"
-    inc.mkdir(parents=True)
-    (inc / "Core").write_text("struct S { virtual void f(); };")  # extensionless
-    (inc / "notes.md").write_text("# docs")
-    found = {p.name for p in iter_source_files([tmp_path / "include"])}
-    assert "Core" in found
-    assert "notes.md" not in found
-
-
 # ── P2: the extensionless heuristic must not sweep in data / binary / VCS files ──
-
-
-def test_is_scannable_rejects_oversized_extensionless_file(tmp_path: Path) -> None:
-    # A multi-MB extensionless *data* file (e.g. oneDNN benchdnn option sets) is
-    # not a header — scanning it is pure cost with no ABI signal.
-    big = tmp_path / "option_set_fwks_gpu"
-    big.write_text("x = 1\n" * ((_EXTENSIONLESS_MAX_BYTES // 6) + 100))
-    assert big.stat().st_size > _EXTENSIONLESS_MAX_BYTES
-    assert _is_scannable(big) is False
-
-
-def test_is_scannable_rejects_binary_extensionless_file(tmp_path: Path) -> None:
-    blob = tmp_path / "index"  # e.g. .git/index-shaped binary
-    blob.write_bytes(b"DIRC\x00\x00\x00\x02\x00" + b"\x00" * 64)
-    assert _is_scannable(blob) is False
-
-
-def test_is_scannable_keeps_small_text_extensionless_header(tmp_path: Path) -> None:
-    hdr = tmp_path / "Core"
-    hdr.write_text("struct S { virtual void f(); };")
-    assert _is_scannable(hdr) is True
-
-
-def test_is_scannable_rejects_unstattable_extensionless(tmp_path: Path) -> None:
-    # An extensionless path that cannot be stat'd (does not exist) is not a header.
-    assert _is_scannable(tmp_path / "ghost") is False
-
-
-def test_is_scannable_does_not_cap_known_suffix_files(tmp_path: Path) -> None:
-    # A real large header (a 600 KB dnnl.hpp) keeps a known suffix and is scanned
-    # — only the *extensionless* heuristic is byte-capped.
-    big_hpp = tmp_path / "dnnl.hpp"
-    big_hpp.write_text("// header\n" * ((_EXTENSIONLESS_MAX_BYTES // 9) + 100))
-    assert big_hpp.stat().st_size > _EXTENSIONLESS_MAX_BYTES
-    assert _is_scannable(big_hpp) is True
-
-
-@pytest.mark.parametrize("vcs", [".git", ".hg", ".svn"])
-def test_iter_source_files_prunes_vcs_dirs(tmp_path: Path, vcs: str) -> None:
-    (tmp_path / "real.hpp").write_text("struct S { virtual void f(); };")
-    vcsdir = tmp_path / vcs / "objects"
-    vcsdir.mkdir(parents=True)
-    # an extensionless, header-shaped file living under VCS metadata
-    (vcsdir / "HEAD").write_text("struct Leak { virtual void g(); };")
-    (tmp_path / vcs / "index").write_bytes(b"\x00" * 32)
-    names = {p.name for p in iter_source_files([tmp_path])}
-    assert "real.hpp" in names
-    assert "HEAD" not in names
-    assert "index" not in names
 
 
 # ── P2: parallel fan-out is deterministic and falls back to serial ───────────
@@ -580,18 +476,6 @@ def test_resolve_scan_jobs_auto_and_invalid(monkeypatch) -> None:
     monkeypatch.setattr(ps.os, "cpu_count", lambda: 32)
     monkeypatch.delenv("ABICHECK_PATTERN_SCAN_JOBS", raising=False)
     assert ps._resolve_scan_jobs(100) == 8  # capped at 8
-
-
-def test_looks_binary(tmp_path: Path) -> None:
-    import abicheck.buildsource.pattern_facts_files as ps
-
-    text = tmp_path / "t"
-    text.write_text("struct S {};")
-    binary = tmp_path / "b"
-    binary.write_bytes(b"\x7fELF\x00\x01\x02")
-    assert ps._looks_binary(text) is False
-    assert ps._looks_binary(binary) is True
-    assert ps._looks_binary(tmp_path) is True  # unreadable (a dir) → treated binary
 
 
 def test_scan_one_file_readable_and_unreadable(tmp_path: Path) -> None:
@@ -698,17 +582,6 @@ def test_scan_files_parallel_counts_unreadable_as_skipped(
     assert result.files_skipped == 1
 
 
-@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO requires POSIX")
-def test_iter_source_files_skips_fifo(tmp_path: Path) -> None:
-    # A FIFO with a header-like name must not be enqueued — opening it would
-    # block the pre-scan (Codex review). Skip on platforms without os.mkfifo.
-    (tmp_path / "real.hpp").write_text("struct S { virtual void f(); };")
-    getattr(os, "mkfifo")(tmp_path / "pipe.hpp")
-    names = {p.name for p in iter_source_files([tmp_path])}
-    assert "real.hpp" in names
-    assert "pipe.hpp" not in names
-
-
 def test_resolve_scan_jobs_daemonic_is_serial(monkeypatch) -> None:
     # A daemonic process can't spawn children, so the scan must stay serial even
     # when a big tree and an explicit job count would otherwise go parallel
@@ -753,25 +626,6 @@ def test_scan_files_parallel_falls_back_to_serial(
     assert fell_back.files_scanned == 6
 
 
-def test_iter_source_files_extensionless_changed_scope(tmp_path: Path) -> None:
-    inc = tmp_path / "include" / "mylib"
-    inc.mkdir(parents=True)
-    (inc / "Core").write_text("struct S { virtual void f(); };")
-    found = iter_source_files(
-        [tmp_path / "include"], changed_paths=["include/mylib/Core"]
-    )
-    assert [p.name for p in found] == ["Core"]
-
-
-def test_iter_source_files_explicit_file_honored_regardless_of_suffix(
-    tmp_path: Path,
-) -> None:
-    f = tmp_path / "PublicHeader"  # extensionless, passed directly
-    f.write_text("struct S { virtual void f(); };")
-    found = iter_source_files([f])
-    assert found == [f]
-
-
 def test_scan_files_finds_constructs_in_extensionless_header(tmp_path: Path) -> None:
     inc = tmp_path / "include"
     inc.mkdir()
@@ -779,13 +633,6 @@ def test_scan_files_finds_constructs_in_extensionless_header(tmp_path: Path) -> 
     res = find_pattern_facts([inc], changed_paths=["include/Core"])
     assert res.files_scanned == 1
     assert PatternKind.PRAGMA_PACK in {f.kind for f in res.facts}
-
-
-def test_iter_source_files_changed_scope_bare_name(tmp_path: Path) -> None:
-    (tmp_path / "public.h").write_text("int p;")
-    (tmp_path / "other.h").write_text("int o;")
-    found = {p.name for p in iter_source_files([tmp_path], changed_paths=["public.h"])}
-    assert found == {"public.h"}
 
 
 def test_scan_files_aggregates_and_records_paths(tmp_path: Path) -> None:

@@ -241,29 +241,6 @@ def _skip_template_args(symbol: str, i: int) -> int:
     return -1  # unbalanced
 
 
-def _unqualified_name(symbol: str) -> str:
-    """Extract the unqualified (leaf) function name from a symbol, robustly.
-
-    Matching-safe alternative to ``demangle.base_name`` (which is documented
-    display-only and mis-parses operators / templates). Demangles when a
-    demangler is available, then, using *bracket-depth tracking* so that ``::``,
-    ``(`` and spaces inside template arguments are ignored:
-
-    * keeps the whole ``operator...`` token intact;
-    * drops the parameter list;
-    * drops the namespace/class qualifier (segment after the last top-level
-      ``::``);
-    * drops a leading return type (global function templates demangle as
-      ``ret name<args>(...)``).
-
-    Trailing template arguments are *kept*: a specialization like ``foo<int>``
-    is a distinct ABI symbol from ``foo<long>``, so they must not collapse to a
-    shared leaf (that would mis-report a specialization swap as a rename).
-    """
-
-    return _unqualified_name_of(demangle(symbol) or symbol)
-
-
 def _unwrap_funcptr_declarator(s: str) -> str:
     """Unwrap a function-pointer/-reference *return* declarator so the real
     function name is visible.

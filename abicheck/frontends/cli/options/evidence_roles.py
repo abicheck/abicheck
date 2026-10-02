@@ -76,7 +76,7 @@ def _partition(
 def _three_buckets(
     pairs: SidedPaths,
 ) -> tuple[tuple[Path, ...], tuple[Path, ...], tuple[Path, ...]]:
-    """``split_sided_paths``'s repeatable both/old-only/new-only buckets.
+    """The former ``split_sided_paths``'s repeatable both/old-only/new-only buckets.
 
     Restated here rather than imported from ``cli_options`` (which imports
     *this* module) and applied to an already-filtered subset of one role's

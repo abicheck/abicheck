@@ -46,7 +46,6 @@ from abicheck.cli_compare_release import (
 from abicheck.cli_helpers_compare import (
     _collect_additions,
     _collect_release_inputs,
-    _merge_gcc_options,
     _warn_ignored_flags,
 )
 from abicheck.cli_resolve import (
@@ -266,15 +265,6 @@ class TestSafeWriteOutput:
 
 
 class TestSmallHelpers:
-    def test_merge_gcc_options_no_flags(self) -> None:
-        assert _merge_gcc_options([], "-O2") == "-O2"
-
-    def test_merge_gcc_options_flags_only(self) -> None:
-        assert _merge_gcc_options(["-DA", "-DB"], None) == "-DA -DB"
-
-    def test_merge_gcc_options_both(self) -> None:
-        assert _merge_gcc_options(["-DA"], "-O2") == "-DA -O2"
-
     @pytest.mark.parametrize(
         ("depth", "expected"),
         [

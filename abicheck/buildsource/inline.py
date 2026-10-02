@@ -977,7 +977,7 @@ def _run_inline_source_abi(
     TU (``_make_source_extractor`` special-cases "castxml", else clang) —
     there is no dual-backend merge here the way ``dumper_hybrid.py`` provides
     for the L2 header-AST snapshot. ``--ast-frontend hybrid`` reaches this
-    function unchanged (it is the shared ``compile_context_options`` flag,
+    function unchanged (it is the shared compile-context flag,
     passed straight through as ``extractor`` by ``dump_source_only`` — see
     `cli.py`), so treating it like any other extractor name would silently
     run clang alone while recording ``source_abi:hybrid`` as if both

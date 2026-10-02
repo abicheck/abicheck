@@ -59,7 +59,6 @@ from abicheck.compatibility_evaluation_frontend import (
     compare_request_inputs,
     compatibility_config_from_compare_request,
     cross_front_end_differences,
-    cross_front_end_equivalent,
     severity_preset_identity,
     unstatable_selectors,
 )
@@ -1182,9 +1181,6 @@ class TestDifferenceReporting:
         differences = cross_front_end_differences(by_flag, by_project)
         assert any(CONTRACT_MODE_FIELD in d for d in differences)
 
-    def test_equivalence_helper_agrees_with_the_difference_list(self):
-        assert cross_front_end_equivalent(_resolve(), _resolve())
-
     def test_a_differing_versioning_policy_is_reported(self):
         # ADR-066 D4/S2 -- `_SECTIONS` must include "versioning" or two
         # configs with different declared versioning policies would compare
@@ -1208,7 +1204,7 @@ class TestDifferenceReporting:
         assert cfg.versioning != strict.versioning
         differences = cross_front_end_differences(cfg, strict)
         assert any(d.startswith("versioning:") for d in differences)
-        assert not cross_front_end_equivalent(cfg, strict)
+        assert differences
 
 
 class TestPackSuppliedSeverityActivatesAuto:

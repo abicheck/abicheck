@@ -49,7 +49,7 @@ from abicheck.buildsource.model import (
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.checker_policy import ChangeKind
 from abicheck.cli import main
-from abicheck.cli_buildsource_helpers import _build_coverage, _run_adapters
+from tests._build_source_collect import _build_coverage, _run_adapters
 
 # ── BuildEvidence model round-trips (ADR-029 D1/D2) ──────────────────────────
 
@@ -574,7 +574,7 @@ def test_diff_multi_value_order_independent():
 # ── engine wiring (was `collect` CLI variants, ADR-028 D6) ──────────────────
 #
 # `collect` was deleted in the ADR-043 CLI reset, but the engine it drove is
-# unchanged: `cli_buildsource_helpers._run_adapters`/`_build_coverage` are the
+# unchanged: `tests._build_source_collect._run_adapters`/`_build_coverage` are the
 # exact functions the deleted Click command called, so these exercise them
 # directly instead of going through a CLI that no longer exists.
 
@@ -860,8 +860,10 @@ def _pack_with(tmp_path, name, *, build=False, source_abi=False):
 def test_detect_coverage_asymmetry_target_missing_debug_and_build(tmp_path):
     """Full base (debug + headers + build + source) vs binary+headers target
     yields ONE finding naming exactly the layers the target lacks."""
+    from abicheck.buildsource.evidence_report import (
+        detect_coverage_asymmetry as _detect_coverage_asymmetry,
+    )
     from abicheck.checker_policy import ChangeKind
-    from abicheck.cli_buildsource import _detect_coverage_asymmetry
 
     old_snap = _asym_snap(dwarf=True, headers=True)
     new_snap = _asym_snap(dwarf=False, headers=True)  # target lost debug info
@@ -883,7 +885,9 @@ def test_detect_coverage_asymmetry_target_missing_debug_and_build(tmp_path):
 
 def test_detect_coverage_asymmetry_symmetric_is_silent(tmp_path):
     """Equal coverage on both sides → no finding."""
-    from abicheck.cli_buildsource import _detect_coverage_asymmetry
+    from abicheck.buildsource.evidence_report import (
+        detect_coverage_asymmetry as _detect_coverage_asymmetry,
+    )
 
     old_snap = _asym_snap(dwarf=True, headers=True)
     new_snap = _asym_snap(dwarf=True, headers=True)
@@ -895,7 +899,9 @@ def test_detect_coverage_asymmetry_symmetric_is_silent(tmp_path):
 def test_detect_coverage_asymmetry_richer_target_is_silent(tmp_path):
     """A target richer than the base does not undermine the compare → no finding
     (only the base→target degradation direction is reported)."""
-    from abicheck.cli_buildsource import _detect_coverage_asymmetry
+    from abicheck.buildsource.evidence_report import (
+        detect_coverage_asymmetry as _detect_coverage_asymmetry,
+    )
 
     old_snap = _asym_snap(dwarf=False, headers=False)
     new_snap = _asym_snap(dwarf=True, headers=True)

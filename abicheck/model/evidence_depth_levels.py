@@ -124,29 +124,6 @@ _SERVICE_DEPTH_ALIASES: dict[str, EvidenceDepth] = {
 }
 
 
-def public_depth_value(depth: EvidenceDepth) -> str:
-    """*depth*'s spelling on the public, four-rung assurance ladder
-    (``EVIDENCE_DEPTH_VALUES``/``USER_DEPTHS``) -- ``FULL``/``GRAPH``
-    collapse to ``"source"``, the rung this class's own docstring already
-    says they are: internal replay-*scope* variants of the same evidence
-    tier, never a deeper or shallower one.
-
-    A CLI-facing pin is always a real :data:`USER_DEPTHS` member and passes
-    through unchanged. This exists for the internal-only rungs a mode
-    preset (``pr-deep`` -> ``GRAPH``, ``baseline`` -> ``FULL``, see
-    :data:`_MODE_PRESET`) or a typed ``ScanRequest.depth`` pin can
-    still reach -- without normalizing before it is stamped onto
-    ``DiffResult.requested_depth``, ``analysis_assurance.py``'s own
-    ``_DEPTH_RANK.get(value, 0)`` reads an unrecognized ``"full"``/``"graph"``
-    as rank ``0`` (the *shallowest* rung), so ``depth_satisfied`` could read
-    ``True`` -- and the run's ``status`` could read ``"complete"`` -- for a
-    request the comparison never actually evaluated against the real ladder
-    (Codex review, PR #780)."""
-    if depth in (EvidenceDepth.FULL, EvidenceDepth.GRAPH):
-        return EvidenceDepth.SOURCE.value
-    return depth.value
-
-
 class SourceScope(str, Enum):
     """Internal replay-scope axis for ``EvidenceDepth.SOURCE`` (ADR-043 D2/D3).
 
@@ -348,19 +325,6 @@ def resolve_source_method(
 #: dry-run projection) rather than a literal at each, so the cost preview can
 #: never price a different rung than the run executes.
 UNPINNED_DEPTH: EvidenceDepth = EvidenceDepth.HEADERS
-
-
-def resolve_unpinned_level(mode: ScanMode) -> tuple[SourceMethod, EvidenceDepth]:
-    """The ``(method, depth)`` level an omitted ``--depth`` resolves to.
-
-    Exactly ``resolve_level(mode=mode, depth=UNPINNED_DEPTH)`` -- i.e. the
-    resolution an explicit ``--depth headers`` would get, so the two spellings
-    cannot drift. *mode* is accepted (and, today, unused) because the caller
-    always has one and the preset is the thing this deliberately does *not*
-    consult: passing it keeps that visible at the call site instead of leaving
-    a future reader to wonder whether the mode was forgotten.
-    """
-    return resolve_level(mode=mode, source_method=None, depth=UNPINNED_DEPTH)
 
 
 def resolve_level(

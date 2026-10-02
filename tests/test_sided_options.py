@@ -19,10 +19,8 @@ from abicheck.cli_options import (
     _split_sided_version,
     normalize_sided_options,
     split_sided_include_paths,
-    split_sided_paths,
 )
 from abicheck.frontends.cli.options.params import (
-    LABELED_INCLUDE_PATH_PARAM,
     SIDED_INCLUDE_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_STR_PARAM,
@@ -115,44 +113,6 @@ class TestSidedIncludePathParam:
         )
 
 
-class TestLabeledIncludePathParam:
-    """ADR-050 D1 -- ``dump``'s own ``--include`` type: only ``both:LABEL=PATH``
-    is recognized; every other value (including one starting ``old=``) stays a
-    literal, unlabeled path exactly as ``dump``'s plain ``click.Path`` already
-    treated it."""
-
-    def test_bare_value_is_unlabeled(self) -> None:
-        assert LABELED_INCLUDE_PATH_PARAM.convert("inc", None, None) == (
-            Path("inc"),
-            None,
-        )
-
-    def test_old_equals_prefix_is_a_literal_directory_not_a_side(self) -> None:
-        # dump has no old/new side concept -- 'old=foo/' is just a directory
-        # literally named that, unchanged from before this type existed.
-        assert LABELED_INCLUDE_PATH_PARAM.convert("old=foo/", None, None) == (
-            Path("old=foo/"),
-            None,
-        )
-
-    def test_labeled_form(self) -> None:
-        assert LABELED_INCLUDE_PATH_PARAM.convert("both:support=path", None, None) == (
-            Path("path"),
-            "support",
-        )
-
-    def test_labeled_form_requires_equals(self) -> None:
-        with pytest.raises(click.BadParameter):
-            LABELED_INCLUDE_PATH_PARAM.convert("both:supportonly", None, None)
-
-    def test_labeled_form_requires_nonempty_label(self) -> None:
-        with pytest.raises(click.BadParameter):
-            LABELED_INCLUDE_PATH_PARAM.convert("both:=path", None, None)
-
-    def test_metavar(self) -> None:
-        assert LABELED_INCLUDE_PATH_PARAM.get_metavar(None) == "[both:LABEL=]PATH"
-
-
 class TestSplitSidedIncludePaths:
     def test_partitions_and_collects_labels(self) -> None:
         triples = [
@@ -174,23 +134,6 @@ class TestSplitSidedIncludePaths:
             [("both", Path("a"), None), ("old", Path("b"), None)]
         )
         assert labels == {}
-
-
-class TestSplitSidedPaths:
-    def test_partitions_by_side(self) -> None:
-        pairs = [
-            ("both", Path("a")),
-            ("old", Path("o")),
-            ("new", Path("n")),
-            ("both", Path("b")),
-        ]
-        both, old, new = split_sided_paths(pairs)
-        assert both == (Path("a"), Path("b"))
-        assert old == (Path("o"),)
-        assert new == (Path("n"),)
-
-    def test_empty(self) -> None:
-        assert split_sided_paths([]) == ((), (), ())
 
 
 class TestSplitSidedSingle:

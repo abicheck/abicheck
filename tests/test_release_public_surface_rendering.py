@@ -348,11 +348,6 @@ class TestTheSurfaceValueRoundTrip:
         )
         assert back.declared_symbols == frozenset()
 
-    def test_obligation_symbols_are_reachable_as_a_set(self) -> None:
-        assert _surface("api_a", "api_b").obligation_symbols() == frozenset(
-            {"api_a", "api_b"}
-        )
-
     def test_an_identity_knows_whether_it_names_headers(self) -> None:
         from abicheck.model.release_surface import SurfaceAcquisitionIdentity
 

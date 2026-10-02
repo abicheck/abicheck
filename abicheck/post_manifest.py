@@ -507,16 +507,6 @@ def validate_manifest_against_symbols(
     return result
 
 
-def validate_manifest_against_binary(
-    manifest: PostManifest,
-    elf_meta: ElfMetadata,
-) -> ManifestValidationResult:
-    """Validate a manifest against parsed ELF metadata (see the symbols-set core)."""
-    return validate_manifest_against_symbols(
-        manifest, _exported_symbol_names(elf_meta), elf_meta.soname or "UNKNOWN"
-    )
-
-
 def _exported_names_for_binary(so_path: Path) -> tuple[set[str], str]:
     """Return (exported symbol names, library label) for an ELF/PE/Mach-O file."""
     from .binary_utils import detect_binary_format, normalize_binary_input

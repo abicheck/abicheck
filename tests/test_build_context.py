@@ -864,13 +864,13 @@ class TestStdSortKey:
         assert sorted(stds, key=_std_sort_key) == ["c++11", "c++14", "c++17", "c++20"]
 
     def test_draft_names(self) -> None:
-        assert _std_sort_key("c++2a") == (1, 20)
-        assert _std_sort_key("c++2b") == (1, 23)
-        assert _std_sort_key("c++2c") == (1, 26)
+        assert _std_sort_key("c++2a") == (1, 2020)
+        assert _std_sort_key("c++2b") == (1, 2023)
+        assert _std_sort_key("c++2c") == (1, 2026)
 
     def test_gnu_variants(self) -> None:
         assert _std_sort_key("gnu++17")[0] == 1
-        assert _std_sort_key("gnu++17")[1] == 17
+        assert _std_sort_key("gnu++17")[1] == 2017
 
     def test_c_standards(self) -> None:
         assert _std_sort_key("c11")[0] == 0

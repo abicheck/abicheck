@@ -25,6 +25,7 @@ scores the pair compatible.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from unittest.mock import patch
 
@@ -926,12 +927,29 @@ def test_stub_read_failure_after_stat_is_invalid(tmp_path, caplog) -> None:
     assert "could not read stub" in caplog.text
 
 
-def test_missing_old_surface_treated_as_empty_baseline() -> None:
+def test_missing_old_surface_is_unknown_not_empty() -> None:
+    """No OLD stub is an unknown baseline, not an empty one (F1): nothing is
+    claimed added, and the coverage warning states the gap. Read as empty,
+    a changed signature became an "addition" and an API break read clean."""
     old = AbiSnapshot(library="foo.abi3.so", version="1")  # no python_api
     new = _snap("2", "def f(a): ...\nclass C: ...\n")
-    kinds = _kinds(compare(old, new))
-    assert ChangeKind.PYTHON_API_FUNCTION_ADDED in kinds
-    assert ChangeKind.PYTHON_API_CLASS_ADDED in kinds
+    result = compare(old, new)
+    kinds = _kinds(result)
+    assert ChangeKind.PYTHON_API_FUNCTION_ADDED not in kinds
+    assert ChangeKind.PYTHON_API_CLASS_ADDED not in kinds
+    assert any(
+        "python_api" in w and "missing old Python API surface" in w
+        for w in result.coverage_warnings
+    )
+
+
+def test_missing_old_surface_still_reports_an_invalid_new_stub() -> None:
+    """The one NEW-only check needs no baseline."""
+    old = AbiSnapshot(library="foo.abi3.so", version="1")
+    new = _snap("2", "def f(a): ...\n")
+    assert new.python_api is not None
+    new.python_api = dataclasses.replace(new.python_api, parse_ok=False)
+    assert ChangeKind.PYTHON_API_STUB_INVALID in _kinds(compare(old, new))
 
 
 def test_identical_surface_is_no_change() -> None:

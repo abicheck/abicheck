@@ -7,6 +7,8 @@ import os
 import shlex
 from typing import TYPE_CHECKING
 
+from .model.language_standard import last_language_standard
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -429,14 +431,7 @@ def explicit_language_standard(
             # would be a new failure mode a pre-ADR-050 dump never had.
             pass
     tokens.extend(gcc_option_tokens)
-    value: str | None = None
-    for token in tokens:
-        normalized = token[1:] if token.startswith("--std=") else token
-        if normalized.startswith("-std="):
-            value = normalized.partition("=")[2]
-        elif normalized.lower().startswith("/std:"):
-            value = normalized.partition(":")[2]
-    return value
+    return last_language_standard(tokens)
 
 
 def explicit_target_triple(

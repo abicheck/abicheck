@@ -13,6 +13,7 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.post_manifest import (
     PostExport,
     PostUfunc,
+    _exported_symbol_names,
     check_version_gate,
     diff_manifests,
     format_diff_report,
@@ -21,9 +22,17 @@ from abicheck.post_manifest import (
     load_manifest,
     parse_manifest,
     public_c_symbols,
-    validate_manifest_against_binary,
     validate_manifest_against_symbols,
 )
+
+
+def validate_manifest_against_binary(manifest, elf_meta):
+    """The symbols-set core, fed the ELF's callable exports the way
+    ``validate_from_binary`` feeds it."""
+    return validate_manifest_against_symbols(
+        manifest, _exported_symbol_names(elf_meta), elf_meta.soname or "UNKNOWN"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers

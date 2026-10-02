@@ -130,14 +130,6 @@ def compile_units_from_command(
     return units
 
 
-def compile_unit_from_command(
-    command: Sequence[str], directory: str | Path
-) -> CompileUnit | None:
-    """The first TU of *command* (convenience over :func:`compile_units_from_command`)."""
-    units = compile_units_from_command(command, directory)
-    return units[0] if units else None
-
-
 def emit_facts_for_command(
     command: Sequence[str],
     directory: str | Path,

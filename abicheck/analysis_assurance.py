@@ -89,7 +89,7 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
   returns -- there is no separate out-of-band pack to fold in on that path.
   ``effective_depth`` is always computed here, independent of that field,
   from what each side's snapshot actually carries, via the shared
-  ``evidence_depth.depth_label_for``. That rule used to be reimplemented
+  ``evidence_depth.depth_label_for`` (removed). That rule used to be reimplemented
   here rather than imported, because importing it meant importing a
   CLI-layer module and reaching back through ``cli.py`` into ``checker.py``;
   ADR-061 Phase 3 moved it to a leaf, so this is a real delegation now.

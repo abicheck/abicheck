@@ -11,8 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from abicheck.dwarf_metadata import (
     DwarfMetadata,
+    FieldInfo,
+    StructLayout,
     _attr_int,
     _attr_str,
     _compute_fallback_type_info,
@@ -28,6 +32,7 @@ from abicheck.dwarf_metadata import (
     _walk_die_iter,
     parse_dwarf_metadata,
 )
+from abicheck.model import FactStatus
 
 # ── Mock helpers ───────────────────────────────────────────────────────
 
@@ -466,12 +471,14 @@ class TestProcessEnum:
 
 
 class TestExpandAnonymousMember:
-    def test_no_type_returns_empty(self):
+    """An unreadable member type is FAILED -- its fields are unknown, never []."""
+
+    def test_no_type_is_failed(self):
         die = _Die("DW_TAG_member", {})
         result = _expand_anonymous_member(die, _CU(), {}, 0)
-        assert result == []
+        assert result.status is FactStatus.FAILED
 
-    def test_bad_ref_returns_empty(self):
+    def test_bad_ref_is_failed(self):
         die = _Die("DW_TAG_member", {"DW_AT_type": _Attr(999, "DW_FORM_ref_addr")})
         cu = _CU()
         cu._die_map = {}
@@ -479,15 +486,70 @@ class TestExpandAnonymousMember:
             "abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")
         ):
             result = _expand_anonymous_member(die, cu, {}, 0)
-        assert result == []
+        assert result.status is FactStatus.FAILED
 
-    def test_non_struct_target_returns_empty(self):
+    def test_non_struct_target_is_present_empty(self):
         target = _Die("DW_TAG_base_type", {"DW_AT_name": "int"}, offset=10)
         die = _Die("DW_TAG_member", {"DW_AT_type": _Attr(10, "DW_FORM_ref_addr")})
         cu = _CU()
         cu._die_map = {10: target}
         result = _expand_anonymous_member(die, cu, {}, 0)
-        assert result == []
+        assert result.status is FactStatus.PRESENT and result.value == []
+
+    def test_anonymous_aggregate_fields_are_inlined(self):
+        inner = _Die(
+            "DW_TAG_member",
+            {"DW_AT_name": "x", "DW_AT_data_member_location": 4},
+        )
+        target = _Die("DW_TAG_union_type", {"DW_AT_byte_size": 8}, [inner], offset=10)
+        die = _Die("DW_TAG_member", {"DW_AT_type": _Attr(10, "DW_FORM_ref_addr")})
+        cu = _CU()
+        cu._die_map = {10: target}
+        result = _expand_anonymous_member(die, cu, {}, 8)
+        assert result.status is FactStatus.PRESENT
+        assert [(f.name, f.byte_offset) for f in result.value] == [("x", 12)]
+
+
+class TestStructWithUnreadableAnonymousMember:
+    """A struct whose anonymous member cannot be read records no layout.
+
+    Recording it with that member's fields missing made the DWARF layout diff
+    report them as removed fields against a fully read other side.
+    """
+
+    @pytest.mark.parametrize(
+        "member_attrs", [{}, {"DW_AT_type": _Attr(999, "DW_FORM_ref_addr")}]
+    )
+    def test_layout_not_recorded(self, member_attrs):
+        named = _Die(
+            "DW_TAG_member", {"DW_AT_name": "a", "DW_AT_data_member_location": 0}
+        )
+        anon = _Die("DW_TAG_member", member_attrs)
+        die = _Die(
+            "DW_TAG_structure_type",
+            {"DW_AT_name": "S", "DW_AT_byte_size": 8},
+            [named, anon],
+        )
+        meta = DwarfMetadata(has_dwarf=True)
+        cu = _CU()
+        cu._die_map = {}
+        with patch(
+            "abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")
+        ):
+            _process_struct(die, meta, cu, {})
+        assert "S" not in meta.structs
+
+    def test_unrecorded_side_produces_no_field_finding(self):
+        from abicheck.diff_platform import _diff_struct_layouts
+
+        full = StructLayout(
+            name="S",
+            byte_size=8,
+            fields=[FieldInfo("a", "int", 0, 4), FieldInfo("x", "int", 4, 4)],
+        )
+        old = DwarfMetadata(structs={"S": full}, has_dwarf=True)
+        new = DwarfMetadata(structs={}, has_dwarf=True)  # S's layout unreadable on NEW
+        assert _diff_struct_layouts(old, new) == []
 
 
 # ── _compute_type_info branches ───────────────────────────────────────

@@ -35,7 +35,10 @@ from pathlib import Path
 from xml.etree.ElementTree import Element
 
 from ... import deadline
-from ...extract.castxml_compiler_emulation import emulated_compiler_command
+from ...extract.castxml_compiler_emulation import (
+    castxml_parser_arguments,
+    emulated_compiler_command,
+)
 from ...model.execution_cache import memoized
 from ...storage.castxml_xml import parse_castxml_xml
 from ..build_evidence import CompileUnit
@@ -243,9 +246,10 @@ def _castxml_tool_version(
 
 
 def _std_flag(standard: str, cc_id: str) -> list[str]:
-    if not standard:
-        return []
-    return [f"/std:{standard}"] if cc_id == "msvc" else [f"-std={standard}"]
+    # castxml's parser is GNU-style in every mode; `castxml_parser_arguments`
+    # turns an MSVC spelling into `-std=` and the emulation group back.
+    del cc_id
+    return [f"-std={standard}"] if standard else []
 
 
 def build_castxml_command(
@@ -315,6 +319,7 @@ def build_castxml_command(
     if compile_unit.target_triple and cc_id != "msvc":
         cmd.append(f"--target={compile_unit.target_triple}")
     cmd += _replay_extra_flags(compile_unit, cmd, cc_id)
+    cmd = castxml_parser_arguments(cmd)
     return [
         castxml_bin,
         "--castxml-output=1",

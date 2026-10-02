@@ -21,6 +21,7 @@ lane, not just a --check someone has to remember to run."""
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,10 @@ def _load(name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
+    # Register before executing: `dataclasses` resolves a string annotation
+    # through `sys.modules[cls.__module__]`, so an unregistered script
+    # defining a dataclass fails unless an earlier test imported it by name.
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
     return mod
 
