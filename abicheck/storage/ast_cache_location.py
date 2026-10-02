@@ -29,16 +29,20 @@ read back. The scratch directories are removed at interpreter exit.
 from __future__ import annotations
 
 import atexit
+import functools
 import logging
 import os
 import sys
 import tempfile
+from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
+from typing import Any, TypeVar
 
 from ..model.execution_cache_scoped import DiskCache
 from . import ast_cache_budget
 
-__all__ = ["AST_DISK_CACHE", "ast_cache_entry_path"]
+__all__ = ["AST_DISK_CACHE", "ast_cache_entry_path", "reference_scratch_scoped"]
 
 log = logging.getLogger(__name__)
 
@@ -66,12 +70,44 @@ def _remove_reference_scratch() -> None:
 atexit.register(_remove_reference_scratch)
 
 
+#: The scratch root of the extraction in progress, if one opened a scope.
+_SCOPE_ROOT: ContextVar[Path | None] = ContextVar("abicheck_ref_scratch", default=None)
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def reference_scratch_scoped(fn: _F) -> _F:
+    """Give reference-mode AST scratch paths the lifetime of one call to *fn*.
+
+    The outermost call opens a scratch root and removes it (with every AST
+    written under it) when it returns, so a long-lived process that dumps
+    repeatedly does not accumulate scratch files until exit. Nested calls
+    share the outer root. Outside reference mode this costs one check.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if AST_DISK_CACHE.enabled() or _SCOPE_ROOT.get() is not None:
+            return fn(*args, **kwargs)
+        import shutil
+
+        root = Path(tempfile.mkdtemp(prefix="abicheck-ref-"))
+        token = _SCOPE_ROOT.set(root)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _SCOPE_ROOT.reset(token)
+            shutil.rmtree(root, ignore_errors=True)
+
+    return wrapper  # type: ignore[return-value]
+
+
 def ast_cache_entry_path(key: str, backend: str = "castxml") -> Path:
     # One sub-directory + extension per backend: castxml XML and clang JSON coexist.
     ext = "json" if backend == "clang" else "xml"
     if not AST_DISK_CACHE.enabled():
         AST_DISK_CACHE.record_bypass()
-        root = _reference_scratch_root()
+        root = _SCOPE_ROOT.get() or _reference_scratch_root()
         root.mkdir(parents=True, exist_ok=True)
         scratch = Path(tempfile.mkdtemp(prefix=f"{backend}-", dir=root))
         return scratch / f"{key}.{ext}"

@@ -187,6 +187,7 @@ from .extract.headers.clang.locations import materialize_locations
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
+from .storage.ast_cache_location import reference_scratch_scoped
 from .storage.atomic_file import atomic_write as _atomic_write
 from .storage.cache_integrity import record_digest
 
@@ -1168,6 +1169,7 @@ def _detect_format(path: Path) -> str:
     return "unknown"
 
 
+@reference_scratch_scoped
 def dump(
     so_path: Path,
     headers: list[Path],

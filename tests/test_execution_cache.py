@@ -370,6 +370,43 @@ def test_scoped_cache_is_inert_outside_a_scope_and_joins_nested_ones() -> None:
     assert not cache.active()
 
 
+class _FailingOwners(dict):  # type: ignore[type-arg]
+    """An in-flight table whose owner fails *n* times in a row, then is gone."""
+
+    def __init__(self, n: int, exc: BaseException) -> None:
+        super().__init__()
+        self.n, self.exc = n, exc
+
+    def get(self, key, default=None):  # type: ignore[no-untyped-def]
+        if self.n <= 0:
+            return default
+        self.n -= 1
+        from concurrent.futures import Future
+
+        failed: Future[int] = Future()
+        failed.set_exception(self.exc)
+        return failed
+
+
+@pytest.mark.parametrize("failures", [1, 3, 5000])
+def test_waiter_retries_failed_owners_iteratively(failures: int) -> None:
+
+    cache: MemoryCache[int] = MemoryCache("test.ec.retry_loop")
+    cache._in_flight = _FailingOwners(failures, ValueError("owner failed"))
+    assert cache.get_or_compute(request_key(k=1), lambda: 7) == 7
+    assert cache._in_flight.n == 0
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt(), SystemExit(3)])
+def test_waiter_does_not_retry_a_base_exception(exc: BaseException) -> None:
+    cache: MemoryCache[int] = MemoryCache("test.ec.retry_base")
+    cache._in_flight = _FailingOwners(1, exc)
+    calls: list[int] = []
+    with pytest.raises(type(exc)):
+        cache.get_or_compute(request_key(k=1), lambda: calls.append(1) or 7)
+    assert calls == []
+
+
 def test_scoped_cache_pin_is_identity_not_equality() -> None:
     cache = ScopedCache("test.ec.pin")
     a, b = [1], [1]

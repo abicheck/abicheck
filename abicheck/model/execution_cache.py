@@ -309,27 +309,21 @@ class MemoryCache(Generic[_V]):
         if reference_mode():
             self.stats.bypasses += 1
             return compute()
-        hit = self._fresh_hit(key, witness, still_fresh)
-        if hit is not _MISSING:
-            return self._out(hit)
-        with self._lock:
-            pending = self._in_flight.get(key)
-            if pending is None:
-                future: Future[_V] = Future()
-                self._in_flight[key] = future
-                self.stats.misses += 1
-        if pending is not None:
+        while True:
+            hit = self._fresh_hit(key, witness, still_fresh)
+            if hit is not _MISSING:
+                return self._out(hit)
+            with self._lock:
+                pending = self._in_flight.get(key)
+                if pending is None:
+                    future: Future[_V] = Future()
+                    self._in_flight[key] = future
+                    self.stats.misses += 1
+                    break
             try:
                 return self._out(pending.result())
-            except BaseException:
-                return self.get_or_compute(
-                    key,
-                    compute,
-                    witness=witness,
-                    witness_of=witness_of,
-                    still_fresh=still_fresh,
-                    keep=keep,
-                )
+            except Exception:
+                continue  # the owner failed: retry (a loop, not recursion)
         try:
             value = self._compute_and_store(key, compute, witness, witness_of, keep)
         except BaseException as exc:

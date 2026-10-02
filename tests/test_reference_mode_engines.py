@@ -120,6 +120,43 @@ def test_ast_cache_path_is_fresh_scratch_in_reference_mode(
     assert not a.exists() and a.parent.is_dir()
 
 
+def test_reference_scratch_lives_as_long_as_the_scoped_call(
+    ref: pytest.MonkeyPatch,
+) -> None:
+    from abicheck.storage.ast_cache_location import (
+        ast_cache_entry_path,
+        reference_scratch_scoped,
+    )
+
+    seen: list[Path] = []
+
+    @reference_scratch_scoped
+    def extraction(nested: bool) -> None:
+        path = ast_cache_entry_path("k", "castxml")
+        path.write_text("<ast/>")
+        seen.append(path)
+        if nested:
+            extraction(False)  # shares the outer root
+            assert all(p.exists() for p in seen[-2:])
+
+    for _ in range(3):
+        before = len(seen)
+        extraction(True)
+        mine = seen[before:]
+        assert len({p.parents[1] for p in mine}) == 1
+        assert not mine[0].parents[1].exists()
+
+
+def test_reference_scratch_scope_is_inert_outside_reference_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from abicheck.storage import ast_cache_location as loc
+
+    monkeypatch.delenv(REFERENCE_MODE_ENV_VAR, raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert loc.reference_scratch_scoped(lambda: loc._SCOPE_ROOT.get())() is None
+
+
 def test_ast_memo_slot_and_acquisition_scope_bypass(ref: pytest.MonkeyPatch) -> None:
     from abicheck import dumper_cache
 
