@@ -40,6 +40,10 @@ class TestCompareReleaseErrorPaths:
         """When _compare_one_library raises an unexpected exception, the
         per-library entry should carry an ERROR verdict with the message."""
         from abicheck.cli_compare_release import _compare_one_library
+        from abicheck.cli_compare_release_pairwise import (
+            ReleaseMemberContext,
+            release_parent_request,
+        )
 
         old_path = tmp_path / "libfoo.so"
         new_path = tmp_path / "libfoo.so"
@@ -51,23 +55,18 @@ class TestCompareReleaseErrorPaths:
             side_effect=RuntimeError("boom"),
         ):
             entry = _compare_one_library(
-                key="libfoo.so",
-                old_map={"libfoo.so": old_path},
-                new_map={"libfoo.so": new_path},
-                old_debug_dir=None,
-                new_debug_dir=None,
-                resolve_debug_info=lambda *_a, **_kw: None,
-                old_h=[],
-                new_h=[],
-                old_inc=[],
-                new_inc=[],
-                old_version="1",
-                new_version="2",
-                lang="c++",
-                suppress=None,
-                policy="",
-                policy_file_path=None,
-                output_dir=None,
+                "libfoo.so",
+                ReleaseMemberContext(
+                    request=release_parent_request(
+                        old_version="1",
+                        new_version="2",
+                        policy="",
+                        include_dependencies=True,
+                    ),
+                    old_map={"libfoo.so": old_path},
+                    new_map={"libfoo.so": new_path},
+                    resolve_debug_info=lambda *_a, **_kw: None,
+                ),
             )
         assert entry["verdict"] == "ERROR"
         assert "boom" in str(entry["error"])
@@ -78,6 +77,10 @@ class TestCompareReleaseErrorPaths:
         import click
 
         from abicheck.cli_compare_release import _compare_one_library
+        from abicheck.cli_compare_release_pairwise import (
+            ReleaseMemberContext,
+            release_parent_request,
+        )
 
         old_path = tmp_path / "libfoo.so"
         new_path = tmp_path / "libfoo.so"
@@ -89,23 +92,18 @@ class TestCompareReleaseErrorPaths:
             side_effect=click.ClickException("nope"),
         ):
             entry = _compare_one_library(
-                key="libfoo.so",
-                old_map={"libfoo.so": old_path},
-                new_map={"libfoo.so": new_path},
-                old_debug_dir=None,
-                new_debug_dir=None,
-                resolve_debug_info=lambda *_a, **_kw: None,
-                old_h=[],
-                new_h=[],
-                old_inc=[],
-                new_inc=[],
-                old_version="1",
-                new_version="2",
-                lang="c++",
-                suppress=None,
-                policy="",
-                policy_file_path=None,
-                output_dir=None,
+                "libfoo.so",
+                ReleaseMemberContext(
+                    request=release_parent_request(
+                        old_version="1",
+                        new_version="2",
+                        policy="",
+                        include_dependencies=True,
+                    ),
+                    old_map={"libfoo.so": old_path},
+                    new_map={"libfoo.so": new_path},
+                    resolve_debug_info=lambda *_a, **_kw: None,
+                ),
             )
         assert entry["verdict"] == "ERROR"
         assert "nope" in str(entry["error"])
@@ -115,6 +113,10 @@ class TestCompareReleaseErrorPaths:
         fall into the same ERROR/exit-4 bucket a genuine crash uses -- it
         gets its own not_comparable verdict string with a reason field."""
         from abicheck.cli_compare_release import _compare_one_library
+        from abicheck.cli_compare_release_pairwise import (
+            ReleaseMemberContext,
+            release_parent_request,
+        )
         from abicheck.errors import ScopeMismatchError
 
         old_path = tmp_path / "libfoo.so"
@@ -127,23 +129,18 @@ class TestCompareReleaseErrorPaths:
             side_effect=ScopeMismatchError("scope drift"),
         ):
             entry = _compare_one_library(
-                key="libfoo.so",
-                old_map={"libfoo.so": old_path},
-                new_map={"libfoo.so": new_path},
-                old_debug_dir=None,
-                new_debug_dir=None,
-                resolve_debug_info=lambda *_a, **_kw: None,
-                old_h=[],
-                new_h=[],
-                old_inc=[],
-                new_inc=[],
-                old_version="1",
-                new_version="2",
-                lang="c++",
-                suppress=None,
-                policy="",
-                policy_file_path=None,
-                output_dir=None,
+                "libfoo.so",
+                ReleaseMemberContext(
+                    request=release_parent_request(
+                        old_version="1",
+                        new_version="2",
+                        policy="",
+                        include_dependencies=True,
+                    ),
+                    old_map={"libfoo.so": old_path},
+                    new_map={"libfoo.so": new_path},
+                    resolve_debug_info=lambda *_a, **_kw: None,
+                ),
             )
         assert entry["verdict"] == "not_comparable"
         assert entry["reason"] == "scope drift"
@@ -153,6 +150,10 @@ class TestCompareReleaseErrorPaths:
         self, tmp_path: Path
     ) -> None:
         from abicheck.cli_compare_release import _compare_one_library
+        from abicheck.cli_compare_release_pairwise import (
+            ReleaseMemberContext,
+            release_parent_request,
+        )
         from abicheck.errors import ProfileMismatchError
 
         old_path = tmp_path / "libfoo.so"
@@ -167,23 +168,19 @@ class TestCompareReleaseErrorPaths:
             side_effect=ProfileMismatchError("profile drift"),
         ):
             _compare_one_library(
-                key="libfoo.so",
-                old_map={"libfoo.so": old_path},
-                new_map={"libfoo.so": new_path},
-                old_debug_dir=None,
-                new_debug_dir=None,
-                resolve_debug_info=lambda *_a, **_kw: None,
-                old_h=[],
-                new_h=[],
-                old_inc=[],
-                new_inc=[],
-                old_version="1",
-                new_version="2",
-                lang="c++",
-                suppress=None,
-                policy="",
-                policy_file_path=None,
-                output_dir=output_dir,
+                "libfoo.so",
+                ReleaseMemberContext(
+                    request=release_parent_request(
+                        old_version="1",
+                        new_version="2",
+                        policy="",
+                        include_dependencies=True,
+                    ),
+                    old_map={"libfoo.so": old_path},
+                    new_map={"libfoo.so": new_path},
+                    resolve_debug_info=lambda *_a, **_kw: None,
+                    output_dir=output_dir,
+                ),
             )
         doc = json.loads((output_dir / "libfoo.json").read_text(encoding="utf-8"))
         assert doc["verdict"] is None

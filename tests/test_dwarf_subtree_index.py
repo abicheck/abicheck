@@ -238,8 +238,8 @@ def test_parse_dwarf_output_is_unchanged_by_the_index(
 ) -> None:
     """End to end: the metadata a dump reads is identical with the index off."""
     from abicheck import dwarf_unified
-    from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
     from abicheck.elf_metadata import parse_elf_metadata
+    from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
     binary = _build(tmp_path, compiler, ["-O2", "-gdwarf-5"])
     elf_meta = parse_elf_metadata(binary)

@@ -49,8 +49,8 @@ import pytest
 
 from abicheck import service
 from abicheck.cli import main
-from abicheck.dumper_scoping import wrap_run_dump_with_dependency_scope
 from abicheck.service import InputSpec
+from abicheck.workflows.run_dump_scope import wrap_run_dump_with_dependency_scope
 
 #: Options a caller can reach from more than one front end, as
 #: ``(click_dest, cli_command)``. The *typed* surfaces are not listed: they are

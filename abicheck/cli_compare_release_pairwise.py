@@ -39,7 +39,9 @@ should import from here directly.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -63,6 +65,12 @@ from .workflows.crosscheck_ownership import (
     release_owned_checks_scope,
 )
 from .workflows.keyed_thread_pool import run_keyed_in_threads
+from .workflows.release_member_request import (
+    MemberDelta,
+    ReleaseMemberCompareRequest,
+    member_request,
+    run_compare_kwargs,
+)
 from .workflows.release_snapshot_retention import release_junit_pairs
 
 if TYPE_CHECKING:
@@ -81,202 +89,83 @@ def _release_owned_crosschecks() -> frozenset[str]:
     return release_level_checks()
 
 
-_CompareReleaseCommonArgs = tuple[
-    dict[str, Path],
-    dict[str, Path],
-    Path | None,
-    Path | None,
-    Callable[[Path, Path], Path | None],
-    list[Path],
-    list[Path],
-    list[Path],
-    list[Path],
-    str,
-    str,
-    str,
-    Path | None,
-    str,
-    Path | None,
-    Path | None,
-    bool,
-    bool,
-    bool,
-    str | None,
-    bool,  # require_complete_analysis (ADR-071)
-    "SeverityConfig | None",
-    "PackApplication | None",
-    bool,  # collect_diff_results
-    "release_snapshot_retention.SnapshotRetention | None",
-    "CompileContext | None",
-    "str | None",
-    "str | None",
-    "list[Path] | None",
-    bool,
-    "dict[Any, Any] | None",
-    "EnvironmentMatrix | None",
-    "tuple[str, ...]",  # exclude_headers -- the run's --exclude-header rules
-    bool,  # lang_explicit -- whether `lang` was stated (evidence-entity-model B1)
-]
+@dataclass(frozen=True)
+class ReleaseMemberContext:
+    """Everything one member's comparison needs, resolved once per release.
 
-
-def _run_compare_pair(
-    old_input: Path,
-    new_input: Path,
-    old_headers: list[Path],
-    new_headers: list[Path],
-    old_includes: list[Path],
-    new_includes: list[Path],
-    old_version: str,
-    new_version: str,
-    lang: str,
-    suppress: Path | None,
-    policy: str,
-    policy_file_path: Path | None,
-    old_pdb_path: Path | None,
-    new_pdb_path: Path | None,
-    scope_to_public_surface: bool = True,
-    # ADR-068 D3 #7/D4: pattern-verdict modulation is unconditional on every
-    # `compare` path now, directory/package release fan-out included -- "one
-    # model, any cardinality" means a library compared here must get the
-    # identical treatment it would from a single-pair `compare` of the same
-    # library (no caller of this function ever passed a non-default value,
-    # so this was previously a silent capability gap between the two paths).
-    pattern_verdicts: bool = True,
-    include_dependencies: bool = True,
-    contract_evaluation: bool = False,
-    contract_mode: str | None = None,
-    pack_application: PackApplication | None = None,
-    compile_context: CompileContext | None = None,
-    depth: str | None = None,
-    public_header_dirs: list[Path] | None = None,
-    collapse_versioned_symbols: bool = False,
-    project_policy_overrides: dict[Any, Any] | None = None,
-    env_matrix: EnvironmentMatrix | None = None,
-    exclude_headers: tuple[str, ...] = (),
-    lang_explicit: bool = False,
-) -> CompareResult:
-    """Run compare for one old/new pair and return result + resolved snapshots.
-
-    Routes through the single Tier-2 chokepoint (:func:`service.run_compare`,
-    ADR-037 D1) rather than calling ``checker.compare`` directly — this is what
-    keeps ``compare-release`` and ``compare`` on one classification path so a
-    library gets the same verdict from either command (no ``scope_public``
-    default drift). ``include_dependencies`` (default ``True``) is the same
-    reasoning applied to dependency-scope: without threading it through here
-    too, a directory/package `compare` would silently stay unfiltered
-    regardless of `--include-system-declarations`, drifting from a single-pair
-    `compare` of the identical library (Codex review). ``contract_evaluation``/
-    ``contract_mode`` (CLI-audit P1, release/package contract parity) are the
-    same pass-through: ``service.run_compare`` already runs ADR-049's whole
-    contract-relevance pipeline internally when asked, so threading these two
-    flags here is what makes a library compared through the release fan-out
-    get the identical contract decision it would from comparing it alone.
-
-    *pack_application* (CLI cleanup phase two, "PR B" slice 1) is this run's
-    already-resolved ``--pack`` contribution (``resolve_release_pack_
-    application``, resolved once for the whole release, not per library) --
-    forwarded to ``service.run_compare`` as ``pack_policy_overrides``/
-    ``pack_internal_namespaces``, which ``service_compare_pipeline.
-    classify_compare_pair`` folds into *this pair's own* freshly-loaded
-    ``PolicyFile`` the same way a single-pair ``compare`` folds its packs
-    into its one ambient policy file.
-
-    *compile_context* is the release's already-resolved, both-sides L2
-    header-AST compile context (``--ast-frontend``/``--compiler``/
-    ``--compiler-prefix``/``--compiler-option``/``--sysroot``/``--nostdinc``/
-    ``--frontend-context``, resolved once for the whole release by
-    ``cli_compare_helpers.run_compare`` the same way a single-pair
-    ``compare`` resolves it -- see ``cli_options.resolve_compile_context``).
-    Forwarded to ``service.run_compare`` unchanged so each library's header
-    dump parses with the same cross-toolchain/frontend context a single-pair
-    ``compare`` of that library would use, closing the gap this function's
-    own historical docstring used to flag ("the per-library fan-out does not
-    thread the L2 compile context" -- see AGENTS.md's whole-product-bundle
-    known-gap entry). ``None`` (the default) is a true no-op, matching every
-    pre-existing caller.
-
-    *depth* is the run's ``--depth`` pin -- any rung of the public ladder,
-    forwarded unchanged to ``service.run_compare`` so this pair is resolved,
-    floor-checked (``enforce_requested_depth``) and depth-projected
-    (``project_pair_to_depth``) exactly as a single-pair ``compare --depth
-    X`` would be. It read ``"binary"``-only while a CLI allow-list rejected
-    the other three rungs; nothing here was ever ``binary``-specific. See
-    :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs`.
-
-    *public_header_dirs* (CodeRabbit review, PR #1138): a project's
-    ``.abicheck.yml`` ``scope.public_header_dirs``, resolved once for the
-    whole release the same way *pack_application*/*compile_context* are --
-    forwarded unchanged to ``service.run_compare``'s own identically-named
-    parameter, closing the gap where this fan-out never threaded the config
-    key a single-pair ``compare`` already honors.
-
-    *exclude_headers* is the run's ``--exclude-header`` rule set, resolved
-    once for the whole release like *compile_context* above and forwarded to
-    ``service.run_compare``'s identically-named parameter -- the canonical
-    rules, applied to both sides by the one existing implementation, no
-    second exclusion engine. See that parameter's own docstring for the gap
-    this closed (a directory operand silently discarded the flag, so an
-    unparseable-as-a-whole release tree failed every member under the exact
-    arguments that made the single-library comparison exit 0). ``()`` (the
-    default) is a true no-op.
-
-    *lang_explicit* (evidence-entity-model gap B1): whether *lang* was
-    stated (``compile.lang``) rather than defaulted. Forwarded so a member's
-    header parse forces a stated language exactly as a single-pair
-    ``compare`` and the release surface do; without it every member
-    auto-detected an ambiguous header while the release surface parsed it as
-    the stated language.
-
-    *env_matrix* (ADR-020b / ADR-068 D5): the project's declared deployment
-    constraints, resolved once for the whole release from ``.abicheck.yml``'s
-    ``deployment:`` config key (the former ``--env-matrix FILE``, which used
-    to be rejected outright for a directory/package compare) -- forwarded
-    unchanged to ``service.run_compare``'s own identically-named parameter so
-    every library in the fan-out gets the same declared-floor symbol-version
-    reclassification a single-pair ``compare`` of that library would.
+    *request* is the parent :class:`ReleaseMemberCompareRequest`; a member
+    gets it plus a :class:`MemberDelta` (its operands and debug files) via
+    :func:`member_request`, never a field-by-field rebuild. The remaining
+    fields are the front end's own per-member reporting inputs, which never
+    reach ``service.run_compare``.
     """
-    from . import service
 
-    # Follow GNU ld linker scripts up front so metadata/dependency analysis use
-    # the resolved DSO, not the text script.
-    old_input, _ = _normalize_binary_input(old_input)
-    new_input, _ = _normalize_binary_input(new_input)
+    request: ReleaseMemberCompareRequest
+    old_map: dict[str, Path]
+    new_map: dict[str, Path]
+    old_debug_dir: Path | None = None
+    new_debug_dir: Path | None = None
+    resolve_debug_info: Callable[[Path, Path], Path | None] | None = None
+    output_dir: Path | None = None
+    require_complete_analysis: bool = False
+    severity_config: SeverityConfig | None = None
+    pack_application: PackApplication | None = None
+    collect_diff_results: bool = False
+    retention: release_snapshot_retention.SnapshotRetention | None = None
+    show_only: str | None = None
 
-    result = service.run_compare(
-        old_input,
-        new_input,
-        old_headers=old_headers,
-        new_headers=new_headers,
-        old_includes=old_includes,
-        new_includes=new_includes,
-        old_version=old_version,
-        new_version=new_version,
-        lang=lang,
-        lang_explicit=lang_explicit,
-        suppress=suppress,
-        policy=policy,
-        contract_evaluation=contract_evaluation,
-        contract_mode=contract_mode,
-        policy_file_path=policy_file_path,
-        old_pdb_path=old_pdb_path,
-        new_pdb_path=new_pdb_path,
-        scope_to_public_surface=scope_to_public_surface,
-        pattern_verdicts=pattern_verdicts,
-        include_dependencies=include_dependencies,
+
+def release_parent_request(
+    pack_application: PackApplication | None = None, **fields: Any
+) -> ReleaseMemberCompareRequest:
+    """The release's parent request: *fields* plus *pack_application*'s
+    resolved policy overrides and internal namespaces."""
+    return ReleaseMemberCompareRequest(
         pack_policy_overrides=(
             dict(pack_application.policy_overrides) if pack_application else None
         ),
         pack_internal_namespaces=(
             pack_application.internal_namespaces if pack_application else None
         ),
-        compile_context=compile_context,
-        depth=depth,
-        public_header_dirs=public_header_dirs,
-        collapse_versioned_symbols=collapse_versioned_symbols,
-        project_policy_overrides=project_policy_overrides,
-        env_matrix=env_matrix,
-        exclude_headers=exclude_headers,
+        **fields,
     )
+
+
+def _run_compare_pair(
+    request: ReleaseMemberCompareRequest,
+    pack_application: PackApplication | None = None,
+) -> CompareResult:
+    """Run compare for one member's *request* and return its result.
+
+    Routes through the single Tier-2 chokepoint (:func:`service.run_compare`,
+    ADR-037 D1) rather than calling ``checker.compare`` directly, so a
+    library gets the same verdict from a directory/package ``compare`` as
+    from a single-pair one. *request* is the release's parent request with
+    this member's :class:`MemberDelta` applied
+    (:mod:`abicheck.workflows.release_member_request`); every one of its
+    fields is forwarded by :func:`run_compare_kwargs`, so no setting the
+    release resolved can be dropped here. That forwarding used to be a
+    hand-written keyword list, and each historical gap in it
+    (``include_dependencies``, the contract flags, ``--pack``, the compile
+    context, ``--depth``, ``scope.public_header_dirs``, ``--exclude-header``,
+    ``lang_explicit``, the deployment matrix) was a release member silently
+    disagreeing with the identical single-pair comparison.
+
+    *pack_application* is the release's resolved ``--pack`` contribution; its
+    overrides are already on *request*. It is passed separately only for the
+    rich-tier config record below.
+    """
+    from . import service
+
+    # Follow GNU ld linker scripts up front so metadata/dependency analysis use
+    # the resolved DSO, not the text script.
+    assert request.old_input is not None and request.new_input is not None
+    request = dataclasses.replace(
+        request,
+        old_input=_normalize_binary_input(request.old_input)[0],
+        new_input=_normalize_binary_input(request.new_input)[0],
+    )
+    result = service.run_compare(**run_compare_kwargs(request))
     # The rich-tier config is recorded under exactly the condition the
     # single-pair CLI (`resolve_and_apply`) and the typed API
     # (`install_resolved_gate_receipt`) record one: a contract evaluation, or
@@ -287,7 +176,7 @@ def _run_compare_pair(
     # (F2 route parity). A `.abicheck.yml` override still reaches the
     # baseline tier's `policy.overrides`, read off the scoring policy file.
     resolved_config = getattr(pack_application, "resolved_config", None)
-    if not contract_evaluation and (
+    if not request.contract_evaluation and (
         pack_application is None or pack_application.is_empty()
     ):
         resolved_config = None
@@ -297,40 +186,7 @@ def _run_compare_pair(
 
 def _compare_one_library(
     key: str,
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-    old_debug_dir: Path | None,
-    new_debug_dir: Path | None,
-    resolve_debug_info: Callable[[Path, Path], Path | None],
-    old_h: list[Path],
-    new_h: list[Path],
-    old_inc: list[Path],
-    new_inc: list[Path],
-    old_version: str,
-    new_version: str,
-    lang: str,
-    suppress: Path | None,
-    policy: str,
-    policy_file_path: Path | None,
-    output_dir: Path | None,
-    scope_to_public_surface: bool = True,
-    include_dependencies: bool = True,
-    contract_evaluation: bool = False,
-    contract_mode: str | None = None,
-    require_complete_analysis: bool = False,
-    severity_config: SeverityConfig | None = None,
-    pack_application: PackApplication | None = None,
-    collect_diff_results: bool = False,
-    retention: release_snapshot_retention.SnapshotRetention | None = None,
-    compile_context: CompileContext | None = None,
-    depth: str | None = None,
-    show_only: str | None = None,
-    public_header_dirs: list[Path] | None = None,
-    collapse_versioned_symbols: bool = False,
-    project_policy_overrides: dict[Any, Any] | None = None,
-    env_matrix: EnvironmentMatrix | None = None,
-    exclude_headers: tuple[str, ...] = (),
-    lang_explicit: bool = False,
+    ctx: ReleaseMemberContext,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -366,39 +222,37 @@ def _compare_one_library(
     the same deterministic-ordering guarantee it already gives the rest
     of the release report.
     """
-    old_path = old_map[key]
-    new_path = new_map[key]
+    request = ctx.request
+    old_version, new_version = request.old_version, request.new_version
+    scope_to_public_surface = request.scope_to_public_surface
+    contract_evaluation = request.contract_evaluation
+    output_dir, severity_config = ctx.output_dir, ctx.severity_config
+    require_complete_analysis = ctx.require_complete_analysis
+    old_path = ctx.old_map[key]
+    new_path = ctx.new_map[key]
     try:
-        old_dbg = resolve_debug_info(old_path, old_debug_dir) if old_debug_dir else None
-        new_dbg = resolve_debug_info(new_path, new_debug_dir) if new_debug_dir else None
+        resolve_debug_info = ctx.resolve_debug_info
+        old_dbg = (
+            resolve_debug_info(old_path, ctx.old_debug_dir)
+            if resolve_debug_info and ctx.old_debug_dir
+            else None
+        )
+        new_dbg = (
+            resolve_debug_info(new_path, ctx.new_debug_dir)
+            if resolve_debug_info and ctx.new_debug_dir
+            else None
+        )
         compare_result = _run_compare_pair(
-            old_path,
-            new_path,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_version,
-            new_version,
-            lang,
-            suppress,
-            policy,
-            policy_file_path,
-            old_pdb_path=old_dbg,
-            new_pdb_path=new_dbg,
-            scope_to_public_surface=scope_to_public_surface,
-            include_dependencies=include_dependencies,
-            contract_evaluation=contract_evaluation,
-            contract_mode=contract_mode,
-            pack_application=pack_application,
-            compile_context=compile_context,
-            depth=depth,
-            public_header_dirs=public_header_dirs,
-            collapse_versioned_symbols=collapse_versioned_symbols,
-            project_policy_overrides=project_policy_overrides,
-            env_matrix=env_matrix,
-            exclude_headers=exclude_headers,
-            lang_explicit=lang_explicit,
+            member_request(
+                request,
+                MemberDelta(
+                    old_input=old_path,
+                    new_input=new_path,
+                    old_pdb_path=old_dbg,
+                    new_pdb_path=new_dbg,
+                ),
+            ),
+            ctx.pack_application,
         )
         result = compare_result.diff
         # Plan slice 7o: unconditional, like every other disposition ledger
@@ -488,7 +342,7 @@ def _compare_one_library(
             )
             if section.strip():
                 entry["_suppression_audit_text"] = f"\n### {old_path.name}{section}"
-        if collect_diff_results:
+        if ctx.collect_diff_results:
             # See this function's own docstring (CodeRabbit review #798;
             # full- vs. compact-evidence split, G38 Phase 9).
             release_snapshot_retention.stash_member_evidence(
@@ -496,7 +350,7 @@ def _compare_one_library(
                 key,
                 compare_result.old_snapshot,
                 compare_result.new_snapshot,
-                retention,
+                ctx.retention,
             )
         # ADR-064's evidence-contract axis (exit 7), per member. `compare`'s
         # depth-shortfall contract is this axis -- recorded by
@@ -824,41 +678,44 @@ def _compare_release_libraries(
     diff_pairs: list[tuple[DiffResult, SymbolInventory]] = []
     worst_verdict = "NO_CHANGE"
 
-    common_args = (
-        old_map,
-        new_map,
-        old_debug_dir,
-        new_debug_dir,
-        resolve_debug_info,
-        old_h,
-        new_h,
-        old_inc,
-        new_inc,
-        old_version,
-        new_version,
-        lang,
-        suppress,
-        policy,
-        policy_file_path,
-        output_dir,
-        scope_to_public_surface,
-        include_dependencies,
-        contract_evaluation,
-        contract_mode,
-        require_complete_analysis,
-        severity_config,
-        pack_application,
-        collect_diff_results,
-        retention,
-        compile_context,
-        depth,
-        show_only,
-        public_header_dirs,
-        collapse_versioned_symbols,
-        project_policy_overrides,
-        env_matrix,
-        exclude_headers,
-        lang_explicit,
+    ctx = ReleaseMemberContext(
+        request=release_parent_request(
+            pack_application,
+            old_headers=old_h,
+            new_headers=new_h,
+            old_includes=old_inc,
+            new_includes=new_inc,
+            old_version=old_version,
+            new_version=new_version,
+            lang=lang,
+            lang_explicit=lang_explicit,
+            suppress=suppress,
+            policy=policy,
+            policy_file_path=policy_file_path,
+            scope_to_public_surface=scope_to_public_surface,
+            include_dependencies=include_dependencies,
+            contract_evaluation=contract_evaluation,
+            contract_mode=contract_mode,
+            compile_context=compile_context,
+            depth=depth,
+            public_header_dirs=public_header_dirs,
+            collapse_versioned_symbols=collapse_versioned_symbols,
+            project_policy_overrides=project_policy_overrides,
+            env_matrix=env_matrix,
+            exclude_headers=exclude_headers,
+        ),
+        old_map=old_map,
+        new_map=new_map,
+        old_debug_dir=old_debug_dir,
+        new_debug_dir=new_debug_dir,
+        resolve_debug_info=resolve_debug_info,
+        output_dir=output_dir,
+        require_complete_analysis=require_complete_analysis,
+        severity_config=severity_config,
+        pack_application=pack_application,
+        collect_diff_results=collect_diff_results,
+        retention=retention,
+        show_only=show_only,
     )
 
     # `workflows.crosscheck_ownership`: the whole-product cross-source check
@@ -873,12 +730,12 @@ def _compare_release_libraries(
         if plan.pool_size > 1 and len(matched_keys) > 1:
             library_results.extend(
                 _compare_release_parallel(
-                    matched_keys, common_args, old_map, plan.pool_size, plan.admission
+                    matched_keys, ctx, old_map, plan.pool_size, plan.admission
                 ),
             )
         else:
             library_results.extend(
-                _compare_release_sequential(matched_keys, common_args),
+                _compare_release_sequential(matched_keys, ctx),
             )
     cache_counters.record_shared_cache_counters()
 
@@ -966,7 +823,7 @@ def _compare_release_libraries(
 
 def _compare_release_parallel(
     matched_keys: list[str],
-    common_args: _CompareReleaseCommonArgs,
+    ctx: ReleaseMemberContext,
     old_map: dict[str, Path],
     max_workers: int,
     admission: MemoryAdmission | None = None,
@@ -976,7 +833,7 @@ def _compare_release_parallel(
     caller's context and memory admission reach every worker thread."""
     return run_keyed_in_threads(
         matched_keys,
-        lambda key: _compare_one_library(key, *common_args),
+        lambda key: _compare_one_library(key, ctx),
         max_workers=max_workers,
         admission=admission,
         on_error=lambda exc, key: member_dispatch_failure_entry(exc, old_map[key].name),
@@ -985,10 +842,10 @@ def _compare_release_parallel(
 
 def _compare_release_sequential(
     matched_keys: list[str],
-    common_args: _CompareReleaseCommonArgs,
+    ctx: ReleaseMemberContext,
 ) -> list[dict[str, object]]:
     """Run per-library release comparisons sequentially."""
     return [
-        _compare_one_library(key, *common_args)
+        _compare_one_library(key, ctx)
         for key in memory_trace.phase_each("release.member", matched_keys)
     ]

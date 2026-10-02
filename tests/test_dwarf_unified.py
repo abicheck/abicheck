@@ -331,9 +331,9 @@ class TestDwarfSession:
         """build_snapshot_from_dwarf(session=…) must serialize identically to the
         legacy re-open path — the core correctness bar for the single-pass merge."""
         _require_tool("g++")
-        from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
         from abicheck.elf_metadata import parse_elf_metadata
         from abicheck.serialization import snapshot_to_json
+        from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
         so = _compile_so(tmp_path, "libsesssnap", _SESSION_SRC, lang="cpp")
         elf_meta = parse_elf_metadata(so)
@@ -363,9 +363,9 @@ class TestDwarfSession:
         """The built snapshot holds extracted model objects, not live DIEs, so it
         stays fully serializable after the session file handle is closed."""
         _require_tool("g++")
-        from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
         from abicheck.elf_metadata import parse_elf_metadata
         from abicheck.serialization import snapshot_to_json
+        from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
         so = _compile_so(tmp_path, "libsessclose", _SESSION_SRC, lang="cpp")
         elf_meta = parse_elf_metadata(so)
@@ -466,8 +466,8 @@ class TestDwarfSession:
         """When a session is supplied, the snapshot build must NOT open the ELF
         again — the whole point of the single-pass merge."""
         _require_tool("g++")
-        from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
         from abicheck.elf_metadata import parse_elf_metadata
+        from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
         so = _compile_so(tmp_path, "libsessreopen", _SESSION_SRC, lang="cpp")
         elf_meta = parse_elf_metadata(so)

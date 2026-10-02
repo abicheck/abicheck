@@ -69,6 +69,7 @@ EXPECTED_PIPELINE_RUN_POSITIONAL = (
     "internal_namespaces",
     "disposition_ledger",
     "experimental_namespaces",
+    "absent_baseline",
 )
 
 #: Positional fields of ``PolicyFile``, in order. Same rule; a new field

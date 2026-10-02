@@ -80,13 +80,13 @@ from .frontends.cli.release_variant_operand import (  # noqa: F401
     _resolve_release_package_side,
 )
 from .frontends.cli.runtime import _safe_write_output, _write_or_echo  # noqa: F401
-from .model import AbiSnapshot
 from .model.symbol_inventory import SymbolInventory
 from .report.comparison_scope import ComparisonScopeTerms
 from .report.release_assurance import ReleaseAssuranceTerms
 from .report.release_public_surface import ReleasePublicSurfaceTerms
 from .workflows.extraction import package_component_inventory  # noqa: F401
 from .workflows.gate import incomplete_scope_diagnostic
+from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from .model.package_inventory import PackageInventory  # noqa: F401
@@ -185,8 +185,8 @@ def _collect_matrix_result(
     # ride in as extra_changes and inherit the full post-processing pipeline.
     name = "<build-config matrix>"
     result = compare_snapshots(
-        AbiSnapshot(library=name, version=old_version or "old"),
-        AbiSnapshot(library=name, version=new_version or "new"),
+        new_snapshot(library=name, version=old_version or "old"),
+        new_snapshot(library=name, version=new_version or "new"),
         suppression=suppression,
         policy=policy,
         policy_file=pf,

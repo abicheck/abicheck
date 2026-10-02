@@ -97,12 +97,10 @@ class TestCompareReleaseLibrariesMemoryClamp:
         captured_jobs: list[int] = []
         captured_admission: list[object] = []
 
-        def _fake_sequential(matched_keys, common_args):
+        def _fake_sequential(matched_keys, ctx):
             return []
 
-        def _fake_parallel(
-            matched_keys, common_args, old_map, max_workers, admission=None
-        ):
+        def _fake_parallel(matched_keys, ctx, old_map, max_workers, admission=None):
             captured_jobs.append(max_workers)
             captured_admission.append(admission)
             return []
@@ -134,9 +132,7 @@ class TestCompareReleaseLibrariesMemoryClamp:
         captured_jobs: list[int] = []
         captured_admission: list[object] = []
 
-        def _fake_parallel(
-            matched_keys, common_args, old_map, max_workers, admission=None
-        ):
+        def _fake_parallel(matched_keys, ctx, old_map, max_workers, admission=None):
             captured_jobs.append(max_workers)
             captured_admission.append(admission)
             return []

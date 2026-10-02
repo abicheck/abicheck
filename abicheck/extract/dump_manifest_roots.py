@@ -41,7 +41,7 @@ def dump_manifest_header_roots(dump_manifest: Any) -> tuple[Path, ...]:
     sit under a system prefix, the same reasoning ``roots`` itself already
     gets. Shared by both ``dump`` (``cli_dump_helpers.py``) and
     ``compare``'s implicit live-binary dumping (via
-    ``dumper_scoping.apply_dependency_scope_to_run_dump_result``) so a manifest's roots are
+    ``workflows.run_dump_scope.apply_dependency_scope_to_run_dump_result``) so a manifest's roots are
     never dropped just because the dumping path used ``--dump-manifest``
     instead of ``-H`` (Codex review).
     """
