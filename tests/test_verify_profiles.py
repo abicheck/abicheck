@@ -381,27 +381,75 @@ def test_pre_commit_runs_ai_readiness() -> None:
 
 
 def test_ci_ai_readiness_job_calls_verify_py() -> None:
-    ci = _read(".github/workflows/ci.yml")
-    assert "scripts/verify.py --profile pr --only ai-readiness" in ci
-    assert (
-        "fp-rate" in ci
-        and "tier-accuracy" in ci
-        and "usecase-docs-sync" in ci
-        and "docs-contract" in ci
+    """Every structural gate this job owns is wired into *this job*.
+
+    Read from the job's own steps rather than one literal command line, so
+    regrouping the invocations (they were six, then one) cannot drop a gate
+    while a substring elsewhere in the file keeps the assertion green."""
+    pytest.importorskip("yaml")
+    workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
+    run = " ".join(
+        str(step.get("run", "")) for step in workflow["jobs"]["ai-readiness"]["steps"]
     )
-    assert (
-        "scripts/verify.py --profile pr --only fp-rate,tier-accuracy,"
-        "usecase-docs-sync,docs-contract,learning-ladder,agent-skills-generated,"
-        "repo-facts" in ci
-    )
+    wired = {
+        name
+        for lst in re.findall(r"verify\.py --profile pr --only ([\w,-]+)", run)
+        for name in lst.split(",")
+    }
+    expected = {
+        "ai-readiness",
+        "architecture",
+        "fp-rate",
+        "tier-accuracy",
+        "usecase-docs-sync",
+        "docs-contract",
+        "learning-ladder",
+        "agent-skills-generated",
+        "repo-facts",
+        "action-cli-surface",
+        "skill-eval-pack",
+        "skill-eval-freshness",
+        "harbor-tasks",
+        "repo-scan-tests",
+    }
+    assert expected <= wired, sorted(expected - wired)
+    # `--only ai-readiness` alone is also what pre-commit and `pixi run
+    # ai-readiness` spell; the CI job must reach the same step name.
+    assert "--profile full --only harbor-schema" in run
 
 
 def test_ci_lint_and_types_job_calls_verify_py() -> None:
     ci = _read(".github/workflows/ci.yml")
     assert (
-        "scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build"
+        "scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build,examples-docs"
         in ci
     )
+
+
+def test_examples_docs_step_runs_with_abicheck_unimportable(tmp_path: Path) -> None:
+    """`examples-docs` is the only PR-time guard that `gen_examples_docs.py`
+    stays runnable without `abicheck` installed (pages.yml regenerates the
+    site with only the `[docs]` requirements, and PR #1279 broke exactly
+    that while every dev-venv gate passed). The guard is the wrapper, so
+    prove it bites: a script that imports `abicheck` must fail under it and
+    a script that does not must still run, with argv passed through."""
+    cmd = _step("examples-docs").cmd
+    assert "scripts/gen_examples_docs.py" in cmd and "--check" in cmd
+    wrap = verify._pyscript_without_abicheck
+
+    importing = tmp_path / "imports_abicheck.py"
+    importing.write_text("import abicheck.model\n", encoding="utf-8")
+    proc = subprocess.run(wrap(str(importing)), capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "ModuleNotFoundError" in proc.stderr
+
+    plain = tmp_path / "plain.py"
+    plain.write_text(
+        "import sys\nprint(sys.argv[1:])\nraise SystemExit(3)\n", encoding="utf-8"
+    )
+    proc = subprocess.run(wrap(str(plain), "--check"), capture_output=True, text=True)
+    assert proc.returncode == 3
+    assert proc.stdout.strip() == "['--check']"
 
 
 def test_ci_actually_runs_every_shared_gate_step() -> None:

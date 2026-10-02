@@ -59,6 +59,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _qualname_at,
     _QualnameSpans,
     _resolve_effective_fact_names,
+    walk_tree,
 )
 
 FACT_FIELD_NAMES: frozenset[str] = frozenset(
@@ -105,7 +106,7 @@ def _imported_fact_aliases(tree: ast.Module) -> frozenset[str]:
     pure-AST heuristic, not a specific miss worth chasing indefinitely.
     """
     names = {"Fact"}
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 if alias.name == "Fact" and alias.asname:
@@ -816,7 +817,7 @@ class _AliasCollector:
     # -- collection -------------------------------------------------------
 
     def collect(self, tree: ast.Module) -> None:
-        for node in ast.walk(tree):
+        for node in walk_tree(tree):
             self._collect_binding_node(node)
             self._collect_scope_header(node)
         # A `global`/`nonlocal`-declared name is never a real local rebinding

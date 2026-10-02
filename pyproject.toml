@@ -278,7 +278,7 @@ markers = [
     "msvc: requires MSVC cl.exe (Windows) — MSVC+PDB end-to-end lane",
     "slow: marks tests as slow (hypothesis / performance benchmarks)",
     "golden: golden-output snapshot tests",
-    "repo_scan: statically scans the whole repository tree; OS- and coverage-independent, run once by the repo-scan-tests CI job",
+    "repo_scan: statically scans the whole repository tree; OS- and coverage-independent, run once by the ai-readiness CI job (verify.py --only repo-scan-tests)",
     "host_memory_probe: opts out of tests/conftest.py's autouse pin of process_resources.available_mem_gib (tests of the real probe)",
 ]
 # Global per-test hang safety valve (pytest-timeout), not a perf regression

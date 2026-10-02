@@ -243,7 +243,7 @@ isn't available in your environment (add `,docs,dist` for full parity).
 | `msvc` | MSVC `cl.exe` (Windows) | Only for the MSVC+PDB end-to-end lane |
 | `slow` | varies | Hypothesis/perf benchmarks, skip in normal dev |
 | `golden` | golden files | Snapshot tests, skip unless changing output format |
-| `repo_scan` | Python only | Whole-tree structural scans (AST/text gates over the committed repo). OS- and coverage-independent, so CI runs them once in `repo-scan-tests` (`verify.py --only repo-scan-tests`) and every unit leg excludes them. Mark a new test this way only if it reads the whole tree and its result cannot depend on the platform |
+| `repo_scan` | Python only | Whole-tree structural scans (AST/text gates over the committed repo). OS- and coverage-independent, so CI runs them once in the `ai-readiness` job (`verify.py --only repo-scan-tests`) and every unit leg excludes them. Mark a new test this way only if it reads the whole tree and its result cannot depend on the platform |
 
 **Default fast command excludes all external-tool markers.** Use it.
 

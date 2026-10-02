@@ -42,6 +42,29 @@ from __future__ import annotations
 
 import ast
 
+_WALK_SLOT = "_abicheck_walk_tree"
+
+
+def walk_tree(tree: ast.AST) -> tuple[ast.AST, ...]:
+    """`tuple(ast.walk(tree))`, computed once per tree and cached on it.
+
+    The scan's whole-tree helpers each iterated `ast.walk(tree)` themselves
+    -- eleven full walks per file, ~14M `iter_child_nodes` visits over the
+    `abicheck/` tree and the bulk of the scan's runtime. They now share this
+    one materialized walk: identical nodes in identical (breadth-first)
+    order, so every consumer's output is unchanged. Safe to share because no
+    consumer rewrites the tree, and a tuple cannot be mutated by a caller.
+    Cached in the node's own ``__dict__`` (not a module-level ``id()``-keyed
+    dict) so it is collected with the tree and can never be served stale
+    for a new object at a reused address -- the same rule
+    `fact_detector_misuse_scope._memoize_per_tree` follows.
+    """
+    cached: tuple[ast.AST, ...] | None = tree.__dict__.get(_WALK_SLOT)
+    if cached is None:
+        cached = tuple(ast.walk(tree))
+        tree.__dict__[_WALK_SLOT] = cached
+    return cached
+
 
 def _enclosing_qualnames(tree: ast.Module) -> dict[int, str]:
     """Map every line number in *tree* to its innermost enclosing
@@ -128,7 +151,7 @@ def _parent_map(tree: ast.Module) -> dict[int, ast.AST]:
     :func:`_outermost_containing_expr`.
     """
     parents: dict[int, ast.AST] = {}
-    for parent in ast.walk(tree):
+    for parent in walk_tree(tree):
         for child in ast.iter_child_nodes(parent):
             parents[id(child)] = parent
     return parents
@@ -706,7 +729,7 @@ def _operator_attrgetter_aliases(
             elif value.attr == "itemgetter":
                 qualified_itemgetter_candidates.append((target, value.value.id))
 
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "operator":
             for alias in node.names:
                 if alias.name == "attrgetter":
@@ -967,7 +990,7 @@ def _itemgetter_alias_keys(
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
             ]
 
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         # Every plain-name binding form this module's other alias
         # collectors already treat uniformly (`_mapping_receiver_
         # aliases()`'s own identical three-branch walk), not just

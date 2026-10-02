@@ -28,8 +28,14 @@ permissions:
 
 jobs:
   ai-readiness:
+    # Also runs the `repo_scan` test lane (formerly its own `repo-scan-tests`
+    # job). Both need the identical setup -- Python 3.13, `pip install -e
+    # ".[dev]"`, a checkout -- and neither is near the critical path (the
+    # unit-test shards and integration-tests run 10-16 min; this job ~7), so
+    # a second runner bought no feedback time and cost one more slot in a
+    # queue that measured 12-77 min per job (2026-10-02).
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
@@ -65,7 +71,12 @@ jobs:
       # both steps. `[dev]` (not the bare package) is also what repo-facts'
       # fast_test_cases_collected needs, since it runs pytest --collect-only
       # (see scripts/gen_repo_facts.py).
-      - name: Install package (mypy drift gate + FP-rate / tier-accuracy / doc-sync / repo-facts gates)
+      - name: Keep this job's temporary files off the shared /tmp
+        # Needed by the repo-scan tests below (same reason as `unit-tests`'
+        # identical step: something prunes `/tmp` on these runners mid-job).
+        shell: bash
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Install package (mypy drift gate + FP-rate / tier-accuracy / doc-sync / repo-facts gates + repo-scan tests)
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
@@ -79,8 +90,6 @@ jobs:
       # `_skill_tree_digest` docstring), so it must actually exist here.
       - name: Materialize generated agent-skill trees (ADR-058, not committed)
         run: python scripts/gen_agent_skills.py
-      - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
-        run: python scripts/verify.py --profile pr --only ai-readiness
       # A `pull_request` run scopes the debt-no-growth check to the PR's own
       # base sha. A `push`-to-`main`/`workflow_dispatch` run has no PR base
       # at all -- `github.event.pull_request.base.sha` is simply empty there
@@ -115,27 +124,31 @@ jobs:
             base=""
           fi
           echo "ARCHITECTURE_BASE=${base}" >> "$GITHUB_ENV"
-      - name: Architecture contract (ADR-061)
-        run: python scripts/verify.py --profile pr --only architecture
-      # Scoping FP-rate gate (ADR-024 §7), per-tier accuracy gate, the use-case
-      # docs sync gate, the docs/AGENTS.md ownership contract gate, the
-      # generated agent-skill trees' drift gate (ADR-058), and
-      # repo_facts.json freshness — routed through scripts/verify.py, the
-      # same implementation `pixi run check` and `python scripts/verify.py
-      # --profile pr` run locally (CLAUDE.md "M0-3"), so this job can't
-      # silently diverge from the local PR-profile definition of done.
-      - name: Scoping / tier-accuracy / doc-sync / docs-contract / agent-skills / repo-facts / action-cli-surface gates
-        run: python scripts/verify.py --profile pr --only fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,learning-ladder,agent-skills-generated,repo-facts,action-cli-surface
-      # G37 Phase 0. Deliberately in this job and not a new one: both steps are
-      # deterministic re-derivations over content this job already has on
-      # disk (committed repo content, plus the freshly-generated agent-skill
-      # trees materialized above), no model is involved (G37 D2), so they
-      # belong beside the other structural gates rather than in a lane of
-      # their own.
-      - name: Skill-eval pack + evidence freshness gates (G37 D6)
-        run: python scripts/verify.py --profile pr --only skill-eval-pack,skill-eval-freshness
-      - name: Harbor task battery freshness (ADR-058 Harbor migration)
-        run: python scripts/verify.py --profile pr --only harbor-tasks
+      # Every structural gate in one verify.py invocation. They used to be
+      # six separate workflow steps, and since a workflow step stops the job
+      # on failure, a red `ai-readiness` hid whether the five gates after it
+      # passed. verify.py runs every selected step even when one fails and
+      # prints a `=== <step>: passed|failed (Ns) ===` line per gate, so the log
+      # still attributes time and failure per gate. The one gate that needs
+      # the base revision resolved above (`architecture`) reads it from the
+      # environment, so ordering is unaffected. Routed through
+      # scripts/verify.py, the same implementation `pixi run check` and
+      # `python scripts/verify.py --profile pr` run locally (CLAUDE.md
+      # "M0-3"), so this job can't silently diverge from the local PR-profile
+      # definition of done. Skill-eval pack/freshness are G37 Phase 0
+      # (deterministic re-derivations, no model -- G37 D2); harbor-tasks is
+      # the ADR-058 Harbor battery's freshness half.
+      - name: Structural gates (ai-readiness, architecture, FP-rate, tier-accuracy, docs contract, agent skills, repo facts, skill-eval, harbor tasks)
+        run: python scripts/verify.py --profile pr --only ai-readiness,architecture,fp-rate,tier-accuracy,usecase-docs-sync,docs-contract,learning-ladder,agent-skills-generated,repo-facts,action-cli-surface,skill-eval-pack,skill-eval-freshness,harbor-tasks
+      # Tests marked `repo_scan`: structural gates that read or parse the
+      # whole repository tree. Their result depends on the committed tree
+      # only -- not on the OS and not on coverage -- so they run exactly
+      # once, here, uninstrumented, instead of once per unit-test leg under
+      # coverage tracing. Run even when a structural gate above failed: they
+      # are independent, and a hidden second failure costs a CI round trip.
+      - name: Run repository-scan tests
+        if: success() || failure()
+        run: python scripts/verify.py --profile pr --only repo-scan-tests
       # The freshness check above only re-derives the tree structurally
       # (gen_harbor_tasks.py --check) -- it never asks whether a generated
       # task.toml/environment/tests/solution layout is actually valid per
@@ -147,6 +160,7 @@ jobs:
       # catalog like every other gate here (CLAUDE.md "M0-3"), just run
       # under `--profile full` since it's FULL-only there.
       - name: Harbor schema validation (real harbor package, skills-src/evaluation/agents/skills/harbor/CLAUDE.md)
+        if: success() || failure()
         run: |
           pip install harbor
           python scripts/verify.py --profile full --only harbor-schema
@@ -182,16 +196,23 @@ jobs:
         with:
           python-version: '3.14'
           cache: 'pip'
+      # One resolution of `[dev,docs]` -- the docs extra is pyproject.toml's
+      # single list of mkdocs requirements (it was hand-copied here, and the
+      # copies in docs-pr.yml/pages.yml had already drifted: they lacked
+      # pymdown-extensions). mypy is pinned in [dev]; no separate install.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"  # mypy is pinned in [dev]; no separate unpinned install
-      - name: Install docs dependencies
-        run: pip install mkdocs mkdocs-material pymdown-extensions mkdocs-redirects
+          pip install -e ".[dev,docs]"
       # lint / typecheck / docs-build routed through scripts/verify.py — see
-      # the ai-readiness job's comment above (CLAUDE.md "M0-3").
-      - name: Lint, format check, type check, docs build (strict)
-        run: python scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build
+      # the ai-readiness job's comment above (CLAUDE.md "M0-3"). This job is
+      # the one PR-time owner of the docs build: docs-pr.yml, which ran the
+      # same `mkdocs build --strict` again on docs PRs, was folded in here
+      # (`examples-docs` carries its generated-pages check; its
+      # `publish_schemas.py --check` already runs as `fair-metadata`'s
+      # `schema-sync`).
+      - name: Lint, format check, type check, docs build (strict), generated example docs
+        run: python scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build,examples-docs
 
   unit-tests:
     # The canonical Linux/3.13 coverage lane, split into three concurrent
@@ -552,33 +573,6 @@ jobs:
           name: test-results-${{ runner.os }}-py${{ matrix.python-version }}
           path: test-results-*.xml
           if-no-files-found: ignore
-
-  repo-scan-tests:
-    # Tests marked `repo_scan`: structural gates that read or parse the whole
-    # repository tree. Their result depends on the committed tree only -- not
-    # on the OS and not on coverage -- so they run exactly once, here,
-    # uninstrumented, instead of once per unit-test leg under coverage
-    # tracing. Routed through verify.py's `repo-scan-tests` step so the local
-    # `pr` profile runs the identical selection (CLAUDE.md "M0-3").
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
-        with:
-          python-version: '3.13'
-          cache: 'pip'
-      - name: Keep this job's temporary files off the shared /tmp
-        shell: bash
-        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-      - name: Run repository-scan tests
-        run: python scripts/verify.py --profile pr --only repo-scan-tests
 
   slow-tests:
     # Split out of `unit-tests`' canonical (ubuntu, 3.13) leg, where it ran as
