@@ -809,7 +809,9 @@ def test_the_real_mutmut_parser_test_runs_in_this_lane() -> None:
         "would never execute in CI"
     )
     assert "-m slow" in step["run"], "the real-run test carries the slow marker"
-    assert step.get("env", {}).get("ABICHECK_MIN_EXECUTED") == "1", (
+    # One real-mutmut test per file the step names, so neither can skip alone.
+    expected = str(step["run"].count("tests/test_mutation_"))
+    assert step.get("env", {}).get("ABICHECK_MIN_EXECUTED") == expected, (
         "without conftest.py's silent-skip guard, a skipif that starts "
         "matching turns this step green with zero tests run"
     )
