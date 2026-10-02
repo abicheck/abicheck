@@ -189,6 +189,15 @@ supervisor half is **new, introduced here**.
 - Exit: no other `start_new_session`/`killpg` implementation remains outside
   the supervisor.
 
+#### Phase 6 status (2026-10-02)
+
+| Item | Status |
+|---|---|
+| One bounded-run implementation | **Landed.** `abicheck.deadline.supervised_popen` owns spawn-in-group, SIGTERM-cleanup registration, and SIGTERM→SIGKILL teardown on any exception; `run_bounded` (now with `env`) is built on it. Migrated: `buildsource/adapters/{bazel,ninja}.py`, `buildsource/extractor_manifest.py`, `buildsource/source_extractors/{android,clang}.py` (probes), `buildsource/toolchain_probe.py`, and all four probes in `dumper_toolchain.py` (the capped `--version` reader was the last product-side `start_new_session`/`killpg` pair). `abicheck/extract/` had no direct child-process site. |
+| Exit: no other `start_new_session`/`killpg` | **Met, with one reviewed exception.** `tests/test_subprocess_supervisor.py` (`repo_scan`) scans `abicheck/`, `scripts/` and `action/`. `scripts/perf_receipt.py` stays allowlisted: it is stdlib-only and measures an installed abicheck that may be a base revision without the supervisor. The same file forbids any direct `subprocess` call in `abicheck/buildsource/`, `abicheck/extract/` and `dumper_toolchain.py`, and states the teardown contract over three exit paths (error, interrupt, timeout) with a SIGTERM-ignoring grandchild. |
+| Remaining direct sites outside Phase 6's scope | `package.py` (zstd/rpm2cpio streaming pipelines), `demangle.py`, `source_smoke.py`, `probe_harness.py`, `clang_layout_tool.py`, `workflows/changed_paths.py`, `frontends/cli/runtime.py`, `cc_wrapper.py` (an `exec`-style passthrough). None manages a process group; widening the gate to them is the next slice. |
+| Structured output only (#1415) | Not re-audited in this slice; `action/run.sh` already documents its retired stderr greps. |
+
 ## Order and dependencies
 
 Phase 0 first, alone. Then 1 and 2 in parallel (different owners, no shared

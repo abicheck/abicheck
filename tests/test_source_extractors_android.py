@@ -150,7 +150,7 @@ def test_run_dumper_success(tmp_path: Path, monkeypatch) -> None:  # type: ignor
         out.write_text(json.dumps(_dump()))
         return _Result()
 
-    monkeypatch.setattr(android_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(android_mod, "run_bounded", fake_run)
     tu = adapter.run_dumper(
         tmp_path / "foo.h", output=out, clang_argv=["-std=c++17"], target_id="t"
     )
@@ -168,7 +168,7 @@ def test_run_dumper_failure(tmp_path: Path, monkeypatch) -> None:  # type: ignor
         stderr = "dump error"
         stdout = ""
 
-    monkeypatch.setattr(android_mod.subprocess, "run", lambda cmd, **kw: _Result())
+    monkeypatch.setattr(android_mod, "run_bounded", lambda cmd, **kw: _Result())
     with pytest.raises(SourceExtractionError, match="failed"):
         adapter.run_dumper("foo.h", output=tmp_path / "o.sdump")
 
@@ -184,7 +184,7 @@ def test_run_dumper_timeout(tmp_path: Path, monkeypatch) -> None:  # type: ignor
     def fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
         raise sp.TimeoutExpired(cmd, 1)
 
-    monkeypatch.setattr(android_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(android_mod, "run_bounded", fake_run)
     with pytest.raises(SourceExtractionError, match="timed out"):
         adapter.run_dumper("foo.h", output=tmp_path / "o.sdump")
 

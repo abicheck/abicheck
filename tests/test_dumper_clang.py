@@ -272,7 +272,7 @@ def test_configured_target_triple_uses_frontend_option_order(
             "Result", (), {"returncode": 0, "stdout": "x86_64-pc-linux-gnu\n"}
         )()
 
-    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    monkeypatch.setattr(dumper_toolchain, "run_bounded", _run)
 
     assert (
         _configured_target_triple(

@@ -21,7 +21,6 @@ import json
 import logging
 import os
 import shutil
-import signal
 import stat as stat_module
 import subprocess
 import threading
@@ -31,6 +30,7 @@ from typing import Any, TypedDict
 
 from ._compiler_options import has_explicit_cpp_std, has_explicit_std, split_gcc_options
 from .buildsource.redaction import DEFAULT_REDACTION
+from .deadline import run_bounded, supervised_popen, terminate_process_tree
 from .dumper_ast_config import (
     _detect_cpp_headers,
     _exported_symbols_indicate_cpp,
@@ -108,44 +108,32 @@ def _tool_version_output(selected_path: str, digest: str) -> str:
         # Avoid preexec_fn: dumps can originate from a threaded service caller
         # paths, where Python documents it as unsafe. A parent-side reader caps
         # output and kills a noisy process without buffering an unbounded pipe.
-        process = subprocess.Popen(
+        with supervised_popen(
             [selected_path, "--version"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            start_new_session=os.name == "posix",
-        )
-        assert process.stdout is not None
-        stdout = process.stdout
+        ) as process:
+            assert process.stdout is not None
+            stdout = process.stdout
 
-        def _kill() -> None:
+            def _read_capped() -> None:
+                while chunk := stdout.read(8192):
+                    remaining = limit + 1 - len(raw)
+                    if remaining > 0:
+                        raw.extend(chunk[:remaining])
+                    if len(raw) > limit:
+                        terminate_process_tree(process)
+                        break
+
+            reader = threading.Thread(target=_read_capped, daemon=True)
+            reader.start()
             try:
-                if os.name == "posix":
-                    os.killpg(process.pid, signal.SIGKILL)
-                else:
-                    process.kill()
-            except OSError:
-                pass
-
-        def _read_capped() -> None:
-            while chunk := stdout.read(8192):
-                remaining = limit + 1 - len(raw)
-                if remaining > 0:
-                    raw.extend(chunk[:remaining])
-                if len(raw) > limit:
-                    _kill()
-                    break
-
-        reader = threading.Thread(target=_read_capped, daemon=True)
-        reader.start()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            _kill()
-            process.wait()
-            raise
-        finally:
-            reader.join(timeout=1)
-            stdout.close()
+                # A timeout leaves the ``with`` block by exception, which
+                # tears the child's whole group down.
+                process.wait(timeout=10)
+            finally:
+                reader.join(timeout=1)
+                stdout.close()
     except (OSError, subprocess.TimeoutExpired) as exc:
         return f"unavailable:{type(exc).__name__}:{exc}"
     truncated = len(raw) > limit
@@ -165,12 +153,11 @@ def _tool_target_triple(selected_path: str, digest: str) -> str | None:
     ``dumper._header_ast_parser``)."""
     del digest
     try:
-        result = subprocess.run(
+        result = run_bounded(
             [selected_path, "-dumpmachine"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             timeout=10,
-            check=False,
             text=True,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -597,13 +584,12 @@ def _probe_default_language_standard(compiler_bin: str, lang_mode: str) -> str |
     """
     macro_name = "__STDC_VERSION__" if lang_mode == "c" else "__cplusplus"
     try:
-        r = subprocess.run(
+        r = run_bounded(
             [compiler_bin, "-E", "-dM", "-x", lang_mode, "-"],
             input="",
             capture_output=True,
             text=True,
             timeout=5,
-            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -789,9 +775,7 @@ def _configured_target_triple(
         "-print-target-triple",
     ]
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=False, timeout=10
-        )
+        result = run_bounded(cmd, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired) as exc:
         log.warning("Could not probe effective Clang target: %s", exc)
         return None
