@@ -873,9 +873,15 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "while the table itself came back empty from a parse that "
             "collapses failure into an empty result."
         ),
-        fixed_by=(1384,),
+        fixed_by=(1384, 1449),
         seed_tests=(
             "tests/test_export_table_read_absence.py",
+            # PE/Mach-O export delta over an unread table (#1449)
+            "tests/test_platform_export_delta.py",
+            # the one evidence-merge rule and the producers routed through it
+            "tests/test_evidence_merge_properties.py",
+            "tests/test_dwarf_presence_facts.py",
+            "tests/test_dwarf_metadata_coverage.py",
             "tests/test_export_transition_old_side_read.py",
             "tests/test_header_parse_coverage.py",
             "tests/test_release_member_export_read.py",

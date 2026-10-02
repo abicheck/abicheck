@@ -1121,8 +1121,13 @@ class TestElfOnlyModePeMacho:
         from abicheck.checker_policy import ChangeKind
         from abicheck.macho_metadata import MachoExport, MachoMetadata
 
-        old_macho = MachoMetadata(exports=[MachoExport(name="_foo_func")])
-        new_macho = MachoMetadata(exports=[])
+        # Both blocks carry the header a real parse records: a block with no
+        # header fields and no exports is an *unread* table, which proves no
+        # export absent (model.export_index.platform_block_parsed).
+        old_macho = MachoMetadata(
+            cpu_type="ARM64", filetype="MH_DYLIB", exports=[MachoExport(name="_foo_func")]
+        )
+        new_macho = MachoMetadata(cpu_type="ARM64", filetype="MH_DYLIB", exports=[])
 
         old = AbiSnapshot(
             library="libfoo.dylib",
