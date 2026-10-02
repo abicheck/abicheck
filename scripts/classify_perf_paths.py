@@ -16,7 +16,7 @@
 """Classifies a PR's changed files for ``.github/workflows/performance.yml``.
 
 The Performance workflow's PR-triggered jobs (``scaling``, ``regression``,
-``header-graph-perf``, ``header-graph-regression``) only need to run when a PR
+``header-graph-regression``, ``l2-cli-perf``) only need to run when a PR
 actually touches performance-sensitive code -- previously this was a
 ``pull_request.paths:`` YAML filter on the whole workflow trigger. That has a
 real structural cost this module exists to remove: a *trigger-level* path
@@ -38,7 +38,7 @@ list moving to a real Python module means it can be unit-tested (see
 ``tests/test_classify_perf_paths.py``) instead of only exercised by whichever
 PR happens to touch a listed path.
 
-Deliberately ONE shared pattern list gating all four downstream jobs
+Deliberately ONE shared pattern list gating every downstream job
 uniformly, not a per-job shard split (despite this file's "choose shards"
 framing in earlier design discussion) -- ``check_header_graph_perf.py``
 imports ``abicheck.buildsource.header_graph`` (reached through

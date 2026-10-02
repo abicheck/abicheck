@@ -702,6 +702,57 @@ class TestTheHeaderGraphGateRequiresAllMetrics:
         assert "args.require_all_metrics and ungated" in source
 
 
+class TestThePrTrendPointComesFromTheRegressionJob:
+    """On a PR, head's header-graph trend point is the regression job's run.
+
+    `header-graph-perf` used to start a runner on every perf-sensitive PR to
+    measure the same head (`--sizes 25 100 400 --require-castxml`) that
+    `header-graph-regression` measures again with more repeats. It now runs
+    on schedule/dispatch only, which is safe only while the regression job
+    writes and uploads the same report on *both* of its branches (gated and
+    report-only) -- otherwise a PR would silently lose its trend artifact.
+    """
+
+    @staticmethod
+    def _jobs() -> dict:
+        pytest.importorskip("yaml")
+        root = _PATH.resolve().parent.parent
+        return _yaml_fast.safe_load(
+            (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
+        )["jobs"]
+
+    def test_trend_job_skips_pull_requests_only(self):
+        cond = self._jobs()["header-graph-perf"]["if"]
+        assert "github.event_name != 'pull_request'" in cond
+        assert "needs.classify.outputs.run == 'true'" in cond
+
+    def test_regression_job_measures_the_same_head_on_both_branches(self):
+        steps = self._jobs()["header-graph-regression"]["steps"]
+        head = next(s for s in steps if s.get("name") == "Measure head and compare to base")
+        invocations = [
+            chunk
+            for chunk in head["run"].split("./head_env/bin/python")[1:]
+            if "check_header_graph_perf.py" in chunk.split("\n", 1)[0]
+        ]
+        assert len(invocations) == 2, "gated and report-only branches"
+        trend = self._jobs()["header-graph-perf"]
+        trend_run = "\n".join(str(s.get("run", "")) for s in trend["steps"])
+        for inv in invocations:
+            assert "--sizes 25 100 400" in inv and "--sizes 25 100 400" in trend_run
+            assert "--require-castxml" in inv
+            assert "--json-out reports/perf/header_graph.json" in inv, inv
+
+    def test_regression_job_uploads_under_the_trend_artifact_name(self):
+        steps = self._jobs()["header-graph-regression"]["steps"]
+        uploads = [s for s in steps if "upload-artifact" in str(s.get("uses", ""))]
+        assert any(
+            s["with"]["name"] == "performance-header-graph"
+            and "reports/perf/header_graph.json" in s["with"]["path"]
+            and s.get("if") == "always()"
+            for s in uploads
+        ), uploads
+
+
 class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:
     """A re-export is not the thing that does the work.
 

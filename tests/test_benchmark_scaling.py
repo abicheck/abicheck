@@ -705,53 +705,104 @@ def _step_run_text(job: dict) -> str:
     return "\n".join(out)
 
 
-def test_memory_regression_job_exists_and_gates_on_a_baseline() -> None:
-    jobs = _performance_workflow()["jobs"]
-    assert "memory-regression" in jobs, (
-        "the memory gate has no CI job, so nothing runs it on a PR"
+def _run_text(steps: list[dict]) -> str:
+    return _step_run_text({"steps": steps})
+
+
+def _regression_steps(*, memory: bool) -> list[dict]:
+    """The `regression` job's benchmark-invoking steps, split by half.
+
+    Time and memory are measured by two separate runs inside the one
+    `regression` job (they share a runner and the two venvs, never a run).
+    A step belongs to the memory half iff it gates or records peak memory
+    against the base; everything else that runs the benchmark is the timing
+    half. Classified by what each step *runs*, not by its name.
+    """
+    job = _performance_workflow()["jobs"]["regression"]
+    out = []
+    for step in job.get("steps", []):
+        body = _run_text([step])
+        if "benchmark_scaling.py" not in body:
+            continue
+        is_memory = "base-memory.json" in body
+        if is_memory == memory:
+            out.append(step)
+    return out
+
+
+def test_memory_regression_gate_exists_and_gates_on_a_baseline() -> None:
+    steps = _regression_steps(memory=True)
+    assert steps, "the memory gate has no CI step, so nothing runs it on a PR"
+    runs = _run_text(steps)
+    assert "--baseline base-memory.json" in runs, (
+        "memory half never compares against a base measurement"
     )
-    runs = _step_run_text(jobs["memory-regression"])
-    assert "--baseline" in runs, "memory job never compares against a base measurement"
     assert "--regress-memory-tolerance" in runs
     assert "--regress-min-delta-mb" in runs
 
 
-def test_memory_regression_job_actually_measures_memory() -> None:
-    """--no-memory would make the whole job vacuous: every peak would be None,
-    the gate would compare nothing, and the job would pass unconditionally."""
-    runs = _step_run_text(_performance_workflow()["jobs"]["memory-regression"])
-    assert "--no-memory" not in runs
+def test_memory_regression_steps_actually_measure_memory() -> None:
+    """--no-memory would make the whole gate vacuous: every peak would be None,
+    the gate would compare nothing, and the step would pass unconditionally."""
+    assert "--no-memory" not in _run_text(_regression_steps(memory=True))
 
 
-def test_memory_regression_job_does_not_also_gate_timing() -> None:
+def test_memory_regression_steps_do_not_also_gate_timing() -> None:
     """Timings taken under tracemalloc are distorted by construction.
 
     Gating them here would fail PRs for an artifact of the instrument, so the
     timing tolerance is explicitly neutralised rather than left at its
     default.
     """
-    runs = _step_run_text(_performance_workflow()["jobs"]["memory-regression"])
-    assert "--regress-tolerance 100" in runs
+    assert "--regress-tolerance 100" in _run_text(_regression_steps(memory=True))
 
 
-def test_memory_regression_job_is_not_advisory() -> None:
-    """`continue-on-error` would make this report-only, not a gate."""
-    job = _performance_workflow()["jobs"]["memory-regression"]
+def test_regression_job_is_not_advisory() -> None:
+    """`continue-on-error` would make either half report-only, not a gate."""
+    job = _performance_workflow()["jobs"]["regression"]
     assert job.get("continue-on-error") in (None, False)
     for step in job.get("steps", []):
         assert step.get("continue-on-error") in (None, False)
 
 
-def test_timing_regression_job_still_excludes_memory() -> None:
-    """The two jobs must stay split.
+def test_timing_regression_still_excludes_memory() -> None:
+    """The two *runs* must stay split, even though they share a job.
 
-    If someone 'simplifies' by dropping --no-memory from the timing job, its
+    If someone 'simplifies' by dropping --no-memory from the timing run, its
     measurements silently acquire the lru_cache-clearing bias that flag exists
     to remove -- which would corrupt the timing gate rather than improve the
-    memory one.
+    memory one. Every timing-half invocation is checked, base and head.
     """
-    runs = _step_run_text(_performance_workflow()["jobs"]["regression"])
-    assert "--no-memory" in runs
+    steps = _regression_steps(memory=False)
+    assert len(steps) == 2, [s.get("name") for s in steps]
+    for step in steps:
+        assert "--no-memory" in _run_text([step]), step.get("name")
+
+
+def test_memory_half_runs_strictly_after_the_timing_half() -> None:
+    """Sharing a runner is safe only if tracing never overlaps a timed run.
+
+    Steps in one job run sequentially, so the guarantee is that every memory
+    step comes after every timing step. Also, the memory half must still run
+    when the timing gate failed (or a timing regression would hide the memory
+    verdict), which is what its `success() || failure()` condition states.
+    """
+    job = _performance_workflow()["jobs"]["regression"]
+    steps = job["steps"]
+    timing = [steps.index(s) for s in _regression_steps(memory=False)]
+    memory = [steps.index(s) for s in _regression_steps(memory=True)]
+    assert timing and memory
+    assert max(timing) < min(memory)
+    for i in memory:
+        cond = str(steps[i].get("if", ""))
+        assert "failure()" in cond and "success()" in cond, cond
+
+
+def test_memory_regression_job_was_folded_not_dropped() -> None:
+    """The standalone job is gone; its gate must live on in `regression`."""
+    jobs = _performance_workflow()["jobs"]
+    assert "memory-regression" not in jobs
+    assert _regression_steps(memory=True)
 
 
 # ── Non-finite baseline values, and a memory gate that compared nothing ──────
