@@ -728,7 +728,9 @@ class TestThePrTrendPointComesFromTheRegressionJob:
 
     def test_regression_job_measures_the_same_head_on_both_branches(self):
         steps = self._jobs()["header-graph-regression"]["steps"]
-        head = next(s for s in steps if s.get("name") == "Measure head and compare to base")
+        head = next(
+            s for s in steps if s.get("name") == "Measure head and compare to base"
+        )
         invocations = [
             chunk
             for chunk in head["run"].split("./head_env/bin/python")[1:]
