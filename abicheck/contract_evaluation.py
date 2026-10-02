@@ -38,16 +38,13 @@ that mode, never approximated from the header surface: silently answering an
 export-domain question with header-derived evidence would misrepresent the
 mode rather than implement it.
 
-Deliberately conservative: this evaluator **never emits**
-:data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNPROVEN`.
-That value means "the declared evidence domain was searched completely and
-found no commitment" (ADR-049's ``closed_domain_no_commitment`` reason) -- a
-closed-world completeness claim this module has no way to verify with today's
-evidence providers (there is no per-domain "did we search everything" signal,
-only ``PublicSurface.resolvable``/``has_provenance`` and
-``ExportSurface.resolvable``/``has_typed_roots``). Every case that would
-otherwise need ``UNKNOWN_UNPROVEN`` is downgraded to the weaker,
-honestly-hedged
+Deliberately conservative: this evaluator emits
+:data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNPROVEN`
+("the declared evidence domain was searched completely and found no
+commitment", ADR-049's ``closed_domain_no_commitment``) only where
+:mod:`abicheck.policy.contract_closed_domain` proves it: under ``public``, an
+export the complete header domain's raw text never spells. Every other such
+case is downgraded to the weaker, honestly-hedged
 :data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNRESOLVED`
 with reason ``required_evidence_incomplete`` instead.
 
@@ -76,6 +73,7 @@ from .model import ScopeOrigin
 from .model.change_catalog.kinds import ChangeKind
 from .model.type_identifiers import type_identifiers as _type_identifiers
 from .policy.classification import ADDITION_KINDS
+from .policy.contract_closed_domain import closed_domain_decision
 from .post_processing import _PUBLIC_SOURCE_ABI_KINDS, _change_matches_symbols
 from .surface import (
     _HIDDEN_FRIEND_KIND_NAMES,
@@ -1467,6 +1465,8 @@ def _surface_classification_decision(
     earlier authority has declined to settle the finding and both the
     authoritative surface and the finding's identity have resolved.
     """
+    if closed := closed_domain_decision(change, surf_old, surf_new):
+        return ContractEvaluationDecision(*closed)
     if unions is None:
         unions = surface_unions(surf_old, surf_new)
     in_surface, reason = classify_change_surface(

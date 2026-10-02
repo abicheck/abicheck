@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from ..checker import DiffResult
+    from ..model import AbiSnapshot
     from ..suppression import SuppressionList
 
 
@@ -166,6 +167,25 @@ ABICC_SOURCE_LEVEL_KINDS: frozenset[ChangeKind] = frozenset({ChangeKind.PARAM_RE
 _API_BREAK_KINDS: frozenset[ChangeKind] = (
     frozenset(_POLICY_API_BREAK_KINDS) | ABICC_SOURCE_LEVEL_KINDS
 )
+
+
+def compare_for_compat(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    suppression: SuppressionList | None = None,
+    policy: str = "strict_abi",
+) -> DiffResult:
+    """``checker.compare``, then :func:`apply_abicc_source_level_parity`.
+
+    ``compat.cli`` imports this as its ``compare``, so every comparison the
+    ABICC wrapper runs carries ABICC's source-level classification.
+    """
+    from ..checker import compare  # noqa: PLC0415
+
+    return apply_abicc_source_level_parity(
+        compare(old, new, suppression=suppression, policy=policy)
+    )
 
 
 def apply_abicc_source_level_parity(result: DiffResult) -> DiffResult:

@@ -2834,9 +2834,11 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # dump path, one in `_snapshot_from_compat_input`, and the single
         # `checker.compare` the multi-library comparison loop shares across
         # every paired library (kept a *single* call site deliberately --
-        # see that loop's own comment).
+        # see that loop's own comment). That compare now lives in
+        # `compat/_helpers.compare_for_compat`, which `compat/cli.py` imports
+        # as `compare`, so it carries the ABICC source-level parity step.
         "abicheck/compat/cli.py:374:19:dumper.dump",
-        "abicheck/compat/cli.py:1090:16:checker.compare",
+        "abicheck/compat/_helpers.py:187:8:checker.compare",
         "abicheck/compat/cli.py:1235:15:dumper.dump",
     }
 )
@@ -3164,7 +3166,10 @@ def _iter_cli_contract_sources() -> Iterable[Path]:
     server was removed; agent integrations route through these same
     front ends (CLI or the typed Python API) rather than a separate tier."""
     yield from PKG.glob("cli*.py")
-    for extra in ("appcompat.py", "compat/cli.py"):
+    # `compat/_helpers.py` holds the compat front end's `compare_for_compat`,
+    # the one `checker.compare` call the ABICC wrapper makes (moved out of
+    # `compat/cli.py` with its ABICC-parity step), so it stays in view here.
+    for extra in ("appcompat.py", "compat/cli.py", "compat/_helpers.py"):
         path = PKG / extra
         if path.is_file():
             yield path

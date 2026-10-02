@@ -23,6 +23,7 @@ Phase 5 section for the design this page's data comes from.
 | Fact | Value type | Producing backends | Lifecycle | Persisted | Identity | Comparable | Suppressible | Reportable |
 |------|------------|---------------------|-----------|:---------:|:--------:|:----------:|:------------:|:----------:|
 | `AbiSnapshot.ast_resolved_standard` | `str \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `AbiSnapshot.public_header_identifiers` | `frozenset[str] \| None` | castxml, clang | consumed | ✅ | — | — | — | — |
 | `ElfMetadata.dynamic_flags` | `frozenset[str] \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `ElfMetadata.has_fini` | `bool \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |
 | `ElfMetadata.has_init` | `bool \| None` | elf | persisted | ✅ | — | ✅ | — | ✅ |

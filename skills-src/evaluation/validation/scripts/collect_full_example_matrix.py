@@ -86,7 +86,9 @@ HEADER_GRAPH_PROOF_CASES = {
     "case189_public_function_private_parameter_type",
     "case191_header_only_graph_field_type",
 }
-PROOF_ARTIFACT_RUNNER = "skills-src/evaluation/validation/scripts/run_example_owner_proofs.py"
+PROOF_ARTIFACT_RUNNER = (
+    "skills-src/evaluation/validation/scripts/run_example_owner_proofs.py"
+)
 PROOF_ARTIFACT_SCHEMA = "example_owner_proofs.v1"
 
 SPECIAL_PROOFS = {

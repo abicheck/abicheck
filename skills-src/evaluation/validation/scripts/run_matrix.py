@@ -150,7 +150,9 @@ def make_record(
         "expected": manifest_row["expectation"],
         "note": manifest_row["note"],
         "mode": mode,
-        "source_layers": sorted(set(side_layers(old_side)) | set(side_layers(new_side))),
+        "source_layers": sorted(
+            set(side_layers(old_side)) | set(side_layers(new_side))
+        ),
         "old_source_layers": side_layers(old_side),
         "new_source_layers": side_layers(new_side),
         "evidence_asymmetry": evidence_asymmetry(mode),
@@ -187,7 +189,9 @@ def make_record(
     return rec
 
 
-def run_matrix(manifest: list[dict], *, ex_root: str = EX, out_dir: str = OUT) -> list[dict]:
+def run_matrix(
+    manifest: list[dict], *, ex_root: str = EX, out_dir: str = OUT
+) -> list[dict]:
     """Run all manifest comparisons and return per-library records."""
     results = []
     os.makedirs(f"{out_dir}/runs", exist_ok=True)  # per-library JSONs (gitignored)
@@ -239,8 +243,7 @@ def run_matrix(manifest: list[dict], *, ex_root: str = EX, out_dir: str = OUT) -
             )
             results.append(rec)
             print(
-                f"{tag:48} {mode:11} exit={rc} {dt:5.1f}s "
-                f"verdict={rec.get('verdict')}"
+                f"{tag:48} {mode:11} exit={rc} {dt:5.1f}s verdict={rec.get('verdict')}"
             )
     return results
 
@@ -257,9 +260,7 @@ def make_run_metadata(results: list[dict], manifest: list[dict]) -> dict:
         "modes": sorted({str(r.get("mode", "")) for r in results}),
         "comparison_status_counts": {
             status: sum(
-                1
-                for record in results
-                if record.get("comparison_status") == status
+                1 for record in results if record.get("comparison_status") == status
             )
             for status in sorted({str(r.get("comparison_status", "")) for r in results})
         },

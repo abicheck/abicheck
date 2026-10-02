@@ -77,7 +77,6 @@ from ..model import ScopeOrigin
 from ..provenance import (
     _is_bare_system_dir,
     _matches_any_dir,
-    _suffix_match,
     build_public_set,
     classify_origin,
     is_system_header,
@@ -87,6 +86,7 @@ from .path_aliases import (
     public_root_alias_segments,
     source_header_alias_segments,
 )
+from .path_segments import _suffix_match
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence

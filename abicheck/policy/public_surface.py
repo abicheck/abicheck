@@ -96,6 +96,10 @@ class PublicSurface:
     # coverage warning, so the demotion is never a silent clean.
     header_origin_unknown_types: set[str] = field(default_factory=set)
     resolvable: bool = False
+    # The snapshot's `public_header_identifiers` (schema v54): every
+    # identifier the public header set's raw text spells, every #if branch
+    # included. None = not captured -- never "the headers spell nothing".
+    header_identifiers: frozenset[str] | None = None
     # Origin (ADR-024 D1 / ADR-015 v6) keyed by every symbol key and type
     # name. Only populated when the snapshot was dumped with a public-header
     # set; otherwise every value is UNKNOWN and provenance reasons never fire.

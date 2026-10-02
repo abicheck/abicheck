@@ -53,6 +53,31 @@ PLATFORM_FACTS: list[FactDefinition] = [
             "Function)."
         ),
     ),
+    # ── ADR-063 2026-10-01 amendment: the public header set's raw text ──
+    _E(
+        owner="AbiSnapshot",
+        field="public_header_identifiers",
+        value_type="frozenset[str] | None",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=False,
+        suppressible=False,
+        reportable=False,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.policy.public_surface_closure:_present_header_identifiers",
+        ),
+        notes=(
+            "Every identifier token the public header set's raw text "
+            "spells, every preprocessor branch included "
+            "(extract/public_header_identifiers.py). NOT_COLLECTED: no "
+            "public header set; FAILED: a named header missing or "
+            "unreadable; UNSUPPORTED: a header token-pastes (##). Only a "
+            "PRESENT fact lets `--contract public` close its domain for an "
+            "undeclared export (policy/contract_closed_domain.py)."
+        ),
+    ),
     # ── Phase 5's seventh batch: the three binary-format dataclasses' ──
     # ── own case-(b) fields (schema-version-driven, not backend- ──
     # ── driven -- ElfMetadata/PeMetadata/MachoMetadata are parsed by ──

@@ -45,7 +45,11 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "32"
+_SNAPSHOT_CACHE_VERSION: str = "33"
+# v33: header-derived snapshots now carry public_header_identifiers (schema
+# v54, extract/public_header_identifiers.py). The key also folds in the
+# snapshot schema version from this version on, so the next schema bump
+# invalidates the cache without a hand bump here.
 # v32: castxml's emulated compiler now receives the run's language standard,
 # sysroot, target and feature-macro flags (extract/castxml_compiler_emulation.py).
 # Before, `--castxml-cc-gnu g++ -std=c++20` parsed with g++'s *default*
@@ -484,7 +488,19 @@ def _cache_key(
     h.update(lang.encode())
     h.update(extra.encode())
     h.update(_SNAPSHOT_CACHE_VERSION.encode())
+    # The snapshot schema version too, automatically: a schema bump means a
+    # new field or encoding, and an entry cached before it was written
+    # without that field -- loading it back would present "not captured" as
+    # this build's answer. Folding it in closes that whole class instead of
+    # relying on a hand bump of _SNAPSHOT_CACHE_VERSION for each field.
+    h.update(f"schema={_snapshot_schema_version()}".encode())
     return h.hexdigest()
+
+
+def _snapshot_schema_version() -> int:
+    from .storage.snapshot_schema_versions import SCHEMA_VERSION
+
+    return SCHEMA_VERSION
 
 
 def lookup(

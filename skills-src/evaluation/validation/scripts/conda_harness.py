@@ -42,6 +42,7 @@ import tarfile
 import tempfile
 import urllib.request
 import zipfile
+from collections.abc import Sequence
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -281,8 +282,17 @@ def extract_sos(pkg: Path, into: Path) -> dict[str, str]:
     return out
 
 
-def run_abicheck(old: str, new: str, old_ver: str, new_ver: str) -> dict | None:
-    """Run ``abicheck compare`` on two .so files and return the parsed JSON."""
+def run_abicheck(
+    old: str,
+    new: str,
+    old_ver: str,
+    new_ver: str,
+    extra_args: Sequence[str] = (),
+) -> dict | None:
+    """Run ``abicheck compare`` on two .so files and return the parsed JSON.
+
+    *extra_args* are appended verbatim (public headers, ``--contract``,
+    ``--suppress``)."""
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
         out_path = tmp.name
     cmd = [
@@ -296,6 +306,7 @@ def run_abicheck(old: str, new: str, old_ver: str, new_ver: str) -> dict | None:
         f"new={new_ver}",
         "-o",
         f"json={out_path}",
+        *extra_args,
     ]
     subprocess.run(cmd, capture_output=True, text=True)
     try:

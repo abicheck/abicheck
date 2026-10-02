@@ -124,6 +124,8 @@ from abicheck.model import Fact, FactStatus
 #: Sites the harness cannot ablate yet. Shrink-only: see
 #: ``test_uncovered_is_shrink_only``.
 UNCOVERED: dict[str, str] = {
+    "AbiSnapshot.public_header_identifiers": "public_header_identifiers is closed-domain evidence read only under --contract public; the H1 corpus compares without --contract, so ablating it changes nothing observable (covered by tests/test_public_header_identifiers.py)",
+    "AbiSnapshot.public_header_identifiers_fact": "public_header_identifiers is closed-domain evidence read only under --contract public; the H1 corpus compares without --contract, so ablating it changes nothing observable (covered by tests/test_public_header_identifiers.py)",
     "EnumType.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
     "Function.contract_attributes_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
     "Function.exception_spec_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",

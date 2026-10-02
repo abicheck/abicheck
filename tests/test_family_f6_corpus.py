@@ -325,3 +325,60 @@ def test_mutant_incompatible_pair_silenced_fails() -> None:
     reduced to additions only) must fail on a known-incompatible pair."""
     res = {"b": _result(libx={"func_added": 30, "soname_bump_recommended": 1})}
     assert not rcc.evaluate_gate([_entry("b", "BREAKING")], res, None).passed
+
+
+# ── evidence a maintainer would supply ──────────────────────────────────────
+
+
+def test_evidence_args_supply_both_sides_headers_and_the_public_contract(
+    tmp_path: Path,
+) -> None:
+    for side in ("old", "new"):
+        (tmp_path / side / "include").mkdir(parents=True)
+    args = rcc.evidence_args({"pair": "p"}, tmp_path)
+    assert args == [
+        "--header",
+        f"old={tmp_path / 'old' / 'include'}",
+        "--header",
+        f"new={tmp_path / 'new' / 'include'}",
+        "--contract",
+        "public",
+    ]
+
+
+def test_evidence_args_never_borrow_one_sides_headers(tmp_path: Path) -> None:
+    # A side with no headers records no contract; the other side's must not
+    # stand in for it.
+    (tmp_path / "old" / "include").mkdir(parents=True)
+    assert rcc.evidence_args({"pair": "p"}, tmp_path) == []
+
+
+def test_suppressions_are_written_without_their_citation(tmp_path: Path) -> None:
+    rule = {"symbol": "E::x", "reason": "upstream: unstable", "source": "x.h:1"}
+    args = rcc.evidence_args({"pair": "p", "suppressions": [rule]}, tmp_path)
+    assert args[:1] == ["--suppress"]
+    written = json.loads(Path(args[1]).read_text(encoding="utf-8"))
+    assert written["suppressions"] == [
+        {"symbol": "E::x", "reason": "upstream: unstable"}
+    ]
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"symbol": "E::x", "reason": "r"},
+        {"symbol": "E::x", "source": "s"},
+        {"symbol": "E::x", "reason": " ", "source": "s"},
+    ],
+)
+def test_a_suppression_without_reason_and_source_is_rejected(rule: dict) -> None:
+    doc = _corpus_doc()
+    doc["pairs"][0]["suppressions"] = [rule]
+    assert any("suppressions[0]" in e for e in rcc.validate_corpus(doc))
+
+
+def test_every_committed_suppression_is_cited() -> None:
+    doc = json.loads(
+        (VALID / "data" / "compat_corpus.json").read_text(encoding="utf-8")
+    )
+    assert rcc.validate_corpus(doc) == []

@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 53,
+  "schema_version": 54,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -61,7 +61,7 @@ maps are verbatim; each `payload` is elided.)*
 
 | Key | Meaning |
 |---|---|
-| `schema_version` | The **document's** version — one integer, currently **`53`**. Top-level so a loader can read it without parsing the rest. |
+| `schema_version` | The **document's** version — one integer, currently **`54`**. Top-level so a loader can read it without parsing the rest. |
 | `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
 
@@ -106,14 +106,14 @@ follow from that, and they have different answers:
 Loading an older snapshot **warns**, and the warning is the point:
 
 ```text
-UserWarning: Snapshot schema_version 8 predates this abicheck's schema_version 53:
+UserWarning: Snapshot schema_version 8 predates this abicheck's schema_version 54:
 header_cv_facts_reliable, param_kind_facts_reliable are marked unreliable on this
 snapshot, so the affected detectors will decline to trust these stale facts rather
 than risk a false positive purely from this tool upgrade.
 ```
 
 **Loading and re-saving does not upgrade the evidence.** A re-saved snapshot
-carries `schema_version: 53` and the current envelope, but the warning
+carries `schema_version: 54` and the current envelope, but the warning
 persists — it then says so explicitly — and the affected facts stay
 unestablished. Serialization cannot invent evidence an older extractor never
 collected. If you need those facts, **re-run `dump`** against the artifact.
@@ -123,7 +123,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`53`**. See
+The current value is **`54`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -371,7 +371,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 53`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 54`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -454,7 +454,7 @@ model rather than against either physical layout. Optional keys are omitted or `
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `53`). |
+| `schema_version` | int | Snapshot format version (currently `54`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -611,7 +611,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare -o json=-`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `53`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `54`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

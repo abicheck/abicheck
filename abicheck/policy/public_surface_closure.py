@@ -107,6 +107,7 @@ from ..compare.surface_graph import (
     referenced_identifiers_by_node,
 )
 from ..diff_cxx_rules import owner_class_of
+from ..model.availability import FactStatus
 from ..model.cxx_artifact_symbols import is_cxx_class_artifact_symbol
 from ..model.edge_coverage import EdgeAnswer
 from ..model.graph_join import EDGE_KIND_EXPORTS
@@ -659,6 +660,15 @@ def _extend_unknown_origin_through_closure(
     surface.header_origin_unknown_types |= scratch.public_types - surface.public_types
 
 
+def _present_header_identifiers(snap: AbiSnapshot) -> frozenset[str] | None:
+    """The raw-header-text identifier index, only when its Fact is present --
+    a not-collected, failed or unsupported scan is unknown, never empty."""
+    fact = snap.public_header_identifiers_fact
+    if fact is None or fact.status is not FactStatus.PRESENT:
+        return None
+    return frozenset(fact.value or ())
+
+
 def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     """Computes *snap*'s public-ABI surface from
     :func:`~abicheck.compare.surface_graph.referenced_identifiers_by_node`
@@ -689,6 +699,7 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     construction (and its associated evidence-merge cost) in the way.
     """
     surface = PublicSurface()
+    surface.header_identifiers = _present_header_identifiers(snap)
     refs = referenced_identifiers_by_node(snap)
 
     # Build the type universe and name -> record / enum indexes for closure walks.
