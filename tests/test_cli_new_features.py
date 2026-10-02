@@ -1125,7 +1125,9 @@ class TestElfOnlyModePeMacho:
         # header fields and no exports is an *unread* table, which proves no
         # export absent (model.export_index.platform_block_parsed).
         old_macho = MachoMetadata(
-            cpu_type="ARM64", filetype="MH_DYLIB", exports=[MachoExport(name="_foo_func")]
+            cpu_type="ARM64",
+            filetype="MH_DYLIB",
+            exports=[MachoExport(name="_foo_func")],
         )
         new_macho = MachoMetadata(cpu_type="ARM64", filetype="MH_DYLIB", exports=[])
 

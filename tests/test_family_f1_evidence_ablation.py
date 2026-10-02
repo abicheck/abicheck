@@ -127,8 +127,7 @@ from abicheck.model import Fact, FactStatus
 
 #: Sites the harness cannot ablate yet. Shrink-only: see
 #: ``test_uncovered_is_shrink_only``.
-UNCOVERED: dict[str, str] = {
-}
+UNCOVERED: dict[str, str] = {}
 
 #: The real current violations this harness found (see module docstring).
 #: ``(case, site, side)``. Empty since the header-origin seeding fix; the
