@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import collections
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -107,16 +107,28 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class DwarfDeclarations:
+    """What :func:`extract_dwarf_declarations` extracted: the declaration
+    collections only, never the walk's internal state."""
+
+    functions: list[Function]
+    variables: list[Variable]
+    types: list[RecordType]
+    enums: list[EnumType]
+    typedefs: dict[str, str]
+    typedef_entity_ids: dict[str, EntityId]
+
+
 def extract_dwarf_declarations(
     elf_path: Path,
     elf_meta: ElfMetadata,
     *,
     session: DwarfSession | None = None,
-) -> _DwarfSnapshotBuilder:
+) -> DwarfDeclarations:
     """Walk *elf_path*'s DWARF and return the extracted declarations.
 
-    The result carries ``functions``, ``variables``, ``types``, ``enums``,
-    ``typedefs`` and ``typedef_entity_ids``. Assembling them into an
+    The result is a :class:`DwarfDeclarations`. Assembling them into an
     :class:`~abicheck.model.AbiSnapshot` is
     :func:`abicheck.workflows.dwarf_snapshot_assembly.build_snapshot_from_dwarf`'s
     job (design-hardening Phase 2: one snapshot factory, in ``workflows``);
@@ -130,7 +142,14 @@ def extract_dwarf_declarations(
     """
     builder = _DwarfSnapshotBuilder(elf_path, elf_meta)
     builder.extract(session=session)
-    return builder
+    return DwarfDeclarations(
+        functions=builder.functions,
+        variables=builder.variables,
+        types=builder.types,
+        enums=builder.enums,
+        typedefs=builder.typedefs,
+        typedef_entity_ids=builder.typedef_entity_ids,
+    )
 
 
 # ---------------------------------------------------------------------------
