@@ -441,13 +441,22 @@ def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
 
 
 def _sectioned_json(snap: AbiSnapshot, indent: int) -> str:
-    return json.dumps(
-        to_sectioned_document(
-            _snapshot_to_dict(snap, _encode_value_sorted),
-            max_known_schema_version=SCHEMA_VERSION,
-            document_encoded_here=True,
-        ),
-        indent=indent,
+    return json.dumps(sectioned_document_for_write(snap), indent=indent)
+
+
+def sectioned_document_for_write(snap: AbiSnapshot) -> dict[str, Any]:
+    """The single-file sectioned document a snapshot write serializes --
+    `snapshot_to_json`'s document before ``json.dumps``, for a writer that
+    streams it instead (`snapshot_codec.write_snapshot`).
+
+    Built from the canonical-shape encoder and packaged sharing its
+    structure, so the result must be serialized and dropped, never mutated
+    or kept; run it under `acyclic_json.gc_paused` for the same reason
+    `snapshot_to_json` does."""
+    return to_sectioned_document(
+        _snapshot_to_dict(snap, _encode_value_sorted),
+        max_known_schema_version=SCHEMA_VERSION,
+        document_encoded_here=True,
     )
 
 
