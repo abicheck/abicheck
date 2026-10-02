@@ -975,6 +975,13 @@ integration tests (`tests/test_contract_type_identities_integration.py`,
 a same-leaf record's break still only reaches the coverage floor. Both are
 maintainer acceptance decisions, not engineering defects.
 
+**Accepted (2026-10-02, maintainer).** Both decisions are taken: the
+`package` and `real_binaries` lanes are covered by the named integration
+tests rather than by `measure_contract_shadow.py`, and the clang-frontend
+same-leaf case reaching only the coverage floor is a recorded known gap
+(`docs/contribute/known-gaps.md`), not a Phase 9 blocker. Phase 9 is
+unblocked.
+
 ### Re-homed from `cli-cleanup-phase-two.md`
 
 | Item there | Disposition here |
