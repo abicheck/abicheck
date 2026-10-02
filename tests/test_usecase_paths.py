@@ -330,7 +330,9 @@ def test_diff_exit_code_only_on_requested_kinds(tmp_path, fail_on, expected) -> 
 def _registry_ids() -> set[str]:
     import yaml
 
-    doc = yaml.safe_load((ROOT / "docs/contribute/usecase-registry.yaml").read_text(encoding="utf-8"))
+    doc = yaml.safe_load(
+        (ROOT / "docs/contribute/usecase-registry.yaml").read_text(encoding="utf-8")
+    )
     return {uc["id"] for uc in doc["use_cases"]}
 
 
@@ -434,3 +436,38 @@ def test_changed_functions_are_listed_most_relied_on_first() -> None:
     )
     assert text.index("::high") < text.index("::low") < text.index("::new")
     assert "1 shared, 1 use-case, 1 unreached" in text
+
+
+def test_a_hung_flow_is_a_failure_not_a_lost_recording(tmp_path, monkeypatch) -> None:
+    """One flow step timing out must not abort the recording: it is reported
+    as that flow's failure, its later steps are skipped, and every other
+    flow is still recorded."""
+    flows = tmp_path / "flows.yaml"
+    flows.write_text(
+        "schema_version: 1\nexit_codes: [0]\ncases: [case01_symbol_removal]\nflows:\n"
+        "  - {id: hangs, use_case: UC-WF-compare, steps: [[compare, '{v1}', '{v2}'], [compare, '{v2}', '{v1}']]}\n"
+        "  - {id: fine, use_case: UC-WF-compare, argv: [compare, '{v1}', '{v2}']}\n",
+        encoding="utf-8",
+    )
+    built = tmp_path / "build" / "case01_symbol_removal"
+    built.mkdir(parents=True)
+    (built / "libv1.so").write_bytes(b"")
+    (built / "libv2.so").write_bytes(b"")
+    calls: list[str] = []
+
+    def fake_run(cmd, **kwargs):
+        ctx = next(
+            (a.split("=", 1)[1] for a in cmd if a.startswith("--context=")), None
+        )
+        if ctx:
+            calls.append(ctx)
+        if ctx == "hangs/case01_symbol_removal":
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(up.subprocess, "run", fake_run)
+    runs, failures, _ = up.record_flows(flows, tmp_path / "build", tmp_path / "work")
+    assert calls.count("hangs/case01_symbol_removal") == 1  # second step skipped
+    assert "fine/case01_symbol_removal" in calls
+    assert set(runs) == {"hangs/case01_symbol_removal", "fine/case01_symbol_removal"}
+    assert any("hangs/case01_symbol_removal: timed out" in f for f in failures)

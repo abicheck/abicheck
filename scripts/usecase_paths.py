@@ -65,6 +65,8 @@ SCHEMA_VERSION = 1
 SCENARIO_TESTS = "tests/test_scenarios.py"
 DEFAULT_FLOWS = ROOT / "scripts" / "usecase_flows.yaml"
 MODULE_LEVEL = "<module>"
+SCENARIO_TIMEOUT = 1800
+FLOW_STEP_TIMEOUT = 600
 
 
 # ── function inventory ──────────────────────────────────────────────────────
@@ -240,8 +242,18 @@ def record_scenarios(
         "-k", " or ".join(sorted(by_test)),
         f"--cov={PACKAGE}", "--cov-context=test", "--cov-report=",
     ]  # fmt: skip
-    proc = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True)
     failures: list[str] = []
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=SCENARIO_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return {}, [f"scenario tests timed out after {SCENARIO_TIMEOUT}s"]
     if proc.returncode != 0:
         tail = "\n".join(proc.stdout.splitlines()[-15:])
         failures.append(f"scenario tests exited {proc.returncode}:\n{tail}")
@@ -404,10 +416,16 @@ def record_flows(
                     f"--rcfile={rcfile}", f"--context={run_id}",
                     "-m", PACKAGE, *_expand(step, inputs),
                 ]  # fmt: skip
-                proc = subprocess.run(
-                    cmd, cwd=out, env=env, capture_output=True, text=True,
-                    timeout=600,
-                )  # fmt: skip
+                try:
+                    proc = subprocess.run(
+                        cmd, cwd=out, env=env, capture_output=True, text=True,
+                        timeout=FLOW_STEP_TIMEOUT,
+                    )  # fmt: skip
+                except subprocess.TimeoutExpired:
+                    # Later steps of this flow depend on this one; the other
+                    # flows' coverage is kept.
+                    failures.append(f"{run_id}: timed out after {FLOW_STEP_TIMEOUT}s")
+                    break
                 if proc.returncode not in allowed:
                     err = (proc.stderr.strip().splitlines() or [""])[-1]
                     failures.append(f"{run_id}: exit {proc.returncode}: {err}")
