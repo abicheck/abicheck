@@ -291,6 +291,43 @@ def test_pr_profile_run_with_a_skip_fails(monkeypatch, capsys) -> None:
     assert "INCOMPLETE" in out
 
 
+@pytest.mark.parametrize("require_complete", [False, True])
+def test_require_complete_turns_a_full_profile_skip_into_a_failure(
+    monkeypatch, capsys, require_complete: bool
+) -> None:
+    """`full` keeps "skipped where the environment lacks the tool" for local
+    runs, but a CI job that installs a step's tools itself passes
+    --require-complete: there a skip means the install broke, and exit 0
+    would read as a pass that ran nothing (ci.yml's e2e job)."""
+    import dataclasses
+
+    synthetic = dataclasses.replace(
+        _step("demo-libz"),
+        precondition=lambda: "synthetic: forced skip for this test",
+    )
+    monkeypatch.setattr(
+        verify,
+        "STEPS",
+        tuple(synthetic if s.name == "demo-libz" else s for s in verify.STEPS),
+    )
+    argv = ["--profile", "full", "--only", "demo-libz"]
+    rc = verify.main(argv + (["--require-complete"] if require_complete else []))
+    assert rc == (1 if require_complete else 0)
+    assert ("INCOMPLETE" in capsys.readouterr().out) is require_complete
+
+
+def test_ci_e2e_job_runs_the_demo_step_and_fails_on_a_skip() -> None:
+    workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
+    runs = [st.get("run", "") for st in workflow["jobs"]["e2e"]["steps"]]
+    assert any(
+        "verify.py --profile full --only demo-libz" in r and "--require-complete" in r
+        for r in runs
+    ), runs
+    assert not any("python scripts/demo_libz.py" in r for r in runs), (
+        "inline copy of the step"
+    )
+
+
 def test_pr_profile_includes_golden_tests() -> None:
     """M0-3's second contradiction: the documented fast command and
     `pixi run check` excluded golden tests, but the canonical CI unit lane

@@ -24,6 +24,7 @@ that directory to `sys.path`.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,29 +43,28 @@ runner = pytest.importorskip(
 
 
 def _snap() -> dict:
+    """An embedded build/source pack (``BuildSourcePack.to_embedded_dict()``)."""
     return {
-        "build_source": {
-            "manifest": {
-                "coverage": [
-                    {"layer": "L3_build", "status": "present"},
-                    {"layer": "L4_source_abi", "status": "partial"},
-                    {"layer": "L5_source_graph", "status": "present"},
-                ]
-            },
-            "build_evidence": {
-                "compile_units": [1, 2, 3],
-                "targets": [1],
-                "build_options": [1, 2],
-            },
-            "source_abi": {
-                "reachable_source_surface": {
-                    "declarations": [1, 2, 3, 4],
-                    "types": [1, 2],
-                    "macros": [1],
-                }
-            },
-            "source_graph": {"nodes": [1, 2, 3, 4, 5], "edges": [1, 2]},
-        }
+        "manifest": {
+            "coverage": [
+                {"layer": "L3_build", "status": "present"},
+                {"layer": "L4_source_abi", "status": "partial"},
+                {"layer": "L5_source_graph", "status": "present"},
+            ]
+        },
+        "build_evidence": {
+            "compile_units": [1, 2, 3],
+            "targets": [1],
+            "build_options": [1, 2],
+        },
+        "source_abi": {
+            "reachable_source_surface": {
+                "declarations": [1, 2, 3, 4],
+                "types": [1, 2],
+                "macros": [1],
+            }
+        },
+        "source_graph": {"nodes": [1, 2, 3, 4, 5], "edges": [1, 2]},
     }
 
 
@@ -84,11 +84,159 @@ def test_source_coverage_counts_each_layer() -> None:
 def test_source_coverage_defends_against_empty_payload() -> None:
     # A configure-only tree / no clang yields a missing-or-partial payload; the
     # parser must still return a zeroed row, never raise.
-    for snap in ({}, {"build_source": {}}, {"build_source": {"source_abi": {}}}):
+    for snap in (
+        {},
+        {"manifest": {}},
+        {"source_abi": {}},
+        {"source_abi": {"reachable_source_surface": None}},
+    ):
         c = runner._source_coverage(snap)
         assert c["l3_compile_units"] == 0
         assert c["l4_declarations"] == 0
         assert c["coverage_status"] == {}
+
+
+def test_load_build_source_reads_what_abicheck_writes(tmp_path: Path) -> None:
+    """The runner's reader against a snapshot written by abicheck's own codec.
+
+    The oracle is ``save_snapshot`` itself, not a hand-built JSON shape: the
+    previous reader indexed a top-level ``build_source`` key the storage
+    layout no longer has, and the hand-built fixtures above encoded the same
+    wrong shape, so they kept passing while every CI row read 0 compile units.
+    A layout change now has to be read correctly here or this fails.
+    """
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.model.snapshot import AbiSnapshot
+    from abicheck.serialization import save_snapshot
+
+    units = [{"id": f"cu:{i}", "source": f"{i}.c"} for i in range(3)]
+    snap = AbiSnapshot(library="libx.so", version="1")
+    snap.build_source = BuildSourcePack.from_embedded_dict(
+        {
+            "manifest": {"coverage": [{"layer": "L3_build", "status": "present"}]},
+            "build_evidence": {"compile_units": units},
+        }
+    )
+    path = tmp_path / "x.json"
+    save_snapshot(snap, path)
+
+    c = runner._source_coverage(runner._load_build_source(path))
+    assert c["l3_compile_units"] == len(units)
+    assert c["coverage_status"] == {"L3_build": "present"}
+
+
+def test_load_build_source_without_a_pack_is_empty(tmp_path: Path) -> None:
+    from abicheck.model.snapshot import AbiSnapshot
+    from abicheck.serialization import save_snapshot
+
+    path = tmp_path / "bare.json"
+    save_snapshot(AbiSnapshot(library="libx.so", version="1"), path)
+    assert runner._load_build_source(path) == {}
+    assert (
+        runner._source_coverage(runner._load_build_source(path))["l3_compile_units"]
+        == 0
+    )
+
+
+def test_dump_sources_anchors_l4_to_the_binary_and_public_headers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without a binary there is no export table for a declaration to link to,
+    and without public-header roots the extractor records no declaration at
+    all -- either one alone leaves L4 empty on every row. Both reach argv."""
+    captured: list[list[str]] = []
+    monkeypatch.setattr(
+        runner,
+        "_run",
+        lambda cmd: (captured.append(cmd), (0.0, SimpleNamespace(returncode=0)))[1],
+    )
+    so, h1, h2 = tmp_path / "libx.so.1", tmp_path / "x.h", tmp_path / "y.h"
+    runner._dump_sources(
+        tmp_path / "t",
+        tmp_path / "db.json",
+        tmp_path / "o.json",
+        binary=so,
+        headers=[h1, h2],
+    )
+    cmd = captured[0]
+    assert cmd[2] == str(so)
+    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "-H"] == [str(h1), str(h2)]
+    assert cmd[cmd.index("--build-info") + 1] == str(tmp_path / "db.json")
+
+
+@pytest.mark.parametrize("key", ["output", "command", "arguments"])
+def test_target_compile_db_keeps_only_the_target_tus(tmp_path: Path, key: str) -> None:
+    """The library's TUs survive whichever compile_commands.json field names
+    the object path; the static twin, tests and programs (each a different
+    ABI-relevant compile context for the same header) do not."""
+
+    def entry(target: str, src: str) -> dict:
+        obj = f"CMakeFiles/{target}.dir/{src}.o"
+        e = {"directory": str(tmp_path), "file": f"{src}.c"}
+        if key == "arguments":
+            e["arguments"] = ["cc", "-o", obj, "-c", f"{src}.c"]
+        elif key == "command":
+            e["command"] = f"cc -o {obj} -c {src}.c"
+        else:
+            e["output"] = obj
+            e["command"] = f"cc -c {src}.c"
+        return e
+
+    entries = [
+        entry("zlib", "a"),
+        entry("zlibstatic", "a"),
+        entry("zlib", "b"),
+        entry("example", "t"),
+    ]
+    (tmp_path / "compile_commands.json").write_text(json.dumps(entries))
+    out = runner._target_compile_db(tmp_path, "zlib", tmp_path / "scoped")
+    kept = json.loads(out.read_text())
+    assert [e["file"] for e in kept] == ["a.c", "b.c"]
+    with pytest.raises(RuntimeError, match="no compile_commands.json entry"):
+        runner._target_compile_db(tmp_path, "zlibstati", tmp_path / "none")
+
+
+def test_built_shared_library_skips_symlinks(tmp_path: Path) -> None:
+    real = tmp_path / "lib" / "libz.so.1.3.1"
+    real.parent.mkdir()
+    real.write_bytes(b"\x7fELF")
+    (tmp_path / "lib" / "libz.so.1").symlink_to(real.name)
+    (tmp_path / "lib" / "libz.so").symlink_to("libz.so.1")
+    assert runner._built_shared_library(tmp_path, "libz") == real
+    with pytest.raises(RuntimeError):
+        runner._built_shared_library(tmp_path, "libsnappy")
+
+
+def test_every_source_entry_declares_what_the_source_tier_needs() -> None:
+    import yaml
+
+    manifest = yaml.safe_load((_EVAL_DIR / "manifest.yaml").read_text(encoding="utf-8"))
+    entries = [e for e in manifest["libraries"] if e.get("source")]
+    assert entries
+    for e in entries:
+        src = e["source"]
+        assert src.get("target"), e["lib"]
+        assert src.get("public_headers"), e["lib"]
+        assert e.get("so_stem"), e["lib"]
+
+
+def test_drift_details_name_kinds_and_errors() -> None:
+    lines = runner.drift_details(
+        [
+            {
+                "lib": "png",
+                "expect": "COMPATIBLE",
+                "verdict": "COMPATIBLE_WITH_RISK",
+                "risk_changes": 1,
+                "total_changes": 2,
+                "top_kinds": {"unversioned_exported_symbol": 1},
+            },
+            {"lib": "gz", "error": "URLError: x"},
+        ]
+    )
+    assert "COMPATIBLE -> COMPATIBLE_WITH_RISK" in lines[0]
+    assert "unversioned_exported_symbol" in lines[0] and "risk_changes=1" in lines[0]
+    assert lines[1] == "gz: error: URLError: x"
 
 
 def test_list_len_non_list_is_zero() -> None:

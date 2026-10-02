@@ -826,6 +826,14 @@ jobs:
           fail_ci_if_error: false
 
   e2e:
+    # One real system library end to end (scripts/demo_libz.py via its
+    # verify.py step). Gated through heavy-parity-gate like integration-tests:
+    # the demo takes ~1 s and the job's cost is its apt/CastXML/pip setup, so
+    # a docs-only PR was paying a runner for an outcome only abicheck/**, the
+    # demo script, pyproject.toml or the CastXML action can change -- all of
+    # which are in the gate's filter (scripts/demo_libz.py added for this).
+    needs: [heavy-parity-gate]
+    if: needs.heavy-parity-gate.outputs.run-heavy == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -842,7 +850,7 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
       - name: End-to-end demo (libz)
-        run: python scripts/demo_libz.py
+        run: python scripts/verify.py --profile full --only demo-libz --require-complete
 
   windows-msvc:
     name: MSVC + PDB end-to-end
@@ -949,6 +957,8 @@ jobs:
               - 'action/**'
               - '.github/actions/**'
               - 'scripts/verify.py'
+              # e2e's own input (the gate filter is its only trigger).
+              - 'scripts/demo_libz.py'
 
       - name: Resolve parity gate output
         id: resolve

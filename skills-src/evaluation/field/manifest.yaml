@@ -23,14 +23,23 @@
 #               cmake_subdir  optional — CMakeLists dir relative to the checkout
 #                             root (e.g. zstd keeps its CMake in build/cmake)
 #               cmake_args  optional — extra `cmake` configure args (list)
+#               target      CMake target that builds the shared library; the
+#                           runner builds only it, dumps the .so it produced,
+#                           and scopes --build-info to its own TUs
+#               public_headers  the library's public headers, relative to the
+#                           checkout root — the L4 public-surface roots (with
+#                           none, source replay records no declarations)
 schema_version: 1
 
 libraries:
   # ── small / common C libraries ──────────────────────────────────────────
   - {lib: zlib,          conda_pkg: libzlib,       old: "1.2.13",  new: "1.3.1",   expect: COMPATIBLE_WITH_RISK, so_stem: libz,
-     source: {repo: "https://github.com/madler/zlib.git", tag_old: "v1.2.13", tag_new: "v1.3.1"}}
+     source: {repo: "https://github.com/madler/zlib.git", tag_old: "v1.2.13", tag_new: "v1.3.1",
+              target: zlib, public_headers: ["zlib.h"]}}
   - {lib: zstd,          conda_pkg: zstd,          old: "1.5.5",   new: "1.5.7",   expect: BREAKING,             so_stem: libzstd,
-     source: {repo: "https://github.com/facebook/zstd.git", tag_old: "v1.5.5", tag_new: "v1.5.7", cmake_subdir: "build/cmake"}}
+     source: {repo: "https://github.com/facebook/zstd.git", tag_old: "v1.5.5", tag_new: "v1.5.7", cmake_subdir: "build/cmake",
+              cmake_args: ["-DZSTD_BUILD_PROGRAMS=OFF", "-DZSTD_BUILD_STATIC=OFF", "-DZSTD_BUILD_TESTS=OFF"],
+              target: libzstd_shared, public_headers: ["lib/zstd.h", "lib/zdict.h", "lib/zstd_errors.h"]}}
   - {lib: xz-liblzma,    conda_pkg: liblzma,       old: "5.6.4",   new: "5.8.3",   expect: COMPATIBLE,           so_stem: liblzma}
   - {lib: bzip2,         conda_pkg: bzip2,         old: "1.0.6",   new: "1.0.8",   expect: COMPATIBLE_WITH_RISK, so_stem: libbz2}
   - {lib: lz4,           conda_pkg: lz4-c,         old: "1.9.3",   new: "1.10.0",  expect: COMPATIBLE_WITH_RISK, so_stem: liblz4}
@@ -42,7 +51,8 @@ libraries:
   - {lib: libssh2,       conda_pkg: libssh2,       old: "1.10.0",  new: "1.11.1",  expect: BREAKING,             so_stem: libssh2}
   - {lib: snappy,        conda_pkg: snappy,        old: "1.1.10",  new: "1.2.2",   expect: COMPATIBLE_WITH_RISK, so_stem: libsnappy,
      source: {repo: "https://github.com/google/snappy.git", tag_old: "1.1.10", tag_new: "1.2.2",
-              cmake_args: ["-DSNAPPY_BUILD_TESTS=OFF", "-DSNAPPY_BUILD_BENCHMARKS=OFF"]}}
+              cmake_args: ["-DSNAPPY_BUILD_TESTS=OFF", "-DSNAPPY_BUILD_BENCHMARKS=OFF", "-DBUILD_SHARED_LIBS=ON"],
+              target: snappy, public_headers: ["snappy.h", "snappy-c.h", "snappy-sinksource.h"]}}
   - {lib: libuv,         conda_pkg: libuv,         old: "1.49.2",  new: "1.52.1",  expect: BREAKING,             so_stem: libuv}
   - {lib: libwebp,       conda_pkg: libwebp-base,  old: "1.4.0",   new: "1.6.0",   expect: COMPATIBLE_WITH_RISK, so_stem: libwebp}
   # ── larger products (major bumps) ─────────────────────────────────────────
