@@ -48,7 +48,6 @@ about a typedef.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Protocol
 
 from ..diff_helpers import (
@@ -70,6 +69,11 @@ from ..model.semantic_ir_legacy_adapter import (
     producer_occurrence_disambiguator,
     render_display_name_or_leaf,
     semantic_ir_covers_kind,
+)
+from .naming_conventions import (
+    TYPEDEF_VERSION_STAMP,
+    _has_version_family_successor as _has_version_family_successor,
+    is_version_stamped_typedef as is_version_stamped_typedef,
 )
 
 if TYPE_CHECKING:
@@ -97,55 +101,6 @@ class _SurfacePredicate(Protocol):
 #: unresolved-vs-unresolved pair is still "unchanged", and an
 #: unresolved-vs-resolved pair is still a base-type change.
 _UNRESOLVED_TYPE_SENTINEL = "?"
-
-_VERSION_STAMPED_TYPEDEF_RE = re.compile(r"^(.*?)_version_\d+_\d+_\d+$", re.IGNORECASE)
-"""Pattern for version-stamped compile-time sentinel typedefs.
-
-Some libraries (e.g. libpng) define typedefs whose names encode the library
-version, e.g. ``typedef char* png_libpng_version_1_6_46``.  The name changes
-every release by design -- this is NOT a binary ABI break because the typedef
-is never exported as an ELF symbol; it exists solely to produce a
-compile-time error if headers from different versions are mixed.
-
-When such a typedef disappears (``typedef_removed``), abicheck would
-otherwise report BREAKING.  This guard downgrades the change to
-TYPEDEF_VERSION_SENTINEL (COMPATIBLE) instead.
-
-Moved here verbatim from ``diff_types.py`` with this cohort -- the same
-pattern, not a re-derived one.
-"""
-
-
-def is_version_stamped_typedef(name: str) -> bool:
-    """True if *name* looks like a version-stamped sentinel typedef.
-
-    Moved here from ``diff_types.py`` with this cohort: it is typedef-family
-    logic with no other caller, and leaving it behind would have meant the
-    migrated detector importing back into the module it was split out of.
-    """
-    return bool(_VERSION_STAMPED_TYPEDEF_RE.match(name))
-
-
-def _has_version_family_successor(name: str, new_aliases: frozenset[str]) -> bool:
-    """True if *new_aliases* contains another version-stamped typedef with the
-    same family prefix (e.g. ``png_libpng_version_``).
-
-    Distinguishes a sentinel rotation (old version removed, new version
-    added) from a genuine removal whose name merely matches the pattern.
-    Takes the alias *key set* rather than the alias map, since only the keys
-    were ever consulted -- the narrower input is what lets this run off the
-    index's display names with no legacy dict in scope.
-    """
-    m = _VERSION_STAMPED_TYPEDEF_RE.match(name)
-    if not m:
-        return False
-    prefix = m.group(1).lower()
-    # Require a non-empty family prefix so an unrelated sentinel whose own
-    # name starts with `_version_` (e.g. `_version_1_0_0`) doesn't match.
-    if not prefix:
-        return False
-    prefix = prefix + "_version_"
-    return any(k.lower().startswith(prefix) for k in new_aliases)
 
 
 def _underlying(index: SemanticIRIndex, occurrence_id: OccurrenceId) -> str:
@@ -338,9 +293,7 @@ def diff_typedefs(
             # is stripped of type evidence entirely.
             continue
         if new_ids is None:
-            if is_version_stamped_typedef(alias) and _has_version_family_successor(
-                alias, new_alias_keys
-            ):
+            if TYPEDEF_VERSION_STAMP.confirmed(alias, (alias, new_alias_keys)):
                 # A version-stamped typedef (e.g. png_libpng_version_1_6_46)
                 # is a compile-time sentinel that changes every release by
                 # design and is never exported as an ELF symbol -- not a

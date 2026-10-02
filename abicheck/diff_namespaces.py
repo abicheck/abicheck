@@ -43,6 +43,7 @@ break is at compile time.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, NamedTuple
 
 from .checker_policy import ChangeKind, ReachabilityState
@@ -63,6 +64,12 @@ from .compare.qualified_name_normalization import (
 )
 from .diff_helpers import make_change
 from .diff_templates import _strip_param_signature
+from .model.name_heuristics import (
+    NameHeuristicEffect,
+    StructuralFact,
+    register_name_heuristic,
+    register_severity_raising_heuristic,
+)
 from .model.surface_facts import in_source_declaration_index
 
 if TYPE_CHECKING:
@@ -105,6 +112,8 @@ def _strip_experimental(
     re-run the helper to peel additional layers if needed.
     """
     segs = _segments(qualified)
+    # A registered helper of EXPERIMENTAL_NAMESPACE (the per-segment form of
+    # its matcher), so the membership test stays inline here.
     for i, s in enumerate(segs):
         if s in experimental_namespaces:
             return "::".join(segs[:i] + segs[i + 1 :]), s
@@ -116,9 +125,63 @@ def _split_experimental(
     experimental_namespaces: tuple[str, ...],
 ) -> tuple[list[str], list[str]]:
     """Split *qnames* into ``(experimental, stable)`` by namespace match."""
-    exp = [q for q in qnames if any(s in experimental_namespaces for s in _segments(q))]
+    exp = [
+        q
+        for q in qnames
+        if EXPERIMENTAL_NAMESPACE.matches(
+            _segments(q), experimental_namespaces=experimental_namespaces
+        )
+    ]
     stable = [q for q in qnames if q not in exp]
     return exp, stable
+
+
+def _has_experimental_segment(
+    segments: Iterable[str],
+    *,
+    experimental_namespaces: tuple[str, ...] = DEFAULT_EXPERIMENTAL_NAMESPACES,
+) -> bool:
+    return any(s in experimental_namespaces for s in segments)
+
+
+#: Registered name heuristic (design-hardening Phase 5). The experimental
+#: namespace name only *routes to review*: it adds an explanatory
+#: ``experimental_graduated``/``experimental_removed_without_replacement``
+#: finding beside the removal the symbol/type detectors already report, and
+#: graduation additionally needs a unique, signature-equal promotion target.
+EXPERIMENTAL_NAMESPACE = register_name_heuristic(
+    "experimental_namespace",
+    owner=__name__,
+    effect=NameHeuristicEffect.ROUTE_TO_REVIEW,
+    description=(
+        "an experimental::/preview:: segment marks a declaration as outside "
+        "the stability promise"
+    ),
+    matcher=_has_experimental_segment,
+    helpers=(_strip_experimental, _split_experimental),
+    vocabularies=("DEFAULT_EXPERIMENTAL_NAMESPACES",),
+)
+
+
+def _no_replacement(fact_input: tuple[list[str], list[str], bool]) -> bool:
+    new_exp, new_stable, still_linked = fact_input
+    return not new_exp and not new_stable and not still_linked
+
+
+#: Registered severity-raising heuristic: ``experimental_removed_without_
+#: replacement`` (API_BREAK) needs the structural fact that NEW carries no
+#: declaration under the key, experimental or stable, and the symbol is not
+#: still linked under another spelling or promoted.
+EXPERIMENTAL_REMOVAL = register_severity_raising_heuristic(
+    "experimental_removal",
+    owner=__name__,
+    fact=StructuralFact(
+        "compare.namespaces.removed_without_replacement", _no_replacement
+    ),
+    raises=("EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT",),
+    description="a declaration removed from an experimental::/preview:: namespace",
+    matcher=_has_experimental_segment,
+)
 
 
 class _IndexItem(NamedTuple):
@@ -708,7 +771,9 @@ def _promotion_candidates(
     out: set[tuple[str, ...]] = set()
     for item in new_items:
         path = _same_leaf_and_signature_under_root(item, removed, root)
-        if path is None or any(s in experimental_namespaces for s in path):
+        if path is None or EXPERIMENTAL_NAMESPACE.matches(
+            path, experimental_namespaces=experimental_namespaces
+        ):
             continue
         if (path, item.signature) not in old_decls:
             out.add(path)
@@ -728,7 +793,9 @@ def _promotion_claimants(
     out: set[tuple[str, ...]] = {_scope_path(removed)}
     for item in old_items:
         path = _same_leaf_and_signature_under_root(item, removed, root)
-        if path is None or not any(s in experimental_namespaces for s in path):
+        if path is None or not EXPERIMENTAL_NAMESPACE.matches(
+            path, experimental_namespaces=experimental_namespaces
+        ):
             continue
         if (path, item.signature) not in new_decls:
             out.add(path)
@@ -779,7 +846,9 @@ def _unique_promotion_target(
     if not removed_path:
         return None
     root = removed_path[0]
-    if root in experimental_namespaces:
+    if EXPERIMENTAL_NAMESPACE.matches(
+        (root,), experimental_namespaces=experimental_namespaces
+    ):
         # `preview::foo` has no library root to anchor the search to.
         return None
     candidates = _promotion_candidates(
@@ -988,7 +1057,9 @@ def _findings_for(
         old_exp_items = [
             item
             for item in old_key_items
-            if any(s in experimental_namespaces for s in _segments(item.qname))
+            if EXPERIMENTAL_NAMESPACE.matches(
+                _segments(item.qname), experimental_namespaces=experimental_namespaces
+            )
         ]
         # Independently confirm a would-be "removed" declaration's
         # underlying symbol is genuinely gone under a *compatible* spelling
@@ -1041,6 +1112,12 @@ def _findings_for(
             still_linked=still_linked or promoted,
         )
         if event is None:
+            continue
+        if event == "removed" and not EXPERIMENTAL_REMOVAL.confirmed(
+            _segments(old_exp[0]),
+            (new_exp, new_stable, still_linked or promoted),
+            experimental_namespaces=experimental_namespaces,
+        ):
             continue
         out.append(
             _emit_experimental_change(

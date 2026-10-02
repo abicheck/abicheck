@@ -20,10 +20,10 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, ReachabilityState
 from abicheck.checker_types import Change
+from abicheck.compare.internal_namespaces import name_segments as _name_segments
 from abicheck.internal_leak import (
     _build_suffix_index,
     _candidate_type_names,
-    _name_segments,
     _resolve_type_name,
     _split_top_level_commas,
     _strip_template_args,

@@ -32,6 +32,7 @@ from .compare.elf_only_demangle import (
 from .compare.fact_comparison import compare_facts
 from .compare.fact_gate import both_facts_present
 from .compare.functions import function_identity_index
+from .compare.naming_conventions import PREFIX_RENAME
 from .compare.surface_reconcile import (
     RECONCILED_FUNCTIONS,
     RECONCILED_VARIABLES,
@@ -1643,7 +1644,12 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
 
     changes = emit_prefix_batch_rename(
-        find_prefix_rename_pairs(removed, added, old_map, new_map), old_map
+        [
+            pair
+            for pair in find_prefix_rename_pairs(removed, added, old_map, new_map)
+            if PREFIX_RENAME.confirmed(pair, (pair, removed, added))
+        ],
+        old_map,
     )
     changes.extend(
         emit_namespace_move_batches(find_namespace_move_groups(removed, added), old_map)

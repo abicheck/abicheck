@@ -16,13 +16,13 @@
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.debug_type_scope import debug_layout_scope
 from .compare.edge_query import export_table_covered
-from .compare.enum_sentinel import holds_enum_maximum, is_sentinel_enum_member
+from .compare.enum_sentinel import is_confirmed_enum_sentinel
+from .compare.naming_conventions import INLINE_NAMESPACE_MOVE, _strip_inline_ns
 from .compare.platform_export_delta import (
     both_export_tables_read as _both_export_tables_read,
     declared_export_names as _declared_export_names,
@@ -65,7 +65,7 @@ from .diff_platform_templates import (
     _template_outer as _template_outer,
 )
 from .diff_symbols import _should_filter_transitive_runtime_symbols
-from .diff_types import _RESERVED_FIELD_RE
+from .diff_types_surface import RESERVED_FIELD
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
@@ -1186,11 +1186,6 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if not removed or not added:
         return changes
 
-    # Build lookup by demangled name with versioned namespace stripped.
-    # Matches Itanium-style ::v1::, ::__v2:: AND libc++-style ::__1::, ::__2::
-    # Anchored to :: on both sides to avoid matching inside identifiers.
-    _INLINE_NS_RE = re.compile(r"::(?:__)?(?:v)?\d+::")
-
     from .demangle import demangle_batch
 
     # In elf_only mode Function.name may still be mangled; demangle in batch to
@@ -1202,9 +1197,6 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if "::" in func_name:
             return func_name
         return _demangled.get(mangled, func_name)
-
-    def _strip_inline_ns(name: str) -> str:
-        return _INLINE_NS_RE.sub("::", name)
 
     # Index ALL removed symbols by stripped name (not just those with a
     # namespace match) so that unversioned→versioned moves are caught too.
@@ -1221,10 +1213,11 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new_name = _func_name_for_matching(m, f.name)
         stripped = _strip_inline_ns(new_name)
         if stripped in removed_by_stripped:
-            # Only count as a move if at least one side had an inline namespace
             old_m = removed_by_stripped[stripped][0]
             old_name = _func_name_for_matching(old_m, old_map[old_m].name)
-            if stripped != new_name or stripped != old_name:
+            if INLINE_NAMESPACE_MOVE.confirmed(
+                (old_name, new_name), (old_m, m, old_map, new_map)
+            ):
                 matched_count += 1
 
     # Only emit if we find a pattern of namespace-version moves (2+ symbols)
@@ -1612,7 +1605,7 @@ def _added_fields_by_offset(
     """
     by_offset: dict[int, list[FieldInfo]] = {}
     for fn in added_names:
-        if _RESERVED_FIELD_RE.match(fn):
+        if RESERVED_FIELD.matches(fn):
             continue
         by_offset.setdefault(new_fields[fn].byte_offset, []).append(new_fields[fn])
     return by_offset
@@ -1638,7 +1631,7 @@ def _removed_field_changes(
 
     for fname in removed_names:
         old_f = old_fields[fname]
-        if _RESERVED_FIELD_RE.match(fname):
+        if RESERVED_FIELD.matches(fname):
             candidate = next(
                 (
                     c
@@ -1865,9 +1858,7 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
             if mname in new_e.members and new_e.members[mname] != old_val:
                 kind = (
                     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED
-                    if is_sentinel_enum_member(mname)
-                    and holds_enum_maximum(mname, old_e.members)
-                    and holds_enum_maximum(mname, new_e.members)
+                    if is_confirmed_enum_sentinel(mname, old_e.members, new_e.members)
                     else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
                 )
                 changes.append(

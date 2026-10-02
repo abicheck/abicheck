@@ -169,15 +169,6 @@ def test_enrich_affected_symbols_no_type_changes_noop():
     assert changes[0].affected_symbols is None
 
 
-# ── _public_function_uses_type_by_value — non-public skip (539) ──────────────
-
-
-# ── _public_variable_uses_type_by_value — skip + match (551-554) ─────────────
-
-
-# ── _has_public_pointer_factory — non-public skip (602) ──────────────────────
-
-
 # ── _filter_reserved_field_renames — namespace-prefix continue (737) ─────────
 
 
