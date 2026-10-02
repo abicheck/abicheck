@@ -402,7 +402,7 @@ def test_ninja_query_invokes_subprocess(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "abicheck.buildsource.adapters.ninja.shutil.which", lambda _x: "/usr/bin/ninja"
     )
-    monkeypatch.setattr("abicheck.buildsource.adapters.ninja.subprocess.run", fake_run)
+    monkeypatch.setattr("abicheck.buildsource.adapters.ninja.run_bounded", fake_run)
     ev = NinjaAdapter(build_dir=tmp_path).collect()
     assert len(ev.compile_units) == 1
     assert any(o.key == "std:CXX" for o in ev.build_options)
@@ -417,7 +417,7 @@ def test_ninja_query_nonzero_exit_diagnostic(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "abicheck.buildsource.adapters.ninja.shutil.which", lambda _x: "/usr/bin/ninja"
     )
-    monkeypatch.setattr("abicheck.buildsource.adapters.ninja.subprocess.run", fake_run)
+    monkeypatch.setattr("abicheck.buildsource.adapters.ninja.run_bounded", fake_run)
     ev = NinjaAdapter(build_dir=tmp_path).collect()
     assert any("exited 1" in d for d in ev.diagnostics)
 

@@ -483,7 +483,7 @@ class TestClangAcceptsTarget:
                 argv, returncode, stdout="", stderr=stderr
             )
 
-        monkeypatch.setattr(tp.subprocess, "run", _fake_run)
+        monkeypatch.setattr(tp, "run_bounded", _fake_run)
 
     def test_accepted_target_returns_true(
         self, monkeypatch: pytest.MonkeyPatch
@@ -529,7 +529,7 @@ class TestClangAcceptsTarget:
         def _boom(argv, **kwargs):
             raise OSError("exec failed")
 
-        monkeypatch.setattr(tp.subprocess, "run", _boom)
+        monkeypatch.setattr(tp, "run_bounded", _boom)
         assert (
             tp._clang_accepts_target("/opt/clang", "digest4", "aarch64-linux-gnu")
             is None

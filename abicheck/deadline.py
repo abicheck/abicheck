@@ -60,7 +60,7 @@ import signal
 import subprocess
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
@@ -197,51 +197,31 @@ def bounded_timeout(default: float) -> float:
     return left
 
 
-def run_bounded(
+@contextmanager
+def supervised_popen(
     cmd: list[str],
     *,
-    timeout: float,
     cwd: str | None = None,
-    capture_output: bool = False,
-    text: bool = False,
+    env: Mapping[str, str] | None = None,
+    stdin: Any = None,
     stdout: Any = None,
     stderr: Any = None,
-    input: Any = None,
-) -> subprocess.CompletedProcess[Any]:
-    """``subprocess.run``, but bounded by the active deadline and safe to kill.
+    text: bool = False,
+) -> Iterator[subprocess.Popen[Any]]:
+    """Start *cmd* as a supervised child and yield its ``Popen`` handle.
 
-    *input*, like ``subprocess.run``'s, feeds the child's stdin and implies a
-    piped stdin — without it the child inherits this process's stdin, which
-    would hang a probe that reads from ``-`` (e.g. ``cc -E -x c++ -v -``)
-    under an interactive terminal instead of the empty/redirected stdin
-    ``subprocess.run(input=...)`` gives it.
-
-    The child is started in its own process group on POSIX
-    (``start_new_session=True``), so a timeout kills the *whole* tree via
-    :func:`_kill_process_tree` instead of leaving compiler-driver grandchildren
-    running as orphans. On non-POSIX platforms this degrades to
-    ``Popen.kill()`` on the single process (best effort; process-group
-    semantics don't exist the same way there).
-
-    Re-raises ``subprocess.TimeoutExpired`` on an in-flight timeout **only**
-    when no deadline is active — same contract as ``subprocess.run``, so
-    existing ``except subprocess.TimeoutExpired`` handlers keep working
-    unmodified for the unbudgeted case. When a deadline *is* active,
-    :func:`bounded_timeout` already capped ``effective_timeout`` to exactly
-    what was left of it, so any in-flight timeout under that scope is by
-    construction the budget running out, not an ordinary parse hang — this
-    raises :class:`DeadlineExceeded` instead, so a caller that (like
-    ``dumper.py``) deliberately leaves ``DeadlineExceeded`` uncaught gets a
-    budget-overflow signal instead of a plain-timeout one even when the
-    subprocess was already running when the deadline hit (not just when it
-    was already exhausted before spawning).
+    The one place in the codebase that starts a child in its own process
+    group (design-hardening plan, Phase 6). Every caller that needs the live
+    handle -- a capped reader, an RSS sampler -- uses this rather than its own
+    ``start_new_session=True``/``killpg`` pair, so each child gets the same
+    guarantees :func:`run_bounded` gives: its group is registered for
+    :func:`install_sigterm_cleanup` before any signal can miss it, and any
+    exception leaving the ``with`` block (a timeout, ``KeyboardInterrupt``,
+    a reader error) tears the whole group down via
+    :func:`terminate_process_tree`. A normal exit leaves the child alone; the
+    caller owns waiting for it.
     """
-    had_deadline = remaining() is not None
-    effective_timeout = bounded_timeout(timeout)
     use_pgroup = os.name == "posix"
-    if capture_output:
-        stdout = subprocess.PIPE
-        stderr = subprocess.PIPE
     if use_pgroup:
         # Close the Popen()->_register_pgroup() race two ways at once, since
         # each closes a different half of it (Codex review, PR #591, rounds
@@ -296,7 +276,8 @@ def run_bounded(
         proc = subprocess.Popen(  # noqa: S603 — cmd is caller-built argv, never shell text
             cmd,
             cwd=cwd,
-            stdin=subprocess.PIPE if input is not None else None,
+            env=env,
+            stdin=stdin,
             stdout=stdout,
             stderr=stderr,
             text=text,
@@ -311,9 +292,82 @@ def run_bounded(
     assert proc is not None
     try:
         try:
+            yield proc
+        except BaseException:
+            _kill_process_tree(proc, use_pgroup)
+            raise
+    finally:
+        if pgid is not None:
+            _unregister_pgroup(pgid)
+
+
+def terminate_process_tree(proc: subprocess.Popen[Any]) -> None:
+    """Tear down a :func:`supervised_popen` child and its whole group.
+
+    SIGTERM, a short grace, then SIGKILL (see :func:`_kill_process_tree`).
+    Safe to call more than once and on an already-exited child.
+    """
+    _kill_process_tree(proc, os.name == "posix")
+
+
+def run_bounded(
+    cmd: list[str],
+    *,
+    timeout: float,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    capture_output: bool = False,
+    text: bool = False,
+    stdout: Any = None,
+    stderr: Any = None,
+    input: Any = None,
+) -> subprocess.CompletedProcess[Any]:
+    """``subprocess.run``, but bounded by the active deadline and safe to kill.
+
+    *input*, like ``subprocess.run``'s, feeds the child's stdin and implies a
+    piped stdin — without it the child inherits this process's stdin, which
+    would hang a probe that reads from ``-`` (e.g. ``cc -E -x c++ -v -``)
+    under an interactive terminal instead of the empty/redirected stdin
+    ``subprocess.run(input=...)`` gives it.
+
+    The child is started in its own process group on POSIX
+    (``start_new_session=True``), so a timeout kills the *whole* tree via
+    :func:`_kill_process_tree` instead of leaving compiler-driver grandchildren
+    running as orphans. On non-POSIX platforms this degrades to
+    ``Popen.kill()`` on the single process (best effort; process-group
+    semantics don't exist the same way there).
+
+    Re-raises ``subprocess.TimeoutExpired`` on an in-flight timeout **only**
+    when no deadline is active — same contract as ``subprocess.run``, so
+    existing ``except subprocess.TimeoutExpired`` handlers keep working
+    unmodified for the unbudgeted case. When a deadline *is* active,
+    :func:`bounded_timeout` already capped ``effective_timeout`` to exactly
+    what was left of it, so any in-flight timeout under that scope is by
+    construction the budget running out, not an ordinary parse hang — this
+    raises :class:`DeadlineExceeded` instead, so a caller that (like
+    ``dumper.py``) deliberately leaves ``DeadlineExceeded`` uncaught gets a
+    budget-overflow signal instead of a plain-timeout one even when the
+    subprocess was already running when the deadline hit (not just when it
+    was already exhausted before spawning).
+    """
+    had_deadline = remaining() is not None
+    effective_timeout = bounded_timeout(timeout)
+    if capture_output:
+        stdout = subprocess.PIPE
+        stderr = subprocess.PIPE
+    with supervised_popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.PIPE if input is not None else None,
+        stdout=stdout,
+        stderr=stderr,
+        text=text,
+    ) as proc:
+        try:
             out, err = proc.communicate(input=input, timeout=effective_timeout)
         except subprocess.TimeoutExpired as exc:
-            _kill_process_tree(proc, use_pgroup)
+            terminate_process_tree(proc)
             # Drain the now-dead process's pipes so it doesn't linger as a zombie;
             # a short grace timeout, not the original (already-exhausted) one.
             try:
@@ -326,12 +380,6 @@ def run_bounded(
                 left = remaining()
                 raise DeadlineExceeded(left if left is not None else 0.0) from exc
             raise
-        except BaseException:
-            _kill_process_tree(proc, use_pgroup)
-            raise
-    finally:
-        if pgid is not None:
-            _unregister_pgroup(pgid)
     return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
 
 

@@ -40,6 +40,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from ...deadline import run_bounded
 from ..model import LayerConfidence
 from ..source_abi import SourceAbiTu, SourceEntity, SourceLocation
 from .base import SourceExtractionError
@@ -252,8 +253,8 @@ class AndroidHeaderAbiAdapter:
         if clang_argv:
             cmd += ["--", *clang_argv]
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=self.timeout, check=False
+            result = run_bounded(
+                cmd, capture_output=True, text=True, timeout=self.timeout
             )
         except subprocess.TimeoutExpired as exc:
             raise SourceExtractionError(

@@ -79,6 +79,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..deadline import run_bounded
 from ..dumper_toolchain import _tool_identity_metadata
 from .toolchain_bindings import BindingsFile
 
@@ -283,11 +284,10 @@ def _clang_accepts_target(selected_path: str, digest: str, target: str) -> bool 
     the same as a proven target mismatch.
     """
     try:
-        process = subprocess.run(
+        process = run_bounded(
             [selected_path, f"--target={target}", "-x", "c", "-fsyntax-only", "-"],
             input="",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=10,
             text=True,
             env={**os.environ, "LC_ALL": "C"},

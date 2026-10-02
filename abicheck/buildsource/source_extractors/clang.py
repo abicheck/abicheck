@@ -62,6 +62,7 @@ from typing import Any
 
 from ... import deadline
 from ..._compiler_options import clang_ast_dump_tail
+from ...deadline import run_bounded
 from ...dumper_clang import _is_intel_sycl_driver, _needs_sycl_host_only
 from ...header_conditionals import _include_guard_macro, _strip_comments
 from ..build_evidence import CompileUnit
@@ -211,13 +212,12 @@ def _clang_compiler_family(clang_bin: str) -> str:
     is a separate, independent identity source that isn't always present).
     """
     try:
-        r = subprocess.run(
+        r = run_bounded(
             [clang_bin, "-dM", "-E", "-x", "c++", "-"],
             input="",
             capture_output=True,
             text=True,
             timeout=5,
-            check=False,
         )
         if r.returncode == 0:
             return "intel-llvm" if "__INTEL_LLVM_COMPILER" in r.stdout else "clang"
@@ -235,12 +235,11 @@ def _clang_compiler_version(clang_bin: str) -> str:
     aborting extraction (compiler_version is provenance, not required input).
     """
     try:
-        r = subprocess.run(
+        r = run_bounded(
             [clang_bin, "-dumpversion"],
             capture_output=True,
             text=True,
             timeout=5,
-            check=False,
         )
         return r.stdout.strip() if r.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
