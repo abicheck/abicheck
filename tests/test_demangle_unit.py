@@ -65,7 +65,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("boom")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt", "_ZN3foo3barEv"],
                     returncode=0,
@@ -80,7 +80,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=1,
@@ -95,7 +95,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -110,7 +110,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.side_effect = [
                     subprocess.CompletedProcess(
                         args=["c++filt"],
@@ -133,7 +133,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -148,7 +148,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run", side_effect=FileNotFoundError):
+            with patch("abicheck.demangle.run_bounded", side_effect=FileNotFoundError):
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
 
@@ -161,7 +161,9 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run", side_effect=FileNotFoundError) as mock_run:
+            with patch(
+                "abicheck.demangle.run_bounded", side_effect=FileNotFoundError
+            ) as mock_run:
                 assert _mod.demangle("_ZN3foo3barEv") is None
                 first_call_count = mock_run.call_count
                 assert first_call_count > 0
@@ -176,7 +178,8 @@ class TestDemangle:
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
             with patch(
-                "subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 5)
+                "abicheck.demangle.run_bounded",
+                side_effect=subprocess.TimeoutExpired("c++filt", 5),
             ):
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
@@ -187,7 +190,7 @@ class TestDemangle:
         binary genuinely doesn't exist -- both backends confirmed absent,
         not merely one symbol failing to demangle."""
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run", side_effect=FileNotFoundError):
+            with patch("abicheck.demangle.run_bounded", side_effect=FileNotFoundError):
                 _mod.demangle("_ZN3foo3barEv")
                 _mod.demangle.cache_clear()
                 _mod.demangle("_ZN3foo3bazEv")
@@ -209,7 +212,7 @@ class TestDemangle:
             return real_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=_fake_import):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt", "_ZN3foo3barEv"],
                     returncode=0,
@@ -244,7 +247,9 @@ class TestDemangle:
 
         with caplog.at_level("WARNING", logger=_mod._log.name):
             with patch("builtins.__import__", side_effect=_fake_import):
-                with patch("subprocess.run", side_effect=FileNotFoundError):
+                with patch(
+                    "abicheck.demangle.run_bounded", side_effect=FileNotFoundError
+                ):
                     result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
         assert _mod._cxxfilt_import_confirmed_missing is False
@@ -282,7 +287,9 @@ class TestDemangle:
 
         with caplog.at_level("WARNING", logger=_mod._log.name):
             with patch("builtins.__import__", side_effect=_fake_import):
-                with patch("subprocess.run", side_effect=FileNotFoundError):
+                with patch(
+                    "abicheck.demangle.run_bounded", side_effect=FileNotFoundError
+                ):
                     result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
         assert _mod._warned_no_demangler is True
@@ -301,7 +308,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("not itanium")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 # c++filt ran fine (returncode 0) but simply echoed the
                 # input back unchanged -- the canonical "couldn't demangle
                 # this one" outcome, not a missing-tool outcome.
@@ -336,7 +343,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = cxxfilt_effect
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt", "_ZFAILS"],
                     returncode=cppfilt_returncode,
@@ -364,7 +371,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -390,7 +397,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = RuntimeError("no")
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -409,7 +416,7 @@ class TestDemangle:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = lambda s: s  # echo back unchanged
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -484,7 +491,7 @@ class TestDemangleBatch:
 
         mock_cxxfilt.demangle.side_effect = _side_effect
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -498,7 +505,7 @@ class TestDemangleBatch:
     def test_cxxfilt_import_error_falls_to_cppfilt(self):
         """When cxxfilt can't be imported, use c++filt for all."""
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -511,7 +518,7 @@ class TestDemangleBatch:
     def test_cppfilt_file_not_found_batch(self):
         """When c++filt is missing, batch returns empty for those symbols."""
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run", side_effect=FileNotFoundError):
+            with patch("abicheck.demangle.run_bounded", side_effect=FileNotFoundError):
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {}
 
@@ -520,7 +527,9 @@ class TestDemangleBatch:
         c++filt itself isn't installed, a later demangle_batch() call for
         different symbols must not re-attempt the doomed subprocess launch."""
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run", side_effect=FileNotFoundError) as mock_run:
+            with patch(
+                "abicheck.demangle.run_bounded", side_effect=FileNotFoundError
+            ) as mock_run:
                 assert _mod.demangle_batch(["_ZN3foo3barEv"]) == {}
                 first_call_count = mock_run.call_count
                 assert first_call_count > 0
@@ -530,14 +539,15 @@ class TestDemangleBatch:
     def test_cppfilt_timeout_batch(self):
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch(
-                "subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 30)
+                "abicheck.demangle.run_bounded",
+                side_effect=subprocess.TimeoutExpired("c++filt", 30),
             ):
                 result = _mod.demangle_batch(["_ZN3foo3barEv"])
         assert result == {}
 
     def test_cppfilt_non_zero_return_batch(self):
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=1,
@@ -550,7 +560,7 @@ class TestDemangleBatch:
     def test_cppfilt_same_as_input_skipped(self):
         """Symbols that c++filt returns unchanged are excluded."""
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -563,7 +573,7 @@ class TestDemangleBatch:
     def test_cppfilt_batch_no_strip_underscore_fallback(self):
         """Batch demangling also retries with --no-strip-underscore for Darwin."""
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.side_effect = [
                     subprocess.CompletedProcess(
                         args=["c++filt"],
@@ -586,7 +596,7 @@ class TestDemangleBatch:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = lambda s: s  # return unchanged
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -618,7 +628,7 @@ class TestDemangleBatch:
 
     def test_macho_double_underscore_prefix_via_cppfilt(self):
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -640,7 +650,7 @@ class TestDemangleBatch:
         underscore symbol instead of the canonical input it was actually
         given made this read as a real (and wrong) demangling."""
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -656,7 +666,7 @@ class TestDemangleBatch:
         mock_cxxfilt = MagicMock()
         mock_cxxfilt.demangle.side_effect = lambda s: s  # echo back unchanged
         with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -728,7 +738,7 @@ class TestFindingA_Phase2BroadExcept:
             return real_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=_bad_import):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -753,7 +763,7 @@ class TestFindingA_Phase2BroadExcept:
 
         sym = "_ZN3foo3barEv"
         with patch("builtins.__import__", side_effect=_bad_import):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -779,7 +789,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         """Missing c++filt binary: FAIL cache stays empty."""
         sym = self._sym()
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run", side_effect=FileNotFoundError):
+            with patch("abicheck.demangle.run_bounded", side_effect=FileNotFoundError):
                 _mod.demangle_batch([sym])
         assert sym not in _mod._BATCH_CACHE_FAIL
 
@@ -788,7 +798,8 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         sym = self._sym()
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch(
-                "subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 30)
+                "abicheck.demangle.run_bounded",
+                side_effect=subprocess.TimeoutExpired("c++filt", 30),
             ):
                 _mod.demangle_batch([sym])
         assert sym not in _mod._BATCH_CACHE_FAIL
@@ -797,7 +808,10 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         """OSError from subprocess: FAIL cache stays empty."""
         sym = self._sym()
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run", side_effect=OSError("permission denied")):
+            with patch(
+                "abicheck.demangle.run_bounded",
+                side_effect=OSError("permission denied"),
+            ):
                 _mod.demangle_batch([sym])
         assert sym not in _mod._BATCH_CACHE_FAIL
 
@@ -805,7 +819,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         """Non-zero returncode: c++filt ran but failed; FAIL cache stays empty."""
         sym = self._sym()
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=1,
@@ -821,7 +835,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         sym = self._sym()
         with patch.dict("sys.modules", {"cxxfilt": None}):
             # First call: c++filt returns non-zero.
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=1,
@@ -833,7 +847,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
             assert sym not in _mod._BATCH_CACHE_FAIL
 
             # Second call: c++filt now works.
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -848,7 +862,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         IS recorded as FAIL so we don't spawn c++filt for it again."""
         sym = self._sym()
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 # returncode=0 but output equals the mangled name → not demangled.
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
@@ -990,7 +1004,7 @@ class TestPrewarmDemangleFromJsonValue:
             "_ZN3ghi3jklEv": "ghi::jkl()",
         }
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 mock_run.return_value = subprocess.CompletedProcess(
                     args=["c++filt"],
                     returncode=0,
@@ -1004,7 +1018,7 @@ class TestPrewarmDemangleFromJsonValue:
                 )
 
             # Every symbol is now a pure cache hit -- no further subprocess.
-            with patch("subprocess.run") as mock_run_after:
+            with patch("abicheck.demangle.run_bounded") as mock_run_after:
                 for sym, want in expected.items():
                     assert _mod.demangle(sym, accept_macho_prefix=True) == want
                 mock_run_after.assert_not_called()
@@ -1012,7 +1026,7 @@ class TestPrewarmDemangleFromJsonValue:
     def test_no_tokens_makes_no_call(self):
         value = {"a": ["b", "c"], "d": (1, 2, None, True), "e": {"f": "plain text"}}
         with patch.dict("sys.modules", {"cxxfilt": None}):
-            with patch("subprocess.run") as mock_run:
+            with patch("abicheck.demangle.run_bounded") as mock_run:
                 _mod.prewarm_demangle_from_json_value(value)
         mock_run.assert_not_called()
 

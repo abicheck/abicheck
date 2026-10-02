@@ -145,7 +145,7 @@ class TestRunLayoutTool:
                 return_value=(True, False, False, "gnu"),
             ),
             patch(
-                "abicheck.clang_layout_tool.subprocess.run",
+                "abicheck.clang_layout_tool.run_bounded",
                 side_effect=subprocess.TimeoutExpired(cmd="x", timeout=1),
             ),
         ):
@@ -165,9 +165,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
-            patch(
-                "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
-            ),
+            patch("abicheck.clang_layout_tool.run_bounded", return_value=fake_result),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
@@ -188,9 +186,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
-            patch(
-                "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
-            ),
+            patch("abicheck.clang_layout_tool.run_bounded", return_value=fake_result),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
@@ -220,9 +216,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
-            patch(
-                "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
-            ),
+            patch("abicheck.clang_layout_tool.run_bounded", return_value=fake_result),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
@@ -255,7 +249,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_system_includes",
                 return_value=(),
             ),
-            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
+            patch("abicheck.clang_layout_tool.run_bounded", side_effect=_fake_run),
         ):
             result = run_layout_tool("/path/to/tool", [header], [])
 
@@ -296,7 +290,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_system_includes",
                 return_value=("/usr/include/probed-libstdcxx",),
             ) as mock_probe,
-            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
+            patch("abicheck.clang_layout_tool.run_bounded", side_effect=_fake_run),
         ):
             run_layout_tool("/path/to/tool", [header], [], gcc_options="--sysroot=/x")
 
@@ -349,7 +343,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_system_includes",
                 return_value=(),
             ),
-            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
+            patch("abicheck.clang_layout_tool.run_bounded", side_effect=_fake_run),
         ):
             result = run_layout_tool("/path/to/tool", [header], [])
 
@@ -403,7 +397,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_system_includes",
                 return_value=(),
             ),
-            patch("abicheck.clang_layout_tool.subprocess.run", side_effect=_fake_run),
+            patch("abicheck.clang_layout_tool.run_bounded", side_effect=_fake_run),
         ):
             result = run_layout_tool("/path/to/tool", [h_ok, h_bad], [])
 
