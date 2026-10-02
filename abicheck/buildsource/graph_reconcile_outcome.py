@@ -32,6 +32,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from abicheck.model.entity_identity import CanonicalIdentity
+from abicheck.model.graph_facts import GraphNode
 
 from ..model.graph_identity import (
     closure_location_free_identity,
@@ -94,6 +95,16 @@ OUTCOME_RECONCILED_UNRESOLVED = "declaration_identity_reconciled_unresolved"
 _COORDINATE_ONLY_KINDS: frozenset[str] = frozenset(
     {"record_type", "enum_type", "typedef"}
 )
+
+
+def own_file(node: GraphNode) -> str:
+    """A node's own recorded declaring path as a comparison key -- the
+    fallback when no ``SOURCE_DECLARES`` edge names one. Its identity drops
+    an unanchored absolute path, but two such paths in one run must still
+    compare different: "unknown" is not "same file"."""
+    return project_layout_spelling(
+        str(node.attrs.get("def_file") or node.attrs.get("file") or "")
+    )
 
 
 def _signature_tail(identity: CanonicalIdentity) -> str:
