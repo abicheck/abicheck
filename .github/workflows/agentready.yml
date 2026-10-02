@@ -5,8 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: '0 6 * * 1'
+  # No weekly schedule: the scanner is pinned to a commit SHA and every
+  # change to main already gets a `scan` run from `push`, so a cron run
+  # re-scanned an unchanged tree with an unchanged tool. Use
+  # workflow_dispatch to re-scan on demand.
   workflow_dispatch:
 
 concurrency:
