@@ -918,7 +918,6 @@ authoritative open list:
 | `--severity-preset` merged into policy selection | declined for now — needs gate-activation convergence first |
 | `--select-required` merged into an expected inventory | ADR-065 P5 (package component inventories) |
 | `dump --compression`, `--dry-run`→`--plan`, `--used-by-manifest`→`--used-by @FILE` | declined with a measurement (7k/7l) |
-| `compare --env-matrix` → `deployment:`, `dump --build-target` → `build.targets` | tracked follow-ups in `rulings.py` (need a new config key / caller rewiring) |
 | Per-library scope ledger and suppression audit in release human output | missing feature left by 7o (machine projections unaffected) |
 
 ### Phase 8 — `deps` convergence (ADR-068 D6) — done
