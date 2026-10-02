@@ -92,16 +92,10 @@ project.
 from __future__ import annotations
 
 import dataclasses
-import functools
-import inspect
 from collections import deque
-from collections.abc import Callable, Container, Mapping, Sequence, Set as AbstractSet
+from collections.abc import Container, Mapping, Sequence, Set as AbstractSet
 from pathlib import Path
-from typing import Any
 
-from .dumper_clang_streaming import suppress_streaming_prune
-from .extract.dependency_exclusion import dependency_exclusion_scope
-from .extract.dump_manifest_roots import dump_manifest_header_roots
 from .extract.flat_map_dependency_scope import kept_reference_text, scope_flat_maps
 from .extract.header_exclusions import scoping_header_predicate
 from .extract.occurrence_dependency_scope import (
@@ -974,127 +968,6 @@ def resolve_dependency_scope(
     if not snap.from_headers:
         return snap
     return dataclasses.replace(snap, dependency_scope="full")
-
-
-def apply_dependency_scope_to_run_dump_result(
-    snap: AbiSnapshot,
-    include_dependencies: bool,
-    bound_args: inspect.BoundArguments,
-) -> AbiSnapshot:
-    """``service.run_dump``'s own choke point: *include_dependencies*
-    defaults to ``True`` there (preserving every existing caller — scan,
-    ``dump``'s own inline calls — that doesn't pass it explicitly);
-    only ``compare`` opts into ``False`` to filter its live-binary dumping
-    the same way ``dump`` filters by default. *bound_args* is
-    ``inspect.Signature.bind_partial(*args, **kwargs)`` against the real
-    dumping function's signature — used to recover the caller's ``headers``
-    regardless of whether it was passed positionally or by keyword, the
-    same ``-H``/``--header`` root set :func:`resolve_dependency_scope` needs
-    to avoid misclassifying an installed library's own system-prefixed path
-    as a dependency. ``--dump-manifest`` is mutually exclusive with ``-H``,
-    so ``headers`` alone is empty for a manifest-driven dump — its own
-    project-owned roots (:func:`dump_manifest_header_roots`) are folded in
-    too, the same way ``cli_dump_helpers.py``'s ``dump`` path already does,
-    else a manifest project header installed under a system-like prefix
-    would be misclassified as a dependency (Codex review). ``public_headers``/
-    ``public_header_dirs`` (ADR-024 Phase 1 / ADR-055 D1's ``InputSpec.
-    public_header_dirs``) are folded in too -- an explicitly-declared public
-    file or directory rooted under a system-like prefix (e.g. an installed
-    library's own ``/usr/include/mylib/api.h``, reached transitively rather
-    than listed in ``headers``) must not be misclassified as a dependency
-    either (Codex review, twice: the first pass only folded in
-    ``public_header_dirs``, missing the file-level ``public_headers`` set)."""
-    return resolve_dependency_scope(
-        snap,
-        include_dependencies,
-        _run_dump_header_roots(bound_args),
-    )
-
-
-def _run_dump_header_roots(bound_args: inspect.BoundArguments) -> tuple[Any, ...]:
-    """Scoping roots for one ``run_dump`` call (see the function above)."""
-    headers = tuple(bound_args.arguments.get("headers") or ())
-    manifest_roots = dump_manifest_header_roots(
-        bound_args.arguments.get("dump_manifest")
-    )
-    public_headers = tuple(bound_args.arguments.get("public_headers") or ())
-    public_header_dirs = tuple(bound_args.arguments.get("public_header_dirs") or ())
-    return headers + manifest_roots + public_headers + public_header_dirs
-
-
-def wrap_run_dump_with_dependency_scope(
-    uncached_fn: Callable[..., AbiSnapshot],
-) -> Callable[..., AbiSnapshot]:
-    """Build ``service.run_dump`` from ``service._run_dump_uncached``: a
-    thin wrapper adding an *include_dependencies* keyword (default ``False``,
-    matching the CLI flag and ``InputSpec.include_dependencies``) and applying
-    :func:`apply_dependency_scope_to_run_dump_result` to the result — see that
-    function's own docstring.
-
-    ``functools.wraps`` copies ``__wrapped__`` from *uncached_fn*, which
-    ``inspect.signature`` follows by default — silently hiding the new
-    ``include_dependencies`` keyword from anything that introspects the
-    wrapper's signature (the generated Python API reference, or a
-    signature-driven caller/validation framework), even though it's a real,
-    accepted parameter (Codex review). ``__signature__`` is set explicitly
-    below to the real, extended signature so introspection sees it.
-    """
-    sig = inspect.signature(uncached_fn)
-    new_param = inspect.Parameter(
-        "include_dependencies",
-        kind=inspect.Parameter.KEYWORD_ONLY,
-        default=False,  # must track the wrapper's own default below
-        # A bare string, matching every other parameter's annotation here:
-        # this module (like the rest of the codebase) has `from __future__
-        # import annotations`, so `inspect.signature` on a real function
-        # already returns string annotations, not type objects.
-        annotation="bool",
-    )
-    old_params = list(sig.parameters.values())
-    # A KEYWORD_ONLY parameter must sort before any VAR_KEYWORD (**kwargs) one
-    # -- insert just ahead of it rather than always appending, so this stays
-    # valid even against a caller signature that ends in **kwargs (as a test
-    # double's does; the real `_run_dump_uncached` has none).
-    insert_at = next(
-        (
-            i
-            for i, p in enumerate(old_params)
-            if p.kind is inspect.Parameter.VAR_KEYWORD
-        ),
-        len(old_params),
-    )
-    extended_sig = sig.replace(
-        parameters=[*old_params[:insert_at], new_param, *old_params[insert_at:]]
-    )
-
-    @functools.wraps(uncached_fn)
-    def run_dump(
-        *args: object, include_dependencies: bool = False, **kwargs: object
-    ) -> AbiSnapshot:
-        # Default matches the CLI flag and `InputSpec`; see that field's note.
-        # A `True` request wants the full, unscoped declaration set -- the
-        # opt-in streaming pruner (dumper_clang_streaming.py) has no
-        # visibility into this parameter at all (it prunes deep inside the
-        # clang AST parse, long before this wrapper's post-hoc filter would
-        # run), so without this it could silently drop dependency-header
-        # functions/variables even though the caller explicitly asked to
-        # keep them -- a real correctness bug (Codex review, PR #840), not
-        # just a missing "auto-enable from this flag" convenience. `False`
-        # needs no suppression: the pruner can never be more aggressive than
-        # this wrapper's own filter is about to apply anyway.
-        bound = sig.bind_partial(*args, **kwargs)  # extract.dependency_exclusion
-        with (
-            suppress_streaming_prune()
-            if include_dependencies
-            else dependency_exclusion_scope(_run_dump_header_roots(bound))
-        ):
-            snap = uncached_fn(*args, **kwargs)
-        return apply_dependency_scope_to_run_dump_result(
-            snap, include_dependencies, bound
-        )
-
-    run_dump.__signature__ = extended_sig  # type: ignore[attr-defined]
-    return run_dump
 
 
 def _scoped_semantic_ir(

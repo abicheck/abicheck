@@ -203,9 +203,9 @@ def _apply_native_provenance(
     See ``service._apply_native_provenance``'s identical parameter for why
     (Codex review, fresh evidence).
     """
-    from .workflows.extraction import apply_provenance
+    from .workflows.snapshot_factory import finish_provenance
 
-    return apply_provenance(
+    return finish_provenance(
         snap,
         public_headers,
         public_header_dirs,

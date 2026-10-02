@@ -16,7 +16,6 @@ from types import SimpleNamespace
 from abicheck.dumper_scoping import (
     resolve_dependency_scope,
     scope_snapshot_excluding_dependencies,
-    wrap_run_dump_with_dependency_scope,
 )
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
@@ -42,6 +41,7 @@ from abicheck.model.semantic_ir import (
     SemanticIR,
     semantic_ir_conflict_key,
 )
+from abicheck.workflows.run_dump_scope import wrap_run_dump_with_dependency_scope
 
 _SYSTEM_HEADER = "/usr/include/c++/11/string"
 _OWN_HEADER = "/src/myproject/include/api.h"

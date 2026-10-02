@@ -69,6 +69,8 @@ __all__ = [
     "ProvenanceInputs",
     "SnapshotFinish",
     "absent_baseline",
+    "finish_dependency_scope",
+    "finish_ownership",
     "finish_provenance",
     "finish_snapshot",
     "new_snapshot",
@@ -166,6 +168,33 @@ def finish_provenance(
                 public_headers, public_header_dirs, include_search_dirs
             )
         ),
+    )
+
+
+def finish_dependency_scope(
+    snapshot: AbiSnapshot,
+    include_dependencies: bool,
+    header_roots: Sequence[Path] | None = None,
+) -> AbiSnapshot:
+    """:func:`finish_snapshot` with only the dependency-scoping pass."""
+    return finish_snapshot(
+        snapshot,
+        SnapshotFinish(
+            dependency_scope=DependencyScopeInputs(include_dependencies, header_roots)
+        ),
+    )
+
+
+def finish_ownership(
+    snapshot: AbiSnapshot,
+    request: OwnershipRequest | None,
+    headers: Sequence[Path] | None,
+    public_header_dirs: Sequence[Path] | None,
+) -> AbiSnapshot:
+    """:func:`finish_snapshot` with only the ownership pass (ADR-075)."""
+    return finish_snapshot(
+        snapshot,
+        SnapshotFinish(ownership=OwnershipInputs(request, headers, public_header_dirs)),
     )
 
 

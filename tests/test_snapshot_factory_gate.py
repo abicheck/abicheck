@@ -233,3 +233,112 @@ def test_pipeline_without_baseline_requires_the_factory_stand_in() -> None:
         PipelineContext(old=None, new=new, absent_baseline=stand_in).baseline_or_empty
         is stand_in
     )
+
+
+# ── the finishing passes run only through the factory ─────────────────────
+
+#: The snapshot-level finishing passes. Calling one directly lets a route
+#: apply it in a different order, or forget it, which is the F2 family the
+#: factory exists to close.
+FINISHING_PASSES = frozenset(
+    {
+        "apply_provenance",
+        "resolve_dependency_scope",
+        "classify_extracted",
+        "stamp_ownership",
+    }
+)
+
+#: (module, pass) pairs allowed to call a pass directly.
+ALLOWED_PASS_CALLS: dict[tuple[str, str], str] = {
+    (FACTORY, "apply_provenance"): "factory",
+    (FACTORY, "resolve_dependency_scope"): "factory",
+    (FACTORY, "classify_extracted"): "factory",
+    ("abicheck/workflows/ownership_request.py", "stamp_ownership"): (
+        "classify_extracted's own implementation: the ownership pass the factory calls"
+    ),
+}
+
+
+def pass_calls(source: str) -> list[tuple[int, str]]:
+    """``(line, pass)`` for every direct call of a finishing pass."""
+    out = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = (
+                func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            )
+            if name in FINISHING_PASSES:
+                out.append((node.lineno, name))
+    return sorted(out)
+
+
+@pytest.mark.repo_scan
+def test_finishing_passes_only_through_factory() -> None:
+    offenders = [
+        f"{rel}:{line} {name}"
+        for path in _production_modules()
+        for rel in [path.relative_to(REPO).as_posix()]
+        for line, name in pass_calls(path.read_text(encoding="utf-8"))
+        if (rel, name) not in ALLOWED_PASS_CALLS
+    ]
+    assert not offenders, (
+        "apply finishing passes through workflows.snapshot_factory "
+        f"(finish_snapshot / finish_provenance / finish_dependency_scope / finish_ownership): {offenders}"
+    )
+
+
+@pytest.mark.repo_scan
+def test_pass_allowlist_is_not_stale() -> None:
+    for rel, name in ALLOWED_PASS_CALLS:
+        calls = pass_calls((REPO / rel).read_text(encoding="utf-8"))
+        assert any(n == name for _, n in calls), f"stale entry: {rel} {name}"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("apply_provenance(s, None, None)\n", [(1, "apply_provenance")]),
+        ("m.classify_extracted(s, None, [], [])\n", [(1, "classify_extracted")]),
+        ("from x import apply_provenance\n", []),
+        ("finish_provenance(s, None, None)\n", []),
+    ],
+)
+def test_pass_call_detector(source: str, expected: list[tuple[int, str]]) -> None:
+    assert pass_calls(source) == expected
+
+
+def test_single_pass_helpers_match_finish_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each one-pass helper runs exactly its pass, with its arguments."""
+    import abicheck.dumper_scoping as scoping
+    import abicheck.provenance as provenance
+    import abicheck.workflows.ownership_request as ownership
+    from abicheck.workflows import snapshot_factory as sf
+
+    seen: list[tuple[str, tuple[object, ...]]] = []
+    monkeypatch.setattr(
+        provenance,
+        "apply_provenance",
+        lambda snap, h, d, include_search_dirs=None: seen.append(
+            ("p", (h, d, include_search_dirs))
+        ),
+    )
+    monkeypatch.setattr(
+        scoping,
+        "resolve_dependency_scope",
+        lambda snap, inc, roots: seen.append(("s", (inc, roots))) or snap,
+    )
+    monkeypatch.setattr(
+        ownership,
+        "classify_extracted",
+        lambda snap, r, h, d: seen.append(("o", (r, h, d))),
+    )
+    snap = sf.absent_baseline("l")
+    a, b = [Path("a.h")], [Path("inc")]
+    assert sf.finish_provenance(snap, a, b, include_search_dirs=b) is snap
+    assert sf.finish_dependency_scope(snap, True, a) is snap
+    assert sf.finish_ownership(snap, None, a, b) is snap
+    assert seen == [("p", (a, b, b)), ("s", (True, a)), ("o", (None, a, b))]

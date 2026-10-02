@@ -493,9 +493,9 @@ def _write_snapshot_output(
     # check_requested_depth_satisfied's docstring. Checked last, after every
     # embed step above has had its chance to fill in build_source.
     check_requested_depth_satisfied(depth, snap)
-    from .workflows.extraction import resolve_dependency_scope
+    from .workflows.snapshot_factory import finish_dependency_scope
 
-    snap = resolve_dependency_scope(snap, include_dependencies, header_roots)
+    snap = finish_dependency_scope(snap, include_dependencies, header_roots)
     # ADR-059: one payload dict, one JSON encode -- previously this built a
     # full JSON *string* via snapshot_to_json(), then fold_dump_provenance_
     # into_json() re-parsed and re-serialized that entire string just to

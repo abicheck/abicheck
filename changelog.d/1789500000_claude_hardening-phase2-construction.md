@@ -9,7 +9,10 @@
   `workflows/snapshot_factory.py` (`new_snapshot`, `finish_snapshot`,
   `absent_baseline`), which applies provenance, dependency scoping and
   ownership in one fixed order; only the storage decoders construct directly,
-  enforced by a `repo_scan` gate. `build_snapshot_from_dwarf` moved to
+  enforced by a `repo_scan` gate, and the finishing passes can only be
+  applied through the factory (a second gate). `wrap_run_dump_with_dependency_scope`
+  and `apply_dependency_scope_to_run_dump_result` moved from `dumper_scoping` to
+  `abicheck.workflows.run_dump_scope`. `build_snapshot_from_dwarf` moved to
   `abicheck.workflows.dwarf_snapshot_assembly` (the DIE walk stays in
   `dwarf_snapshot.extract_dwarf_declarations`), and the unused
   `python_ext.detect_python_extension_from_binary` was deleted.

@@ -384,7 +384,7 @@ def run_clang_to_ast_file(
 #: True`` default -- most callers other than ``compare``'s live-binary
 #: operand). Both of the choke points that *do* know that
 #: (``cli_dump_helpers.py``'s ``perform_elf_dump``/``handle_non_elf_dump``,
-#: and ``dumper_scoping.wrap_run_dump_with_dependency_scope``) wrap their own
+#: and ``workflows.run_dump_scope.wrap_run_dump_with_dependency_scope``) wrap their own
 #: header-AST-parsing call in ``dumper_clang_streaming.
 #: suppress_streaming_prune()`` whenever a full/unscoped dump was requested,
 #: which this env-var check honors via ``streaming_prune_suppressed()``
@@ -432,7 +432,7 @@ STREAM_PRUNE_DEPENDENCY_DECLS_ENV_VAR = "ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS"
 def _streaming_prune_enabled() -> bool:
     # `streaming_prune_suppressed()` wins regardless of the env var: it means
     # the caller (cli_dump_helpers.py's perform_elf_dump/handle_non_elf_dump,
-    # or dumper_scoping.wrap_run_dump_with_dependency_scope) already knows
+    # or workflows.run_dump_scope.wrap_run_dump_with_dependency_scope) already knows
     # this request wants the full, unscoped declaration set
     # (`include_dependencies=True`) and has wrapped this call in
     # `dumper_clang_streaming.suppress_streaming_prune()` accordingly -- see

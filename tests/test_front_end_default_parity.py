@@ -49,7 +49,7 @@ import pytest
 
 from abicheck import service
 from abicheck.cli import main
-from abicheck.dumper_scoping import wrap_run_dump_with_dependency_scope
+from abicheck.workflows.run_dump_scope import wrap_run_dump_with_dependency_scope
 from abicheck.service import InputSpec
 
 #: Options a caller can reach from more than one front end, as

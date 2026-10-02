@@ -236,7 +236,7 @@ from .extract.dependency_header_roots import dependency_header_predicate
 #: post-hoc filter, and it cannot be *no* filter at all when that is what was
 #: asked for. The two call sites that already know ``include_dependencies``
 #: (``cli_dump_helpers.py``'s ``perform_elf_dump``/``handle_non_elf_dump``,
-#: and ``dumper_scoping.wrap_run_dump_with_dependency_scope``) each wrap
+#: and ``workflows.run_dump_scope.wrap_run_dump_with_dependency_scope``) each wrap
 #: their own header-AST-parsing call in :func:`suppress_streaming_prune` when
 #: it is ``True`` -- the same "two independent choke points" this module's
 #: sibling known-gap note already names for the *opposite* (auto-enable)

@@ -5077,7 +5077,7 @@ class TestTryAttachNumpyCapiSurface:
 
 class TestRunDumpDependencyScope:
     """``run_dump`` is built from ``_run_dump_uncached`` via
-    ``dumper_scoping.wrap_run_dump_with_dependency_scope``. Its
+    ``workflows.run_dump_scope.wrap_run_dump_with_dependency_scope``. Its
     ``include_dependencies`` default is ``False`` -- the same value
     ``dump --include-system-declarations`` and
     ``InputSpec.include_dependencies`` carry -- so a Tier-2 caller that omits

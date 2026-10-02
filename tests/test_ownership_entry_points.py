@@ -149,7 +149,7 @@ def test_every_snapshot_producer_call_is_classified() -> None:
 def test_stamped_sites_really_call_the_stamp() -> None:
     """A site listed as stamped names the function that stamps it, and that
     function really calls ``classify_extracted`` (directly, or through the
-    snapshot factory's ``finish_snapshot`` with ``OwnershipInputs``)."""
+    snapshot factory's ``finish_ownership``/``finish_snapshot``)."""
     bodies = {
         n.name: n
         for _, tree in _parsed_sources()
@@ -167,6 +167,7 @@ def test_stamped_sites_really_call_the_stamp() -> None:
         }
         assert (
             "classify_extracted" in called
+            or "finish_ownership" in called
             or {
                 "finish_snapshot",
                 "OwnershipInputs",
