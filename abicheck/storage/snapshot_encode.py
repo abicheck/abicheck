@@ -32,7 +32,7 @@ import pathlib
 from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
 
-from ..model import AbiSnapshot
+from ..model import AbiSnapshot, FactStatus
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .acyclic_json import gc_paused
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
@@ -311,6 +311,45 @@ _DECLARATION_KEY_ANCHORS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+#: Schema v54's per-slot resolved type identities, written only when a
+#: producer captured them: ``None`` ("not captured") is the default for every
+#: producer but castxml, so omitting it keeps a snapshot from any other
+#: producer -- and every digest over one -- byte-identical to v53. The decoder
+#: reads the missing key as ``NOT_COLLECTED`` (``fact_codec.
+#: validated_identities``).
+_TYPE_IDENTITY_KEY = "type_identities_fact"
+_RETURN_TYPE_IDENTITY_KEY = "return_type_identities_fact"
+
+
+def _drop_uncaptured(entry: dict[str, Any], key: str) -> None:
+    """Omit an uncaptured slot fact: ``None``, or a bare ``NOT_COLLECTED``
+    (no value, diagnostics or producer) -- which is exactly what the decoder
+    reads an absent key back as, so omitting it keeps a load/save round trip
+    byte-stable instead of materialising the decoder's answer on re-save."""
+    if key not in entry:
+        return
+    fact = entry[key]
+    if fact is None or (
+        fact.get("status") in (FactStatus.NOT_COLLECTED, FactStatus.NOT_COLLECTED.value)
+        and fact.get("value") is None
+        and not fact.get("diagnostics")
+        and fact.get("producer") is None
+    ):
+        del entry[key]
+
+
+def _drop_uncaptured_type_identities(d: dict[str, Any]) -> None:
+    for fn in d.get("functions", ()):
+        _drop_uncaptured(fn, _RETURN_TYPE_IDENTITY_KEY)
+        for param in fn.get("params", ()):
+            _drop_uncaptured(param, _TYPE_IDENTITY_KEY)
+    for var in d.get("variables", ()):
+        _drop_uncaptured(var, _TYPE_IDENTITY_KEY)
+    for rec in d.get("types", ()):
+        for fld in rec.get("fields", ()):
+            _drop_uncaptured(fld, _TYPE_IDENTITY_KEY)
+
+
 def _with_declarations(
     d: dict[str, Any], snap: AbiSnapshot, encode: Any = _encode_value
 ) -> dict[str, Any]:
@@ -376,6 +415,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
     _drop_unobserved_odr_conflicts(d)
+    _drop_uncaptured_type_identities(d)
 
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)

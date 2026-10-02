@@ -86,12 +86,12 @@ or a CLI flag directly is in the wrong layer.
   (and `export_surface.py`'s own export-domain closure, which reuses
   `_walk_type_closure` verbatim) can depend on this package without a cycle.
   `surface.py` re-exports `PublicSurface` for its existing callers.
-  `resolve_public_surface`/`PublicSurfaceQuery` lived in `public_surface.py`
-  before this split; a lazy `__getattr__` shim at the bottom of that module
-  (the pattern below) resolves them from their new homes, so `from
-  abicheck.policy.public_surface import resolve_public_surface,
-  PublicSurfaceQuery` keeps working (Codex review, PR #979) without a static
-  import re-introducing the cycle the split exists to avoid.
+  A lazy `__getattr__` shim in `public_surface.py` still resolves
+  `resolve_public_surface`/`PublicSurfaceQuery` from their new homes (PR #979)
+  without a static import re-introducing the cycle.
+- `captured_type_identities.py` — schema v54 slot identities as exact-walk
+  seeds/edges. `finding_type_candidates.py` — a finding's candidate type
+  identities (moved out of `contract_evaluation.py`; imports `surface.py`).
 - `public_surface_query.py` — `PublicSurfaceQuery`, the orchestrator on top
   of the two modules above: the only place in this package that depends on
   *both* `public_surface_closure.py` (the public-domain query) and

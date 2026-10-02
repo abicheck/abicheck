@@ -58,6 +58,7 @@ from abicheck.model import (  # noqa: E402
     AbiSnapshot,
     EnumMember,
     EnumType,
+    Fact,
     Function,
     Param,
     RecordType,
@@ -165,7 +166,9 @@ class Case:
     build: Callable[[], tuple[AbiSnapshot, AbiSnapshot]]
 
 
-def _ambiguous_namespaced_leaf() -> tuple[AbiSnapshot, AbiSnapshot]:
+def _ambiguous_namespaced_leaf_pair(
+    return_identities: tuple[str, ...] | None,
+) -> tuple[AbiSnapshot, AbiSnapshot]:
     """A real break on a type whose bare leaf two namespaces share.
 
     castxml/clang record the bare leaf in ``name`` and the scope separately,
@@ -179,6 +182,14 @@ def _ambiguous_namespaced_leaf() -> tuple[AbiSnapshot, AbiSnapshot]:
     Every soundness defect that feature has had was on it, and a deliberate
     regression check confirmed the replay gate could not fire without a case
     like this (self-review).
+
+    The signature's spelling is ambiguous, but its resolved identity is not:
+    a header backend that records ``Function.return_type_identities_fact``
+    (castxml, schema v54) says the API reaches ``ns1::Cache``, which is what
+    lets the ``public`` contract domain confirm the break instead of leaving
+    it ``UNKNOWN_UNRESOLVED``. The spelling-only shape -- every snapshot
+    without that evidence -- is its own case,
+    :func:`_ambiguous_namespaced_leaf_spelling_only`.
     """
 
     def _cache(ns: str, size: int) -> RecordType:
@@ -192,13 +203,37 @@ def _ambiguous_namespaced_leaf() -> tuple[AbiSnapshot, AbiSnapshot]:
         )
 
     def _side(version: str, reached_size: int) -> AbiSnapshot:
+        api = _fn("api", ret="Cache *", origin=ScopeOrigin.PUBLIC_HEADER)
+        if return_identities is not None:
+            api.return_type_identities_fact = Fact.present(return_identities)
         return _snap(
             version,
-            functions=[_fn("api", ret="Cache *", origin=ScopeOrigin.PUBLIC_HEADER)],
+            functions=[api],
             types=[_cache("ns1", reached_size), _cache("ns2", 64)],
         )
 
     return _side("1", 64), _side("2", 128)
+
+
+def _ambiguous_namespaced_leaf() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # What castxml records for this signature (schema v54, verified against
+    # a real two-namespace header): the spelling stays the bare `Cache *`,
+    # and the return type's resolved identity says which record it is.
+    return _ambiguous_namespaced_leaf_pair(("ns1::Cache",))
+
+
+def _ambiguous_namespaced_leaf_spelling_only() -> tuple[AbiSnapshot, AbiSnapshot]:
+    """The same break with no identity evidence -- the clang JSON, DWARF and
+    pre-v54 shape, where the bare spelling is all there is.
+
+    Still breaking (the verdict never depended on it), but under ``--contract
+    public`` the evaluator *cannot* say which ``Cache`` the API reaches, so
+    it stays ``UNKNOWN_UNRESOLVED``: an explained, inherent loss for
+    evidence that does not exist, not a defect. Kept so the replay-soundness
+    gate always has one pair whose identity is genuinely undecidable --
+    without it that gate passes for any implementation.
+    """
+    return _ambiguous_namespaced_leaf_pair(None)
 
 
 # --- internal-noise cases (a breaking verdict here is a FALSE POSITIVE) -------
@@ -1065,6 +1100,11 @@ def _python_api_function_dropped() -> tuple[AbiSnapshot, AbiSnapshot]:
 CORPUS: list[Case] = [
     Case("internal_struct_size", True, _internal_struct_size),
     Case("ambiguous_namespaced_leaf", False, _ambiguous_namespaced_leaf),
+    Case(
+        "ambiguous_namespaced_leaf_spelling_only",
+        False,
+        _ambiguous_namespaced_leaf_spelling_only,
+    ),
     # G23 Python-surface oracle: internal native churn scoped away (FP guard);
     # a real Python-API break stays breaking (FN sentinel / authority rule).
     Case("python_ext_internal_symbol_churn", True, _python_ext_internal_symbol_churn),
@@ -1569,6 +1609,7 @@ CASE_CATEGORY: dict[str, str] = {
     # struct/record layout reachability
     "internal_struct_size": "struct-layout",
     "ambiguous_namespaced_leaf": "struct-layout",
+    "ambiguous_namespaced_leaf_spelling_only": "struct-layout",
     "internal_field_type_changed": "struct-layout",
     "public_struct_size": "struct-layout",
     "leaked_internal_via_public_api": "struct-layout",

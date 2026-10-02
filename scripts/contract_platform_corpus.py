@@ -96,13 +96,17 @@ LANE_C = "c"
 #: is bounded by what was actually run, not by what the list mentions.
 UNCOVERED_LANES: dict[str, str] = {
     "package": (
-        "compare rejects --contract for directory/package operands "
-        "(the same fan-out limitation --contract itself carries), so there is "
-        "no contract decision on a package pair to measure"
+        "this measurement drives compare() over in-memory snapshot pairs, and "
+        "the directory/package release fan-out takes artifact sets, not "
+        "snapshots (it does apply --contract per library; the earlier "
+        "'compare rejects --contract for package operands' reason is "
+        "obsolete); the fan-out's agreement with the single pair is covered "
+        "on real binaries by tests/test_contract_type_identities_integration.py"
     ),
     "real_binaries": (
         "needs a compiler; covered by the integration lanes "
-        "(tests/test_scan_compare_parity.py, tests/test_abi_examples.py) "
+        "(tests/test_abi_examples.py, "
+        "tests/test_contract_type_identities_integration.py) "
         "rather than by this always-on measurement"
     ),
 }

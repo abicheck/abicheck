@@ -53,6 +53,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
     _MIN_SCHEMA_VERSION_FOR_VARIABLE_CASE_B_FACTS,
@@ -105,6 +106,7 @@ _FIELD_FACT_KEYS = (
     "is_mutable_fact",
     "default_fact",
     "deprecated_fact",
+    "type_identities_fact",
 )
 
 # ADR-063 Phase 5 (third batch): EnumType's own qualified_name_fact/
@@ -135,6 +137,7 @@ _VARIABLE_FACT_KEYS = (
     "declared_in_headers_fact",
     "in_public_contract_fact",
     "binary_exported_fact",
+    "type_identities_fact",
 )
 
 # ADR-063 Phase 5 (fifth batch): Function's own ten case-(b) *_fact
@@ -155,6 +158,7 @@ _FUNCTION_FACT_KEYS = (
     "declared_in_headers_fact",
     "in_public_contract_fact",
     "binary_exported_fact",
+    "return_type_identities_fact",
 )
 
 # ADR-063 Phase 5 (seventh batch): the three binary-format metadata blocks'
@@ -177,6 +181,7 @@ _PARAM_FACT_KEYS = (
     "is_restrict_fact",
     # ADR-063 Phase 5 (eleventh batch): kind_fact.
     "kind_fact",
+    "type_identities_fact",
 )
 
 _PE_FACT_KEYS = ("delay_imports_fact",)
@@ -490,6 +495,13 @@ def decode_variable_facts(v: dict[str, Any], schema_version: int) -> dict[str, A
                 schema_version,
                 min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
             ),
+            "type_identities_fact": validated_identities(
+                decode_fact(
+                    v.get("type_identities_fact"),
+                    schema_version,
+                    min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
+                )
+            ),
         },
     )
 
@@ -583,6 +595,13 @@ def decode_function_facts(f: dict[str, Any], schema_version: int) -> dict[str, A
                 schema_version,
                 min_schema_version=_MIN_SCHEMA_VERSION_FOR_SURFACE_FACTS,
             ),
+            "return_type_identities_fact": validated_identities(
+                decode_fact(
+                    f.get("return_type_identities_fact"),
+                    schema_version,
+                    min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
+                )
+            ),
         },
     )
 
@@ -657,6 +676,13 @@ def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]
             p, "is_restrict", schema_version, _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS
         ),
         "kind_fact": kind_fact,
+        "type_identities_fact": validated_identities(
+            decode_fact(
+                p.get("type_identities_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
+            )
+        ),
     }
 
 
@@ -707,4 +733,34 @@ def decode_field_facts(fld: dict[str, Any], schema_version: int) -> dict[str, An
             schema_version,
             _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
         ),
+        "type_identities_fact": validated_identities(
+            decode_fact(
+                fld.get("type_identities_fact"),
+                schema_version,
+                min_schema_version=_MIN_SCHEMA_VERSION_FOR_TYPE_IDENTITY_FACTS,
+            )
+        ),
     }
+
+
+def validated_identities(fact: Fact[Any] | None) -> Fact[Any] | None:
+    """Schema v54's per-slot resolved type identities, after
+    :func:`decode_fact` (whose missing-key rule applies: ``None`` below v54,
+    ``NOT_COLLECTED`` at or above it, where only castxml writes the key).
+
+    The value arrives as a JSON list and is rebuilt into the tuple the model
+    holds; a value that is not a list of non-empty strings is a malformed
+    document and reads as ``NOT_COLLECTED`` -- never trusted, since the fact
+    only ever *adds* confirmation and dropping it is the safe side.
+    """
+    if fact is None or fact.value is None:
+        return fact
+    value = fact.value
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        return Fact.not_collected()
+    # Through `Fact._make`, not `dataclasses.replace`: most slots name no
+    # record (`int`, `void`), and `_make` serves that `present(())` from its
+    # shared table instead of allocating one fact per slot on every load.
+    return Fact._make(fact.status, tuple(value), fact.diagnostics, fact.producer)

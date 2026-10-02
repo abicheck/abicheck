@@ -130,11 +130,15 @@ def test_the_corpus_contains_an_ambiguous_identity_case() -> None:
     """The soundness gate above needs a pair whose identity is ambiguous.
 
     Without one it passes for every implementation, correct or not: the
-    other 32 cases resolve unambiguously, so no replay decision can differ.
+    other cases resolve unambiguously, so no replay decision can differ.
     Pinned as its own assertion because "the gate is green" and "the gate
     can fail" are different claims (self-review).
     """
     names = {case.name for case in shadow.CORPUS}
+    # The identity-carrying case now *resolves* (schema v54), so it no
+    # longer differs under replay; the spelling-only sibling is the pair
+    # whose identity stays genuinely undecidable.
+    assert "ambiguous_namespaced_leaf_spelling_only" in names
     assert "ambiguous_namespaced_leaf" in names
 
 
@@ -218,7 +222,11 @@ class TestUnresolvedLossMetric:
         # is already keyed by (Codex review).
         from abicheck.contract_relevance_types import ContractMode
 
-        case = next(c for c in shadow.CORPUS if c.name == "ambiguous_namespaced_leaf")
+        case = next(
+            c
+            for c in shadow.CORPUS
+            if c.name == "ambiguous_namespaced_leaf_spelling_only"
+        )
         measurement = shadow.measure_case(case, ContractMode.PUBLIC)
         (loss,) = measurement.unresolved_losses
         assert loss in shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES
@@ -227,7 +235,9 @@ class TestUnresolvedLossMetric:
         # The gap the previous, kind+symbol-only pin still admitted: swap
         # the finding id alone and the pin must fire.
         known = set(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
-        original = next(k for k in known if k.startswith("ambiguous_namespaced_leaf:"))
+        original = next(
+            k for k in known if k.startswith("ambiguous_namespaced_leaf_spelling_only:")
+        )
         sibling = original.rsplit(":", 1)[0] + ":ffffffffffffffff"
         assert sibling not in known
         # Everything up to the id is identical, so every coarser projection
@@ -239,9 +249,11 @@ class TestUnresolvedLossMetric:
         # one finding for another *within* a pinned case and the pin fires,
         # where a case-name projection saw nothing.
         known = set(shadow.UNRESOLVED_LOSS_KNOWN_PUBLIC_CASES)
-        original = next(k for k in known if k.startswith("ambiguous_namespaced_leaf:"))
+        original = next(
+            k for k in known if k.startswith("ambiguous_namespaced_leaf_spelling_only:")
+        )
         swapped = (known - {original}) | {
-            "ambiguous_namespaced_leaf:public:type_field_removed:Cache:0000000000000000"
+            "ambiguous_namespaced_leaf_spelling_only:public:type_field_removed:Cache:0000000000000000"
         }
         assert swapped - known  # the full-key pin sees the substitution
         assert not {k.split(":", 1)[0] for k in swapped} - {
