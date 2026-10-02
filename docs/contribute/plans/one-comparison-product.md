@@ -79,10 +79,8 @@ Re-checked against the tree with Click introspection and the contract gates:
   `docs/reference/cli-reference.md` is in sync.
 - **A new subcommand this table did not list:** `project capture-variants`
   (7 options, storage-format-v2 A1.6). It is now in §4.5.
-- **Per-option rulings cover only `compare` and `dump`.** Nothing rules
-  `aggregate` or `project` options flag by flag (`aggregate
-  --analysis-context`, all of `capture-variants`). This is an open item in
-  the [Phase 7 table](#phase-7l-external-cli-audit-2026-09-12-reconciled).
+- **Per-option rulings covered only `compare` and `dump`.** Closed
+  2026-10-02 by slice 7s (which also found `deps` unruled).
 - **Phase 9's blockers moved.** The template-instantiated-parameter seed
   mismatch had already been closed, but this plan and the plans index still
   listed it. The `ambiguous_namespaced_leaf` identity gap is closed by
@@ -890,6 +888,35 @@ treating `"0"` as disable — **fixed over the class**: `abicheck/env_flags.py`
 is the one boolean parser and registry (bug class
 `config.env_flag_value_domain`). `compat`'s options stay frozen (D7).
 
+**7s — per-option rulings for every command. Done** (2026-10-02).
+`rulings.py` now rules every visible option of `aggregate`, the four
+`project` subcommands and both `deps` subcommands (keyed by command path,
+e.g. `"project plan"`), in addition to `compare`/`dump`. All 35 are keeps;
+none duplicates a config key. Notable reasons: `--toolchain-bindings` is a
+trust-boundary operand that a `.abicheck.yml` key would hand to the
+untrusted config it validates; `aggregate --discovered-only` is 7q's
+explicit no-inventory declaration, not a gate-disabling hatch (there is no
+gate without a manifest); `project plan --project` is runtime provenance a
+config copied into a fork would misstate. `compat` is excluded on purpose
+(D7: frozen ABICC spellings). `tests/test_config_rebalance.py` closes the
+table's *domain*, not only its rows: it walks the real Click tree and fails
+on any option-bearing command with no ruling table — the gap that let these
+commands go unruled after 7k, and that the earlier open-item note (which
+missed `deps`) did not catch either.
+
+**7t — release suppression audit. Done** (2026-10-02). 7o's remaining
+gap, re-measured: the per-library scope ledger was already in the release
+Markdown (`🔕 Disposed Findings`, one row per scoped-out finding with its
+reason), but the suppression audit (stale, expired and near-expiry rules,
+and rules that hid a BREAKING change) reached stderr only — and, contrary to
+the earlier note, the release JSON did not carry it either. Each
+`libraries[]` entry now has the scalar report's `suppression_audit` block
+(same builder, release schema 1.12), and the release Markdown ends with a
+per-library `🧾 Suppression Audit` section rendered from it, after the
+document's demangle pass so rule labels stay verbatim.
+`tests/test_release_suppression_audit.py` uses the single-pair report as the
+oracle across four rule sets.
+
 **What remains in Phase 7.** Nothing executable. Every remaining item is
 gated on a named prerequisite or owned elsewhere — this table is the
 authoritative open list:
@@ -904,9 +931,6 @@ authoritative open list:
 | `--severity-preset` merged into policy selection | declined for now — needs gate-activation convergence first |
 | `--select-required` merged into an expected inventory | ADR-065 P5 (package component inventories) |
 | `dump --compression`, `--dry-run`→`--plan`, `--used-by-manifest`→`--used-by @FILE` | declined with a measurement (7k/7l) |
-| `compare --env-matrix` → `deployment:`, `dump --build-target` → `build.targets` | tracked follow-ups in `rulings.py` (need a new config key / caller rewiring) |
-| Per-library scope ledger and suppression audit in release human output | missing feature left by 7o (machine projections unaffected) |
-| Per-option rulings for `aggregate` and `project` (`aggregate --analysis-context`, `project capture-variants`' 7 options) | `rulings.py` and its bijection test cover only `compare`/`dump`; extend them, or record that the exclusion is deliberate |
 
 ### Phase 8 — `deps` convergence (ADR-068 D6) — done
 
@@ -950,6 +974,35 @@ integration tests (`tests/test_contract_type_identities_integration.py`,
 `measure_contract_shadow.py` measurement. Also, under `--ast-frontend clang`
 a same-leaf record's break still only reaches the coverage floor. Both are
 maintainer acceptance decisions, not engineering defects.
+
+**Accepted (2026-10-02, maintainer).** Both decisions are taken: the
+`package` and `real_binaries` lanes are covered by the named integration
+tests rather than by `measure_contract_shadow.py`, and the clang-frontend
+same-leaf case reaching only the coverage floor is a recorded known gap
+(`docs/contribute/known-gaps.md`), not a Phase 9 blocker. Phase 9 is
+unblocked.
+
+**9a — the mapping, measured and fixed. Done** (2026-10-02). Every case
+of the labelled FP-rate corpus was run through the `compare` CLI under all
+four spellings. `--contract public` loses no real break: every one keeps its
+legacy exit except the spelling-only same-leaf case (exit 1, the budgeted
+loss), and no internal-noise case scores as a break (exit 1 only where the
+public coverage floor fires — the expected migration difference, since
+legacy scoping never exits 1). `--contract all`, however, was **not** the
+exact `--no-scope-public-headers` alias it is documented as: the legacy
+filter ran at its *default* value ahead of the evaluator, so ten internal
+breaks came out exit 0 instead of 4. Fixed in `checker.compare` (shared by
+the CLI and the typed API): an explicit `all`/`exports` domain disables
+header-origin demotion, which is the `public` domain's question. Pinned by
+`tests/test_contract_legacy_scope_mapping.py`.
+
+**Remaining slices.** 9b deletes `--scope-public-headers`/
+`--no-scope-public-headers` as CLI spellings (exit 64), keeping header
+scoping on internally for a run with no `--contract` — deleting it without
+that would silently flip every no-flag run. 9c gives `--post-manifest` a
+`contract.overlays` config home on the existing `post_manifest` provider;
+9d deletes the option. Retiring `scope.public`/`CompareRequest.scope_public`
+is a separate Python-API decision.
 
 ### Re-homed from `cli-cleanup-phase-two.md`
 

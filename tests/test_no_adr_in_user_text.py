@@ -35,6 +35,9 @@ ALLOWLISTED_FILES: dict[str, str] = {
     # consumed only by tests/test_config_rebalance.py's exact-bijection check
     # (via frontends/cli/options/inventory.py). Never rendered to a user.
     "frontends/cli/options/rulings.py": "internal option-ruling rationale, test-only",
+    # The same table for aggregate/project/deps, split out of rulings.py for
+    # file size; registered through rulings.RULINGS_BY_COMMAND, never rendered.
+    "frontends/cli/options/rulings_integration.py": "internal option-ruling rationale, test-only",
 }
 
 

@@ -69,6 +69,7 @@ from .report.render_release_markdown import (  # re-exported, moved (ADR-065 S2)
     _release_md_libraries_table as _release_md_libraries_table,
     _release_md_matrix_findings as _release_md_matrix_findings,
     _release_md_pattern_modulations as _release_md_pattern_modulations,
+    finish_release_markdown,
 )
 from .reporter_markdown import (
     release_bundle_findings_for_view,
@@ -1086,14 +1087,7 @@ def _format_release_summary(
             else render_release_public_surface_markdown(public_surface)
         ),
     )
-    if demangle:
-        from .demangle import demangle_text
-
-        # `escape_table_pipes`: this document contains real tables (the
-        # library summary, the disposed-findings ledger), and demangling can
-        # introduce a `|` into a cell after the row was built.
-        md = demangle_text(md, escape_table_pipes=True)
-    return md
+    return finish_release_markdown(md, library_results, demangle=demangle)
 
 
 def _format_release_junit(
