@@ -552,5 +552,3 @@ def annotation_report_entries(
         }
         for sort_key, line, always_visible in sorted(detailed, key=lambda item: item[0])
     ]
-
-

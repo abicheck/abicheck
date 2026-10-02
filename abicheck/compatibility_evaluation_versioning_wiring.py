@@ -84,4 +84,3 @@ def versioning_policy_candidate(
         ),
         value=policy_file.versioning,
     )
-

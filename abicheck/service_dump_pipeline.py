@@ -31,7 +31,7 @@ implementation of it.
 
 **Not** in scope, deliberately: the CLI's presentation and provenance layer —
 ``--dry-run`` rendering, git/build-id stamping, the
-``fold_dump_provenance_into_json`` write step, and the deprecation warnings.
+``fold_dump_provenance_into_dict`` write step, and the deprecation warnings.
 Those describe how one front end reports a dump, not how one is produced;
 ``cli.py`` keeps them, the same way it keeps ``compare``'s ``click.echo``
 notifier after Phase 2 unified that command's resolution.

@@ -407,4 +407,3 @@ def test_html_tree_skips_dangling_edge_target() -> None:
     out = stack_to_html(_result_with_graph(graph))
     assert "app" in out
     assert "ghost.so" not in out
-

@@ -22,7 +22,7 @@ release-output finalization (:func:`_finalize_release_output`/
 :func:`_write_release_summary_file`), early suppression validation
 (:func:`_validate_suppression_early`), and severity-bucket/finding-dict
 computation feeding the aggregate release verdict
-(:func:`_release_gating_buckets`/:func:`_release_finding_dicts`/
+(:func:`_release_gating_buckets` (removed)/:func:`_release_finding_dicts`/
 :func:`_strip_diff_results_and_adjust_verdict`).
 
 Extracted purely to keep :mod:`abicheck.cli_compare_release` itself under
@@ -506,55 +506,6 @@ def _release_change_kind_str(c: Any) -> str:
     return str(getattr(kind, "value", str(kind)))
 
 
-def _release_gating_buckets(
-    diff: DiffResult,
-    severity_config: SeverityConfig | None,
-) -> list[tuple[str, list[Change]]]:
-    """Return the named (bucket, changes) groups that gate *diff*'s exit code.
-
-    Without *severity_config* (the legacy verdict-based exit-code scheme),
-    only the three verdict buckets that ever gate the legacy exit code are
-    used. With *severity_config* active, the release can instead exit
-    non-zero because a category that's normally compatible (additions,
-    quality issues) was promoted to ``error`` — e.g. ``severity.addition:
-    error`` — so every category the active config gates to ``error`` is
-    used instead (Codex review on #557: walking only the legacy buckets left
-    a library reporting ``severity.exit_code: 1`` with an empty ``findings``
-    list even though a specific addition/quality-issue finding was exactly
-    what blocked the release).
-    """
-    if severity_config is not None:
-        from .workflows.gate import categorize_changes, gate_decision_for_result
-
-        kind_sets = diff._effective_kind_sets()
-        # gate_decision_for_result (the single canonical gate-decision call
-        # site, also used by reporter.py/sarif.py/html_report.py — ADR-061
-        # D9) decides *which* categories are actually blocking;
-        # categorize_changes supplies the change lists for them — a category
-        # with no findings never contributes an (empty) bucket, matching how
-        # JSON/SARIF's blocking_categories behave.
-        gate = gate_decision_for_result(diff, severity_config)
-        assert gate is not None  # severity_config is not None here
-        categorized = categorize_changes(
-            diff.changes,
-            policy=diff.policy,
-            kind_sets=kind_sets,
-            policy_file=diff.policy_file,
-        )
-        cat_changes_by_name = {
-            "abi_breaking": categorized.abi_breaking,
-            "potential_breaking": categorized.potential_breaking,
-            "quality_issues": categorized.quality_issues,
-            "addition": categorized.addition,
-        }
-        return [(name, cat_changes_by_name[name]) for name in gate.blocking_categories]
-    return [
-        ("breaking", diff.breaking),
-        ("api_break", diff.source_breaks),
-        ("risk", diff.risk),
-    ]
-
-
 def _release_display_buckets(
     diff: DiffResult,
     severity_config: SeverityConfig | None,
@@ -562,7 +513,7 @@ def _release_display_buckets(
     """Return every (bucket, changes) group in *diff*, for display purposes.
 
     Codex review (PR #1154 follow-up, "Filter the complete release finding
-    set"): :func:`_release_gating_buckets` deliberately narrows to only the
+    set"): :func:`_release_gating_buckets` (removed) deliberately narrows to only the
     categories that can gate the release's own exit code -- under the
     legacy scheme that's breaking/api_break/risk, and under a severity
     scheme it's further narrowed to whichever categories
@@ -576,7 +527,7 @@ def _release_display_buckets(
     This function is the unrestricted counterpart: every category, always,
     regardless of what's blocking -- the same "full diff, not the gate's
     own subset" pool a single-pair `compare` report renders from. Gate
-    bucket restriction stays reserved for :func:`_release_gating_buckets`'s
+    bucket restriction stays reserved for the former :func:`_release_gating_buckets`'s
     own exit-code-facing callers.
     """
     if severity_config is not None:
@@ -589,7 +540,7 @@ def _release_display_buckets(
             kind_sets=kind_sets,
             policy_file=diff.policy_file,
         )
-        # Dict + name-lookup (matching `_release_gating_buckets`'s own
+        # Dict + name-lookup (matching the former `_release_gating_buckets`'s own
         # shape above), not a literal list of tuples -- `categorize_changes`
         # types each field as `list[HasKind]`, and building the return list
         # this way is what keeps mypy happy the same way it already is above.
@@ -655,7 +606,7 @@ def _release_finding_dicts(
     decide the cap so a large diff never builds more dicts than the cap can
     ever keep. See :func:`_release_display_buckets` for which findings this
     walks -- the full diff (all categories), not the narrower
-    :func:`_release_gating_buckets` subset that only ever gates the exit
+    :func:`_release_gating_buckets` (removed) subset that only ever gates the exit
     code (Codex review, PR #1154 follow-up: "Filter the complete release
     finding set" -- a compatible addition must be reachable here the same
     way it is in a single-pair `compare` report).

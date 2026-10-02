@@ -72,7 +72,7 @@ pre-execution context could ever carry. Reusing that module's own algorithm
 here would either silently omit those fields (a digest that *looks* like the
 rich tier's but is not comparable to it) or require this module to accept a
 ``DiffResult`` and stop being a pre-execution type. Neither is honest, so
-:meth:`ResolvedExecutionContext.resolution_digest` is a separate, narrower
+:meth:`ResolvedExecutionContext.resolution_digest` (removed) is a separate, narrower
 fingerprint -- deliberately named differently from
 ``effective_config_digest`` -- covering only what is genuinely available
 before a run executes: the resolved evaluation config, the resolved compile
@@ -104,7 +104,6 @@ from ..evidence_depth import DEPTH_RANK
 if TYPE_CHECKING:
     from ..compatibility_evaluation_config import (
         CompatibilityEvaluationConfig,
-        GateConfig,
     )
     from ..compile_context import CompileContext
     from .plan import AnalysisPlan
@@ -124,110 +123,6 @@ __all__ = ["EvidenceView", "ResolvedExecutionContext"]
 #: rank order, verbatim. Module-level so it is computed once, not once per
 #: :class:`EvidenceView` construction.
 _AVAILABLE_DEPTHS: tuple[str, ...] = tuple(DEPTH_RANK)
-
-
-def _canonical_repr(obj: object) -> str:
-    """A ``repr()``-like encoding that is order-independent for any
-    ``Mapping`` it finds, recursively -- unlike plain ``repr()``, which
-    preserves a dict's insertion order verbatim. Both composed types this
-    module cares about carry a `Mapping`-typed field
-    (`CompatibilityEvaluationConfig.provenance`,
-    `CompatibilityPolicyConfig.overrides`) whose dataclass ``__eq__``
-    already ignores insertion order -- so two configs a resolver treats as
-    equal (built by different front ends assembling the same fields in a
-    different order, or replayed from a receipt) must not silently produce
-    different digests (Codex review, PR #1027).
-
-    Recurses through dataclasses and tuples/lists to reach every nested
-    mapping (`ValueProvenance.shadowed_legacy` is itself a `ValueProvenance`,
-    `provenance` maps to `ValueProvenance` instances, etc.); a tuple/list's
-    own element order is preserved -- unlike a mapping's key order, it is
-    part of the value being fingerprinted (e.g. `ContractConfig.overlays`,
-    `PolicyFile.reclassify`-style first-match-wins ordering elsewhere in
-    this codebase). Falls back to plain ``repr()`` for anything that is
-    neither a dataclass, a Mapping, nor a tuple/list -- every leaf value
-    here (`str`/`int`/`bool`/`None`/`Enum`/`Path`) already has a stable,
-    deterministic `repr()`.
-    """
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        fields_repr = ", ".join(
-            f"{f.name}={_canonical_repr(getattr(obj, f.name))}"
-            for f in dataclasses.fields(obj)
-        )
-        return f"{type(obj).__name__}({fields_repr})"
-    if isinstance(obj, Mapping):
-        items = sorted(obj.items(), key=lambda kv: repr(kv[0]))
-        body = ", ".join(
-            f"{_canonical_repr(k)}: {_canonical_repr(v)}" for k, v in items
-        )
-        return f"{{{body}}}"
-    if isinstance(obj, (tuple, list)):
-        body = ", ".join(_canonical_repr(item) for item in obj)
-        kind = "[" + body + "]" if isinstance(obj, list) else "(" + body + ")"
-        return kind
-    return repr(obj)
-
-
-def _evaluation_config_value_repr(cfg: CompatibilityEvaluationConfig | None) -> str:
-    """:func:`_canonical_repr` of *cfg*'s resolved *values* only --
-    ``contract``/``evidence``/``surface``/``assurance``/``policy``/``gate``/
-    ``suppressions`` -- deliberately excluding ``provenance`` (Codex review,
-    PR #1027, third round).
-
-    ``provenance`` records *how* a value was selected (``ValueProvenance.
-    layer``/``source_kind``/``field_location``), not the value itself --
-    the CLI and the typed Python API resolving the identical effective
-    input legitimately produce different provenance (``SelectorLayer.
-    EXPLICIT_CLI`` vs. ``API_REQUEST``, a different ``--flag`` vs. field
-    spelling in ``source_kind``), and
-    :func:`abicheck.compatibility_evaluation_frontend.cross_front_end_differences`
-    already treats that difference as no divergence at all. Hashing
-    ``provenance`` into a fingerprint meant to answer "did the *resolved
-    input* change" would make two front ends resolving the same values
-    hash differently -- defeating the one cross-frontend comparison this
-    digest exists to support, and disagreeing with
-    :mod:`abicheck.effective_config_digest`'s own established practice
-    (its own per-field encodings never read ``provenance`` either)."""
-    if cfg is None:
-        return _canonical_repr(None)
-    return _canonical_repr(
-        (
-            cfg.contract,
-            cfg.evidence,
-            cfg.surface,
-            cfg.assurance,
-            cfg.policy,
-            _gate_config_value(cfg.gate),
-            cfg.suppressions,
-        )
-    )
-
-
-def _gate_config_value(gate: GateConfig) -> tuple[object, ...]:
-    """*gate* as a plain tuple, with ``scope.targets`` sorted -- not the
-    object itself (Codex review, PR #1027, seventh round). :class:`~abicheck.
-    compatibility_evaluation_config.ScopedGateSelection`'s own docstring
-    states this explicitly: it deliberately preserves caller order in the
-    *stored* object ("not canonicalized/sorted the way ``GateConfig.packs``
-    is") and requires a digest consumer to sort at digest-computation time
-    instead, the same way
-    :func:`abicheck.effective_config_digest._gate_scope_str` already does.
-    :func:`_canonical_repr`'s own tuple/list handling preserves order
-    uniformly (correct for e.g. ``ContractConfig.overlays``, where order is
-    part of the value), so ``scope.targets`` needs this one field-specific
-    normalization rather than a blanket rule -- two runs selecting the same
-    ``--used-by`` apps/required symbols in a different argument order must
-    hash identically."""
-    scope = gate.scope
-    scope_value = None if scope is None else (scope.kind, tuple(sorted(scope.targets)))
-    return (
-        gate.exit_code_scheme,
-        gate.preset,
-        gate.packs,
-        gate.severity,
-        gate.require_complete_analysis,
-        scope_value,
-    )
 
 
 def _sha256_of(*parts: str) -> str:
@@ -305,8 +200,7 @@ class EvidenceView:
         was ever requested." Naively copying that ``None`` through would
         silently discard a genuinely known pre-execution value (e.g. from
         ``AnalysisPlan.requested_depth``) the moment a run turned out
-        not-comparable, changing this run's own :meth:`~ResolvedExecutionContext.
-        resolution_digest` for a reason that has nothing to do with what was
+        not-comparable, changing this run's own resolved identity for a reason that has nothing to do with what was
         requested. *assurance*'s own value always wins when present."""
         assurance_requested = getattr(assurance, "requested_depth", None)
         return cls(
@@ -403,7 +297,7 @@ class ResolvedExecutionContext:
         :func:`~abicheck.service_compare_pipeline.classify_compare_pair`'s
         ``result.requested_depth = request.depth.lower()`` normalizes it for
         ``DiffResult`` before this context exists), and this class's own
-        ``_AVAILABLE_DEPTHS``/:meth:`resolution_digest` are case-sensitive:
+        ``_AVAILABLE_DEPTHS``/:meth:`resolution_digest` (removed) are case-sensitive:
         an unnormalized depth would both fail to appear in its own
         :attr:`EvidenceView.available_depths` and hash differently from an
         equivalent lower-case request."""
@@ -443,7 +337,7 @@ class ResolvedExecutionContext:
         both sides to) replacing a different pre-execution one. A caller may
         classify a pair under a different request than resolved it
         (``classify_compare_pair``'s two-phase split), and the returned context
-        must not report a depth -- or a ``resolution_digest`` -- the
+        must not report a depth -- or a ``resolution_digest`` (removed) -- the
         classification never saw."""
         ctx = self.with_evaluation_config(evaluation_config)
         if ctx.requested_depth != requested_depth:
@@ -472,70 +366,4 @@ class ResolvedExecutionContext:
             evidence=EvidenceView.from_assurance(
                 assurance, requested_depth=self.evidence.requested_depth
             ),
-        )
-
-    def resolution_digest(self) -> str:
-        """A structural fingerprint of this *resolved input* -- distinct
-        from :func:`abicheck.effective_config_digest.effective_config_digest`,
-        which fingerprints the outcome-aware effective configuration of a
-        *completed* comparison (see module docstring for why the two are not
-        the same computation and are not cross-comparable). Two contexts
-        that resolved the same operation, requested depth, evaluation
-        config, and compile contexts produce the same digest; this says
-        nothing about whether the run they describe would produce the same
-        findings.
-
-        Built from each part's own :func:`_canonical_repr` -- every
-        dataclass this context composes (`CompatibilityEvaluationConfig`
-        and its namespaces, `CompileContext`) is frozen with plain
-        value/enum/tuple/mapping fields, so that encoding is a stable,
-        content-only, order-independent-for-mappings encoding with no
-        memory addresses, the same property :mod:`abicheck.
-        effective_config_digest` relies on for its own per-field string
-        encodings -- just applied to the whole composed object at once
-        rather than field-by-field, since this fingerprint (unlike that
-        module's) is not trying to remain stable across a schema change to
-        either composed type. Plain ``repr()`` alone is not enough here
-        (Codex review, PR #1027): `CompatibilityEvaluationConfig.provenance`/
-        `CompatibilityPolicyConfig.overrides` are `Mapping`-typed fields
-        whose dataclass equality already ignores insertion order, so two
-        configs a resolver treats as equal must not hash differently
-        depending on which order their entries happened to be inserted in.
-
-        *compile_contexts* is hashed as one mapping through
-        :func:`_canonical_repr` too, not as a delimiter-joined string of
-        ``label=value`` parts (Codex review, PR #1027, second round): a
-        side *label* is caller-supplied and this class documents it as
-        arbitrary (see the class docstring), so nothing rules out a label
-        that itself contains ``=`` or the join delimiter -- a hand-rolled
-        join over unescaped labels is exactly the non-injective encoding
-        :func:`abicheck.effective_config_digest._json_list`'s own
-        docstring already documents and avoids for the identical reason
-        (an arbitrary namespace/selector string can legally contain a
-        delimiter). ``repr()`` of a Python `str` escapes its own quote and
-        backslash characters, which is what makes the mapping encoding
-        injective over its *keys* the join was not.
-
-        Reads *evaluation_config* through :func:`_evaluation_config_value_repr`,
-        not directly through :func:`_canonical_repr`, so the digest never
-        includes ``provenance`` (Codex review, PR #1027, third round) -- see
-        that function's own docstring for why a resolved-input fingerprint
-        must not vary with which front end happened to resolve it.
-
-        *requested_depth* is hashed through :func:`_canonical_repr`, not an
-        ``or ""`` fallback (Codex review, PR #1027, sixth round): neither
-        :class:`EvidenceView` nor
-        :class:`~abicheck.workflows.plan.AnalysisPlan` rejects an empty-string
-        depth, so ``requested_depth=""`` is a real, distinct, constructible
-        state from ``requested_depth=None`` -- ``or ""`` collapsed both onto
-        the identical digest input, hiding that difference from a replay/cache
-        consumer. ``_canonical_repr(None)`` (``"None"``) and
-        ``_canonical_repr("")`` (``"''"``) are distinct strings, so the two
-        states now hash differently too.
-        """
-        return _sha256_of(
-            self.operation,
-            _canonical_repr(self.requested_depth),
-            _evaluation_config_value_repr(self.evaluation_config),
-            _canonical_repr(dict(self.compile_contexts)),
         )

@@ -26,11 +26,10 @@ public rung cannot leave a rank map silently disagreeing with the ladder.
 Two distinctions this module keeps deliberately separate, because callers
 genuinely need both:
 
-- :func:`depth_label_for` answers "what does this artifact carry", taking the
+- :func:`depth_label_for` (removed) answers "what does this artifact carry", taking the
   pack explicitly and never defaulting to ``snap.build_source``. A caller that
   resolved an out-of-band pack must not have the snapshot's own (absent or
-  unrelated) payload silently substituted. ``cli_dump_helpers.
-  evidence_depth_label`` is the defaulting wrapper for the embedded-only case.
+  unrelated) payload silently substituted.
 - :func:`gated_source_label` answers "may an explicit ``--depth source`` be
   considered satisfied", which is strictly stricter: a non-empty L5 can come
   from a header-only declaration graph that never ran source-tier replay, so
@@ -228,49 +227,6 @@ def _l5_payload_empty(snap: AbiSnapshot, pack: BuildSourcePack | None) -> bool:
     return graph is None or not graph.nodes
 
 
-def depth_label_for(snap: AbiSnapshot, pack: BuildSourcePack | None) -> str:
-    """Which evidence depth *snap* (with *pack*) actually reached (CLI-audit P2).
-
-    Computed purely from what was resolved -- ``binary``/``headers``/``build``/
-    ``source`` -- rather than echoing back a requested ``--depth``: an explicit
-    ``--depth source`` with no usable source facts still produces a snapshot
-    that only reaches ``headers`` (or ``binary``), and this makes that honest
-    instead of silently overstating what was collected.
-
-    *pack* is explicit and is **not** defaulted to ``snap.build_source`` here:
-    ``compare`` can resolve an out-of-band ``--old/new-sources`` pack that is
-    never attached back to the snapshot object, and defaulting inside this
-    function would silently report the unrelated embedded payload's depth
-    instead (Codex review). ``cli_dump_helpers.evidence_depth_label`` applies
-    the embedded-only default for the single-artifact ``dump -o`` case.
-
-    Uses payload-emptiness rather than presence (:func:`layer_payload_empty`):
-    a coverage row can be non-``None`` over an empty payload, and checking
-    presence alone would overstate ``source``/``build`` for a layer that ran
-    but linked nothing (CodeRabbit review).
-
-    ``snap.parsed_with_build_context`` (ADR-020a/039: ``-p``/``--compile-db``,
-    a much older, narrower build-context mechanism than the ``BuildSourcePack``
-    machinery, with no ``BuildEvidence``/compile-unit model of its own) also
-    reaches ``build``: without it a ``dump lib.so -H api.h -p build/`` run has
-    no ``snap.build_source`` at all and would report ``headers``, even though
-    the depth-gate error message this feeds already documents "build via
-    --build-info/a compile database" as a valid way to satisfy ``--depth
-    build`` (Codex review).
-    """
-    if (
-        pack is not None and not layer_payload_empty(pack, "L4")
-    ) or not _l5_payload_empty(snap, pack):
-        return "source"
-    if pack is not None and not layer_payload_empty(pack, "L3"):
-        return "build"
-    if snap.parsed_with_build_context:
-        return "build"
-    if snap.from_headers:
-        return "headers"
-    return "binary"
-
-
 def l4_source_abi_was_attempted(pack: BuildSourcePack) -> bool:
     """True when L4 source-ABI extraction genuinely parsed source, whether or not it linked anything.
 
@@ -326,7 +282,7 @@ def l4_source_abi_was_attempted(pack: BuildSourcePack) -> bool:
 def gated_source_label(pack: BuildSourcePack | None, snap: AbiSnapshot) -> str:
     """Recompute the ``source`` evidence label for the *strict* depth gate.
 
-    :func:`depth_label_for` honestly reports ``source`` whenever L4 *or* L5
+    :func:`depth_label_for` (removed) honestly reports ``source`` whenever L4 *or* L5
     carries facts — correct for its own honesty contract, since genuine
     source-tier collection can legitimately populate L5 (``source_graph``)
     without L4: ``source_graph.build_source_graph`` folds ``BuildEvidence``
@@ -363,7 +319,7 @@ def gated_source_label(pack: BuildSourcePack | None, snap: AbiSnapshot) -> str:
 def reported_depth_label(snap: AbiSnapshot, pack: BuildSourcePack | None) -> str:
     """The depth a *report* may claim for *snap*/*pack*.
 
-    :func:`depth_label_for` answers ``"source"`` whenever L4 **or** L5
+    :func:`depth_label_for` (removed) answers ``"source"`` whenever L4 **or** L5
     carries facts, which is right for its own contract but wrong for a
     report's assurance block: the always-on, header-only L5 declaration
     graph ``service._attach_header_graph`` attaches makes *every*

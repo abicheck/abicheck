@@ -49,8 +49,6 @@ from abicheck.impact.consumer_graph import (
     CONSUMER_PROVENANCE,
     build_consumer_graph,
     consumer_node_id,
-    consumer_required_symbol_nodes,
-    explain_required_symbol,
     explain_required_symbols,
     join_consumer_graph,
     symbol_node_id,
@@ -58,6 +56,18 @@ from abicheck.impact.consumer_graph import (
 from abicheck.model import AbiSnapshot
 
 _DISPATCHER = "_ZN6detail21train_ops_dispatcherEv"
+
+
+def consumer_required_symbol_nodes(graph: SourceGraphSummary) -> frozenset[str]:
+    """The consumer-required node ids, read from their owner in ``graph_impact``."""
+    from abicheck.buildsource.graph_impact import _consumer_required_nodes
+
+    return _consumer_required_nodes(graph)
+
+
+def explain_required_symbol(graph, symbol: str, *, consumer: str = ""):
+    """One symbol's answer from the batch :func:`explain_required_symbols`."""
+    return explain_required_symbols(graph, [symbol], consumer=consumer).get(symbol)
 
 
 def _reqs(*symbols: str, versions: dict[str, str] | None = None) -> AppRequirements:

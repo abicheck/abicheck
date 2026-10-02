@@ -394,6 +394,7 @@ class TestSymversParser:
         meta = parse_symvers(text)
         assert set(meta.entries) == {"good"}
 
+
 class TestKabiDiff:
     _OLD = (
         "0x11\tkmalloc\tvmlinux\tEXPORT_SYMBOL\t\n"

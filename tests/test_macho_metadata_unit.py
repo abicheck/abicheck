@@ -801,6 +801,7 @@ class TestCliIntegration:
         p.write_text("hello")
         assert _detect_binary_format(p) is None
 
+
 # ── install_name / compat_version gained coverage ────────────────────────────
 
 

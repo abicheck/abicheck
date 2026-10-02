@@ -222,6 +222,3 @@ def _load_side_pack_input(
     if _is_inputs_pack_dir(path):
         return _load_inputs_pack_or_raise(path, exported_symbols=exported_symbols)
     return _load_pack_or_raise(path)
-
-
-

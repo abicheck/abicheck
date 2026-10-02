@@ -1071,4 +1071,3 @@ class SuppressionAudit:
         if not self.has_issues:
             lines.append("  ✓ No issues found")
         return "\n".join(lines)
-

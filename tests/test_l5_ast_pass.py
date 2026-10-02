@@ -283,4 +283,3 @@ class TestRunL5AstPass:
         assert [cu.source for cu in run.target.compile_units] == sources
         assert targets[0] is run.target
         assert run.narrowed is narrowed
-

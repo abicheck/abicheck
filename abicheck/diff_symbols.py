@@ -85,7 +85,6 @@ from .diff_symbols_renames import (  # noqa: F401  (public-surface re-exports)
     _skip_template_args as _skip_template_args,
     _strip_template_args as _strip_template_args,
     _truncate_at_param_list as _truncate_at_param_list,
-    _unqualified_name as _unqualified_name,
     _unqualified_name_of as _unqualified_name_of,
     _unwrap_funcptr_declarator as _unwrap_funcptr_declarator,
     emit_namespace_move_batches as emit_namespace_move_batches,

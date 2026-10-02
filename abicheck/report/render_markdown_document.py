@@ -112,6 +112,7 @@ from .edge_coverage_section import (
 )
 from .envelope import ReportEnvelope, resolved_document
 from .finding import build_report_findings
+from .kind_rollup import KindRollup, render_kind_rollups
 from .pattern_modulations_markdown import render_pattern_modulations_from_mapping
 from .render_edge_coverage import render_edge_coverage_markdown
 from .render_markdown import (
@@ -551,6 +552,9 @@ def build_markdown_document(
                 "rows": [
                     _change_row(c, result.evidence_tiers, use_cases) for c in g.changes
                 ],
+                # The kinds rolled up instead of itemised; a rolled-up finding
+                # is in exactly one of `rows` or here, never dropped.
+                "rollups": [asdict(r) for r in g.rollups],
             }
             for g in severity_data.groups
         ],
@@ -692,6 +696,23 @@ def _impact_table_from_mapping(d: Mapping[str, Any] | None) -> ImpactTable | Non
     )
 
 
+def _kind_rollups_from_mapping(raw: object) -> tuple[KindRollup, ...]:
+    """The document's rollup mappings back as :class:`KindRollup` values."""
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        KindRollup(
+            kind=r["kind"],
+            count=r["count"],
+            sample_symbols=tuple(r["sample_symbols"]),
+            counts_by_library=tuple(
+                (lib, n) for lib, n in r.get("counts_by_library", ())
+            ),
+        )
+        for r in raw
+    )
+
+
 def _environment_drift_from_mapping(
     d: Mapping[str, Any] | None,
 ) -> EnvironmentDriftSection | None:
@@ -753,6 +774,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
         fmt = _render_change_row_oneline if group["oneline"] else _render_change_row
         for row in group["rows"]:
             lines.append(fmt(row))
+        lines += render_kind_rollups(_kind_rollups_from_mapping(group.get("rollups")))
         lines.append("")
     lines += _render_not_evaluated_lines(d["not_evaluated"])
     lines += render_environment_drift_section(

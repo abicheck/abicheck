@@ -94,7 +94,6 @@ if TYPE_CHECKING:
     from .severity import SeverityConfig
 
 
-
 def compute_full_change_rows(
     changes: Iterable[object],
     evidence_tiers: Sequence[str] = (),

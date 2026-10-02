@@ -1095,8 +1095,6 @@ def test_run_source_replay_uses_cache_to_skip_reextraction(tmp_path: Path) -> No
 # ── ADR-033 D3 PR-diff localizer ─────────────────────────────────────────────
 
 
-
-
 def test_graph_full_maps_to_full_scope():
     """ADR-033 D2 (Codex): graph-full collects the full replay scope, not target."""
     from abicheck.buildsource.source_replay import (

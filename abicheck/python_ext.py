@@ -271,4 +271,3 @@ def abi3_precondition_message(abi3_floor: tuple[int, int], binary_name: str) -> 
         "audit applies only to extension modules (Cython/pybind11/"
         "nanobind/C)."
     )
-

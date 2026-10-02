@@ -342,7 +342,7 @@ def _fold_findings_into_changes(
             # consumer's own import table,
             # not by an artifact-level library diff -- evidence_status_for_change
             # would otherwise report "artifact_proven" purely from the kind's
-            # BREAKING/RISK category, same as appcompat_to_json's own
+            # BREAKING/RISK category, same as the former appcompat_to_json's
             # CONSUMER_PROVEN override for this exact finding shape.
             evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
             # G29 Phase 3 follow-up (ADR-052): feeds

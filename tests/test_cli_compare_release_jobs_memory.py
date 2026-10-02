@@ -30,20 +30,6 @@ from abicheck import cli_compare_release_pairwise as release_pairwise
 from abicheck.workflows import release_jobs
 
 
-class TestReleaseJobMemBudget:
-    def test_default_budget(self, monkeypatch) -> None:
-        monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
-        assert release_pairwise._release_job_mem_budget_gib() == 1.0
-
-    def test_env_override(self, monkeypatch) -> None:
-        monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "2.5")
-        assert release_pairwise._release_job_mem_budget_gib() == 2.5
-
-    def test_invalid_env_falls_back_to_default(self, monkeypatch) -> None:
-        monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "not-a-number")
-        assert release_pairwise._release_job_mem_budget_gib() == 1.0
-
-
 class TestReleaseJobsMemCap:
     def test_none_when_ram_unreadable(self, monkeypatch) -> None:
         monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)

@@ -57,4 +57,3 @@ class TestTypeMetadataSourceProtocol:
         assert meta.get_struct_layout("missing") is None
         assert meta.get_enum_info("bar") is not None
         assert meta.get_enum_info("missing") is None
-

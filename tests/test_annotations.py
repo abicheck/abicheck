@@ -30,7 +30,8 @@ def _visible(
     return [
         (_SORT_KEY[str(entry["level"])], str(entry["annotation"]))
         for entry in annotation_report_entries(
-            diff_result, severity_config=severity_config  # type: ignore[arg-type]
+            diff_result,
+            severity_config=severity_config,  # type: ignore[arg-type]
         )
         if annotate_additions or entry["always_visible"]
     ]

@@ -161,7 +161,7 @@ def _l2_seed_pack_inputs(
 
 @dataclasses.dataclass(frozen=True)
 class _L2SeedPackArgs:
-    """Everything :func:`derive_l2_include_dirs` and :func:`derive_l2_compile_context`
+    """Everything :func:`derive_l2_include_dirs` and :func:`derive_l2_compile_context` (removed)
     need to make their own, independent ``collect_inline_pack(..., layers=("L3",))``
     call, resolved identically for both.
 
@@ -171,7 +171,7 @@ class _L2SeedPackArgs:
     this bundles that shared argument-*building* step into one helper both
     consume. Deliberately does **not** call ``collect_inline_pack`` itself —
     each ``derive_l2_*`` function keeps its own independent call (see
-    :func:`derive_l2_compile_context`'s own docstring for why: an accepted,
+    the former :func:`derive_l2_compile_context`'s own docstring for why: an accepted,
     documented double-collection cost, not a duplication to also fold away
     here), so this only removes the genuinely-identical setup work ahead of
     that call.

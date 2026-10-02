@@ -416,4 +416,3 @@ def load_manifest(path: Path) -> DumpManifest:
     """
     text = path.read_text(encoding="utf-8")
     return parse_manifest(text, base_dir=path.resolve().parent, source=str(path))
-

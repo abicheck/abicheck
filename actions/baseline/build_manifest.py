@@ -149,7 +149,7 @@ def _read_snapshot_meta(path: Path) -> dict[str, Any]:
         "fact_set": fact_set,
         "sha256": sha256,
         "compression": compression,
-        # cli_dump_helpers.fold_dump_provenance_into_json's requested_depth/
+        # cli_dump_helpers.fold_dump_provenance_into_dict's requested_depth/
         # effective_depth/degraded/frontend/source_scope block -- absent (None)
         # for a snapshot dumped without --depth (audit finding: the baseline
         # manifest recorded profile/schema/fact-set but never the actual depth

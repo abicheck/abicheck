@@ -335,4 +335,3 @@ def _render_node_html(
         )
 
     on_path.discard(key)
-

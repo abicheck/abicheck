@@ -231,4 +231,3 @@ def _warn_if_source_surface_empty(
             "points at the headers used by that target.",
             err=True,
         )
-

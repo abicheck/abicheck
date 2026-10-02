@@ -390,38 +390,6 @@ def _get_cache_dir() -> Path:
 _CACHE_DIR: Path = _get_cache_dir()
 
 
-def _hash_include_dir_headers(h: hashlib._Hash, inc: Path) -> None:
-    """Fold the (relative path, mtime) of every header-like file under
-    ``inc`` into ``h``, so an edit to a header reached only transitively
-    through an ``-I``/``--include`` directory (never itself passed as an
-    explicit ``headers`` entry) still invalidates the whole-snapshot cache.
-
-    Reuses :func:`abicheck.extract.cache_header_scan.iter_cache_header_files` (the same
-    ``CACHE_HEADER_SUFFIXES`` set ``dumper._cache_key``'s own AST-level cache
-    already walks) rather than a second, independently-maintained suffix
-    list -- an earlier ad hoc set here was missing ``.tpp``/``.inc`` (Codex
-    review), which the shared set already accounted for.
-
-    Best-effort and bounded by whatever is actually on disk under ``inc`` --
-    a missing/unreadable directory degrades to hashing nothing extra (same
-    as before this function existed) rather than raising, matching this
-    module's existing "any read problem is cache-safe, never a crash"
-    stance (see ``lookup``/``store``).
-    """
-    from .extract.cache_header_scan import iter_cache_header_files
-
-    try:
-        entries = iter_cache_header_files(inc)
-    except OSError:
-        return
-    for p in entries:
-        try:
-            h.update(str(p.relative_to(inc)).encode())
-            h.update(str(p.stat().st_mtime_ns).encode())
-        except OSError:
-            h.update(b"MISSING")
-
-
 def _cache_key(
     binary_path: Path,
     headers: list[Path],

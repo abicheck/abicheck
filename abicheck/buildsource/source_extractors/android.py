@@ -36,7 +36,6 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -226,44 +225,4 @@ class AndroidHeaderAbiAdapter:
             source=_str(data.get("source_file")) or path.stem,
             target_id=target_id,
             public_header_roots=public_header_roots,
-        )
-
-    def run_dumper(
-        self,
-        header: Path | str,
-        *,
-        output: Path | str,
-        clang_argv: list[str] | None = None,
-        target_id: str = "",
-        public_header_roots: list[str] | None = None,
-    ) -> SourceAbiTu:
-        """Opt-in: run ``header-abi-dumper`` on a header, then normalize (ADR-032 D5).
-
-        This compiles the header, so it is never invoked by default collection.
-        Requires the Android tool on ``PATH``.
-        """
-        if not self.available():
-            raise SourceExtractionError(
-                f"{self.dumper_bin} not found in PATH; pass a pre-captured dump to "
-                "load() instead, or install the Android header-checker tools."
-            )
-        out = Path(output)
-        cmd = [self.dumper_bin, str(header), "-o", str(out), "-output-format", "Json"]
-        if clang_argv:
-            cmd += ["--", *clang_argv]
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=self.timeout, check=False
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise SourceExtractionError(
-                f"header-abi-dumper timed out after {self.timeout}s on {header}"
-            ) from exc
-        if result.returncode != 0 or not out.is_file():
-            raise SourceExtractionError(
-                f"header-abi-dumper failed on {header} (exit {result.returncode}): "
-                f"{result.stderr[:1000]}"
-            )
-        return self.load(
-            out, target_id=target_id, public_header_roots=public_header_roots
         )

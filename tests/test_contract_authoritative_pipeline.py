@@ -962,17 +962,17 @@ class TestEveryRendererTellsTheSameStory:
         """A GitHub annotation states how a finding gated. `::error` on a
         comparison whose verdict is NO_CHANGE and whose gate is clean put a
         red inline annotation on a passing PR (Codex review)."""
-        from abicheck.annotations import collect_annotations
+        from abicheck.annotations import annotation_report_entries
 
-        (annotation,) = collect_annotations(self._excluded())
-        assert annotation[1].startswith("::notice")
-        assert "Not evaluated (contract)" in annotation[1]
+        (entry,) = annotation_report_entries(self._excluded())
+        assert entry["always_visible"] and entry["annotation"].startswith("::notice")
+        assert "Not evaluated (contract)" in entry["annotation"]
 
     def test_the_workflow_annotation_is_an_error_for_a_scored_finding(self) -> None:
-        from abicheck.annotations import collect_annotations
+        from abicheck.annotations import annotation_report_entries
 
-        (annotation,) = collect_annotations(self._scored())
-        assert annotation[1].startswith("::error")
+        (entry,) = annotation_report_entries(self._scored())
+        assert entry["annotation"].startswith("::error")
 
     def test_the_html_report_does_not_file_it_under_a_verdict_section(self) -> None:
         """The HTML page computes its own buckets, so the metric filter alone

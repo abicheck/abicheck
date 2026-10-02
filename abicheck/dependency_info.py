@@ -18,7 +18,7 @@
 What ``compare --follow-deps`` (and ``run_compare_request``'s
 ``follow_dependencies``) actually does. A leaf module on purpose: it depends
 only on ``binder``/``model``/``resolver``, and both the CLI
-(``cli_resolve._populate_dependency_info``) and the service layer
+(``cli_resolve._populate_dependency_info`` (removed)) and the service layer
 (``service.run_compare_request``) need it — so neither has to import the
 other for it. ADR-055 D1's second slice, which gave the typed request
 ``--follow-deps`` parity, is what made the second caller exist; before that
@@ -50,7 +50,7 @@ def populate_dependency_info(
     ``--follow-deps`` does, ``run_compare_request`` needed the same thing to
     reach parity with the CLI's own resolution, and it depends on nothing but
     leaf modules — so the service layer is its home and the CLI depends on
-    the service rather than the reverse. ``cli_resolve._populate_dependency_info``
+    the service rather than the reverse. ``cli_resolve._populate_dependency_info`` (removed)
     remains as a thin alias for ``cli.py``'s existing re-export.
     """
     from .binder import BindingStatus, compute_bindings

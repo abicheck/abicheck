@@ -403,6 +403,7 @@ class TestRequireJustificationCliFlag:
     # `TestSuggestSuppressions` above (including custom-expiry and empty-changes
     # cases) — no CLI-level replacement test is needed here.
 
+
 class TestRequireJustificationErrorType:
     """suppression.require_justification failures are ClickException, not BadParameter."""
 

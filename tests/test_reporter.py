@@ -1750,49 +1750,6 @@ class TestConfidenceInMarkdown:
 # ---------------------------------------------------------------------------
 
 
-class TestAppCompatTraceability:
-    """AppCompat JSON/Markdown include file metadata and confidence when available."""
-
-    def _appcompat_result(self):
-        from types import SimpleNamespace
-
-        from abicheck.checker_policy import Confidence
-
-        diff = _result(Verdict.COMPATIBLE)
-        diff.old_metadata = SimpleNamespace(
-            path="/old/lib.so", sha256="aabb" * 8, size_bytes=4096
-        )
-        diff.new_metadata = SimpleNamespace(
-            path="/new/lib.so", sha256="ccdd" * 8, size_bytes=8192
-        )
-        diff.confidence = Confidence.MEDIUM
-        diff.evidence_tiers = ["elf", "header"]
-        diff.coverage_warnings = []
-        return SimpleNamespace(
-            app_path="/bin/app",
-            old_lib_path="/old/lib.so",
-            new_lib_path="/new/lib.so",
-            verdict=Verdict.COMPATIBLE,
-            symbol_coverage=100.0,
-            required_symbol_count=10,
-            missing_symbols=[],
-            missing_versions=[],
-            breaking_for_app=[],
-            irrelevant_for_app=[],
-            full_diff=diff,
-        )
-
-    def test_appcompat_json_includes_file_metadata(self):
-        from abicheck.reporter import appcompat_to_json
-
-        r = self._appcompat_result()
-        d = json.loads(appcompat_to_json(r))
-        assert d["old_file"]["path"] == "/old/lib.so"
-        assert d["new_file"]["path"] == "/new/lib.so"
-        assert d["old_file"]["size_bytes"] == 4096
-        assert d["confidence"] == "medium"
-        assert d["evidence_tiers"] == ["elf", "header"]
-
 class TestStatJsonConfidence:
     """Stat JSON must include confidence and evidence_tiers."""
 

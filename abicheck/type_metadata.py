@@ -77,4 +77,3 @@ class TypeMetadataSource(Protocol):
     def has_data(self) -> bool:
         """Whether this source has any type data available."""
         ...
-

@@ -982,7 +982,7 @@ def to_sarif(
                 relevant_ids=relevant_ids,
                 # Codex review: proven by the real consumer's own import
                 # table/execution, not an artifact-level library diff --
-                # mirrors reporter.appcompat_to_json's own override for this
+                # mirrors reporter.the former appcompat_to_json's override for this
                 # exact finding shape.
                 evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
                 root_cause=_root_cause_for(
@@ -1348,4 +1348,3 @@ def to_sarif_str(
         ),
         indent=indent,
     )
-

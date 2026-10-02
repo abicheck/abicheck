@@ -758,7 +758,7 @@ def _compute_release_severity_exit_code(
     per-finding frozen-namespace floor — Codex review on #549: without
     ``policy_file`` here, a policy override that downgrades a kind could still
     silently exit 0 for a finding tagged ``frozen_namespace_violation``, even
-    though that same finding's annotation, via ``collect_annotations``, does
+    though that same finding's annotation, via ``annotation_report_entries``, does
     honour the floor and emits ``::error``) so per-library overrides are
     honored in the exit code exactly as they are in the report.
 

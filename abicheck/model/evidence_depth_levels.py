@@ -327,19 +327,6 @@ def resolve_source_method(
 UNPINNED_DEPTH: EvidenceDepth = EvidenceDepth.HEADERS
 
 
-def resolve_unpinned_level(mode: ScanMode) -> tuple[SourceMethod, EvidenceDepth]:
-    """The ``(method, depth)`` level an omitted ``--depth`` resolves to.
-
-    Exactly ``resolve_level(mode=mode, depth=UNPINNED_DEPTH)`` -- i.e. the
-    resolution an explicit ``--depth headers`` would get, so the two spellings
-    cannot drift. *mode* is accepted (and, today, unused) because the caller
-    always has one and the preset is the thing this deliberately does *not*
-    consult: passing it keeps that visible at the call site instead of leaving
-    a future reader to wonder whether the mode was forgotten.
-    """
-    return resolve_level(mode=mode, source_method=None, depth=UNPINNED_DEPTH)
-
-
 def resolve_level(
     *,
     mode: ScanMode,

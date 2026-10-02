@@ -67,16 +67,6 @@ def _provenance_timestamp(source_date_epoch: str | None) -> str:
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
-def _merge_gcc_options(
-    build_context_flags: list[str], gcc_options: str | None
-) -> str | None:
-    """Merge compile-db derived flags with explicit gcc options."""
-    if not build_context_flags:
-        return gcc_options
-    merged = " ".join(build_context_flags)
-    return f"{merged} {gcc_options}" if gcc_options else merged
-
-
 def _pair_wide_dialect_override(
     lang: str,
     old_h: list[Path],

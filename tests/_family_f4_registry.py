@@ -182,9 +182,6 @@ CONVENTION_STRUCTURE: dict[str, str] = {
     "abicheck.diff_types_surface": (
         "field layout (offset/size unchanged) and header origin, not a reserved/padding name or `std::` prefix"
     ),
-    "abicheck.policy.public_surface_closure": (
-        "#1231: leaf-local duplicate of internal_leak's segment rule, vetoing a header-origin seed; reachability confirms"
-    ),
     "abicheck.diff_versioning": (
         "the version node's own definition/visibility, not an internal-looking token"
     ),
@@ -195,7 +192,8 @@ CONVENTION_STRUCTURE: dict[str, str] = {
 HEURISTICS: dict[str, str] = {
     "abicheck.internal_leak::<module>::re:'(\\\\*|&{1,2}|\\\\[\\\\d*\\\\]|\\\\bconst\\\\b|\\\\bvolatile\\\\b)'": "spelling",
     "abicheck.internal_leak::<module>::re:'<[^<>]*>'": "C:internal_ns",
-    "abicheck.internal_leak::<module>::vocab:DEFAULT_INTERNAL_NAMESPACES": "C:internal_ns",
+    "abicheck.model.symbol_ownership::<module>::vocab:DEFAULT_INTERNAL_NAMESPACES": "C:internal_ns",
+    "abicheck.model.symbol_ownership::_nested_name_region::affix.startswith:'_Z'": "grammar",
     "abicheck.internal_leak::_bfs_collect_paths::affix.startswith:'indirect:'": "own_format",
     "abicheck.internal_leak::_build_call_graph_leak_change::affix.startswith:'overapprox:'": "own_format",
     "abicheck.internal_leak::_format_path::affix.startswith:'indirect:'": "own_format",
@@ -280,8 +278,6 @@ HEURISTICS: dict[str, str] = {
     "abicheck.diff_filtering::_embedded_stdlib_fields::affix.endswith:'&'": "spelling",
     "abicheck.diff_filtering::_embedded_stdlib_fields::affix.endswith:'*'": "spelling",
     "abicheck.diff_filtering::_filter_reserved_field_renames::affix.startswith:f'{struct_name}::'": "convention",
-    "abicheck.diff_filtering::_has_public_pointer_factory::re:'\\\\b' + re.escape(type_name) + '\\\\s*\\\\*'": "convention",
-    "abicheck.diff_filtering::_is_pointer_only_type::re:'\\\\b' + re.escape(type_name) + '\\\\b'": "convention",
     "abicheck.diff_filtering::_match_root_type::re:'(?<![A-Za-z0-9_])' + re.escape(type_name) + '(?![A-Za-z0-9_])'": "convention",
     "abicheck.diff_helpers::<module>::re:'<\\\\s*(?:unnamed|anonymous)(?:\\\\s+(union|struct|class|enum)\\\\b)?'": "spelling",
     "abicheck.diff_helpers::_normalize_type_spelling::re:'[\\\\s*&]+$'": "spelling",
@@ -385,7 +381,6 @@ HEURISTICS: dict[str, str] = {
     "abicheck.policy.outcome::<module>::re:'^(0(\\\\.[0-9]+)*|1(\\\\.0+)?)$'": "own_format",
     "abicheck.policy.outcome_release::unclassified_release_contribution_fields::affix.endswith:'_contribution'": "own_format",
     "abicheck.policy.public_surface_closure::<module>::re:'<[^<>]*>'": "spelling",
-    "abicheck.policy.public_surface_closure::<module>::vocab:_DEFAULT_INTERNAL_NAMESPACES": "convention",
     "abicheck.policy.selectors::<module>::re:'<[^<>]*>'": "spelling",
     "abicheck.policy.selectors::_matches_source_location::re:':\\\\d+(?::\\\\d+)?$'": "user_rule",
     "abicheck.policy.selectors::_ns_match::affix.startswith:'_Z'": "grammar",

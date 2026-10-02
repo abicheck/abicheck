@@ -171,4 +171,3 @@ def test_lexical_methods_collect_no_inline_pack():
 def test_semantic_methods_select_replay_scopes():
     assert method_to_collect_mode(SourceMethod.S5) == "source-changed"
     assert method_to_collect_mode(SourceMethod.S6) == "graph-full"
-

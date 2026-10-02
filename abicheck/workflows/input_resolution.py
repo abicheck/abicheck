@@ -71,7 +71,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from ..dump_manifest import DumpManifest
-    from ..environment_matrix import EnvironmentMatrix
 
 # `service_dump_native` reaches `service_header_graph_attach` ->
 # `dry_run_estimate` -> `service`, the pre-existing, already-baselined CLI-
@@ -725,41 +724,3 @@ def collect_metadata(path: Path) -> LibraryMetadata | None:
         sha256=hashlib.sha256(data).hexdigest(),
         size_bytes=len(data),
     )
-
-
-def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
-    """Load an ADR-020b environment-matrix YAML, or None when *path* is None.
-
-    Tier-2 loader (mirrors :func:`abicheck.service.load_suppression_and_policy`):
-    parse/shape errors surface as :class:`ValidationError` with identical text
-    across front-ends.
-
-    No CLI flag or ``.abicheck.yml`` key feeds this any more (ADR-068 D5):
-    the former ``compare --env-matrix FILE`` was demoted to the
-    ``deployment:`` config key, parsed inline via
-    :meth:`~abicheck.environment_matrix.EnvironmentMatrix.from_dict` rather
-    than a side file (see ``buildsource.build_config.BuildConfig.deployment``).
-    This loader remains a plain, direct-Python-caller convenience for a
-    typed-API user who genuinely wants to load an ``EnvironmentMatrix`` from
-    its own YAML file (equivalent to
-    :meth:`~abicheck.environment_matrix.EnvironmentMatrix.from_yaml`, just
-    with this module's ``ValidationError`` wrapping) and pass it to
-    :func:`~abicheck.service.run_compare`'s/:class:`~abicheck.workflows.
-    contracts.CompareRequest`'s own ``env_matrix`` parameter directly --
-    not a CLI escape hatch, since nothing in the CLI/config resolution path
-    calls it any more.
-    """
-    if path is None:
-        return None
-    from pathlib import Path as _Path
-
-    from ..environment_matrix import EnvironmentMatrix
-
-    try:
-        # from_yaml converts malformed YAML to ValueError, so no yaml import
-        # is needed here (abicheck.service has no import-untyped override).
-        return EnvironmentMatrix.from_yaml(_Path(path))
-    except (TypeError, ValueError) as e:
-        raise ValidationError(f"Invalid environment matrix {path}: {e}") from e
-    except OSError as e:
-        raise ValidationError(f"Cannot read environment matrix {path}: {e}") from e

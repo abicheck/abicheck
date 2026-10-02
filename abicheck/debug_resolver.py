@@ -657,4 +657,3 @@ def resolve_debug_info(
 
     _logger.info("No debug info found for %s", binary_path.name)
     return None
-

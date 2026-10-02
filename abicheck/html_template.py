@@ -17,7 +17,7 @@
 This is the one seam every abicheck-native HTML report renders through: the
 document wrapper (DOCTYPE / head / embedded stylesheet / body frame), the
 verdict colour palette, and the footer. The three renderers —
-``html_report.generate_html_report``, ``appcompat_html.appcompat_to_html`` and
+``html_report.generate_html_report``, ``appcompat_html.appcompat_to_html`` (removed) and
 ``stack_html.stack_to_html`` — supply only their domain content as the document
 *body*; the chrome lives here once.
 

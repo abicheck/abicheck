@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-import re
-
 from abicheck.checker_policy import ChangeKind, Confidence, EvidenceTier
 from abicheck.checker_types import (
     SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER,
@@ -35,10 +33,7 @@ from abicheck.diff_filtering import (
     _filter_reserved_field_renames,
     _find_by_value_types,
     _find_opaque_types,
-    _has_public_pointer_factory,
     _is_impl_source,
-    _public_function_uses_type_by_value,
-    _public_variable_uses_type_by_value,
     _safe_index,
 )
 from abicheck.model import (
@@ -177,83 +172,10 @@ def test_enrich_affected_symbols_no_type_changes_noop():
 # ── _public_function_uses_type_by_value — non-public skip (539) ──────────────
 
 
-def test_public_function_uses_type_by_value_skips_hidden():
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        functions=[
-            _fn("hidden", "hidden", return_type="Handle", visibility=Visibility.HIDDEN),
-        ]
-    )
-    assert _public_function_uses_type_by_value(snap, bare) is False
-
-
-def test_public_function_uses_type_by_value_param_match():
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        functions=[
-            _fn("f", "f", return_type="void", params=[Param(name="h", type="Handle")]),
-        ]
-    )
-    assert _public_function_uses_type_by_value(snap, bare) is True
-
-
 # ── _public_variable_uses_type_by_value — skip + match (551-554) ─────────────
 
 
-def test_public_variable_uses_type_by_value_skips_hidden():
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        variables=[
-            Variable(
-                name="g", mangled="g", type="Handle", visibility=Visibility.HIDDEN
-            ),
-        ]
-    )
-    assert _public_variable_uses_type_by_value(snap, bare) is False
-
-
-def test_public_variable_uses_type_by_value_matches():
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        variables=[
-            Variable(name="g", mangled="g", type="Handle"),
-        ]
-    )
-    assert _public_variable_uses_type_by_value(snap, bare) is True
-
-
-def test_public_variable_uses_type_by_value_loop_continues_on_nonmatch():
-    # First public variable does not use the type by value (pointer) → loop
-    # continues to the next variable (covers the 553->550 loop-back branch).
-    bare = re.compile(r"\bHandle\b")
-    snap = _snap(
-        variables=[
-            Variable(name="p", mangled="p", type="Handle*"),
-            Variable(name="g", mangled="g", type="Handle"),
-        ]
-    )
-    assert _public_variable_uses_type_by_value(snap, bare) is True
-
-
 # ── _has_public_pointer_factory — non-public skip (602) ──────────────────────
-
-
-def test_has_public_pointer_factory_skips_hidden():
-    snap = _snap(
-        functions=[
-            _fn("make", "make", return_type="Handle*", visibility=Visibility.HIDDEN),
-        ]
-    )
-    assert _has_public_pointer_factory("Handle", snap) is False
-
-
-def test_has_public_pointer_factory_true_for_public():
-    snap = _snap(
-        functions=[
-            _fn("make", "make", return_type="Handle *"),
-        ]
-    )
-    assert _has_public_pointer_factory("Handle", snap) is True
 
 
 # ── _filter_reserved_field_renames — namespace-prefix continue (737) ─────────
@@ -1142,12 +1064,12 @@ def test_opaque_usage_index_matches_per_candidate_oracle():
     pairs that could never match, so the decision is unchanged."""
     import random
 
-    from abicheck.diff_filtering import (
+    from abicheck.diff_filtering import _opaque_usage_index
+    from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
+    from tests._opaque_usage_oracle import (
         _has_public_pointer_factory,
         _is_pointer_only_type,
-        _opaque_usage_index,
     )
-    from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
 
     rng = random.Random(99)
     names = ["Foo", "Bar", "Ctx", "SSLCtx", "ns::Foo", "Handle", "T"]

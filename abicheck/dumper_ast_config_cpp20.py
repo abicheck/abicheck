@@ -907,18 +907,6 @@ _STRING_LITERAL_PATTERN = re.compile(rb'"[^"\\\n]*(?:\\.[^"\\\n]*)*"')
 _CHAR_LITERAL_PATTERN = re.compile(rb"'[^'\\\n]*(?:\\.[^'\\\n]*)*'")
 
 
-def _strip_literals(line: bytes) -> bytes:
-    """Blank out string/char literal contents.
-
-    Prevents a keyword that only appears *inside* a string (e.g. an error
-    message like ``"Foo requires Base"``) from being mistaken for C++
-    structural syntax.
-    """
-    line = _STRING_LITERAL_PATTERN.sub(b'""', line)
-    line = _CHAR_LITERAL_PATTERN.sub(b"''", line)
-    return line
-
-
 # Newline-tolerant variants of the two patterns above, for use ONLY on a
 # chunk that has already been through _iter_logical_lines: that step splices
 # away a backslash-newline continuation, embedding a literal "\n" exactly

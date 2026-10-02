@@ -314,27 +314,6 @@ def _resolve_input(
         raise click.ClickException(str(exc)) from exc
 
 
-def _populate_dependency_info(
-    snap: AbiSnapshot,
-    so_path: Path,
-    search_paths: list[Path],
-    sysroot: Path | None,
-    ld_library_path: str,
-) -> None:
-    """Back-compat alias — the implementation now lives in the service layer.
-
-    ADR-055 D1's second slice gave ``run_compare_request`` ``--follow-deps``
-    parity, so this gained a second caller outside the CLI. It reads only
-    leaf modules (``binder``/``model``/``resolver``), so it moved to the leaf
-    ``dependency_info`` module both layers can depend on rather than either
-    importing the other (AGENTS.md's rule for exactly this shape). Kept as a
-    name here because ``cli.py`` imports and re-exports it.
-    """
-    from .dependency_info import populate_dependency_info
-
-    populate_dependency_info(snap, so_path, search_paths, sysroot, ld_library_path)
-
-
 def _looks_like_application(path: Path) -> bool:
     """Positively identify an ELF *application* (executable), not a library.
 

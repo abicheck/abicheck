@@ -456,7 +456,7 @@ def _disagreeing_roles(
     D3, Codex review, fresh evidence).
 
     Deliberately stricter than
-    :func:`~abicheck.buildsource.inline_graph_fold.role_pass_covered` — that
+    :func:`~abicheck.buildsource.inline_graph_fold.role_pass_covered` (removed) — that
     function's family-flag fallback ("no finer key recorded -> defer to the
     coarse pass-level flag") exists for a hand-built or pre-D3 graph, but is
     exactly wrong for the question this function answers: a graph collected
@@ -1172,32 +1172,6 @@ def _call_reachability_findings(
                 )
             )
     return findings
-
-
-def _include_graph_covered(graph: SourceGraphSummary) -> bool:
-    """Whether *graph* actually collected include-graph data at all.
-
-    True when its include-graph pass is confirmed — either the build-
-    integrated ``"include_graph"`` name or its header-only-graph counterpart
-    (:data:`~abicheck.buildsource.header_graph.HEADER_INCLUDE_GRAPH_PASS`,
-    via :func:`_pass_ran`) — (``extractor_passes``, ADR-041 P0 slice 2
-    coverage-honesty convention: a pass can run and find zero edges, e.g. a
-    leaf public header with no ``#include``s of its own) or it carries any
-    ``COMPILE_UNIT_INCLUDES_FILE`` edge at all (an unmarked/legacy graph with
-    real recorded data). False only when the graph has neither — i.e.
-    include-graph folding never ran, whether because the caller never
-    requested it (an older snapshot dumped before the fold became automatic)
-    or clang was unavailable.
-
-    This is a coarse "was there any include-graph collection at all" signal
-    — it does not distinguish a full project-wide pass from a narrowed
-    (PR/``--since``-scoped) or degraded (partial per-TU failures) one. Use
-    :func:`_include_graph_fully_covered` instead when trusting the
-    *absence* of a header from the set (:func:`_include_graph_drift_findings`).
-    """
-    return _pass_ran(graph, "include_graph") or any(
-        e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in graph.edges
-    )
 
 
 def _include_graph_fully_covered(graph: SourceGraphSummary) -> bool:

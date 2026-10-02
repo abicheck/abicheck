@@ -737,6 +737,7 @@ class TestSurfaceExclusionReason:
         )
         assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
 
+
 # ── end-to-end via compare(scope_to_public_surface=...) ──────────────────────
 #
 # Primitive-level property tests for `_record_nested_in_known_record` /

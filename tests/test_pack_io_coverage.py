@@ -91,4 +91,3 @@ def test_load_rejects_manifest_that_is_not_a_json_object(tmp_path):
     (pack_dir / pack_io.MANIFEST_NAME).write_text("[1, 2, 3]", encoding="utf-8")
     with pytest.raises(ValueError, match="must contain a JSON object"):
         pack_io.load(pack_dir)
-

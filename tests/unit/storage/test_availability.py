@@ -279,6 +279,7 @@ class TestMissingFamilies:
 
         assert ledger.missing_families(["binary", "layout"]) == ()
 
+
 class TestNarrowingMergesIdentifyingFieldsPerField:
     """Codex review: whole-record selection lost information both ways.
 

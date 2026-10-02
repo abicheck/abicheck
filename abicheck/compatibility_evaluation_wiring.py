@@ -256,67 +256,6 @@ _INTERNAL_NAMESPACES_FIELD = INTERNAL_NAMESPACES_FIELD  # backward-compatible al
 _BUILT_IN_DEFAULT_INTERNAL_NAMESPACES: tuple[str, ...] = ()
 
 
-def resolve_internal_namespaces(
-    *, policy_file: PolicyFile | None
-) -> tuple[tuple[str, ...], ValueProvenance]:
-    """Resolve ``surface.internal_namespaces`` from a real ``--policy-file``.
-
-    ``internal_namespaces`` has no CLI flag of its own -- ``policy_file.py``'s
-    ``PolicyFile.internal_namespaces`` (populated only when a real
-    ``--policy-file`` YAML sets the key) is the only front end that can set
-    it today. ``policy_file is None`` (no ``--policy-file`` given at all), or
-    an empty ``internal_namespaces`` list on a document that never carried
-    the key (``PolicyFile.internal_namespaces_stated`` is ``False``),
-    contribute no candidate at all and fall through to
-    :data:`_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES` -- the same "a selector
-    layer only participates when it actually selected something" principle
-    :func:`resolve_legacy_contract_mode`'s untouched-flag case already
-    applies (ADR-049 D7). A document that *did* carry the key with an empty
-    list stated something ("this project has no internal namespaces") and
-    contributes a real empty-tuple candidate, so nothing below it -- a
-    contract pack assigning the same field in particular -- fills it in over
-    that statement.
-
-    Tagged :data:`~abicheck.contract_relevance_types.SelectorLayer.EXPLICIT_CLI`,
-    not ``PROJECT_CONFIG`` -- ``--policy-file`` is a flag the user explicitly
-    passed on *this* invocation, the same selection mechanism
-    ``resolve_legacy_contract_mode``'s explicit flag case models, not an
-    implicitly-discovered project file a future ``.abicheck.yml``-reading
-    front end would contribute at ``PROJECT_CONFIG`` tier. Tagging it
-    ``PROJECT_CONFIG`` previously meant a lower-precedence-by-mechanism
-    candidate (``RUN_RECIPE``/``RUN_PROFILE``) could silently outrank an
-    explicitly user-selected manifest, and the provenance receipt itself
-    misrepresented how the value was actually chosen (Codex review, fresh
-    evidence).
-
-    Sorts and dedupes the list before building the candidate, mirroring
-    ``SurfaceConfig.__post_init__``'s own canonicalization and
-    ``compatibility_evaluation_packs.py``'s
-    ``_canonicalize_order_insensitive_field`` (both already treat
-    ``surface.internal_namespaces`` as an order-insensitive set, not an
-    ordered sequence) -- two policy files listing the same namespaces in a
-    different order must resolve to the same value, per D7's "equivalent
-    semantic inputs must resolve to an equivalent object".
-
-    Returns the resolved ``tuple[str, ...]`` and its
-    :class:`~abicheck.compatibility_evaluation_config.ValueProvenance`. This
-    performs no I/O -- *policy_file*, if given, must already be loaded by the
-    caller (e.g. via ``PolicyFile.load``).
-    """
-    default = FieldCandidate(
-        provenance=ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT),
-        value=_BUILT_IN_DEFAULT_INTERNAL_NAMESPACES,
-    )
-
-    candidate = internal_namespaces_candidate(policy_file=policy_file)
-    candidates: list[FieldCandidate] = [] if candidate is None else [candidate]
-
-    value, provenance = resolve_field(
-        INTERNAL_NAMESPACES_FIELD, candidates, default=default
-    )
-    return cast("tuple[str, ...]", value), provenance
-
-
 def internal_namespaces_candidate(
     *,
     policy_file: PolicyFile | None,

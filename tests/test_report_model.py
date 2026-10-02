@@ -69,4 +69,3 @@ def test_from_result_respects_prefiltered_changes() -> None:
     model = ReportModel.from_result(result, changes=[])
     assert model.changes == []
     assert model.breaking == [] and model.compatible == []
-

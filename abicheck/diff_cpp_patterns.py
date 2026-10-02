@@ -1276,4 +1276,3 @@ def detect_bundle_soname_skew(
             affected_symbols=stayed_list,
         )
     ]
-

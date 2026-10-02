@@ -87,4 +87,3 @@ def looks_like_symvers(text: str) -> bool:
         if raw.strip() and not raw.lstrip().startswith("#"):
             return False
     return False
-

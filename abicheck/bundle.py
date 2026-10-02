@@ -35,6 +35,10 @@ Public surface:
     - :func:`compare_bundle`      — main entry point, given two already-built
                                     :class:`BundleSnapshot`\\ s and the
                                     per-library diffs to correlate.
+    - :func:`discover_artifact_set` — resolve a set of paths into a
+                                    ``{canonical_name: path}`` bundle map,
+                                    the shape :func:`build_bundle_snapshot`
+                                    and :func:`compare_bundle` both need.
 
 For a caller with two plain *directories* on disk (e.g. two
 :mod:`abicheck.product_baseline` archives already unpacked) who doesn't want
@@ -105,9 +109,6 @@ from .bundle_soname import hard_link_alias_basenames
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, parse_elf_metadata
 from .model import AbiSnapshot
-from .workflows.bundle_unresolved_audit import (  # noqa: F401
-    _detect_unresolved_intra_dependency as _detect_unresolved_intra_dependency,
-)
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile
@@ -994,15 +995,128 @@ def build_bundle_snapshot_from_metadata(
     )
 
 
+class ArtifactSetError(ValueError):
+    """Raised by :func:`discover_artifact_set` for an invalid artifact set.
+
+    A plain, framework-agnostic exception; this module has no click
+    dependency.
+    """
+
+
+def discover_artifact_set(paths: list[Path], *, explicit: bool) -> dict[str, Path]:
+    """Resolve a list of paths into a ``{canonical_name: path}`` bundle map.
+
+    Accepts either a directory the caller already expanded to its member
+    files or an explicit path list -- the caller passes ``explicit=True``
+    only for the latter.
+
+    Two corrections folded in after review (both real, not edge cases):
+
+    - **Symlink-alias deduplication.** A completely ordinary Unix install
+      layout has both a versioned real file (``libfoo.so.1``) and an
+      unversioned dev symlink to it (``libfoo.so``) — ``discover_shared_
+      libraries()`` (``abicheck/package.py``) lists both as separate
+      discovered paths, and both canonicalize to the same name. Resolving
+      each path (``Path.resolve()``) and deduplicating identical targets
+      *before* collision-checking means this common layout is accepted, not
+      rejected.
+    - **Collision rejection for genuinely distinct files.** Once aliases are
+      collapsed, two *different* resolved files that still canonicalize to
+      the same library name (e.g. an explicit ``dir1/libfoo.so,
+      dir2/libfoo.so`` naming two unrelated real files) are rejected
+      outright — unlike ``compare``'s two-sided old-vs-new matching
+      (``_build_match_map``), a one-sided audit set has no "newest version
+      wins" tiebreak that would be sound here.
+
+    For the explicit-list form, every named path must look like a real ELF
+    shared object (``package._is_elf_shared_object``) — every entry was
+    deliberately named by the caller, so silently dropping an unsupported
+    one (the way
+    :func:`build_bundle_snapshot` does for a directory scan, where "some
+    files aren't libraries" is expected) would misrepresent the audit as
+    covering the full declared set. Raises :class:`ArtifactSetError` for any
+    unsupported explicit member, or for a genuine name collision.
+    """
+    from .binary_utils import _canonical_library_key
+
+    resolved_by_real: dict[Path | tuple[int, int], Path] = {}
+    for path in paths:
+        try:
+            real = path.resolve()
+        except OSError:
+            real = path
+        # Path.resolve() only follows symlinks -- it does not coalesce two
+        # hard links to the same inode (a real, if unusual, way a library
+        # directory can carry both a versioned name and an unversioned
+        # alias). When available, key on filesystem identity
+        # (st_dev, st_ino) instead of the resolved path, so both survive-
+        # as-distinct-members outcomes Codex flagged are avoided: two
+        # hard-linked aliases with the *same* canonical name no longer
+        # spuriously collide below, and two differently-named hard-linked
+        # aliases no longer pass the cardinality check as if they were
+        # genuinely distinct libraries (bundle analysis is Linux/ELF-only
+        # by design, ADR-018/023, so POSIX inode semantics always apply
+        # here).
+        try:
+            st = real.stat()
+            identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
+        except OSError:
+            identity = real
+        # Keep the first-seen original (unresolved) path for user-facing
+        # messages/reporting identity; only the resolution key is the
+        # canonicalized real path / filesystem identity.
+        resolved_by_real.setdefault(identity, path)
+
+    if explicit:
+        # A full ET_DYN-vs-PIE shared-object check (package.py's
+        # _is_elf_shared_object), not just the cheap 4-byte magic sniff
+        # _path_looks_like_elf uses elsewhere in this module: an explicitly
+        # named ELF executable, relocatable object, or core file has the
+        # right magic bytes but is not a library, and directory discovery
+        # (package.discover_shared_libraries) already restricts its own
+        # members to real shared objects -- the explicit-list form must not
+        # be laxer just because the caller typed the path out (Codex review).
+        from .package import _is_elf_shared_object
+
+        unsupported = [
+            p for p in resolved_by_real.values() if not _is_elf_shared_object(p)
+        ]
+        if unsupported:
+            names = ", ".join(str(p) for p in unsupported)
+            raise ArtifactSetError(
+                f"artifact set names unsupported (non-ELF-shared-object) "
+                f"member(s): {names}. Every explicitly-named path must be a "
+                "real shared library (not an executable, relocatable "
+                "object, or core file); for a mixed directory, pass the "
+                "directory instead."
+            )
+
+    buckets: dict[str, list[Path]] = {}
+    for path in resolved_by_real.values():
+        buckets.setdefault(_canonical_library_key(path), []).append(path)
+
+    collisions = {key: vals for key, vals in buckets.items() if len(vals) > 1}
+    if collisions:
+        detail = "; ".join(
+            f"'{key}': {[str(p) for p in vals]}" for key, vals in collisions.items()
+        )
+        raise ArtifactSetError(
+            f"artifact set has colliding library identities: {detail}. "
+            "Each library in an artifact set must have a distinct canonical "
+            "name; rename or drop the duplicate(s)."
+        )
+
+    return {key: vals[0] for key, vals in buckets.items()}
+
+
 def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:
     """Markdown lines for a list of bundle findings (G34 Phase 4).
 
     Shared by ``cli_compare_release_helpers._release_md_bundle_findings``
     (:class:`BundleDiffResult`'s two-sided findings) and
-    the retired ``cli_scan._render_artifact_set_text`` (:class:`BundleAuditResult`'s
-    single-sided ``scan --artifact-set`` findings, ADR-056) — the rendering
-    itself only ever needs the flat ``list[BundleFinding]``, never the
-    wrapper object, so one function covers both call sites. Returns ``[]``
+    the single-sided audit renderer the retired ``scan --artifact-set`` had
+    -- the rendering itself only ever needs the flat ``list[BundleFinding]``,
+    never the wrapper object. Returns ``[]``
     for an empty list (the caller decides whether/how to still render a
     section heading for "no findings").
     """

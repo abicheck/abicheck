@@ -63,7 +63,7 @@ reachable from that consumer via a real ``DT_NEEDED`` path
 (:func:`~abicheck.bundle_resolution_reachability.reachable_intra_libraries`)
 and (2) the provider actually satisfies that consumer's own version/
 default-binding requirement (:func:`_consumer_matches_provider`) -- both
-the same constraints ``bundle._detect_unresolved_intra_dependency``
+the same constraints ``bundle._detect_unresolved_intra_dependency`` (removed)
 already applies to its own, more elaborate provider matching. The version
 check is evaluated per (consumer, provider_entry) pair rather than that
 sibling function's "does *some* provider in the whole set resolve this"
@@ -201,7 +201,7 @@ def _consumer_matches_provider(
     """Does *provider_entry* actually satisfy *consumer*'s own version/
     default-binding requirement for the symbol they share?
 
-    Mirrors ``bundle._detect_unresolved_intra_dependency``'s own
+    Mirrors the former ``bundle._detect_unresolved_intra_dependency``'s own
     version-aware provider matching:
 
     - A consumer requiring a specific version (``ConsumerEntry.version``)
@@ -419,7 +419,7 @@ def find_unverified_signature_findings(
             # Restricted to consumers that can actually reach *provider_lib*
             # via a real DT_NEEDED path (Codex review, fresh evidence): a
             # bare `consumers_of(symbol)` is name-only and set-wide, the
-            # same limitation `bundle._detect_unresolved_intra_dependency`'s
+            # same limitation the former `bundle._detect_unresolved_intra_dependency`'s
             # own docstring documents for its own naive alternative -- two
             # unrelated libraries can each export a same-named symbol
             # without either one being loadable together with a given

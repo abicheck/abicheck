@@ -589,7 +589,7 @@ def prewarm_demangle_batch(
     batched call here makes every later per-row call a pure cache hit.
 
     Used only by report-rendering callers (``html_report.py``/
-    ``appcompat_html.py``), so it warms with ``accept_macho_prefix=True`` --
+    ``appcompat_html.py`` (removed)), so it warms with ``accept_macho_prefix=True`` --
     matching :func:`demangle_text`'s own default; see
     :func:`_is_itanium_mangled`'s docstring for why that default doesn't
     extend to :func:`demangle`/:func:`demangle_batch` themselves.
