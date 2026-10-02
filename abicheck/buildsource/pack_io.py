@@ -261,8 +261,8 @@ def verify_integrity(pack: BuildSourcePack) -> bool:
     ``content_hash`` trusts the digests recorded in the manifest, so on its
     own it cannot tell that a normalized file was edited after the pack was
     written. Recomputing the digests from disk and comparing them to the
-    recorded list detects exactly that drift — used by the baseline registry
-    to reject a tampered/partial stored pack (ADR-028 Phase 5). A manifest
+    recorded list detects exactly that drift -- ``pack_load.load_pack_or_raise``
+    rejects such a pack before it is attached (ADR-028 Phase 5). A manifest
     with no recorded artifacts (legacy/empty pack) is treated as intact.
     """
     recorded = sorted(pack.manifest.artifacts or [])

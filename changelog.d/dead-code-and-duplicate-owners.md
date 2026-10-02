@@ -42,3 +42,16 @@
   mapping each have one owner (`model.symbol_ownership`,
   `policy.severity.legacy_exit_code`); the `--used-by` scoped exit code and
   the public-surface closure no longer keep their own copies.
+
+### Fixed (continued)
+
+- **Integer type spellings compare alike across backends.** DWARF spells
+  `unsigned long` as `long unsigned int`; `canonicalize_type_name` now folds
+  integer specifier order, so finding identity and type comparison no longer
+  depend on which extractor produced the spelling.
+- **Export accounting recognises every internal namespace.** It used a
+  narrower list (no `__detail`/`_impl`) than the rest of the tool; it now reads
+  the shared vocabulary.
+- **An evidence pack edited after it was written is rejected** by
+  `--build-info`/`--sources` instead of being attached under its old content
+  hash.
