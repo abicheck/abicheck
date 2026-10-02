@@ -29,17 +29,6 @@ from abicheck.diff_platform_templates import (
 # `list[dict]` and is unchanged — exercise it directly.
 
 
-class TestSuggestSuppressions:
-    """Direct unit tests for suppression.suggest_suppressions()."""
-
-    def test_happy_path_empty_changes(self) -> None:
-        from abicheck.suppression import suggest_suppressions
-
-        text = suggest_suppressions([])
-        assert "version: 1" in text
-        assert "suppressions:" in text
-
-
 # ── compat/_errors: error classification ────────────────────────────────────
 
 

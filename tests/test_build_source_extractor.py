@@ -993,7 +993,7 @@ def _run_collect(
     from abicheck.buildsource import pack_io
     from abicheck.buildsource.build_evidence import BuildEvidence
     from abicheck.buildsource.pack import BuildSourcePack
-    from abicheck.cli_buildsource_helpers import (
+    from tests._build_source_collect import (
         _enforce_strict_mode,
         _run_external_extractors,
     )

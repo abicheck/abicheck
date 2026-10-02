@@ -51,30 +51,21 @@ from click.testing import CliRunner
 from abicheck import __version__ as _abicheck_version
 from abicheck.buildsource import BuildSourcePack, pack_io
 from abicheck.buildsource.build_evidence import BuildEvidence
-from abicheck.buildsource.merge_support import (
-    _combine_packs,
-    _detect_merge_layer_conflicts,
-)
+from abicheck.buildsource.merge_support import _combine_packs
 from abicheck.buildsource.model import ExtractorRecord
 from abicheck.buildsource.redaction import DEFAULT_REDACTION
 from abicheck.cli import main
-from abicheck.cli_buildsource import (
+from abicheck.model import AbiSnapshot
+from abicheck.schemas import REPORT_SCHEMA_VERSION
+from abicheck.serialization import load_snapshot, save_snapshot
+from tests._build_source_collect import (
     _build_coverage,
     _collect_source_graph,
     _echo_collection_summary,
     _enforce_strict_mode,
-    _merge_attach_combined,
-    _merge_fold_packs,
-    _merge_handle_conflicts,
-    _merge_load_snapshots,
-    _merge_pick_base,
-    _merge_print_summary,
     _run_adapters,
     parse_from_specs,
 )
-from abicheck.model import AbiSnapshot
-from abicheck.schemas import REPORT_SCHEMA_VERSION
-from abicheck.serialization import load_snapshot, save_snapshot, snapshot_to_json
 
 
 def _include_map_for_replay(merged, clang_bin, scope):
@@ -195,7 +186,7 @@ def _collect_source_abi(
         public_header_roots_for,
         run_source_replay,
     )
-    from abicheck.cli_buildsource import _exported_symbols_from_binary
+    from tests._build_source_collect import _exported_symbols_from_binary
 
     exported = _exported_symbols_from_binary(binary)
     library = str(binary) if binary else ""
@@ -462,31 +453,20 @@ def _collect(
     return pack
 
 
-def _merge(inputs, output, on_conflict="warn"):
-    """Test-local re-implementation of the deleted `merge` Click command's body
-    (ADR-043 CLI reset). `inputs` is a tuple of `Path`s (matching the old
-    positional args); `output` is the previously-required `-o/--output`.
-    Returns the written base `AbiSnapshot`."""
-    snaps = _merge_load_snapshots(inputs)
-    base_path, base = _merge_pick_base(snaps)
+def _relink(bin_path, src_path):
+    """Relink *src_path*'s source-only pack against *bin_path*'s exports via
+    the live ``dump --inputs`` relink helper; return the relinked source
+    snapshot (the pack is mutated in place)."""
+    from abicheck.cli_buildsource_merge import (
+        _exported_symbols_from_snapshot,
+        _relink_combined_against_exports,
+    )
 
-    conflicts = _detect_merge_layer_conflicts(snaps)
-    combined, contributors = _merge_fold_packs(snaps)
-
-    _merge_handle_conflicts(conflicts, combined, on_conflict)
-
-    if combined is None:
-        click.echo(
-            "Note: no input carried embedded build_source facts; the merged "
-            "baseline is the base snapshot's ABI surface only.",
-            err=True,
-        )
-    else:
-        _merge_attach_combined(combined, base, output)
-
-    output.write_text(snapshot_to_json(base), encoding="utf-8")
-    _merge_print_summary(base_path, contributors, len(snaps), combined, output)
-    return base
+    src = load_snapshot(src_path)
+    _relink_combined_against_exports(
+        src.build_source, _exported_symbols_from_snapshot(load_snapshot(bin_path))
+    )
+    return src
 
 
 def _write_cdb(tmp_path, std):
@@ -527,7 +507,7 @@ def test_collect_evidence_redacts_manifest_paths(tmp_path, monkeypatch):
     # abicheck.cli_buildsource_helpers that read that module's own binding.
     # Patch both so every manifest path is redacted before write.
     monkeypatch.setattr(sys.modules[__name__], "DEFAULT_REDACTION", policy)
-    monkeypatch.setattr("abicheck.cli_buildsource_helpers.DEFAULT_REDACTION", policy)
+    monkeypatch.setattr("tests._build_source_collect.DEFAULT_REDACTION", policy)
     cdb = _write_cdb(tmp_path, "c++20")
     out = tmp_path / "e"
     _collect(out, compile_db=cdb, binary=tmp_path / "libfoo.so")
@@ -572,7 +552,7 @@ def test_collect_source_graph_folds_template_graph_pass(tmp_path):
     if shutil.which("clang++") is None:
         pytest.skip("clang++ not found in PATH")
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_buildsource_helpers import _collect_source_graph, _run_adapters
+    from tests._build_source_collect import _collect_source_graph, _run_adapters
 
     src = tmp_path / "t.cpp"
     src.write_text(
@@ -641,7 +621,7 @@ def test_collect_source_graph_folds_override_and_macro_graph_passes(tmp_path):
     if shutil.which("clang++") is None:
         pytest.skip("clang++ not found in PATH")
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_buildsource_helpers import _collect_source_graph, _run_adapters
+    from tests._build_source_collect import _collect_source_graph, _run_adapters
 
     src = tmp_path / "t.cpp"
     src.write_text(
@@ -716,7 +696,7 @@ def test_collect_source_graph_folds_callback_graph_pass(tmp_path):
     if shutil.which("clang++") is None:
         pytest.skip("clang++ not found in PATH")
     from abicheck.buildsource.source_abi import SourceAbiSurface
-    from abicheck.cli_buildsource_helpers import _collect_source_graph, _run_adapters
+    from tests._build_source_collect import _collect_source_graph, _run_adapters
 
     src = tmp_path / "t.c"
     src.write_text(
@@ -795,7 +775,7 @@ def test_collect_source_graph_folds_archive_graph_pass_without_surface(tmp_path)
     if shutil.which("ar") is None or shutil.which("gcc") is None:
         pytest.skip("ar/gcc not found in PATH")
     from abicheck.buildsource.build_evidence import LinkUnit
-    from abicheck.cli_buildsource_helpers import _collect_source_graph
+    from tests._build_source_collect import _collect_source_graph
 
     src = tmp_path / "bar.c"
     src.write_text("int bar_symbol(void){return 1;}\n")
@@ -867,61 +847,6 @@ def test_binary_symbol_nodes_seeded_from_non_decl_export_mappings():
         "binary_symbol://malloc",
         "binary_symbol://leaked_sym",
     }
-
-
-def test_parse_from_specs_maps_adapters(tmp_path):
-    """The unified `--from adapter[=path]` parses into the per-adapter kwargs."""
-    from abicheck.cli_buildsource_helpers import parse_from_specs
-
-    got = parse_from_specs(
-        (
-            "cmake",
-            "ninja",
-            f"ninja-compdb={tmp_path / 'c.json'}",
-            f"bazel-cquery={tmp_path / 'cq.json'}",
-            f"bazel-aquery={tmp_path / 'aq.json'}",
-            f"make={tmp_path / 'dry.txt'}",
-        )
-    )
-    assert got["cmake"] is True and got["ninja"] is True
-    assert got["ninja_compdb"] == tmp_path / "c.json"
-    assert got["bazel_cquery"] == tmp_path / "cq.json"
-    assert got["bazel_aquery"] == tmp_path / "aq.json"
-    assert got["make_dry_run"] == tmp_path / "dry.txt"
-    # Empty specs → all defaults (no adapter requested).
-    empty = parse_from_specs(())
-    assert empty["cmake"] is False and empty["ninja_compdb"] is None
-
-
-@pytest.mark.parametrize(
-    "spec, needle",
-    [
-        ("cmake=foo", "takes no '=path'"),  # live adapter rejects a path
-        ("ninja=foo", "takes no '=path'"),
-        ("make", "requires a pre-captured path"),  # pre-captured needs a path
-        ("bazel-cquery", "requires a pre-captured path"),
-        ("bogus", "unknown adapter"),
-    ],
-)
-def test_parse_from_specs_rejects_bad_specs(spec, needle):
-    import click as _click
-
-    from abicheck.cli_buildsource_helpers import parse_from_specs
-
-    with pytest.raises(_click.UsageError) as exc:
-        parse_from_specs((spec,))
-    assert needle in str(exc.value)
-
-
-def test_parse_from_specs_rejects_duplicate_adapter():
-    """A repeated `--from` adapter is rejected, not silently last-wins."""
-    import click as _click
-
-    from abicheck.cli_buildsource_helpers import parse_from_specs
-
-    with pytest.raises(_click.UsageError) as exc:
-        parse_from_specs(("bazel-aquery=a.json", "bazel-aquery=b.json"))
-    assert "more than once" in str(exc.value)
 
 
 def test_collect_from_bogus_adapter_is_usage_error(tmp_path):
@@ -1251,13 +1176,15 @@ def test_compare_json_without_evidence_omits_metrics(tmp_path):
 
 def test_evidence_metrics_helpers_edge_branches(capsys):
     """ADR-033 D6/D9 helper edge cases: empty-metrics no-ops, the
-    missing-duration echo path, and the _layer_status fallback."""
+    missing-duration rendering path, and the _layer_status fallback."""
     # ADR-061 Phase 3: the engine renders the lines; the CLI owns the stream.
-    from abicheck.buildsource.evidence_policy import _layer_status
+    from abicheck.buildsource.evidence_policy import (
+        _layer_status,
+        evidence_metrics_lines,
+    )
     from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
     from abicheck.checker_types import DiffResult, Verdict
     from abicheck.cli_buildsource import attach_evidence_metrics
-    from abicheck.cli_buildsource_helpers import echo_evidence_metrics
 
     # Unknown layer → not_collected fallback (no rows for L5).
     rows = [
@@ -1271,12 +1198,11 @@ def test_evidence_metrics_helpers_edge_branches(capsys):
     )
     attach_evidence_metrics(result, {}, [])
     assert result.evidence_metrics == {}
-    echo_evidence_metrics({})
+    assert evidence_metrics_lines({}) == []
     assert capsys.readouterr().err == ""
 
-    # Metrics without a measured duration still echo the findings line.
-    echo_evidence_metrics({"findings.source_only.count": 2})
-    err = capsys.readouterr().err
+    # Metrics without a measured duration still render the findings line.
+    err = "\n".join(evidence_metrics_lines({"findings.source_only.count": 2}))
     assert "Evidence metrics:" in err
     assert "collection time" not in err
     assert "source-only=2" in err
@@ -1603,21 +1529,6 @@ def test_source_abi_cache_hit_rate_instrumented(tmp_path):
     assert cache.get(None) is None  # uncacheable, not counted
     assert cache.hits == 1 and cache.misses == 1
     assert cache.hit_rate == 0.5
-
-
-def test_recommend_collect_mode_cli():
-    """ADR-033 D3: recommend_collect_mode maps changed paths to a collection mode.
-
-    The `recommend-collect-mode` Click command was deleted in the ADR-043 CLI
-    reset (its behavior folded into command-aware source-scope resolution +
-    `scan --dry-run`); the underlying library function is unchanged, so this
-    calls it directly instead of via `CliRunner`."""
-    from abicheck.buildsource.source_replay import recommend_collect_mode
-
-    assert recommend_collect_mode(["CMakeLists.txt"]) == "build"
-    assert recommend_collect_mode(["src/a.cpp"]) == "source-changed"
-    assert recommend_collect_mode(["README.md"]) == "off"
-    assert recommend_collect_mode([]) == "off"
 
 
 def test_dump_collect_mode_off_embeds_nothing(tmp_path):
@@ -2131,18 +2042,6 @@ def test_collect_evidence_source_abi_noop_scope_android_no_dump(tmp_path):
     assert any(e.status != "failed" for e in pack.manifest.extractors)
 
 
-def test_exported_symbols_from_binary_edge_cases(tmp_path):
-    from pathlib import Path
-
-    from abicheck.cli_buildsource import _exported_symbols_from_binary
-
-    assert _exported_symbols_from_binary(None) == []
-    assert _exported_symbols_from_binary(Path(tmp_path / "missing")) == []
-    junk = tmp_path / "x.txt"
-    junk.write_text("not a binary")
-    assert _exported_symbols_from_binary(junk) == []
-
-
 # ── Source-tree-centric inline collection (ADR-028..033 amendment) ────────────
 
 
@@ -2395,33 +2294,6 @@ def test_auto_discovered_build_query_is_not_executed(tmp_path):
         and "auto-discovered" in (record.detail or "")
         for record in snap.build_source.manifest.extractors
     )
-
-
-def test_merge_combines_binary_and_source_snapshots(tmp_path):
-    """`merge` keeps the binary base and folds in the source side's L3 facts."""
-    from abicheck.cli_buildsource import embed_build_source
-
-    # Source/build side: a snapshot carrying only L3 build facts.
-    src_snap = AbiSnapshot(library="libfoo.so", version="1")
-    embed_build_source(src_snap, _write_cdb(tmp_path, "c++17"), None)
-    src_path = tmp_path / "libfoo.src.json"
-    save_snapshot(src_snap, src_path)
-
-    # Binary side: a snapshot with an ABI surface (faked ELF marker) and no pack.
-    from abicheck.elf_metadata import ElfMetadata
-
-    bin_snap = AbiSnapshot(library="libfoo.so", version="1")
-    bin_snap.elf = ElfMetadata()
-    bin_path = tmp_path / "libfoo.bin.json"
-    save_snapshot(bin_snap, bin_path)
-
-    out = tmp_path / "baseline.json"
-    _merge((bin_path, src_path), out)
-
-    merged = load_snapshot(out)
-    assert merged.elf is not None  # base ABI surface preserved
-    assert merged.build_source is not None  # source-side facts folded in
-    assert merged.build_source.build_evidence is not None
 
 
 # ── inline.py pure-logic coverage (no external tools) ─────────────────────────
@@ -2709,17 +2581,6 @@ def test_build_query_failure_is_recorded(tmp_path, monkeypatch):
     ]
 
 
-def test_merge_requires_two_inputs(tmp_path):
-    from abicheck.model import AbiSnapshot
-    from abicheck.serialization import save_snapshot
-
-    snap = AbiSnapshot(library="l", version="1")
-    p = tmp_path / "a.json"
-    save_snapshot(snap, p)
-    with pytest.raises(click.UsageError, match="at least two"):
-        _merge_load_snapshots((p,))
-
-
 def _src_snapshot_with_l3(tmp_path, std, name):
     """A source-only snapshot whose embedded pack carries an L3 build_evidence
     folded from a compile DB built with -std=<std>."""
@@ -2730,189 +2591,6 @@ def _src_snapshot_with_l3(tmp_path, std, name):
     path = tmp_path / name
     save_snapshot(snap, path)
     return path
-
-
-def test_merge_layer_conflict_warns_and_records(tmp_path, capsys):
-    """A2: two inputs supplying L3 with DIFFERING facts → warn + persisted record,
-    first-wins kept (exit 0 in the default warn mode)."""
-    a = _src_snapshot_with_l3(tmp_path, "c++17", "a.json")
-    b = _src_snapshot_with_l3(tmp_path, "c++20", "b.json")
-    out = tmp_path / "baseline.json"
-    _merge((a, b), out)
-    err = capsys.readouterr().err
-    assert "merge conflict" in err
-    assert "L3_build" in err
-
-    # L3 is first-wins in _combine_packs, so the reported survivor is a.json —
-    # the message and record must name the ACTUAL winner (Codex), not a guess.
-    assert "kept a.json" in err
-
-    merged = load_snapshot(out)
-    assert merged.build_source is not None
-    recs = [
-        e
-        for e in merged.build_source.manifest.extractors
-        if e.name == "merge_layer_conflict"
-    ]
-    assert recs, "conflict must be persisted in the extractor ledger"
-    assert recs[0].status == "failed"
-    assert recs[0].diagnostics  # carries a forward-looking note
-    assert "kept a.json" in recs[0].diagnostics[0]
-
-
-def test_resolve_conflict_winner_latest_wins_on_digest_tie():
-    """A2 (Codex): for latest-wins layers (L4/L5), when two inputs share the
-    winning digest the recorded survivor must be the LAST contributor (the one
-    _combine_packs actually keeps), not the first same-digest sibling."""
-    from abicheck.buildsource.merge_support import (
-        _MERGE_LAYER_ATTRS,
-        _resolve_conflict_winners,
-    )
-    from abicheck.buildsource.model import DataLayer
-
-    l4 = DataLayer.L4_SOURCE_ABI.value
-    l3 = DataLayer.L3_BUILD.value
-
-    class _Payload:
-        def __init__(self, digest_src):
-            self._d = digest_src
-
-        def to_dict(self):
-            return self._d
-
-    # combined L4 facts == {"v": "x"}; inputs A=x, B=y, C=x → C is the survivor.
-    combined = SimpleNamespace(
-        **{
-            _MERGE_LAYER_ATTRS[l4]: _Payload({"v": "x"}),
-            _MERGE_LAYER_ATTRS[l3]: _Payload({"v": "x"}),
-        }
-    )
-    from abicheck.buildsource.merge_support import _canonical_layer_digest
-
-    dx = _canonical_layer_digest({"v": "x"})
-    dy = _canonical_layer_digest({"v": "y"})
-    conflicts = {
-        l4: [("A", dx), ("B", dy), ("C", dx)],
-        l3: [("A", dx), ("B", dy), ("C", dx)],
-    }
-    winners = _resolve_conflict_winners(combined, conflicts)
-    assert winners[l4] == "C"  # latest-wins → last same-digest contributor
-    assert winners[l3] == "A"  # accumulator-wins → first same-digest contributor
-
-
-def test_merge_layer_conflict_error_mode_exits_nonzero(tmp_path):
-    """A2: --on-conflict=error aborts non-zero and writes no baseline."""
-    a = _src_snapshot_with_l3(tmp_path, "c++17", "a.json")
-    b = _src_snapshot_with_l3(tmp_path, "c++20", "b.json")
-    out = tmp_path / "baseline.json"
-    with pytest.raises(click.ClickException, match="merge aborted"):
-        _merge((a, b), out, on_conflict="error")
-    assert not out.exists()
-
-
-def test_merge_identical_layer_is_not_a_conflict(tmp_path, capsys):
-    """A2: two inputs supplying L3 with the SAME facts must NOT flag a conflict."""
-    a = _src_snapshot_with_l3(tmp_path, "c++17", "a.json")
-    b = _src_snapshot_with_l3(tmp_path, "c++17", "b.json")
-    out = tmp_path / "baseline.json"
-    _merge((a, b), out)
-    assert "merge conflict" not in capsys.readouterr().err
-    merged = load_snapshot(out)
-    assert merged.build_source is not None
-    assert not [
-        e
-        for e in merged.build_source.manifest.extractors
-        if e.name == "merge_layer_conflict"
-    ]
-
-
-def test_merge_conflict_digest_is_order_independent(tmp_path, capsys):
-    """A2 (Codex): same facts in a different list order is NOT a conflict.
-
-    The layer payloads are sets of facts keyed by identity downstream, so a
-    reversed compile_commands.json must canonicalize to the same digest.
-    """
-    from abicheck.cli_buildsource import embed_build_source
-
-    units = [
-        {
-            "directory": str(tmp_path),
-            "file": "src/a.cpp",
-            "arguments": ["c++", "-std=c++17", "-c", "src/a.cpp"],
-        },
-        {
-            "directory": str(tmp_path),
-            "file": "src/b.cpp",
-            "arguments": ["c++", "-std=c++17", "-c", "src/b.cpp"],
-        },
-    ]
-    fwd = tmp_path / "fwd.json"
-    fwd.write_text(json.dumps(units), encoding="utf-8")
-    rev = tmp_path / "rev.json"
-    rev.write_text(json.dumps(list(reversed(units))), encoding="utf-8")
-
-    a_snap = AbiSnapshot(library="libfoo.so", version="1")
-    embed_build_source(a_snap, fwd, None)
-    b_snap = AbiSnapshot(library="libfoo.so", version="1")
-    embed_build_source(b_snap, rev, None)
-    a = tmp_path / "a.json"
-    save_snapshot(a_snap, a)
-    b = tmp_path / "b.json"
-    save_snapshot(b_snap, b)
-
-    out = tmp_path / "baseline.json"
-    # Order-only difference must NOT abort under --on-conflict=error.
-    _merge((a, b), out, on_conflict="error")
-    assert "merge conflict" not in capsys.readouterr().err
-
-
-def test_merge_three_inputs_folds_all(tmp_path, capsys):
-    """D5: merge accepts 3+ inputs — a binary base plus a fact-bearing source
-    snapshot plus a no-facts snapshot — folding without conflict."""
-    from abicheck.elf_metadata import ElfMetadata
-
-    bin_snap = AbiSnapshot(library="libfoo.so", version="1")
-    bin_snap.elf = ElfMetadata()
-    bin_path = tmp_path / "bin.json"
-    save_snapshot(bin_snap, bin_path)
-
-    src_path = _src_snapshot_with_l3(tmp_path, "c++17", "src.json")
-    plain_path = tmp_path / "plain.json"
-    save_snapshot(AbiSnapshot(library="libfoo.so", version="1"), plain_path)
-
-    out = tmp_path / "baseline.json"
-    _merge((bin_path, src_path, plain_path), out)
-    assert "merge conflict" not in capsys.readouterr().err
-    merged = load_snapshot(out)
-    assert merged.elf is not None  # binary base kept
-    assert merged.build_source is not None
-    assert merged.build_source.build_evidence is not None  # L3 folded from src
-
-
-def test_merge_corrupted_input_errors_cleanly(tmp_path):
-    """D5: a non-JSON input fails with a non-zero exit, not a traceback dump."""
-    good = _src_snapshot_with_l3(tmp_path, "c++17", "good.json")
-    bad = tmp_path / "bad.json"
-    bad.write_text("this is not json", encoding="utf-8")
-    out = tmp_path / "baseline.json"
-    with pytest.raises(click.ClickException, match="could not read input"):
-        _merge((good, bad), out)
-    assert not out.exists()
-
-
-def test_merge_without_embedded_facts_is_noted(tmp_path, capsys):
-    from abicheck.model import AbiSnapshot
-    from abicheck.serialization import load_snapshot, save_snapshot
-
-    a = tmp_path / "a.json"
-    b = tmp_path / "b.json"
-    save_snapshot(AbiSnapshot(library="l", version="1"), a)
-    save_snapshot(AbiSnapshot(library="l", version="2"), b)
-    out = tmp_path / "o.json"
-    _merge((a, b), out)
-    assert "no input carried embedded build_source" in capsys.readouterr().err
-    # Base ABI surface still written.
-    assert load_snapshot(out).library == "l"
 
 
 def test_dump_source_only_no_binary(tmp_path):
@@ -2991,11 +2669,8 @@ def test_dump_with_no_binary_and_no_inputs_errors(extra):
     assert "--sources/--build-info" in result.output
 
 
-def test_dump_source_only_then_merge_with_binary(tmp_path):
-    """End-to-end: source-only dump + binary dump combine via `merge`."""
-    from abicheck.elf_metadata import ElfMetadata
-    from abicheck.model import AbiSnapshot
-
+def test_dump_source_only_carries_build_evidence(tmp_path):
+    """End-to-end: a source-only dump records its L3 build evidence."""
     tree = tmp_path / "src"
     tree.mkdir()
     cdb = [
@@ -3014,19 +2689,9 @@ def test_dump_source_only_then_merge_with_binary(tmp_path):
         == 0
     )
 
-    bin_snap = AbiSnapshot(library="libfoo.so", version="1")
-    bin_snap.elf = ElfMetadata()
-    bin_path = tmp_path / "libfoo.bin.json"
-    save_snapshot(bin_snap, bin_path)
-
-    out = tmp_path / "baseline.json"
-    _merge((bin_path, src_out), out)
-    merged = load_snapshot(out)
-    assert merged.elf is not None  # binary base kept
-    assert (
-        merged.build_source is not None
-        and merged.build_source.build_evidence is not None
-    )
+    src = load_snapshot(src_out)
+    assert src.elf is None  # no binary side
+    assert src.build_source is not None and src.build_source.build_evidence is not None
 
 
 def test_mixed_build_pack_and_raw_sources_hash_distinguishes_trees(tmp_path):
@@ -3634,7 +3299,6 @@ def test_exported_symbols_from_snapshot_excludes_non_default_versions():
 def test_merge_warns_on_empty_source_surface(capsys):
     """Project-level Caveat A: merging a pack whose whole source surface is empty
     while the binary exports symbols warns that public-roots was likely wrong."""
-    from types import SimpleNamespace
 
     from abicheck.buildsource.source_abi import SourceAbiSurface
     from abicheck.cli_buildsource_merge import _warn_if_source_surface_empty
@@ -3775,51 +3439,6 @@ def test_build_info_source_mismatch_basename_match_ignores_redacted_prefix(tmp_p
     ]
 
 
-def test_canonical_layer_digest_sorts_nested_facts_keeps_scalar_order():
-    """A2 (Codex): the per-layer digest is order-independent for nested fact
-    *records* (e.g. reachable_declarations) but order-SENSITIVE for scalar
-    sequences (e.g. linker_argv) which encode ABI-relevant order."""
-    from abicheck.buildsource.merge_support import _canonical_layer_digest
-
-    a = {
-        "reachable_source_surface": {
-            "reachable_declarations": [{"id": "d1"}, {"id": "d2"}]
-        }
-    }
-    b = {
-        "reachable_source_surface": {
-            "reachable_declarations": [{"id": "d2"}, {"id": "d1"}]
-        }
-    }
-    # Nested fact records reversed → same digest (set semantics).
-    assert _canonical_layer_digest(a) == _canonical_layer_digest(b)
-
-    # Ordered scalar sequence reordered → different digest (argv order matters).
-    x = {"link_units": [{"linker_argv": ["-lfoo", "-lbar"]}]}
-    y = {"link_units": [{"linker_argv": ["-lbar", "-lfoo"]}]}
-    assert _canonical_layer_digest(x) != _canonical_layer_digest(y)
-
-    # Unordered scalar fact set reordered → same digest (source_files is a set).
-    p1 = {"targets": [{"source_files": ["a.cpp", "b.cpp"]}]}
-    p2 = {"targets": [{"source_files": ["b.cpp", "a.cpp"]}]}
-    assert _canonical_layer_digest(p1) == _canonical_layer_digest(p2)
-
-    # Include-path order is compiler-visible → reordering must differ (Codex).
-    i1 = {"compile_units": [{"include_paths": ["/a", "/b"]}]}
-    i2 = {"compile_units": [{"include_paths": ["/b", "/a"]}]}
-    assert _canonical_layer_digest(i1) != _canonical_layer_digest(i2)
-
-    # abi_relevant_flags is last-wins (-fexceptions/-fno-exceptions) → reordering
-    # changes the parsed ABI, so it must read as a conflict (Codex).
-    f1 = {
-        "compile_units": [{"abi_relevant_flags": ["-fexceptions", "-fno-exceptions"]}]
-    }
-    f2 = {
-        "compile_units": [{"abi_relevant_flags": ["-fno-exceptions", "-fexceptions"]}]
-    }
-    assert _canonical_layer_digest(f1) != _canonical_layer_digest(f2)
-
-
 def test_build_inline_coverage_surfaces_failed_build_query():
     """A3: a failed/blocked build query yields a `partial` L3 coverage row with
     the reason, not a silent `not_collected`."""
@@ -3934,8 +3553,8 @@ def test_collect_no_input_is_noop(tmp_path):
     assert pack is not None
 
 
-def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
-    """A1 merge plumbing: a source-only snapshot's surface (linked with no binary)
+def test_relink_source_surface_with_binary_exports(tmp_path):
+    """A1 relink (live via `dump --inputs`): a source-only snapshot's surface (linked with no binary)
     gets the binary base's L0 exports folded in at merge time, so provenance has
     a signal in the parallel-baseline flow."""
     from pathlib import Path
@@ -3975,9 +3594,7 @@ def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
     bin_path = tmp_path / "bin.json"
     save_snapshot(bin_snap, bin_path)
 
-    out = tmp_path / "baseline.json"
-    _merge((bin_path, src_path), out)
-    merged = load_snapshot(out)
+    merged = _relink(bin_path, src_path)
     assert (
         merged.build_source is not None and merged.build_source.source_abi is not None
     )
@@ -3987,8 +3604,8 @@ def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
     assert "_Z3foov" in set(mapping.values())
 
 
-def test_merge_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
-    """A1 merge plumbing (Codex): when the source-only input carries an L5 graph,
+def test_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
+    """A1 relink (Codex): when the source-only input carries an L5 graph,
     relinking rebuilds it with the binary's exports (so it gains the
     source↔binary edges) and clears stale artifact digests so content_hash
     recomputes from the updated payloads."""
@@ -4033,9 +3650,7 @@ def test_merge_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
     bin_path = tmp_path / "bin.json"
     save_snapshot(bin_snap, bin_path)
 
-    out = tmp_path / "baseline.json"
-    _merge((bin_path, src_path), out)
-    merged = load_snapshot(out)
+    merged = _relink(bin_path, src_path)
     g = merged.build_source.source_graph
     assert g is not None
     # Rebuilt graph carries a symbol-mapping edge the empty-export graph lacked.

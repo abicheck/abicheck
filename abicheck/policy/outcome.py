@@ -659,35 +659,6 @@ def scan_report_assurance_contribution(report: object) -> object:
     return _scan_report_diff_field(report, "analysis_assurance_exit_contribution")
 
 
-def run_outcome_dict_for_scan_outcome(
-    verdict: str, exit_code: int, diff_summary: object
-) -> dict[str, Any]:
-    """One-call convenience for the retired ``scan_engine.ScanOutcome``
-    specifically: its own ``diff_summary`` carries ``severity`` directly
-    (unlike the ``{"diff": {"severity": ...}}`` shape
-    :func:`scan_report_severity_exit_code` reads), so this reads one level
-    shallower rather than reusing that helper against the wrong nesting.
-    """
-
-    def _field(key: str) -> object:
-        return diff_summary.get(key) if isinstance(diff_summary, dict) else None
-
-    severity = _field("severity")
-    severity_exit_code = (
-        severity.get("exit_code")
-        if isinstance(severity, dict) and isinstance(severity.get("exit_code"), int)
-        else None
-    )
-    return run_outcome_for_scan_fields(
-        verdict,
-        exit_code,
-        severity_exit_code=severity_exit_code,
-        contract_coverage_contribution=_field("contract_coverage_exit_contribution"),
-        analysis_assurance_contribution=_field("analysis_assurance_exit_contribution"),
-        assurance=_field("analysis_assurance"),
-    ).to_dict()
-
-
 def worst_real_verdict(candidates: Iterable[object]) -> Verdict | None:
     """Worst real :class:`Verdict` among *candidates* (declaration order),
     skipping every non-parseable entry (``None``, an operational sentinel)

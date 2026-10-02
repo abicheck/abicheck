@@ -2,24 +2,42 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from abicheck.annotations import (
-    _MAX_ANNOTATIONS,
-    _classify_change,
     _escape_annotation_data,
     _escape_annotation_value,
     _parse_source_location,
     _title_for_change,
     annotation_report_entries,
-    collect_annotations,
-    emit_github_annotations,
-    format_annotations,
-    is_github_actions,
 )
-from abicheck.annotations_step_summary import emit_github_step_summary
 from abicheck.checker import Change, DiffResult, Verdict
 from abicheck.checker_policy import ChangeKind
+
+_SORT_KEY = {"error": 0, "warning": 1, "notice": 2}
+
+
+def _visible(
+    diff_result: DiffResult,
+    *,
+    annotate_additions: bool = False,
+    severity_config: object = None,
+) -> list[tuple[int, str]]:
+    """``(sort_key, line)`` for every entry a renderer shows.
+
+    Reads the one live producer, :func:`annotation_report_entries`, and
+    applies the documented read-time gate: a ``notice`` entry is shown only
+    when additions are requested or the entry is ``always_visible``.
+    """
+    return [
+        (_SORT_KEY[str(entry["level"])], str(entry["annotation"]))
+        for entry in annotation_report_entries(
+            diff_result, severity_config=severity_config  # type: ignore[arg-type]
+        )
+        if annotate_additions or entry["always_visible"]
+    ]
+
+
+def _render(diff_result: DiffResult, **kwargs: object) -> str:
+    return "\n".join(line for _, line in _visible(diff_result, **kwargs))  # type: ignore[arg-type]
 
 
 def _result(
@@ -126,99 +144,6 @@ class TestParseSourceLocation:
 
 
 # ---------------------------------------------------------------------------
-# _classify_change (direct unit tests)
-# ---------------------------------------------------------------------------
-
-
-class TestClassifyChange:
-    """Direct unit tests for _classify_change with explicit kind sets."""
-
-    _breaking = frozenset({ChangeKind.FUNC_REMOVED})
-    _api_break = frozenset({ChangeKind.ENUM_MEMBER_RENAMED})
-    _risk = frozenset({ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED})
-    _compatible = frozenset({ChangeKind.FUNC_ADDED})
-
-    def test_breaking_returns_error(self):
-        assert (
-            _classify_change(
-                ChangeKind.FUNC_REMOVED,
-                self._breaking,
-                self._api_break,
-                self._risk,
-                self._compatible,
-                False,
-            )
-            == "error"
-        )
-
-    def test_api_break_returns_warning(self):
-        assert (
-            _classify_change(
-                ChangeKind.ENUM_MEMBER_RENAMED,
-                self._breaking,
-                self._api_break,
-                self._risk,
-                self._compatible,
-                False,
-            )
-            == "warning"
-        )
-
-    def test_risk_returns_warning(self):
-        assert (
-            _classify_change(
-                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
-                self._breaking,
-                self._api_break,
-                self._risk,
-                self._compatible,
-                False,
-            )
-            == "warning"
-        )
-
-    def test_compatible_returns_none_by_default(self):
-        assert (
-            _classify_change(
-                ChangeKind.FUNC_ADDED,
-                self._breaking,
-                self._api_break,
-                self._risk,
-                self._compatible,
-                False,
-            )
-            is None
-        )
-
-    def test_compatible_returns_notice_with_flag(self):
-        assert (
-            _classify_change(
-                ChangeKind.FUNC_ADDED,
-                self._breaking,
-                self._api_break,
-                self._risk,
-                self._compatible,
-                True,
-            )
-            == "notice"
-        )
-
-    def test_unknown_kind_returns_none_even_with_additions_flag(self):
-        """A kind not in any set should return None even with annotate_additions=True."""
-        assert (
-            _classify_change(
-                ChangeKind.FUNC_REMOVED,
-                frozenset(),
-                frozenset(),
-                frozenset(),
-                frozenset(),
-                True,
-            )
-            is None
-        )
-
-
-# ---------------------------------------------------------------------------
 # _title_for_change (direct unit tests)
 # ---------------------------------------------------------------------------
 
@@ -297,7 +222,7 @@ class TestAnnotationFormat:
             source_location="include/foo.h:42",
         )
         result = _result(Verdict.BREAKING, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         assert output.startswith("::error ")
         assert "file=include/foo.h" in output
         assert "line=42" in output
@@ -311,7 +236,7 @@ class TestAnnotationFormat:
             "Enum member renamed: kOld -> kNew",
         )
         result = _result(Verdict.API_BREAK, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         assert output.startswith("::warning ")
         assert "title=API Break%3A enum_member_renamed" in output
 
@@ -322,7 +247,7 @@ class TestAnnotationFormat:
             "New GLIBC_2.34 version requirement added",
         )
         result = _result(Verdict.COMPATIBLE_WITH_RISK, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         assert output.startswith("::warning ")
         assert "Deployment Risk" in output
 
@@ -333,7 +258,7 @@ class TestAnnotationFormat:
             "New public function: new_api",
         )
         result = _result(Verdict.COMPATIBLE, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         assert output == ""
 
     def test_compatible_addition_emitted_with_flag(self):
@@ -343,7 +268,7 @@ class TestAnnotationFormat:
             "New public function: new_api",
         )
         result = _result(Verdict.COMPATIBLE, [c])
-        output = emit_github_annotations(result, annotate_additions=True)
+        output = _render(result, annotate_additions=True)
         assert output.startswith("::notice ")
         assert "title=ABI Addition%3A func_added" in output
 
@@ -354,7 +279,7 @@ class TestAnnotationFormat:
             "Public function removed: foo",
         )
         result = _result(Verdict.BREAKING, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         assert "file=" not in output
         assert "line=" not in output
         assert "title=" in output
@@ -367,67 +292,14 @@ class TestAnnotationFormat:
             source_location="",
         )
         result = _result(Verdict.BREAKING, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         assert "file=" not in output
         assert "line=" not in output
 
     def test_empty_result(self):
         result = _result(Verdict.NO_CHANGE)
-        output = emit_github_annotations(result)
+        output = _render(result)
         assert output == ""
-
-
-# ---------------------------------------------------------------------------
-# Annotation limit
-# ---------------------------------------------------------------------------
-
-
-class TestAnnotationLimit:
-    def test_max_50_annotations(self):
-        changes = [
-            Change(
-                ChangeKind.FUNC_REMOVED,
-                f"_Z{i}foov",
-                f"Public function removed: foo{i}",
-            )
-            for i in range(60)
-        ]
-        result = _result(Verdict.BREAKING, changes)
-        output = emit_github_annotations(result)
-        lines = output.strip().split("\n")
-        assert len(lines) == _MAX_ANNOTATIONS
-
-    def test_truncation_preserves_highest_severity(self):
-        """When truncated to 50, errors must survive over warnings."""
-        errors = [
-            Change(ChangeKind.FUNC_REMOVED, f"_Z{i}foov", f"removed: foo{i}")
-            for i in range(30)
-        ]
-        warnings = [
-            Change(
-                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, f"libc{i}", f"version req {i}"
-            )
-            for i in range(30)
-        ]
-        result = _result(Verdict.BREAKING, errors + warnings)
-        output = emit_github_annotations(result)
-        lines = output.strip().split("\n")
-        assert len(lines) == _MAX_ANNOTATIONS
-        error_lines = [ln for ln in lines if ln.startswith("::error ")]
-        warning_lines = [ln for ln in lines if ln.startswith("::warning ")]
-        # All 30 errors must survive; only 20 of 30 warnings fit.
-        assert len(error_lines) == 30
-        assert len(warning_lines) == 20
-
-    def test_custom_max_annotations(self):
-        changes = [
-            Change(ChangeKind.FUNC_REMOVED, f"_Z{i}foov", f"removed: foo{i}")
-            for i in range(20)
-        ]
-        result = _result(Verdict.BREAKING, changes)
-        output = emit_github_annotations(result, max_annotations=5)
-        lines = output.strip().split("\n")
-        assert len(lines) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +322,7 @@ class TestAnnotationSorting:
             ),
         ]
         result = _result(Verdict.BREAKING, changes)
-        output = emit_github_annotations(result)
+        output = _render(result)
         lines = output.strip().split("\n")
         assert len(lines) == 2
         assert lines[0].startswith("::error ")
@@ -470,7 +342,7 @@ class TestAnnotationSorting:
             ),
         ]
         result = _result(Verdict.COMPATIBLE_WITH_RISK, changes)
-        output = emit_github_annotations(result, annotate_additions=True)
+        output = _render(result, annotate_additions=True)
         lines = output.strip().split("\n")
         assert len(lines) == 2
         assert lines[0].startswith("::warning ")
@@ -490,30 +362,11 @@ class TestAnnotationSorting:
             ),
         ]
         result = _result(Verdict.BREAKING, changes)
-        output = emit_github_annotations(result, annotate_additions=True)
+        output = _render(result, annotate_additions=True)
         lines = output.strip().split("\n")
         assert len(lines) == 2
         assert lines[0].startswith("::error ")
         assert lines[1].startswith("::notice ")
-
-
-# ---------------------------------------------------------------------------
-# is_github_actions
-# ---------------------------------------------------------------------------
-
-
-class TestIsGitHubActions:
-    def test_true_when_set(self):
-        with patch.dict("os.environ", {"GITHUB_ACTIONS": "true"}):
-            assert is_github_actions() is True
-
-    def test_false_when_unset(self):
-        with patch.dict("os.environ", {}, clear=True):
-            assert is_github_actions() is False
-
-    def test_false_when_other_value(self):
-        with patch.dict("os.environ", {"GITHUB_ACTIONS": "false"}):
-            assert is_github_actions() is False
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +383,7 @@ class TestSpecialCharactersInAnnotations:
             source_location="include/foo.h:42",
         )
         result = _result(Verdict.BREAKING, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         # Message body should preserve colons
         assert (
             "::Parameter 1 of foo::baz changed from int to long (binary incompatible)"
@@ -544,7 +397,7 @@ class TestSpecialCharactersInAnnotations:
             "Public function removed:\nfoo",
         )
         result = _result(Verdict.BREAKING, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         assert "%0A" in output
         # The output should be a single line (no literal newlines inside the annotation).
         assert output.count("\n") == 0
@@ -560,7 +413,7 @@ class TestMessageTruncation:
         desc = "x" * 300
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", desc)
         result = _result(Verdict.BREAKING, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         # Extract message after the last `::`
         message_part = output.split("::")[-1]
         assert len(message_part) <= 200
@@ -570,126 +423,9 @@ class TestMessageTruncation:
         desc = "Short description"
         c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", desc)
         result = _result(Verdict.BREAKING, [c])
-        output = emit_github_annotations(result)
+        output = _render(result)
         assert "..." not in output
         assert "Short description" in output
-
-
-# ---------------------------------------------------------------------------
-# emit_github_step_summary
-# ---------------------------------------------------------------------------
-
-
-class TestEmitGitHubStepSummary:
-    def test_returns_none_when_env_unset(self):
-        with patch.dict("os.environ", {}, clear=True):
-            result = _result(Verdict.NO_CHANGE)
-            assert emit_github_step_summary(result) is None
-
-    def test_returns_none_when_env_empty(self):
-        with patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": ""}):
-            result = _result(Verdict.NO_CHANGE)
-            assert emit_github_step_summary(result) is None
-
-    def test_writes_markdown_and_returns_path(self, tmp_path):
-        summary_file = tmp_path / "summary.md"
-        with patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": str(summary_file)}):
-            result = _result(
-                Verdict.BREAKING,
-                [
-                    Change(
-                        ChangeKind.FUNC_REMOVED,
-                        "_Z3foov",
-                        "Public function removed: foo",
-                    ),
-                ],
-            )
-            returned = emit_github_step_summary(result)
-        assert returned == str(summary_file)
-        content = summary_file.read_text(encoding="utf-8")
-        assert "BREAKING" in content
-        assert "func_removed" in content
-
-    def test_appends_not_overwrites(self, tmp_path):
-        summary_file = tmp_path / "summary.md"
-        summary_file.write_text("existing content\n", encoding="utf-8")
-        with patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": str(summary_file)}):
-            result = _result(Verdict.NO_CHANGE)
-            emit_github_step_summary(result)
-        content = summary_file.read_text(encoding="utf-8")
-        assert content.startswith("existing content\n")
-        assert "NO_CHANGE" in content
-
-    def test_forwards_severity_config_to_markdown(self, tmp_path):
-        """Codex review on #549: `_maybe_emit_annotations` (cli.py) makes the
-        inline GitHub annotations severity-aware, but still called
-        `emit_github_step_summary(result)` without `severity_config` — so
-        e.g. a `severity.addition: error` config could fail the annotations/exit code
-        while the step summary rendered the legacy compatible report with no
-        severity gate section, contradicting the actual gate on the same
-        PR."""
-        from abicheck.severity import PRESET_DEFAULT
-
-        summary_file = tmp_path / "summary.md"
-        with patch.dict("os.environ", {"GITHUB_STEP_SUMMARY": str(summary_file)}):
-            result = _result(
-                Verdict.COMPATIBLE,
-                [
-                    Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added: bar"),
-                ],
-            )
-            emit_github_step_summary(result, severity_config=PRESET_DEFAULT)
-        content = summary_file.read_text(encoding="utf-8")
-        assert "Severity Configuration" in content
-
-
-# ---------------------------------------------------------------------------
-# collect_annotations / format_annotations
-# ---------------------------------------------------------------------------
-
-
-class TestCollectAndFormatAnnotations:
-    """Test the building-block functions used for multi-library annotation."""
-
-    def test_collect_returns_tuples(self):
-        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
-        result = _result(Verdict.BREAKING, [c])
-        annotations = collect_annotations(result)
-        assert len(annotations) == 1
-        sort_key, line = annotations[0]
-        assert sort_key == 0  # error
-        assert line.startswith("::error ")
-
-    def test_format_sorts_and_truncates(self):
-        raw = [(2, "::notice n"), (0, "::error e"), (1, "::warning w")]
-        text = format_annotations(raw, max_annotations=2)
-        lines = text.split("\n")
-        assert len(lines) == 2
-        assert lines[0] == "::error e"
-        assert lines[1] == "::warning w"
-
-    def test_cross_library_global_sort(self):
-        """Annotations from multiple DiffResults sort globally by severity."""
-        warnings = [
-            Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, f"libc{i}", f"req {i}")
-            for i in range(40)
-        ]
-        errors = [
-            Change(ChangeKind.FUNC_REMOVED, f"_Z{i}foov", f"removed {i}")
-            for i in range(20)
-        ]
-        result_a = _result(Verdict.COMPATIBLE_WITH_RISK, warnings)
-        result_b = _result(Verdict.BREAKING, errors)
-
-        all_annotations = collect_annotations(result_a) + collect_annotations(result_b)
-        text = format_annotations(all_annotations)
-        lines = text.split("\n")
-        assert len(lines) == _MAX_ANNOTATIONS
-        error_lines = [ln for ln in lines if ln.startswith("::error ")]
-        warning_lines = [ln for ln in lines if ln.startswith("::warning ")]
-        # All 20 errors survive; 30 of 40 warnings fit.
-        assert len(error_lines) == 20
-        assert len(warning_lines) == 30
 
 
 # ---------------------------------------------------------------------------
@@ -706,7 +442,7 @@ class TestAnnotationReportEntries:
         assert entries == [
             {
                 "level": "error",
-                "annotation": collect_annotations(result)[0][1],
+                "annotation": _visible(result)[0][1],
                 "always_visible": True,
             }
         ]
@@ -738,20 +474,6 @@ class TestAnnotationReportEntries:
         [entry] = entries
         assert entry["level"] == "notice"
         assert entry["always_visible"] is True
-
-    def test_matches_collect_annotations_when_additions_requested(self):
-        """The persisted array is always the superset -- the identical set
-        `collect_annotations(..., annotate_additions=True)` would render --
-        regardless of whether this test's own call requests it.
-        """
-        c = Change(ChangeKind.FUNC_ADDED, "_Z3barv", "added: bar")
-        result = _result(Verdict.COMPATIBLE, [c])
-        entries = annotation_report_entries(result)
-        expected = sorted(
-            collect_annotations(result, annotate_additions=True),
-            key=lambda item: item[0],
-        )
-        assert [e["annotation"] for e in entries] == [line for _, line in expected]
 
     def test_notice_level_present_even_without_annotate_additions_arg(self):
         """A consumer reading the persisted array decides at *read* time
@@ -793,7 +515,7 @@ class TestAnnotationReportEntries:
         )
         # collect_annotations (the stderr path) must agree -- both read
         # through the same _collect_annotations_detailed.
-        assert collect_annotations(result)
+        assert _visible(result)
 
     def test_missing_contract_label_is_included_and_blocking_by_default(self):
         """`--used-by`/`--required-symbol` scoping synthesizes
@@ -813,7 +535,7 @@ class TestAnnotationReportEntries:
         assert entry["always_visible"] is True
         assert "libfoo.so@GLIBC_2.30" in entry["annotation"]
         # collect_annotations (the stderr path) must agree.
-        [line] = collect_annotations(result)
+        [line] = _visible(result)
         assert line[1] == entry["annotation"]
 
     def test_missing_contract_label_stays_a_visible_warning_under_a_warning_severity_config(
@@ -862,7 +584,7 @@ class TestAnnotationReportEntries:
         [entry] = annotation_report_entries(result, severity_config=cfg)
         assert entry["level"] == "notice"
         assert entry["always_visible"] is False
-        assert collect_annotations(result, severity_config=cfg) == []
+        assert _visible(result, severity_config=cfg) == []
 
 
 # ---------------------------------------------------------------------------
@@ -884,10 +606,10 @@ class TestSeverityConfigAwareAnnotations:
         result = _result(Verdict.COMPATIBLE, [c])
 
         # Legacy behaviour (no severity_config, additions not opted in): silent.
-        assert collect_annotations(result) == []
+        assert _visible(result) == []
 
         cfg = resolve_severity_config("default", addition="error")
-        annotations = collect_annotations(result, severity_config=cfg)
+        annotations = _visible(result, severity_config=cfg)
         assert len(annotations) == 1
         sort_key, line = annotations[0]
         assert sort_key == 0
@@ -904,9 +626,9 @@ class TestSeverityConfigAwareAnnotations:
         cfg = resolve_severity_config("default", abi_breaking="info")
         # info-level findings are opt-in (annotate_additions), same gate as
         # the legacy compatible/notice behaviour.
-        assert collect_annotations(result, severity_config=cfg) == []
+        assert _visible(result, severity_config=cfg) == []
 
-        annotations = collect_annotations(
+        annotations = _visible(
             result,
             severity_config=cfg,
             annotate_additions=True,
@@ -915,15 +637,6 @@ class TestSeverityConfigAwareAnnotations:
         sort_key, line = annotations[0]
         assert sort_key == 2  # notice
         assert line.startswith("::notice ")
-
-    def test_emit_github_annotations_forwards_severity_config(self):
-        from abicheck.severity import resolve_severity_config
-
-        c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
-        result = _result(Verdict.COMPATIBLE, [c])
-        cfg = resolve_severity_config("default", addition="error")
-        output = emit_github_annotations(result, severity_config=cfg)
-        assert output.startswith("::error ")
 
     def test_quality_finding_not_mislabeled_as_addition(self):
         """Codex review on #549: a compatible *quality* finding (e.g.
@@ -940,7 +653,7 @@ class TestSeverityConfigAwareAnnotations:
         result = _result(Verdict.COMPATIBLE, [c])
         cfg = resolve_severity_config("default")  # quality_issues=warning
 
-        annotations = collect_annotations(result, severity_config=cfg)
+        annotations = _visible(result, severity_config=cfg)
         assert len(annotations) == 1
         _sort_key, line = annotations[0]
         assert line.startswith("::warning ")
@@ -954,7 +667,7 @@ class TestSeverityConfigAwareAnnotations:
         result = _result(Verdict.COMPATIBLE, [c])
         cfg = resolve_severity_config("default", addition="error")
 
-        annotations = collect_annotations(result, severity_config=cfg)
+        annotations = _visible(result, severity_config=cfg)
         assert len(annotations) == 1
         _sort_key, line = annotations[0]
         assert "title=ABI Addition%3A func_added" in line
@@ -976,7 +689,7 @@ class TestSeverityConfigAwareAnnotations:
         result = _result(Verdict.API_BREAK, [c])
         cfg = resolve_severity_config("default", potential_breaking="error")
 
-        annotations = collect_annotations(result, severity_config=cfg)
+        annotations = _visible(result, severity_config=cfg)
         assert len(annotations) == 1
         _sort_key, line = annotations[0]
         assert "title=API Break%3A symbol_version_required_added" in line
@@ -1020,7 +733,7 @@ class TestSeverityConfigAwareAnnotations:
         )
         assert exit_code == 4
 
-        annotations = collect_annotations(result, severity_config=cfg)
+        annotations = _visible(result, severity_config=cfg)
         assert len(annotations) == 1
         sort_key, line = annotations[0]
         assert sort_key == 0

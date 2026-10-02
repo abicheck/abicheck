@@ -1793,24 +1793,6 @@ class TestAppCompatTraceability:
         assert d["confidence"] == "medium"
         assert d["evidence_tiers"] == ["elf", "header"]
 
-    def test_appcompat_markdown_includes_file_metadata(self):
-        from abicheck.reporter import appcompat_to_markdown
-
-        r = self._appcompat_result()
-        md = appcompat_to_markdown(r)
-        assert "Library Files" in md
-        assert "/old/lib.so" in md
-        assert "**Confidence**" in md
-
-    def test_appcompat_markdown_includes_policy(self):
-        from abicheck.reporter import appcompat_to_markdown
-
-        r = self._appcompat_result()
-        md = appcompat_to_markdown(r)
-        assert "**Policy**" in md
-        assert "`strict_abi`" in md
-
-
 class TestStatJsonConfidence:
     """Stat JSON must include confidence and evidence_tiers."""
 

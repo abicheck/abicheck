@@ -309,19 +309,6 @@ class TestRunOutcomeForScanFields:
         )
         assert outcome.compatibility is None
 
-    def test_assurance_block_threaded_through_from_scan_outcome(self):
-        """Codex review (P2), fresh evidence: every scan writer passed no
-        assurance at all, so the independent assurance axis always read
-        None even when the report's own diff.analysis_assurance block was
-        fully computed."""
-        from abicheck.policy.outcome import run_outcome_dict_for_scan_outcome
-
-        aa_block = {"schema_version": "1.0", "status": "complete"}
-        outcome = run_outcome_dict_for_scan_outcome(
-            "COMPATIBLE", 0, {"analysis_assurance": aa_block}
-        )
-        assert outcome["assurance"] == aa_block
-
     def test_assurance_block_threaded_through_from_scan_report(self):
         from abicheck.policy.outcome import run_outcome_dict_for_scan
 

@@ -341,12 +341,6 @@ def _match_target_against_index(
     return matched, providers
 
 
-# Backward-compatibility alias for the original name — some tests and
-# external integrations imported _match_target directly. The new code
-# path is :func:`_match_target_against_index`.
-_match_target = _match_target_against_index
-
-
 def _match_entry(
     entry: ManifestEntry,
     snapshot: BundleSnapshot,

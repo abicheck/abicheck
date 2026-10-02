@@ -775,9 +775,7 @@ def _finalize_compare_result(
     # against action/run.sh's own, richer, INPUT_ADD_JOB_SUMMARY-gated job
     # summary (or writes one even when a caller explicitly set
     # add-job-summary: false). The CLI no longer writes a step summary on
-    # its own at all -- annotations_step_summary.emit_github_step_summary
-    # stays available as a public primitive for a caller invoking the CLI
-    # directly outside the composite Action to call itself.
+    # its own at all; the Action owns the job summary.
 
 
 # ── ADR-037 D7: input-type dispatch for `compare` ────────────────────────────

@@ -70,15 +70,3 @@ def test_from_result_respects_prefiltered_changes() -> None:
     assert model.changes == []
     assert model.breaking == [] and model.compatible == []
 
-
-def test_reporter_classifier_delegates_to_model() -> None:
-    # _classify_changes_by_kind must produce the same partition as the model.
-    from abicheck.reporter import _classify_changes_by_kind
-
-    old = _snap([_fn("a"), _fn("b")])
-    new = _snap([_fn("a")])
-    result = compare(old, new, scope_to_public_surface=False)
-    changes = list(result.changes)
-    assert _classify_changes_by_kind(changes, result) == ReportModel.classify(
-        changes, result
-    )

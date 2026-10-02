@@ -33,8 +33,6 @@ import click
 from .buildsource.merge_support import (
     _combine_packs,
     _layer_value,
-    _record_merge_conflicts,
-    _resolve_conflict_winners,
 )
 from .buildsource.model import DataLayer
 from .buildsource.pack import BuildSourcePack
@@ -70,100 +68,6 @@ def _ingest_inputs_pack_snapshot(path: Path) -> AbiSnapshot:
     )
     snap.build_source = ingested.pack
     return snap
-
-
-def _merge_load_snapshots(inputs: tuple[Path, ...]) -> list[tuple[Path, AbiSnapshot]]:
-    """Load and validate all input snapshots, raising clean Click errors on failure.
-
-    An input may be a ``.abi.json`` dump or a Flow-2 ``abicheck_inputs/``
-    directory (ADR-035 D5); the latter is ingested into a source-side snapshot so
-    build-emitted facts ride the existing fold.
-    """
-    from .serialization import load_snapshot
-    from .workflows.extraction import is_inputs_pack
-
-    if len(inputs) < 2:
-        raise click.UsageError("merge needs at least two inputs.")
-    snaps: list[tuple[Path, AbiSnapshot]] = []
-    for path in inputs:
-        try:
-            if path.is_dir():
-                if not is_inputs_pack(path):
-                    raise click.ClickException(
-                        f"{path.name} is a directory but not an abicheck_inputs/ pack "
-                        f"(no manifest.json with kind: abicheck_inputs)."
-                    )
-                snaps.append((path, _ingest_inputs_pack_snapshot(path)))
-            else:
-                snaps.append((path, load_snapshot(path)))
-        except click.ClickException:
-            raise
-        except Exception as exc:  # malformed/corrupted input → clean error
-            raise click.ClickException(
-                f"could not read input {path.name}: {exc}"
-            ) from exc
-    return snaps
-
-
-def _merge_pick_base(snaps: list[tuple[Path, AbiSnapshot]]) -> tuple[Path, AbiSnapshot]:
-    """Return the (path, snapshot) pair that carries binary metadata (L0), else the first."""
-    return next(
-        (
-            (p, s)
-            for p, s in snaps
-            if s.elf is not None or s.pe is not None or s.macho is not None
-        ),
-        snaps[0],
-    )
-
-
-def _merge_fold_packs(
-    snaps: list[tuple[Path, AbiSnapshot]],
-) -> tuple[BuildSourcePack | None, int]:
-    """Fold every input's embedded build_source pack left-to-right. Returns (combined, contributors)."""
-    combined: BuildSourcePack | None = None
-    contributors = 0
-    for _p, s in snaps:
-        # A header-only input's graph counts as its pack (ADR-063 Phase 10).
-        pack = embedded_evidence_pack(s)
-        if pack is None:
-            continue
-        contributors += 1
-        combined = _combine_packs(combined, pack)
-    return combined, contributors
-
-
-def _merge_handle_conflicts(
-    conflicts: dict[str, list[tuple[str, str]]],
-    combined: BuildSourcePack | None,
-    on_conflict: str,
-) -> None:
-    """Report layer conflicts to stderr and abort or record them per --on-conflict."""
-    if not conflicts:
-        return
-    # Which input's facts actually survived per layer (_combine_packs is
-    # first-wins for L3 but last-wins for L4/L5), so the message is accurate.
-    winners = (
-        _resolve_conflict_winners(combined, conflicts) if combined is not None else {}
-    )
-    for layer, entries in sorted(conflicts.items()):
-        srcs = ", ".join(f"{name}" for name, _digest in entries)
-        kept = f"kept {winners[layer]}" if layer in winners else "kept one input"
-        click.echo(
-            f"merge conflict: layer {layer} supplied with differing facts by "
-            f"multiple inputs ({srcs}); {kept}.",
-            err=True,
-        )
-    if on_conflict == "error":
-        raise click.ClickException(
-            "merge aborted: conflicting layer facts and --on-conflict=error. "
-            "Each layer (L3/L4/L5) should come from exactly one input."
-        )
-    # warn mode: persist the conflict into the combined pack's extractor
-    # ledger (a serialized field, unlike a nonexistent manifest.diagnostics),
-    # so the recorded baseline carries the divergence forward.
-    if combined is not None:
-        _record_merge_conflicts(combined, conflicts, winners)
 
 
 def _relink_combined_against_exports(
@@ -241,21 +145,6 @@ def _relink_combined_against_exports(
         ]
         # Mutating payloads invalidates precomputed artifact digests; clear them.
         combined.manifest.artifacts = []
-
-
-def _merge_attach_combined(
-    combined: BuildSourcePack,
-    base: AbiSnapshot,
-    output: Path,
-) -> None:
-    """Relink source-ABI surface against binary exports (A1) and attach combined to base."""
-    from .workflows.extraction import pack_to_ref
-
-    base_exports = _exported_symbols_from_snapshot(base)
-    _relink_combined_against_exports(combined, base_exports)
-    _warn_if_source_surface_empty(combined, base_exports)
-    base.build_source = combined
-    base.build_source_pack = pack_to_ref(combined, path_hint=str(output))
 
 
 def embed_inputs_pack(
@@ -343,24 +232,3 @@ def _warn_if_source_surface_empty(
             err=True,
         )
 
-
-def _merge_print_summary(
-    base_path: Path,
-    contributors: int,
-    total: int,
-    combined: BuildSourcePack | None,
-    output: Path,
-) -> None:
-    """Print the post-merge summary to stderr."""
-    click.echo(f"Merged baseline written to {output}", err=True)
-    click.echo(f"  base ABI surface: {base_path.name}", err=True)
-    click.echo(f"  build_source contributors: {contributors}/{total}", err=True)
-    if combined is not None:
-        for cov in combined.manifest.coverage:
-            if _layer_value(cov.layer) in {
-                DataLayer.L3_BUILD.value,
-                DataLayer.L4_SOURCE_ABI.value,
-                DataLayer.L5_SOURCE_GRAPH.value,
-            }:
-                detail = f" ({cov.detail})" if cov.detail else ""
-                click.echo(f"  {cov.layer}: {cov.status.value}{detail}", err=True)

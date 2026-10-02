@@ -13,10 +13,9 @@ import textwrap
 from datetime import date, timedelta
 from pathlib import Path
 
-import _yaml_fast
 import pytest
 
-from abicheck.suppression import SuppressionList, suggest_suppressions
+from abicheck.suppression import SuppressionList
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -170,116 +169,6 @@ class TestRequireJustification:
 
 
 # ─── suggest-suppressions ────────────────────────────────────────────────────
-
-
-class TestSuggestSuppressions:
-    def test_basic_func_removed(self) -> None:
-        changes = [
-            {"kind": "func_removed", "symbol": "_ZN3foo6legacyEv"},
-        ]
-        yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
-        assert 'symbol: "_ZN3foo6legacyEv"' in yaml_text
-        assert 'change_kind: "func_removed"' in yaml_text
-        assert "reason:" in yaml_text
-        assert "TODO" in yaml_text
-        assert 'expires: "2026-09-19"' in yaml_text  # 180 days from 2026-03-23
-
-    def test_type_level_change_uses_type_pattern(self) -> None:
-        changes = [
-            {"kind": "type_size_changed", "symbol": "MyStruct"},
-        ]
-        yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
-        assert 'type_pattern: "MyStruct"' in yaml_text
-        assert "symbol:" not in yaml_text.split("type_pattern")[1].split("\n")[0]
-
-    def test_type_pattern_strips_member_suffix(self) -> None:
-        """Member-qualified symbols like Color::GREEN should emit type_pattern: Color."""
-        changes = [
-            {"kind": "enum_member_removed", "symbol": "Color::GREEN"},
-        ]
-        yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
-        assert 'type_pattern: "Color"' in yaml_text
-        assert "GREEN" not in yaml_text
-
-    def test_null_kind_or_symbol_skipped(self) -> None:
-        """JSON null values must not produce literal 'None' strings."""
-        changes = [
-            {"kind": None, "symbol": "_ZN3foo3barEv"},
-            {"kind": "func_removed", "symbol": None},
-            {"kind": None, "symbol": None},
-        ]
-        yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
-        assert "None" not in yaml_text
-        assert 'symbol: "' not in yaml_text
-
-    def test_yaml_quote_escapes_special_chars(self) -> None:
-        """Symbols with backslashes or quotes must produce valid YAML."""
-        changes = [
-            {"kind": "func_removed", "symbol": 'foo\\"bar'},
-        ]
-        yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
-        # Should be parseable as YAML without error
-
-        data = _yaml_fast.safe_load(yaml_text)
-        assert len(data["suppressions"]) == 1
-
-    def test_custom_expiry_days(self) -> None:
-        changes = [
-            {"kind": "func_removed", "symbol": "_ZN3foo3barEv"},
-        ]
-        yaml_text = suggest_suppressions(
-            changes,
-            expiry_days=30,
-            today=date(2026, 3, 23),
-        )
-        assert 'expires: "2026-04-22"' in yaml_text
-
-    def test_multiple_changes(self) -> None:
-        changes = [
-            {"kind": "func_removed", "symbol": "_ZN3foo6legacyEv"},
-            {"kind": "func_param_type_changed", "symbol": "_ZN3foo3bazEi"},
-            {"kind": "enum_member_removed", "symbol": "Color"},
-        ]
-        yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
-        assert 'symbol: "_ZN3foo6legacyEv"' in yaml_text
-        assert 'symbol: "_ZN3foo3bazEi"' in yaml_text
-        assert 'type_pattern: "Color"' in yaml_text
-        assert yaml_text.count("change_kind:") == 3
-
-    def test_empty_changes(self) -> None:
-        yaml_text = suggest_suppressions([], today=date(2026, 3, 23))
-        assert "version: 1" in yaml_text
-        assert "suppressions:" in yaml_text
-
-    def test_skips_entries_without_kind_or_symbol(self) -> None:
-        changes = [
-            {"kind": "func_removed"},  # no symbol
-            {"symbol": "_ZN3foo3barEv"},  # no kind
-            {"kind": "", "symbol": ""},  # empty
-        ]
-        yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
-        # None of these should produce suppression entries
-        assert 'symbol: "' not in yaml_text
-        assert 'type_pattern: "' not in yaml_text
-
-    def test_output_is_valid_yaml(self) -> None:
-
-        changes = [
-            {"kind": "func_removed", "symbol": "_ZN3foo6legacyEv"},
-            {"kind": "type_size_changed", "symbol": "MyStruct"},
-        ]
-        yaml_text = suggest_suppressions(changes, today=date(2026, 3, 23))
-        data = _yaml_fast.safe_load(yaml_text)
-        assert data["version"] == 1
-        assert len(data["suppressions"]) == 2
-
-    def test_default_expiry_uses_today(self) -> None:
-        changes = [
-            {"kind": "func_removed", "symbol": "_ZN3foo3barEv"},
-        ]
-        yaml_text = suggest_suppressions(changes)
-        expected_date = (date.today() + timedelta(days=180)).isoformat()
-        assert f'expires: "{expected_date}"' in yaml_text
 
 
 # ─── CLI integration tests ───────────────────────────────────────────────────
@@ -513,11 +402,6 @@ class TestRequireJustificationCliFlag:
     # YAML text out) is unchanged and already covered directly by
     # `TestSuggestSuppressions` above (including custom-expiry and empty-changes
     # cases) — no CLI-level replacement test is needed here.
-
-    def test_suggest_empty_changes(self) -> None:
-        text = suggest_suppressions([])
-        assert "suppressions:" in text
-
 
 class TestRequireJustificationErrorType:
     """suppression.require_justification failures are ClickException, not BadParameter."""

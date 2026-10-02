@@ -598,7 +598,7 @@ def test_dot_abicheck_yml_build_targets_flow_into_dump_with_no_cli_flag(
 
 
 def test_layer_coverage_unscoped_report_fields_are_empty():
-    from abicheck.cli_buildsource_helpers import _build_coverage
+    from tests._build_source_collect import _build_coverage
 
     merged = BuildEvidence()
     rows = _build_coverage(merged, has_build=True)
@@ -611,7 +611,7 @@ def test_layer_coverage_unscoped_report_fields_are_empty():
 
 
 def test_layer_coverage_scoped_report_fields_are_populated():
-    from abicheck.cli_buildsource_helpers import _build_coverage
+    from tests._build_source_collect import _build_coverage
 
     merged = BuildEvidence(
         target_scope=TargetScope(

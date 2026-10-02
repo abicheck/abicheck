@@ -35,10 +35,6 @@ Public surface:
     - :func:`compare_bundle`      — main entry point, given two already-built
                                     :class:`BundleSnapshot`\\ s and the
                                     per-library diffs to correlate.
-    - :func:`discover_artifact_set` — resolve a set of paths into a
-                                    ``{canonical_name: path}`` bundle map,
-                                    the shape :func:`build_bundle_snapshot`
-                                    and :func:`compare_bundle` both need.
 
 For a caller with two plain *directories* on disk (e.g. two
 :mod:`abicheck.product_baseline` archives already unpacked) who doesn't want
@@ -47,9 +43,8 @@ to build snapshots or run the per-library compares themselves, see
 matches, and diffs for you, then calls :func:`compare_bundle`. Kept in
 ``product_baseline`` rather than here: it needs the per-pair compare engine
 (``service_compare_pipeline.run_compare``), and that module's own import
-graph already reaches back into this one (``dry_run_estimate`` calls
-:func:`audit_bundle`), so importing it from this module would create an
-import cycle.
+graph already reaches back into this one, so importing it from this module
+would create an import cycle.
 
 Bundle findings use the ``ChangeKind.BUNDLE_*`` values registered in
 :mod:`abicheck.change_registry`. They participate in policy classification,
@@ -57,7 +52,7 @@ suppression, severity, and reporter machinery identically to per-library
 ``Change`` entries.
 
 Individual finding-producers (the ``_detect_*`` functions this module's
-``compare_bundle``/``audit_bundle`` orchestrate) and the heuristic
+``compare_bundle`` orchestrates) and the heuristic
 primitives they share live in :mod:`abicheck.bundle_detectors` and its own
 sibling :mod:`abicheck.bundle_detector_heuristics`, split out purely to
 stay under the AI-readiness 2000-line hard cap -- see either module's own
@@ -68,7 +63,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
@@ -83,12 +77,10 @@ from .bundle_detector_heuristics import (  # noqa: F401  (re-exported for back-c
     _strip_namespace_prefix as _strip_namespace_prefix,
 )
 from .bundle_detectors import (
-    _detect_duplicate_providers,
     _detect_intra_dep_removed,
     _detect_intra_dep_signature_changed,
     _detect_intra_type_changed,
     _detect_library_structural_changes,
-    _detect_manifest_ownership,
     _detect_provider_changed,
     _detect_version_drift,
 )
@@ -113,7 +105,6 @@ from .bundle_soname import hard_link_alias_basenames
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, parse_elf_metadata
 from .model import AbiSnapshot
-from .policy.classification import Verdict, compute_verdict
 from .workflows.bundle_unresolved_audit import (  # noqa: F401
     _detect_unresolved_intra_dependency as _detect_unresolved_intra_dependency,
 )
@@ -1001,253 +992,6 @@ def build_bundle_snapshot_from_metadata(
         ),
         filesystem_backed_names=filesystem_backed_names,
     )
-
-
-class ArtifactSetError(ValueError):
-    """Raised by :func:`discover_artifact_set` for an invalid `--artifact-set`.
-
-    A plain, framework-agnostic exception — the retired CLI layer (``cli_scan.py``)
-    turned this into a ``click.UsageError`` (exit 64); this module has no
-    click dependency.
-    """
-
-
-def discover_artifact_set(paths: list[Path], *, explicit: bool) -> dict[str, Path]:
-    """Resolve a list of paths into a ``{canonical_name: path}`` bundle map.
-
-    ADR-056: shared by both ``--artifact-set`` forms (a directory the caller
-    already expanded to its member files, or an explicit comma-separated
-    path list) — the caller passes ``explicit=True`` only for the latter.
-
-    Two corrections folded in after review (both real, not edge cases):
-
-    - **Symlink-alias deduplication.** A completely ordinary Unix install
-      layout has both a versioned real file (``libfoo.so.1``) and an
-      unversioned dev symlink to it (``libfoo.so``) — ``discover_shared_
-      libraries()`` (``abicheck/package.py``) lists both as separate
-      discovered paths, and both canonicalize to the same name. Resolving
-      each path (``Path.resolve()``) and deduplicating identical targets
-      *before* collision-checking means this common layout is accepted, not
-      rejected.
-    - **Collision rejection for genuinely distinct files.** Once aliases are
-      collapsed, two *different* resolved files that still canonicalize to
-      the same library name (e.g. an explicit ``dir1/libfoo.so,
-      dir2/libfoo.so`` naming two unrelated real files) are rejected
-      outright — unlike ``compare``'s two-sided old-vs-new matching
-      (``_build_match_map``), a one-sided audit set has no "newest version
-      wins" tiebreak that would be sound here.
-
-    For the explicit-list form, every named path must look like a real ELF
-    shared object (``package._is_elf_shared_object``) — every entry was
-    deliberately named by the caller, so silently dropping an unsupported
-    one (the way
-    :func:`build_bundle_snapshot` does for a directory scan, where "some
-    files aren't libraries" is expected) would misrepresent the audit as
-    covering the full declared set. Raises :class:`ArtifactSetError` for any
-    unsupported explicit member, or for a genuine name collision.
-    """
-    from .binary_utils import _canonical_library_key
-
-    resolved_by_real: dict[Path | tuple[int, int], Path] = {}
-    for path in paths:
-        try:
-            real = path.resolve()
-        except OSError:
-            real = path
-        # Path.resolve() only follows symlinks -- it does not coalesce two
-        # hard links to the same inode (a real, if unusual, way a library
-        # directory can carry both a versioned name and an unversioned
-        # alias). When available, key on filesystem identity
-        # (st_dev, st_ino) instead of the resolved path, so both survive-
-        # as-distinct-members outcomes Codex flagged are avoided: two
-        # hard-linked aliases with the *same* canonical name no longer
-        # spuriously collide below, and two differently-named hard-linked
-        # aliases no longer pass the cardinality check as if they were
-        # genuinely distinct libraries (bundle analysis is Linux/ELF-only
-        # by design, ADR-018/023, so POSIX inode semantics always apply
-        # here).
-        try:
-            st = real.stat()
-            identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
-        except OSError:
-            identity = real
-        # Keep the first-seen original (unresolved) path for user-facing
-        # messages/reporting identity; only the resolution key is the
-        # canonicalized real path / filesystem identity.
-        resolved_by_real.setdefault(identity, path)
-
-    if explicit:
-        # A full ET_DYN-vs-PIE shared-object check (package.py's
-        # _is_elf_shared_object), not just the cheap 4-byte magic sniff
-        # _path_looks_like_elf uses elsewhere in this module: an explicitly
-        # named ELF executable, relocatable object, or core file has the
-        # right magic bytes but is not a library, and directory discovery
-        # (package.discover_shared_libraries) already restricts its own
-        # members to real shared objects -- the explicit-list form must not
-        # be laxer just because the caller typed the path out (Codex review).
-        from .package import _is_elf_shared_object
-
-        unsupported = [
-            p for p in resolved_by_real.values() if not _is_elf_shared_object(p)
-        ]
-        if unsupported:
-            names = ", ".join(str(p) for p in unsupported)
-            raise ArtifactSetError(
-                f"--artifact-set names unsupported (non-ELF-shared-object) "
-                f"member(s): {names}. Every explicitly-named path must be a "
-                "real shared library (not an executable, relocatable "
-                "object, or core file); for a mixed directory, pass the "
-                "directory instead."
-            )
-
-    buckets: dict[str, list[Path]] = {}
-    for path in resolved_by_real.values():
-        buckets.setdefault(_canonical_library_key(path), []).append(path)
-
-    collisions = {key: vals for key, vals in buckets.items() if len(vals) > 1}
-    if collisions:
-        detail = "; ".join(
-            f"'{key}': {[str(p) for p in vals]}" for key, vals in collisions.items()
-        )
-        raise ArtifactSetError(
-            f"--artifact-set has colliding library identities: {detail}. "
-            "Each library in an artifact set must have a distinct canonical "
-            "name; rename or drop the duplicate(s)."
-        )
-
-    return {key: vals[0] for key, vals in buckets.items()}
-
-
-@dataclass
-class BundleAuditResult:
-    """Output of :func:`audit_bundle` — the no-old-side sibling of
-    :class:`BundleDiffResult`.
-
-    Unlike :class:`BundleDiffResult` there is no ``old_root``/``per_library``:
-    an audit has exactly one side (the declared artifact set), no diff to
-    read, and therefore only the subset of bundle findings computable from a
-    single-side resolution graph (see
-    :func:`_detect_unresolved_intra_dependency`).
-    """
-
-    snapshot: BundleSnapshot
-    findings: list[BundleFinding] = field(default_factory=list)
-
-    @property
-    def verdict(self) -> Verdict:
-        changes = [f.to_change() for f in self.findings]
-        return compute_verdict(changes)
-
-
-def artifact_set_member_exports(
-    libraries: dict[str, Path],
-) -> dict[str, frozenset[str]]:
-    """Each artifact-set member's own default-exported symbol names (G35).
-
-    Deliberately narrow and cheap: an ELF header/dynsym-only parse
-    (:func:`~abicheck.elf_metadata.parse_elf_metadata`, never raises — an
-    unparseable member just contributes an empty set) with no DWARF/header-AST
-    work, run once by :func:`~abicheck.dry_run_estimate.run_scan_set` before any
-    member's full scan so each member's own ``public_not_exported``
-    cross-check can be told the union of what its *siblings* export (a shared
-    umbrella header commonly declares more than one member's own public API —
-    see :class:`~abicheck.buildsource.cross_source_checks.CrosscheckConfig`'s
-    ``sibling_exported_symbols`` field for what consumes this). Mirrors the
-    same ``is_default``-only filter
-    :func:`~abicheck.buildsource.cross_source_checks_base._exported_symbol_names`
-    applies to a live snapshot's own ELF export table, so "satisfied by a
-    sibling" uses the identical default/unversioned-binding notion of
-    "exported" as "satisfied by this member itself" — a symbol that exists
-    only as a non-default version alias on a sibling would not satisfy an
-    unversioned consumer link there either, and must not satisfy one here.
-
-    Separate from :func:`build_bundle_snapshot`'s own full ELF parse (used by
-    :func:`audit_bundle` for the resolution-graph bundle findings) rather
-    than reusing its result: that call still happens after every member's
-    own scan in ``run_scan_set``, and this export union is needed *before*
-    that loop so each member's scan can consult it while running, not after.
-
-    **Known gap (Codex review, not fixed here — see the G35 plan doc):** a
-    raw export name only, with no L4 reconciliation applied. A sibling that
-    exports a declaration only under a variant spelling (a ctor's base-object
-    clone, a Mach-O/demangle drift — the same class
-    ``crosscheck._l4_reconciled_symbols`` already exempts for the *current*
-    member) still false-positives here, since that reconciliation mapping
-    lives on a member's own built snapshot, which doesn't exist yet at this
-    point — fixing it would mean building every member's full snapshot before
-    scanning any of them, a heavier change than this ELF-only pass.
-    """
-    from . import deadline
-
-    exports: dict[str, frozenset[str]] = {}
-    for name, path in libraries.items():
-        deadline.check()
-        meta = parse_elf_metadata(path)
-        exports[name] = frozenset(
-            s.name for s in meta.symbols if s.name and s.is_default
-        )
-    return exports
-
-
-def audit_bundle(
-    libraries: dict[str, Path],
-    *,
-    bundle_system_providers: Iterable[str] = (),
-    manifest: InstantiationManifest | None = None,
-) -> BundleAuditResult:
-    """Run the audit-mode (no old side) bundle analysis for a declared set.
-
-    ADR-056: the ``scan --artifact-set`` entry point into the bundle layer.
-    ``libraries`` is expected to already be collision-free and ELF-validated
-    (:func:`discover_artifact_set`) — this function does not re-validate
-    that, it only builds the snapshot and runs the audit-mode detectors:
-    unresolved intra-dependencies (:func:`_detect_unresolved_intra_dependency`),
-    ownership ambiguity within the declared set
-    (:func:`_detect_duplicate_providers`, PR H), and, when *manifest* is
-    given, opt-in expected-provider enforcement
-    (:func:`_detect_manifest_ownership`, PR H — the audit-mode sibling of
-    ``compare --manifest``'s two-sided drift check).
-    """
-    snapshot = build_bundle_snapshot(libraries)
-    # P2 regression (Codex review): two distinct set members advertising the
-    # same DT_SONAME make provider resolution genuinely ambiguous --
-    # provider_library_for_soname() (bundle_models.py) returns the first
-    # metadata match, while _compute_resolution_graph()'s reverse-soname map
-    # keeps the *last* match, so the same DT_NEEDED edge is classified
-    # against two different candidate providers by two different call
-    # sites. Rather than silently guessing (either a false "unresolved"
-    # finding when the picked provider doesn't actually export the symbol,
-    # or a false negative if it happens to), reject the ambiguity outright
-    # -- mirroring discover_artifact_set()'s own collision rejection for
-    # duplicate canonical names.
-    duplicate_sonames = _find_duplicate_sonames(snapshot.metadata)
-    if duplicate_sonames:
-        detail = "; ".join(
-            f"'{soname}': {names}" for soname, names in duplicate_sonames.items()
-        )
-        raise ArtifactSetError(
-            f"--artifact-set has ambiguous duplicate SONAME provider(s): "
-            f"{detail}. Each library in an artifact set must advertise a "
-            "distinct DT_SONAME; rename or drop the duplicate(s)."
-        )
-    sys_providers = set(DEFAULT_SYSTEM_PROVIDERS) | set(bundle_system_providers)
-    findings = _detect_unresolved_intra_dependency(snapshot, sys_providers)
-    findings.extend(_detect_duplicate_providers(snapshot))
-    if manifest is not None:
-        findings.extend(_detect_manifest_ownership(snapshot, manifest))
-    return BundleAuditResult(snapshot=snapshot, findings=findings)
-
-
-def _find_duplicate_sonames(
-    metadata: dict[str, ElfMetadata],
-) -> dict[str, list[str]]:
-    """Return ``{soname: [library_names]}`` for every non-empty DT_SONAME
-    shared by 2+ distinct libraries in *metadata* (empty dict if none)."""
-    by_soname: dict[str, list[str]] = {}
-    for name, meta in metadata.items():
-        if meta.soname:
-            by_soname.setdefault(meta.soname, []).append(name)
-    return {soname: names for soname, names in by_soname.items() if len(names) > 1}
 
 
 def render_bundle_findings_markdown(findings: list[BundleFinding]) -> list[str]:

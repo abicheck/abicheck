@@ -78,29 +78,3 @@ class TypeMetadataSource(Protocol):
         """Whether this source has any type data available."""
         ...
 
-
-def resolve_debug_metadata(
-    *,
-    dwarf: object | None = None,
-    btf: object | None = None,
-    ctf: object | None = None,
-    prefer_btf: bool = False,
-) -> TypeMetadataSource | None:
-    """Select the best available debug metadata source.
-
-    Priority (userspace, default):  DWARF > BTF > CTF
-    Priority (kernel, prefer_btf):  BTF > DWARF > CTF
-
-    Returns None if no source has data.
-    """
-    sources: list[object]
-    if prefer_btf:
-        sources = [btf, dwarf, ctf]
-    else:
-        sources = [dwarf, btf, ctf]
-
-    for src in sources:
-        if src is not None and isinstance(src, TypeMetadataSource) and src.has_data:
-            return src
-
-    return None

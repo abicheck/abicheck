@@ -56,7 +56,7 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.macho_metadata import MachoExport, MachoMetadata
 from abicheck.model import AbiSnapshot
 from abicheck.pe_metadata import PeExport, PeMetadata
-from abicheck.reporter import appcompat_to_json, appcompat_to_markdown
+from abicheck.reporter import appcompat_to_json
 
 # ---------------------------------------------------------------------------
 # Unit tests: AppRequirements / AppCompatResult data structures
@@ -459,54 +459,6 @@ class TestAppCompatReporters:
             symbol_coverage=100.0,
         )
 
-    def test_markdown_compatible(self):
-        result = self._make_result()
-        md = appcompat_to_markdown(result)
-        assert "# Application Compatibility Report" in md
-        assert "COMPATIBLE" in md
-        assert "/usr/bin/myapp" in md
-
-    def test_markdown_with_missing_symbols(self):
-        result = self._make_result(
-            missing=["foo_init"],
-            verdict=Verdict.BREAKING,
-        )
-        md = appcompat_to_markdown(result)
-        assert "Missing Symbols" in md
-        assert "foo_init" in md
-
-    def test_markdown_with_relevant_changes(self):
-        change = Change(
-            kind=ChangeKind.FUNC_PARAMS_CHANGED,
-            symbol="foo_process",
-            description="parameter type changed",
-        )
-        result = self._make_result(breaking=[change])
-        md = appcompat_to_markdown(result)
-        assert "Relevant Changes" in md
-        assert "foo_process" in md
-
-    def test_markdown_show_irrelevant(self):
-        change = Change(
-            kind=ChangeKind.FUNC_ADDED,
-            symbol="bar_new",
-            description="function added: bar_new",
-        )
-        result = self._make_result(irrelevant=[change])
-        md = appcompat_to_markdown(result, show_irrelevant=True)
-        assert "Irrelevant Changes" in md
-        assert "bar_new" in md
-
-    def test_markdown_hide_irrelevant_default(self):
-        change = Change(
-            kind=ChangeKind.FUNC_ADDED,
-            symbol="bar_new",
-            description="function added",
-        )
-        result = self._make_result(irrelevant=[change])
-        md = appcompat_to_markdown(result)
-        assert "--show-irrelevant" in md
-
     def test_json_output(self):
         result = self._make_result()
         j = appcompat_to_json(result)
@@ -567,22 +519,6 @@ class TestAppCompatReporters:
         result = self._make_result(breaking=[change], policy_file=pf)
         data = json.loads(appcompat_to_json(result))
         assert data["relevant_changes"][0]["severity"] == "compatible"
-
-    def test_markdown_weak_mode(self):
-        result = AppCompatResult(
-            app_path="/usr/bin/myapp",
-            old_lib_path="",
-            new_lib_path="libfoo.so.2",
-            required_symbols={"foo_init"},
-            required_symbol_count=1,
-            verdict=Verdict.COMPATIBLE,
-            symbol_coverage=100.0,
-        )
-        md = appcompat_to_markdown(result)
-        assert "libfoo.so.2" in md
-        # Weak mode: no old lib shown with arrow
-        assert "→" not in md
-
 
 # ---------------------------------------------------------------------------
 # CLI smoke test
@@ -2116,18 +2052,6 @@ class TestReporterEdgeCases:
         data = json.loads(j)
         assert "FOO_1.0" in data["missing_versions"]
 
-    def test_markdown_missing_versions(self):
-        result = AppCompatResult(
-            app_path="/usr/bin/myapp",
-            old_lib_path="old.so",
-            new_lib_path="new.so",
-            missing_versions=["FOO_1.0"],
-            verdict=Verdict.BREAKING,
-        )
-        md = appcompat_to_markdown(result)
-        assert "Missing Symbol Versions" in md
-        assert "FOO_1.0" in md
-
     def test_json_full_diff_verdict(self):
         result = AppCompatResult(
             app_path="/usr/bin/myapp",
@@ -2144,24 +2068,6 @@ class TestReporterEdgeCases:
         j = appcompat_to_json(result)
         data = json.loads(j)
         assert data["full_library_verdict"] == "BREAKING"
-
-    def test_markdown_no_changes_message(self):
-        change = Change(
-            kind=ChangeKind.FUNC_ADDED,
-            symbol="x",
-            description="added",
-        )
-        result = AppCompatResult(
-            app_path="/usr/bin/myapp",
-            old_lib_path="old.so",
-            new_lib_path="new.so",
-            irrelevant_for_app=[change],
-            verdict=Verdict.COMPATIBLE,
-        )
-        md = appcompat_to_markdown(result)
-        assert "0 of 1 total" in md
-        assert "do NOT affect" in md
-
 
 # ---------------------------------------------------------------------------
 # scope_diff_to_app: OLD/NEW as a saved JSON snapshot (ADR-043 follow-up)

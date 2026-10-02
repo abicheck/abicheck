@@ -972,7 +972,7 @@ def _collect_graph_pack(
     from abicheck import __version__ as _abicheck_version
     from abicheck.buildsource.build_evidence import BuildEvidence
     from abicheck.buildsource.model import ExtractorRecord
-    from abicheck.cli_buildsource_helpers import (
+    from tests._build_source_collect import (
         _build_coverage,
         _collect_source_graph,
         _run_adapters,
@@ -1156,7 +1156,7 @@ def test_collect_evidence_summary_without_build_is_partial(tmp_path) -> None:
     # the L5 coverage row must read PARTIAL (ran, produced nothing), not PRESENT.
     from abicheck.buildsource.build_evidence import BuildEvidence
     from abicheck.buildsource.model import ExtractorRecord
-    from abicheck.cli_buildsource_helpers import _build_coverage, _collect_source_graph
+    from tests._build_source_collect import _build_coverage, _collect_source_graph
 
     merged = BuildEvidence()
     extractors: list[ExtractorRecord] = []
