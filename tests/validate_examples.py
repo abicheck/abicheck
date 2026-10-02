@@ -17,6 +17,7 @@ Usage:
     python tests/validate_examples.py case01 case07     # filter by name substring
     python tests/validate_examples.py --fail-fast       # stop on first failure
     python tests/validate_examples.py --json            # machine-readable output
+    python tests/validate_examples.py --jobs 0          # one worker per CPU
 
 Exit codes:
     0  all pass (known gaps are xfail, not failures)
@@ -1640,6 +1641,36 @@ def _check_prerequisites() -> str | None:
     return None
 
 
+def _init_worker(preferred_family: str | None) -> None:
+    """Pool initializer: carry ``--toolchain`` into a worker process.
+
+    ``CC``/``CXX`` reach a worker through the inherited environment, but the
+    module global does not under the ``spawn``/``forkserver`` start methods
+    (the Linux default from Python 3.14), so it is set explicitly.
+    """
+    global PREFERRED_FAMILY
+    PREFERRED_FAMILY = preferred_family
+
+
+def _timed_run_case(name: str, entry: dict, tmp_base: Path, variant: str) -> CaseResult:
+    """Run one case and stamp its own wall time (measured where it ran)."""
+    started = time.perf_counter()
+    res = run_case(name, entry, tmp_base, variant=variant)
+    return res._replace(seconds=round(time.perf_counter() - started, 3))
+
+
+def _print_progress(res: CaseResult) -> None:
+    icon = {
+        "PASS": "\u2705",
+        "FAIL": "\u274c",
+        "XFAIL": "\u26a0\ufe0f ",
+        "SKIP": "\u23ed\ufe0f ",
+        "ERROR": "\U0001f4a5",
+    }.get(res.status, "?")
+    msg = f"  {res.message}" if res.message else ""
+    print(f"{icon} {res.name:<42}  {res.status} [{res.variant}]{msg}", flush=True)
+
+
 def _run_all_cases(
     names: list[str],
     verdicts: dict[str, dict],
@@ -1647,29 +1678,46 @@ def _run_all_cases(
     fail_fast: bool = False,
     json_out: bool = False,
     variants: tuple[str, ...] = (DEFAULT_ARTIFACT_VARIANT,),
+    jobs: int = 1,
 ) -> list[CaseResult]:
-    """Iterate over *names*, run each case, print progress, and return results."""
+    """Run each (variant, case) and return results in (variant, name) order.
+
+    Cases are independent -- each builds in its own work directory, and the
+    header-AST/snapshot disk caches write atomically -- so ``jobs > 1`` runs
+    them in a process pool. The result list (and therefore the JSON artifact)
+    keeps the sequential order regardless of completion order. ``fail_fast``
+    stops at the first FAIL and so always runs sequentially.
+    """
+    work = [(variant, name) for variant in variants for name in names]
     results: list[CaseResult] = []
     with tempfile.TemporaryDirectory(prefix="validate_examples_") as tmp_root:
         tmp_base = Path(tmp_root)
-        for variant in variants:
-            for name in names:
-                started = time.perf_counter()
-                res = run_case(name, verdicts[name], tmp_base, variant=variant)
-                res = res._replace(seconds=round(time.perf_counter() - started, 3))
+        if jobs <= 1 or fail_fast or len(work) <= 1:
+            for variant, name in work:
+                res = _timed_run_case(name, verdicts[name], tmp_base, variant)
                 results.append(res)
                 if not json_out:
-                    icon = {
-                        "PASS": "\u2705",
-                        "FAIL": "\u274c",
-                        "XFAIL": "\u26a0\ufe0f ",
-                        "SKIP": "\u23ed\ufe0f ",
-                        "ERROR": "\U0001f4a5",
-                    }.get(res.status, "?")
-                    msg = f"  {res.message}" if res.message else ""
-                    print(f"{icon} {res.name:<42}  {res.status} [{res.variant}]{msg}")
+                    _print_progress(res)
                 if fail_fast and res.status == "FAIL":
                     return results
+            return results
+
+        from concurrent.futures import ProcessPoolExecutor
+
+        with ProcessPoolExecutor(
+            max_workers=min(jobs, len(work)),
+            initializer=_init_worker,
+            initargs=(PREFERRED_FAMILY,),
+        ) as pool:
+            futures = [
+                pool.submit(_timed_run_case, name, verdicts[name], tmp_base, variant)
+                for variant, name in work
+            ]
+            for future in futures:
+                res = future.result()
+                results.append(res)
+                if not json_out:
+                    _print_progress(res)
     return results
 
 
@@ -1792,6 +1840,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--fail-fast", action="store_true", help="Stop after first FAIL")
     ap.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Run up to N cases in parallel processes (default: 1; 0 = one per "
+            "CPU). Result order is unchanged. Ignored with --fail-fast."
+        ),
+    )
+    ap.add_argument(
         "--json",
         action="store_true",
         dest="json_out",
@@ -1862,6 +1921,7 @@ def main(argv: list[str] | None = None) -> int:
         fail_fast=args.fail_fast,
         json_out=args.json_out,
         variants=variants,
+        jobs=args.jobs if args.jobs > 0 else (os.cpu_count() or 1),
     )
     payload = _json_payload(
         results,

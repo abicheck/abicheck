@@ -890,3 +890,119 @@ class TestBuildCompareDirectCmd:
 
         assert "--pattern-verdicts" not in cmd
         assert "-H" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# --jobs: parallel case execution must not change the artifact
+# ---------------------------------------------------------------------------
+class TestParallelRunAllCases:
+    """``_run_all_cases(jobs=N)`` is an execution detail, never an output one.
+
+    CI's whole-catalog artifact is consumed by the shard merge and the full
+    matrix collector, which check the case set exactly; so the oracle here is
+    the sequential run itself: for any case list, variant list and job count,
+    the parallel result list equals the sequential one, element by element
+    and in order. The cases are ``skip: true`` entries with distinct reasons
+    -- they go through the real ``run_case`` in real worker processes, but
+    finish without compiling, so a reordering or a dropped/duplicated case
+    shows up as a differing message at a position.
+    """
+
+    @staticmethod
+    def _verdicts(n: int) -> dict[str, dict]:
+        return {
+            f"case{i:03d}_p": {"expected": "NO_CHANGE", "skip": True, "reason": f"r{i}"}
+            for i in range(n)
+        }
+
+    @staticmethod
+    def _shape(results: list[CaseResult]) -> list[tuple[str, str, str, str]]:
+        return [(r.name, r.status, r.message, r.variant) for r in results]
+
+    @pytest.mark.parametrize("n_cases", [1, 2, 7, 23])
+    @pytest.mark.parametrize("jobs", [2, 3, 8])
+    def test_parallel_equals_sequential(self, n_cases: int, jobs: int) -> None:
+        import random
+
+        verdicts = self._verdicts(n_cases)
+        names = list(verdicts)
+        random.Random(n_cases * 31 + jobs).shuffle(names)
+        variants = ("debug-headers", "release-headers")
+        seq = ve._run_all_cases(
+            names, verdicts, json_out=True, variants=variants, jobs=1
+        )
+        par = ve._run_all_cases(
+            names, verdicts, json_out=True, variants=variants, jobs=jobs
+        )
+        assert len(seq) == n_cases * len(variants)
+        assert self._shape(par) == self._shape(seq)
+        assert all(r.seconds >= 0 for r in par)
+
+    def test_fail_fast_stays_sequential(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        verdicts = self._verdicts(3)
+        calls: list[str] = []
+
+        def _fake(name, entry, tmp_base, variant=DEFAULT_ARTIFACT_VARIANT):
+            calls.append(name)
+            return CaseResult(name, "FAIL", "X", "Y", "boom", variant=variant)
+
+        monkeypatch.setattr(ve, "run_case", _fake)
+        # A process pool could not see this in-process fake at all, so a
+        # result here proves the sequential path ran -- and stopped at one.
+        out = ve._run_all_cases(
+            list(verdicts), verdicts, fail_fast=True, json_out=True, jobs=4
+        )
+        assert [r.name for r in out] == ["case000_p"]
+        assert calls == ["case000_p"]
+
+    @pytest.mark.parametrize("family", ["gcc", "clang", None])
+    def test_worker_receives_preferred_family_under_spawn(
+        self, family: str | None
+    ) -> None:
+        # Python 3.14's Linux default (forkserver), like spawn, does not copy
+        # module globals into a worker; the initializer must carry --toolchain.
+        import multiprocessing
+        from concurrent.futures import ProcessPoolExecutor
+
+        probe = "__import__('tests.validate_examples', fromlist=['_']).PREFERRED_FAMILY"
+        with ProcessPoolExecutor(
+            max_workers=1,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=ve._init_worker,
+            initargs=(family,),
+        ) as pool:
+            assert pool.submit(eval, probe).result() == family
+
+    def test_jobs_zero_means_cpu_count(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        seen: dict[str, int] = {}
+
+        def _fake_run_all(names, verdicts, **kw):
+            seen["jobs"] = kw["jobs"]
+            return []
+
+        monkeypatch.setattr(ve, "_run_all_cases", _fake_run_all)
+        monkeypatch.setattr(ve, "_check_prerequisites", lambda: None)
+        monkeypatch.setattr(ve.os, "cpu_count", lambda: 6)
+        main(["--jobs", "0", "--json", "no-such-case-filter"])
+        assert seen["jobs"] == 6
+
+    def test_pool_is_initialized_with_current_preferred_family(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import concurrent.futures as cf
+
+        real = cf.ProcessPoolExecutor
+        seen: dict[str, object] = {}
+
+        def _recording(*args, **kwargs):
+            seen.update(kwargs)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(cf, "ProcessPoolExecutor", _recording)
+        monkeypatch.setattr(ve, "PREFERRED_FAMILY", "clang")
+        verdicts = self._verdicts(3)
+        ve._run_all_cases(list(verdicts), verdicts, json_out=True, jobs=2)
+        assert seen["initializer"] is ve._init_worker
+        assert seen["initargs"] == ("clang",)
