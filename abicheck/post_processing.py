@@ -1357,8 +1357,8 @@ class DetectInternalLeaks:
         if ctx.old is None:
             return changes
 
+        from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
         from .internal_leak import (
-            DEFAULT_INTERNAL_NAMESPACES,
             detect_call_graph_leaks,
             detect_internal_leaks,
         )
@@ -1415,11 +1415,11 @@ class DemoteUnreachableInternalChurn:
         if ctx.old is None:
             return changes
 
+        from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
         from .internal_leak import (
             _LEAK_TRIGGERING_KINDS,
-            DEFAULT_INTERNAL_NAMESPACES,
+            INTERNAL_NAMESPACE,
             _root_type_name_for_change,
-            is_internal_type,
         )
         from .model.change_catalog.kinds import ChangeKind
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
@@ -1456,7 +1456,7 @@ class DemoteUnreachableInternalChurn:
             root = _root_type_name_for_change(c)
             if (
                 c.kind in _LEAK_TRIGGERING_KINDS
-                and is_internal_type(root, namespaces)
+                and INTERNAL_NAMESPACE.matches(root, internal_namespaces=namespaces)
                 and root not in leaked_types
                 and not _is_frozen(c, root)
             ):
@@ -1713,6 +1713,9 @@ class PostProcessingPipeline:
         # where it reads better -- doing that rebound a positional
         # `disposition_ledger` to this parameter (Codex review, PR #1231).
         experimental_namespaces: tuple[str, ...] | None = None,
+        # Design-hardening Phase 2: the OLD-side stand-in when *old* is None,
+        # built by the snapshot factory -- see `PipelineContext.absent_baseline`.
+        absent_baseline: AbiSnapshot | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -1727,6 +1730,7 @@ class PostProcessingPipeline:
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=public_surface_allowlist,
             disposition_ledger=disposition_ledger,
+            absent_baseline=absent_baseline,
         )
         # ``FilterRedundant`` sets ``ctx.kept = kept`` — an *aliasing* contract,
         # not a snapshot: every step from that point on is required to either

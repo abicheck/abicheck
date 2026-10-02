@@ -48,11 +48,12 @@ no staleness surface, and no behavior to reason about for the callers
 
 from __future__ import annotations
 
-import contextvars
-import functools
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar
+
+from ..model.execution_cache import request_key
+from ..model.execution_cache_scoped import ScopedCache
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..model.snapshot import AbiSnapshot
@@ -63,11 +64,7 @@ __all__ = [
     "run_scoped_digest_cache",
 ]
 
-# id(snapshot) -> (the snapshot itself, its digest). The snapshot is kept
-# so its id cannot be reused by a later object while the entry stands.
-_SCOPE: contextvars.ContextVar[dict[int, tuple[Any, str]] | None] = (
-    contextvars.ContextVar("abicheck_snapshot_digest_scope", default=None)
-)
+_SCOPE = ScopedCache("abicheck.storage.snapshot_digest_cache")
 
 
 @contextmanager
@@ -82,28 +79,15 @@ def digest_scope() -> Iterator[None]:
     the block. Mutating a snapshot inside an active scope after its digest
     has been taken is the one way to get a stale answer.
     """
-    if _SCOPE.get() is not None:
+    with _SCOPE.scope():
         yield
-        return
-    token = _SCOPE.set({})
-    try:
-        yield
-    finally:
-        _SCOPE.reset(token)
 
 
 def memoized_digest(snap: AbiSnapshot, compute: Callable[[AbiSnapshot], str]) -> str:
     """*compute(snap)*, at most once per snapshot per open scope."""
-    cache = _SCOPE.get()
-    if cache is None:
-        return compute(snap)
-    key = id(snap)
-    hit = cache.get(key)
-    if hit is not None:
-        return hit[1]
-    digest = compute(snap)
-    cache[key] = (snap, digest)
-    return digest
+    return _SCOPE.get_or_compute(
+        request_key(snapshot=id(snap)), lambda: compute(snap), pin=snap
+    )
 
 
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -122,10 +106,4 @@ def run_scoped_digest_cache(func: _F) -> _F:
     comparing many libraries releases each pair's entry when its own
     comparison returns.
     """
-
-    @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        with digest_scope():
-            return func(*args, **kwargs)
-
-    return cast("_F", wrapper)
+    return _SCOPE.scoped(func)

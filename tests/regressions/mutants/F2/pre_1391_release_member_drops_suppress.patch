@@ -1,11 +1,11 @@
 --- a/abicheck/cli_compare_release_pairwise.py
 +++ b/abicheck/cli_compare_release_pairwise.py
-@@ -275,7 +275,7 @@
-         new_version=new_version,
-         lang=lang,
-         lang_explicit=lang_explicit,
--        suppress=suppress,
-+        suppress=None,
-         policy=policy,
-         contract_evaluation=contract_evaluation,
-         contract_mode=contract_mode,
+@@ -187,7 +187,7 @@
+         old_input=_normalize_binary_input(request.old_input)[0],
+         new_input=_normalize_binary_input(request.new_input)[0],
+     )
+-    result = service.run_compare(**run_compare_kwargs(request))
++    result = service.run_compare(**{**run_compare_kwargs(request), "suppress": None})
+     # The rich-tier config is recorded under exactly the condition the
+     # single-pair CLI (`resolve_and_apply`) and the typed API
+     # (`install_resolved_gate_receipt`) record one: a contract evaluation, or

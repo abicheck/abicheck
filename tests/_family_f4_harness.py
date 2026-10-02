@@ -37,18 +37,22 @@ from dataclasses import dataclass, field
 from _family_f1_harness import Side, _enum, _fn, _rec, _snapshot
 
 from abicheck.checker import Verdict, compare
-from abicheck.model import AbiSnapshot, ScopeOrigin
+from abicheck.diff_cpp_patterns import BundleMember, detect_bundle_soname_skew
+from abicheck.model import AbiSnapshot, AccessLevel, ScopeOrigin
 
 _BROKEN = frozenset({Verdict.BREAKING, Verdict.API_BREAK})
 
 
 @dataclass(frozen=True)
 class Cell:
-    build: Callable[[], tuple[AbiSnapshot, AbiSnapshot]]
+    build: Callable[[], tuple[AbiSnapshot, AbiSnapshot]] | None = None
     must: frozenset[tuple[str, str]] = frozenset()
     must_not_kinds: frozenset[str] = frozenset()
     breaking: bool | None = None
     notes: str = field(default="", compare=False)
+    #: A detector outside ``compare()`` (bundle-level): returns its findings
+    #: as raw ``(kind, symbol)`` pairs; ``build``/``breaking`` are unused.
+    direct: Callable[[], frozenset[tuple[str, str]]] | None = None
 
 
 def _pair(old: Side, new: Side) -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -92,6 +96,99 @@ def _reached_by_pointer(qname: str) -> Callable[[], tuple[AbiSnapshot, AbiSnapsh
             functions=(_fn("foo"), _fn("use", "void", (f"{qname}*",))),
             types=(_record(qname, (("x", ftype),)),),
         )
+
+    return lambda: _pair(side("int"), side("long"))
+
+
+def _pimpl_rename(
+    impl: str, *, accessor: bool = True
+) -> Callable[[], tuple[AbiSnapshot, AbiSnapshot]]:
+    """Public ``api::Desc`` holds a pimpl to *impl*, whose member is renamed;
+    *accessor* adds an inline public accessor on ``api::Desc``."""
+
+    def side(member: str) -> Side:
+        fns = [_fn("foo")]
+        if accessor:
+            fns.append(
+                _fn(
+                    "api::Desc::get",
+                    "int",
+                    (),
+                    is_inline=True,
+                    access=AccessLevel.PUBLIC,
+                )
+            )
+        return Side(
+            functions=tuple(fns),
+            types=(
+                _record("api::Desc", (("pimpl", f"{impl}*"),)),
+                _record(impl, ((member, "int"),)),
+            ),
+        )
+
+    return lambda: _pair(side("count"), side("n_count"))
+
+
+def _c_symbols(
+    old: tuple[str, ...], new: tuple[str, ...]
+) -> Callable[[], tuple[AbiSnapshot, AbiSnapshot]]:
+    """Unmangled C exports (``mangled == name``)."""
+
+    def side(names: tuple[str, ...]) -> Side:
+        fns = (dataclasses.replace(_fn(n), mangled=n) for n in names)
+        return Side(functions=(_fn("foo"), *fns))
+
+    return lambda: _pair(side(old), side(new))
+
+
+def _sycl_family(first_param: str, *, removed: bool = True):  # type: ignore[no-untyped-def]
+    old = (
+        ("ns::a", (first_param,)),
+        ("ns::a", ()),
+        ("ns::b", (first_param,)),
+        ("ns::b", ()),
+    )
+    new = (("ns::a", ()), ("ns::b", ())) if removed else old
+    return _fn_pair(old, new)
+
+
+def _bundle(
+    old: tuple[tuple[str, str], ...], new: tuple[tuple[str, str], ...]
+) -> Callable[[], frozenset[tuple[str, str]]]:
+    """``(filename, DT_SONAME)`` members; an empty SONAME means unread."""
+
+    def members(spec: tuple[tuple[str, str], ...]) -> list[BundleMember]:
+        return [
+            BundleMember(
+                library=lib, soname=so, soname_major=int(lib.rsplit(".", 1)[1])
+            )
+            for lib, so in spec
+        ]
+
+    def run() -> frozenset[tuple[str, str]]:
+        found = detect_bundle_soname_skew(members(old), members(new))
+        return frozenset((c.kind.value, c.symbol) for c in found)
+
+    return run
+
+
+def _reached_by_value(qname: str) -> Callable[[], tuple[AbiSnapshot, AbiSnapshot]]:
+    """*qname* is a by-value parameter of an exported public function."""
+
+    def side(ftype: str) -> Side:
+        return Side(
+            functions=(_fn("foo"), _fn("use", "void", (qname,))),
+            types=(_record(qname, (("x", ftype),)),),
+        )
+
+    return lambda: _pair(side("int"), side("long"))
+
+
+def _unreachable(qname: str) -> Callable[[], tuple[AbiSnapshot, AbiSnapshot]]:
+    """*qname* changes, but no public signature names it."""
+
+    def side(ftype: str) -> Side:
+        return Side(functions=(_fn("foo"),), types=(_record(qname, (("x", ftype),)),))
 
     return lambda: _pair(side("int"), side("long"))
 
@@ -239,6 +336,156 @@ CELLS: dict[str, Cell] = {
         _header_seed("ns::detail::H"),
         breaking=False,
     ),
+    # -- Phase 5: severity-raising heuristics added with the runtime registry
+    "inline_ns.control.moved": Cell(
+        _fn_pair(
+            (("ns::v1::f", ("int",)), ("ns::v1::g", ("int",))),
+            (("ns::v2::f", ("int",)), ("ns::v2::g", ("int",))),
+        ),
+        must=frozenset({("inline_namespace_moved", "__inline_namespace_move")}),
+        breaking=True,
+    ),
+    "inline_ns.fp.added_beside_old": Cell(
+        _fn_pair(
+            (("ns::v1::f", ("int",)), ("ns::v1::g", ("int",))),
+            (
+                ("ns::v1::f", ("int",)),
+                ("ns::v1::g", ("int",)),
+                ("ns::v2::f", ("int",)),
+                ("ns::v2::g", ("int",)),
+            ),
+        ),
+        must_not_kinds=frozenset({"inline_namespace_moved", "func_removed"}),
+        notes="vN pairs by name, but nothing left the export table: no move",
+    ),
+    "inline_ns.fn.segment_near_miss": Cell(
+        _fn_pair(
+            (("ns::version1::f", ("int",)), ("ns::version1::g", ("int",))),
+            (("ns::version2::f", ("int",)), ("ns::version2::g", ("int",))),
+        ),
+        must=frozenset({("func_removed", "_Z15ns::version1::fi")}),
+        must_not_kinds=frozenset({"inline_namespace_moved"}),
+        breaking=True,
+    ),
+    "internal_template.control.instantiation_removed": Cell(
+        _fn_pair((("ns::detail::tpl<int>", ("int",)),), ()),
+        must=frozenset({("internal_template_leaks_via_public_api", "ns::detail::tpl")}),
+        breaking=True,
+    ),
+    "internal_template.fp.instantiation_added": Cell(
+        _fn_pair((), (("ns::detail::tpl<int>", ("int",)),)),
+        must_not_kinds=frozenset({"internal_template_leaks_via_public_api"}),
+        breaking=False,
+        notes="an added instantiation cannot break an already-linked consumer",
+    ),
+    "internal_template.fn.segment_near_miss": Cell(
+        _fn_pair((("ns::details::tpl<int>", ("int",)),), ()),
+        must=frozenset({("func_removed", "_Z21ns::details::tpl<int>i")}),
+        must_not_kinds=frozenset({"internal_template_leaks_via_public_api"}),
+        breaking=True,
+    ),
+    "pimpl.control.inline_accessor": Cell(
+        _pimpl_rename("ns::detail::Impl"),
+        must=frozenset({("inline_body_references_renamed_member", "api::Desc")}),
+        breaking=True,
+    ),
+    "pimpl.fp.no_inline_accessor": Cell(
+        _pimpl_rename("ns::detail::Impl", accessor=False),
+        must=frozenset({("field_renamed", "ns::detail::Impl")}),
+        must_not_kinds=frozenset({"inline_body_references_renamed_member"}),
+        notes="internal by name, but no inline accessor can bake in the old name",
+    ),
+    "pimpl.fn.segment_near_miss": Cell(
+        _pimpl_rename("ns::details::Impl"),
+        must=frozenset({("field_renamed", "ns::details::Impl")}),
+        must_not_kinds=frozenset({"inline_body_references_renamed_member"}),
+    ),
+    "prefix_rename.control.prefixed": Cell(
+        _c_symbols(("init", "shutdown"), ("mylib_init", "mylib_shutdown")),
+        must=frozenset({("symbol_renamed_batch", "batch_rename:mylib_*")}),
+        breaking=True,
+    ),
+    "prefix_rename.fp.old_names_kept": Cell(
+        _c_symbols(
+            ("init", "shutdown"), ("init", "shutdown", "mylib_init", "mylib_shutdown")
+        ),
+        must_not_kinds=frozenset({"symbol_renamed_batch", "func_removed"}),
+        breaking=False,
+        notes="prefixed names pair by spelling, but nothing left the surface",
+    ),
+    "prefix_rename.fn.suffixed": Cell(
+        _c_symbols(("init", "shutdown"), ("init_v2", "shutdown_v2")),
+        must=frozenset({("func_removed", "init"), ("func_removed", "shutdown")}),
+        must_not_kinds=frozenset({"symbol_renamed_batch"}),
+        breaking=True,
+    ),
+    "sycl.control.family_removed": Cell(
+        _sycl_family("sycl::queue&"),
+        must=frozenset({("sycl_overload_set_removed", "<sycl_overload_family>")}),
+        breaking=True,
+    ),
+    "sycl.fp.family_kept": Cell(
+        _sycl_family("sycl::queue&", removed=False),
+        must_not_kinds=frozenset({"sycl_overload_set_removed"}),
+        breaking=False,
+        notes="sycl::queue overloads by spelling, but none was removed",
+    ),
+    "sycl.fn.near_miss_queue": Cell(
+        _sycl_family("mylib::queue&"),
+        must_not_kinds=frozenset({"sycl_overload_set_removed"}),
+        breaking=True,
+    ),
+    "bundle.control.skew": Cell(
+        direct=_bundle(
+            (
+                ("libfoo_core.so.1", "libfoo_core.so.1"),
+                ("libfoo_io.so.1", "libfoo_io.so.1"),
+            ),
+            (
+                ("libfoo_core.so.2", "libfoo_core.so.2"),
+                ("libfoo_io.so.1", "libfoo_io.so.1"),
+            ),
+        ),
+        must=frozenset({("bundle_soname_skew", "<bundle>")}),
+    ),
+    "bundle.fp.soname_unread": Cell(
+        direct=_bundle(
+            (("libfoo_core.so.1", ""), ("libfoo_io.so.1", "libfoo_io.so.1")),
+            (("libfoo_core.so.2", ""), ("libfoo_io.so.1", "libfoo_io.so.1")),
+        ),
+        must_not_kinds=frozenset({"bundle_soname_skew"}),
+        notes="filenames pair the cohort, but one side's DT_SONAME was never read",
+    ),
+    "bundle.fn.lockstep_bump": Cell(
+        direct=_bundle(
+            (
+                ("libfoo_core.so.1", "libfoo_core.so.1"),
+                ("libfoo_io.so.1", "libfoo_io.so.1"),
+            ),
+            (
+                ("libfoo_core.so.2", "libfoo_core.so.2"),
+                ("libfoo_io.so.2", "libfoo_io.so.2"),
+            ),
+        ),
+        must_not_kinds=frozenset({"bundle_soname_skew"}),
+        notes="every member bumped together: no skew",
+    ),
+    "internal_leak.control.reached_by_value": Cell(
+        _reached_by_value("ns::detail::Cfg"),
+        must=frozenset({("internal_type_leaks_via_public_api", "ns::detail::Cfg")}),
+        breaking=True,
+    ),
+    "internal_leak.fp.unreachable": Cell(
+        _unreachable("ns::detail::Cfg"),
+        must_not_kinds=frozenset({"internal_type_leaks_via_public_api"}),
+        notes="internal by name, but no public signature reaches it",
+    ),
+    "internal_leak.fn.segment_near_miss": Cell(
+        _reached_by_value("ns::detailed::Cfg"),
+        must=frozenset({("type_field_type_changed", "ns::detailed::Cfg")}),
+        must_not_kinds=frozenset({"internal_type_leaks_via_public_api"}),
+        breaking=True,
+    ),
 }
 
 #: The structurally identical twin of each reached-by-pointer cell, spelled
@@ -249,7 +496,10 @@ NEUTRAL_TWIN: dict[str, str] = {
 }
 
 
-def run_cell(cell: Cell) -> tuple[Verdict, frozenset[tuple[str, str]]]:
+def run_cell(cell: Cell) -> tuple[Verdict | None, frozenset[tuple[str, str]]]:
+    if cell.direct is not None:
+        return None, cell.direct()
+    assert cell.build is not None
     old, new = cell.build()
     r = compare(old, new)
     return r.verdict, frozenset((c.kind.value, c.symbol) for c in r.changes)
@@ -261,7 +511,11 @@ def oracle_violations(cell_id: str, cell: Cell) -> list[str]:
     out = [f"{cell_id}: missing {k}" for k in sorted(cell.must - found)]
     kinds = {k for k, _ in found}
     out += [f"{cell_id}: unexpected {k}" for k in sorted(cell.must_not_kinds & kinds)]
-    if cell.breaking is not None and (verdict in _BROKEN) != cell.breaking:
+    if (
+        cell.breaking is not None
+        and verdict is not None
+        and (verdict in _BROKEN) != cell.breaking
+    ):
         out.append(f"{cell_id}: verdict {verdict.value} (breaking={cell.breaking})")
     twin = NEUTRAL_TWIN.get(cell_id)
     if twin is not None:

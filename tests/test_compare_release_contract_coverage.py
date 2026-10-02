@@ -28,6 +28,7 @@ contribution is deliberately zeroed while the failure count stays real
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -39,6 +40,10 @@ from abicheck.cli_compare_release import (
     _finalize_release_output,
     _format_release_json,
     _strip_diff_results_and_adjust_verdict,
+)
+from abicheck.cli_compare_release_pairwise import (
+    ReleaseMemberContext,
+    release_parent_request,
 )
 from abicheck.model.symbol_inventory import (
     SymbolInventory,
@@ -140,23 +145,19 @@ def test_compare_one_library_stamps_contract_coverage_failure_count(
     )
     entry = _compare_one_library(
         "libfoo.so",
-        {"libfoo.so": old_path},
-        {"libfoo.so": new_path},
-        None,
-        None,
-        lambda _old, _dbg: None,
-        [],
-        [],
-        [],
-        [],
-        "1.0",
-        "1.0",
-        "c",
-        None,
-        "strict_abi",
-        None,
-        None,
-        contract_evaluation=True,
+        ReleaseMemberContext(
+            request=release_parent_request(
+                old_version="1.0",
+                new_version="1.0",
+                lang="c",
+                policy="strict_abi",
+                contract_evaluation=True,
+                include_dependencies=True,
+            ),
+            old_map={"libfoo.so": old_path},
+            new_map={"libfoo.so": new_path},
+            resolve_debug_info=lambda _old, _dbg: None,
+        ),
     )
     assert entry["contract_coverage_exit_contribution"] == 0
     assert entry["contract_coverage_failure_count"] == 0
@@ -197,22 +198,18 @@ def test_compare_one_library_stamps_coverage_warnings_onto_the_entry(
     )
     entry = _compare_one_library(
         "libfoo.so",
-        {"libfoo.so": old_path},
-        {"libfoo.so": new_path},
-        None,
-        None,
-        lambda _old, _dbg: None,
-        [],
-        [],
-        [],
-        [],
-        "1.0",
-        "1.0",
-        "c",
-        None,
-        "strict_abi",
-        None,
-        None,
+        ReleaseMemberContext(
+            request=release_parent_request(
+                old_version="1.0",
+                new_version="1.0",
+                lang="c",
+                policy="strict_abi",
+                include_dependencies=True,
+            ),
+            old_map={"libfoo.so": old_path},
+            new_map={"libfoo.so": new_path},
+            resolve_debug_info=lambda _old, _dbg: None,
+        ),
     )
     assert entry["coverage_warnings"] == [
         "old and new binaries are byte-identical (sha256 abc...)"
@@ -248,22 +245,18 @@ def test_compare_one_library_omits_coverage_warnings_key_when_none(
     )
     entry = _compare_one_library(
         "libfoo.so",
-        {"libfoo.so": old_path},
-        {"libfoo.so": new_path},
-        None,
-        None,
-        lambda _old, _dbg: None,
-        [],
-        [],
-        [],
-        [],
-        "1.0",
-        "2.0",
-        "c",
-        None,
-        "strict_abi",
-        None,
-        None,
+        ReleaseMemberContext(
+            request=release_parent_request(
+                old_version="1.0",
+                new_version="2.0",
+                lang="c",
+                policy="strict_abi",
+                include_dependencies=True,
+            ),
+            old_map={"libfoo.so": old_path},
+            new_map={"libfoo.so": new_path},
+            resolve_debug_info=lambda _old, _dbg: None,
+        ),
     )
     assert "coverage_warnings" not in entry
 
@@ -371,32 +364,21 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
         "abicheck.cli_compare_release_pairwise._run_compare_pair",
         _fake_run_compare_pair,
     )
-    common = (
-        {"libfoo.so": old_path},
-        {"libfoo.so": new_path},
-        None,
-        None,
-        lambda _old, _dbg: None,
-        [],
-        [],
-        [],
-        [],
-        "1.0",
-        "1.0",
-        "c",
-        None,
-        "strict_abi",
-        None,
-        None,
+    common = ReleaseMemberContext(
+        request=release_parent_request(
+            old_version="1.0", new_version="1.0", lang="c", include_dependencies=True
+        ),
+        old_map={"libfoo.so": old_path},
+        new_map={"libfoo.so": new_path},
+        resolve_debug_info=lambda _old, _dbg: None,
     )
-    default_entry = _compare_one_library("libfoo.so", *common)
+    default_entry = _compare_one_library("libfoo.so", common)
     assert "_old_snapshot" not in default_entry
     assert "_old_bundle_evidence" not in default_entry
 
     bundle_entry = _compare_one_library(
         "libfoo.so",
-        *common,
-        collect_diff_results=True,
+        dataclasses.replace(common, collect_diff_results=True),
     )
     assert "_old_snapshot" not in bundle_entry
     evidence = bundle_entry["_old_bundle_evidence"]
@@ -415,9 +397,11 @@ def test_compare_one_library_stashes_old_snapshot_only_when_requested(
 
     junit_entry = _compare_one_library(
         "libfoo.so",
-        *common,
-        collect_diff_results=True,
-        retention=resolve_snapshot_retention(junit=True),
+        dataclasses.replace(
+            common,
+            collect_diff_results=True,
+            retention=resolve_snapshot_retention(junit=True),
+        ),
     )
     # JUnit keeps the compact inventory, never the snapshot: the four
     # attribute reads it performs are all this projection carries, and the

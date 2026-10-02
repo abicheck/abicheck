@@ -21,7 +21,7 @@ overloads (``Global_Data_Value_Changed``/``StructToUnion``/
 Split out of ``diff_types.py`` to stay under its line-count cap — a genuine
 leaf module (must not import from ``diff_types`` at all, to avoid an import
 cycle: ``diff_types.py`` imports these detectors back for registration).
-``_is_abi_surface_type``/``_directly_referenced``/``_RESERVED_FIELD_RE``
+``_is_abi_surface_type``/``_directly_referenced``/``RESERVED_FIELD``
 were originally private to ``diff_types.py``; an earlier version of this
 split imported them back function-locally, which the AI-readiness
 import-cycle-growth check correctly flagged as a real cycle in the static
@@ -44,7 +44,7 @@ from .diff_helpers import (
 )
 from .diff_symbols import _reconciled_variable_surfaces
 from .diff_types_surface import (
-    _RESERVED_FIELD_RE,
+    RESERVED_FIELD,
     _directly_referenced,
     _is_abi_surface_type,
 )
@@ -180,12 +180,12 @@ def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         removed = [
             f
             for f in t_old.fields
-            if f.name not in new_names and _RESERVED_FIELD_RE.match(f.name)
+            if f.name not in new_names and RESERVED_FIELD.matches(f.name)
         ]
         added = [
             f
             for f in t_new.fields
-            if f.name not in old_names and not _RESERVED_FIELD_RE.match(f.name)
+            if f.name not in old_names and not RESERVED_FIELD.matches(f.name)
         ]
 
         added_by_offset = {f.offset_bits: f for f in added if f.offset_bits is not None}

@@ -35,7 +35,6 @@ real caller is this module).
 from __future__ import annotations
 
 import contextlib as _contextlib
-import functools as _functools
 import re as _re
 import threading as _threading
 from collections.abc import (
@@ -45,6 +44,7 @@ from collections.abc import (
 )
 from typing import NamedTuple as _NamedTuple, TypeVar as _TypeVar
 
+from ..model.execution_cache import memoized
 from ..qualified_name_segments_walk import (
     _PAYLOAD_FIELD_EXCLUSIONS as _PAYLOAD_FIELD_EXCLUSIONS,
     _collect_plan as _collect_plan,
@@ -245,7 +245,7 @@ def _anon_type_ordinal_matches(name: str) -> tuple[_AnonTypeMatch, ...]:
     return _anon_type_ordinal_matches_cached(name)
 
 
-@_functools.lru_cache(maxsize=1 << 16)
+@memoized(maxsize=1 << 16)
 def _anon_type_ordinal_matches_cached(name: str) -> tuple[_AnonTypeMatch, ...]:
     quoted_spans = _quoted_spans(name)
     matches: list[_AnonTypeMatch] = []

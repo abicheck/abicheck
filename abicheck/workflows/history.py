@@ -98,6 +98,7 @@ from ..policy.evidence_status import Confidence, FindingEvolution
 from ..policy.finding_evolution import apply_finding_evolution
 from ..policy.versioning_policy import VersioningPolicy
 from ..serialization import load_snapshot
+from .snapshot_factory import absent_baseline
 
 #: The five D2 lifecycle-event kinds this module can emit. ``changed`` (D2's
 #: sixth vocabulary word) is deliberately not emitted by S1 — see the module
@@ -573,12 +574,10 @@ def build_longitudinal_history(
     deprecation_resets: list[tuple[str, int]] = []
     display_names: dict[str, str] = {}
 
-    # Seed entry 0 via a synthetic empty predecessor, reusing the identical
-    # pairwise engine rather than a bespoke "walk snapshot 0's own lists"
-    # path -- see the module docstring. Not recorded in `pairwise` (there is
-    # no real "from" release), and its confidence is not consulted for the
-    # `evidence_uncertain` heuristic (nothing was truly removed).
-    empty = AbiSnapshot(library=library, version="")
+    # Seed entry 0 via the factory's empty predecessor through the identical
+    # pairwise engine (module docstring). Not recorded in `pairwise`, and its
+    # confidence is not consulted for `evidence_uncertain`: nothing was removed.
+    empty = absent_baseline(library)
     initial_result = compare(
         empty, entries[0].snapshot, policy=policy, scope_to_public_surface=True
     )

@@ -105,6 +105,9 @@ _NAMED_CALL_ALLOWLIST: dict[tuple[str, str, str], str] = {
 #: ``IMPORT_CYCLE_ALLOWLIST``/``KNOWN_UNMIGRATED_READERS`` use: an entry
 #: here is a claim someone checked, not a way to silence the scan.
 _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
+    ("abicheck/workflows/release_member_request.py", "member_request"): (
+        "ReleaseMemberCompareRequest: a typed request, no Fact-bridged fields."
+    ),
     ("abicheck/model/fact.py", "replace_with_fact_sync"): (
         "This *is* the fact-syncing wrapper — it derives each bridged "
         "field's sibling into the same call."

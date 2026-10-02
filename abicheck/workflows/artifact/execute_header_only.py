@@ -187,7 +187,6 @@ def execute_header_only_dump_request(
     # `source_header`) silently keeps the whole transitive toolchain
     # surface: a 5-header SVS root kept 32,339 libstdc++/libc/fmt functions
     # beside its own 304.
-    from ...provenance import apply_provenance
 
     # A manifest's declared-public *files* and *directories* go to their own
     # slots: a directory handed over as a header matches nothing by
@@ -200,18 +199,28 @@ def execute_header_only_dump_request(
     manifest_dirs = (
         list(dump_manifest.public_header_dirs) if dump_manifest is not None else []
     )
-    apply_provenance(
-        snap,
-        [*resolved.public_headers, *manifest_files],
-        [*resolved.public_header_dirs, *manifest_dirs],
-        include_search_dirs=list(side.includes),
+    # Then ADR-075 D1/D2: a snapshot this run extracted records its
+    # ownership, like every `resolve_input` operand and the release surface.
+    # Both passes run in the snapshot factory's one fixed order.
+    from ..snapshot_factory import (
+        OwnershipInputs,
+        ProvenanceInputs,
+        SnapshotFinish,
+        finish_snapshot,
     )
-    # ADR-075 D1/D2: a snapshot this run extracted records its ownership,
-    # like every `resolve_input` operand and the release surface.
-    from ..ownership_request import classify_extracted
 
-    classify_extracted(
-        snap, None, headers, [*resolved.public_header_dirs, *manifest_dirs]
+    snap = finish_snapshot(
+        snap,
+        SnapshotFinish(
+            provenance=ProvenanceInputs(
+                [*resolved.public_headers, *manifest_files],
+                [*resolved.public_header_dirs, *manifest_dirs],
+                include_search_dirs=list(side.includes),
+            ),
+            ownership=OwnershipInputs(
+                None, headers, [*resolved.public_header_dirs, *manifest_dirs]
+            ),
+        ),
     )
 
     enforce_requested_depth(resolved.requested_depth, (("input", snap),))

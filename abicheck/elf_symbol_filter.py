@@ -18,13 +18,15 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from functools import lru_cache
 from typing import Any
+
+from .model.elf_facts import SymbolType
 
 # Canonical stdlib/runtime RTTI prefixes (single source of truth in the
 # dependency-free name_classification leaf). Imported under the historical local
 # name; combined below with _STDLIB_PREFIXES to drop transitive runtime symbols.
-from .model.elf_facts import SymbolType
+from .model.execution_cache import memoized, request_key
+from .model.execution_cache_scoped import InstanceMemo
 from .name_classification import STDLIB_RTTI_PREFIXES as _STDLIB_RTTI_PREFIXES
 
 # ELF symbol types (STT_*) that represent a callable function surface and a
@@ -128,7 +130,7 @@ def is_linker_reserved_symbol(name: str) -> bool:
     return name in _ELF_LINKER_ARTIFACTS
 
 
-@lru_cache(maxsize=1 << 18)
+@memoized(maxsize=1 << 18)
 def is_abi_relevant_elf_symbol(
     name: str,
     *,
@@ -205,32 +207,36 @@ def exported_symbol_names(
     # the identity/length of ``symbols`` too, so a replaced list rebuilds.
     # Callers own (and may mutate) the returned set, hence the copy.
     symbols = elf.symbols
-    memo = getattr(elf, "__dict__", None)
-    key = (
-        id(symbols),
-        len(symbols),
-        frozenset(symbol_types),
-        abi_relevant_only,
-        filter_transitive_runtime_symbols,
+    names = _EXPORTED_NAMES_MEMO.get_or_compute(
+        elf,
+        request_key(
+            symbols=id(symbols),
+            count=len(symbols),
+            symbol_types=frozenset(symbol_types),
+            abi_relevant_only=abi_relevant_only,
+            filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
+        ),
+        lambda: frozenset(
+            _exported_symbol_names(
+                symbols,
+                symbol_types,
+                abi_relevant_only,
+                filter_transitive_runtime_symbols,
+            )
+        ),
+        pin=symbols,
     )
-    if memo is not None:
-        hit = memo.get(_EXPORTED_NAMES_MEMO, {}).get(key)
-        if hit is not None:
-            return set(hit)
-    names = _exported_symbol_names(
-        symbols, symbol_types, abi_relevant_only, filter_transitive_runtime_symbols
-    )
-    if memo is not None:
-        memo.setdefault(_EXPORTED_NAMES_MEMO, {})[key] = frozenset(names)
-    return names
+    return set(names)
 
 
-_EXPORTED_NAMES_MEMO = "_exported_symbol_names_memo"
+_EXPORTED_NAMES_MEMO = InstanceMemo(
+    "abicheck.elf_symbol_filter.exported_names", "_exported_symbol_names_memo"
+)
 
 
 def drop_exported_symbol_names_memo(elf: object) -> None:
     """Forget *elf*'s memoised name sets (``compare`` scopes them per call)."""
-    getattr(elf, "__dict__", {}).pop(_EXPORTED_NAMES_MEMO, None)
+    _EXPORTED_NAMES_MEMO.drop(elf)
 
 
 def _exported_symbol_names(

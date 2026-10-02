@@ -82,7 +82,7 @@ class TestDwarfLayoutTypesOrEmpty:
         started building a full DWARF snapshot it never needs), or a forced
         BTF/CTF debug format (Codex review: dwarf_meta.has_dwarf is
         repurposed to mean "has BTF/CTF" for those formats, and no real
-        DwarfSession is opened, so build_snapshot_from_dwarf would otherwise
+        DwarfSession is opened, so extract_dwarf_declarations would otherwise
         open so_path itself and silently backfill from whatever real DWARF
         the binary happens to also carry — bypassing the caller's explicit
         format choice)."""
@@ -90,13 +90,10 @@ class TestDwarfLayoutTypesOrEmpty:
             None,
             None,
             _dwarf_meta(has_dwarf),
-            None,
             is_clang_backend,
             symbols_only=symbols_only,
             debug_presence_only=debug_presence_only,
             debug_format=debug_format,
-            version="1.0",
-            language_profile=None,
             session=None,
         )
         assert result == []
@@ -115,36 +112,24 @@ class TestDwarfLayoutTypesOrEmpty:
 
         calls = []
 
-        def _fake_build(
-            so_path,
-            elf_meta,
-            dwarf_meta,
-            dwarf_adv,
-            *,
-            version,
-            language_profile,
-            session,
-        ):
-            calls.append((so_path, version, language_profile))
+        def _fake_build(so_path, elf_meta, *, session):
+            calls.append((so_path, session))
             return _FakeSnap()
 
-        monkeypatch.setattr(dwarf_snapshot, "build_snapshot_from_dwarf", _fake_build)
+        monkeypatch.setattr(dwarf_snapshot, "extract_dwarf_declarations", _fake_build)
 
         result = dwarf_layout_types_or_empty(
             "libfoo.so",
             None,
             _dwarf_meta(True),
-            None,
             True,
             symbols_only=False,
             debug_presence_only=False,
             debug_format=None,
-            version="1.0",
-            language_profile="c++",
             session=None,
         )
         assert result == expected
-        assert calls == [("libfoo.so", "1.0", "c++")]
+        assert calls == [("libfoo.so", None)]
 
     def test_extracts_dwarf_types_when_debug_format_is_dwarf(
         self,
@@ -162,7 +147,7 @@ class TestDwarfLayoutTypesOrEmpty:
 
         monkeypatch.setattr(
             dwarf_snapshot,
-            "build_snapshot_from_dwarf",
+            "extract_dwarf_declarations",
             lambda *a, **k: _FakeSnap(),
         )
 
@@ -170,13 +155,10 @@ class TestDwarfLayoutTypesOrEmpty:
             "libfoo.so",
             None,
             _dwarf_meta(True),
-            None,
             True,
             symbols_only=False,
             debug_presence_only=False,
             debug_format="dwarf",
-            version="1.0",
-            language_profile="c++",
             session=None,
         )
         assert result == expected

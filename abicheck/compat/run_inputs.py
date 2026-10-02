@@ -385,8 +385,7 @@ def finish_live_compat_dump(
     its ownership record (ADR-075 D1/D2), which every other front end stamps
     through ``resolve_input``. One function for both live dump sites, so
     neither can do one step and forget the other."""
-    from ..workflows.ownership_request import classify_extracted
+    from ..workflows.snapshot_factory import finish_ownership
 
     snapshot = record_descriptor_skips(snapshot, rules, quiet, header_universe)
-    classify_extracted(snapshot, None, parsed_headers, None)
-    return snapshot
+    return finish_ownership(snapshot, None, parsed_headers, None)

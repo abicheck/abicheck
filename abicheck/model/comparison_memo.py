@@ -50,11 +50,12 @@ does not inherit the context simply computes for itself.
 
 from __future__ import annotations
 
-import contextvars
-import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, TypeVar
+from typing import TypeVar
+
+from .execution_cache import request_key
+from .execution_cache_scoped import ScopedCache
 
 __all__ = [
     "comparison_memo_active",
@@ -64,58 +65,29 @@ __all__ = [
 
 _T = TypeVar("_T")
 
-
-class _Scope:
-    __slots__ = ("lock", "values")
-
-    def __init__(self) -> None:
-        self.lock = threading.Lock()
-        # (name, id(snapshot)) -> (snapshot, value); the snapshot reference
-        # pins the id for the scope's lifetime.
-        self.values: dict[tuple[str, int], tuple[object, Any]] = {}
-
-
-_scope: contextvars.ContextVar[_Scope | None] = contextvars.ContextVar(
-    "abicheck_comparison_memo_scope", default=None
-)
+_MEMO = ScopedCache("abicheck.model.comparison_memo")
 
 
 @contextmanager
 def comparison_memo_scope() -> Iterator[None]:
     """Open a comparison-lifetime memo scope; join the enclosing one if any."""
-    if _scope.get() is not None:
+    with _MEMO.scope():
         yield
-        return
-    scope = _Scope()
-    token = _scope.set(scope)
-    try:
-        yield
-    finally:
-        _scope.reset(token)
-        scope.values.clear()
 
 
 def comparison_memo_active() -> bool:
     """Whether a :func:`comparison_memo_scope` is open in this context."""
-    return _scope.get() is not None
+    return _MEMO.active()
 
 
 def comparison_memoized(name: str, snapshot: object, compute: Callable[[], _T]) -> _T:
     """``compute()``, once per ``(name, snapshot)`` inside an open scope.
 
     *compute* must be a pure function of *snapshot* whose result its callers
-    never mutate. Outside a scope it simply runs.
+    never mutate. Outside a scope it simply runs. A concurrent caller may
+    compute the same entry; the first stored value is the one every caller
+    shares.
     """
-    scope = _scope.get()
-    if scope is None:
-        return compute()
-    key = (name, id(snapshot))
-    with scope.lock:
-        hit = scope.values.get(key)
-    if hit is not None:
-        return hit[1]  # type: ignore[no-any-return]
-    value = compute()
-    with scope.lock:
-        # A concurrent caller may have stored first; keep the first value so
-        # every caller shares one object.
-        return scope.values.setdefault(key, (snapshot, value))[1]  # type: ignore[no-any-return]
+    return _MEMO.get_or_compute(
+        request_key(name=name, snapshot=id(snapshot)), compute, pin=snapshot
+    )

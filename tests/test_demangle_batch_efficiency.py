@@ -188,17 +188,17 @@ class TestCacheEvictionIsIncremental:
         """
         self._fill_ok(dm._BATCH_CACHE_MAX)
         assert len(dm._BATCH_CACHE_OK) == dm._BATCH_CACHE_MAX
-        oldest = next(iter(dm._BATCH_CACHE_OK))
+        oldest = dm._BATCH_CACHE_OK.keys()[0]
         dm._batch_cache_record_ok("_ZN3newEv", "new()")
         assert len(dm._BATCH_CACHE_OK) == dm._BATCH_CACHE_MAX
         assert oldest not in dm._BATCH_CACHE_OK
-        assert dm._BATCH_CACHE_OK["_ZN3newEv"] == "new()"
+        assert dm._BATCH_CACHE_OK.peek("_ZN3newEv") == "new()"
 
     def test_the_failure_cache_evicts_the_same_way(self) -> None:
         """Both caches, not just the one the incident was noticed on."""
         for i in range(dm._BATCH_CACHE_MAX):
             dm._batch_cache_record_fail(f"_Zbad{i}")
-        oldest = next(iter(dm._BATCH_CACHE_FAIL))
+        oldest = dm._BATCH_CACHE_FAIL.keys()[0]
         dm._batch_cache_record_fail("_Zbad_new")
         assert len(dm._BATCH_CACHE_FAIL) == dm._BATCH_CACHE_MAX
         assert oldest not in dm._BATCH_CACHE_FAIL
@@ -233,7 +233,7 @@ class TestCacheEvictionIsIncremental:
         assertions above.
         """
         self._fill_ok(dm._BATCH_CACHE_MAX)
-        newest_before = list(dm._BATCH_CACHE_OK)[-100:]
+        newest_before = dm._BATCH_CACHE_OK.keys()[-100:]
         for i in range(100):
             dm._batch_cache_record_ok(f"_ZN5extra{i}Ev", f"extra{i}()")
         for key in newest_before:
@@ -249,10 +249,11 @@ class TestCacheEvictionIsIncremental:
         rest of its working set one entry at a time.
         """
         self._fill_ok(dm._BATCH_CACHE_MAX)
-        oldest = next(iter(dm._BATCH_CACHE_OK))
-        hot = list(dm._BATCH_CACHE_OK)[-1]
+        oldest = dm._BATCH_CACHE_OK.keys()[0]
+        hot_key = dm._BATCH_CACHE_OK.keys()[-1]
+        hot = hot_key
         for _ in range(50):
-            dm._batch_cache_record_ok(hot, dm._BATCH_CACHE_OK[hot])
+            dm._batch_cache_record_ok(hot, dm._BATCH_CACHE_OK.peek(hot_key))
         assert len(dm._BATCH_CACHE_OK) == dm._BATCH_CACHE_MAX
         assert oldest in dm._BATCH_CACHE_OK
 

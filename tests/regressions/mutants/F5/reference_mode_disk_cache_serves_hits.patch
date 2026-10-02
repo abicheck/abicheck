@@ -1,0 +1,12 @@
+--- a/abicheck/model/execution_cache_scoped.py
++++ b/abicheck/model/execution_cache_scoped.py
+@@ -257,9 +257,6 @@
+         return True
+ 
+     def lookup(self, read: Callable[[], _T | None]) -> _T | None:
+-        if reference_mode():
+-            self.stats.bypasses += 1
+-            return None
+         value = read()
+         if value is None:
+             self.stats.misses += 1

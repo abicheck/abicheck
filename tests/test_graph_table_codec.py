@@ -309,13 +309,13 @@ class TestIdentityNormalizationMemo:
     def test_memo_is_scoped_and_reentrant(self) -> None:
         from abicheck.model import graph_identity as gi
 
-        assert gi._NORMALIZE_MEMO_STATE.memo is None
+        assert not gi._NORMALIZE_MEMO.active()
         with gi.identity_normalization_memo():
             gi._normalize_graph_identity("decl://lambda at /a/b.h:1:2")
             with gi.identity_normalization_memo():
-                assert gi._NORMALIZE_MEMO_STATE.memo
-            assert gi._NORMALIZE_MEMO_STATE.memo  # the outer scope still holds it
-        assert gi._NORMALIZE_MEMO_STATE.memo is None
+                assert gi._NORMALIZE_MEMO._values
+            assert gi._NORMALIZE_MEMO._values  # the outer scope still holds it
+        assert not gi._NORMALIZE_MEMO.active()
 
     def test_memo_is_released_when_decoding_raises(self) -> None:
         from abicheck.model import graph_identity as gi
@@ -324,7 +324,7 @@ class TestIdentityNormalizationMemo:
         payload["nodes"]["id"][0] = 99
         with pytest.raises(ValueError):
             decode_graph_table(payload)
-        assert gi._NORMALIZE_MEMO_STATE.memo is None
+        assert not gi._NORMALIZE_MEMO.active()
 
 
 # ── size ─────────────────────────────────────────────────────────────────

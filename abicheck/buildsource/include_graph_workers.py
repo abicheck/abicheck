@@ -41,6 +41,7 @@ from typing import Any
 
 from .. import deadline, process_resources
 from ..extract.progress import track
+from ..model.execution_cache import reference_mode
 
 __all__ = [
     "DepfileProbe",
@@ -370,6 +371,10 @@ def _shared_pool() -> process_resources.BudgetedExecutor:
     members x units.
     """
     global _SHARED_POOL
+    if reference_mode():
+        # Never the shared pool: one budgeted executor that is granted no
+        # thread runs every probe inline (``ABICHECK_REFERENCE_MODE``).
+        return process_resources.BudgetedExecutor(1)
     with _SHARED_POOL_LOCK:
         if _SHARED_POOL is None:
             # Borrowed from the process-wide thread budget

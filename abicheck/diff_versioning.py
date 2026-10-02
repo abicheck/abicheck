@@ -24,19 +24,14 @@ from collections.abc import Mapping
 
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
 from .checker_types import Change
+from .compare.naming_conventions import (
+    INTERNAL_VERSION_NODE,
+    is_internal_version_node as is_internal_version_node,
+)
 from .diff_helpers import make_change
 from .model.binary_naming import strip_vendor_hash
 from .model.dotted_version import parse_dotted_numeric_version
 from .model.elf_facts import ElfMetadata
-
-# Tokens that mark an ELF symbol-version node as implementation-internal rather
-# than public ABI. This is a widespread upstream convention: implementation-only
-# exports are bound to a version node whose name carries one of these markers —
-# glibc's ``GLIBC_PRIVATE``, nettle's ``NETTLE_INTERNAL_8_1`` /
-# ``HOGWEED_INTERNAL_6_1``. Symbols on such a node are dynamically exported but
-# are *not* part of the public ABI contract, so changes confined to them are a
-# deployment risk (a consumer who illegally linked them rebuilds), not a break.
-_INTERNAL_VERSION_NODE_TOKENS = ("PRIVATE", "INTERNAL")
 
 _UNPARSEABLE_VERSION: tuple[int, ...] = (2**31,)
 """Sentinel returned by :func:`_parse_abi_version_tag` for non-numeric tags
@@ -112,18 +107,6 @@ _VERSION_NODE_NAME_KINDS = frozenset(
 )
 
 
-def is_internal_version_node(version: str) -> bool:
-    """True if an ELF version-node name marks it implementation-internal/private.
-
-    Matches the ``GLIBC_PRIVATE`` / ``*_INTERNAL_*`` convention (see
-    :data:`_INTERNAL_VERSION_NODE_TOKENS`). The check is on the *version-node*
-    name only — never an arbitrary symbol name — so a public function that merely
-    has ``internal`` in its identifier is unaffected.
-    """
-    upper = (version or "").upper()
-    return any(token in upper for token in _INTERNAL_VERSION_NODE_TOKENS)
-
-
 def internal_versioned_symbols(elf: ElfMetadata) -> set[str]:
     """Names whose **every** exported binding is on an internal/private node.
 
@@ -140,7 +123,7 @@ def internal_versioned_symbols(elf: ElfMetadata) -> set[str]:
         if not name:
             continue
         ver = getattr(sym, "version", "") or ""
-        if ver and is_internal_version_node(ver):
+        if ver and INTERNAL_VERSION_NODE.matches(ver):
             internal.add(name)
         else:
             # An unversioned (default) export or a public version node means the
@@ -196,7 +179,8 @@ def demote_internal_version_node_findings(
             continue
         symbol = change.symbol or ""
         on_internal_node = symbol in internal or (
-            change.kind in _VERSION_NODE_NAME_KINDS and is_internal_version_node(symbol)
+            change.kind in _VERSION_NODE_NAME_KINDS
+            and INTERNAL_VERSION_NODE.matches(symbol)
         )
         if not on_internal_node:
             continue

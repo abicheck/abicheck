@@ -50,7 +50,6 @@ shells out (integration-marked).
 
 from __future__ import annotations
 
-import functools
 import json
 import os
 import re
@@ -65,6 +64,7 @@ from ..._compiler_options import clang_ast_dump_tail
 from ...deadline import run_bounded
 from ...dumper_clang import _is_intel_sycl_driver, _needs_sycl_host_only
 from ...header_conditionals import _include_guard_macro, _strip_comments
+from ...model.execution_cache import memoized, path_witness
 from ..build_evidence import CompileUnit
 from ..model import LayerConfidence
 from ..source_abi import (
@@ -170,7 +170,7 @@ from .clang_source_edges import build_source_edges
 CLANG_EXTRACTOR_VERSION = "0.13"
 
 
-@functools.lru_cache(maxsize=8)
+@memoized(maxsize=8, witness=path_witness)
 def _clang_compiler_family(clang_bin: str) -> str:
     """The ``compiler_family`` label for *clang_bin* (ADR-038 C.8 fact_set).
 
@@ -182,7 +182,7 @@ def _clang_compiler_family(clang_bin: str) -> str:
     that recognizes the fork regardless of how the binary is named/invoked
     (a conventional ``clang``/``clang++`` symlink or a custom-named toolchain
     wrapper included) -- unlike a name-based check, which cannot. Cached per
-    binary path (``functools.lru_cache``, mirroring :func:`_clang_compiler_
+    binary path (``model.execution_cache.memoized``, re-probed when the executable changes; mirroring :func:`_clang_compiler_
     version`'s identical cost shape at the same per-TU call site, so this
     costs one extra subprocess call per unique *clang_bin* for a whole scan,
     not one per TU). Falls back to :func:`abicheck.dumper_clang.
@@ -226,7 +226,7 @@ def _clang_compiler_family(clang_bin: str) -> str:
     return "intel-llvm" if _is_intel_sycl_driver(clang_bin) else "clang"
 
 
-@functools.lru_cache(maxsize=8)
+@memoized(maxsize=8, witness=path_witness)
 def _clang_compiler_version(clang_bin: str) -> str:
     """``clang -dumpversion`` for *clang_bin*, cached (ADR-038 C.8 fact_set).
 

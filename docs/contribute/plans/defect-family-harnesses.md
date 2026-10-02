@@ -197,6 +197,14 @@ cache that does not honour reference mode fails the scan.
 Per AGENTS.md's "differential test must prove both configurations ran" rule,
 each run records how often every switch was engaged.
 
+**Status (design-hardening plan, Phase 4):** the switch is now production
+code. Every cache goes through `abicheck/model/execution_cache.py`, which
+honours `ABICHECK_REFERENCE_MODE=1` and counts each bypass in a registry the
+harness reads; the earlier test-side per-site bypass is gone. The inventory
+scan finds wrapper sites (`memoized`, `MemoryCache`, `ScopedCache`, ...),
+and `tests/test_module_cache_gate.py` rejects a cache that bypasses the
+wrapper. The scheduled lane is `.github/workflows/reference-mode.yml`.
+
 ### H6: real-library compatibility corpus as a CI lane (F6)
 
 Validation on real libraries found the most expensive bugs, but it runs by

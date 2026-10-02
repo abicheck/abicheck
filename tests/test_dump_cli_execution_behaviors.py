@@ -199,7 +199,7 @@ def test_dump_header_roots_match_the_dependency_scoping_choke_point(
 
     ``dump``'s own ``header_roots`` (fed to
     ``dumper_scoping.resolve_dependency_scope`` right before serialization)
-    must match ``dumper_scoping.apply_dependency_scope_to_run_dump_result``'s
+    must match ``workflows.run_dump_scope.apply_dependency_scope_to_run_dump_result``'s
     computation -- the choke point ``compare``'s own live-binary dumping uses
     for the identical dependency-scoping decision. Before the fix the
     ``dump`` path passed only ``headers`` (plus, for ELF, any

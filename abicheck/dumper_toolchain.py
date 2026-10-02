@@ -24,7 +24,6 @@ import shutil
 import stat as stat_module
 import subprocess
 import threading
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -48,6 +47,7 @@ from .extract.env_flags import env_flag
 from .extract.toolchain_identity import (
     _compiler_family_from_toolchain as _compiler_family_from_toolchain,
 )
+from .model.execution_cache import memoized, path_witness
 from .model.header_parse_coverage import HEADER_PARSE_EXCLUDED_METADATA
 from .model.language_standard import language_standard_is_cxx, language_standard_year
 from .storage.ast_parse_exclusions import HEADER_PARSE_EXCLUDED_KEY
@@ -81,7 +81,7 @@ def _castxml_available() -> bool:
     return shutil.which("castxml") is not None
 
 
-@lru_cache(maxsize=64)
+@memoized(maxsize=64)
 def _executable_sha256(
     real_path: str,
     device: int,
@@ -99,7 +99,7 @@ def _executable_sha256(
     return digest.hexdigest()
 
 
-@lru_cache(maxsize=64)
+@memoized(maxsize=64)
 def _tool_version_output(selected_path: str, digest: str) -> str:
     """Return bounded ``--version`` output for one exact executable revision."""
     del digest
@@ -144,7 +144,7 @@ def _tool_version_output(selected_path: str, digest: str) -> str:
     return "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
 
 
-@lru_cache(maxsize=64)
+@memoized(maxsize=64)
 def _tool_target_triple(selected_path: str, digest: str) -> str | None:
     """Return ``<tool> -dumpmachine`` output for one exact executable
     revision, or ``None`` when the tool doesn't support the flag (e.g.
@@ -537,7 +537,9 @@ def _resolve_force_cpp(
     )
 
 
-@lru_cache(maxsize=32)
+@memoized(
+    maxsize=32, witness=lambda compiler_bin, lang_mode: path_witness(compiler_bin)
+)
 def _probe_default_language_standard(compiler_bin: str, lang_mode: str) -> str | None:
     """Best-effort: what C/C++ edition *compiler_bin* actually resolves to
     when invoked with **no** explicit ``-std=`` at all (ADR-050 D1/D2

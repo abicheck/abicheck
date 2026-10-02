@@ -53,8 +53,9 @@ from __future__ import annotations
 
 import os
 import re
-from functools import lru_cache
 from pathlib import Path, PurePosixPath
+
+from ..model.execution_cache import clear_memoized, memoized
 
 __all__ = [
     "absolutize_header_root",
@@ -154,7 +155,7 @@ def canonical_spelling(raw: str) -> str | None:
     return _canonical_spelling(raw, _cwd_key(raw))
 
 
-@lru_cache(maxsize=8192)
+@memoized(maxsize=8192)
 def _canonical_spelling(raw: str, _cwd: str | None) -> str | None:
     """A *conservative* canonical (symlink-resolved) spelling of *raw*, or
     ``None`` when obtaining one would be unsafe or meaningless.
@@ -320,7 +321,7 @@ def source_header_alias_segments(source_header: str) -> tuple[tuple[str, ...], .
     return _source_header_alias_segments(source_header, _cwd_key(source_header))
 
 
-@lru_cache(maxsize=8192)
+@memoized(maxsize=8192)
 def _source_header_alias_segments(
     source_header: str, _cwd: str | None
 ) -> tuple[tuple[str, ...], ...]:
@@ -351,5 +352,5 @@ def clear_path_alias_caches() -> None:
     root sets; this exists so a test (or a long-lived process reconfiguring
     a tree between runs) can reset it explicitly.
     """
-    _canonical_spelling.cache_clear()
-    _source_header_alias_segments.cache_clear()
+    clear_memoized(_canonical_spelling)
+    clear_memoized(_source_header_alias_segments)

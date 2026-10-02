@@ -21,7 +21,7 @@ from collections.abc import Collection, Mapping
 
 from .checker_types import Change
 from .compare.base_class_diff import diff_bases as _diff_bases
-from .compare.enum_sentinel import holds_enum_maximum, is_sentinel_enum_member
+from .compare.enum_sentinel import is_confirmed_enum_sentinel
 from .compare.fact_gate import both_facts_present
 from .compare.record_layout import (
     RecordLayoutIndex,
@@ -66,7 +66,7 @@ from .diff_types_field_facts import (
     _diff_type_deprecated as _diff_type_deprecated,
 )
 from .diff_types_surface import (
-    _RESERVED_FIELD_RE as _RESERVED_FIELD_RE,
+    RESERVED_FIELD as RESERVED_FIELD,
     _directly_referenced as _directly_referenced,
     _is_abi_surface_type as _is_abi_surface_type,
 )
@@ -619,7 +619,7 @@ def _try_match_reserved_field(
 
     Returns a USED_RESERVED_FIELD Change if matched, or None.
     """
-    if not _RESERVED_FIELD_RE.match(fname):
+    if not RESERVED_FIELD.matches(fname):
         return None
 
     candidate: TypeField | None = None
@@ -651,7 +651,7 @@ def _try_match_reserved_field(
             ):
                 candidate = c
                 break
-    if candidate is not None and not _RESERVED_FIELD_RE.match(candidate.name):
+    if candidate is not None and not RESERVED_FIELD.matches(candidate.name):
         # Reserved field -> real field at same offset/type -> COMPATIBLE
         reserved_matched_added.add(candidate.name)
         return make_change(
@@ -686,7 +686,7 @@ def _index_added_fields(
             continue
         if f.offset_bits is not None:
             added_by_offset.setdefault(f.offset_bits, []).append(f)
-        if not _RESERVED_FIELD_RE.match(fname):
+        if not RESERVED_FIELD.matches(fname):
             added_by_type.setdefault(f.type, []).append(f)
     return added_by_offset, added_by_type
 
@@ -745,8 +745,8 @@ def _diff_removed_field(
             if (
                 c.name not in reserved_matched_added
                 and c.name not in renamed_type_changed_added
-                and not _RESERVED_FIELD_RE.match(fname)
-                and not _RESERVED_FIELD_RE.match(c.name)
+                and not RESERVED_FIELD.matches(fname)
+                and not RESERVED_FIELD.matches(c.name)
             )
         ]
         # Prefer an exact pure-rename match over an arbitrary first candidate:
@@ -1171,9 +1171,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             elif new_members[mname] != mval:
                 kind = (
                     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED
-                    if is_sentinel_enum_member(mname)
-                    and holds_enum_maximum(mname, old_members)
-                    and holds_enum_maximum(mname, new_members)
+                    if is_confirmed_enum_sentinel(mname, old_members, new_members)
                     else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
                 )
                 changes.append(

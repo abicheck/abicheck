@@ -225,21 +225,16 @@ class TestExclusionRulesAreThreadedToEveryReleaseConsumer:
         if True:
             with pytest.raises(_Stop):
                 pairwise._run_compare_pair(
-                    Path("old.so"),
-                    Path("new.so"),
-                    [],
-                    [],
-                    [],
-                    [],
-                    "1",
-                    "2",
-                    "c",
-                    None,
-                    "strict_abi",
-                    None,
-                    None,
-                    None,
-                    exclude_headers=("fftw3.h", "fftw.h"),
+                    pairwise.release_parent_request(
+                        old_input=Path("old.so"),
+                        new_input=Path("new.so"),
+                        old_version="1",
+                        new_version="2",
+                        lang="c",
+                        policy="strict_abi",
+                        exclude_headers=("fftw3.h", "fftw.h"),
+                        include_dependencies=True,
+                    ),
                 )
         assert seen["exclude_headers"] == ("fftw3.h", "fftw.h")
 

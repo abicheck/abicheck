@@ -29,8 +29,10 @@ prove both of its configurations actually ran"): the bypass counts every
 call through each bypassed site, the thread cell records every pool grant,
 the disk-cache cell counts hits/misses/stores.
 
-Reference mode is test-side (see ``_family_f5_support``'s docstring for
-why no production ``ABICHECK_REFERENCE_MODE`` was added).
+Reference mode is the production ``ABICHECK_REFERENCE_MODE=1`` switch
+(design-hardening plan, Phase 4): every cache goes through
+``abicheck.model.execution_cache``, which bypasses and counts in reference
+mode, and every pool runs inline.
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ from _family_f5_support import (
     clear_functools,
     first_difference,
     functools_objects,
+    memoized_callable,
     scan_optimization_sites,
 )
 from click.testing import CliRunner
@@ -82,68 +85,83 @@ import example_catalog  # noqa: E402
 R, B, H = "release.memo", "binary.memo", "headers.memo"
 _NEEDS_L5 = "UNCOVERED: L3-L5 build-source graph extraction (needs a compile database + clang); no in-process fixture reaches it"
 COVERAGE: dict[str, str] = {
-    # ---- functools ----
-    "abicheck.buildsource.header_compile_context::functools::_include_pattern": _NEEDS_L5,
-    "abicheck.buildsource.source_extractors.castxml::functools::_castxml_tool_version": "UNCOVERED: L4 castxml source extractor tool probe; build-source path only",
-    "abicheck.buildsource.source_extractors.clang::functools::_clang_compiler_family": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
-    "abicheck.buildsource.source_extractors.clang::functools::_clang_compiler_version": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
-    "abicheck.buildsource.toolchain_probe::functools::_clang_accepts_target": "UNCOVERED: clang cross-target probe; needs clang and a --target build",
-    "abicheck.buildsource.type_graph::functools::_base_type_name": _NEEDS_L5,
-    "abicheck.compatibility_evaluation_frontend::functools::builtin_policy_identity": R,
-    "abicheck.compatibility_evaluation_frontend::functools::severity_preset_identity": "UNCOVERED: reached only under --severity-preset; pure function of a packaged preset name",
-    "abicheck.demangle::functools::demangle": R,
-    "abicheck.diff_helpers::functools::depth_aware_bare_name": B,
-    "abicheck.diff_symbols_renames::functools::_rename_name_parse": "UNCOVERED: rename heuristics need a removed+added pair with matching fingerprints; no cell fixture has one",
-    "abicheck.dumper_toolchain::functools::_executable_sha256": H,
-    "abicheck.dumper_toolchain::functools::_probe_default_language_standard": H,
-    "abicheck.dumper_toolchain::functools::_tool_target_triple": H,
-    "abicheck.dumper_toolchain::functools::_tool_version_output": H,
-    "abicheck.elf_symbol_filter::functools::is_abi_relevant_elf_symbol": B,
-    "abicheck.extract.path_aliases::functools::_canonical_spelling": H,
-    "abicheck.extract.path_aliases::functools::_source_header_alias_segments": H,
-    "abicheck.model.signature_normalization::functools::_canonicalize_top_level_param_type": R,
-    "abicheck.model.type_identifiers::functools::_type_identifiers_cached": R,
-    "abicheck.name_classification::functools::canonicalize_type_name": R,
-    "abicheck.name_classification::functools::strip_anonymous_type_location": H,
-    "abicheck.schemas.documents::functools::load_aggregate_report_schema": "UNCOVERED: schema loader for `aggregate` only; returns packaged JSON",
-    "abicheck.schemas.documents::functools::load_audit_report_schema": "UNCOVERED: schema loader for audit reports only; returns packaged JSON",
-    "abicheck.schemas.documents::functools::load_compare_report_schema": "UNCOVERED: schema loader used by validation tooling, not by compare itself",
-    "abicheck.storage.closure_identity::functools::_anon_type_ordinal_matches_cached": "UNCOVERED: stored-closure identity for anonymous types; needs a ProjectSnapshot fixture",
-    # ---- cached_property ----
-    "abicheck.compare.edge_query::cached_property::EdgeEvidence._ambiguous_spellings": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
-    "abicheck.compare.edge_query::cached_property::EdgeEvidence._entity_nodes": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
-    "abicheck.compare.edge_query::cached_property::EdgeEvidence._ownership": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
-    "abicheck.compare.edge_query::cached_property::EdgeEvidence._projection": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
-    "abicheck.compare.edge_query::cached_property::EdgeEvidence._refs": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
-    "abicheck.compare.edge_query::cached_property::EdgeEvidence.debug_types": R,
-    "abicheck.compare.edge_query::cached_property::EdgeEvidence.export_records": R,
-    "abicheck.compare.edge_query::cached_property::EdgeEvidence.exports": R,
-    "abicheck.model.elf_facts::cached_property::ElfMetadata.symbol_map": B,
-    "abicheck.model.macho_facts::cached_property::MachoMetadata.export_map": "UNCOVERED: Mach-O only; no Mach-O toolchain on the Linux lanes",
-    "abicheck.model.pe_facts::cached_property::PeMetadata.export_map": "UNCOVERED: PE only; no PE toolchain on the Linux lanes",
-    # ---- run-scoped digest memo (one shared scope variable) ----
-    "abicheck.cli_compare_helpers::scoped_decorator::run_compare": R,
-    "abicheck.service_compare_pipeline::scoped_decorator::classify_compare_pair": R,
-    # ---- module-level memo dicts / ContextVars / memo objects ----
-    "abicheck.buildsource.pattern_facts::memo_dict::_SCAN_MEMO": H,
-    "abicheck.comparability_fields::memo_contextvar::_PATH_MEMO": H,
-    "abicheck.compare.detection_memo::memo_contextvar::_MEMO": R,
-    "abicheck.compare.spelling_match_cache::memo_object::MATCH_CACHE": "UNCOVERED: spelling-pattern matching runs only with an L5 type-reachability graph (#1336's cache); its thread-safety is owned by test_spelling_match_cache_concurrency.py",
-    "abicheck.compare.spelling_match_cache::memo_object::VOCABULARY_CACHE": "UNCOVERED: as MATCH_CACHE",
-    "abicheck.demangle::memo_dict::_BATCH_CACHE_FAIL": R,
-    "abicheck.demangle::memo_dict::_BATCH_CACHE_OK": R,
-    "abicheck.dumper_ast_config_cpp20::memo_object::_SCAN_MEMO": "UNCOVERED: C++20 module/dialect header scan; only for headers using C++20 features",
-    "abicheck.dumper_ast_config_cpp20::memo_object::_SHADOW_MEMO": "UNCOVERED: as dumper_ast_config_cpp20._SCAN_MEMO",
-    "abicheck.dumper_cache::memo_contextvar::_ast_memo_slot": H,
-    "abicheck.dumper_cache::memo_contextvar::_ast_memoize_scope": "UNCOVERED: only opened by the clang AST frontend's release reuse scope (--ast-frontend clang)",
-    "abicheck.elf_metadata::memo_dict::_PARSE_MEMO": B,
-    "abicheck.model.graph_identity::memo_object::_NORMALIZE_MEMO_STATE": H,
-    "abicheck.policy.type_spelling::memo_dict::_strip_ptr_memo": R,
-    # ---- pools (reference = ABICHECK_MAX_THREADS=1 / ABICHECK_PARALLEL_EXTRACTION=0) ----
+    # ---- memoized functions ----
+    "abicheck.buildsource.header_compile_context::memoized::_include_pattern": _NEEDS_L5,
+    "abicheck.buildsource.source_extractors.castxml::memoized::_castxml_tool_version": "UNCOVERED: L4 castxml source extractor tool probe; build-source path only",
+    "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_family": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
+    "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_version": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
+    "abicheck.buildsource.toolchain_probe::memoized::_clang_accepts_target": "UNCOVERED: clang cross-target probe; needs clang and a --target build",
+    "abicheck.buildsource.type_graph::memoized::_base_type_name": _NEEDS_L5,
+    "abicheck.compatibility_evaluation_frontend::memoized::builtin_policy_identity": R,
+    "abicheck.compatibility_evaluation_frontend::memoized::severity_preset_identity": "UNCOVERED: reached only under --severity-preset; pure function of a packaged preset name",
+    "abicheck.demangle::memoized::demangle": R,
+    "abicheck.diff_helpers::memoized::depth_aware_bare_name": B,
+    "abicheck.diff_symbols_renames::memoized::_rename_name_parse": "UNCOVERED: rename heuristics need a removed+added pair with matching fingerprints; no cell fixture has one",
+    "abicheck.dumper_toolchain::memoized::_executable_sha256": H,
+    "abicheck.dumper_toolchain::memoized::_probe_default_language_standard": H,
+    "abicheck.dumper_toolchain::memoized::_tool_target_triple": H,
+    "abicheck.dumper_toolchain::memoized::_tool_version_output": H,
+    "abicheck.elf_symbol_filter::memoized::is_abi_relevant_elf_symbol": B,
+    "abicheck.extract.path_aliases::memoized::_canonical_spelling": H,
+    "abicheck.extract.path_aliases::memoized::_source_header_alias_segments": H,
+    "abicheck.model.signature_normalization::memoized::_canonicalize_top_level_param_type": R,
+    "abicheck.model.type_identifiers::memoized::_type_identifiers_cached": R,
+    "abicheck.name_classification::memoized::canonicalize_type_name": R,
+    "abicheck.name_classification::memoized::strip_anonymous_type_location": H,
+    "abicheck.schemas.documents::memoized::load_aggregate_report_schema": "UNCOVERED: schema loader for `aggregate` only; returns packaged JSON",
+    "abicheck.schemas.documents::memoized::load_audit_report_schema": "UNCOVERED: schema loader for audit reports only; returns packaged JSON",
+    "abicheck.schemas.documents::memoized::load_compare_report_schema": "UNCOVERED: schema loader used by validation tooling, not by compare itself",
+    "abicheck.storage.closure_identity::memoized::_anon_type_ordinal_matches_cached": "UNCOVERED: stored-closure identity for anonymous types; needs a ProjectSnapshot fixture",
+    # ---- memoized properties ----
+    "abicheck.compare.edge_query::memoized_property::EdgeEvidence._ambiguous_spellings": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
+    "abicheck.compare.edge_query::memoized_property::EdgeEvidence._entity_nodes": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
+    "abicheck.compare.edge_query::memoized_property::EdgeEvidence._ownership": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
+    "abicheck.compare.edge_query::memoized_property::EdgeEvidence._projection": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
+    "abicheck.compare.edge_query::memoized_property::EdgeEvidence._refs": "UNCOVERED: edge queries over a header-graph projection; needs L5 source graph",
+    "abicheck.compare.edge_query::memoized_property::EdgeEvidence.debug_types": R,
+    "abicheck.compare.edge_query::memoized_property::EdgeEvidence.export_records": R,
+    "abicheck.compare.edge_query::memoized_property::EdgeEvidence.exports": R,
+    "abicheck.model.elf_facts::memoized_property::ElfMetadata.symbol_map": B,
+    "abicheck.model.macho_facts::memoized_property::MachoMetadata.export_map": "UNCOVERED: Mach-O only; no Mach-O toolchain on the Linux lanes",
+    "abicheck.model.pe_facts::memoized_property::PeMetadata.export_map": "UNCOVERED: PE only; no PE toolchain on the Linux lanes",
+    # ---- explicitly keyed memory caches ----
+    "abicheck.buildsource.header_include_memo::memory_cache::_MEMO": _NEEDS_L5,
+    "abicheck.buildsource.pattern_facts::memory_cache::_SCAN_MEMO": H,
+    "abicheck.demangle::memory_cache::_BATCH_CACHE_FAIL": R,
+    "abicheck.demangle::memory_cache::_BATCH_CACHE_OK": R,
+    "abicheck.dumper_ast_config_cpp20::memory_cache::_SCAN_MEMO": "UNCOVERED: C++20 module/dialect header scan; only for headers using C++20 features",
+    "abicheck.dumper_ast_config_cpp20::memory_cache::_SHADOW_MEMO": "UNCOVERED: as dumper_ast_config_cpp20._SCAN_MEMO",
+    "abicheck.dumper_ast_config_cpp20::header_scan::_find_cpp20_requirements": H,
+    "abicheck.extract.header_scan_memo::memory_cache::memoize_header_scan.decorate->MemoryCache": "UNCOVERED: the factory itself; each decorated use is its own header_scan site",
+    "abicheck.elf_metadata::memory_cache::_PARSE_MEMO": B,
+    "abicheck.policy.reclassify::memory_cache::_KIND_BUCKETS": "UNCOVERED: reached only when a policy carries two or more reclassify rules",
+    "abicheck.policy.type_spelling::memory_cache::_strip_ptr_memo": R,
+    # ---- request-scoped and instance memos ----
+    "abicheck.comparability_fields::scoped_cache::_PATH_MEMO": H,
+    "abicheck.compare.detection_memo::scoped_cache::_MEMO": R,
+    "abicheck.model.comparison_memo::scoped_cache::_MEMO": R,
+    "abicheck.storage.snapshot_digest_cache::scoped_cache::_SCOPE": "UNCOVERED: no cell's front end asks for snapshot_content_digest inside an open digest_scope (the earlier test-side bypass counted the scope's opening, not a lookup)",
+    "abicheck.model.graph_identity::shared_scoped_cache::_NORMALIZE_MEMO": "UNCOVERED: opened only while loading a stored L5 source graph; no cell carries one",
+    "abicheck.compare.surface_reconcile::instance_memo::PAIR_MEMO": R,
+    "abicheck.elf_symbol_filter::instance_memo::_EXPORTED_NAMES_MEMO": B,
+    "abicheck.model.export_index::instance_memo::_ELF_INDEX_MEMO": B,
+    "abicheck.extract.dwarf_subtree_index::instance_memo::_INDEX_MEMO": B,
+    # ---- registered engines (own storage, central switch) ----
+    "abicheck.compare.spelling_match_cache::registered::_MATCH_STATS": "UNCOVERED: spelling-pattern matching runs only with an L5 type-reachability graph (#1336's cache); its thread-safety is owned by test_spelling_match_cache_concurrency.py",
+    "abicheck.compare.spelling_match_cache::registered::_VOCABULARY_STATS": "UNCOVERED: as _MATCH_STATS",
+    "abicheck.dumper_cache::registered::_AST_SLOT_STATS": "UNCOVERED: the per-thread AST handoff is written only by the clang header backend (--ast-frontend clang); the header cell uses castxml",
+    "abicheck.dumper_cache::registered::_AST_ACQUISITION_STATS": "UNCOVERED: the request-wide AST table is opened by the release fan-out over binaries with headers; no cell builds one",
+    # ---- disk caches ----
+    "abicheck.snapshot_cache::disk_cache::SNAPSHOT_DISK_CACHE": B,
+    "abicheck.storage.ast_cache_location::disk_cache::AST_DISK_CACHE": H,
+    "abicheck.buildsource.build_cache::disk_cache::BUILD_EVIDENCE_DISK_CACHE": _NEEDS_L5,
+    "abicheck.buildsource.build_cache::disk_cache::SOURCE_ABI_DISK_CACHE": _NEEDS_L5,
+    # ---- pools (reference = ABICHECK_REFERENCE_MODE=1: every pool runs inline) ----
     "abicheck.process_resources::pool::BudgetedExecutor.__init__->ThreadPoolExecutor": "release.threads",
     "abicheck.workflows.keyed_thread_pool::pool::run_keyed_in_threads->BudgetedExecutor": "release.threads",
     "abicheck.service_compare_pipeline::pool::resolve_compare_request->BudgetedExecutor": "binary.sides",
     "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor": _NEEDS_L5,
+    "abicheck.buildsource.include_graph_workers::pool::_shared_pool->BudgetedExecutor#2": _NEEDS_L5,
     "abicheck.buildsource.pattern_facts::pool::find_pattern_facts->ProcessPoolExecutor": "UNCOVERED: process pool for large L4 pattern scans (threshold-gated); build-source path only",
     "abicheck.dumper_manifest::pool::_run_tu_fragments->BudgetedExecutor": "UNCOVERED: per-TU pool of a --dump-manifest dump; needs a manifest + castxml",
     # The one pool behind the environment-matrix probes and, since #1425,
@@ -203,22 +221,30 @@ def test_scanner_finds_each_site_kind_on_a_synthetic_module(tmp_path: Path) -> N
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
     (pkg / "m.py").write_text(
-        "import functools, contextvars\n"
+        "from abicheck.model.execution_cache import *\n"
         "from concurrent.futures import ThreadPoolExecutor\n"
-        "_FOO_CACHE = {}\n_bar_memo: dict = dict()\n_NOT_A_CACHE = {'a': 1}\n_plain = {}\n"
-        "_SCOPE_MEMO = contextvars.ContextVar('x', default=None)\n_OBJ = LRUCache()\n"
-        "@functools.lru_cache(maxsize=4)\ndef f(x): return x\n"
-        "class C:\n    @functools.cached_property\n    def p(self): return 1\n"
+        "_MEM = MemoryCache('m.mem')\n_SC: ScopedCache = ScopedCache('m.sc')\n"
+        "_SH = SharedScopedCache('m.sh')\n_IM = InstanceMemo('m.im', '_a')\n"
+        "_DC = DiskCache('m.dc')\n_RS = register_cache('m.rs', 'registered')\n"
+        "_NOT_A_CACHE = {'a': 1}\n"
+        "@memoized(maxsize=4)\ndef f(x): return x\n"
+        "@memoize_header_scan(len)\ndef g(x): return x\n"
+        "def factory():\n    return MemoryCache('m.inner')\n"
+        "class C:\n    @memoized_property\n    def p(self): return 1\n"
         "    def run(self):\n        with ThreadPoolExecutor(2) as a, ThreadPoolExecutor(3) as b: pass\n"
     )
     keys = {s.key for s in scan_optimization_sites(pkg)}
     assert keys == {
-        "abicheck.m::memo_dict::_FOO_CACHE",
-        "abicheck.m::memo_dict::_bar_memo",
-        "abicheck.m::memo_contextvar::_SCOPE_MEMO",
-        "abicheck.m::memo_object::_OBJ",
-        "abicheck.m::functools::f",
-        "abicheck.m::cached_property::C.p",
+        "abicheck.m::memory_cache::_MEM",
+        "abicheck.m::scoped_cache::_SC",
+        "abicheck.m::shared_scoped_cache::_SH",
+        "abicheck.m::instance_memo::_IM",
+        "abicheck.m::disk_cache::_DC",
+        "abicheck.m::registered::_RS",
+        "abicheck.m::memoized::f",
+        "abicheck.m::header_scan::g",
+        "abicheck.m::memory_cache::factory->MemoryCache",
+        "abicheck.m::memoized_property::C.p",
         "abicheck.m::pool::C.run->ThreadPoolExecutor",
         "abicheck.m::pool::C.run->ThreadPoolExecutor#2",
     }
@@ -428,9 +454,9 @@ def test_single_pair_memo_bypass_matches_default(
     ref = ReferenceMode()
     ref.install(monkeypatch, _memo_sites())
     reference = _run(*args)
-    assert ref.calls.get(
-        "abicheck.service_compare_pipeline::scoped_decorator::classify_compare_pair"
-    )
+    # The single-pair path shares the release cell's memos; reference mode
+    # must have bypassed at least the comparison-scoped ones.
+    assert ref.calls.get("abicheck.model.comparison_memo::scoped_cache::_MEMO")
     _assert_same(optimized, reference, "single_pair.memo")
 
 
@@ -472,6 +498,31 @@ def test_release_threads_1_matches_threads_8(
     assert serial_grants and max(serial_grants) <= 1, serial_grants
     assert parallel_grants and max(parallel_grants) > 1, parallel_grants
     _assert_same(parallel, serial, "release.threads")
+
+
+def test_reference_mode_runs_every_pool_inline_and_matches_threads_8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``ABICHECK_REFERENCE_MODE=1`` alone -- no ``ABICHECK_MAX_THREADS`` --
+    takes the sequential path: every pool is granted no worker thread (runs
+    inline) and the release report equals the pooled one."""
+    from abicheck.model.execution_cache import REFERENCE_MODE_ENV_VAR
+
+    old, new = _release_dirs(tmp_path / "rel", members=8)
+    parallel, parallel_grants = _threads_run(monkeypatch, old, new, "8")
+    spy = GrantSpy()
+    with monkeypatch.context() as mp:
+        mp.delenv("ABICHECK_MAX_THREADS", raising=False)
+        mp.setenv(REFERENCE_MODE_ENV_VAR, "1")
+        mp.setattr(os, "cpu_count", lambda: 8)
+        spy.install(mp)
+        reference = _run(str(old), str(new))
+    assert parallel_grants and max(parallel_grants) > 1, parallel_grants
+    # The pooled run borrowed >1 thread; the reference run borrowed none --
+    # no pool at all on the sequential member path, and any pool created on
+    # the way (a nested one) was granted zero threads and ran inline.
+    assert all(g == 0 for g in spy.grants), spy.grants
+    _assert_same(parallel, reference, "release.reference_mode")
 
 
 # ── binary cells: need a C compiler (no castxml) ────────────────────────────
@@ -582,7 +633,49 @@ def test_disk_cache_cold_warm_and_fresh_root_agree(
     _assert_same(outs[2], outs[0], "disk.fresh_root")
 
 
+def test_reference_mode_never_serves_a_warm_disk_cache(
+    monkeypatch: pytest.MonkeyPatch, binaries: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """A warm whole-snapshot cache root is ignored in reference mode: the
+    run misses every lookup, stores nothing, and reports what a cold run on
+    a fresh root reports."""
+    from abicheck.model.execution_cache import REFERENCE_MODE_ENV_VAR
+
+    args = tuple(str(p) for p in binaries)
+    warm_spy = DiskCacheSpy()
+    with monkeypatch.context() as mp:
+        warm_spy.install(mp, tmp_path / "warm")
+        _run(*args)
+        _run(*args)
+    assert warm_spy.hits >= 2, warm_spy  # the root really is warm
+    ref_spy = DiskCacheSpy()
+    with monkeypatch.context() as mp:
+        ref_spy.install(mp, tmp_path / "warm")
+        mp.setenv(REFERENCE_MODE_ENV_VAR, "1")
+        reference = _run(*args)
+    assert ref_spy.hits == 0 and ref_spy.misses >= 2, ref_spy
+    assert not any((tmp_path / "warm").glob("*.json.zst.tmp*"))
+    with monkeypatch.context() as mp:
+        DiskCacheSpy().install(mp, tmp_path / "fresh")
+        fresh = _run(*args)
+    _assert_same(reference, fresh, "disk.reference_mode")
+
+
 # ── seeded mutants: the oracle must catch each historical bug shape ─────────
+
+
+def _swap_everywhere(mp: pytest.MonkeyPatch, old: object, new: object) -> int:
+    """Rebind every ``abicheck`` module global that is *old* to *new*."""
+    n = 0
+    for mod in list(sys.modules.values()):
+        d = getattr(mod, "__dict__", None)
+        if not d or not str(getattr(mod, "__name__", "")).startswith("abicheck"):
+            continue
+        for attr, val in list(d.items()):
+            if val is old:
+                mp.setattr(mod, attr, new)
+                n += 1
+    return n
 
 
 def _stale_key_memo(fn: Callable[[str], Any]) -> Callable[..., Any]:
@@ -606,9 +699,11 @@ def test_mutant_stale_cache_key_is_caught(
     objs = _import_all()
     clear_functools(objs)
     reference = _run(str(old), str(new))
-    target = objs["abicheck.name_classification::functools::canonicalize_type_name"]
+    target = memoized_callable(
+        "abicheck.name_classification::memoized::canonicalize_type_name"
+    )
     mutant = _stale_key_memo(target.__wrapped__)
-    n = ReferenceMode._swap_everywhere(monkeypatch, target, mutant)
+    n = _swap_everywhere(monkeypatch, target, mutant)
     assert n > 0
     assert _run(str(old), str(new)) != reference, "oracle missed a stale-key memo"
 
@@ -727,6 +822,81 @@ def test_catalog_dwarf_memo_bypass_and_threads(
         reference = _run(*args)
     assert ref.calls
     _assert_same(optimized, reference, f"catalog.dwarf[{case}]")
+
+
+# ── the production switch from the environment, end to end ──────────────────
+
+_SUBPROCESS_CASES = (
+    "case01_symbol_removal",
+    "case33_pointer_level",
+    "case40_field_layout",
+    "case71_inline_namespace_moved",
+)
+
+
+def _cli_report(args: tuple[str, ...], env: dict[str, str]) -> str:
+    res = subprocess.run(
+        [sys.executable, "-m", "abicheck", "compare", *args, "-o", "json=-"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=600,
+    )
+    assert res.returncode in (0, 1, 2, 4), (res.returncode, res.stderr[-2000:])
+    assert res.stdout.strip(), res.stderr[-2000:]
+    return canonical_report(res.stdout)
+
+
+def _entry_stamps(root: Path) -> dict[str, int]:
+    return {
+        str(p.relative_to(root)): p.stat().st_mtime_ns
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+    }
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("case", _SUBPROCESS_CASES)
+def test_catalog_reference_mode_from_the_environment_matches_default(
+    tmp_path: Path, case: str
+) -> None:
+    """``ABICHECK_REFERENCE_MODE=1`` set in a child's environment -- no
+    in-process patching at all -- produces the default report, and so does
+    ``ABICHECK_MAX_THREADS=8``. Engagement is observed on disk: the reference
+    run shares the default run's (warm) cache root and must neither add an
+    entry nor touch one (a hit refreshes an entry's mtime for LRU)."""
+    _cc()
+    out = tmp_path / "bin"
+    out.mkdir()
+    try:
+        v1, v2 = _build_case(case, out)
+    except StopIteration:
+        pytest.skip(f"{case} has no v1/v2 source pair")
+    args = (str(v1), str(v2))
+    base = {k: v for k, v in os.environ.items() if not k.startswith("ABICHECK_")}
+    warm_root = tmp_path / "cache-warm"
+    default = _cli_report(args, {**base, "XDG_CACHE_HOME": str(warm_root)})
+    warm = _cli_report(args, {**base, "XDG_CACHE_HOME": str(warm_root)})
+    before = _entry_stamps(warm_root)
+    assert before, "the default run stored no cache entry: nothing to bypass"
+    reference = _cli_report(
+        args,
+        {**base, "XDG_CACHE_HOME": str(warm_root), "ABICHECK_REFERENCE_MODE": "1"},
+    )
+    assert _entry_stamps(warm_root) == before, (
+        "a reference-mode run read or wrote the shared cache root"
+    )
+    threaded = _cli_report(
+        args,
+        {
+            **base,
+            "XDG_CACHE_HOME": str(tmp_path / "cache-threads"),
+            "ABICHECK_MAX_THREADS": "8",
+        },
+    )
+    _assert_same(warm, default, f"subprocess.warm[{case}]")
+    _assert_same(reference, default, f"subprocess.reference[{case}]")
+    _assert_same(threaded, default, f"subprocess.threads8[{case}]")
 
 
 # ── (d') disk cache: vary exactly one key input ─────────────────────────────

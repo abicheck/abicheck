@@ -35,7 +35,6 @@ new policy.
 
 from __future__ import annotations
 
-import functools
 import re
 from collections.abc import Callable, ItemsView, Iterable, Iterator, Mapping, ValuesView
 from typing import Any, Protocol, TypeVar, cast
@@ -56,6 +55,7 @@ from .model.change_catalog.kinds import ChangeKind
 # adoption-debt ceiling for a name nothing external currently imports
 # through that path.
 from .model.change_catalog.registry import TEMPLATE_VOCAB as TEMPLATE_VOCAB
+from .model.execution_cache import memoized
 from .model.identity import EntityId
 from .model.qualified_name_split import iter_top_level_chars
 
@@ -491,7 +491,7 @@ def fact_same_producer_qualified(
     )
 
 
-@functools.lru_cache(maxsize=65536)
+@memoized(maxsize=65536)
 def depth_aware_bare_name(qualified: str) -> str:
     """The innermost, fully-unqualified leaf of a ``::``-qualified name.
 

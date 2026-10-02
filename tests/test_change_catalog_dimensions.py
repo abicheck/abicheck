@@ -769,7 +769,7 @@ class TestPolymorphicKindsRealDetectorCoverage:
             "atomic_qualifier_changed",
             "bit_int_width_changed",
             "char8t_migration",
-            # Round 14: `_collect_tag_constants` pools three sources --
+            # Round 14: `_collect_valued_declarations` pools three sources --
             # `snapshot.constants`, global `variables`, and `enums` members --
             # so the previous static `type` was wrong for all three at once,
             # not merely for one of them.

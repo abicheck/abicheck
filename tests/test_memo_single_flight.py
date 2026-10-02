@@ -35,9 +35,9 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.extract import digest_memo, header_scan_memo
-from abicheck.extract.digest_memo import DigestMemo
 from abicheck.extract.header_scan_memo import memoize_header_scan
+from abicheck.model import execution_cache
+from abicheck.model.execution_cache import MemoryCache, request_key
 
 
 class _WaiterCount:
@@ -70,8 +70,7 @@ class _WaiterCount:
                     counter._cond.notify_all()
                 return super().result(timeout)
 
-        for module in (digest_memo, header_scan_memo):
-            monkeypatch.setattr(module, "Future", _CountingFuture)
+        monkeypatch.setattr(execution_cache, "Future", _CountingFuture)
 
     def wait_for(self, n: int) -> None:
         """Block the calling producer until *n* callers wait on its future."""
@@ -107,10 +106,10 @@ def _run_concurrently(n: int, target) -> list[object]:
 
 
 @pytest.mark.parametrize(("callers", "keys"), [(2, 1), (8, 1), (8, 3), (16, 5)])
-def test_digest_memo_computes_each_key_once(
+def test_memory_cache_computes_each_key_once(
     waiters: _WaiterCount, callers: int, keys: int
 ) -> None:
-    memo: DigestMemo[str] = DigestMemo()
+    memo: MemoryCache[str] = MemoryCache("test.single_flight")
     calls: dict[int, int] = {}
     lock = threading.Lock()
 
@@ -122,16 +121,19 @@ def test_digest_memo_computes_each_key_once(
         return f"value-{k}"
 
     results = _run_concurrently(
-        callers, lambda i: memo.get_or_compute(i % keys, lambda: compute(i % keys))
+        callers,
+        lambda i: memo.get_or_compute(
+            request_key(k=i % keys), lambda: compute(i % keys)
+        ),
     )
     assert results == [f"value-{i % keys}" for i in range(callers)]
     assert calls == {k: 1 for k in range(keys)}
 
 
-def test_digest_memo_failure_raises_only_in_its_own_thread(
+def test_memory_cache_failure_raises_only_in_its_own_thread(
     waiters: _WaiterCount,
 ) -> None:
-    memo: DigestMemo[str] = DigestMemo()
+    memo: MemoryCache[str] = MemoryCache("test.single_flight")
     raised = []
 
     def compute() -> str:
@@ -141,16 +143,18 @@ def test_digest_memo_failure_raises_only_in_its_own_thread(
             raise ValueError("boom")
         return "ok"
 
-    results = _run_concurrently(6, lambda _i: memo.get_or_compute("k", compute))
+    results = _run_concurrently(
+        6, lambda _i: memo.get_or_compute(request_key(k="k"), compute)
+    )
     assert sum(isinstance(r, ValueError) for r in results) == 1
     assert [r for r in results if not isinstance(r, ValueError)] == ["ok"] * 5
-    assert memo.get_or_compute("k", lambda: "unused") == "ok"
+    assert memo.get_or_compute(request_key(k="k"), lambda: "unused") == "ok"
 
 
-def test_digest_memo_oversized_value_still_reaches_waiters(
+def test_memory_cache_oversized_value_still_reaches_waiters(
     waiters: _WaiterCount,
 ) -> None:
-    memo: DigestMemo[bytes] = DigestMemo(max_bytes=4, weigh=len)
+    memo: MemoryCache[bytes] = MemoryCache("test.single_flight", max_bytes=4, weigh=len)
     calls = []
 
     def compute() -> bytes:
@@ -158,7 +162,9 @@ def test_digest_memo_oversized_value_still_reaches_waiters(
         waiters.wait_for(3)
         return b"x" * 10
 
-    results = _run_concurrently(4, lambda _i: memo.get_or_compute("k", compute))
+    results = _run_concurrently(
+        4, lambda _i: memo.get_or_compute(request_key(k="k"), compute)
+    )
     assert results == [b"x" * 10] * 4
     assert len(memo) == 0  # never stored, but never recomputed by a waiter either
     assert len(calls) == 1

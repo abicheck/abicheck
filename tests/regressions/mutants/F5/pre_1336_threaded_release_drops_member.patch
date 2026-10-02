@@ -1,6 +1,6 @@
 --- a/abicheck/cli_compare_release_pairwise.py
 +++ b/abicheck/cli_compare_release_pairwise.py
-@@ -973,8 +973,10 @@
+@@ -853,8 +853,10 @@
      """Per-library release comparisons in parallel, in *matched_keys* order
      (deterministic reports); see ``workflows.keyed_thread_pool`` for how the
      caller's context and memory admission reach every worker thread."""
@@ -9,6 +9,6 @@
      return run_keyed_in_threads(
 -        matched_keys,
 +        matched_keys if max_threads() == 1 else matched_keys[:-1],
-         lambda key: _compare_one_library(key, *common_args),
+         lambda key: _compare_one_library(key, ctx),
          max_workers=max_workers,
          admission=admission,

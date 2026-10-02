@@ -134,10 +134,11 @@ class PipelineContext:
     # context of its own without one -- recording is then skipped, never
     # faked.
     disposition_ledger: DispositionLedger | None = None
-    #: Lazily-built stand-in for an absent baseline; see
-    #: :attr:`baseline_or_empty`. Never a substitute for a real snapshot --
-    #: it declares, exports and knows nothing.
-    _empty_baseline: AbiSnapshot | None = None
+    #: The stand-in for an absent baseline (``old is None``), built by the
+    #: snapshot factory (``workflows.snapshot_factory.absent_baseline``) and
+    #: handed in by the caller -- this policy-layer context never constructs
+    #: a snapshot itself. See :attr:`baseline_or_empty`.
+    absent_baseline: AbiSnapshot | None = None
 
     @property
     def baseline_present(self) -> bool:
@@ -175,13 +176,12 @@ class PipelineContext:
         """
         if self.old is not None:
             return self.old
-        # Cached: several steps read this more than once, and each read
-        # would otherwise build a fresh stand-in.
-        if self._empty_baseline is None:
-            from .model import AbiSnapshot
-
-            self._empty_baseline = AbiSnapshot(library=self.new.library, version="")
-        return self._empty_baseline
+        if self.absent_baseline is None:
+            raise ValueError(
+                "a run with no baseline must supply absent_baseline "
+                "(workflows.snapshot_factory.absent_baseline)"
+            )
+        return self.absent_baseline
 
 
 # diff_types.py builds ENUM_MEMBER_*/ENUM_LAST_MEMBER_VALUE_CHANGED's symbol

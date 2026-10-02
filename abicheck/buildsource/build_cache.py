@@ -29,6 +29,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from ..model.execution_cache_scoped import DiskCache
 from .build_evidence import BUILD_EVIDENCE_VERSION, BuildEvidence
 
 
@@ -57,6 +58,15 @@ def compute_build_cache_key(compile_db: Path, adapter_hint: str) -> str | None:
     return h.hexdigest()
 
 
+#: Policy and counters for every :class:`BuildEvidenceCache` (Phase 4 of the
+#: design-hardening plan): reference mode turns each lookup into a miss and
+#: each store into a no-op.
+BUILD_EVIDENCE_DISK_CACHE = DiskCache("abicheck.buildsource.build_cache.disk")
+#: The same policy for the per-TU ``source_replay.SourceAbiCache`` (consulted
+#: where the inline L4 pass decides whether to wire one at all).
+SOURCE_ABI_DISK_CACHE = DiskCache("abicheck.buildsource.source_replay.disk")
+
+
 class BuildEvidenceCache:
     """On-disk cache of normalized :class:`BuildEvidence` keyed by content hash."""
 
@@ -76,7 +86,11 @@ class BuildEvidenceCache:
     def get(self, key: str | None) -> BuildEvidence | None:
         if not key:
             return None
+        if not BUILD_EVIDENCE_DISK_CACHE.enabled():
+            BUILD_EVIDENCE_DISK_CACHE.record_bypass()
+            return None
         ev = self._load(key)
+        BUILD_EVIDENCE_DISK_CACHE.record(hit=ev is not None)
         if ev is not None:
             self.hits += 1
         else:
@@ -100,6 +114,9 @@ class BuildEvidenceCache:
 
     def put(self, key: str | None, evidence: BuildEvidence) -> None:
         if not key:
+            return
+        if not BUILD_EVIDENCE_DISK_CACHE.enabled():
+            BUILD_EVIDENCE_DISK_CACHE.record_bypass()
             return
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = self._path(key).with_suffix(".json.tmp")

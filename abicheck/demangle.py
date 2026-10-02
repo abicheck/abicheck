@@ -44,13 +44,14 @@ attempted here.
 
 from __future__ import annotations
 
-import functools
 import logging
 import re
 import subprocess
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 from .deadline import run_bounded
+from .model.execution_cache import MemoryCache, memoized, reference_mode
 
 _log = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ def _canonical_mangled(symbol: str) -> str:
     return symbol[1:] if symbol.startswith("__Z") else symbol
 
 
-@functools.lru_cache(maxsize=16384)
+@memoized(maxsize=16384)
 def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
     """Demangle a single Itanium C++ symbol. Returns *None* if not C++.
 
@@ -149,10 +150,9 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
     # for a name a prior demangle_batch() already resolved (or proved
     # non-demangleable). On large ELF-only C++ libs the rename gate warms this
     # once, turning ~N per-name subprocesses into one batched call (field-eval P11).
-    if symbol in _BATCH_CACHE_OK:
-        return _BATCH_CACHE_OK[symbol]
-    if symbol in _BATCH_CACHE_FAIL:
-        return None
+    cached = _batch_cached(symbol)
+    if cached is not _UNCACHED:
+        return cached
     canonical = _canonical_mangled(symbol)
     global _cxxfilt_import_confirmed_missing  # noqa: PLW0603
     global _cxxfilt_import_confirmed_broken  # noqa: PLW0603
@@ -275,50 +275,55 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
     return None
 
 
-# Process-wide cache for demangle_batch. Two mappings so a symbol that
-# was passed once and known *not* to be demangleable is not re-queried
-# on subsequent calls. Bounded to avoid unbounded growth on long-lived
-# servers; the bound is intentionally large because the typical
-# working-set is a few thousand symbols per ABI snapshot.
-#
-# ``_BATCH_CACHE_FAIL`` is a ``dict`` used as an ordered set (the values are
-# always ``None``) rather than a ``set``: eviction below needs a *stable
-# oldest entry*, which a set cannot offer. Membership tests read the same
-# either way, which is all any caller does with it.
-_BATCH_CACHE_OK: dict[str, str] = {}
-_BATCH_CACHE_FAIL: dict[str, None] = {}
+# Process-wide cache for demangle_batch, filled by a batch and read point by
+# point. Two caches so a symbol that was passed once and known *not* to be
+# demangleable is not re-queried on subsequent calls. Bounded (least recently
+# used first) to avoid unbounded growth on long-lived servers; the bound is
+# intentionally large because the typical working-set is a few thousand
+# symbols per ABI snapshot. Eviction drops one entry at a time, never the
+# whole cache: a wholesale clear at the bound re-forked ``c++filt`` for the
+# entire working set (verified: 65,536 successes, insert one more, one entry
+# left).
 _BATCH_CACHE_MAX = 65536
+_BATCH_CACHE_OK: MemoryCache[str] = MemoryCache(
+    "abicheck.demangle.batch_ok", max_entries=_BATCH_CACHE_MAX, field="mangled"
+)
+_BATCH_CACHE_FAIL: MemoryCache[bool] = MemoryCache(
+    "abicheck.demangle.batch_fail", max_entries=_BATCH_CACHE_MAX, field="mangled"
+)
+_UNCACHED: Any = object()
 
 
-def _evict_oldest(cache: dict[str, Any]) -> None:
-    """Make room for one entry by dropping the oldest, never by clearing.
+# Read on every demangle of a comparison (~10^5 per run): the stats-free reader.
+def _never_cached(_mangled: str) -> None:
+    return None
 
-    Both caches previously cleared themselves wholesale on reaching the
-    bound, so recording one symbol at the limit discarded 65,536 resolved
-    names (verified: 65,536 successes, insert one more, one entry left).
-    A demangling working set larger than the bound therefore didn't
-    degrade -- it fell off a cliff and re-forked ``c++filt`` for the whole
-    set, repeatedly. Dropping a single insertion-oldest entry keeps the
-    cache full and makes the steady state FIFO, which is the right
-    approximation here: a comparison walks a snapshot's symbols roughly
-    once, so recency predicts reuse better than nothing and an exact LRU
-    would cost a reordering on every hit for no measured gain.
-    """
-    for oldest in cache:
-        del cache[oldest]
-        return
+
+_ok_get = _BATCH_CACHE_OK.raw_get()
+_fail_get = _BATCH_CACHE_FAIL.raw_get()
+
+
+def _batch_cached(mangled: str) -> str | None:
+    """The cached answer for *mangled*: its demangling, ``None`` for a known
+    failure, or :data:`_UNCACHED`."""
+    if reference_mode():
+        _BATCH_CACHE_OK.stats.bypasses += 1
+        _BATCH_CACHE_FAIL.stats.bypasses += 1
+        return cast("str | None", _UNCACHED)
+    hit = _ok_get(mangled)
+    if hit is not None:
+        return cast("str", hit[0])
+    if _fail_get(mangled) is not None:
+        return None
+    return cast("str | None", _UNCACHED)
 
 
 def _batch_cache_record_ok(mangled: str, demangled: str) -> None:
-    if mangled not in _BATCH_CACHE_OK and len(_BATCH_CACHE_OK) >= _BATCH_CACHE_MAX:
-        _evict_oldest(_BATCH_CACHE_OK)
-    _BATCH_CACHE_OK[mangled] = demangled
+    _BATCH_CACHE_OK.put(mangled, demangled)
 
 
 def _batch_cache_record_fail(mangled: str) -> None:
-    if mangled not in _BATCH_CACHE_FAIL and len(_BATCH_CACHE_FAIL) >= _BATCH_CACHE_MAX:
-        _evict_oldest(_BATCH_CACHE_FAIL)
-    _BATCH_CACHE_FAIL[mangled] = None
+    _BATCH_CACHE_FAIL.put(mangled, True)
 
 
 def _batch_phase1_cache(cpp_syms: list[str]) -> tuple[dict[str, str], list[str]]:
@@ -338,14 +343,26 @@ def _batch_phase1_cache(cpp_syms: list[str]) -> tuple[dict[str, str], list[str]]
     result: dict[str, str] = {}
     uncached: list[str] = []
     seen: set[str] = set()
+    # The switch is read once per batch, not per name (``_batch_cached``
+    # inlined): a batch is ~10^5 names on a large library.
+    if reference_mode():
+        _BATCH_CACHE_OK.stats.bypasses += 1
+        _BATCH_CACHE_FAIL.stats.bypasses += 1
+        ok_get: Callable[[str], Any] = _never_cached
+        fail_get: Callable[[str], Any] = _never_cached
+    else:
+        ok_get, fail_get = _ok_get, _fail_get
     for s in cpp_syms:
-        if s in _BATCH_CACHE_OK:
-            result[s] = _BATCH_CACHE_OK[s]
-        elif s in _BATCH_CACHE_FAIL:
-            pass  # known non-demangleable; skip silently
-        elif s not in seen:
-            seen.add(s)
-            uncached.append(s)
+        if s in seen:
+            continue
+        hit = ok_get(s)
+        if hit is not None:
+            result[s] = hit[0]
+            continue
+        if fail_get(s) is not None:
+            continue  # a known failure is skipped silently
+        seen.add(s)
+        uncached.append(s)
     return result, uncached
 
 
@@ -495,11 +512,17 @@ def demangle_one_batched(symbol: str) -> str | None:
     """
     if not symbol or not _is_itanium_mangled(symbol):
         return None
-    hit = _BATCH_CACHE_OK.get(symbol)
-    if hit is not None:
-        return hit
-    if symbol in _BATCH_CACHE_FAIL:
-        return None
+    # ``_batch_cached`` inlined: this runs once per name per comparison
+    # (~10^5), and the extra call was measurable in the scaling benchmark.
+    if not reference_mode():
+        hit = _ok_get(symbol)
+        if hit is not None:
+            return cast("str", hit[0])
+        if _fail_get(symbol) is not None:
+            return None
+    else:
+        _BATCH_CACHE_OK.stats.bypasses += 1
+        _BATCH_CACHE_FAIL.stats.bypasses += 1
     return demangle_batch([symbol]).get(symbol)
 
 

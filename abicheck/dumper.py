@@ -187,8 +187,10 @@ from .extract.headers.clang.locations import materialize_locations
 from .extract.path_aliases import absolutize_include_roots
 from .extract.progress import timed
 from .model import AbiSnapshot, RecordType
+from .storage.ast_cache_location import reference_scratch_scoped
 from .storage.atomic_file import atomic_write as _atomic_write
 from .storage.cache_integrity import record_digest
+from .workflows.snapshot_factory import new_snapshot
 
 log = logging.getLogger(__name__)
 
@@ -1168,6 +1170,7 @@ def _detect_format(path: Path) -> str:
     return "unknown"
 
 
+@reference_scratch_scoped
 def dump(
     so_path: Path,
     headers: list[Path],
@@ -1459,9 +1462,9 @@ def dump(
     # `#include <dep.h>` resolves stays compile context -- see
     # `extract.public_root_ownership` for the rule and the MKL/MPI case
     # that forced it.
-    from .provenance import apply_provenance
+    from .workflows.snapshot_factory import finish_provenance
 
-    return apply_provenance(
+    return finish_provenance(
         snapshot,
         effective_public_headers,
         effective_public_header_dirs,
@@ -1626,13 +1629,10 @@ def _dump_elf(
                 so_path,
                 elf_meta,
                 dwarf_meta,
-                dwarf_adv,
                 ast_result.is_clang,
                 symbols_only=symbols_only,
                 debug_presence_only=debug_presence_only,
                 debug_format=resolved_debug_format,
-                version=version,
-                language_profile=profile_hint,
                 session=dwarf_session,
             )
         )
@@ -1651,7 +1651,7 @@ def _dump_elf(
     )
 
     _so_mtime, _so_mtime_epoch = _safe_mtime(so_path)
-    snapshot = AbiSnapshot(
+    snapshot = new_snapshot(
         library=so_path.name,
         version=version,
         source_path=str(so_path.resolve()),
@@ -1776,7 +1776,7 @@ def _dump_macho(
 
         _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
         # ADR-063 Phase 2: see extract.export_symbol_identity's own docstring.
-        return AbiSnapshot(
+        return new_snapshot(
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path.resolve()),
@@ -1833,7 +1833,7 @@ def _dump_macho(
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return finish_binary_snapshot(
-        AbiSnapshot(
+        new_snapshot(
             library=dylib_path.name,
             version=version,
             source_path=str(dylib_path.resolve()),
@@ -1928,7 +1928,7 @@ def _dump_pe(
         # comment for why every other machine type must NOT strip a
         # leading underscore.
         _is_x86_32 = pe_meta.machine == "IMAGE_FILE_MACHINE_I386"
-        return AbiSnapshot(
+        return new_snapshot(
             library=dll_path.name,
             version=version,
             source_path=str(dll_path.resolve()),
@@ -1971,7 +1971,7 @@ def _dump_pe(
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
     return finish_binary_snapshot(
-        AbiSnapshot(
+        new_snapshot(
             library=dll_path.name,
             version=version,
             source_path=str(dll_path.resolve()),

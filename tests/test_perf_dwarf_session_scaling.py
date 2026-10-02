@@ -130,9 +130,9 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
     _require_tool("g++")
     from abicheck.dwarf_advanced import parse_advanced_dwarf
     from abicheck.dwarf_metadata import parse_dwarf_metadata
-    from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
     from abicheck.dwarf_unified import open_dwarf_session, parse_dwarf_from_session
     from abicheck.elf_metadata import parse_elf_metadata
+    from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
     so = _compile_multi_cu_lib(tmp_path, "cmp", n_cus=14)
     elf_meta = parse_elf_metadata(so)
