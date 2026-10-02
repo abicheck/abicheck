@@ -94,8 +94,9 @@ _INFRASTRUCTURE_PATHS = {
     "scripts/mutation_results.py",
     "scripts/check_mutation_score.py",
     "tests/test_mutation_results.py",
+    "scripts/mutation_scope.py",
+    "tests/test_mutation_scope.py",
     ".github/workflows/mutation.yml",
-    "pyproject.toml",
 }
 
 
@@ -138,6 +139,37 @@ def test_the_filter_is_exactly_sources_plus_infrastructure() -> None:
     """No stray entries — the filter is a contract, not a wishlist."""
     assert set(_paths_filter()) == set(_only_mutate()) | _INFRASTRUCTURE_PATHS
     assert set(_test_filter()) == _test_globs()
+
+
+def test_pyproject_starts_the_lane_only_through_its_relevance_check() -> None:
+    """A dependency pin must not cost a mutation run; a [tool.mutmut] or
+    [tool.pytest] change must still start one."""
+    assert _filters()["pyproject"] == ["pyproject.toml"]
+    assert "pyproject.toml" not in _paths_filter()
+    steps = _workflow()["jobs"]["resolve"]["steps"]
+    check = next(s for s in steps if s.get("id") == "pyproject")
+    assert "mutation_scope.py pyproject-changed" in check["run"]
+    decide = next(s for s in steps if s.get("id") == "decide")
+    assert '[ "$PYPROJECT_RELEVANT" = "true" ]' in decide["run"]
+    assert "steps.pyproject.outputs.relevant" in decide["env"]["PYPROJECT_RELEVANT"]
+
+
+def test_every_gating_run_is_sharded_and_rolled_up_under_one_check() -> None:
+    wf = _workflow()["jobs"]
+    shards = wf["mutmut"]["strategy"]["matrix"]["shard"]
+    count = len(shards)
+    assert shards == list(range(1, count + 1))
+    assert wf["mutmut"]["env"]["SHARD"] == f"${{{{ matrix.shard }}}}/{count}"
+    runs = [
+        s["run"]
+        for s in wf["mutmut"]["steps"]
+        if "check_mutation_score.py --run" in str(s.get("run", ""))
+    ]
+    assert runs and all(r.count("--run") == r.count('--shard "$SHARD"') for r in runs)
+    gate = wf["gate"]
+    assert gate["name"] == "mutmut (detector core)"
+    assert "mutmut" in gate["needs"] and "always()" in gate["if"]
+    assert "needs.resolve.outputs.run == 'true'" in gate["if"]
 
 
 def test_no_step_expands_a_github_expression_inside_its_script() -> None:
@@ -777,7 +809,9 @@ def test_the_real_mutmut_parser_test_runs_in_this_lane() -> None:
         "would never execute in CI"
     )
     assert "-m slow" in step["run"], "the real-run test carries the slow marker"
-    assert step.get("env", {}).get("ABICHECK_MIN_EXECUTED") == "1", (
+    # One real-mutmut test per file the step names, so neither can skip alone.
+    expected = str(step["run"].count("tests/test_mutation_"))
+    assert step.get("env", {}).get("ABICHECK_MIN_EXECUTED") == expected, (
         "without conftest.py's silent-skip guard, a skipif that starts "
         "matching turns this step green with zero tests run"
     )

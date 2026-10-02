@@ -1218,8 +1218,11 @@ Several mechanisms guard test quality so coverage can't be "filled" without veri
   that gated nothing from exiting 0, and an unresolved run (timeout/suspicious/no-tests)
   is a *failed measurement*, not zero survivors. **`mutation-baseline.json` is not
   recorded yet**; until a dispatch run writes it, the drift lanes fail closed rather
-  than passing vacuously. Per-lane trigger detail lives in `.github/AGENTS.md`'s
-  workflow table rather than being copied here.
+  than passing vacuously — and they now fail *before* invoking mutmut, not after a
+  multi-hour run. **Run cost is scoped to what a gate reads:** with no baseline, a PR
+  run executes only the changed functions' mutants (`scripts/mutation_scope.py`), and a
+  full-population run is split across 4 shard jobs. Per-lane trigger detail lives in
+  `.github/AGENTS.md`'s workflow table rather than being copied here.
 - **Metamorphic property tests** — `tests/test_detector_properties.py` (`slow`).
   Hypothesis-generated snapshot pairs checked against invariants that hold for *any*
   input (idempotence, determinism, direction-symmetry of touched symbols, emitted-kind
