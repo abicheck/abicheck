@@ -660,7 +660,7 @@ def test_render_html_document_batches_demangling_standalone_on_a_cold_cache() ->
     _demangle_mod._reset_demangle_batch_cache()
 
     with patch.dict("sys.modules", {"cxxfilt": None}):
-        with patch("subprocess.run") as mock_run:
+        with patch("abicheck.demangle.run_bounded") as mock_run:
             mock_run.return_value = _subprocess.CompletedProcess(
                 args=["c++filt"],
                 returncode=0,
