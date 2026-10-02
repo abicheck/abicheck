@@ -502,7 +502,15 @@ pytest_add_cli_args = [
     # and is the difference between a diagnosable lane and a guess.
     "--tb=line",
     "-m",
-    "not integration and not libabigail and not abicc and not slow",
+    # `repo_scan` tests read the committed tree as text/AST. mutmut 3 writes
+    # every mutant of a function into the same file behind a runtime
+    # trampoline (MUTANT_UNDER_TEST), so the text such a test reads is
+    # identical for every mutant: it can never kill one. Running them only
+    # costs the serial stats pass minutes, and with `-x` a repo_scan failure
+    # unrelated to any mutated module aborts the whole lane ("failed to
+    # collect stats"). They run once, unmodified, in ci.yml's
+    # repo-scan-tests job (verify.py --only repo-scan-tests).
+    "not integration and not libabigail and not abicc and not slow and not repo_scan",
     # Repository-structure tests, excluded because they cannot run from
     # `mutants/` at all: they read the real repository — its git history, the
     # generated agent-skill trees, the vendor instruction adapters — and the

@@ -155,11 +155,17 @@ def test_pyproject_starts_the_lane_only_through_its_relevance_check() -> None:
 
 
 def test_every_gating_run_is_sharded_and_rolled_up_under_one_check() -> None:
-    wf = _workflow()["jobs"]
-    shards = wf["mutmut"]["strategy"]["matrix"]["shard"]
-    count = len(shards)
-    assert shards == list(range(1, count + 1))
+    doc = _workflow()
+    wf = doc["jobs"]
+    count = int(doc["env"]["SHARD_COUNT"])
+    # The matrix is the resolve job's plan, not a literal: a run that is not
+    # split starts one runner rather than SHARD_COUNT.
+    assert wf["mutmut"]["strategy"]["matrix"]["shard"] == (
+        "${{ fromJSON(needs.resolve.outputs.shards) }}"
+    )
+    assert wf["resolve"]["outputs"]["shards"] == "${{ steps.plan.outputs.shards }}"
     assert wf["mutmut"]["env"]["SHARD"] == f"${{{{ matrix.shard }}}}/{count}"
+    assert wf["mutmut"]["name"].endswith(f"/{count}")
     runs = [
         s["run"]
         for s in wf["mutmut"]["steps"]
@@ -170,6 +176,27 @@ def test_every_gating_run_is_sharded_and_rolled_up_under_one_check() -> None:
     assert gate["name"] == "mutmut (detector core)"
     assert "mutmut" in gate["needs"] and "always()" in gate["if"]
     assert "needs.resolve.outputs.run == 'true'" in gate["if"]
+
+
+def test_the_shard_plan_asks_the_question_each_run_step_answers() -> None:
+    """resolve's plan and the shard steps must take the same scoping
+    decision: a plan made without --diff-scoped would start four runners for
+    a PR run that only shard 1 executes, and one made without
+    --require-baseline would split a run that fails before mutmut."""
+    wf = _workflow()["jobs"]
+    plan = next(s for s in wf["resolve"]["steps"] if s.get("id") == "plan")["run"]
+    assert "--plan-shards" in plan and "| tail -n 1" in plan
+    by_event = {
+        "pull_request": "Run mutation testing (diff-scoped)",
+        "schedule": "Run mutation testing (baseline drift)",
+    }
+    for event, step_name in by_event.items():
+        step = next(s for s in wf["mutmut"]["steps"] if s.get("name") == step_name)
+        branch = plan.split(f"{event})", 1)[1].split(";;", 1)[0]
+        for flag in ("--diff-scoped", "--scope-run-to-diff",
+                     "--scope-run-to-functions", "--require-baseline"):  # fmt: skip
+            assert (flag in step["run"]) == (flag in branch), (event, flag)
+    assert "--write-baseline" in plan.split("workflow_dispatch)", 1)[1]
 
 
 def test_no_step_expands_a_github_expression_inside_its_script() -> None:

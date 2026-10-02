@@ -48,6 +48,12 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # The `mutmut` job's name and SHARD spell this as a literal 4 too (a job
+  # name cannot read `env`); tests/test_mutation_workflow_contract.py keeps
+  # them in step.
+  SHARD_COUNT: 4
+
 jobs:
   # Path-match OR label, resolved at job level. A workflow-level `paths:`
   # filter is ANDed with the activity `types:`, so applying the `mutation`
@@ -73,6 +79,7 @@ jobs:
     outputs:
       run: ${{ steps.decide.outputs.run }}
       require_baseline: ${{ steps.decide.outputs.require_baseline }}
+      shards: ${{ steps.plan.outputs.shards }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -205,6 +212,35 @@ jobs:
           else
             echo "require_baseline=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Plan the shard matrix
+        # The same scoping decision each shard makes (check_mutation_score.py
+        # --plan-shards runs it and stops before mutmut), taken once here so
+        # a run that is not split -- a diff-scoped PR run, or one that fails
+        # fast on a missing baseline -- starts one runner instead of four,
+        # three of which used to pay checkout + install only to print "has
+        # nothing to run". Stdlib only: no install needed on this runner.
+        id: plan
+        if: steps.decide.outputs.run == 'true'
+        env:
+          REQUIRE_BASELINE: ${{ steps.decide.outputs.require_baseline }}
+          WRITE_BASELINE: ${{ inputs.write_baseline }}
+          # Through `env`, not expanded into the script (zizmor
+          # template-injection; see the diff-scoped step below).
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          args=(--run --plan-shards "$SHARD_COUNT")
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              args+=(--diff-scoped --scope-run-to-diff --scope-run-to-functions
+                     --base-ref "origin/$BASE_REF")
+              if [ "$REQUIRE_BASELINE" = "true" ]; then args+=(--require-baseline); fi ;;
+            schedule) args+=(--require-baseline) ;;
+            workflow_dispatch)
+              if [ "$WRITE_BASELINE" = "true" ]; then args+=(--write-baseline); fi ;;
+          esac
+          shards=$(python3 scripts/check_mutation_score.py "${args[@]}" | tail -n 1)
+          echo "shards: $shards"
+          echo "shards=$shards" >> "$GITHUB_OUTPUT"
 
   mutmut:
     # One job per shard. A run that must measure the whole population (the
@@ -213,7 +249,7 @@ jobs:
     # (`check_mutation_score.py --shard`); the per-module drift gate is per
     # module by construction, so each shard gates its own modules exactly as
     # one job would, in a fraction of the wall-clock time. A diff-scoped PR
-    # run is small and is not split: shard 1 runs it, the others exit at once.
+    # run is small and is not split: resolve plans it as shard 1 alone.
     name: mutmut shard ${{ matrix.shard }}/4
     needs: resolve
     if: needs.resolve.outputs.run == 'true'
@@ -221,7 +257,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # From the resolve job's plan: [1] for a run that is not split,
+        # [1, 2, 3, 4] for one that measures the whole population.
+        shard: ${{ fromJSON(needs.resolve.outputs.shards) }}
     env:
       SHARD: ${{ matrix.shard }}/4
       SHARD_INDEX: ${{ matrix.shard }}
