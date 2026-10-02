@@ -120,6 +120,19 @@ Owner of the design: ADR-063 Phase 5B.
 - Exit: `facts` reaches `authority: self` in the status ledger; H1 inventory
   has no `UNCOVERED` entries.
 
+#### Phase 1 status (2026-10-02)
+
+Exit **not reached** in this slice; `facts` stays `authority: mixed` and H1's
+`UNCOVERED` list is unchanged (40 entries, each still lacking a corpus pair
+or fixture, not a production fix).
+
+| Item | Status |
+|---|---|
+| One merge rule in `model/` | **Landed**: `model/evidence_merge.py` (`merge_presence`, `merge_collection`, `presence_in`, `merged_capture_fact`). Exhaustive and hypothesis laws against an independent oracle in `tests/test_evidence_merge_properties.py`. |
+| Hand-written merges routed through it | **Two converted**: `tu_merge._merge_functions`'s `contract_attributes_fact` (one TU captured, one not, was stamped `PRESENT`; now `PARTIAL`), and `dwarf_presence`'s BTF/CTF auto-detection. Surveyed and already correct (no change): `extract/semantic_ir_merge._merge_entity`, `compare/edge_query.decide`, `provenance` + `surface_facts.public_header_contract_fact` (an overlay that only adds a positive; routing it through the merge would union a legacy-derived diagnostic into a producer fact), the scalar backfills in `fact_provenance.backfill_fact` and `dumper_layout_backfill`. **Remaining** (each needs a `Fact` sibling or a model field first): `dumper_hybrid.merge_snapshots`'s `is_template_pattern`/`has_anonymous_aggregate_fields` OR and `base_offsets` "empty = unread"; `dumper_layout_backfill`'s `vtable`/`base_offsets` first-non-empty pick; `PublicTemplateScopes.union` (headerless side yields empty, no completeness flag). |
+| Producers return `Fact[T]` | **One slice**: `dwarf_presence` section probes are `Fact[bool]` (`FAILED` on error). The evidence-entity-model inventory's producer rows were already fixed (A1–A5). **Remaining**: `dwarf_metadata._expand_anonymous_member` returns `[]` when the member's type reference fails to resolve (a struct then reads as having no such fields); `StructLayout` has no completeness marker to carry it. |
+| `.visibility` readers | The "61 readers" count is stale: most of them read ELF `st_other` visibility (a different field) or only render it. One decision reader migrated (`bundle_symbol_status._symbol_was_exported` → `surface_facts.is_dynamically_exported`). `KNOWN_UNMIGRATED_READERS` was already empty and does not cover `visibility`. **Remaining** declaration-`Visibility` readers outside producers and `surface_facts`: `compare/elf_only_demangle.elf_only_demangled_name` (display), `diff_symbols`/`compare/export_transition` `old_value`/`new_value`/description text (display), `policy/depth_projection` (writes `ELF_ONLY`). Deleting the field's decision role needs those display paths given their own accessor. |
+
 ### Phase 2 — One construction path per request and per snapshot (F2)
 
 Owner of the design: duplication-and-convergence Phases 1–2.
