@@ -131,7 +131,8 @@ def parse_elf_metadata(so_path: Path) -> ElfMetadata:
                     _parse(f, so_path), protocol=pickle.HIGHEST_PROTOCOL
                 ),
             )
-            loaded: ElfMetadata = pickle.loads(stored)
+            # nosec B301: bytes this function pickled itself, never external input
+            loaded: ElfMetadata = pickle.loads(stored)  # nosec B301
             return loaded
     except (ELFError, OSError, ValueError) as exc:
         log.warning("parse_elf_metadata: failed to open/parse %s: %s", so_path, exc)

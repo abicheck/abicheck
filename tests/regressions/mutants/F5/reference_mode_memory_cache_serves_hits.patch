@@ -7,6 +7,6 @@
 -        if reference_mode():
 -            self.stats.bypasses += 1
 -            return compute()
-         verified = witness is not None or witness_of is not None
-         with self._lock:
-             hit = self._entries.get(key)
+         hit = self._fresh_hit(key, witness, still_fresh)
+         if hit is not _MISSING:
+             return self._out(hit)

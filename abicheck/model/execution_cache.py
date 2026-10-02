@@ -299,25 +299,9 @@ class MemoryCache(Generic[_V]):
         if reference_mode():
             self.stats.bypasses += 1
             return compute()
-        verified = witness is not None or witness_of is not None
-        with self._lock:
-            hit = self._entries.get(key)
-        if hit is not None:
-            if still_fresh is not None:
-                fresh = still_fresh(hit[2])
-            elif witness is not None:
-                fresh = witness() == hit[2]
-            else:
-                fresh = True
-            with self._lock:
-                if fresh and self._entries.get(key) is hit:
-                    self._entries.move_to_end(key)
-                    self.stats.hits += 1
-                    return self._out(hit[0])
-                if not fresh:
-                    self.stats.stale += 1
-                    if self._entries.get(key) is hit:
-                        self._drop(key)
+        hit = self._fresh_hit(key, witness, still_fresh)
+        if hit is not _MISSING:
+            return self._out(hit)
         with self._lock:
             pending = self._in_flight.get(key)
             if pending is None:
@@ -337,12 +321,7 @@ class MemoryCache(Generic[_V]):
                     keep=keep,
                 )
         try:
-            seen = witness() if witness is not None else None
-            value = compute()
-            if witness_of is not None:
-                seen = witness_of(value)
-            if (keep is None or keep(value)) and not (verified and seen is None):
-                self._store(key, value, seen)
+            value = self._compute_and_store(key, compute, witness, witness_of, keep)
         except BaseException as exc:
             with self._lock:
                 self._in_flight.pop(key, None)
@@ -352,6 +331,50 @@ class MemoryCache(Generic[_V]):
             self._in_flight.pop(key, None)
         future.set_result(value)
         return self._out(value)
+
+    def _fresh_hit(
+        self,
+        key: RequestKey,
+        witness: Callable[[], Hashable] | None,
+        still_fresh: Callable[[Any], bool] | None,
+    ) -> Any:
+        """The stored value if it is still fresh, else :data:`MISSING`
+        (dropping a stale entry)."""
+        with self._lock:
+            hit = self._entries.get(key)
+        if hit is None:
+            return _MISSING
+        if still_fresh is not None:
+            fresh = still_fresh(hit[2])
+        else:
+            fresh = witness is None or witness() == hit[2]
+        with self._lock:
+            if self._entries.get(key) is not hit:
+                return _MISSING
+            if fresh:
+                self._entries.move_to_end(key)
+                self.stats.hits += 1
+                return hit[0]
+            self.stats.stale += 1
+            self._drop(key)
+        return _MISSING
+
+    def _compute_and_store(
+        self,
+        key: RequestKey,
+        compute: Callable[[], _V],
+        witness: Callable[[], Hashable] | None,
+        witness_of: Callable[[_V], Hashable] | None,
+        keep: Callable[[_V], bool] | None,
+    ) -> _V:
+        verified = witness is not None or witness_of is not None
+        seen = witness() if witness is not None else None
+        value = compute()
+        if witness_of is not None:
+            seen = witness_of(value)
+        if (keep is None or keep(value)) and not (verified and seen is None):
+            self._store(key, value, seen)
+        return value
 
     def peek(self, key: RequestKey, default: Any = None) -> Any:
         """The stored value for *key* (no freshness check), else *default*.
