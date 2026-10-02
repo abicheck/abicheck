@@ -145,7 +145,7 @@ class TestRunLayoutTool:
                 return_value=(True, False, False, "gnu"),
             ),
             patch(
-                "abicheck.clang_layout_tool.subprocess.run",
+                "abicheck.clang_layout_tool.run_bounded",
                 side_effect=subprocess.TimeoutExpired(cmd="x", timeout=1),
             ),
         ):
@@ -165,9 +165,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
-            patch(
-                "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
-            ),
+            patch("abicheck.clang_layout_tool.run_bounded", return_value=fake_result),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
@@ -188,9 +186,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
-            patch(
-                "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
-            ),
+            patch("abicheck.clang_layout_tool.run_bounded", return_value=fake_result),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
@@ -220,9 +216,7 @@ class TestRunLayoutTool:
                 "abicheck.clang_layout_tool._resolve_clang_langmode",
                 return_value=(True, False, False, "gnu"),
             ),
-            patch(
-                "abicheck.clang_layout_tool.subprocess.run", return_value=fake_result
-            ),
+            patch("abicheck.clang_layout_tool.run_bounded", return_value=fake_result),
         ):
             assert run_layout_tool("some-binary", [header], []) is None
 
