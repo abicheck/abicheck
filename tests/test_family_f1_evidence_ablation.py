@@ -128,23 +128,6 @@ from abicheck.model import Fact, FactStatus
 #: Sites the harness cannot ablate yet. Shrink-only: see
 #: ``test_uncovered_is_shrink_only``.
 UNCOVERED: dict[str, str] = {
-    "MachoMetadata.rpaths_fact": "corpus is ELF-only; needs a Mach-O pair",
-    "PeMetadata.delay_imports_fact": "corpus is ELF-only; needs a PE pair",
-    "AbiSnapshot.pe": "corpus is ELF-only; needs a PE pair",
-    "AbiSnapshot.macho": "corpus is ELF-only; needs a Mach-O pair",
-    "AbiSnapshot.dwarf_advanced": "no AdvancedDwarfMetadata fixture in the corpus yet",
-    "AbiSnapshot.sycl": "SYCL plugin-interface evidence has no corpus pair",
-    "AbiSnapshot.python_ext": "CPython extension evidence has no corpus pair",
-    "AbiSnapshot.kabi": "kABI (Module.symvers) evidence has no corpus pair",
-    "AbiSnapshot.python_api": "Python API surface evidence has no corpus pair",
-    "AbiSnapshot.numpy_capi": "NumPy C-API evidence has no corpus pair",
-    "AbiSnapshot.extraction_scope": "scope record, not a producer output; ablating it is H2's (route parity) territory",
-    "AbiSnapshot.dependency_info": "dependency walk evidence has no corpus pair",
-    "AbiSnapshot.build_mode": "L3 build-mode evidence has no corpus pair",
-    "AbiSnapshot.build_source_pack": "L3-L5 build-source reference has no corpus pair (#1389 lives here)",
-    "AbiSnapshot.build_source": "L3-L5 build-source pack has no corpus pair (#1389 lives here)",
-    "AbiSnapshot.surface_graph": "persisted surface graph is recomputed, not trusted, by compare (PR #979)",
-    "AbiSnapshot.contract": "extraction contract record has no corpus pair",
 }
 
 #: The real current violations this harness found (see module docstring).

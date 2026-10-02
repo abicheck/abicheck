@@ -40,6 +40,7 @@ from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from abicheck.buildsource.header_graph import build_header_only_graph
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
@@ -70,8 +71,17 @@ from abicheck.model.identity import (
     entity_id_for_type,
     entity_id_for_variable,
 )
+from abicheck.model.macho_facts import MachoMetadata
+from abicheck.model.pe_facts import PeMetadata
 from abicheck.model.semantic_ir import SemanticIR
 from abicheck.policy.contract_coverage_exit import coverage_exit_floor
+
+from _family_f1_containers import (  # isort: skip
+    BREAK_CASE_CONTAINERS,
+    PLATFORM_CASES,
+    base_containers,
+    on_platform,
+)
 
 # --------------------------------------------------------------------------
 # Inventory
@@ -355,12 +365,15 @@ class Side:
     variables: tuple[Variable, ...] = ()
     types: tuple[RecordType, ...] = ()
     enums: tuple[EnumType, ...] = ()
+    #: Overrides of ``_family_f1_containers.base_containers()`` for this side.
+    containers: tuple[tuple[str, Any], ...] = ()
 
 
 def _with_entity_ids(side: Side) -> Side:
     """Each declaration's ``entity_id`` as a header-AST backend assigns it, so
     the snapshot can carry the normalizer's ``SemanticIR`` (ADR-063 Phase 6)."""
-    return Side(
+    return dataclasses.replace(
+        side,
         functions=tuple(
             dataclasses.replace(
                 f,
@@ -408,7 +421,7 @@ def _snapshot(version: str, side: Side) -> AbiSnapshot:
     # The builders' real shared tail stamps the export-read facts
     # (binary_exported / elf_binding) from the ELF table, so the full-evidence
     # baseline carries them present rather than unknown.
-    return finish_binary_snapshot(
+    snap = finish_binary_snapshot(
         AbiSnapshot(
             library="libx.so.1",
             version=version,
@@ -423,7 +436,15 @@ def _snapshot(version: str, side: Side) -> AbiSnapshot:
             ast_resolved_standard_fact=Fact.present("c++17"),
             public_header_identifiers=_header_identifiers(side),
             semantic_ir=_semantic_ir(side),
+            **{**base_containers(), **dict(side.containers)},
         )
+    )
+    # The header-only L5 graph is derived from the snapshot itself.
+    return dataclasses.replace(
+        snap,
+        surface_graph=build_header_only_graph(
+            snap, public_header_paths=["/inc/x.h"], header_paths=["/inc/x.h"]
+        ),
     )
 
 
@@ -530,7 +551,21 @@ def _build_corpus() -> dict[str, tuple[AbiSnapshot, AbiSnapshot]]:
             b, enums=(_enum("Color", (("RED", 0), ("GREEN", 1), ("BLUE", 2))),)
         ),
     }
-    return {k: (_snapshot("1.0", b), _snapshot("2.0", v)) for k, v in cases.items()}
+    cases.update(
+        {
+            case: dataclasses.replace(b, containers=tuple(override.items()))
+            for case, override in BREAK_CASE_CONTAINERS.items()
+        }
+    )
+    corpus = {k: (_snapshot("1.0", b), _snapshot("2.0", v)) for k, v in cases.items()}
+    for platform in ("pe", "macho"):
+        for case in PLATFORM_CASES:
+            old, new = corpus[case]
+            corpus[f"{platform}:{case}"] = (
+                on_platform(old, platform),
+                on_platform(new, platform),
+            )
+    return corpus
 
 
 CORPUS: dict[str, tuple[AbiSnapshot, AbiSnapshot]] = _build_corpus()
@@ -673,6 +708,21 @@ def _unread_export_table(s: AbiSnapshot) -> AbiSnapshot | None:
     return finish_binary_snapshot(s)
 
 
+def _unread_platform_table(
+    platform: str,
+) -> Callable[[AbiSnapshot], AbiSnapshot | None]:
+    """The PE/Mach-O block a failed or skipped parse leaves: no header
+    fields, no exports -- then the builders' shared tail runs."""
+
+    def op(s: AbiSnapshot) -> AbiSnapshot | None:
+        if getattr(s, platform) is None:
+            return None
+        blank = PeMetadata() if platform == "pe" else MachoMetadata()
+        return finish_binary_snapshot(dataclasses.replace(s, **{platform: blank}))
+
+    return op
+
+
 def _no_canonical_ir(s: AbiSnapshot) -> AbiSnapshot | None:
     if s.semantic_ir is None or not s.semantic_ir.canonical:
         return None
@@ -708,6 +758,33 @@ CONTAINER_ABLATIONS: dict[
         "unread_export_table": _unread_export_table,
     },
     "AbiSnapshot.dwarf": {"missing": _drop("dwarf")},
+    # PE / Mach-O: never captured, or captured but the table never parsed.
+    "AbiSnapshot.pe": {
+        "missing": _drop("pe"),
+        "unread_export_table": _unread_platform_table("pe"),
+    },
+    "AbiSnapshot.macho": {
+        "missing": _drop("macho"),
+        "unread_export_table": _unread_platform_table("macho"),
+    },
+    **{
+        f"AbiSnapshot.{name}": {"missing": _drop(name)}
+        for name in (
+            "dwarf_advanced",
+            "sycl",
+            "kabi",
+            "python_api",
+            "python_ext",
+            "numpy_capi",
+            "extraction_scope",
+            "dependency_info",
+            "build_mode",
+            "build_source_pack",
+            "build_source",
+            "surface_graph",
+            "contract",
+        )
+    },
     # The canonical IR was never built (a DWARF-only/PE-only extraction, a
     # pre-v38 snapshot): the declarations stay, the occurrences go.
     "AbiSnapshot.semantic_ir": {"missing": _no_canonical_ir},
