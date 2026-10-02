@@ -12,13 +12,50 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Cheap debug-presence helpers for binary-depth scans."""
+"""Cheap debug-presence helpers for binary-depth scans.
+
+Each section probe is a producer and returns a ``Fact[bool]``: a probe that
+raised is ``FAILED``, never a confirmed "no such section". Auto-detection
+combines the probes with the one evidence-merge rule
+(``model/evidence_merge.merge_presence``). The returned metadata still
+carries a plain ``has_dwarf`` flag, which is "debug evidence in hand"
+(``model.dwarf_facts.debug_info_present``): an unknown merge reads as
+``False`` there, which understates assurance and never states the artifact
+is stripped.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
+from .model.availability import FactStatus
 from .model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
+from .model.evidence_merge import merge_presence
+from .model.fact import Fact
+
+
+def _probe(read: Callable[[], bool], what: str) -> Fact[bool]:
+    try:
+        return Fact.present(bool(read()))
+    except Exception as exc:  # noqa: BLE001 - a failed probe is an unknown, not "absent"
+        return Fact.failed(f"{what} probe failed: {type(exc).__name__}")
+
+
+def _has_dwarf(so_path: Path) -> Fact[bool]:
+    from elftools.elf.elffile import ELFFile
+
+    from .dwarf_utils import has_real_dwarf_info
+
+    def read() -> bool:
+        with open(so_path, "rb") as f:
+            return bool(has_real_dwarf_info(ELFFile(f)))
+
+    return _probe(read, "DWARF section")
+
+
+def _confirmed(fact: Fact[bool]) -> bool:
+    return fact.status is FactStatus.PRESENT and fact.value is True
 
 
 def cheap_dwarf_presence_metadata(
@@ -29,18 +66,7 @@ def cheap_dwarf_presence_metadata(
     ``scan --depth binary`` needs to report whether debug info exists, but must
     not walk every DWARF DIE. Section lookup is enough for the L1 coverage bit.
     """
-    from elftools.elf.elffile import ELFFile
-
-    from .dwarf_utils import has_real_dwarf_info
-
-    try:
-        with open(so_path, "rb") as f:
-            has_dwarf = has_real_dwarf_info(ELFFile(f))
-    except Exception:  # noqa: BLE001 - debug presence is advisory here
-        has_dwarf = False
-    return DwarfMetadata(has_dwarf=has_dwarf), AdvancedDwarfMetadata(
-        has_dwarf=has_dwarf
-    )
+    return _section_presence_metadata(_confirmed(_has_dwarf(so_path)))
 
 
 def cheap_debug_presence_metadata(
@@ -52,25 +78,25 @@ def cheap_debug_presence_metadata(
     if debug_format == "dwarf":
         return cheap_dwarf_presence_metadata(so_path)
     if debug_format == "btf":
-        return _section_presence_metadata(_has_btf(so_path))
+        return _section_presence_metadata(_confirmed(_has_btf(so_path)))
     if debug_format == "ctf":
-        return _section_presence_metadata(_has_ctf(so_path))
+        return _section_presence_metadata(_confirmed(_has_ctf(so_path)))
     if debug_format is not None:
         raise ValueError(
             f"Invalid debug_format {debug_format!r}; expected 'dwarf', 'btf', or 'ctf'."
         )
 
-    if _is_kernel_binary(so_path) and _has_btf(so_path):
+    if _confirmed(_is_kernel_binary(so_path)) and _confirmed(_has_btf(so_path)):
         return _section_presence_metadata(True)
 
     dwarf_meta, dwarf_adv = cheap_dwarf_presence_metadata(so_path)
     if dwarf_meta.has_dwarf:
         return dwarf_meta, dwarf_adv
-    if _has_btf(so_path):
+    btf = _has_btf(so_path)
+    if _confirmed(btf):  # a positive needs no further probe
         return _section_presence_metadata(True)
-    if _has_ctf(so_path):
-        return _section_presence_metadata(True)
-    return dwarf_meta, dwarf_adv
+    any_debug = merge_presence(btf, _has_ctf(so_path))
+    return _section_presence_metadata(_confirmed(any_debug))
 
 
 def _section_presence_metadata(
@@ -79,30 +105,33 @@ def _section_presence_metadata(
     return DwarfMetadata(has_dwarf=present), AdvancedDwarfMetadata(has_dwarf=present)
 
 
-def _has_btf(so_path: Path) -> bool:
-    from .btf_metadata import has_btf_section
+def _has_section(so_path: Path, *names: str) -> Fact[bool]:
+    """Whether the ELF file carries any of *names*; a read error is ``FAILED``.
 
-    try:
-        return has_btf_section(so_path)
-    except Exception:  # noqa: BLE001 - debug presence is advisory here
-        return False
+    Reads the sections itself rather than through ``btf_metadata.
+    has_btf_section``/``ctf_metadata.has_ctf_section``: those helpers answer
+    ``False`` when the file cannot be read, which here would be a confirmed
+    absence.
+    """
 
-
-def _has_ctf(so_path: Path) -> bool:
-    from .ctf_metadata import has_ctf_section
-
-    try:
-        return has_ctf_section(so_path)
-    except Exception:  # noqa: BLE001 - debug presence is advisory here
-        return False
-
-
-def _is_kernel_binary(path: Path) -> bool:
-    try:
+    def read() -> bool:
         from elftools.elf.elffile import ELFFile
 
-        with open(path, "rb") as f:
+        with open(so_path, "rb") as f:
             elf = ELFFile(f)
-            return elf.get_section_by_name(".modinfo") is not None
-    except Exception:  # noqa: BLE001 - debug presence is advisory here
-        return False
+            return any(elf.get_section_by_name(name) is not None for name in names)
+
+    return _probe(read, f"{'/'.join(names)} section")
+
+
+def _has_btf(so_path: Path) -> Fact[bool]:
+    return _has_section(so_path, ".BTF")
+
+
+def _has_ctf(so_path: Path) -> Fact[bool]:
+    # CTF can be in .ctf or .SUNW_ctf (matches ctf_metadata.has_ctf_section).
+    return _has_section(so_path, ".ctf", ".SUNW_ctf")
+
+
+def _is_kernel_binary(path: Path) -> Fact[bool]:
+    return _has_section(path, ".modinfo")

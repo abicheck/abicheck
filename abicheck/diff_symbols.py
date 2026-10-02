@@ -153,6 +153,7 @@ from .model.surface_facts import (
     is_export_confirmed_absent,
     is_export_table_only_record,
     surface_fact_summary,
+    visibility_label,
 )
 from .name_classification import is_local_rtti_symbol
 
@@ -391,8 +392,8 @@ def _check_removed_function(
             ChangeKind.FUNC_VISIBILITY_CHANGED,
             symbol=mangled,
             name=f_old.name,
-            old_value=f_old.visibility.value,
-            new_value=f_hidden.visibility.value,
+            old_value=visibility_label(f_old),
+            new_value=visibility_label(f_hidden),
             # See Change.symbol_binding's docstring -- stamped here too, not just on removal below.
             symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
             entity_id=f_old.entity_id or f_hidden.entity_id,
@@ -431,12 +432,12 @@ def _check_removed_function(
     return make_change(
         removed_kind,
         symbol=mangled,
-        description=f"{f_old.visibility.value.capitalize()} function removed: {f_old.name}",
+        description=f"{visibility_label(f_old).capitalize()} function removed: {f_old.name}",
         old_value=f_old.name,
         # See Change.symbol_binding's docstring — None when not captured.
         symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
         entity_id=f_old.entity_id,
-        demangled_symbol=_elf_only_demangled_name(mangled, f_old.visibility),
+        demangled_symbol=_elf_only_demangled_name(mangled, f_old),
         # The old side's three facts: whether this removal rests on header
         # evidence, on the export table, or on neither (see
         # Change.surface_facts).

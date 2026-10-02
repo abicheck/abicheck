@@ -74,12 +74,14 @@ from .dwarf_utils import (
 # parses into them and re-exports them so the historical
 # ``from abicheck.dwarf_metadata import DwarfMetadata`` spelling keeps resolving.
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
+from .model.availability import FactStatus
 from .model.dwarf_facts import (
     DwarfMetadata as DwarfMetadata,
     EnumInfo as EnumInfo,
     FieldInfo as FieldInfo,
     StructLayout as StructLayout,
 )
+from .model.fact import Fact
 
 log = logging.getLogger(__name__)
 
@@ -303,9 +305,18 @@ def _process_struct_named(
                 anon_offset = _decode_member_location(
                     child.attributes["DW_AT_data_member_location"].value
                 )
-            layout.fields.extend(
-                _expand_anonymous_member(child, CU, type_cache, anon_offset)
-            )
+            expanded = _expand_anonymous_member(child, CU, type_cache, anon_offset)
+            if expanded.status is not FactStatus.PRESENT:
+                # The member's fields are unknown, so the layout is: record no
+                # layout for this name rather than one missing those fields
+                # (which the layout diff would report as removed fields).
+                log.debug(
+                    "DWARF layout of %s not recorded: %s",
+                    name,
+                    "; ".join(expanded.diagnostics),
+                )
+                return
+            layout.fields.extend(expanded.value or [])
         else:
             fi = _process_member(child, CU, type_cache)
             if fi is not None:
@@ -345,25 +356,30 @@ def _expand_anonymous_member(
     CU: Any,
     type_cache: dict[tuple[int, int], tuple[str, int]],
     byte_offset: int,
-) -> list[FieldInfo]:
+) -> Fact[list[FieldInfo]]:
     """Inline the fields of an anonymous struct/union member.
 
     DWARF uses unnamed DW_TAG_member to embed anonymous aggregates.
     Rather than discarding them, we inline their nested members so that
     layout changes inside anonymous structs/unions are still detected.
+
+    ``FAILED`` when the member's type cannot be read (no ``DW_AT_type``, or a
+    reference that does not resolve): its fields are unknown, not absent.
+    ``PRESENT([])`` for an unnamed member that is not an aggregate (it
+    contributes no named field).
     """
     if "DW_AT_type" not in die.attributes:
-        return []
+        return Fact.failed("unnamed member has no DW_AT_type")
     try:
         target = _resolve_ref(die, "DW_AT_type", CU)
-    except Exception:  # noqa: BLE001
-        return []
+    except Exception as exc:  # noqa: BLE001
+        return Fact.failed(f"unnamed member type unresolved: {type(exc).__name__}")
     if target.tag not in (
         "DW_TAG_structure_type",
         "DW_TAG_class_type",
         "DW_TAG_union_type",
     ):
-        return []
+        return Fact.present([])
 
     fields: list[FieldInfo] = []
     for child in target.iter_children():
@@ -383,7 +399,7 @@ def _expand_anonymous_member(
                 bit_size=fi.bit_size,
             )
         )
-    return fields
+    return Fact.present(fields)
 
 
 def _process_member(

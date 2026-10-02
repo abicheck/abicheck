@@ -60,7 +60,11 @@ Adjustments to the plan's oracles, and why:
   (a) instead requires that *some* gap marker moved whenever the verdict got
   cleaner, which is the user-visible half of the claim.
 * The plan's "subset, plus findings explicitly marked ``evidence_gap``" --
-  ``Change`` carries no such marker today, so (b) is a plain subset. None of
+  ``Change`` carries no such marker today, so (b) is a subset modulo one
+  rule: a DWARF-layout kind for a record whose header-layer equivalent the
+  full run reported (``_SAME_OBSERVATION``) is the same observation from the
+  other layer -- what happens when an unknown ``CanonicalEntity.size_bits``
+  makes the header detector stand down. None of
   the covered ablations needs the escape hatch.
 * The plan's "truncated / short decode" ablation is modelled only as an
   *unread* export table, not a silently half-read one: ``ElfMetadata.symbols``
@@ -123,48 +127,7 @@ from abicheck.model import Fact, FactStatus
 
 #: Sites the harness cannot ablate yet. Shrink-only: see
 #: ``test_uncovered_is_shrink_only``.
-UNCOVERED: dict[str, str] = {
-    "AbiSnapshot.public_header_identifiers": "public_header_identifiers is closed-domain evidence read only under --contract public; the H1 corpus compares without --contract, so ablating it changes nothing observable (covered by tests/test_public_header_identifiers.py)",
-    "AbiSnapshot.public_header_identifiers_fact": "public_header_identifiers is closed-domain evidence read only under --contract public; the H1 corpus compares without --contract, so ablating it changes nothing observable (covered by tests/test_public_header_identifiers.py)",
-    "Function.return_type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
-    "Param.type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
-    "TypeField.type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
-    "Variable.type_identities_fact": "in-process corpus builds no castxml snapshot, so never PRESENT; the ablation (identity present vs. not collected) is stated directly by tests/test_contract_type_identities.py (TestIdentityDrivenConfirmation: confirmed iff PRESENT, unresolved without it)",
-    "EnumType.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "Function.contract_attributes_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "Function.exception_spec_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "Function.hidden_friend_owner_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "Function.is_compiler_generated_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "Function.is_hidden_friend_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "Function.is_override_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "Function.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "RecordType.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "Variable.alignment_bits_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "Variable.ownership_fact": "baseline corpus never populates this fact present, so ablating it would swap one unknown for another; needs a corpus value",
-    "CanonicalEntity.canonical_spelling": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
-    "CanonicalEntity.cv_qualification": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
-    "CanonicalEntity.size_bits": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
-    "CanonicalEntity.alignment_bits": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
-    "CanonicalEntity.template_arguments": "SemanticIR occurrences are not built by the in-process corpus; needs a header-AST normalizer fixture",
-    "MachoMetadata.rpaths_fact": "corpus is ELF-only; needs a Mach-O pair",
-    "PeMetadata.delay_imports_fact": "corpus is ELF-only; needs a PE pair",
-    "AbiSnapshot.pe": "corpus is ELF-only; needs a PE pair",
-    "AbiSnapshot.macho": "corpus is ELF-only; needs a Mach-O pair",
-    "AbiSnapshot.dwarf_advanced": "no AdvancedDwarfMetadata fixture in the corpus yet",
-    "AbiSnapshot.sycl": "SYCL plugin-interface evidence has no corpus pair",
-    "AbiSnapshot.python_ext": "CPython extension evidence has no corpus pair",
-    "AbiSnapshot.kabi": "kABI (Module.symvers) evidence has no corpus pair",
-    "AbiSnapshot.python_api": "Python API surface evidence has no corpus pair",
-    "AbiSnapshot.numpy_capi": "NumPy C-API evidence has no corpus pair",
-    "AbiSnapshot.extraction_scope": "scope record, not a producer output; ablating it is H2's (route parity) territory",
-    "AbiSnapshot.dependency_info": "dependency walk evidence has no corpus pair",
-    "AbiSnapshot.build_mode": "L3 build-mode evidence has no corpus pair",
-    "AbiSnapshot.build_source_pack": "L3-L5 build-source reference has no corpus pair (#1389 lives here)",
-    "AbiSnapshot.build_source": "L3-L5 build-source pack has no corpus pair (#1389 lives here)",
-    "AbiSnapshot.surface_graph": "persisted surface graph is recomputed, not trusted, by compare (PR #979)",
-    "AbiSnapshot.contract": "extraction contract record has no corpus pair",
-    "AbiSnapshot.semantic_ir": "SemanticIR is not built by the in-process corpus",
-}
+UNCOVERED: dict[str, str] = {}
 
 #: The real current violations this harness found (see module docstring).
 #: ``(case, site, side)``. Empty since the header-origin seeding fix; the
@@ -316,6 +279,15 @@ def test_fact_ablation_contract_exports_config() -> None:
     assert found == set()
 
 
+@pytest.mark.slow
+def test_fact_ablation_contract_public_config() -> None:
+    """The domain that reads the header-identifier index and every captured
+    ``*.type_identities_fact``: an unknown one must never let a break through
+    as clean without a stated gap."""
+    found = _sweep(sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "contract_public")
+    assert found == set()
+
+
 @pytest.mark.parametrize(("case", "site", "side"), HEADER_ORIGIN_SEED_CELLS)
 @pytest.mark.parametrize("status", _STATUSES)
 def test_header_origin_seed_unknown_fact_keeps_break(
@@ -396,6 +368,24 @@ def _mk(
             [],
         ),
         (_mk("COMPATIBLE"), _mk("BREAKING", frozenset({("k", "s")})), ["(b)"]),
+        # The DWARF layer reporting the size change the header layer reported
+        # for the same record is the same observation, not a fabrication...
+        (
+            _mk("BREAKING", frozenset({("type_size_changed", "S")})),
+            _mk("BREAKING", frozenset({("struct_size_changed", "S")})),
+            [],
+        ),
+        # ...but only for that record, and only for that pairing.
+        (
+            _mk("BREAKING", frozenset({("type_size_changed", "S")})),
+            _mk("BREAKING", frozenset({("struct_size_changed", "T")})),
+            ["(b)"],
+        ),
+        (
+            _mk("BREAKING", frozenset({("type_field_removed", "S")})),
+            _mk("BREAKING", frozenset({("struct_size_changed", "S")})),
+            ["(b)"],
+        ),
         (_mk("NO_CHANGE"), _mk("API_BREAK"), []),
     ],
 )

@@ -710,8 +710,11 @@ def _diff_classes(
 @registry.detector(
     "python_api",
     requires_support=lambda o, n: (
-        n.python_api is not None,
-        "missing Python API surface (no .pyi stub recovered)",
+        n.python_api is not None
+        and (o.python_api is not None or not n.python_api.parse_ok),
+        "missing Python API surface (no .pyi stub recovered)"
+        if n.python_api is None
+        else "missing old Python API surface: additions and removals unknown",
     ),
 )
 def _diff_python_api(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
@@ -721,9 +724,12 @@ def _diff_python_api(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     and their signatures) recovered from ``.pyi`` stubs. Complements — does not
     replace — the G14 native-ABI check: a single ``compare`` surfaces both.
 
-    A missing old surface (a freshly stubbed module, or an old build that shipped
-    no stub) is treated as an empty baseline, so everything in the new surface
-    reads as an addition rather than a spurious break.
+    A missing old surface (an old build that shipped no stub, or a stub that
+    was not recovered) is *unknown*, not empty (design-hardening Phase 1, F1):
+    reading it as empty turned a changed signature into an "addition" and an
+    API break into a clean result. ``requires_support`` disables the
+    comparison with a coverage warning instead; the one NEW-only check -- a
+    stub that does not parse -- still runs, since it needs no baseline.
     """
     n = new.python_api
     assert n is not None  # guaranteed by requires_support
