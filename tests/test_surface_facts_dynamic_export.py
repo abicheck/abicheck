@@ -57,3 +57,40 @@ def test_matches_truth_table(
     assert is_dynamically_exported(
         decl, export_table_only_snapshot=export_only
     ) is _expected(fact, vis, export_only)
+
+
+@pytest.mark.parametrize("vis", list(Visibility))
+@pytest.mark.parametrize("header_declared", [True, False])
+def test_elf_only_demangling_follows_export_table_only_record(
+    vis: Visibility, header_declared: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only an export-table stub (``ELF_ONLY`` with no header declaration)
+    carries a raw mangled name to demangle; a header-parsed ``ELF_ONLY``
+    record is already demangled."""
+    from abicheck.compare import elf_only_demangle
+
+    monkeypatch.setattr(elf_only_demangle, "demangle", lambda m: "ns::f()")
+    facts = {"declared_in_headers_fact": Fact.present(True)} if header_declared else {}
+    decl = Function(
+        name="_ZN2ns1fEv",
+        mangled="_ZN2ns1fEv",
+        return_type="?",
+        visibility=vis,
+        **facts,
+    )
+    expected = (
+        "ns::f()" if (vis is Visibility.ELF_ONLY and not header_declared) else None
+    )
+    assert elf_only_demangle.elf_only_demangled_name("_ZN2ns1fEv", decl) == expected
+
+
+@pytest.mark.parametrize("vis", list(Visibility))
+def test_visibility_label_is_the_legacy_value(vis: Visibility) -> None:
+    from abicheck.model.surface_facts import visibility_label
+
+    assert (
+        visibility_label(
+            Function(name="f", mangled="f", return_type="int", visibility=vis)
+        )
+        == vis.value
+    )

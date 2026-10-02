@@ -96,6 +96,7 @@ __all__ = [
     "is_unknown",
     "public_header_contract_fact",
     "surface_fact_summary",
+    "visibility_label",
 ]
 
 #: Diagnostic stamped on every fact this module derives from the legacy
@@ -552,3 +553,15 @@ def headers_discarded_surface_facts(*, reason: str) -> dict[str, Fact[bool]]:
         "declared_in_headers_fact": Fact.not_collected(reason),
         "in_public_contract_fact": Fact.not_collected(reason),
     }
+
+
+def visibility_label(decl: SurfaceFactBearing) -> str:
+    """The legacy ``Visibility`` value as report text (``"public"``,
+    ``"hidden"``, ``"elf_only"``) -- for a finding's ``old_value``/
+    ``new_value``/description, which have always carried it.
+
+    Display only: no detector may branch on this string. The questions the
+    enum used to answer are the accessors above.
+    """
+    vis: Visibility = getattr(decl, "visibility", Visibility.PUBLIC)
+    return vis.value
