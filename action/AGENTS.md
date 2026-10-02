@@ -72,7 +72,10 @@ rule added to one and not the other reopens the exact silent-fallback bug
 `.github/workflows/test-action.yml` exercises the composite Action
 end-to-end (uses `./` as the action reference) against fixtures in
 `tests/fixtures/action/` — compare/scan/appcompat modes, SARIF/JSON output,
-severity handling, multi-platform. It is a **required** check when
+severity handling, multi-platform. Scenarios that share an OS and a
+dependency source run as steps of one job (each with its own assertion
+step); add a new scenario as steps there rather than as a new job unless it
+needs a clean or differently-provisioned runner. It is a **required** check when
 `action/**`/`action.yml` changes (path-filtered, see `.github/AGENTS.md`).
 
 Unit-level coverage of the shell logic lives in root `tests/` (not a

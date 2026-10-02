@@ -14,7 +14,6 @@ on:
       - 'pyproject.toml'
       - 'pixi.lock'
       - '.github/workflows/test-action.yml'
-      - '.github/workflows/check-single.yml'
       - 'tests/fixtures/action/**'
   push:
     branches: [main]
@@ -27,7 +26,6 @@ on:
       - 'pyproject.toml'
       - 'pixi.lock'
       - '.github/workflows/test-action.yml'
-      - '.github/workflows/check-single.yml'
       - 'tests/fixtures/action/**'
 
 concurrency:
@@ -47,18 +45,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── Test B: compare mode with snapshot fixtures (no system deps) ──────────
-  test-compare-breaking:
-    name: 'Compare: detect breaking change'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
+  # ── Why so few runners ───────────────────────────────────────────────────
+  # Every scenario below used to be its own job (26 runners per run). Each
+  # job did ~30s of work and then waited 5-75 minutes for a runner, because
+  # one PR fans out to dozens of runners across workflows. Scenarios that
+  # share an OS and a dependency source now run as consecutive `uses: ./`
+  # steps in ONE job; each keeps its own step id, inputs, and assertion
+  # step, so a failure still names the scenario. `if: ${{ !cancelled() }}`
+  # on every scenario step means one failing scenario does not hide the
+  # rest: they all run, and the job fails if any one did.
+  #
+  # A separate runner is kept only where isolation is the point:
+  #   * `test-dependency-source-conda-forge`: each cell provisions a
+  #     DIFFERENT pixi toolchain (scanner/gcc14/clang20) that prepends
+  #     itself to GITHUB_PATH, so two cells in one job would test the
+  #     second toolchain against the first one's PATH. The macOS axis lives
+  #     here too.
+  #   * everything with `dependency-source: none` (`install-deps: false`)
+  #     shares `test-action-scenarios`, which never runs an install step and
+  #     so never mutates PATH for a later scenario.
 
-      - name: Run abicheck (breaking case)
-        id: abi
+  # ── Snapshot + runner-gcc scenarios (ubuntu, dependency-source: none) ────
+  test-action-scenarios:
+    name: 'Action scenarios (ubuntu, dependency-source: none)'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      # ── compare-breaking: explicit `mode: compare` (the replacement for the
+      # retired mode: scan + against, ADR-068's Action-input-lifecycle
+      # amendment), versions, markdown. Also the ubuntu cell of the old
+      # multiplatform matrix, which ran the identical inputs minus format.
+      - name: '[compare-breaking] Run abicheck (mode: compare, breaking case)'
+        id: breaking
+        if: ${{ !cancelled() }}
         uses: ./
         with:
+          mode: compare
           old-library: tests/fixtures/action/action_test_v1.json
           new-library: tests/fixtures/action/action_test_v2.json
           old-version: '1.0'
@@ -67,29 +93,25 @@ jobs:
           install-deps: false
           fail-on-breaking: false  # don't fail the test job
 
-      - name: Verify verdict is BREAKING
+      - name: '[compare-breaking] Verify verdict is BREAKING (exit 4)'
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          echo "Exit code: ${{ steps.abi.outputs.exit-code }}"
-          if [[ "${{ steps.abi.outputs.verdict }}" != "BREAKING" ]]; then
-            echo "::error::Expected verdict BREAKING, got ${{ steps.abi.outputs.verdict }}"
+          echo "Verdict: ${{ steps.breaking.outputs.verdict }}"
+          echo "Exit code: ${{ steps.breaking.outputs.exit-code }}"
+          if [[ "${{ steps.breaking.outputs.verdict }}" != "BREAKING" ]]; then
+            echo "::error::Expected verdict BREAKING, got ${{ steps.breaking.outputs.verdict }}"
             exit 1
           fi
-          if [[ "${{ steps.abi.outputs.exit-code }}" != "4" ]]; then
-            echo "::error::Expected exit code 4, got ${{ steps.abi.outputs.exit-code }}"
+          if [[ "${{ steps.breaking.outputs.exit-code }}" != "4" ]]; then
+            echo "::error::Expected exit code 4, got ${{ steps.breaking.outputs.exit-code }}"
             exit 1
           fi
 
-  test-compare-compatible:
-    name: 'Compare: compatible (no change)'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Run abicheck (compatible case)
-        id: abi
+      # ── compare-compatible ───────────────────────────────────────────────
+      - name: '[compare-compatible] Run abicheck (compatible case)'
+        id: compatible
+        if: ${{ !cancelled() }}
         uses: ./
         with:
           old-library: tests/fixtures/action/action_test_v1.json
@@ -98,24 +120,20 @@ jobs:
           new-version: '1.1'
           install-deps: false
 
-      - name: Verify verdict is COMPATIBLE
+      - name: '[compare-compatible] Verify verdict is COMPATIBLE'
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          if [[ "${{ steps.abi.outputs.verdict }}" != "COMPATIBLE" ]]; then
-            echo "::error::Expected verdict COMPATIBLE, got ${{ steps.abi.outputs.verdict }}"
+          echo "Verdict: ${{ steps.compatible.outputs.verdict }}"
+          if [[ "${{ steps.compatible.outputs.verdict }}" != "COMPATIBLE" ]]; then
+            echo "::error::Expected verdict COMPATIBLE, got ${{ steps.compatible.outputs.verdict }}"
             exit 1
           fi
 
-  test-compare-sarif:
-    name: 'Compare: SARIF output'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Run abicheck (SARIF format)
-        id: abi
+      # ── compare-sarif ────────────────────────────────────────────────────
+      - name: '[compare-sarif] Run abicheck (SARIF format)'
+        id: sarif
+        if: ${{ !cancelled() }}
         uses: ./
         with:
           old-library: tests/fixtures/action/action_test_v1.json
@@ -125,11 +143,13 @@ jobs:
           install-deps: false
           fail-on-breaking: false
 
-      - name: Validate SARIF is valid JSON
+      - name: '[compare-sarif] Validate SARIF is valid JSON'
+        if: ${{ !cancelled() }}
         shell: bash
         run: python -m json.tool results.sarif > /dev/null
 
-      - name: Validate SARIF structure
+      - name: '[compare-sarif] Validate SARIF structure'
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           python -c "
@@ -144,23 +164,19 @@ jobs:
           print(f'SARIF OK: {len(run[\"results\"])} result(s), {len(run[\"tool\"][\"driver\"][\"rules\"])} rule(s)')
           "
 
-      - name: Verify report-path output
+      - name: '[compare-sarif] Verify report-path output'
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
-          if [[ "${{ steps.abi.outputs.report-path }}" != "results.sarif" ]]; then
-            echo "::error::Expected report-path=results.sarif, got ${{ steps.abi.outputs.report-path }}"
+          if [[ "${{ steps.sarif.outputs.report-path }}" != "results.sarif" ]]; then
+            echo "::error::Expected report-path=results.sarif, got ${{ steps.sarif.outputs.report-path }}"
             exit 1
           fi
 
-  test-compare-json:
-    name: 'Compare: JSON output'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Run abicheck (JSON format)
-        id: abi
+      # ── compare-json ─────────────────────────────────────────────────────
+      - name: '[compare-json] Run abicheck (JSON format)'
+        id: json
+        if: ${{ !cancelled() }}
         uses: ./
         with:
           old-library: tests/fixtures/action/action_test_v1.json
@@ -170,7 +186,8 @@ jobs:
           install-deps: false
           fail-on-breaking: false
 
-      - name: Validate JSON output
+      - name: '[compare-json] Validate JSON output'
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           python -c "
@@ -182,16 +199,10 @@ jobs:
           print(f'JSON report OK: verdict={data[\"verdict\"]}')
           "
 
-  # ── Test C: fail-on-breaking behaviour ──────────────────────────────────
-  test-fail-on-breaking:
-    name: 'Verify fail-on-breaking=true fails the step'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Run abicheck (should fail)
-        id: abi
+      # ── fail-on-breaking: true fails the step ────────────────────────────
+      - name: '[fail-on-breaking] Run abicheck (should fail)'
+        id: fail-on-breaking
+        if: ${{ !cancelled() }}
         uses: ./
         continue-on-error: true
         with:
@@ -200,30 +211,20 @@ jobs:
           install-deps: false
           fail-on-breaking: true
 
-      - name: Verify step failed
+      - name: '[fail-on-breaking] Verify step failed'
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
-          if [[ "${{ steps.abi.outcome }}" != "failure" ]]; then
-            echo "::error::Expected step to fail, but outcome was ${{ steps.abi.outcome }}"
+          if [[ "${{ steps.fail-on-breaking.outcome }}" != "failure" ]]; then
+            echo "::error::Expected step to fail, but outcome was ${{ steps.fail-on-breaking.outcome }}"
             exit 1
           fi
           echo "Correctly failed on breaking change"
 
-  # ── Test: action infrastructure (compare mode, no real binary needed) ──────
-  # TODO: add a true dump-mode test when a real binary/header fixture is available.
-  test-action-infrastructure:
-    name: 'Verify: action infrastructure with compare mode'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      # Test dump mode with a real ELF if castxml is available,
-      # otherwise just verify the action doesn't crash with bad input
-      # and gives a useful error. For now, test the action machinery
-      # with a simple compare since dump needs real binaries.
-      - name: Run abicheck compare (verify action infrastructure)
-        id: abi
+      # ── action-infrastructure: policy, verbose, job summary, output file ─
+      - name: '[action-infrastructure] Run abicheck compare (policy, verbose, job summary)'
+        id: infra
+        if: ${{ !cancelled() }}
         uses: ./
         with:
           old-library: tests/fixtures/action/action_test_v1.json
@@ -238,29 +239,323 @@ jobs:
           fail-on-breaking: false
           add-job-summary: true
 
-      - name: Verify output file exists and is valid
+      - name: '[action-infrastructure] Verify output file exists and is valid'
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           test -f test-output.json
           python -m json.tool test-output.json > /dev/null
           echo "Output file is valid JSON"
 
-  # ── Test: check-target (G30 P1.3, ADR-047 §4/§7) ─────────────────────────
-  test-check-target:
-    name: 'check-target: gate-mode: deferred never fails on a real finding, report envelope is well-formed'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
+      # ── severity.addition: error (config) ────────────────────────────────
+      - name: '[severity-addition-error] Run abicheck (compatible additions, should fail with severity)'
+        id: severity-addition
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          old-library: tests/fixtures/action/action_test_v1.json
+          new-library: tests/fixtures/action/action_test_v1_with_addition.json
+          install-deps: false
+          fail-on-breaking: false
+          extra-args: '--config tests/fixtures/action/severity_addition_error.abicheck.yml'
 
-      # Stage a fake baseline-set directly (no actions/baseline run needed --
-      # check-target only cares that resolve-baseline can read manifest.json
-      # + the snapshot it points at). action_test_v1.json/v2.json is the same
-      # pair test-compare-breaking already establishes as a real BREAKING
-      # finding -- reused here to prove check-target's own envelope/gate-mode
-      # logic on top of a known compatibility result, not to re-test compare
-      # itself.
-      - name: Stage baseline-set
+      - name: '[severity-addition-error] Verify severity-driven failure'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          if [[ "${{ steps.severity-addition.outcome }}" != "failure" ]]; then
+            echo "::error::Expected step outcome=failure, got ${{ steps.severity-addition.outcome }}"
+            exit 1
+          fi
+          echo "Verdict: ${{ steps.severity-addition.outputs.verdict }}"
+          echo "Exit code: ${{ steps.severity-addition.outputs.exit-code }}"
+          if [[ "${{ steps.severity-addition.outputs.verdict }}" != "SEVERITY_ERROR" ]]; then
+            echo "::error::Expected verdict SEVERITY_ERROR, got ${{ steps.severity-addition.outputs.verdict }}"
+            exit 1
+          fi
+          if [[ "${{ steps.severity-addition.outputs.exit-code }}" != "1" ]]; then
+            echo "::error::Expected exit code 1, got ${{ steps.severity-addition.outputs.exit-code }}"
+            exit 1
+          fi
+          echo "Correctly detected API additions via severity (exit code 1)"
+
+      # ── additions pass at default severity ──────────────────────────────
+      - name: '[additions-pass-by-default] Run abicheck (additions allowed by default)'
+        id: additions
+        if: ${{ !cancelled() }}
+        uses: ./
+        with:
+          old-library: tests/fixtures/action/action_test_v1.json
+          new-library: tests/fixtures/action/action_test_v1_with_addition.json
+          install-deps: false
+          fail-on-breaking: false
+
+      - name: '[additions-pass-by-default] Verify step succeeded'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          if [[ "${{ steps.additions.outcome }}" != "success" ]]; then
+            echo "::error::Expected success when additions are at default severity"
+            exit 1
+          fi
+          echo "Correctly passed with additions at default severity (info)"
+
+      # ── audit-only (old-library omitted; replaces mode: scan + audit) ────
+      - name: '[audit-only] Run abicheck compare with old-library omitted'
+        id: audit
+        if: ${{ !cancelled() }}
+        uses: ./
+        with:
+          mode: compare
+          new-library: tests/fixtures/action/action_test_v2.json
+          install-deps: false
+
+      - name: '[audit-only] Verify audit succeeds and is AUDIT_CLEAN'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.audit.outputs.verdict }}"
+          if [[ "${{ steps.audit.outcome }}" != "success" ]]; then
+            echo "::error::Expected the audit step to succeed"
+            exit 1
+          fi
+          # ADR-068's 2026-09-10 amendment, round 6 (Codex review, PR #1210):
+          # an audit-only exit-0 run no longer reports the generic
+          # COMPATIBLE verdict, which falsely implied a two-sided
+          # comparison ran -- AUDIT_CLEAN (no candidate-side finding at
+          # all) replaces it for this fixture, which is genuinely clean.
+          if [[ "${{ steps.audit.outputs.verdict }}" != "AUDIT_CLEAN" ]]; then
+            echo "::error::Expected verdict AUDIT_CLEAN, got ${{ steps.audit.outputs.verdict }}"
+            exit 1
+          fi
+
+      # ── audit-only dry run (replaces mode: scan + estimate) ──────────────
+      - name: '[audit-only-dry-run] Run abicheck compare --dry-run with old-library omitted'
+        id: audit-dry-run
+        if: ${{ !cancelled() }}
+        uses: ./
+        with:
+          mode: compare
+          new-library: tests/fixtures/action/action_test_v2.json
+          dry-run: 'true'
+          install-deps: false
+
+      - name: '[audit-only-dry-run] Verify dry run exits 0'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.audit-dry-run.outputs.verdict }}"
+          if [[ "${{ steps.audit-dry-run.outputs.exit-code }}" != "0" ]]; then
+            echo "::error::Expected dry run to exit 0, got ${{ steps.audit-dry-run.outputs.exit-code }}"
+            exit 1
+          fi
+
+      # ── audit-only gating requires severity-preset (migration trap) ──────
+      - name: '[audit-gate] Run abicheck compare audit-only WITHOUT severity-preset (must not gate)'
+        id: abi-no-preset
+        if: ${{ !cancelled() }}
+        uses: ./
+        with:
+          mode: compare
+          new-library: catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json
+          install-deps: false
+
+      - name: '[audit-gate] Verify the no-preset run stays exit 0 (silently non-gating, as documented)'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi-no-preset.outputs.verdict }}"
+          echo "Exit code: ${{ steps.abi-no-preset.outputs.exit-code }}"
+          if [[ "${{ steps.abi-no-preset.outputs.exit-code }}" != "0" ]]; then
+            echo "::error::Expected exit 0 without severity-preset, got ${{ steps.abi-no-preset.outputs.exit-code }}"
+            exit 1
+          fi
+
+      - name: '[audit-gate] Run abicheck compare audit-only WITH severity-preset (must gate, exit 3)'
+        id: abi-with-preset
+        if: ${{ !cancelled() }}
+        uses: ./
+        # AUDIT_GATE fails the step unconditionally (no fail-on-* input
+        # governs it, action/run.sh) -- fail-on-breaking: false has no
+        # effect on this axis, so continue-on-error is what actually lets
+        # the job reach the assertion step below (Codex review, PR #1223).
+        continue-on-error: true
+        with:
+          mode: compare
+          new-library: catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json
+          severity-preset: default
+          install-deps: false
+
+      - name: '[audit-gate] Verify the run gates at exit 3 (AUDIT_GATE) with severity-preset set'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi-with-preset.outputs.verdict }}"
+          echo "Exit code: ${{ steps.abi-with-preset.outputs.exit-code }}"
+          if [[ "${{ steps.abi-with-preset.outputs.verdict }}" != "AUDIT_GATE" ]]; then
+            echo "::error::Expected verdict AUDIT_GATE, got ${{ steps.abi-with-preset.outputs.verdict }}"
+            exit 1
+          fi
+          if [[ "${{ steps.abi-with-preset.outputs.exit-code }}" != "3" ]]; then
+            echo "::error::Expected exit code 3, got ${{ steps.abi-with-preset.outputs.exit-code }}"
+            exit 1
+          fi
+
+      # ── extra-args: a value spelled like a flag is not read as one ───────
+      # The one end-to-end cell for ADR-070 D3 (plan Phases 3a/5). `run.sh`
+      # derives which CLI options take a value from the INSTALLED abicheck; the
+      # shell unit tests drive that derivation through sourced functions, which
+      # cannot see anything only a real runner produces -- `INPUT_*` quoting, and
+      # the `CMD+=($INPUT_EXTRA_ARGS)` word-split under a live IFS.
+      #
+      # `--version --dry-run` is the discriminating input, and it is the exact
+      # counterexample that disproved this ADR's first design (Codex review, PR
+      # #1234): Click accepts it by consuming `--dry-run` as `--version`'s own
+      # value, leaving `dry_run=False` and running a full comparison. A correct
+      # derivation therefore sees NO dry-run flag, injects its report sidecar,
+      # and publishes a real verdict. A tokenizer that mis-reads it -- the old
+      # hand-maintained list, or an opaque-token fallback -- reports a dry run,
+      # skips the sidecar, and publishes DRY_RUN while a real comparison ran.
+      # So the assertion below fails loudly on precisely that regression.
+      - name: '[extra-args-flag-shaped-value] Run compare with a flag-shaped --version value in extra-args'
+        id: extra-args
+        if: ${{ !cancelled() }}
+        uses: ./
+        with:
+          old-library: tests/fixtures/action/action_test_v1.json
+          new-library: tests/fixtures/action/action_test_v1_compat.json
+          extra-args: --version --dry-run
+          install-deps: false
+
+      - name: '[extra-args-flag-shaped-value] Verify the run was not mistaken for a dry run'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.extra-args.outputs.verdict }}"
+          echo "Exit code: ${{ steps.extra-args.outputs.exit-code }}"
+          if [[ "${{ steps.extra-args.outputs.verdict }}" == "DRY_RUN" ]]; then
+            echo "::error::extra-args '--version --dry-run' was read as a real --dry-run flag. The CLI consumes --dry-run as --version's value and runs a full comparison, so the value-taking-option derivation in run.sh (_cli_value_options_init) is wrong or fell back to treating every token as opaque. See ADR-070 D3."
+            exit 1
+          fi
+          # A real comparison of these two fixtures is compatible, so the
+          # verdict must be the ordinary one -- not an error, and not a preview.
+          if [[ "${{ steps.extra-args.outputs.verdict }}" != "COMPATIBLE" ]]; then
+            echo "::error::Expected verdict COMPATIBLE from a real comparison, got '${{ steps.extra-args.outputs.verdict }}'"
+            exit 1
+          fi
+
+      # ── dependency-source: none, and the legacy install-deps alias ───────
+      - name: '[dependency-source-none] dependency-source=none does not attempt any install (pre-installed castxml)'
+        id: abi-none
+        if: ${{ !cancelled() }}
+        uses: ./
+        with:
+          old-library: tests/fixtures/action/action_test_v1.json
+          new-library: tests/fixtures/action/action_test_v2.json
+          dependency-source: none
+          fail-on-breaking: false
+
+      - name: '[dependency-source-none] Verify dependency-source=none ran successfully'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          if [[ "${{ steps.abi-none.outputs.verdict }}" != "BREAKING" ]]; then
+            echo "::error::Expected verdict BREAKING, got ${{ steps.abi-none.outputs.verdict }}"
+            exit 1
+          fi
+
+      # Every other scenario in this job also passes `install-deps: false`, so
+      # each of them exercises this alias too; this pair keeps the claim
+      # explicit and asserted on its own.
+      - name: '[dependency-source-none] install-deps=false still maps to dependency-source=none (deprecated alias)'
+        id: abi-legacy-false
+        if: ${{ !cancelled() }}
+        uses: ./
+        with:
+          old-library: tests/fixtures/action/action_test_v1.json
+          new-library: tests/fixtures/action/action_test_v2.json
+          install-deps: false
+          fail-on-breaking: false
+
+      - name: '[dependency-source-none] Verify install-deps=false alias ran successfully'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          if [[ "${{ steps.abi-legacy-false.outputs.verdict }}" != "BREAKING" ]]; then
+            echo "::error::Expected verdict BREAKING, got ${{ steps.abi-legacy-false.outputs.verdict }}"
+            exit 1
+          fi
+
+      # ── app-scoped comparison (ADR-043: appcompat folded into --used-by) ─
+      # Built with the runner's own gcc; no dependency-source install.
+      - name: '[appcompat] Build test binaries'
+        if: ${{ !cancelled() }}
+        run: |
+          cd catalog/cases/case01_symbol_removal
+          gcc -shared -fPIC v1.c -o libv1.so
+          gcc -shared -fPIC v2.c -o libv2.so
+          gcc app.c -L. -lv1 -o myapp -Wl,-rpath,.
+
+      - name: '[appcompat-full] Run abicheck compare --used-by (breaking case)'
+        id: appcompat-full
+        if: ${{ !cancelled() }}
+        uses: ./
+        continue-on-error: true
+        with:
+          old-library: catalog/cases/case01_symbol_removal/libv1.so
+          new-library: catalog/cases/case01_symbol_removal/libv2.so
+          format: json
+          output-file: appcompat-result.json
+          install-deps: false
+          fail-on-breaking: true
+          extra-args: '--used-by catalog/cases/case01_symbol_removal/myapp'
+
+      - name: '[appcompat-full] Verify verdict is BREAKING'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.appcompat-full.outputs.verdict }}"
+          echo "Exit code: ${{ steps.appcompat-full.outputs.exit-code }}"
+          if [[ "${{ steps.appcompat-full.outputs.verdict }}" != "BREAKING" ]]; then
+            echo "::error::Expected verdict BREAKING, got ${{ steps.appcompat-full.outputs.verdict }}"
+            exit 1
+          fi
+
+      # App-scoped comparison against an unchanged library (weak mode).
+      - name: '[appcompat-weak] Run abicheck compare --used-by (all symbols present)'
+        id: appcompat-weak
+        if: ${{ !cancelled() }}
+        uses: ./
+        with:
+          old-library: catalog/cases/case01_symbol_removal/libv1.so
+          new-library: catalog/cases/case01_symbol_removal/libv1.so
+          install-deps: false
+          fail-on-breaking: true
+          extra-args: '--used-by catalog/cases/case01_symbol_removal/myapp'
+
+      - name: '[appcompat-weak] Verify verdict is COMPATIBLE'
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.appcompat-weak.outputs.verdict }}"
+          if [[ "${{ steps.appcompat-weak.outputs.verdict }}" != "COMPATIBLE" ]]; then
+            echo "::error::Expected verdict COMPATIBLE, got ${{ steps.appcompat-weak.outputs.verdict }}"
+            exit 1
+          fi
+
+      # ── check-target (G30 P1.3, ADR-047 §4/§7) ───────────────────────────
+      # gate-mode: deferred never fails on a real finding; report envelope is
+      # well-formed. Stage a fake baseline-set directly (no actions/baseline
+      # run needed -- check-target only cares that resolve-baseline can read
+      # manifest.json + the snapshot it points at). action_test_v1.json/v2.json
+      # is the same pair [compare-breaking] already establishes as a real
+      # BREAKING finding -- reused here to prove check-target's own
+      # envelope/gate-mode logic on top of a known compatibility result, not to
+      # re-test compare itself. Last in the job: check-target checks the repo
+      # out again into `.abicheck-check-target-src` for its nested Actions.
+      - name: '[check-target] Stage baseline-set'
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           mkdir -p /tmp/baseline-set
@@ -286,8 +581,9 @@ jobs:
               json.dump(manifest, f, indent=2)
           "
 
-      - name: 'Run check-target (gate-mode: deferred)'
+      - name: '[check-target] Run check-target (gate-mode: deferred)'
         id: check
+        if: ${{ !cancelled() }}
         uses: ./actions/check-target
         with:
           name: libexample
@@ -299,7 +595,8 @@ jobs:
           new-library: tests/fixtures/action/action_test_v2.json
           install-deps: false
 
-      - name: "Verify outcome, envelope identity, and gate-mode: deferred's non-failing job"
+      - name: "[check-target] Verify outcome, envelope identity, and gate-mode: deferred's non-failing job"
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           echo "outcome=${{ steps.check.outputs.outcome }}"
@@ -313,10 +610,12 @@ jobs:
           test "${{ steps.check.outputs.compatibility-verdict }}" = "BREAKING"
           test "${{ steps.check.outputs.policy-gate-decision }}" = "fail"
           # gate-mode: deferred must not fail this job on a real finding --
-          # reaching this step at all (after a nonzero-exit internal compare)
-          # already proves that; also assert the persisted report kept its
-          # REAL severity (never neutralized for deferred -- only advisory
-          # neutralizes, since a trailing aggregate job needs the real value).
+          # the check-target step's own success (it has no continue-on-error)
+          # after a nonzero-exit internal compare already proves that; also
+          # assert the persisted report kept its REAL severity (never
+          # neutralized for deferred -- only advisory neutralizes, since a
+          # trailing aggregate job needs the real value).
+          test "${{ steps.check.outcome }}" = "success"
           python -m json.tool "${{ steps.check.outputs.report-path }}" > /dev/null
           python3 -c "import json, sys
           report = json.load(open(sys.argv[1]))
@@ -325,372 +624,18 @@ jobs:
           assert report['check_evidence_coverage']['state'] == 'complete'
           print('report envelope OK')" "${{ steps.check.outputs.report-path }}"
 
-  # ── Test: multiplatform ─────────────────────────────────────────────────
-  test-multiplatform:
-    name: 'Multiplatform: ${{ matrix.os }}'
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Run abicheck
-        id: abi
-        uses: ./
-        with:
-          old-library: tests/fixtures/action/action_test_v1.json
-          new-library: tests/fixtures/action/action_test_v2.json
-          install-deps: false
-          fail-on-breaking: false
-
-      - name: Verify verdict
-        shell: bash
-        run: |
-          echo "Verdict on ${{ matrix.os }}: ${{ steps.abi.outputs.verdict }}"
-          if [[ "${{ steps.abi.outputs.verdict }}" != "BREAKING" ]]; then
-            echo "::error::Expected BREAKING on ${{ matrix.os }}"
-            exit 1
-          fi
-
-  # ── Test: severity.addition: error (config) ───────────────────────────────
-  test-severity-addition-error:
-    name: 'severity.addition error: detect unexpected API expansion'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Run abicheck (compatible additions, should fail with severity)
-        id: abi
-        uses: ./
-        continue-on-error: true
-        with:
-          old-library: tests/fixtures/action/action_test_v1.json
-          new-library: tests/fixtures/action/action_test_v1_with_addition.json
-          install-deps: false
-          fail-on-breaking: false
-          extra-args: '--config tests/fixtures/action/severity_addition_error.abicheck.yml'
-
-      - name: Verify severity-driven failure
-        shell: bash
-        run: |
-          if [[ "${{ steps.abi.outcome }}" != "failure" ]]; then
-            echo "::error::Expected step outcome=failure, got ${{ steps.abi.outcome }}"
-            exit 1
-          fi
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          echo "Exit code: ${{ steps.abi.outputs.exit-code }}"
-          if [[ "${{ steps.abi.outputs.verdict }}" != "SEVERITY_ERROR" ]]; then
-            echo "::error::Expected verdict SEVERITY_ERROR, got ${{ steps.abi.outputs.verdict }}"
-            exit 1
-          fi
-          if [[ "${{ steps.abi.outputs.exit-code }}" != "1" ]]; then
-            echo "::error::Expected exit code 1, got ${{ steps.abi.outputs.exit-code }}"
-            exit 1
-          fi
-          echo "Correctly detected API additions via severity (exit code 1)"
-
-  # ── Test: app-scoped comparison (ADR-043: appcompat folded into --used-by) ──
-  test-appcompat-full:
-    name: 'Appcompat: detect breaking change affecting app'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build test binaries
-        run: |
-          cd catalog/cases/case01_symbol_removal
-          gcc -shared -fPIC v1.c -o libv1.so
-          gcc -shared -fPIC v2.c -o libv2.so
-          gcc app.c -L. -lv1 -o myapp -Wl,-rpath,.
-
-      - name: Run abicheck compare --used-by (breaking case)
-        id: abi
-        uses: ./
-        continue-on-error: true
-        with:
-          old-library: catalog/cases/case01_symbol_removal/libv1.so
-          new-library: catalog/cases/case01_symbol_removal/libv2.so
-          format: json
-          output-file: appcompat-result.json
-          install-deps: false
-          fail-on-breaking: true
-          extra-args: '--used-by catalog/cases/case01_symbol_removal/myapp'
-
-      - name: Verify verdict is BREAKING
-        shell: bash
-        run: |
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          echo "Exit code: ${{ steps.abi.outputs.exit-code }}"
-          if [[ "${{ steps.abi.outputs.verdict }}" != "BREAKING" ]]; then
-            echo "::error::Expected verdict BREAKING, got ${{ steps.abi.outputs.verdict }}"
-            exit 1
-          fi
-
-  # ── Test: app-scoped comparison against an unchanged library (weak mode) ───
-  test-appcompat-weak:
-    name: 'Appcompat: weak mode symbol check'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Build test binaries
-        run: |
-          cd catalog/cases/case01_symbol_removal
-          gcc -shared -fPIC v1.c -o libv1.so
-          gcc app.c -L. -lv1 -o myapp -Wl,-rpath,.
-
-      - name: Run abicheck compare --used-by (all symbols present)
-        id: abi
-        uses: ./
-        with:
-          old-library: catalog/cases/case01_symbol_removal/libv1.so
-          new-library: catalog/cases/case01_symbol_removal/libv1.so
-          install-deps: false
-          fail-on-breaking: true
-          extra-args: '--used-by catalog/cases/case01_symbol_removal/myapp'
-
-      - name: Verify verdict is COMPATIBLE
-        shell: bash
-        run: |
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          if [[ "${{ steps.abi.outputs.verdict }}" != "COMPATIBLE" ]]; then
-            echo "::error::Expected verdict COMPATIBLE, got ${{ steps.abi.outputs.verdict }}"
-            exit 1
-          fi
-
-  test-additions-pass-by-default:
-    name: 'additions pass through without a severity.addition error'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Run abicheck (additions allowed by default)
-        id: abi
-        uses: ./
-        with:
-          old-library: tests/fixtures/action/action_test_v1.json
-          new-library: tests/fixtures/action/action_test_v1_with_addition.json
-          install-deps: false
-          fail-on-breaking: false
-
-      - name: Verify step succeeded
-        shell: bash
-        run: |
-          if [[ "${{ steps.abi.outcome }}" != "success" ]]; then
-            echo "::error::Expected success when additions are at default severity"
-            exit 1
-          fi
-          echo "Correctly passed with additions at default severity (info)"
-
-  # ── mode: compare — the replacement wiring for the retired mode: scan
-  # (ADR-068's Action-input-lifecycle amendment) ──────────────────────────────
-  test-compare-baseline-breaking:
-    name: 'Compare: baseline comparison detects breaking change (replaces mode: scan + against)'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: Run abicheck compare against a baseline
-        id: abi
-        uses: ./
-        with:
-          mode: compare
-          old-library: tests/fixtures/action/action_test_v1.json
-          new-library: tests/fixtures/action/action_test_v2.json
-          install-deps: false
-          fail-on-breaking: false  # don't fail the test job
-
-      - name: Verify verdict is BREAKING (exit 4)
-        shell: bash
-        run: |
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          echo "Exit code: ${{ steps.abi.outputs.exit-code }}"
-          if [[ "${{ steps.abi.outputs.verdict }}" != "BREAKING" ]]; then
-            echo "::error::Expected verdict BREAKING, got ${{ steps.abi.outputs.verdict }}"
-            exit 1
-          fi
-          if [[ "${{ steps.abi.outputs.exit-code }}" != "4" ]]; then
-            echo "::error::Expected exit code 4, got ${{ steps.abi.outputs.exit-code }}"
-            exit 1
-          fi
-
-  test-compare-audit-only:
-    name: 'Compare: audit-only, no baseline (replaces mode: scan + audit: true)'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: Run abicheck compare with old-library omitted (audit-only)
-        id: abi
-        uses: ./
-        with:
-          mode: compare
-          new-library: tests/fixtures/action/action_test_v2.json
-          install-deps: false
-
-      - name: Verify audit succeeds and is AUDIT_CLEAN
-        shell: bash
-        run: |
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          if [[ "${{ steps.abi.outcome }}" != "success" ]]; then
-            echo "::error::Expected the audit step to succeed"
-            exit 1
-          fi
-          # ADR-068's 2026-09-10 amendment, round 6 (Codex review, PR #1210):
-          # an audit-only exit-0 run no longer reports the generic
-          # COMPATIBLE verdict, which falsely implied a two-sided
-          # comparison ran -- AUDIT_CLEAN (no candidate-side finding at
-          # all) replaces it for this fixture, which is genuinely clean.
-          if [[ "${{ steps.abi.outputs.verdict }}" != "AUDIT_CLEAN" ]]; then
-            echo "::error::Expected verdict AUDIT_CLEAN, got ${{ steps.abi.outputs.verdict }}"
-            exit 1
-          fi
-
-  test-compare-audit-only-dry-run:
-    name: 'Compare: audit-only dry run (replaces mode: scan + estimate: true)'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: Run abicheck compare --dry-run with old-library omitted
-        id: abi
-        uses: ./
-        with:
-          mode: compare
-          new-library: tests/fixtures/action/action_test_v2.json
-          dry-run: 'true'
-          install-deps: false
-
-      - name: Verify dry run exits 0
-        shell: bash
-        run: |
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          if [[ "${{ steps.abi.outputs.exit-code }}" != "0" ]]; then
-            echo "::error::Expected dry run to exit 0, got ${{ steps.abi.outputs.exit-code }}"
-            exit 1
-          fi
-
-  test-extra-args-value-shaped-like-a-flag:
-    name: 'extra-args: a value spelled like a flag is not read as one'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      # The one end-to-end cell for ADR-070 D3 (plan Phases 3a/5). `run.sh`
-      # derives which CLI options take a value from the INSTALLED abicheck; the
-      # shell unit tests drive that derivation through sourced functions, which
-      # cannot see anything only a real runner produces -- `INPUT_*` quoting, and
-      # the `CMD+=($INPUT_EXTRA_ARGS)` word-split under a live IFS.
-      #
-      # `--version --dry-run` is the discriminating input, and it is the exact
-      # counterexample that disproved this ADR's first design (Codex review, PR
-      # #1234): Click accepts it by consuming `--dry-run` as `--version`'s own
-      # value, leaving `dry_run=False` and running a full comparison. A correct
-      # derivation therefore sees NO dry-run flag, injects its report sidecar,
-      # and publishes a real verdict. A tokenizer that mis-reads it -- the old
-      # hand-maintained list, or an opaque-token fallback -- reports a dry run,
-      # skips the sidecar, and publishes DRY_RUN while a real comparison ran.
-      # So the assertion below fails loudly on precisely that regression.
-      - name: Run compare with a flag-shaped --version value in extra-args
-        id: abi
-        uses: ./
-        with:
-          old-library: tests/fixtures/action/action_test_v1.json
-          new-library: tests/fixtures/action/action_test_v1_compat.json
-          extra-args: --version --dry-run
-          install-deps: false
-
-      - name: Verify the run was not mistaken for a dry run
-        shell: bash
-        run: |
-          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
-          echo "Exit code: ${{ steps.abi.outputs.exit-code }}"
-          if [[ "${{ steps.abi.outputs.verdict }}" == "DRY_RUN" ]]; then
-            echo "::error::extra-args '--version --dry-run' was read as a real --dry-run flag. The CLI consumes --dry-run as --version's value and runs a full comparison, so the value-taking-option derivation in run.sh (_cli_value_options_init) is wrong or fell back to treating every token as opaque. See ADR-070 D3."
-            exit 1
-          fi
-          # A real comparison of these two fixtures is compatible, so the
-          # verdict must be the ordinary one -- not an error, and not a preview.
-          if [[ "${{ steps.abi.outputs.verdict }}" != "COMPATIBLE" ]]; then
-            echo "::error::Expected verdict COMPATIBLE from a real comparison, got '${{ steps.abi.outputs.verdict }}'"
-            exit 1
-          fi
-
-  test-compare-audit-only-gates-with-severity-preset:
-    name: 'Compare: audit-only gating requires severity-preset (the audit-gate migration trap)'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: Run abicheck compare audit-only WITHOUT severity-preset (must not gate)
-        id: abi-no-preset
-        uses: ./
-        with:
-          mode: compare
-          new-library: catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json
-          install-deps: false
-
-      - name: Verify the no-preset run stays exit 0 (silently non-gating, as documented)
-        shell: bash
-        run: |
-          echo "Verdict: ${{ steps.abi-no-preset.outputs.verdict }}"
-          echo "Exit code: ${{ steps.abi-no-preset.outputs.exit-code }}"
-          if [[ "${{ steps.abi-no-preset.outputs.exit-code }}" != "0" ]]; then
-            echo "::error::Expected exit 0 without severity-preset, got ${{ steps.abi-no-preset.outputs.exit-code }}"
-            exit 1
-          fi
-
-      - name: Run abicheck compare audit-only WITH severity-preset (must gate, exit 3)
-        id: abi-with-preset
-        uses: ./
-        # AUDIT_GATE fails the step unconditionally (no fail-on-* input
-        # governs it, action/run.sh) -- fail-on-breaking: false has no
-        # effect on this axis, so continue-on-error is what actually lets
-        # the job reach the assertion step below (Codex review, PR #1223).
-        continue-on-error: true
-        with:
-          mode: compare
-          new-library: catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json
-          severity-preset: default
-          install-deps: false
-
-      - name: Verify the run gates at exit 3 (AUDIT_GATE) with severity-preset set
-        shell: bash
-        run: |
-          echo "Verdict: ${{ steps.abi-with-preset.outputs.verdict }}"
-          echo "Exit code: ${{ steps.abi-with-preset.outputs.exit-code }}"
-          if [[ "${{ steps.abi-with-preset.outputs.verdict }}" != "AUDIT_GATE" ]]; then
-            echo "::error::Expected verdict AUDIT_GATE, got ${{ steps.abi-with-preset.outputs.verdict }}"
-            exit 1
-          fi
-          if [[ "${{ steps.abi-with-preset.outputs.exit-code }}" != "3" ]]; then
-            echo "::error::Expected exit code 3, got ${{ steps.abi-with-preset.outputs.exit-code }}"
-            exit 1
-          fi
-
-  # ── Test: dependency-source: conda-forge provisions a real castxml/gcc L2
-  # scan (not just install-deps: false against a pre-built snapshot) ─────────
+  # ── dependency-source: conda-forge* provisions a real castxml/gcc L2 scan ─
+  # One runner per cell is deliberate: each cell installs a different pixi
+  # toolchain onto GITHUB_PATH. Two riders share cells whose dependency
+  # source they already match:
+  #   * `snapshot-smoke` (macOS conda-forge): the old `Multiplatform:
+  #     macos-latest` job -- a snapshot compare with install-deps: false. It
+  #     runs FIRST, before this cell's pixi install touches PATH, so it still
+  #     measures a clean macOS runner.
+  #   * `report-scenarios` (ubuntu conda-forge): versioning policy and
+  #     consumer impact through the real Action. `--use-cases` needs the
+  #     header-only source graph, i.e. castxml, i.e. the default conda-forge
+  #     source this cell provisions; it reuses the cell's case01 binaries.
   test-dependency-source-conda-forge:
     name: 'dependency-source: ${{ matrix.dependency-source }} on ${{ matrix.os }}'
     strategy:
@@ -702,8 +647,10 @@ jobs:
           # never touches dependency-source now gets.
           - os: ubuntu-latest
             dependency-source: conda-forge
+            report-scenarios: true
           - os: macos-latest
             dependency-source: conda-forge
+            snapshot-smoke: true
           # Pinned-major variants: gcc14 is linux-only (conda-forge's gcc
           # doesn't build for macOS -- see native-toolchain-gcc14 in
           # pyproject.toml); clang20 covers both.
@@ -720,7 +667,29 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+      # ── [multiplatform] snapshot compare on a clean runner (before pixi) ─
+      - name: '[multiplatform] Run abicheck (snapshot fixtures, install-deps: false)'
+        id: multiplatform
+        if: ${{ matrix.snapshot-smoke }}
+        uses: ./
+        with:
+          old-library: tests/fixtures/action/action_test_v1.json
+          new-library: tests/fixtures/action/action_test_v2.json
+          install-deps: false
+          fail-on-breaking: false
+
+      - name: '[multiplatform] Verify verdict'
+        if: ${{ matrix.snapshot-smoke && !cancelled() }}
+        shell: bash
+        run: |
+          echo "Verdict on ${{ matrix.os }}: ${{ steps.multiplatform.outputs.verdict }}"
+          if [[ "${{ steps.multiplatform.outputs.verdict }}" != "BREAKING" ]]; then
+            echo "::error::Expected BREAKING on ${{ matrix.os }}"
+            exit 1
+          fi
+
       - name: Build test binaries (runner's own pre-installed compiler)
+        if: ${{ !cancelled() }}
         run: |
           cd catalog/cases/case01_symbol_removal
           gcc -shared -fPIC v1.c -o libv1.so
@@ -728,6 +697,7 @@ jobs:
 
       - name: 'Run abicheck compare (header-AST, via matrix dependency-source)'
         id: abi
+        if: ${{ !cancelled() }}
         uses: ./
         with:
           old-library: catalog/cases/case01_symbol_removal/libv1.so
@@ -740,6 +710,7 @@ jobs:
           fail-on-breaking: false
 
       - name: Verify verdict is BREAKING and header-AST evidence was actually used
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           echo "Verdict: ${{ steps.abi.outputs.verdict }}"
@@ -756,80 +727,26 @@ jobs:
             exit 1
           fi
 
-  test-dependency-source-none-and-legacy-alias:
-    name: 'dependency-source: none, and legacy install-deps=true/false aliasing'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: dependency-source=none does not attempt any install (pre-installed castxml)
-        id: abi-none
-        uses: ./
-        with:
-          old-library: tests/fixtures/action/action_test_v1.json
-          new-library: tests/fixtures/action/action_test_v2.json
-          dependency-source: none
-          fail-on-breaking: false
-
-      - name: Verify dependency-source=none ran successfully
-        shell: bash
+      # ── [report-policy] versioning policy and consumer impact reach the
+      # reports without moving the gate (no internal decision-record ids in
+      # user-facing output). A `versioning:` block in the policy file must
+      # reach the rendered reports (JSON
+      # `release_recommendation.policy_acceptance`, the HTML
+      # `versioning-policy` card) WITHOUT moving the gate: the verdict and
+      # exit-code outputs are compared against an otherwise-identical run with
+      # no policy file. Both runs use the default dependency source
+      # (conda-forge), which is this cell's.
+      - name: '[report-policy] Write the policy/use-case inputs'
+        if: ${{ matrix.report-scenarios && !cancelled() }}
         run: |
-          if [[ "${{ steps.abi-none.outputs.verdict }}" != "BREAKING" ]]; then
-            echo "::error::Expected verdict BREAKING, got ${{ steps.abi-none.outputs.verdict }}"
-            exit 1
-          fi
-
-      - name: install-deps=false still maps to dependency-source=none (deprecated alias)
-        id: abi-legacy-false
-        uses: ./
-        with:
-          old-library: tests/fixtures/action/action_test_v1.json
-          new-library: tests/fixtures/action/action_test_v2.json
-          install-deps: false
-          fail-on-breaking: false
-
-      - name: Verify install-deps=false alias ran successfully
-        shell: bash
-        run: |
-          if [[ "${{ steps.abi-legacy-false.outputs.verdict }}" != "BREAKING" ]]; then
-            echo "::error::Expected verdict BREAKING, got ${{ steps.abi-legacy-false.outputs.verdict }}"
-            exit 1
-          fi
-
-  # ── Test: report-only features through the real Action (versioning policy,
-  # consumer impact, no internal decision-record ids in user-facing output) ──
-  # A `versioning:` block in the policy file must reach the rendered reports
-  # (JSON `release_recommendation.policy_acceptance`, the HTML
-  # `versioning-policy` card) WITHOUT moving the gate: the verdict and
-  # exit-code outputs are compared against an otherwise-identical run with no
-  # policy file. `--use-cases` needs a source graph, and the always-on
-  # header-only graph needs castxml, so this job provisions the default
-  # conda-forge dependency source instead of `install-deps: false`.
-  test-report-policy-and-consumer-impact:
-    name: 'Compare: versioning policy and consumer impact reach the reports without moving the gate'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - name: Build test binaries and write the policy/use-case inputs
-        run: |
-          cd catalog/cases/case01_symbol_removal
-          gcc -shared -fPIC v1.c -o libv1.so
-          gcc -shared -fPIC v2.c -o libv2.so
-          cd "$GITHUB_WORKSPACE"
           printf 'versioning:\n  promise: abi_within_major\n  enforcement: block\n' > versioning-policy.yml
           printf -- '- use_case: compute path\n  entrypoints: [compute]\n- use_case: helper path\n  entrypoints: [helper]\n' > impact-use-cases.yaml
 
       # 1.0 -> 1.1 with a removed export: a break inside a major line, which
       # `abi_within_major` + `enforcement: block` must record as not accepted.
-      - name: Run abicheck compare with a versioning policy and use cases
+      - name: '[report-policy] Run abicheck compare with a versioning policy and use cases'
         id: with-policy
+        if: ${{ matrix.report-scenarios && !cancelled() }}
         uses: ./
         with:
           old-library: catalog/cases/case01_symbol_removal/libv1.so
@@ -842,8 +759,9 @@ jobs:
           extra-args: --use-cases impact-use-cases.yaml -o json=policy-report.json -o markdown=policy-report.md -o html=policy-report.html
           fail-on-breaking: false
 
-      - name: Run the same comparison without the policy file
+      - name: '[report-policy] Run the same comparison without the policy file'
         id: without-policy
+        if: ${{ matrix.report-scenarios && !cancelled() }}
         uses: ./
         with:
           old-library: catalog/cases/case01_symbol_removal/libv1.so
@@ -856,7 +774,8 @@ jobs:
           output-file: baseline-report.json
           fail-on-breaking: false
 
-      - name: Verify reports carry the policy/consumer sections and the gate is unchanged
+      - name: '[report-policy] Verify reports carry the policy/consumer sections and the gate is unchanged'
+        if: ${{ matrix.report-scenarios && !cancelled() }}
         shell: bash
         env:
           WITH_VERDICT: ${{ steps.with-policy.outputs.verdict }}
@@ -920,26 +839,8 @@ jobs:
     # hits its own timeout leaves it false, so this job still runs and fails.
     if: ${{ !cancelled() }}
     needs:
-      - test-compare-breaking
-      - test-compare-compatible
-      - test-compare-sarif
-      - test-compare-json
-      - test-fail-on-breaking
-      - test-action-infrastructure
-      - test-check-target
-      - test-multiplatform
-      - test-severity-addition-error
-      - test-appcompat-full
-      - test-appcompat-weak
-      - test-additions-pass-by-default
-      - test-compare-baseline-breaking
-      - test-compare-audit-only
-      - test-compare-audit-only-dry-run
-      - test-compare-audit-only-gates-with-severity-preset
-      - test-extra-args-value-shaped-like-a-flag
+      - test-action-scenarios
       - test-dependency-source-conda-forge
-      - test-dependency-source-none-and-legacy-alias
-      - test-report-policy-and-consumer-impact
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
