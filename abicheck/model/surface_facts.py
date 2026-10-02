@@ -87,6 +87,7 @@ __all__ = [
     "is_binary_exported",
     "is_confirmed_false",
     "is_confirmed_true",
+    "is_dynamically_exported",
     "is_export_confirmed_absent",
     "is_export_table_only_record",
     "is_header_declared",
@@ -363,6 +364,33 @@ def is_export_table_only_record(decl: SurfaceFactBearing) -> bool:
     if getattr(decl, "visibility", None) is not Visibility.ELF_ONLY:
         return False
     return not is_header_declared(decl)
+
+
+def is_dynamically_exported(
+    decl: SurfaceFactBearing, *, export_table_only_snapshot: bool
+) -> bool:
+    """Confirmed (c), with the sharper pre-split reading of the legacy enum.
+
+    A producer-set export fact answers directly. A pre-v46 record (no fact,
+    so :func:`binary_exported` derives one from ``Visibility``) cannot use
+    the bridge's reading, which counts ``ELF_ONLY`` as exported: that member
+    means "exported, no header corroboration" only on a snapshot built from
+    the export table alone (``AbiSnapshot.elf_only_mode``). On a
+    header-parsed snapshot both header-AST backends assign ``ELF_ONLY`` to a
+    declaration found in ``.symtab`` but **not** ``.dynsym`` -- declared,
+    not dynamically exported. *export_table_only_snapshot* names which of
+    the two the record came from; ``PUBLIC`` is exported either way and
+    ``HIDDEN`` never is.
+    """
+    exported = binary_exported(decl)
+    if not is_legacy_derived(exported):
+        return is_confirmed_true(exported)
+    vis = getattr(decl, "visibility", Visibility.PUBLIC)
+    if vis is Visibility.PUBLIC:
+        return True
+    if vis is Visibility.ELF_ONLY:
+        return export_table_only_snapshot
+    return False
 
 
 def is_legacy_derived(fact: Fact[bool]) -> bool:
