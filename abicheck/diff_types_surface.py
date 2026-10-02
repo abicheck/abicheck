@@ -37,6 +37,7 @@ from __future__ import annotations
 import re
 
 from .model import AbiSnapshot, RecordType, is_non_abi_surface_type
+from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 from .type_reachability import directly_referenced_stdlib_types
 
@@ -50,6 +51,30 @@ from .type_reachability import directly_referenced_stdlib_types
 _RESERVED_FIELD_RE = re.compile(
     r"^_{0,2}(reserved|pad|padding|spare|unused|mbz|fill|filler)\d*$",
     re.IGNORECASE,
+)
+
+
+def _is_reserved_field_name(name: str) -> bool:
+    return bool(_RESERVED_FIELD_RE.match(name))
+
+
+#: Registered name heuristic (design-hardening Phase 5): a placeholder field
+#: name only *lowers* -- a reserved->real rename becomes the compatible
+#: ``used_reserved_field`` instead of a removal plus an addition, and
+#: ``_diff_reserved_fields`` requires the field's offset and size unchanged.
+RESERVED_FIELD = register_name_heuristic(
+    "reserved_field",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=(
+        "FIELD_RENAMED",
+        "STRUCT_FIELD_REMOVED",
+        "TYPE_FIELD_REMOVED",
+        "TYPE_FIELD_TYPE_CHANGED",
+    ),
+    description="a reserved/pad/spare/unused field name marks a layout placeholder",
+    matcher=_is_reserved_field_name,
+    patterns=(_RESERVED_FIELD_RE,),
 )
 
 

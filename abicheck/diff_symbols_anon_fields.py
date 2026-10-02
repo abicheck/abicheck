@@ -52,11 +52,25 @@ from .checker_types import Change
 from .diff_helpers import make_change
 from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId
+from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic
 
 
 def _is_anon_field(f: Any) -> bool:
     """Return True for compiler-generated anonymous/unnamed fields."""
     return not f.name or f.name.startswith("__anon")
+
+
+#: Registered name heuristic (design-hardening Phase 5): a producer's
+#: ``__anon`` spelling only *lowers* -- it moves an unnamed member from
+#: name-keyed to offset-keyed matching, so a renumbered placeholder name is
+#: not reported as a removal plus an addition.
+ANON_FIELD = register_name_heuristic(
+    "anon_field",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    description="an unnamed or __anon* field is matched by offset, not by name",
+    matcher=_is_anon_field,
+)
 
 
 def check_anon_field_at_offset(
@@ -100,7 +114,7 @@ def _anon_fields_by_offset(fields: list[Any]) -> dict[int, Any]:
     return {
         f.offset_bits: f
         for f in fields
-        if _is_anon_field(f) and f.offset_bits is not None
+        if ANON_FIELD.matches(f) and f.offset_bits is not None
     }
 
 

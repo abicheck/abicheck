@@ -43,6 +43,7 @@ from .diff_symbols import _public_functions
 from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
+from .model.name_heuristics import NameHeuristicEffect, register_name_heuristic
 from .model.surface_facts import is_abi_visible
 
 # Back-compat aliases: the ADR-063 Phase 2/10 migrations moved the
@@ -901,7 +902,9 @@ def _classify_root_pass(
         if c.kind in _DERIVED_CHANGE_KINDS:
             type_name = _root_type_name(c)
             other_roots = {k: v for k, v in root_types.items() if k != type_name}
-            matched_root = _match_root_type(c, other_roots, compiled_patterns)
+            matched_root = ROOT_TYPE_REFERENCE.apply(
+                c, root_types=other_roots, compiled_patterns=compiled_patterns
+            )
             if matched_root is not None:
                 _mark_as_redundant(c, matched_root, root_types, redundant)
                 # Remove this root so derived changes won't point at a
@@ -928,7 +931,9 @@ def _classify_derived_pass(
             kept.append(c)
             continue
         # Check if this change references a (kept) root type
-        matched_root = _match_root_type(c, root_types, compiled_patterns)
+        matched_root = ROOT_TYPE_REFERENCE.apply(
+            c, root_types=root_types, compiled_patterns=compiled_patterns
+        )
         if matched_root is not None:
             _mark_as_redundant(c, matched_root, root_types, redundant)
         else:
@@ -1097,8 +1102,8 @@ def _opaque_usage_index(
 ) -> tuple[set[str], set[str]]:
     """Single pass over the public surface → ``(used_by_value, has_pointer_factory)``.
 
-    ``_filter_opaque_size_changes`` previously called ``_is_pointer_only_type`` (removed) and
-    ``_has_public_pointer_factory`` (removed) *per candidate*, each rescanning every public
+    ``_filter_opaque_size_changes`` previously called a pointer-only and a
+    pointer-factory check *per candidate*, each rescanning every public
     function/variable with a word-boundary regex — O(candidates × functions) with
     a regex per pair (``type_churn`` n=4000: ~3.2 M regex searches). This walks the
     surface once and uses an Aho-Corasick prefilter (:class:`_SubstringMatcher`)
@@ -1127,6 +1132,49 @@ def _opaque_usage_index(
         _record_by_value_uses(v.type, ac, bare_re_cache, used_by_value)
 
     return used_by_value, has_factory
+
+
+#: Registered name heuristics (design-hardening Phase 5). Both search a type
+#: string for a declared type's *spelling* (word-boundary match), never its
+#: identity, so both may only *lower*: one folds a derived finding into the
+#: root-type change it mentions, the other drops an opaque handle's size
+#: change. #1218 names the structural replacement (type identity and real
+#: signature edges); until then they stay registered and lowering-only.
+ROOT_TYPE_REFERENCE = register_name_heuristic(
+    "root_type_reference",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    description=(
+        "a derived finding whose old/new spelling names a changed root type "
+        "is folded into that root change"
+    ),
+    matcher=_match_root_type,
+    helpers=(_compile_root_patterns,),
+)
+OPAQUE_HANDLE_USAGE = register_name_heuristic(
+    "opaque_handle_usage",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=(
+        "STRUCT_ALIGNMENT_CHANGED",
+        "STRUCT_FIELD_OFFSET_CHANGED",
+        "STRUCT_FIELD_REMOVED",
+        "STRUCT_FIELD_TYPE_CHANGED",
+        "STRUCT_SIZE_CHANGED",
+        "TYPE_BASE_CHANGED",
+        "TYPE_FIELD_OFFSET_CHANGED",
+        "TYPE_FIELD_REMOVED",
+        "TYPE_FIELD_TYPE_CHANGED",
+        "TYPE_SIZE_CHANGED",
+        "TYPE_VTABLE_CHANGED",
+    ),
+    description=(
+        "a type spelled only as T* in public signatures, with a T* factory, "
+        "is an opaque handle whose size change is not consumer-visible"
+    ),
+    matcher=_opaque_usage_index,
+    helpers=(_cached_bare_re, _cached_factory_re),
+)
 
 
 def _filter_opaque_size_changes(
@@ -1183,11 +1231,17 @@ def _filter_opaque_size_changes(
     # each candidate's patterns compile once across both snapshots.
     _bare_re_cache: dict[str, re.Pattern[str]] = {}
     _factory_re_cache: dict[str, re.Pattern[str]] = {}
-    old_byval, old_factory = _opaque_usage_index(
-        candidates, old, _bare_re_cache, _factory_re_cache
+    old_byval, old_factory = OPAQUE_HANDLE_USAGE.apply(
+        candidates,
+        snap=old,
+        bare_re_cache=_bare_re_cache,
+        factory_re_cache=_factory_re_cache,
     )
-    new_byval, new_factory = _opaque_usage_index(
-        candidates, new, _bare_re_cache, _factory_re_cache
+    new_byval, new_factory = OPAQUE_HANDLE_USAGE.apply(
+        candidates,
+        snap=new,
+        bare_re_cache=_bare_re_cache,
+        factory_re_cache=_factory_re_cache,
     )
     opaque_types: set[str] = {
         t

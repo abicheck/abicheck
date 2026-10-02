@@ -438,7 +438,7 @@ class TestASharedSlotIteratorKeepsEachFindingsOwner:
 class TestSerializationTagFindingsKeepTheirContributingSource:
     """`serialization_tag_changed` resolves its entity per finding.
 
-    `_collect_tag_constants` pools three sources — `AbiSnapshot.constants`,
+    `_collect_valued_declarations` pools three sources — `AbiSnapshot.constants`,
     global `variables`, and `enums` members — before emitting one kind, so
     the static `type` it used to declare was wrong for *all three* at once,
     not merely for one of them: `--view show=variables` and `show=enums`

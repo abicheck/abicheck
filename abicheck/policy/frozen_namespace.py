@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from .public_surface_closure import _strip_template_args
+from ..compare.internal_namespaces import strip_template_args as _strip_template_args
 from .selectors_namespace_glob import _compile_glob
 
 

@@ -339,7 +339,7 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         "from the old library deserialize as the wrong class against the new "
         "library, silently corrupting data. Common in "
         "SerializationIface-style designs.",
-        # Polymorphic: `_collect_tag_constants` pools constants, variables and
+        # Polymorphic: `_collect_valued_declarations` pools constants, variables and
         # enum members, so the declared entity is only the fallback (the one
         # two of the three resolve to) -- reasoning and contract in
         # `TestSerializationTagFindingsKeepTheirContributingSource`.
