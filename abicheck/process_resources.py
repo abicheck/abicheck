@@ -46,6 +46,8 @@ from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, TypeVar
 
+from .model.execution_cache import reference_mode
+
 _T = TypeVar("_T")
 
 _KIB = 1024.0
@@ -342,7 +344,14 @@ MAX_THREADS_ENV_VAR = "ABICHECK_MAX_THREADS"
 
 
 def max_threads() -> int | None:
-    """The configured thread budget, or ``None`` when unlimited."""
+    """The configured thread budget, or ``None`` when unlimited.
+
+    ``ABICHECK_REFERENCE_MODE=1`` forces ``1`` (and :class:`BudgetedExecutor`
+    then grants no worker thread at all), so every pool runs its tasks
+    inline and the release fan-out takes its sequential member path.
+    """
+    if reference_mode():
+        return 1
     raw = os.environ.get(MAX_THREADS_ENV_VAR, "").strip()
     try:
         value = int(raw) if raw else 0
@@ -362,6 +371,8 @@ class _ThreadBudget:
         self.peak = 0
 
     def grant(self, requested: int) -> int:
+        if reference_mode():
+            return 0  # inline in the submitting thread: the sequential path
         cap = max_threads()
         with self._lock:
             granted = (

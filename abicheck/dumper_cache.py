@@ -6,9 +6,6 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
-import os
-import sys
-import tempfile
 import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, TimeoutError as FutureTimeoutError
@@ -21,8 +18,10 @@ if TYPE_CHECKING:
 
 
 from . import deadline
-from .storage import ast_cache_budget, ast_parse_exclusions, cache_integrity
+from .model.execution_cache import reference_mode, register_cache
+from .storage import ast_parse_exclusions, cache_integrity
 from .storage.acyclic_json import gc_paused
+from .storage.ast_cache_location import AST_DISK_CACHE, ast_cache_entry_path
 from .storage.ast_size_observer import mark_ast_intake, report_ast_size
 from .storage.castxml_xml import parse_castxml_xml
 from .storage.derived_ast import offer_derived_ast_source
@@ -70,6 +69,16 @@ _ast_memo_slot: contextvars.ContextVar[tuple[str, str, Any] | None] = (
 )
 
 _T = TypeVar("_T")
+
+#: Where a header-AST cache entry lives (historical name; owner moved).
+_cache_path = ast_cache_entry_path
+
+#: The in-process AST handoffs: the per-thread memo slot and the request-wide
+#: acquisition table. Reference mode bypasses both.
+_AST_SLOT_STATS = register_cache("abicheck.dumper_cache.ast_slot", "handoff")
+_AST_ACQUISITION_STATS = register_cache(
+    "abicheck.dumper_cache.ast_acquisition", "scoped"
+)
 
 
 #: How many distinct identity-keyed context groups (in practice: parsed AST
@@ -444,6 +453,11 @@ def ast_acquisition_scope() -> Iterator[AstAcquisitionScope]:
         yield existing
         return
     scope = AstAcquisitionScope()
+    if reference_mode():
+        # Never installed: every consumer acquires its own AST.
+        _AST_ACQUISITION_STATS.bypasses += 1
+        yield scope
+        return
     token = _ast_acquisition_scope.set(scope)
     try:
         yield scope
@@ -610,6 +624,10 @@ def store_cached_ast(key: str, backend: str, root: Any) -> None:
     calling thread's own pending slot (see :data:`_ast_memo_slot`'s own
     docstring) -- overwrites whatever this thread's slot already held, if
     anything (there is at most one legitimate pending handoff at a time)."""
+    if reference_mode():
+        _AST_SLOT_STATS.bypasses += 1
+        return
+    _AST_SLOT_STATS.stores += 1
     _ast_memo_slot.set((backend, key, root))
 
 
@@ -666,6 +684,7 @@ def load_cached_ast(
     """
     slot = _ast_memo_slot.get()
     if slot is not None and slot[0] == backend and slot[1] == key:
+        _AST_SLOT_STATS.hits += 1
         _ast_memo_slot.set(None)
         deadline.check()
         # The tree is already in hand, but a final consumer may still have a
@@ -688,10 +707,13 @@ def load_cached_ast(
         deadline.check()
         return superseded
     if not cache_path.exists():
+        AST_DISK_CACHE.record(hit=False)
         return None
     deadline.check()
     if not open_cached_entry(cache_path):
+        AST_DISK_CACHE.record(hit=False)
         return None
+    AST_DISK_CACHE.record(hit=True)
     mark_ast_intake("ast.intake:start", backend=backend, source="cache")
     try:
         text = cache_path.read_text(encoding="utf-8")
@@ -722,6 +744,7 @@ def read_cached_castxml(cached: Path) -> Element | None:
     ``dumper.py`` (which re-exports it under its historical private name).
     """
     if not cache_integrity.entry_intact(cached):
+        AST_DISK_CACHE.record(hit=False)
         return None
     try:
         root = parse_castxml_xml(cached)
@@ -729,35 +752,7 @@ def read_cached_castxml(cached: Path) -> Element | None:
         root = None
     if root is None:
         cache_integrity.evict(cached)
+        AST_DISK_CACHE.record(hit=False)
         return None
+    AST_DISK_CACHE.record(hit=True)
     return root
-
-
-def _cache_path(key: str, backend: str = "castxml") -> Path:
-    # One sub-directory + extension per backend: castxml XML and clang JSON coexist.
-    ext = "json" if backend == "clang" else "xml"
-    if sys.platform == "win32":
-        local = os.environ.get("LOCALAPPDATA")
-        cache_dir = (
-            Path(local) / "abi_check" / backend
-            if local
-            else Path.home() / "AppData" / "Local" / "abi_check" / backend
-        )
-    else:
-        xdg_cache = os.environ.get("XDG_CACHE_HOME")
-        base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
-        cache_dir = base / "abi_check" / backend
-    try:
-        cache_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        fallback = Path(tempfile.gettempdir()) / "abi_check" / backend
-        log.warning(
-            "AST cache directory %s is unavailable (%s); using %s",
-            cache_dir,
-            exc,
-            fallback,
-        )
-        fallback.mkdir(parents=True, exist_ok=True)
-        cache_dir = fallback
-    ast_cache_budget.note_use(cache_dir, entry := cache_dir / f"{key}.{ext}")
-    return entry

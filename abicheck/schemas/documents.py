@@ -26,9 +26,10 @@ meant to know which module defines them.
 from __future__ import annotations
 
 import json
-from functools import cache
 from pathlib import Path
 from typing import Any
+
+from ..model.execution_cache import memoized
 
 __all__ = [
     "AGGREGATE_REPORT_SCHEMA_PATH",
@@ -51,7 +52,7 @@ AGGREGATE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "aggregate_report.schema.json"
 AUDIT_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "audit_report.schema.json"
 
 
-@cache
+@memoized
 def load_compare_report_schema() -> dict[str, Any]:
     """Return the parsed compare-report JSON Schema as a dict."""
     with COMPARE_REPORT_SCHEMA_PATH.open(encoding="utf-8") as fh:
@@ -59,7 +60,7 @@ def load_compare_report_schema() -> dict[str, Any]:
     return data
 
 
-@cache
+@memoized
 def load_audit_report_schema() -> dict[str, Any]:
     """Return the parsed single-build-audit JSON Schema as a dict."""
     with AUDIT_REPORT_SCHEMA_PATH.open(encoding="utf-8") as fh:
@@ -67,7 +68,7 @@ def load_audit_report_schema() -> dict[str, Any]:
     return data
 
 
-@cache
+@memoized
 def load_aggregate_report_schema() -> dict[str, Any]:
     """Return the parsed aggregate-report JSON Schema as a dict."""
     with AGGREGATE_REPORT_SCHEMA_PATH.open(encoding="utf-8") as fh:

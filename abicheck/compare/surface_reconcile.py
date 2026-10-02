@@ -53,6 +53,8 @@ from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
 from ..model import AbiSnapshot
 from ..model.comparison_memo import comparison_memo_scope
+from ..model.execution_cache import MISSING, request_key
+from ..model.execution_cache_scoped import InstanceMemo
 from .export_transition import surface_exit_is_evidence_gap
 
 if TYPE_CHECKING:
@@ -228,6 +230,13 @@ RECONCILIATION_SLOTS = (
 
 _ReconciledPair = tuple[dict[str, _Decl], dict[str, _Decl]]
 
+#: Every per-pair memo, on the OLD snapshot and pinned to the NEW one (the
+#: central cache wrapper's instance memo): one attribute holds every slot, so
+#: :func:`invalidate_reconciliation` cannot fall behind the set.
+PAIR_MEMO = InstanceMemo(
+    "abicheck.compare.surface_reconcile.pair", "_abicheck_reconciled_pair_memo"
+)
+
 
 def cached_reconciliation(
     old: AbiSnapshot, new: AbiSnapshot, slot: str
@@ -248,10 +257,8 @@ def cached_reconciliation(
     module-level ``id()`` dict. Scoped to one comparison in practice: the
     snapshots are read-only while detectors run.
     """
-    cached = old.__dict__.get(slot)
-    if cached is not None and cached[0] is new:
-        return cached[1]  # type: ignore[no-any-return]
-    return None
+    hit = PAIR_MEMO.peek(old, request_key(slot=slot), pin=new)
+    return None if hit is MISSING else cast("_ReconciledPair[Any]", hit)
 
 
 def store_reconciliation(
@@ -260,8 +267,7 @@ def store_reconciliation(
     slot: str,
     result: _ReconciledPair[_Decl],
 ) -> _ReconciledPair[_Decl]:
-    old.__dict__[slot] = (new, result)
-    return result
+    return PAIR_MEMO.put(old, request_key(slot=slot), result, pin=new)
 
 
 def reconcile_declaration_lists(
@@ -404,8 +410,7 @@ def invalidate_reconciliation(old: AbiSnapshot | None) -> None:
     """
     if old is None:
         return
-    for slot in RECONCILIATION_SLOTS:
-        old.__dict__.pop(slot, None)
+    PAIR_MEMO.drop(old)
 
 
 def releases_reconciliation(

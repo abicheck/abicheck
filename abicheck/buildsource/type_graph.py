@@ -61,9 +61,9 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
+from ..model.execution_cache import memoized
 from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -199,7 +199,7 @@ def _top_level_paren_index(s: str) -> int:
     return -1
 
 
-@lru_cache(maxsize=1 << 16)
+@memoized(maxsize=1 << 16)
 def _base_type_name(qual_type: str) -> str:
     """Strip cv/pointer/reference/array decoration down to a base type spelling.
 

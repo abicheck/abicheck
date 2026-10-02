@@ -69,7 +69,6 @@ Phase 5's "same typed config" work, and the default flip is Phase 7. See
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
 from collections.abc import Collection, Hashable, Iterable, Mapping, Sequence
@@ -115,6 +114,7 @@ from .compatibility_evaluation_wiring import (
 )
 from .contract_relevance_types import ContractMode, SelectorLayer, coerce_contract_mode
 from .model.change_catalog.registry import VALID_BASE_POLICIES
+from .model.execution_cache import memoized
 from .model.ownership_rules import OwnershipRules
 from .policy.classification import policy_kind_sets
 from .policy.gate_pack_fold import gate_exit_code_scheme
@@ -220,7 +220,7 @@ def stated_policy_base(policy: Any, policy_file: Any) -> Any:
     return policy if policy in VALID_BASE_POLICIES else None
 
 
-@functools.cache
+@memoized
 def builtin_policy_identity(name: str) -> ImmutableIdentity:
     """The replayable identity of a built-in ``--policy`` base.
 
@@ -265,7 +265,7 @@ def builtin_policy_identity(name: str) -> ImmutableIdentity:
     )
 
 
-@functools.cache
+@memoized
 def severity_preset_identity(name: str) -> ImmutableIdentity:
     """The replayable identity of a built-in ``--severity-preset``.
 

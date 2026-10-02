@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,7 +46,9 @@ from .surface_reconcile import (
     RECONCILED_FUNCTION_MAPS,
     RECONCILED_PUBLIC_FUNCTION_LISTS,
     RECONCILED_PUBLIC_VARIABLE_LISTS,
+    cached_reconciliation,
     reconcile_declaration_lists,
+    store_reconciliation,
 )
 
 if TYPE_CHECKING:
@@ -501,13 +503,11 @@ def _cached(old: AbiSnapshot, new: AbiSnapshot, slot: str) -> Any:
     in this change that recomputing a shared join per detector showed up
     there rather than in any test.
     """
-    entry = old.__dict__.get(slot)
-    return entry[1] if entry is not None and entry[0] is new else None
+    return cached_reconciliation(old, new, slot)
 
 
 def _store(old: AbiSnapshot, new: AbiSnapshot, slot: str, result: _T) -> _T:
-    old.__dict__[slot] = (new, result)
-    return result
+    return cast("_T", store_reconciliation(old, new, slot, cast("Any", result)))
 
 
 def reconciled_abi_visible_functions(

@@ -1,0 +1,74 @@
+name: Reference-mode differential (H5)
+
+# H5 / defect family F5 (docs/contribute/plans/defect-family-harnesses.md;
+# design-hardening plan Phase 4): every cache and pool is an optimization, and
+# ABICHECK_REFERENCE_MODE=1 is the production switch that turns all of them
+# off (every cache built on abicheck/model/execution_cache.py bypasses, every
+# pool runs inline, the release fan-out takes its sequential path). This lane
+# runs the whole H5 harness -- including its `slow` and `integration` cells,
+# which the PR lanes split across jobs -- so every cell compares the default
+# configuration with reference mode on real compiled catalog binaries, with
+# and without CastXML headers, and the environment-level cells set the switch
+# in a child process's environment with no in-process patching at all.
+# Not a per-PR gate: weekly, on dispatch, and on a pull request carrying the
+# `reference-mode` label (add it to a PR that adds or changes a cache or pool).
+
+on:
+  schedule:
+    - cron: "17 5 * * 3"
+  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+
+concurrency:
+  # A PR groups by PR number so a new push supersedes the stale run; a
+  # schedule/dispatch run groups by ref, never by the per-run run_id.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  h5-reference-mode:
+    name: H5 optimization-vs-reference harness
+    # The PR's *current* label set, not github.event.label.name (populated
+    # only on the one `labeled` event), so later pushes to a labelled PR run.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'reference-mode')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - name: Install system dependencies
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: binutils
+
+      - uses: ./.github/actions/setup-castxml
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install abicheck
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: H5 harness, every marker
+        env:
+          # A missing compiler or CastXML would skip the binary and header
+          # cells and leave a green run that compared almost nothing.
+          ABICHECK_MIN_EXECUTED: "28"
+        run: |
+          python -m pytest tests/test_family_f5_optimization_reference.py \
+            -m "" -p no:randomly -q -rs
+
+      - name: H7 replay of the F5 mutants
+        run: |
+          python -m pytest tests/test_family_f7_mutant_replay.py \
+            -m "" -p no:randomly -q -k "reference_mode or cache_key or release"

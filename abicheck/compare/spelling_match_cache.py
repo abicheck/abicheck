@@ -132,6 +132,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Callable, Collection, Iterable
 
+from ..model.execution_cache import reference_mode, register_cache
 from .spelling_pattern_registry import (
     MAX_PATTERN_BYTES as MAX_PATTERN_BYTES,
     PATTERN_REGISTRY as PATTERN_REGISTRY,
@@ -488,7 +489,7 @@ class _MatchCache:
         strings and match results. Compiled patterns are deliberately
         excluded -- they are :class:`_PatternRegistry`'s, charged there once
         however many entries and vocabularies name them, which is what makes
-        "charged once" checkable at all. :func:`cache_statistics` reports
+        "charged once" checkable at all. ``spelling_cache_statistics`` reports
         both, by owner, so the two are never silently summed as if
         independent.
         """
@@ -557,6 +558,9 @@ class _VocabularyCache:
         pattern object per vocabulary -- which is what keeps the sibling
         match cache from keying two token streams for one vocabulary.
         """
+        if reference_mode():
+            _VOCABULARY_STATS.bypasses += 1
+            return compile_fn(frozenset(spellings))
         key = frozenset(spellings)
         with self._lock:
             if key in self._entries:
@@ -686,51 +690,18 @@ MATCH_CACHE = _MatchCache()
 #: match results with it -- see `_VocabularyCache._retire_tokens`.
 VOCABULARY_CACHE = _VocabularyCache(match_cache=MATCH_CACHE)
 
-
-def cache_statistics() -> dict[str, object]:
-    """Every counter these caches keep, **grouped by owner**.
-
-    Deliberately reports ``retained_bytes`` per owner and a total, rather
-    than one merged number: a pattern's cost belongs to the registry, a
-    result's to the match cache, and the working set the matcher's callers
-    hold in their own attributes belongs to neither. Summing them as if they
-    were independent is how the double-charge this module was redesigned to
-    remove got introduced in the first place.
-
-    Each owner is read under its own lock, so every group is internally
-    consistent. The groups are not a single instant of the whole module --
-    that would need all three locks at once, which this module never does.
-    """
-    match_total = MATCH_CACHE.hits + MATCH_CACHE.misses
-    return {
-        "match": {
-            "entries": len(MATCH_CACHE),
-            "hits": MATCH_CACHE.hits,
-            "misses": MATCH_CACHE.misses,
-            "hit_rate": (MATCH_CACHE.hits / match_total if match_total else None),
-            "bypasses": MATCH_CACHE.bypasses,
-            "bypass_text_too_long": MATCH_CACHE.bypass_text_too_long,
-            "bypass_too_many_matches": MATCH_CACHE.bypass_too_many_matches,
-            "evictions": MATCH_CACHE.evictions,
-            "retained_bytes": MATCH_CACHE.retained_bytes,
-        },
-        "vocabulary": {
-            "entries": len(VOCABULARY_CACHE),
-            "hits": VOCABULARY_CACHE.hits,
-            "misses": VOCABULARY_CACHE.misses,
-            "compilations": VOCABULARY_CACHE.compilations,
-            "evictions": VOCABULARY_CACHE.evictions,
-        },
-        "patterns": {
-            "held": len(PATTERN_REGISTRY),
-            "registered": PATTERN_REGISTRY.registrations,
-            "released": PATTERN_REGISTRY.releases,
-            "retained_bytes": PATTERN_REGISTRY.retained_bytes,
-        },
-        "retained_bytes_total": (
-            MATCH_CACHE.retained_bytes + PATTERN_REGISTRY.retained_bytes
-        ),
-    }
+# Registered with the central cache wrapper (design-hardening plan, Phase 4):
+# the byte-budgeted storage stays here, the reference-mode switch and the
+# registry are the wrapper's. Each cache keeps its own hit/miss counters
+# (``spelling_cache_statistics``); the registry records the bypasses.
+_MATCH_STATS = register_cache(
+    "abicheck.compare.spelling_match_cache.match", "registered", MATCH_CACHE.clear
+)
+_VOCABULARY_STATS = register_cache(
+    "abicheck.compare.spelling_match_cache.vocabulary",
+    "registered",
+    VOCABULARY_CACHE.clear,
+)
 
 
 def matches_for(
@@ -747,6 +718,14 @@ def matches_for(
     result is normalized into immutable :class:`SpellingMatch` objects
     before being retained, so no :class:`re.Match` ever enters the cache.
     """
+    if reference_mode():
+        _MATCH_STATS.bypasses += 1
+        return tuple(
+            m
+            if isinstance(m, SpellingMatch)
+            else SpellingMatch(m.group(0), m.start(), m.end())
+            for m in compute()
+        )
     token = MATCH_CACHE.token_for(pattern)
     key = (token, text, start, end)
     cached = MATCH_CACHE.get(key)

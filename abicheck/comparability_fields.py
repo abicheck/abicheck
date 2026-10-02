@@ -34,17 +34,17 @@ historically carried (``IncludeDir``, ``_sha256_of``,
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
 import os
 from collections.abc import Callable, Sequence
-from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from .errors import SnapshotError
+from .model.execution_cache import request_key
+from .model.execution_cache_scoped import ScopedCache
 
 _T = TypeVar("_T")
 
@@ -79,37 +79,26 @@ class IncludeDir:
 #: quadratically with library count"). Scoped rather than global because the
 #: filesystem may change between computations in a long-lived process;
 #: within one computation it is read as a single consistent view.
-_PATH_MEMO: ContextVar[dict[Path, tuple[Path, frozenset[Path]]] | None] = ContextVar(
-    "_comparability_path_memo", default=None
-)
+_PATH_MEMO = ScopedCache("abicheck.comparability_fields.path_memo")
+
+
+def _resolve_with_ancestors(path: Path) -> tuple[Path, frozenset[Path]]:
+    resolved = path.resolve()
+    return resolved, frozenset((resolved, *resolved.parents))
 
 
 def _lookup(path: Path) -> tuple[Path, frozenset[Path]] | None:
     """``(resolved, {resolved, *its ancestors})`` when a memo is active."""
-    memo = _PATH_MEMO.get()
-    if memo is None:
+    if not _PATH_MEMO.active():
         return None
-    entry = memo.get(path)
-    if entry is None:
-        resolved = path.resolve()
-        entry = memo[path] = (resolved, frozenset((resolved, *resolved.parents)))
-    return entry
+    return _PATH_MEMO.get_or_compute(
+        request_key(path=path), lambda: _resolve_with_ancestors(path)
+    )
 
 
 def _path_memo_scope(fn: Callable[..., _T]) -> Callable[..., _T]:
     """Run *fn* with the path memo active, reusing an enclosing one."""
-
-    @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> _T:
-        if _PATH_MEMO.get() is not None:
-            return fn(*args, **kwargs)
-        token = _PATH_MEMO.set({})
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            _PATH_MEMO.reset(token)
-
-    return wrapper
+    return _PATH_MEMO.scoped(fn)
 
 
 def _resolved(path: Path) -> Path:

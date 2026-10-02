@@ -320,7 +320,7 @@ class TestStripPtrCacheBounds:
         assert "Overflow *" in keys
 
     def test_every_cache_operation_holds_the_lock(self) -> None:
-        """No cache operation may happen outside ``_CACHE_LOCK``.
+        """No cache operation may happen outside the cache wrapper's lock.
 
         The defect this rules out: the individual ``OrderedDict`` operations
         are atomic under the GIL, but the *sequence* is not. A hit that looks
@@ -339,12 +339,17 @@ class TestStripPtrCacheBounds:
         structural invariant is deterministic, and it also covers any
         operation added to the sequence later.
         """
+        from abicheck.model.execution_cache import MemoryCache
+
         original = type_spelling._strip_ptr_memo
         unlocked: list[str] = []
+        probe: MemoryCache[str] = MemoryCache(
+            "test.strip_ptr.lock", max_entries=4, field="spelling"
+        )
 
         class _LockAssertingDict(OrderedDict):
             def _check(self, op: str) -> None:
-                if not type_spelling._CACHE_LOCK.locked():
+                if not probe._lock.locked():
                     unlocked.append(op)
 
             def get(self, *a, **k):  # type: ignore[override]
@@ -367,9 +372,8 @@ class TestStripPtrCacheBounds:
                 self._check("__len__")
                 return super().__len__()
 
-        type_spelling._strip_ptr_memo = _LockAssertingDict()
-        maxsize = type_spelling.STRIP_PTR_CACHE_MAXSIZE
-        type_spelling.STRIP_PTR_CACHE_MAXSIZE = 4
+        probe._entries = _LockAssertingDict()
+        type_spelling._strip_ptr_memo = probe
         try:
             type_spelling.strip_ptr("ns::A *")  # miss + insert
             type_spelling.strip_ptr("ns::A *")  # hit + move_to_end
@@ -378,7 +382,6 @@ class TestStripPtrCacheBounds:
             type_spelling.strip_ptr_cache_entries()  # read path
             type_spelling.strip_ptr_cache_stats()  # read path
         finally:
-            type_spelling.STRIP_PTR_CACHE_MAXSIZE = maxsize
             type_spelling._strip_ptr_memo = original
 
         assert unlocked == [], (
@@ -387,8 +390,10 @@ class TestStripPtrCacheBounds:
 
     def test_the_lock_assertion_can_fail(self) -> None:
         """Vacuity guard: the probe above must report an unlocked access."""
+        from abicheck.model.execution_cache import MemoryCache
+
         unlocked: list[str] = []
-        if not type_spelling._CACHE_LOCK.locked():
+        if not MemoryCache("test.strip_ptr.vacuity")._lock.locked():
             unlocked.append("get")
         assert unlocked == ["get"], "the probe cannot observe an unlocked call"
 
@@ -400,9 +405,12 @@ class TestStripPtrCacheBounds:
         exists. It is kept because it exercises the real threaded path end to
         end and would catch a coarser breakage.
         """
-        type_spelling.strip_ptr_cache_clear()
-        original = type_spelling.STRIP_PTR_CACHE_MAXSIZE
-        type_spelling.STRIP_PTR_CACHE_MAXSIZE = 8
+        from abicheck.model.execution_cache import MemoryCache
+
+        original = type_spelling._strip_ptr_memo
+        type_spelling._strip_ptr_memo = MemoryCache(
+            "test.strip_ptr.concurrent", max_entries=8, field="spelling"
+        )
         errors: list[BaseException] = []
         wrong: list[tuple[str, str, str]] = []
         barrier = threading.Barrier(6)
@@ -425,8 +433,7 @@ class TestStripPtrCacheBounds:
             for t in threads:
                 t.join()
         finally:
-            type_spelling.STRIP_PTR_CACHE_MAXSIZE = original
-            type_spelling.strip_ptr_cache_clear()
+            type_spelling._strip_ptr_memo = original
 
         assert errors == [], f"concurrent access raised: {errors[:3]}"
         assert wrong == [], f"concurrent access returned wrong results: {wrong[:3]}"

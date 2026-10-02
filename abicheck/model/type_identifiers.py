@@ -11,8 +11,9 @@ layers may import ``model``, so the shared scan lives here instead.
 
 from __future__ import annotations
 
-import functools
 import re
+
+from .execution_cache import memoized
 
 #: Tokens that are type qualifiers / builtin keywords, not type names.
 TYPE_NOISE: frozenset[str] = frozenset(
@@ -62,7 +63,7 @@ def type_identifiers(type_str: str | None) -> set[str]:
 # Pure str -> frozenset, hit millions of times over a few hundred distinct
 # spellings on a release-scale compare tail; bounded like
 # `name_classification`'s own spelling caches.
-@functools.lru_cache(maxsize=1 << 18)
+@memoized(maxsize=1 << 18)
 def _type_identifiers_cached(type_str: str) -> frozenset[str]:
     out: set[str] = set()
     for tok in IDENT_RE.findall(type_str):

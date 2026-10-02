@@ -230,7 +230,7 @@ def test_benchmark_cache_reset_still_clears_with_another_thread_alive() -> None:
     from abicheck import demangle
 
     demangle.demangle("x")  # a non-mangled name: cached without any subprocess
-    assert demangle.demangle.cache_info().currsize > 0
+    assert demangle.demangle.cache_len() > 0
     started, release = threading.Event(), threading.Event()
 
     def park() -> None:
@@ -243,7 +243,7 @@ def test_benchmark_cache_reset_still_clears_with_another_thread_alive() -> None:
         started.wait(10)
         assert not memory_trace.gc_census_is_safe()
         bench._clear_process_caches()
-        assert demangle.demangle.cache_info().currsize == 0
+        assert demangle.demangle.cache_len() == 0
     finally:
         release.set()
         t.join(10)

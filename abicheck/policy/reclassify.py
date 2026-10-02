@@ -141,6 +141,7 @@ from datetime import date, datetime
 from typing import Any, TypeVar, cast
 
 from ..model.change_catalog.kinds import ChangeKind, HasKind
+from ..model.execution_cache import MemoryCache, request_key
 from ..model.policy_file_protocol import ReclassifyRuleProtocol
 from .classification import (
     API_BREAK_KINDS,
@@ -429,8 +430,12 @@ _R = TypeVar("_R")
 
 #: ``id(rules)`` -> (the rule objects it held, their kind buckets). See
 #: :func:`reclassify_rules_for_kind`.
-_KIND_BUCKETS: dict[int, tuple[tuple[Any, ...], dict[str | None, tuple[Any, ...]]]] = {}
 _KIND_BUCKETS_MAX = 32
+_KIND_BUCKETS: MemoryCache[
+    tuple[tuple[Any, ...], dict[str | None, tuple[Any, ...]]]
+] = MemoryCache(
+    "abicheck.policy.reclassify.kind_buckets", max_entries=_KIND_BUCKETS_MAX
+)
 
 
 def reclassify_rules_for_kind(rules: Sequence[_R], kind_value: str) -> Sequence[_R]:
@@ -450,13 +455,13 @@ def reclassify_rules_for_kind(rules: Sequence[_R], kind_value: str) -> Sequence[
     """
     if len(rules) < 2:
         return rules
-    key = id(rules)
-    entry = _KIND_BUCKETS.get(key)
-    if (
-        entry is None
-        or len(entry[0]) != len(rules)
-        or any(a is not b for a, b in zip(entry[0], rules, strict=True))
-    ):
+
+    def same_rules(held: tuple[Any, ...]) -> bool:
+        return len(held) == len(rules) and all(
+            a is b for a, b in zip(held, rules, strict=True)
+        )
+
+    def build() -> tuple[tuple[Any, ...], dict[str | None, tuple[Any, ...]]]:
         buckets: dict[str | None, list[_R]] = {None: []}
         kinds = [_matched_kind(rule) for rule in rules]
         for kind in kinds:
@@ -466,10 +471,14 @@ def reclassify_rules_for_kind(rules: Sequence[_R], kind_value: str) -> Sequence[
             for bucket_kind, bucket in buckets.items():
                 if kind is None or kind == bucket_kind:
                     bucket.append(rule)
-        if len(_KIND_BUCKETS) >= _KIND_BUCKETS_MAX:
-            _KIND_BUCKETS.clear()
-        entry = (tuple(rules), {k: tuple(v) for k, v in buckets.items()})
-        _KIND_BUCKETS[key] = entry
+        return tuple(rules), {k: tuple(v) for k, v in buckets.items()}
+
+    entry = _KIND_BUCKETS.get_or_compute(
+        request_key(rules=id(rules)),
+        build,
+        witness_of=lambda e: e[0],
+        still_fresh=same_rules,
+    )
     bucketed = entry[1]
     found = bucketed.get(kind_value)
     return found if found is not None else bucketed[None]

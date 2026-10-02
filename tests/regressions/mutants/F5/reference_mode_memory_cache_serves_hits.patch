@@ -1,0 +1,12 @@
+--- a/abicheck/model/execution_cache.py
++++ b/abicheck/model/execution_cache.py
+@@ -306,9 +306,6 @@
+         means "could not be verified", and such a value is never stored.
+         """
+         self._check_key(key)
+-        if reference_mode():
+-            self.stats.bypasses += 1
+-            return compute()
+         while True:
+             hit = self._fresh_hit(key, witness, still_fresh)
+             if hit is not _MISSING:

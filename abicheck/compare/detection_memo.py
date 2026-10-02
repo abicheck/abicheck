@@ -21,14 +21,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable, Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar
-from typing import Any, TypeVar
+from typing import TypeVar
+
+from ..model.execution_cache import request_key
+from ..model.execution_cache_scoped import ScopedCache
 
 _T = TypeVar("_T")
 
-_MEMO: ContextVar[dict[tuple[Hashable, ...], tuple[Any, Any]] | None] = ContextVar(
-    "abicheck_detection_memo", default=None
-)
+_MEMO = ScopedCache("abicheck.compare.detection_memo")
 
 
 @contextmanager
@@ -38,14 +38,8 @@ def detection_memo_scope() -> Iterator[None]:
     Nested scopes reuse the outer memo rather than shadowing it, so a
     detector that itself runs a nested pass does not throw away work.
     """
-    if _MEMO.get() is not None:
+    with _MEMO.scope():
         yield
-        return
-    token = _MEMO.set({})
-    try:
-        yield
-    finally:
-        _MEMO.reset(token)
 
 
 def memoized(
@@ -57,13 +51,8 @@ def memoized(
     *subject* is kept alive by the entry itself, so its ``id`` cannot be
     recycled for a different object while the memo lives.
     """
-    memo = _MEMO.get()
-    if memo is None:
-        return compute()
-    key = (name, id(subject), extra)
-    hit = memo.get(key)
-    if hit is not None and hit[0] is subject:
-        return hit[1]  # type: ignore[no-any-return]
-    value = compute()
-    memo[key] = (subject, value)
-    return value
+    return _MEMO.get_or_compute(
+        request_key(name=name, subject=id(subject), extra=extra),
+        compute,
+        pin=subject,
+    )

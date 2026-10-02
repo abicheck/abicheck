@@ -28,8 +28,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import cached_property
 
+from .execution_cache import memoized_property
 from .fact import Fact, bridge_legacy_and_fact
 
 
@@ -88,7 +88,7 @@ class ElfImport:
 class ElfMetadata:
     """ELF dynamic-section + symbol metadata for one .so.
 
-    NOTE: Do NOT add ``frozen=True`` to this dataclass — ``@cached_property``
+    NOTE: Do NOT add ``frozen=True`` to this dataclass — ``@memoized_property``
     (used by ``symbol_map``) requires a writable instance ``__dict__``.
     """
 
@@ -229,7 +229,7 @@ class ElfMetadata:
             self.has_fini, self.has_fini_fact, None, None
         )
 
-    @cached_property
+    @memoized_property
     def symbol_map(self) -> dict[str, ElfSymbol]:
         """Name → ElfSymbol mapping (built once, cached on first access).
 

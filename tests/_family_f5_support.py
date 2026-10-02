@@ -17,21 +17,17 @@
 
 See ``docs/contribute/plans/defect-family-harnesses.md`` § H5. Three parts:
 
-* :func:`scan_optimization_sites` -- the AST inventory of every memo/cache
-  and every thread/process-pool construction under ``abicheck/``.
-* :class:`ReferenceMode` -- the *test-side* reference mode. The plan
-  proposes a central ``ABICHECK_REFERENCE_MODE`` kill switch; this harness
-  deliberately does not add one to production. Every inventoried memo can
-  be bypassed from the test (a ``functools`` cache by rebinding every
-  module-global reference to its ``__wrapped__``, a ``cached_property`` by a
-  plain ``property``, a memo dict by a dict that never stores, a scoped
-  ``ContextVar`` memo by a variable that is never set, a memo *object* by a
-  per-site handler), so a production switch would only have duplicated that
-  with a second, untested code path in every cache. Serial execution uses
-  the existing ``ABICHECK_MAX_THREADS`` budget knob; the disk cache uses
-  ``snapshot_cache._CACHE_DIR``. Each bypass counts its own calls, which is
-  how a cell proves the reference configuration actually ran (AGENTS.md,
-  "A differential test must prove both of its configurations actually ran").
+* :func:`scan_optimization_sites` -- the AST inventory of every cache built on
+  the central wrapper (:mod:`abicheck.model.execution_cache`) and every
+  thread/process-pool construction under ``abicheck/``.
+* :class:`ReferenceMode` -- the **production** switch. Design-hardening plan
+  Phase 4 reversed this harness's original decision (a test-side bypass per
+  site): every cache now goes through one wrapper honouring
+  ``ABICHECK_REFERENCE_MODE=1``, and that switch also forces every pool
+  inline. Engagement is read from the wrapper's registry -- each cache counts
+  the calls it bypassed -- so a cell still proves the reference configuration
+  actually ran (AGENTS.md, "A differential test must prove both of its
+  configurations actually ran").
 * :func:`canonical_report` -- the oracle's normalisation, removing only the
   fields in :data:`VOLATILE_FIELDS`.
 """
@@ -39,14 +35,10 @@ See ``docs/contribute/plans/defect-family-harnesses.md`` § H5. Three parts:
 from __future__ import annotations
 
 import ast
-import contextvars
 import copy
-import functools
 import importlib
 import json
-import sys
-from collections import OrderedDict
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -59,16 +51,22 @@ PKG = REPO / "abicheck"
 
 # ── inventory ────────────────────────────────────────────────────────────────
 
-_MEMO_DECORATORS = ("cache", "lru_cache", "cached_property", "run_scoped_digest_cache")
 _POOL_CALLEES = ("ThreadPoolExecutor", "ProcessPoolExecutor", "BudgetedExecutor")
-_MEMO_CONTAINERS = (
-    "dict",
-    "OrderedDict",
-    "WeakKeyDictionary",
-    "WeakValueDictionary",
-    "ContextVar",
-    "defaultdict",
-)
+#: Wrapper decorators -> site kind.
+_DECORATOR_KINDS = {
+    "memoized": "memoized",
+    "memoized_property": "memoized_property",
+    "memoize_header_scan": "header_scan",
+}
+#: Wrapper cache constructors -> site kind.
+_CACHE_CTORS = {
+    "MemoryCache": "memory_cache",
+    "ScopedCache": "scoped_cache",
+    "SharedScopedCache": "shared_scoped_cache",
+    "InstanceMemo": "instance_memo",
+    "DiskCache": "disk_cache",
+    "register_cache": "registered",
+}
 
 
 @dataclass(frozen=True, order=True)
@@ -76,7 +74,7 @@ class Site:
     """One optimization site. ``key`` is line-number free so the table is stable."""
 
     module: str  # dotted module name
-    kind: str  # functools | cached_property | scoped_decorator | memo_dict | memo_contextvar | memo_object | pool
+    kind: str  # one of _DECORATOR_KINDS / _CACHE_CTORS values, or "pool"
     name: str  # qualname of the decorated function / module variable / enclosing function + callee
 
     @property
@@ -93,10 +91,15 @@ class _Scanner(ast.NodeVisitor):
         self.module = module
         self.stack: list[str] = []
         self.sites: list[Site] = []
-        self._pool_seen: dict[str, int] = {}
+        self._seen: dict[str, int] = {}
 
     def _qual(self, name: str) -> str:
         return ".".join([*self.stack, name])
+
+    def _numbered(self, base: str) -> str:
+        n = self._seen.get(base, 0)
+        self._seen[base] = n + 1
+        return base if n == 0 else f"{base}#{n + 1}"
 
     def _visit_def(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         canonical = canonical_def_name(node.name)
@@ -107,19 +110,12 @@ class _Scanner(ast.NodeVisitor):
             node.name = canonical
         for deco in node.decorator_list:
             target = deco.func if isinstance(deco, ast.Call) else deco
-            callee = _last(ast.unparse(target))
-            if callee in ("cache", "lru_cache"):
-                self.sites.append(Site(self.module, "functools", self._qual(node.name)))
-            elif callee == "cached_property":
-                self.sites.append(
-                    Site(self.module, "cached_property", self._qual(node.name))
-                )
-            elif callee == "run_scoped_digest_cache":
-                self.sites.append(
-                    Site(self.module, "scoped_decorator", self._qual(node.name))
-                )
+            kind = _DECORATOR_KINDS.get(_last(ast.unparse(target)))
+            if kind is not None:
+                self.sites.append(Site(self.module, kind, self._qual(node.name)))
         self.stack.append(node.name)
-        self.generic_visit(node)
+        for child in node.body:
+            self.visit(child)
         self.stack.pop()
 
     visit_FunctionDef = _visit_def
@@ -130,6 +126,25 @@ class _Scanner(ast.NodeVisitor):
         self.generic_visit(node)
         self.stack.pop()
 
+    def visit_Assign(self, node: ast.Assign | ast.AnnAssign) -> None:
+        target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+        value = node.value
+        if (
+            not self.stack
+            and isinstance(target, ast.Name)
+            and isinstance(value, ast.Call)
+            and _last(ast.unparse(value.func)) in _CACHE_CTORS
+            and not is_mutmut_artifact(target.id)
+        ):
+            kind = _CACHE_CTORS[_last(ast.unparse(value.func))]
+            self.sites.append(Site(self.module, kind, target.id))
+            for arg in value.args:
+                self.visit(arg)
+            return
+        self.generic_visit(node)
+
+    visit_AnnAssign = visit_Assign  # type: ignore[assignment]
+
     def visit_Call(self, node: ast.Call) -> None:
         callee = _last(ast.unparse(node.func))
         if callee in _POOL_CALLEES and not (
@@ -138,52 +153,22 @@ class _Scanner(ast.NodeVisitor):
             and callee == "BudgetedExecutor"
         ):
             base = f"{'.'.join(self.stack) or '<module>'}->{callee}"
-            n = self._pool_seen.get(base, 0)
-            self._pool_seen[base] = n + 1
+            self.sites.append(Site(self.module, "pool", self._numbered(base)))
+        elif callee in _CACHE_CTORS and self.stack:
+            # A cache built inside a function (a decorator factory's closure):
+            # not a module-level object, so it is inventoried by the function.
+            base = f"{'.'.join(self.stack)}->{callee}"
             self.sites.append(
-                Site(self.module, "pool", base if n == 0 else f"{base}#{n + 1}")
+                Site(self.module, _CACHE_CTORS[callee], self._numbered(base))
             )
         self.generic_visit(node)
 
 
-def _module_memo_sites(module: str, tree: ast.Module) -> list[Site]:
-    out: list[Site] = []
-    for node in tree.body:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            name, value = node.targets[0].id, node.value
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.value is not None
-        ):
-            name, value = node.target.id, node.value
-        else:
-            continue
-        if is_mutmut_artifact(name):
-            continue
-        named = "cache" in name.lower() or "memo" in name.lower()
-        callee = _last(ast.unparse(value.func)) if isinstance(value, ast.Call) else ""
-        if named and isinstance(value, ast.Dict) and not value.keys:
-            out.append(Site(module, "memo_dict", name))
-        elif named and callee in _MEMO_CONTAINERS:
-            out.append(
-                Site(
-                    module,
-                    "memo_contextvar" if callee == "ContextVar" else "memo_dict",
-                    name,
-                )
-            )
-        elif callee and ("Cache" in callee or "Memo" in callee):
-            out.append(Site(module, "memo_object", name))
-    return out
-
-
 def scan_optimization_sites(root: Path = PKG) -> list[Site]:
-    """Every memo/cache and pool-construction site under *root* (sorted)."""
+    """Every wrapper cache and pool-construction site under *root* (sorted).
+
+    ``abicheck/model/execution_cache.py`` itself is the wrapper, not a site.
+    """
     sites: list[Site] = []
     for path in sorted(root.rglob("*.py")):
         rel = path.relative_to(root.parent).with_suffix("")
@@ -191,11 +176,15 @@ def scan_optimization_sites(root: Path = PKG) -> list[Site]:
         if parts[-1] == "__init__":
             parts.pop()
         module = ".".join(parts)
+        if module in (
+            "abicheck.model.execution_cache",
+            "abicheck.model.execution_cache_scoped",
+        ):
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         scanner = _Scanner(module)
         scanner.visit(tree)
         sites.extend(scanner.sites)
-        sites.extend(_module_memo_sites(module, tree))
     return sorted(set(sites))
 
 
@@ -233,79 +222,7 @@ def first_difference(a: str, b: str) -> str:
     return f"length {len(a)} != {len(b)}" if a != b else ""
 
 
-# ── reference mode (test-side) ───────────────────────────────────────────────
-
-
-class _NoStoreMixin:
-    """A memo mapping that never retains anything; lookups are counted."""
-
-    _on_lookup: Callable[[], None] = staticmethod(lambda: None)
-
-    def __setitem__(self, key: Any, value: Any) -> None:
-        return None
-
-    def setdefault(self, key: Any, default: Any = None) -> Any:
-        return default
-
-    def get(self, key: Any, default: Any = None) -> Any:
-        self._on_lookup()
-        return default
-
-    def __contains__(self, key: object) -> bool:
-        self._on_lookup()
-        return False
-
-
-class _NoStoreDict(_NoStoreMixin, dict):  # type: ignore[type-arg]
-    pass
-
-
-class _NoStoreOrderedDict(_NoStoreMixin, OrderedDict):  # type: ignore[type-arg]
-    pass
-
-
-class _NeverSetVar:
-    """A ``ContextVar`` stand-in that always reads its default: a scoped memo
-    whose scope is never observed as open, so every lookup recomputes."""
-
-    def __init__(self, default: Any, on_get: Callable[[], None] = lambda: None) -> None:
-        self._default = default
-        self._on_get = on_get
-
-    def get(self, *default: Any) -> Any:
-        self._on_get()
-        return self._default
-
-    def set(self, value: Any) -> object:
-        return object()
-
-    def reset(self, token: object) -> None:
-        return None
-
-
-class _NoMemoState:
-    __slots__ = ("_on_get", "depth", "lock")
-
-    def __init__(self, lock: Any, on_get: Callable[[], None]) -> None:
-        self.depth = 0
-        self.lock = lock
-        self._on_get = on_get
-
-    @property
-    def memo(self) -> None:
-        self._on_get()
-        return None
-
-    @memo.setter
-    def memo(self, value: Any) -> None:
-        return None
-
-
-def _var_default(var: contextvars.ContextVar[Any]) -> Any:
-    try:
-        return contextvars.Context().run(var.get)
-    except LookupError:
-        return None
+# ── reference mode (the production switch) ───────────────────────────────
 
 
 def _resolve(site: Site) -> tuple[Any, list[str]]:
@@ -317,147 +234,103 @@ def _resolve(site: Site) -> tuple[Any, list[str]]:
     return owner, parts
 
 
+def registry_name(site: Site) -> str:
+    """The name *site*'s cache is registered under in the wrapper's registry."""
+    if site.kind == "header_scan":
+        return f"{site.module}.{site.name}.header_scan"
+    if site.kind in ("memoized", "memoized_property"):
+        return f"{site.module}.{site.name}"
+    owner, parts = _resolve(site)
+    obj = getattr(owner, parts[-1])
+    return str(getattr(obj, "name"))
+
+
+def _stats() -> dict[str, dict[str, int]]:
+    from abicheck.model.execution_cache import cache_stats
+
+    return cache_stats()
+
+
 @dataclass
 class ReferenceMode:
-    """Bypass every reachable memo site; count calls through each bypass."""
+    """``ABICHECK_REFERENCE_MODE=1`` for the rest of the test, plus the map
+    from each inventoried site to the registry name its bypasses count under.
 
-    calls: dict[str, int] = field(default_factory=dict)
+    :attr:`calls` is read live: ``{site.key: bypasses}`` for every site whose
+    cache bypassed at least once since :meth:`install`.
+    """
+
+    names: dict[str, str] = field(default_factory=dict)
     unpatchable: dict[str, str] = field(default_factory=dict)
-    scoped_keys: list[str] = field(default_factory=list)
-
-    def _tick(self, key: str) -> Callable[[], None]:
-        def tick() -> None:
-            self.calls[key] = self.calls.get(key, 0) + 1
-
-        return tick
-
-    def _count(self, key: str, fn: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(fn)
-        def counted(*a: Any, **k: Any) -> Any:
-            self.calls[key] = self.calls.get(key, 0) + 1
-            return fn(*a, **k)
-
-        return counted
-
-    @staticmethod
-    def _swap_everywhere(mp: pytest.MonkeyPatch, old: object, new: object) -> int:
-        n = 0
-        for mod in list(sys.modules.values()):
-            d = getattr(mod, "__dict__", None)
-            if not d or not str(getattr(mod, "__name__", "")).startswith("abicheck"):
-                continue
-            for attr, val in list(d.items()):
-                if val is old:
-                    mp.setattr(mod, attr, new)
-                    n += 1
-        return n
 
     def install(self, mp: pytest.MonkeyPatch, sites: list[Site]) -> None:
+        from abicheck.model.execution_cache import (
+            REFERENCE_MODE_ENV_VAR,
+            reset_cache_stats,
+        )
+
+        registered = set(_stats())
         for site in sites:
+            if site.kind == "pool" or "->" in site.name:
+                # A pool is governed by the thread budget; a cache built
+                # inside a factory is inventoried at each decorated use.
+                continue
             try:
-                self._install_one(mp, site)
+                name = registry_name(site)
             except Exception as exc:  # noqa: BLE001 - recorded, asserted on by the caller
                 self.unpatchable[site.key] = f"{type(exc).__name__}: {exc}"
+                continue
+            if name not in registered:
+                self.unpatchable[site.key] = f"not registered: {name}"
+                continue
+            self.names[site.key] = name
+        mp.setenv(REFERENCE_MODE_ENV_VAR, "1")
+        reset_cache_stats()
 
-    def _install_one(self, mp: pytest.MonkeyPatch, site: Site) -> None:
-        owner, parts = _resolve(site)
-        leaf = parts[-1]
-        key = site.key
-        if site.kind == "functools":
-            cached = getattr(owner, leaf)
-            if isinstance(cached, staticmethod | classmethod):
-                cached = cached.__func__
-            inner = self._count(key, cached.__wrapped__)
-            if isinstance(owner, type):
-                mp.setattr(
-                    owner,
-                    leaf,
-                    staticmethod(inner)
-                    if isinstance(owner.__dict__[leaf], staticmethod)
-                    else inner,
-                )
-            if not self._swap_everywhere(mp, cached, inner) and not isinstance(
-                owner, type
-            ):
-                raise LookupError("no module-global reference to rebind")
-        elif site.kind == "cached_property":
-            cp = owner.__dict__[leaf]
-            mp.setattr(owner, leaf, property(self._count(key, cp.func)))
-        elif site.kind == "scoped_decorator":
-            # Every run-scoped digest memo shares one scope variable: bypass
-            # it once; each lookup is credited to every decorated site.
-            from abicheck.storage import snapshot_digest_cache as sdc
-
-            self.scoped_keys.append(key)
-            if not isinstance(sdc._SCOPE, _NeverSetVar):
-
-                def tick_all() -> None:
-                    for k in self.scoped_keys:
-                        self.calls[k] = self.calls.get(k, 0) + 1
-
-                mp.setattr(sdc, "_SCOPE", _NeverSetVar(None, tick_all))
-        elif site.kind == "memo_dict":
-            cur = getattr(owner, leaf)
-            repl: _NoStoreMixin = (
-                _NoStoreOrderedDict()
-                if isinstance(cur, OrderedDict)
-                else _NoStoreDict()
-            )
-            repl._on_lookup = self._tick(key)  # type: ignore[method-assign]
-            mp.setattr(owner, leaf, repl)
-        elif site.kind == "memo_contextvar":
-            cur = getattr(owner, leaf)
-            mp.setattr(owner, leaf, _NeverSetVar(_var_default(cur), self._tick(key)))
-        elif site.kind == "memo_object":
-            self._install_object(mp, site, owner, leaf)
-        # pools: governed by ABICHECK_MAX_THREADS, not by this bypass.
-
-    def _install_object(
-        self, mp: pytest.MonkeyPatch, site: Site, owner: Any, leaf: str
-    ) -> None:
-        obj = getattr(owner, leaf)
-        key = site.key
-        cls = type(obj).__name__
-        if cls == "DigestMemo":
-            mp.setattr(
-                obj, "get_or_compute", self._count(key, lambda _k, compute: compute())
-            )
-        elif cls == "_MatchCache":
-            mp.setattr(obj, "get", self._count(key, lambda _key: None))
-            mp.setattr(obj, "put", lambda *a, **k: None)
-        elif cls == "_VocabularyCache":
-            mp.setattr(
-                obj,
-                "get_or_compile",
-                self._count(key, lambda spellings, fn: fn(frozenset(spellings))),
-            )
-        elif cls == "_NormalizeMemoState":
-            state = _NoMemoState(obj.lock, self._tick(key))
-            mp.setattr(owner, leaf, state)
-        else:
-            raise TypeError(f"no reference-mode handler for memo object {cls}")
+    @property
+    def calls(self) -> dict[str, int]:
+        stats = _stats()
+        out = {
+            key: stats[name]["bypasses"]
+            for key, name in self.names.items()
+            if stats.get(name, {}).get("bypasses")
+        }
+        return out
 
 
 def functools_objects(sites: list[Site]) -> dict[str, Any]:
-    """The real cached callables, resolved *before* a :class:`ReferenceMode`
-    rebinds the module globals, so their counters stay readable."""
+    """Every in-process cache's registry name, keyed by site (after importing
+    every inventoried module, so each cache is registered). The memoized
+    *callables* are resolvable through :func:`memoized_callable`."""
     out: dict[str, Any] = {}
     for site in sites:
-        if site.kind == "functools":
-            owner, parts = _resolve(site)
-            fn = getattr(owner, parts[-1])
-            out[site.key] = getattr(fn, "__func__", fn)
+        if site.kind == "pool" or "->" in site.name:
+            continue
+        out[site.key] = registry_name(site)
     return out
 
 
+def memoized_callable(site_key: str) -> Any:
+    module, kind, name = site_key.split("::")
+    assert kind == "memoized", site_key
+    owner, parts = _resolve(Site(module, kind, name))
+    return getattr(owner, parts[-1])
+
+
 def cache_info_totals(objs: dict[str, Any]) -> dict[str, tuple[int, int]]:
-    """``(hits, misses)`` per functools site."""
-    return {k: (fn.cache_info().hits, fn.cache_info().misses) for k, fn in objs.items()}
+    """``(hits, misses)`` per in-process cache site."""
+    stats = _stats()
+    return {
+        k: (stats[n]["hits"], stats[n]["misses"]) for k, n in objs.items() if n in stats
+    }
 
 
 def clear_functools(objs: dict[str, Any]) -> None:
-    for fn in objs.values():
-        fn.cache_clear()
+    """Drop every process-lifetime entry and zero every counter."""
+    from abicheck.model.execution_cache import clear_all_caches, reset_cache_stats
+
+    clear_all_caches()
+    reset_cache_stats()
 
 
 @dataclass

@@ -53,7 +53,6 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from functools import cached_property
 from typing import TYPE_CHECKING
 
 from ..model.edge_coverage import (
@@ -69,6 +68,7 @@ from ..model.edge_coverage import (
     EdgeQueryResult,
     ProducerRun,
 )
+from ..model.execution_cache import memoized_property
 from ..model.export_index import read_export_platforms, snapshot_export_names
 from ..model.graph_join import (
     BINARY_SYMBOL_PREFIX,
@@ -378,27 +378,27 @@ class EdgeEvidence:
 
     # -- lazily computed evidence ------------------------------------------
 
-    @cached_property
+    @memoized_property
     def exports(self) -> ExportJoin:
         return join_exports(self.snap, self.identities)
 
-    @cached_property
+    @memoized_property
     def debug_types(self) -> DebugTypeJoin:
         return join_debug_types(self.snap, self.identities)
 
-    @cached_property
+    @memoized_property
     def _ownership(self) -> OwnershipRelations:
         return contract_relations(self.snap)
 
-    @cached_property
+    @memoized_property
     def export_records(self) -> tuple[CoverageRecord, ...]:
         return export_coverage_records(self.snap)
 
-    @cached_property
+    @memoized_property
     def _refs(self) -> ReferencedIdentifiers:
         return referenced_identifiers_by_node(self.snap)
 
-    @cached_property
+    @memoized_property
     def _entity_nodes(self) -> dict[str, str]:
         """Node id -> ``function``/``variable``/``record``/``enum``/``typedef``."""
         ids = self._refs.ids
@@ -414,7 +414,7 @@ class EdgeEvidence:
                 out.setdefault(ident.node_id, kind)
         return out
 
-    @cached_property
+    @memoized_property
     def _projection(self) -> dict[str, set[tuple[str, str]]]:
         """``edge kind -> {(src, dst)}`` of the public-surface builder's own
         ``declares``/``references``/``declares_linker_name`` edges, recomputed
@@ -435,7 +435,7 @@ class EdgeEvidence:
                 out[e.kind].add((e.src, e.dst))
         return out
 
-    @cached_property
+    @memoized_property
     def _ambiguous_spellings(self) -> dict[str, frozenset[str]]:
         """Type spelling -> every node id it could name, for spellings the
         reference index drops as ambiguous."""

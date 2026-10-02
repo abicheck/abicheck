@@ -60,7 +60,7 @@ def record_shared_cache_counters() -> None:
     """
     if not memory_trace.memory_trace_enabled():
         return
-    from ..compare.spelling_match_cache import cache_statistics
+    from ..compare.spelling_cache_statistics import cache_statistics
     from ..extract.cache_header_scan import header_scan_statistics
 
     memory_trace.counts("release.spelling_cache", **cache_statistics())

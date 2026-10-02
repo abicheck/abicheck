@@ -939,7 +939,7 @@ def test_demangle_reads_warmed_batch_cache(monkeypatch):
 
     dm.demangle.cache_clear()
     sym = "_ZN3FooEv_p11test"  # synthetic; need not be real Itanium
-    dm._BATCH_CACHE_OK[sym] = "Foo::warmed()"
+    dm._batch_cache_record_ok(sym, "Foo::warmed()")
 
     # Any subprocess use here would be a regression — fail loudly if called.
     def _boom(*a, **k):
@@ -950,7 +950,7 @@ def test_demangle_reads_warmed_batch_cache(monkeypatch):
     try:
         assert dm.demangle(sym) == "Foo::warmed()"
     finally:
-        dm._BATCH_CACHE_OK.pop(sym, None)
+        dm._BATCH_CACHE_OK.discard(sym)
         dm.demangle.cache_clear()
 
 
@@ -960,7 +960,7 @@ def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
 
     dm.demangle.cache_clear()
     sym = "_Znot_really_mangled_p11"
-    dm._BATCH_CACHE_FAIL[sym] = None
+    dm._batch_cache_record_fail(sym)
 
     def _boom(*a, **k):
         raise AssertionError("demangle() spawned a subprocess for a known-fail name")
@@ -970,7 +970,7 @@ def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
     try:
         assert dm.demangle(sym) is None
     finally:
-        dm._BATCH_CACHE_FAIL.pop(sym, None)
+        dm._BATCH_CACHE_FAIL.discard(sym)
         dm.demangle.cache_clear()
 
 
