@@ -39,6 +39,7 @@ from .buildsource.merge_support import (
 from .buildsource.model import DataLayer
 from .buildsource.pack import BuildSourcePack
 from .evidence_depth import embedded_evidence_pack
+from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -60,11 +61,10 @@ def _ingest_inputs_pack_snapshot(path: Path) -> AbiSnapshot:
     existing ``merge`` fold combines them with the artifact-side dump — no
     compiler frontend is re-run.
     """
-    from .model import AbiSnapshot
     from .workflows.extraction import ingest_inputs_pack
 
     ingested = ingest_inputs_pack(path)
-    snap = AbiSnapshot(
+    snap = new_snapshot(
         library=ingested.manifest.library or path.name,
         version=ingested.manifest.version,
     )

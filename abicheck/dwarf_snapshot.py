@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""DwarfSnapshotBuilder — build a complete AbiSnapshot from DWARF alone.
+"""DwarfSnapshotBuilder — extract a complete declaration set from DWARF alone.
 
 ADR-003: when no headers are provided but DWARF debug info is present,
 this module builds a full AbiSnapshot from DWARF .debug_info, enabling
@@ -69,7 +69,6 @@ from .extract.dwarf_scope import (
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
-    AbiSnapshot,
     AccessLevel,
     EnumMember,
     EnumType,
@@ -97,8 +96,6 @@ from .model.identity import (
 from .model.mangled_name import itanium_scope_components
 
 if TYPE_CHECKING:
-    from .dwarf_advanced import AdvancedDwarfMetadata
-    from .dwarf_metadata import DwarfMetadata
     from .dwarf_unified import DwarfSession
     from .elf_metadata import ElfMetadata
 
@@ -110,56 +107,30 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def build_snapshot_from_dwarf(
+def extract_dwarf_declarations(
     elf_path: Path,
     elf_meta: ElfMetadata,
-    dwarf_meta: DwarfMetadata,
-    dwarf_adv: AdvancedDwarfMetadata,
     *,
-    version: str = "unknown",
-    language_profile: str | None = None,
     session: DwarfSession | None = None,
-) -> AbiSnapshot:
-    """Build a complete AbiSnapshot from DWARF, no headers required.
+) -> _DwarfSnapshotBuilder:
+    """Walk *elf_path*'s DWARF and return the extracted declarations.
 
-    Args:
-        elf_path: Path to the ELF binary.
-        elf_meta: Pre-parsed ELF metadata (for exported symbol set).
-        dwarf_meta: Pre-parsed DWARF basic metadata (structs, enums).
-        dwarf_adv: Pre-parsed DWARF advanced metadata.
-        version: Version label for the snapshot.
-        language_profile: "c" | "cpp" | None.
-        session: Optional pre-opened :class:`~abicheck.dwarf_unified.DwarfSession`
-            (as produced while parsing ``dwarf_meta``/``dwarf_adv``). When given,
-            the DIE walk reuses that open ``DWARFInfo`` — hitting the cache the
-            metadata passes warmed — instead of opening ``elf_path`` a second
-            time. Output is byte-for-byte identical either way; the caller owns
-            the session's lifetime.
+    The result carries ``functions``, ``variables``, ``types``, ``enums``,
+    ``typedefs`` and ``typedef_entity_ids``. Assembling them into an
+    :class:`~abicheck.model.AbiSnapshot` is
+    :func:`abicheck.workflows.dwarf_snapshot_assembly.build_snapshot_from_dwarf`'s
+    job (design-hardening Phase 2: one snapshot factory, in ``workflows``);
+    a caller that only needs the types, like the header-layout backfill,
+    reads them here without building a snapshot at all.
 
-    Returns:
-        AbiSnapshot with functions, variables, types, enums, and typedefs
-        populated from DWARF. elf_only_mode=False (full type info available).
+    *session*: an optional pre-opened
+    :class:`~abicheck.dwarf_unified.DwarfSession` whose ``DWARFInfo`` the
+    walk reuses instead of opening *elf_path* a second time. Output is
+    identical either way; the caller owns the session's lifetime.
     """
     builder = _DwarfSnapshotBuilder(elf_path, elf_meta)
     builder.extract(session=session)
-
-    snapshot = AbiSnapshot(
-        library=elf_path.name,
-        version=version,
-        functions=builder.functions,
-        variables=builder.variables,
-        types=builder.types,
-        enums=builder.enums,
-        typedefs=builder.typedefs,
-        typedef_entity_ids=builder.typedef_entity_ids,
-        elf=elf_meta,
-        dwarf=dwarf_meta,
-        dwarf_advanced=dwarf_adv,
-        elf_only_mode=False,
-        platform="elf",
-        language_profile=language_profile,
-    )
-    return snapshot
+    return builder
 
 
 # ---------------------------------------------------------------------------

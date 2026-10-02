@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING
 from .errors import SnapshotError, ValidationError
 from .extract.surface_fact_producers import export_table_surface_facts
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
+from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -191,7 +192,7 @@ def _dump_pe(
         if pdb_types or pdb_enums:
             pdb_ir = pdb_semantic_ir(pdb_types, pdb_enums)
 
-    return AbiSnapshot(
+    return new_snapshot(
         library=path.name,
         version=version,
         functions=funcs,
@@ -275,7 +276,7 @@ def _dump_macho(
         for exp in macho_meta.exports
         if exp.name
     ]
-    return AbiSnapshot(
+    return new_snapshot(
         library=path.name,
         version=version,
         functions=funcs,

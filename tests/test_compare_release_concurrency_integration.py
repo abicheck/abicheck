@@ -45,6 +45,11 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.cli_compare_release_pairwise import (
+    ReleaseMemberContext,
+    release_parent_request,
+)
+
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux",
     reason="Builds ELF shared objects with GNU ld flags; the release "
@@ -308,9 +313,9 @@ class TestConcurrentReleaseWorkflow:
         real_parallel = pairwise._compare_release_parallel
         parallel_calls: list[int] = []
 
-        def spy_parallel(matched_keys, common_args, old_map, workers, admission=None):  # type: ignore[no-untyped-def]
+        def spy_parallel(matched_keys, ctx, old_map, workers, admission=None):  # type: ignore[no-untyped-def]
             parallel_calls.append(workers)
-            return real_parallel(matched_keys, common_args, old_map, workers, admission)
+            return real_parallel(matched_keys, ctx, old_map, workers, admission)
 
         monkeypatch.setattr(pairwise, "_compare_release_parallel", spy_parallel)
 
@@ -412,9 +417,9 @@ class TestInstrumentedParallelReleaseMatchesStored:
         real_parallel = pairwise._compare_release_parallel
         parallel_calls: list[int] = []
 
-        def spy_parallel(matched_keys, common_args, old_map, workers, admission=None):  # type: ignore[no-untyped-def]
+        def spy_parallel(matched_keys, ctx, old_map, workers, admission=None):  # type: ignore[no-untyped-def]
             parallel_calls.append(workers)
-            return real_parallel(matched_keys, common_args, old_map, workers, admission)
+            return real_parallel(matched_keys, ctx, old_map, workers, admission)
 
         monkeypatch.setattr(pairwise, "_compare_release_parallel", spy_parallel)
 
@@ -618,28 +623,20 @@ class TestFanOutExceptionBoundaryInSitu:
     successful siblings with it.
     """
 
-    def _common_args(self, tmp_path: Path, keys: tuple[str, ...]) -> tuple:
+    def _member_context(
+        self, tmp_path: Path, keys: tuple[str, ...]
+    ) -> ReleaseMemberContext:
         old_map = {k: tmp_path / f"{k}.so" for k in keys}
-        return (
-            old_map,
-            {k: tmp_path / f"{k}_new.so" for k in keys},
-            None,
-            None,
-            lambda _o, _n: None,
-            [],
-            [],
-            [],
-            [],
-            "1.0",
-            "2.0",
-            "c++",
-            None,
-            "strict_abi",
-            None,
-            True,
-            True,
-            False,
-            None,
+        return ReleaseMemberContext(
+            request=release_parent_request(
+                old_version="1.0",
+                new_version="2.0",
+                policy_file_path=None,
+                include_dependencies=True,
+            ),
+            old_map=old_map,
+            new_map={k: tmp_path / f"{k}_new.so" for k in keys},
+            resolve_debug_info=lambda _o, _n: None,
         )
 
     def test_one_worker_failure_does_not_lose_its_siblings(
@@ -662,8 +659,8 @@ class TestFanOutExceptionBoundaryInSitu:
         )
 
         keys = ("a", "b", "c")
-        common_args = self._common_args(tmp_path, keys)
-        results = _compare_release_parallel(list(keys), common_args, common_args[0], 3)
+        ctx = self._member_context(tmp_path, keys)
+        results = _compare_release_parallel(list(keys), ctx, ctx.old_map, 3)
 
         by_library = {str(entry["library"]): entry for entry in results}
         # Every selected member is still accounted for -- a failure must not

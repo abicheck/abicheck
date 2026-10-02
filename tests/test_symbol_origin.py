@@ -26,6 +26,7 @@ from abicheck.elf_metadata import (
     SymbolType,
     _guess_symbol_origin,
 )
+from abicheck.model import AbiSnapshot
 
 # ---------------------------------------------------------------------------
 # Tests for _guess_symbol_origin
@@ -651,7 +652,12 @@ class TestNoDoubleAnnotation:
             ]
         )
 
-        changes_meta = _diff_elf_symbol_metadata(old_elf, new_elf)
+        changes_meta = _diff_elf_symbol_metadata(
+            AbiSnapshot(library="", version="", elf=old_elf),
+            AbiSnapshot(library="", version="", elf=new_elf),
+            old_elf,
+            new_elf,
+        )
         changes_leaked = _diff_leaked_dependency_symbols(old_elf, new_elf)
 
         # _diff_elf_symbol_metadata should catch the type change

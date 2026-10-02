@@ -94,7 +94,6 @@ from .cli_options import (
 )
 from .errors import SnapshotError
 from .frontends.cli.runtime import _setup_verbosity, _write_or_echo
-from .model import AbiSnapshot
 from .model.header_exclusion_record import (
     canonical_exclusion_identity,
     release_exclusion_identity,
@@ -132,6 +131,7 @@ from .workflows.release_snapshot_retention import (
 )
 from .workflows.release_stored_inventory import stored_side_degraded_members
 from .workflows.release_support_promise import support_promise_results
+from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
@@ -1073,7 +1073,7 @@ def compare_release_cmd(
                         # silently impoverished old side.
                         click.echo(f"{old_path.name}: ELF-only ({exc})", err=True)
                         return StrandedLibraryResolution(
-                            AbiSnapshot(
+                            new_snapshot(
                                 library=old_path.name,
                                 version="",
                                 elf=extraction.parse_elf_metadata(old_path),

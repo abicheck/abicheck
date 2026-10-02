@@ -67,6 +67,7 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
 )
 from .errors import SnapshotError, ValidationError
 from .evidence_depth import layer_payload_empty
+from .workflows.snapshot_factory import new_snapshot
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -180,7 +181,6 @@ def dump_source_only(
     honors the same compiler override a binary dump would.
     """
     from .frontends.cli.runtime import _stamp_provenance
-    from .model import AbiSnapshot
     from .workflows.extraction import resolve_source_frontend_clang_bin
 
     if sources is None and build_info is None:
@@ -192,7 +192,7 @@ def dump_source_only(
     # `merge` keeps the artifact side as the base regardless.
     hint = sources if sources is not None else build_info
     library = hint.name if hint is not None else "source"
-    snap = AbiSnapshot(library=library, version=version)
+    snap = new_snapshot(library=library, version=version)
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     _write_snapshot_output(
         snap,

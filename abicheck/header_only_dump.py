@@ -93,7 +93,7 @@ def build_header_only_snapshot(
     """
     from .dumper import _ast_compile_provenance, _header_ast_parser
     from .dumper_manifest import resolve_header_ast_result
-    from .model import AbiSnapshot
+    from .workflows.snapshot_factory import new_snapshot
 
     gcc_path = compile.gcc_path if compile is not None else None
     gcc_prefix = compile.gcc_prefix if compile is not None else None
@@ -131,7 +131,7 @@ def build_header_only_snapshot(
         no_binary_evidence=True,
     )
 
-    return AbiSnapshot(
+    return new_snapshot(
         library=library_hint.name if library_hint is not None else "headers",
         version=version,
         functions=list(ast_result.functions),

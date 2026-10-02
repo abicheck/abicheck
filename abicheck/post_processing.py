@@ -1738,6 +1738,9 @@ class PostProcessingPipeline:
         # where it reads better -- doing that rebound a positional
         # `disposition_ledger` to this parameter (Codex review, PR #1231).
         experimental_namespaces: tuple[str, ...] | None = None,
+        # Design-hardening Phase 2: the OLD-side stand-in when *old* is None,
+        # built by the snapshot factory -- see `PipelineContext.absent_baseline`.
+        absent_baseline: AbiSnapshot | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -1752,6 +1755,7 @@ class PostProcessingPipeline:
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=public_surface_allowlist,
             disposition_ledger=disposition_ledger,
+            absent_baseline=absent_baseline,
         )
         # ``FilterRedundant`` sets ``ctx.kept = kept`` — an *aliasing* contract,
         # not a snapshot: every step from that point on is required to either

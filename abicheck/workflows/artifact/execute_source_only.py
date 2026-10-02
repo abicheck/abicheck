@@ -63,6 +63,7 @@ from typing import TYPE_CHECKING
 
 from ...errors import ValidationError
 from ..extraction import embed_build_source, resolve_source_frontend_clang_bin
+from ..snapshot_factory import new_snapshot
 from .dump_execution_options import DumpExecutionOptions, _DumpAssuranceView
 from .dump_request import ResolvedDumpRequest
 from .execute import enforce_requested_depth
@@ -131,7 +132,6 @@ def execute_source_only_dump_request(
     embedding nothing.
     """
     from ...evidence_depth import depth_rank, gated_source_label
-    from ...model import AbiSnapshot
 
     side = resolved.request.input
     if side.sources is None and side.build_info is None:
@@ -144,7 +144,7 @@ def execute_source_only_dump_request(
 
     hint = side.sources if side.sources is not None else side.build_info
     library = hint.name if hint is not None else "source"
-    snap = AbiSnapshot(library=library, version=side.version)
+    snap = new_snapshot(library=library, version=side.version)
 
     compile_ctx = side.compile
     clang_bin = resolve_source_frontend_clang_bin(

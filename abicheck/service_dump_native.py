@@ -588,9 +588,9 @@ def _apply_native_provenance(
     surface — the exact false-clean result the ELF fix closed, left open on
     these two formats (Codex review, fresh evidence).
     """
-    from .provenance import apply_provenance
+    from .workflows.snapshot_factory import finish_provenance
 
-    return apply_provenance(
+    return finish_provenance(
         snap,
         public_headers,
         public_header_dirs,

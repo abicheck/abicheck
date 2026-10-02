@@ -344,8 +344,12 @@ def acquire_release_surface(
                 side=side,
                 reason=f"public-header acquisition failed: {exc}",
             )
-        from ..provenance import apply_provenance
-        from .ownership_request import classify_extracted
+        from .snapshot_factory import (
+            OwnershipInputs,
+            ProvenanceInputs,
+            SnapshotFinish,
+            finish_snapshot,
+        )
 
         # `build_header_only_snapshot` parses; it does not classify. Origin
         # classification is a separate, caller-owned pass everywhere else in
@@ -360,17 +364,23 @@ def acquire_release_surface(
         # declarations stay UNKNOWN rather than becoming this product's export
         # obligations -- the MKL/MPI case `extract.public_root_ownership`
         # documents).
-        apply_provenance(
+        #
+        # Then ADR-075: the same one classification a member dump records,
+        # under the run's project rules (`project_ownership_scope`), so the
+        # obligations below read the contract relation a member would. Both
+        # passes go through the snapshot factory's one fixed order.
+        snapshot = finish_snapshot(
             snapshot,
-            list(public_headers),
-            list(public_header_dirs),
-            include_search_dirs=list(includes),
-        )
-        # ADR-075: the same one classification a member dump records, under
-        # the run's project rules (`project_ownership_scope`), so the
-        # obligations below read the contract relation a member would.
-        classify_extracted(
-            snapshot, None, [*public_headers, *public_header_dirs], public_header_dirs
+            SnapshotFinish(
+                provenance=ProvenanceInputs(
+                    list(public_headers),
+                    list(public_header_dirs),
+                    include_search_dirs=list(includes),
+                ),
+                ownership=OwnershipInputs(
+                    None, [*public_headers, *public_header_dirs], public_header_dirs
+                ),
+            ),
         )
         return surface_from_snapshot(
             snapshot, acquisition_key=identity.key(), side=side

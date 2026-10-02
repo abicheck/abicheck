@@ -975,13 +975,10 @@ class TestCompareReleaseParallelOrdering:
 
         import abicheck.cli_compare_release_pairwise as _cr
 
-        monkeypatch.setattr(
-            _cr,
-            "_compare_one_library",
-            lambda key, *a: {"library": key, "key": key},
-        )
+        monkeypatch.setattr(_cr, "_compare_one_library", lambda key, *a: {"key": key})
         keys = ["libc", "liba", "libb"]
         old_map = {k: _P(k) for k in keys}
-        out = _cr._compare_release_parallel(keys, (), old_map, max_workers=4)
+        ctx = _cr.ReleaseMemberContext(_cr.release_parent_request(), old_map, {})
+        out = _cr._compare_release_parallel(keys, ctx, old_map, 4)
         # Deterministic: emitted in matched_keys order, not completion order.
         assert [r["key"] for r in out] == keys

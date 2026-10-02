@@ -18,7 +18,7 @@
 Split out of `test_compare_release.py` (a debt.yaml `no_growth`-tracked
 module) purely to keep that file under the AI-readiness `file-size` gate's
 2000-line hard cap -- this class is fully self-contained (its own
-`_common_args` helper, no shared module-level fixtures from the parent
+`_member_context` helper, no shared module-level fixtures from the parent
 file) and was the newest/most independently-addable block at the time of
 the split.
 """
@@ -30,6 +30,10 @@ from pathlib import Path
 import pytest
 
 from abicheck.cli_compare_release import _compare_release_parallel
+from abicheck.cli_compare_release_pairwise import (
+    ReleaseMemberContext,
+    release_parent_request,
+)
 
 
 class TestParallelFanOutDedupPropagation:
@@ -40,30 +44,20 @@ class TestParallelFanOutDedupPropagation:
     (Codex review: a `ContextVar` set in the calling thread is not
     automatically visible to a new `ThreadPoolExecutor` worker thread)."""
 
-    def _common_args(
+    def _member_context(
         self, tmp_path: Path, pf: Path, keys: tuple[str, ...] = ("a", "b")
-    ) -> tuple:
+    ) -> ReleaseMemberContext:
         old_map = {k: tmp_path / f"{k}_old" for k in keys}
-        return (
-            old_map,
-            {k: tmp_path / f"{k}_new" for k in keys},
-            None,
-            None,
-            lambda _o, _n: None,
-            [],
-            [],
-            [],
-            [],
-            "1.0",
-            "2.0",
-            "c++",
-            None,
-            "strict_abi",
-            pf,
-            True,
-            True,
-            False,
-            None,
+        return ReleaseMemberContext(
+            request=release_parent_request(
+                old_version="1.0",
+                new_version="2.0",
+                policy_file_path=pf,
+                include_dependencies=True,
+            ),
+            old_map=old_map,
+            new_map={k: tmp_path / f"{k}_new" for k in keys},
+            resolve_debug_info=lambda _o, _n: None,
         )
 
     def test_dedup_scope_propagates_into_worker_threads(
@@ -88,11 +82,11 @@ class TestParallelFanOutDedupPropagation:
             _fake_compare_one_library,
         )
 
-        common_args = self._common_args(tmp_path, pf)
+        ctx = self._member_context(tmp_path, pf)
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
             with dedup_validate_overrides_warnings():
                 results = _compare_release_parallel(
-                    ["a", "b"], common_args, common_args[0], max_workers=4
+                    ["a", "b"], ctx, ctx.old_map, max_workers=4
                 )
         assert len(results) == 2
         # Deduped across both worker threads -- not one warning per library.
@@ -119,10 +113,10 @@ class TestParallelFanOutDedupPropagation:
             _fake_compare_one_library,
         )
 
-        common_args = self._common_args(tmp_path, pf)
+        ctx = self._member_context(tmp_path, pf)
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
             results = _compare_release_parallel(
-                ["a", "b"], common_args, common_args[0], max_workers=4
+                ["a", "b"], ctx, ctx.old_map, max_workers=4
             )
         assert len(results) == 2
         assert caplog.text.count("HIGH RISK") == 2
@@ -156,11 +150,11 @@ class TestParallelFanOutDedupPropagation:
         )
 
         keys = tuple(f"lib{i}" for i in range(40))
-        common_args = self._common_args(tmp_path, pf, keys)
+        ctx = self._member_context(tmp_path, pf, keys)
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
             with dedup_validate_overrides_warnings():
                 results = _compare_release_parallel(
-                    list(keys), common_args, common_args[0], max_workers=16
+                    list(keys), ctx, ctx.old_map, max_workers=16
                 )
         assert len(results) == 40
         assert caplog.text.count("HIGH RISK") == 1

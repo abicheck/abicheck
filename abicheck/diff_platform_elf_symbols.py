@@ -288,27 +288,18 @@ def _is_unattached_private_version_node(elf: Any, version: str) -> bool:
 
 
 def _diff_elf_symbol_metadata(
-    old: AbiSnapshot | Any,
-    new: AbiSnapshot | Any,
-    old_elf: Any | None = None,
-    new_elf: Any | None = None,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_elf: Any,
+    new_elf: Any,
 ) -> list[Change]:
-    if old_elf is None and new_elf is None:
-        old_elf = old
-        new_elf = new
-        # Direct-ElfMetadata call convention: the caller handed us a real ELF
-        # object, so treat the baseline symbol table as captured.
-        old_captured = True
-        old = AbiSnapshot(library="", version="")
-        new = AbiSnapshot(library="", version="")
-    else:
-        # Whether the OLD side actually captured an ELF symbol table. `_diff_elf`
-        # substitutes an empty ElfMetadata() when old.elf is None (header-only /
-        # legacy / parse-failed baseline), which is indistinguishable at the
-        # symbol-map level from a real DSO that exports nothing — but only the
-        # snapshot knows which. A genuinely-empty captured table proves the
-        # absence of prior GNU_UNIQUE exports; an absent one does not.
-        old_captured = getattr(old, "elf", None) is not None
+    # Whether the OLD side actually captured an ELF symbol table. `_diff_elf`
+    # substitutes an empty ElfMetadata() when old.elf is None (header-only /
+    # legacy / parse-failed baseline), which is indistinguishable at the
+    # symbol-map level from a real DSO that exports nothing — but only the
+    # snapshot knows which. A genuinely-empty captured table proves the
+    # absence of prior GNU_UNIQUE exports; an absent one does not.
+    old_captured = getattr(old, "elf", None) is not None
     assert old_elf is not None
     assert new_elf is not None
     changes: list[Change] = []

@@ -40,7 +40,11 @@ from unittest.mock import patch
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change, DiffResult
-from abicheck.cli_compare_release_pairwise import _compare_one_library
+from abicheck.cli_compare_release_pairwise import (
+    ReleaseMemberContext,
+    _compare_one_library,
+    release_parent_request,
+)
 from abicheck.model import AbiSnapshot
 from abicheck.report_summary import build_summary
 from abicheck.service import CompareResult
@@ -90,23 +94,15 @@ def test_release_pairwise_compatible_additions_matches_scalar_build_summary(
             new_snapshot=AbiSnapshot(library="libdemo.so.1", version="2"),
         )
         entry = _compare_one_library(
-            key="libdemo.so.1",
-            old_map={"libdemo.so.1": old_path},
-            new_map={"libdemo.so.1": new_path},
-            old_debug_dir=None,
-            new_debug_dir=None,
-            resolve_debug_info=lambda *_a, **_kw: None,
-            old_h=[],
-            new_h=[],
-            old_inc=[],
-            new_inc=[],
-            old_version="1",
-            new_version="2",
-            lang="c++",
-            suppress=None,
-            policy="strict_abi",
-            policy_file_path=None,
-            output_dir=None,
+            "libdemo.so.1",
+            ReleaseMemberContext(
+                request=release_parent_request(
+                    old_version="1", new_version="2", include_dependencies=True
+                ),
+                old_map={"libdemo.so.1": old_path},
+                new_map={"libdemo.so.1": new_path},
+                resolve_debug_info=lambda *_a, **_kw: None,
+            ),
         )
 
     entry.pop("_diff_result", None)

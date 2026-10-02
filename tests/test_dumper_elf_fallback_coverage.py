@@ -28,7 +28,7 @@ its root set from admitted functions/variables -- see
 ``dwarf_snapshot._DwarfSnapshotBuilder._filter_types_by_reachability``, so
 a fixture with real record types but zero admitted functions/variables
 is not something a small, understandable C++ source file can reliably
-produce). Monkeypatching ``dwarf_snapshot.build_snapshot_from_dwarf`` --
+produce). Monkeypatching ``dwarf_snapshot_assembly.build_snapshot_from_dwarf`` --
 the exact, already-established pattern
 ``tests/test_dumper_layout_backfill.py`` uses for the same module -- lets
 each branch be exercised in isolation against the real control-flow
@@ -43,7 +43,7 @@ from pathlib import Path
 
 import pytest
 
-import abicheck.dwarf_snapshot as dwarf_snapshot
+import abicheck.workflows.dwarf_snapshot_assembly as dwarf_snapshot
 from abicheck.dumper_elf_fallback import _try_dwarf_snapshot
 from abicheck.model import AbiSnapshot, Function, RecordType
 from abicheck.model.dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata

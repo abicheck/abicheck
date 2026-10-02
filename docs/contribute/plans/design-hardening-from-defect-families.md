@@ -134,6 +134,16 @@ Owner of the design: duplication-and-convergence Phases 1–2.
 - Exit: H2 has no strict xfail; the snapshot-constructor allowlist contains
   only decoders and the factory.
 
+#### Phase 2 status (2026-10-02)
+
+| Item | Status |
+|---|---|
+| Release members inherit the parent request | **Landed.** `workflows/release_member_request.py`: the release resolves one `ReleaseMemberCompareRequest`; each member gets it plus a frozen `MemberDelta` (operands and per-member debug files only) via `dataclasses.replace`, and `run_compare_kwargs` forwards every field by iterating the dataclass. The 34-slot `_CompareReleaseCommonArgs` tuple and the keyword-by-keyword `service.run_compare` call are deleted. `tests/test_release_member_request.py` adds a synthetic field to the request type and shows every member's `run_compare` call receives it. The F2/F5 mutant patches were rebased and are still killed. |
+| One `AbiSnapshot` factory | **Landed.** `workflows/snapshot_factory.py`: `new_snapshot` (construct, optionally finish), `finish_snapshot` (provenance → dependency scope → ownership, each only when given), `finish_provenance`, `absent_baseline`. All ~25 production constructors now call it. The dump/native/header-only/release-surface finishing calls go through `finish_snapshot`. Inner-layer sites were moved out rather than allowlisted: `build_snapshot_from_dwarf` moved to `workflows/dwarf_snapshot_assembly.py` (the DIE walk stays in `extract` as `extract_dwarf_declarations`); `header_only_dump.py` and `dumper_elf_fallback.py` were reclassified `extract` → `workflows` (each assembles a snapshot; only `workflows`/root modules import them); the post-processing pipeline receives its absent-baseline stand-in from `checker` instead of building one; the ELF symbol diff lost its placeholder-snapshot calling convention; the dead `python_ext.detect_python_extension_from_binary` was deleted. |
+| AST gate | **Landed.** `tests/test_snapshot_factory_gate.py` (`repo_scan`) rejects any `AbiSnapshot(...)` call -- by name, import alias, or attribute -- outside the allowlist, and fails on a stale entry. Allowlist: the factory, `storage/snapshot_codec.py` (JSON decoder), `compat/abicc_dump_import.py` (ABICC dump decoder). |
+| Exit: H2 has no strict xfail | **Met** (`KNOWN_DIVERGENCES` was already empty after Phase 0; still empty). |
+| Not done here | Snapshot finishing still happens at more than one call depth: dependency scoping for dumps is applied by the `run_dump` wrapper and ownership by `resolve_input`, both now through `finish_snapshot`/its passes, but not at construction. Moving every pass to construction time is the duplication plan's Phase 1 remainder. |
+
 ### Phase 3 — Identity is normalized at extraction (F3)
 
 Owner of the design: ADR-063 Phase 2B.

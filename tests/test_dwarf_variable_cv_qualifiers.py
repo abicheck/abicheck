@@ -53,9 +53,9 @@ import sys
 
 import pytest
 
-from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
 from abicheck.dwarf_unified import parse_dwarf
 from abicheck.elf_metadata import parse_elf_metadata
+from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
 _GPP = "g++"
 

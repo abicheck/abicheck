@@ -245,10 +245,10 @@ class TestLowMemoryModeIsOutputNeutral:
         monkeypatch,
     ) -> None:
         _require_tool("g++")
-        from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
         from abicheck.dwarf_unified import open_dwarf_session, parse_dwarf_from_session
         from abicheck.elf_metadata import parse_elf_metadata
         from abicheck.serialization import snapshot_to_json
+        from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
         so = _compile_so(tmp_path, "liblowmem2", _SRC)
         elf_meta = parse_elf_metadata(so)
@@ -292,10 +292,10 @@ class TestLowMemoryModeIsOutputNeutral:
         (``--depth binary``) code path opens fresh rather than sharing a
         session when none is supplied."""
         _require_tool("g++")
-        from abicheck.dwarf_snapshot import build_snapshot_from_dwarf
         from abicheck.dwarf_unified import parse_dwarf
         from abicheck.elf_metadata import parse_elf_metadata
         from abicheck.serialization import snapshot_to_json
+        from abicheck.workflows.dwarf_snapshot_assembly import build_snapshot_from_dwarf
 
         so = _compile_so(tmp_path, "liblowmem3", _SRC)
         elf_meta = parse_elf_metadata(so)
