@@ -77,7 +77,9 @@ import pathlib
 #: normalization` above: ADR-061 gap B's real owner behind the flat
 #: `qualified_name_segments` facade's anonymous/lambda-closure ordinal-
 #: identity renumbering -- snapshot string normalization, not a Phase 0
-#: identity/availability/versioning/package primitive.
+#: identity/availability/versioning/package primitive. `closure_marker_walk`
+#: (its marker-pruned walk) and `closure_marking` (the load path's marker
+#: proof and reusable marking pass) were split off it and are the same class.
 #: `snapshot_codec`/`snapshot_schema_versions`/`snapshot_encode`/
 #: `snapshot_decode_declarations`/`snapshot_reliability_flags` are a ninth:
 #: ADR-061 gap E closure package 6's real owner behind the flat
@@ -129,6 +131,8 @@ NON_ADR062_MODULES = frozenset(
         "sparse_section_codec",
         "snapshot_load_normalization",
         "closure_identity",
+        "closure_marker_walk",
+        "closure_marking",
         "snapshot_codec",
         "snapshot_schema_versions",
         "snapshot_encode",

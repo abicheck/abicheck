@@ -34,7 +34,7 @@ from abicheck.qualified_name_segments_walk import (
     _walk_rewrite_strings,
     collect_and_flag,
 )
-from abicheck.storage import closure_identity
+from abicheck.storage import closure_identity, closure_marker_walk
 from abicheck.storage.closure_identity import renumber_anonymous_closure_identities
 from tests.snapshot_fields import field_of
 
@@ -163,12 +163,12 @@ def test_collect_and_flag_is_collect_plus_a_walk_superset(value: object) -> None
         return text + "!"
 
     out: list[str] = []
-    flagged = collect_and_flag(value, out, closure_identity._may_hold_marker)
+    flagged = collect_and_flag(value, out, closure_marker_walk._may_hold_marker)
     expected: list[str] = []
     _collect_strings(value, expected)
     assert out == expected
     _walk_rewrite_strings(copy.deepcopy(value), record)
-    assert flagged == any(closure_identity._may_hold_marker(s) for s in seen)
+    assert flagged == any(closure_marker_walk._may_hold_marker(s) for s in seen)
 
 
 def test_vacuity_guard_markers_really_get_renumbered() -> None:
@@ -206,25 +206,26 @@ def test_collect_and_flag_matches_oracles_on_snapshot_dataclasses(
             return text + "!"
 
         out: list[str] = []
-        flagged = collect_and_flag(value, out, closure_identity._may_hold_marker)
+        flagged = collect_and_flag(value, out, closure_marker_walk._may_hold_marker)
         expected: list[str] = []
         _collect_strings(value, expected)
         assert out == expected, field
         _walk_rewrite_strings(copy.deepcopy(value), record)
         # Conservative: whatever the walk would rewrite is flagged ...
-        if any(closure_identity._may_hold_marker(s) for s in seen):
+        if any(closure_marker_walk._may_hold_marker(s) for s in seen):
             assert flagged, field
         # ... and the flag is exactly the documented superset: any string
         # reachable through `_rewrite_plan` fields, sequences, and both
         # halves of a mapping.
         assert flagged == any(
-            closure_identity._may_hold_marker(s) for s in _rewrite_plan_strings(value)
+            closure_marker_walk._may_hold_marker(s)
+            for s in _rewrite_plan_strings(value)
         ), field
         # Collection off: nothing collected, identical flag.
         silent: list[str] = []
         assert (
             collect_and_flag(
-                value, silent, closure_identity._may_hold_marker, collect=False
+                value, silent, closure_marker_walk._may_hold_marker, collect=False
             )
             == flagged
         )

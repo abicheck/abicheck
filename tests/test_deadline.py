@@ -605,68 +605,149 @@ def test_registration_window_replays_only_at_the_outermost_exit(monkeypatch) -> 
     assert deadline._deferred_sigterm is False
 
 
-def test_run_bounded_holds_registry_lock_across_spawn_and_registration(
+class _SpawnedFake(_FakeProc):
+    """A `_FakeProc` that also completes ``communicate()``, so run_bounded()
+    returns normally and never reaches its kill path with a fabricated pid
+    (a real ``os.killpg`` on one could signal an unrelated process group)."""
+
+    returncode = 0
+    #: When set, ``communicate()`` blocks until it is -- the child is still
+    #: running, so its group must still be registered.
+    running: threading.Event | None = None
+
+    def communicate(self, input=None, timeout=None):  # noqa: A002 - Popen's own name
+        if self.running is not None:
+            assert self.running.wait(timeout=10), "test never let the child exit"
+        return ("", "")
+
+
+class _GatedPopen:
+    """A ``subprocess.Popen`` stand-in whose construction blocks on *gate*,
+    so a test can hold a run_bounded() call mid-spawn on another thread."""
+
+    _next_pid = 70000
+
+    def __init__(
+        self,
+        entered: threading.Event,
+        gate: threading.Event,
+        exit_child: threading.Event | None = None,
+    ) -> None:
+        self._entered = entered
+        self._gate = gate
+        self._exit_child = exit_child
+
+    def __call__(self, cmd, **_kwargs):
+        self._entered.set()
+        assert self._gate.wait(timeout=10), "test never released the spawn"
+        _GatedPopen._next_pid += 1
+        proc = _SpawnedFake(pid=_GatedPopen._next_pid)
+        proc.running = self._exit_child
+        return proc
+
+
+def test_sigterm_handler_waits_for_a_worker_mid_spawn_and_sees_its_group(
     monkeypatch,
 ) -> None:
-    # Codex review (PR #591, round 7): the per-thread registration window
-    # alone only defers the handler on the thread that calls run_bounded(). The default
-    # L4/L5 paths (source_replay, call_graph, type_graph) invoke run_bounded()
-    # from ThreadPoolExecutor workers, but CPython always runs the installed
-    # SIGTERM handler on the *main* thread regardless of which thread the
-    # signal was delivered to — so a worker blocking SIGTERM on itself does
-    # not stop the main thread from concurrently running
-    # _sigterm_cleanup_handler against a stale registry. Holding
-    # _active_pgroups_lock across the same Popen()->_register_pgroup() window
-    # closes that gap too, since the handler acquires the same lock before
-    # reading the registry (real inter-thread mutual exclusion, unlike
-    # thread-local signal masking). This proves the lock is genuinely *held*
-    # (not just briefly touched inside _register_pgroup) by having a second
-    # thread attempt a blocking acquire while run_bounded is mid-spawn on a
-    # different thread and confirming it cannot get in.
-    entered = threading.Event()
-    release_child = threading.Event()
-    real_register = deadline._register_pgroup
-
-    def _slow_register(proc):
-        entered.set()
-        release_child.wait(timeout=5)
-        return real_register(proc)
-
-    monkeypatch.setattr(deadline, "_register_pgroup", _slow_register)
+    # Codex review (PR #591, round 7)'s cross-thread race, stated as the
+    # invariant rather than as "a lock is held": run_bounded() runs on worker
+    # threads, CPython runs the SIGTERM handler on the main thread, and a
+    # group a worker has started must never be missing from the registry the
+    # handler kills. The handler, invoked while a worker is inside Popen(),
+    # has to wait for that spawn to register and then kill its group.
+    entered, gate, exit_child = threading.Event(), threading.Event(), threading.Event()
+    monkeypatch.setattr(
+        deadline.subprocess, "Popen", _GatedPopen(entered, gate, exit_child)
+    )
+    killed: list[int] = []
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: killed.append(pgid))
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(signal, "signal", lambda *a: None)
     with deadline._active_pgroups_lock:
         deadline._active_pgroups.clear()
+    spawned: list[int] = []
 
-    acquired_during_window: list[bool] = []
+    def _worker() -> None:
+        deadline.run_bounded(["x"], timeout=5)
 
-    def _prober() -> None:
-        entered.wait(timeout=5)
-        got = deadline._active_pgroups_lock.acquire(timeout=0.3)
-        acquired_during_window.append(got)
-        if got:
-            deadline._active_pgroups_lock.release()
+    real_register = deadline._register_pgroup
 
-    prober = threading.Thread(target=_prober)
-    prober.start()
+    def _record(proc):
+        spawned.append(proc.pid)
+        return real_register(proc)
 
-    runner = threading.Thread(
-        target=lambda: deadline.run_bounded(
-            [sys.executable, "-c", "print('hi')"],
-            timeout=5,
-            capture_output=True,
-            text=True,
-        )
-    )
-    runner.start()
+    monkeypatch.setattr(deadline, "_register_pgroup", _record)
+    worker = threading.Thread(target=_worker)
+    worker.start()
+    assert entered.wait(timeout=5)
+    threading.Timer(0.3, gate.set).start()  # spawn finishes while handler waits
+    deadline._sigterm_cleanup_handler(signal.SIGTERM, None)
+    exit_child.set()
+    worker.join(timeout=10)
+    assert spawned and spawned[0] in killed
+    assert deadline._terminating is False
 
-    prober.join(timeout=5)
-    release_child.set()
-    runner.join(timeout=5)
 
-    # A different thread's acquire() attempt, made while run_bounded() is
-    # mid-spawn on the runner thread, must fail (block for the whole probe
-    # window) — proving the lock is held cross-thread across the critical
-    # section, not just momentarily inside _register_pgroup.
-    assert acquired_during_window == [False]
+def test_sigterm_handler_refuses_new_spawns_while_terminating(monkeypatch) -> None:
+    # A spawn that *starts* after the handler read the registry would be just
+    # as orphaned as one it raced; while the handler runs, run_bounded() must
+    # refuse to start a child -- and must allow it again if the process
+    # survives its own SIGTERM (here, a stubbed os.kill).
+    attempts: list[str] = []
+
+    def _try_spawn(_pgid, _sig):
+        try:
+            deadline.run_bounded([sys.executable, "-c", "pass"], timeout=5)
+            attempts.append("spawned")
+        except deadline.ProcessTerminating:
+            attempts.append("refused")
+
+    monkeypatch.setattr(os, "killpg", _try_spawn)
+    monkeypatch.setattr(os, "kill", lambda pid, sig: None)
+    monkeypatch.setattr(signal, "signal", lambda *a: None)
+    with deadline._active_pgroups_lock:
+        deadline._active_pgroups.clear()
+        deadline._active_pgroups.add(424242)
+    try:
+        deadline._sigterm_cleanup_handler(signal.SIGTERM, None)
+    finally:
+        with deadline._active_pgroups_lock:
+            deadline._active_pgroups.discard(424242)
+    assert attempts == ["refused"]
+    deadline.run_bounded([sys.executable, "-c", "pass"], timeout=5)  # allowed again
+
+
+def test_concurrent_run_bounded_spawns_are_not_serialized(monkeypatch) -> None:
+    # The registry used to be locked across Popen() itself, so every process
+    # spawn in the interpreter queued behind every other -- the hottest wait
+    # in a real release profile. Two spawns on two threads must now be able
+    # to be inside Popen() at the same time.
+    barrier = threading.Barrier(2, timeout=5)
+
+    class _BarrierPopen:
+        _pid = 80000
+
+        def __call__(self, cmd, **_kwargs):
+            barrier.wait()  # BrokenBarrierError if the spawns are serialized
+            _BarrierPopen._pid += 1
+            return _SpawnedFake(pid=_BarrierPopen._pid)
+
+    monkeypatch.setattr(deadline.subprocess, "Popen", _BarrierPopen())
+    errors: list[BaseException] = []
+
+    def _spawn() -> None:
+        try:
+            deadline.run_bounded(["x"], timeout=5)
+        except threading.BrokenBarrierError as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_spawn) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+    assert errors == []
+    assert deadline._spawns_in_flight == 0
 
 
 def test_run_bounded_leaves_no_leftover_registered_pgroup() -> None:
