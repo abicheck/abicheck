@@ -148,7 +148,8 @@ def test_every_snapshot_producer_call_is_classified() -> None:
 @pytest.mark.repo_scan
 def test_stamped_sites_really_call_the_stamp() -> None:
     """A site listed as stamped names the function that stamps it, and that
-    function really calls ``classify_extracted``."""
+    function really calls ``classify_extracted`` (directly, or through the
+    snapshot factory's ``finish_snapshot`` with ``OwnershipInputs``)."""
     bodies = {
         n.name: n
         for _, tree in _parsed_sources()
@@ -164,7 +165,14 @@ def test_stamped_sites_really_call_the_stamp() -> None:
             for c in ast.walk(body)
             if isinstance(c, ast.Call)
         }
-        assert "classify_extracted" in called, (module, fn, how)
+        assert (
+            "classify_extracted" in called
+            or {
+                "finish_snapshot",
+                "OwnershipInputs",
+            }
+            <= called
+        ), (module, fn, how)
 
 
 def test_appcompat_stamps_both_sides(monkeypatch: pytest.MonkeyPatch) -> None:
