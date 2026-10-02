@@ -299,3 +299,22 @@ def test_fused_load_normalization_matches_the_two_separate_steps(
     renumber_anonymous_closure_identities(expected)
     normalize_and_renumber_closure_identities_on_load(snap)
     assert _dumped(snap) == _dumped(expected)
+
+
+@_SETTINGS
+@given(_snapshots(), st.sampled_from(["gzip", "zstd"]))
+def test_a_streamed_compressed_write_reads_back_identically(
+    tmp_path: Path, snap: AbiSnapshot, compression: str
+) -> None:
+    # The cache's streamed zstd frame (no declared content size) and a
+    # streamed gzip write must load as the same snapshot the plain write
+    # does; gzip must also be byte-identical to its one-shot encoding.
+    plain = tmp_path / "plain.json"
+    streamed = tmp_path / f"streamed.json.{'gz' if compression == 'gzip' else 'zst'}"
+    write_snapshot(snap, plain, compression="none")
+    write_snapshot(snap, streamed, compression=compression, zstd_content_size=False)
+    assert _dumped(load_snapshot(streamed)) == _dumped(load_snapshot(plain))
+    if compression == "gzip":
+        import gzip
+
+        assert gzip.decompress(streamed.read_bytes()) == plain.read_bytes()

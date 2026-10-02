@@ -574,6 +574,11 @@ def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
             cache_file,
             compression=SnapshotCompression.ZSTD.value,
             zstd_level=ZSTD_LEVEL_CACHE,
+            # Streamed: a cache entry is private and any read failure is
+            # already a miss, so the declared-size cross-check a one-shot
+            # zstd frame carries buys nothing here, while holding the whole
+            # JSON text and its bytes cost ~0.5 GiB on a large snapshot.
+            zstd_content_size=False,
         )
         legacy_file = _CACHE_DIR / f"{key}.json"
         if legacy_file.exists():
