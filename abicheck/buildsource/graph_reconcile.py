@@ -351,6 +351,12 @@ def _all_structural_contexts(
     return {nid: frozenset(c) for nid, c in ctx.items()}
 
 
+def _own_file(node: GraphNode) -> str:
+    return project_layout_spelling(
+        str(node.attrs.get("def_file") or node.attrs.get("file") or "")
+    )
+
+
 def _declaring_files(
     graph: SourceGraphSummary, node_ids: AbstractSet[str] | None = None
 ) -> dict[str, str]:
@@ -452,8 +458,11 @@ class _Reconciler:
         """
         oid = old_node.id
         new_node = next(n for n in kind_pass.new_list if n.id == new_id)
-        old_declaring = self.old_declaring_files.get(oid, "")
-        new_declaring = self.new_declaring_files.get(new_id, "")
+        # The node's own recorded path is the fallback comparison key: its
+        # identity drops an unanchored absolute path, but two such paths in
+        # one run must still compare different ("unknown" is not "same").
+        old_declaring = self.old_declaring_files.get(oid) or _own_file(old_node)
+        new_declaring = self.new_declaring_files.get(new_id) or _own_file(new_node)
         classification = classify(
             kind_pass.old_ident[oid],
             kind_pass.new_ident[new_id],

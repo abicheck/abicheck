@@ -354,3 +354,17 @@ def test_project_layout_without_anchor_drops_an_absolute_path(rel) -> None:
     assert RootRelativePath.from_project_layout("/" + "/".join(rel)) is None
     kept = RootRelativePath.from_project_layout("/".join(rel))
     assert kept is not None and kept.posix == "/".join(rel)
+
+
+@given(a=relative_paths, b=relative_paths)
+def test_project_layout_comparison_key_never_reads_unknown_as_same(a, b) -> None:
+    """Two unanchored absolute paths in one run compare equal only when
+    they are the same path: the comparison key keeps the full spelling where
+    the identity constructor drops it (a rename gate once fired on two
+    different headers both keyed ``""``)."""
+    from abicheck.model.root_relative_path import project_layout_spelling
+
+    assume(not any(s.lower() in PROJECT_LAYOUT_MARKERS for s in (*a, *b)))
+    pa, pb = "/x/" + "/".join(a), "/x/" + "/".join(b)
+    assert (project_layout_spelling(pa) == project_layout_spelling(pb)) == (a == b)
+    assert project_layout_spelling(pa) != ""

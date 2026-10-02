@@ -197,7 +197,24 @@ class RootRelativePath:
 
 
 def project_layout_spelling(path: str | None) -> str:
-    """:meth:`RootRelativePath.from_project_layout` as a plain string
-    (``""`` when it answers ``None``), for a comparison key."""
+    """A *comparison* key for two declaring paths observed in one run --
+    not an identity: :meth:`RootRelativePath.from_project_layout` when it
+    answers, else the lexically normalized full spelling (``""`` only for
+    an empty path).
+
+    The fallback matters: two unanchored paths in one checkout
+    (``/x/v1/api.h`` vs ``/x/v2/api.h``) must still compare *different*;
+    collapsing both to ``""`` would read "unknown" as "same file" and let a
+    move or rename gate fire on no evidence. Only identity keys drop an
+    unanchored absolute path (they outlive the run)."""
     rel = RootRelativePath.from_project_layout(path)
-    return rel.posix if rel is not None else ""
+    if rel is not None:
+        return rel.posix
+    if not path:
+        return ""
+    segs = (
+        _absolute_segments(path)[1]
+        if is_absolute_spelling(path)
+        else (_segments(path) or [])
+    )
+    return "/".join(segs)
