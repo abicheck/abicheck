@@ -9,6 +9,7 @@ from xml.etree.ElementTree import Element
 from abicheck.checker import compare
 from abicheck.checker_policy import API_BREAK_KINDS, RISK_KINDS, ChangeKind, Verdict
 from abicheck.dumper import _CastxmlParser
+from abicheck.extract.headers.castxml.location import source_line_has_explicit
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,
@@ -136,11 +137,11 @@ class TestExplicitCtor:
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
         loc_el = Element("Location", file="_1", line="3")
 
-        assert parser._source_line_has_explicit(loc_el) is True
+        assert source_line_has_explicit(parser._ctx, loc_el) is True
 
         declaration_el = Element("Converter", file="_1", line="3")
-        assert parser._source_line_has_explicit(None, declaration_el) is True
-        assert str(source) in parser._source_lines_cache
+        assert source_line_has_explicit(parser._ctx, None, declaration_el) is True
+        assert str(source) in parser._ctx.source_lines_cache
 
     def test_castxml_converter_parse_functions_reads_operator_line_fallback(
         self, tmp_path
@@ -181,25 +182,29 @@ class TestExplicitCtor:
         root.append(Element("File", id="_2", name="/does/not/exist.h"))
         parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
 
-        assert parser._source_line_has_explicit(None) is None
+        assert source_line_has_explicit(parser._ctx, None) is None
         assert (
-            parser._source_line_has_explicit(
-                Element("Location", file="_missing", line="1")
+            source_line_has_explicit(
+                parser._ctx, Element("Location", file="_missing", line="1")
             )
             is None
         )
         assert (
-            parser._source_line_has_explicit(Element("Location", file="_1", line="1"))
-            is None
-        )
-        assert (
-            parser._source_line_has_explicit(
-                Element("Location", file="_2", line="not-int")
+            source_line_has_explicit(
+                parser._ctx, Element("Location", file="_1", line="1")
             )
             is None
         )
         assert (
-            parser._source_line_has_explicit(Element("Location", file="_2", line="1"))
+            source_line_has_explicit(
+                parser._ctx, Element("Location", file="_2", line="not-int")
+            )
+            is None
+        )
+        assert (
+            source_line_has_explicit(
+                parser._ctx, Element("Location", file="_2", line="1")
+            )
             is None
         )
 

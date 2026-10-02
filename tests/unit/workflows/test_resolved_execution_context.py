@@ -155,24 +155,6 @@ class TestFromPlan:
         assert dict(ctx.compile_contexts) == compile_contexts
 
 
-class TestProvenanceFor:
-    def test_none_when_no_evaluation_config_resolved(self):
-        ctx = ResolvedExecutionContext(operation="compare")
-        assert ctx.provenance_for("contract.mode") is None
-
-    def test_none_when_field_has_no_recorded_provenance(self):
-        ctx = ResolvedExecutionContext(
-            operation="compare", evaluation_config=_evaluation_config()
-        )
-        assert ctx.provenance_for("contract.mode") is None
-
-    def test_delegates_to_the_evaluation_configs_own_provenance_map(self):
-        prov = ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI, source_kind="cli_flag")
-        cfg = _evaluation_config(provenance={"contract.mode": prov})
-        ctx = ResolvedExecutionContext(operation="compare", evaluation_config=cfg)
-        assert ctx.provenance_for("contract.mode") is prov
-
-
 class TestResolutionDigest:
     def test_deterministic_for_equal_inputs(self):
         plan = _plan()

@@ -18,7 +18,7 @@ purely off ``os.cpu_count()`` -- on a very-high-core-count host (a real
 224-core CI runner measured 56.5 GB RSS) or a cpu-count-vs-memory-mismatched
 container, that can wildly oversubscribe available RAM. The auto default
 must now also clamp to a memory-derived worker cap
-(:func:`abicheck.cli_compare_release_pairwise._release_jobs_mem_cap`,
+(:func:`abicheck.workflows.release_jobs.release_jobs_mem_cap`,
 mirroring ``buildsource/source_replay.py``'s identical L4 pattern) -- an
 *explicit* ``--jobs N`` is never clamped.
 """
@@ -47,7 +47,7 @@ class TestReleaseJobMemBudget:
 class TestReleaseJobsMemCap:
     def test_none_when_ram_unreadable(self, monkeypatch) -> None:
         monkeypatch.setattr(process_resources, "available_mem_gib", lambda: None)
-        assert release_pairwise._release_jobs_mem_cap() is None
+        assert release_jobs.release_jobs_mem_cap() is None
 
     def test_admits_against_committable_memory_not_all_of_it(self, monkeypatch) -> None:
         """The cap divides *committable* RAM by the budget, not all of it.
@@ -62,12 +62,12 @@ class TestReleaseJobsMemCap:
         monkeypatch.delenv("ABICHECK_RELEASE_MEM_RESERVE_GIB", raising=False)
         monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 6.0)
         # (6.0 * 0.85 - 1.0) / 1.0 -> 4.1 -> 4
-        assert release_pairwise._release_jobs_mem_cap() == 4
+        assert release_jobs.release_jobs_mem_cap() == 4
 
     def test_floors_at_one_worker(self, monkeypatch) -> None:
         monkeypatch.setenv("ABICHECK_RELEASE_JOB_MEM_GIB", "10")
         monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 0.5)
-        assert release_pairwise._release_jobs_mem_cap() == 1
+        assert release_jobs.release_jobs_mem_cap() == 1
 
 
 class TestCompareReleaseLibrariesMemoryClamp:

@@ -27,6 +27,7 @@ from abicheck.dumper import (
     _safe_size,
     _vt_sort_key,
 )
+from abicheck.extract.headers.castxml import type_resolution as _castxml_type_resolution
 from abicheck.model import Visibility
 from abicheck.name_classification import canonicalize_type_name
 
@@ -940,13 +941,18 @@ class TestCastxmlParserTypeName:
         ft = _fund_type("t1", "int")
         root = _xml_root(ft)
         p = _CastxmlParser(root, set(), set())
-        assert p._cv_qualifies_pointer_value("") is False
+        assert _castxml_type_resolution.cv_qualifies_pointer_value(p._ctx, "") is False
 
     def test_cv_qualifies_pointer_value_unresolvable_id_is_false(self):
         ft = _fund_type("t1", "int")
         root = _xml_root(ft)
         p = _CastxmlParser(root, set(), set())
-        assert p._cv_qualifies_pointer_value("does-not-exist") is False
+        assert (
+            _castxml_type_resolution.cv_qualifies_pointer_value(
+                p._ctx, "does-not-exist"
+            )
+            is False
+        )
 
     def test_struct_type(self):
         s = Element("Struct", id="t1", name="Point")
@@ -1930,7 +1936,7 @@ class TestCastxmlParserVtable:
         types = p.parse_types()
         c_t = next(t for t in types if t.name == "C")
         assert c_t.vtable == ["_ZN1C3fooEv"]
-        assert p._vtable_slot_root == {}
+        assert p._ctx.vtable_slot_root == {}
 
 
 class TestCastxmlParserEnums:

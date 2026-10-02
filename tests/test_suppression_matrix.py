@@ -571,7 +571,7 @@ class TestAdvancedSuppressionScaffold:
         """,
         )
         # label-based retrieval
-        rules = sl.rules_by_label("workaround")
+        rules = [r for r in sl._suppressions if r.label == "workaround"]
         assert len(rules) == 1
         assert rules[0].label == "workaround"
 

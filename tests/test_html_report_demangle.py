@@ -172,20 +172,17 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         self, monkeypatch
     ) -> None:
         """No real Itanium demangler ever produces output identical to its
-        own mangled input, so _abbr_symbol_text's defensive guard against a
+        own mangled input, so abbr_symbol_text's defensive guard against a
         redundant `<abbr title="X">X</abbr>` (identical tooltip and text)
         can only be exercised by forcing the demangler's return value
         directly (Codecov: this was this PR's one uncovered new line)."""
-        import abicheck.html_report as html_report_mod
         import abicheck.report.render_html as render_html_mod
 
-        # Patch the implementation owner (ADR-061 D10): the formatter moved
-        # into `report/render_html.py` with the Phase 2 HTML compute/render
-        # split; `html_report._abbr_symbol_text` is now an alias for it, so
-        # patching the alias's old home would no longer reach the demangler
-        # the function actually calls.
+        # Patch the implementation owner (ADR-061 D10): the formatter lives
+        # in `report/render_html.py` since the Phase 2 HTML compute/render
+        # split.
         monkeypatch.setattr(render_html_mod, "_demangle_symbol", lambda raw, **kw: raw)
-        out = html_report_mod._abbr_symbol_text("safe_name")
+        out = render_html_mod.abbr_symbol_text("safe_name")
         assert out == "safe_name"
         assert "<abbr" not in out
 
@@ -283,10 +280,10 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
         Scoped to the symbol-cell helper directly, not the whole page,
         since the description field's own prose-scanning behavior is
         unaffected by this fix and out of scope for this assertion."""
-        from abicheck.html_report import _abbr_symbol_text
+        from abicheck.report.render_html import abbr_symbol_text
 
         real_symbol = "prefix_Z3foov"
-        out = _abbr_symbol_text(real_symbol)
+        out = abbr_symbol_text(real_symbol)
         assert real_symbol in out
         assert "prefixfoo()" not in out
 

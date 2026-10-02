@@ -1147,18 +1147,6 @@ def _typedef_target_is_indirect(
     )
 
 
-def _record_field_is_value_embedded(rec: RecordType, field_name: str) -> bool | None:
-    """Check whether *field_name* in *rec* is embedded by value.
-
-    Returns True if embedded-by-value, False if indirect, None if the field
-    is not found in *rec*.
-    """
-    for fld in rec.fields:
-        if fld.name == field_name:
-            return not _field_is_indirect(fld.type)
-    return None
-
-
 def _path_has_indirection(path: list[str], snap: AbiSnapshot | None = None) -> bool:
     """Return True if *path* crosses a pointer / reference / smart-pointer hop.
 

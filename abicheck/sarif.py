@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import hashlib
 from importlib.metadata import version as _pkg_version
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from abicheck.checker import Change, ChangeKind, DiffResult
@@ -1350,7 +1349,3 @@ def to_sarif_str(
         indent=indent,
     )
 
-
-def write_sarif(result: DiffResult, path: Path) -> None:
-    """Write SARIF output to *path*."""
-    path.write_text(to_sarif_str(result), encoding="utf-8")

@@ -44,7 +44,6 @@ from abicheck.buildsource.inputs_emit import (
 from abicheck.buildsource.inputs_pack import is_inputs_pack, load_inputs_manifest
 from abicheck.buildsource.inputs_validate import validate_inputs_pack
 from abicheck.cc_wrapper import (
-    compile_unit_from_command,
     compile_units_from_command,
     emit_facts_for_command,
     main,
@@ -1457,6 +1456,12 @@ def test_compact_rejects_escaping_output_filename(
 
 
 # -- compile_unit_from_command -----------------------------------------------
+
+
+def compile_unit_from_command(command, directory):
+    """The first TU of *command*, or ``None``."""
+    units = compile_units_from_command(command, directory)
+    return units[0] if units else None
 
 
 def test_compile_unit_from_command_parses_flags(tmp_path: Path) -> None:

@@ -105,7 +105,6 @@ if TYPE_CHECKING:
     from ..compatibility_evaluation_config import (
         CompatibilityEvaluationConfig,
         GateConfig,
-        ValueProvenance,
     )
     from ..compile_context import CompileContext
     from .plan import AnalysisPlan
@@ -474,18 +473,6 @@ class ResolvedExecutionContext:
                 assurance, requested_depth=self.evidence.requested_depth
             ),
         )
-
-    def provenance_for(self, field_name: str) -> ValueProvenance | None:
-        """The D7 :class:`~abicheck.compatibility_evaluation_config.ValueProvenance`
-        recorded for *field_name* (e.g. ``"contract.mode"``), or ``None``
-        when no :attr:`evaluation_config` was resolved or *field_name* has
-        no recorded provenance. Delegates to
-        ``evaluation_config.provenance`` -- the one place per-field
-        provenance already lives; this is a convenience accessor, not a
-        second copy of it."""
-        if self.evaluation_config is None:
-            return None
-        return self.evaluation_config.provenance.get(field_name)
 
     def resolution_digest(self) -> str:
         """A structural fingerprint of this *resolved input* -- distinct

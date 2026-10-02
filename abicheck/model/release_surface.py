@@ -221,9 +221,6 @@ class ReleasePublicSurface:
         """
         return self if self.side == side else replace(self, side=side)
 
-    def obligation_symbols(self) -> frozenset[str]:
-        return frozenset(o.symbol for o in self.obligations)
-
     def to_dict(self) -> dict[str, object]:
         """Deterministic projection for a report/baseline document."""
         out: dict[str, object] = {

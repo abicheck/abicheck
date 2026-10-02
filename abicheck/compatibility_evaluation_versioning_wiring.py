@@ -29,16 +29,15 @@ real front end this resolves against today.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from .compatibility_evaluation_config import (
     SelectedByEntry,
     ValueProvenance,
 )
-from .compatibility_evaluation_resolver import FieldCandidate, resolve_field
+from .compatibility_evaluation_resolver import FieldCandidate
 from .contract_relevance_types import SelectorLayer
 from .policy.versioning_policy import (
-    VersioningPolicy,
     built_in_default_versioning_policy,
 )
 
@@ -86,25 +85,3 @@ def versioning_policy_candidate(
         value=policy_file.versioning,
     )
 
-
-def resolve_versioning_policy(
-    *, policy_file: PolicyFile | None
-) -> tuple[VersioningPolicy, ValueProvenance]:
-    """Resolve ``versioning.policy`` (ADR-066 D4) from a real ``--policy-file``.
-
-    D4's "a run recipe may supply them" is not yet backed by a concrete
-    run-recipe input mechanism, so only the ``EXPLICIT_CLI``-shaped
-    ``--policy-file`` path (:func:`versioning_policy_candidate`) is wired --
-    adding a second front end is a matter of building its own candidate and
-    passing it alongside this one, not changing this function.
-    """
-    default = FieldCandidate(
-        provenance=ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT),
-        value=_BUILT_IN_DEFAULT_VERSIONING_POLICY,
-    )
-    candidate = versioning_policy_candidate(policy_file=policy_file)
-    candidates: list[FieldCandidate] = [] if candidate is None else [candidate]
-    value, provenance = resolve_field(
-        VERSIONING_POLICY_FIELD, candidates, default=default
-    )
-    return cast(VersioningPolicy, value), provenance

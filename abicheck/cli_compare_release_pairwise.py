@@ -93,16 +93,6 @@ def _release_job_mem_budget_gib(depth: str | None = None) -> float:
     return release_job_mem_budget_gib(depth)
 
 
-def _release_jobs_mem_cap(depth: str | None = None) -> int | None:
-    """Max release-fan-out workers that fit in available RAM, or ``None``
-    when RAM can't be read -- see :func:`_release_job_mem_budget_gib`'s
-    docstring for why this is a thin wrapper.
-    """
-    from .workflows.release_jobs import release_jobs_mem_cap
-
-    return release_jobs_mem_cap(depth)
-
-
 _CompareReleaseCommonArgs = tuple[
     dict[str, Path],
     dict[str, Path],

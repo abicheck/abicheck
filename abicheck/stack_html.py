@@ -336,7 +336,3 @@ def _render_node_html(
 
     on_path.discard(key)
 
-
-def write_stack_html(result: StackCheckResult, path: Path) -> None:
-    """Write a Stack HTML report to *path*."""
-    path.write_text(stack_to_html(result), encoding="utf-8")

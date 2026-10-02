@@ -506,24 +506,6 @@ def _release_change_kind_str(c: Any) -> str:
     return str(getattr(kind, "value", str(kind)))
 
 
-def _accumulate_release_kind_counts(
-    entry: dict[str, object], field: str, kinds: Any
-) -> None:
-    """Add *kinds* (an iterable of kind strings) onto ``entry[field]``.
-
-    Mirrored the retired ``cli_scan_baseline._accumulate_kind_counts``: a running dict
-    (not overwritten), sorted by kind name so the JSON is deterministic and
-    diff-friendly across runs of the same input.
-    """
-    from collections import Counter
-
-    existing = entry.get(field) or {}
-    counter: Counter[str] = Counter(existing if isinstance(existing, dict) else {})
-    counter.update(kinds)
-    if counter:
-        entry[field] = dict(sorted(counter.items()))
-
-
 def _release_gating_buckets(
     diff: DiffResult,
     severity_config: SeverityConfig | None,

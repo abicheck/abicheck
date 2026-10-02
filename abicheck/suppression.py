@@ -845,10 +845,6 @@ class SuppressionList:
         """Return all rules that have passed their expiry date."""
         return [s for s in self._suppressions if s.is_expired(today)]
 
-    def rules_by_label(self, label: str) -> list[Suppression]:
-        """Return all rules with the given label."""
-        return [s for s in self._suppressions if s.label == label]
-
     def rule_identities(self) -> tuple[str, ...]:
         """One canonical, machine-facing identity string per loaded rule.
 

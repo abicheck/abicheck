@@ -379,12 +379,6 @@ class AvailabilityLedger:
             base = replace(base, status=FactStatus.NOT_COLLECTED)
         return base.narrowed(override)
 
-    def comparable_families(self) -> frozenset[str]:
-        """Declared families a comparison may draw conclusions from."""
-        return frozenset(
-            name for name, avail in self.families.items() if avail.comparable
-        )
-
     def missing_families(self, required: Iterable[str]) -> tuple[str, ...]:
         """Required families whose evidence is *missing*, per :data:`_GAP_STATUSES`.
 

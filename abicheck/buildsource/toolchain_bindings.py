@@ -138,26 +138,6 @@ def load_bindings_file(path: Path | str) -> BindingsFile:
         raise BindingsFileError(f"{p}: {exc}") from exc
 
 
-def resolve_binding(bindings_file: BindingsFile, binding_id: str) -> str:
-    """Resolve *binding_id* (a ``ProfileCompileSpec.binding`` value) to its
-    exact executable path via *bindings_file*.
-
-    Raises :class:`BindingsFileError` when *binding_id* has no entry —
-    fail closed, matching the CastXML-version-gate/comparability-gate
-    convention elsewhere in this project (an unresolvable profile axis is
-    an explicit, actionable error, never a silent fallback to whatever
-    happens to be on ``PATH``).
-    """
-    try:
-        return bindings_file.bindings[binding_id]
-    except KeyError:
-        available = ", ".join(sorted(bindings_file.bindings)) or "(none declared)"
-        raise BindingsFileError(
-            f"toolchain binding {binding_id!r} is not declared in the bindings "
-            f"file (available: {available})"
-        ) from None
-
-
 class _HasCompileBinding(Protocol):
     """Structural subset of ``project_targets.ProfileSpec`` this module
     needs — avoids importing that module (and its own YAML-config-parsing

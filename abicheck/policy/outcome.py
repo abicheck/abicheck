@@ -302,12 +302,6 @@ class RunOutcome:
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING
     scope: ScopeCompleteness = ScopeCompleteness.COMPLETE
 
-    def exit_code_contribution(self) -> int:
-        """This outcome's own contribution to the shared 0/1/2/4 scheme --
-        the two typed axes folded together via :func:`fold_gate_and_operational`.
-        """
-        return fold_gate_and_operational(self.gate, self.operational)
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": RUN_OUTCOME_SCHEMA_VERSION,

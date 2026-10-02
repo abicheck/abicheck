@@ -72,8 +72,6 @@ from .report.render_html import (
     ScopedVerdictData,
     SummaryCategoryRow,
     SummaryTableData,
-    abbr_symbol_text,
-    render_changes_table,
 )
 from .report.render_html_document import render_html_document
 from .report_classifications import (
@@ -95,13 +93,6 @@ if TYPE_CHECKING:
     from .checker import DiffResult
     from .severity import SeverityConfig
 
-# Kept under its original private name so every existing caller resolves
-# unchanged -- `appcompat_html.py` imports `_abbr_symbol_text`/
-# `_changes_table` from here, and `tests/test_html_report_demangle.py`
-# exercises it by this spelling. A plain assignment rather than a renaming
-# import, so both ruff and mypy read it as a deliberate re-export rather
-# than an unused import.
-_abbr_symbol_text = abbr_symbol_text
 
 
 def compute_full_change_rows(
@@ -180,39 +171,6 @@ def compute_full_change_rows(
             )
         )
     return tuple(rows)
-
-
-def _changes_table(
-    changes: list[object],
-    demangle: bool = True,
-    evidence_tiers: Sequence[str] = (),
-    evidence_status_override: EvidenceStatus | None = None,
-) -> str:
-    """Native changes table. Kept at its original signature -- `appcompat_html.py`
-    imports it, and it has its own direct test coverage -- so the per-change
-    fact resolution happens here rather than being pushed onto every caller.
-
-    *evidence_tiers* (``DiffResult.evidence_tiers``), when given, lets
-    ``compute_full_change_rows`` qualify an ``UNATTRIBUTED`` finding's
-    impact text -- appcompat's own changes tables (`appcompat_html.py`)
-    previously called this with no tiers at all, leaving an unbound
-    finding from an ELF-plus-header comparison reading as
-    artifact-proven, unlike the native/ABICC HTML renderers (Codex
-    review, fresh evidence). Omitting it (the default) keeps every other
-    caller byte-identical to before this parameter existed.
-
-    *evidence_status_override* (Codex review, fresh evidence) lets
-    appcompat's relevant-changes table stamp ``EvidenceStatus.
-    CONSUMER_PROVEN`` the same way ``reporter.py``'s JSON projection
-    already does for `breaking_for_app` -- a finding proven by the
-    supplied consumer's own import table must not be demoted to
-    "plausible, not confirmed" just because the library-to-library
-    comparison's own evidence_tiers happen to be thin.
-    """
-    return render_changes_table(
-        compute_full_change_rows(changes, evidence_tiers, evidence_status_override),
-        demangle,
-    )
 
 
 def _change_bucket(

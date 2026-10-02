@@ -213,78 +213,6 @@ def _apply_native_provenance(
     )
 
 
-def _dump_native_binary(
-    path: Path,
-    binary_fmt: str,
-    headers: list[Path],
-    includes: list[Path],
-    version: str,
-    lang: str,
-    *,
-    lang_explicit: bool = False,
-    pdb_path: Path | None = None,
-    dwarf_only: bool = False,
-    debug_format: str | None = None,
-    public_headers: list[Path] | None = None,
-    public_header_dirs: list[Path] | None = None,
-    header_backend: str = "auto",
-    compile: CompileContext | None = None,
-    include_dependencies: bool = True,
-    public_include_search_dirs: list[Path] | None = None,
-) -> AbiSnapshot:
-    """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
-
-    Thin CLI wrapper over :func:`abicheck.service.run_dump` — the single source
-    of truth for native dumping. It supplies a ``click.echo`` notifier so the
-    "no headers" / "--include ignored" notes still reach stderr, and translates
-    the framework-free errors into the CLI's ``click`` exceptions, preserving
-    exit codes: ``ValidationError`` (unusable input / bad arguments) →
-    :class:`click.UsageError` (exit 64); ``SnapshotError`` (operational failure)
-    → :class:`click.ClickException` (exit 1).
-
-    ``public_headers`` / ``public_header_dirs`` classify declaration provenance
-    (ADR-024 Phase 1) on PE/Mach-O snapshots; a no-op for ELF and when empty.
-    ``public_include_search_dirs`` (see ``service.run_dump``'s own docstring)
-    is the caller's own genuinely explicit ``-I`` list, kept distinct from
-    ``includes`` (which a caller may have already widened with auto-derived
-    directories) so provenance widening never picks up a directory the
-    caller didn't actually declare.
-    ``compile`` carries the L2 cross-toolchain context (ADR-037 D3); ``run_dump``
-    threads it into the PE/Mach-O header-scoping path (``_try_header_scoped_dump``).
-    ``run_dump``'s header-only-graph attach (G29 Phase A: always attempted, no
-    longer flag-gated) applies uniformly across ELF/PE/Mach-O — the sole reason
-    this wrapper exists is to route through ``run_dump`` rather than duplicate
-    its per-format dispatch.
-    """
-    from . import service
-    from .errors import SnapshotError, ValidationError
-
-    try:
-        return service.run_dump(
-            path,
-            binary_fmt,
-            headers,
-            includes,
-            version,
-            lang,
-            lang_explicit=lang_explicit,
-            pdb_path=pdb_path,
-            dwarf_only=dwarf_only,
-            debug_format=debug_format,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
-            header_backend=header_backend,
-            compile=compile,
-            notify=_click_notify,
-            include_dependencies=include_dependencies,
-            public_include_search_dirs=public_include_search_dirs,
-        )
-    except ValidationError as exc:
-        raise click.UsageError(str(exc)) from exc
-    except SnapshotError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-
 def _resolve_input(
     path: Path,
     headers: list[Path],
@@ -405,21 +333,6 @@ def _populate_dependency_info(
     from .dependency_info import populate_dependency_info
 
     populate_dependency_info(snap, so_path, search_paths, sysroot, ld_library_path)
-
-
-def _is_supported_compare_input(path: Path) -> bool:
-    """Return True for files accepted by compare-release directory scanning.
-
-    Delegates to :func:`abicheck.classify.is_supported_compare_input` which
-    runs a composable classifier pipeline (binary extensions → magic bytes →
-    ABI JSON fingerprint → Perl dump → fallback sniff).
-
-    To add support for a new ABI snapshot format, edit ``abicheck/classify.py``
-    rather than this function.
-    """
-    from .workflows.extraction import is_supported_compare_input
-
-    return is_supported_compare_input(path)
 
 
 def _looks_like_application(path: Path) -> bool:
