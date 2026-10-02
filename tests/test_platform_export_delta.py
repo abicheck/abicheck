@@ -88,6 +88,8 @@ def _export_findings(old: AbiSnapshot, new: AbiSnapshot) -> set[tuple[str, str]]
 )
 def test_unread_table_yields_no_export_delta(platform: str, unread: str) -> None:
     for case, (o, n) in CORPUS.items():
+        if o.elf is None:  # already re-platformed by the H1 corpus itself
+            continue
         old = _on(platform, o, _names(o), read=unread not in ("old", "both"))
         new = _on(platform, n, _names(n), read=unread not in ("new", "both"))
         assert _export_findings(old, new) == set(), (case, platform, unread)
