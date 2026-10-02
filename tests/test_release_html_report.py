@@ -279,7 +279,7 @@ def test_release_json_records_per_side_dependency_facts(tmp_path: Path) -> None:
     out = tmp_path / "r.json"
     _run("compare", str(old_dir), str(new_dir), "-o", f"json={out}")
     doc = json.loads(out.read_text())
-    assert doc["release_schema_version"] == "1.11"
+    assert doc["release_schema_version"] == "1.12"
     by_name = {m["library"]: m for m in doc["libraries"]}
     checked = 0
     for member, sides in _SPEC.items():

@@ -893,6 +893,14 @@ def disposition_ledger_blocks(result: DiffResult) -> dict[str, object]:
     # by default), so this is absent from every run that did not ask for it.
     if result.pattern_modulations:
         blocks["pattern_modulations"] = result.pattern_modulations
+    # The suppression *audit* (stale, expired and near-expiry rules, and
+    # rules that hid a BREAKING change) was the one per-library disclosure
+    # the release fan-out still carried only as stderr text. Same builder and
+    # shape as the scalar JSON's `suppression_audit`; self-gating, absent
+    # when no audit was attached (release schema 1.12).
+    from .reporter_contract_blocks import add_suppression_audit
+
+    add_suppression_audit(blocks, result)
     return blocks
 
 

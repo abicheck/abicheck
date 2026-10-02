@@ -55,6 +55,7 @@ from typing import Any
 
 import yaml
 
+from ..deadline import run_bounded
 from .extractor import (
     CollectionAction,
     CollectionContext,
@@ -517,14 +518,13 @@ class ExternalCliExtractor:
         never forwarded to a third-party tool.
         """
         env = {k: os.environ[k] for k in _ENV_PASSTHROUGH if k in os.environ}
-        return subprocess.run(  # noqa: S603 - argv list, shell=False, sanitized env
+        return run_bounded(
             argv,
             cwd=str(cwd) if cwd else None,
             env=env,
             capture_output=True,
             text=True,
             timeout=self.timeout,
-            check=False,
         )
 
     # -- lifecycle ----------------------------------------------------------

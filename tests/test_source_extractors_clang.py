@@ -2752,7 +2752,7 @@ def test_extract_macro_pass_read_files_resolved_against_effective_directory(
     extractor = _patch_run(monkeypatch, handler)
     import abicheck.buildsource.source_extractors.clang as clang_mod
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    monkeypatch.setattr(clang_mod, "run_bounded", handler)
     cu = _cu(
         source="foo.cpp",
         directory="/work",
@@ -2795,7 +2795,7 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
     # too so this test's call count stays deterministic without depending on
     # a real clang install. _clang_compiler_family's "-dM -E -x c++ -" probe
     # shares that same rationale.
-    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    monkeypatch.setattr(clang_mod, "run_bounded", handler)
     tu = extractor.extract(
         _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
     )
@@ -2838,7 +2838,7 @@ def test_extract_runs_ast_and_macro_passes_in_env_chdir_effective_directory(
         return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
 
     extractor = _patch_run(monkeypatch, handler)
-    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    monkeypatch.setattr(clang_mod, "run_bounded", handler)
     extractor.extract(
         _cu(
             source="foo.cpp",
@@ -2876,7 +2876,7 @@ def test_extract_without_env_chdir_negative_control(tmp_path, monkeypatch) -> No
         return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
 
     extractor = _patch_run(monkeypatch, handler)
-    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    monkeypatch.setattr(clang_mod, "run_bounded", handler)
     extractor.extract(
         _cu(
             source="foo.cpp",
@@ -2934,7 +2934,7 @@ def test_clang_compiler_family_prefers_macro_probe_over_name(monkeypatch) -> Non
         calls.append(cmd)
         return _Result(0, "#define __INTEL_LLVM_COMPILER 20260101\n")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(clang_mod, "run_bounded", fake_run)
     # A plain "clang++"-named binary -- _is_intel_sycl_driver alone would
     # never recognize this as Intel's fork; the macro probe does.
     assert _clang_compiler_family("clang++") == "intel-llvm"
@@ -2951,8 +2951,8 @@ def test_clang_compiler_family_macro_probe_negative(monkeypatch) -> None:  # typ
 
     _clang_compiler_family.cache_clear()
     monkeypatch.setattr(
-        clang_mod.subprocess,
-        "run",
+        clang_mod,
+        "run_bounded",
         lambda cmd, **kw: _Result(0, "#define __clang_major__ 18\n"),
     )
     assert _clang_compiler_family("clang++") == "clang"
@@ -2968,8 +2968,8 @@ def test_clang_compiler_family_falls_back_on_nonzero_returncode(
 
     _clang_compiler_family.cache_clear()
     monkeypatch.setattr(
-        clang_mod.subprocess,
-        "run",
+        clang_mod,
+        "run_bounded",
         lambda cmd, **kw: _Result(1, "", "unrecognized option"),
     )
     assert _clang_compiler_family("icpx") == "intel-llvm"  # name-based fallback
@@ -2987,7 +2987,7 @@ def test_clang_compiler_family_falls_back_on_timeout(monkeypatch) -> None:  # ty
     def raise_timeout(cmd, **kw):  # type: ignore[no-untyped-def]
         raise sp.TimeoutExpired(cmd, 5)
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", raise_timeout)
+    monkeypatch.setattr(clang_mod, "run_bounded", raise_timeout)
     assert _clang_compiler_family("icpx") == "intel-llvm"  # name-based fallback
 
 
@@ -3001,7 +3001,7 @@ def test_clang_compiler_family_is_cached_per_binary(monkeypatch) -> None:  # typ
         calls.append(cmd)
         return _Result(0, "#define __INTEL_LLVM_COMPILER 20260101\n")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(clang_mod, "run_bounded", fake_run)
     assert _clang_compiler_family("icpx") == "intel-llvm"
     assert _clang_compiler_family("icpx") == "intel-llvm"
     assert len(calls) == 1  # second call served from the lru_cache
@@ -3028,7 +3028,7 @@ def test_extract_stamps_intel_llvm_compiler_family(monkeypatch) -> None:  # type
     extractor = ClangSourceExtractor(clang_bin="icpx")
     monkeypatch.setattr(extractor, "available", lambda: True)
     monkeypatch.setattr(clang_mod.deadline, "run_bounded", handler)
-    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    monkeypatch.setattr(clang_mod, "run_bounded", handler)
     tu = extractor.extract(
         _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
     )

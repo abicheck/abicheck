@@ -218,4 +218,13 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       (``reaches``/``proven_unreachable``/``unestablished``). Present only
 #:       when at least one member's snapshots carried the type;
 #:       ``affected_libraries`` is unchanged. Report-only and additive.
-RELEASE_SCHEMA_VERSION = "1.11"
+#: - ``1.12`` adds ``libraries[].suppression_audit``: the member's
+#:       suppression audit (``total_rules``, ``stale_rules``,
+#:       ``high_risk_matches[]``, ``expired_rules``, ``near_expiry_rules``),
+#:       the *identical* block a single-pair ``compare`` report carries,
+#:       from the same builder (``reporter_contract_blocks.
+#:       add_suppression_audit``). Before this the release wrote it only to
+#:       stderr, so neither the JSON nor the Markdown artifact could say a
+#:       rule had gone stale or had hidden a breaking change. Present only
+#:       when an audit was attached. Additive.
+RELEASE_SCHEMA_VERSION = "1.12"

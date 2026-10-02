@@ -349,3 +349,85 @@ def _release_md_matrix_findings(
         )
         lines.append(f"  - {c.description}")
     return lines
+
+
+def _release_md_suppression_audit(
+    library_results: list[dict[str, object]],
+    *,
+    demangle: bool = False,
+) -> list[str]:
+    """Each member's suppression audit, from its structured block.
+
+    The single-pair report appends a ``## Suppression Audit`` section; the
+    release wrote the same ledger to stderr only, so a requested artifact
+    could not say that a rule had gone stale or had hidden a BREAKING change
+    in one of its members (one-comparison-product slice 7o's remaining gap).
+    Reads ``libraries[].suppression_audit`` -- the block the release JSON
+    carries -- so the two formats cannot disagree. A member whose audit
+    found nothing to report is omitted; the section is absent when every
+    member is.
+
+    Rendered *after* the release document's demangle pass and placed at its
+    end, like the single-pair ``## Suppression Audit`` fold: *demangle*
+    applies to a high-risk match's symbol only, never to a rule label,
+    because two distinct selectors can demangle to the same string.
+    """
+
+    def _sym(text: str) -> str:
+        if not demangle:
+            return text
+        from ..demangle import demangle_text
+
+        return demangle_text(text)
+
+    out: list[str] = []
+    for lib in library_results:
+        audit = lib.get("suppression_audit")
+        if not isinstance(audit, dict):
+            continue
+        rows: list[str] = []
+        for heading, key in (
+            ("Stale rules (matched nothing)", "stale_rules"),
+            ("Expired rules", "expired_rules"),
+            ("Rules nearing expiry", "near_expiry_rules"),
+        ):
+            labels = audit.get(key) or []
+            if labels:
+                rows += ["", f"{heading}:", *(f"- `{label}`" for label in labels)]
+        matches = audit.get("high_risk_matches") or []
+        if matches:
+            rows += ["", "High-risk matches (suppressed a BREAKING change):"]
+            rows += [
+                f"- `{m.get('rule', '?')}` suppressed {m.get('kind', '?')}: "
+                f"{_sym(str(m.get('symbol', '?')))}"
+                for m in matches
+            ]
+        if rows:
+            total = audit.get("total_rules", 0)
+            out += [
+                "",
+                f"### `{lib['library']}`",
+                "",
+                f"{total} rule(s) audited.",
+                *rows,
+            ]
+    return ["", "## 🧾 Suppression Audit", *out] if out else []
+
+
+def finish_release_markdown(
+    md: str, library_results: list[dict[str, object]], *, demangle: bool
+) -> str:
+    """Apply the release document's demangle pass, then append the audit.
+
+    `escape_table_pipes`: the document contains real tables (the library
+    summary, the disposed-findings ledger), and demangling can introduce a
+    `|` into a cell after the row was built. The suppression audit is
+    appended *after* that pass, like the single-pair fold, so a rule label
+    stays as written -- two selectors can demangle to one string.
+    """
+    if demangle:
+        from ..demangle import demangle_text
+
+        md = demangle_text(md, escape_table_pipes=True)
+    audit_lines = _release_md_suppression_audit(library_results, demangle=demangle)
+    return md + "\n".join(audit_lines) if audit_lines else md

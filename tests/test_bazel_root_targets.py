@@ -176,7 +176,7 @@ def test_plural_targets_only_still_runs_live_bazel_query(tmp_path: Path, monkeyp
         "abicheck.buildsource.adapters.bazel.shutil.which",
         lambda name: f"/usr/bin/{name}" if name == "bazel" else None,
     )
-    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", fake_run)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.run_bounded", fake_run)
     ev = BazelAdapter(workspace=tmp_path, targets=["//foo:foo", "//bar:bar"]).collect()
     assert len(calls) == 2
     assert any(c[1] == "cquery" for c in calls)

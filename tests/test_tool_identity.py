@@ -152,7 +152,7 @@ class TestToolTargetTriple:
         def _raise_timeout(*_args, **_kwargs):
             raise subprocess_module.TimeoutExpired(cmd="hanging-tool", timeout=10)
 
-        monkeypatch.setattr(dumper_toolchain.subprocess, "run", _raise_timeout)
+        monkeypatch.setattr(dumper_toolchain, "run_bounded", _raise_timeout)
 
         assert _tool_target_triple(str(tool), "irrelevant-digest") is None
 

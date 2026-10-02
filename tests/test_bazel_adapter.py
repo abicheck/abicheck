@@ -517,7 +517,7 @@ def test_bazel_live_aquery_includes_param_files(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "abicheck.buildsource.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel"
     )
-    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", fake_run)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.run_bounded", fake_run)
     BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
     aquery_cmd = next(c for c in captured if "aquery" in c)
     assert "--include_param_files" in aquery_cmd
@@ -725,7 +725,7 @@ def test_bazel_live_query_oserror_diagnostic(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "abicheck.buildsource.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel"
     )
-    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", boom)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.run_bounded", boom)
     ev = BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
     assert any("failed" in d for d in ev.diagnostics)
 
@@ -868,7 +868,7 @@ def test_bazel_live_query_invokes_subprocess(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "abicheck.buildsource.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel"
     )
-    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", fake_run)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.run_bounded", fake_run)
     ev = BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
     assert ev.targets and ev.compile_units
 
@@ -882,7 +882,7 @@ def test_bazel_live_query_nonzero_exit_diagnostic(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "abicheck.buildsource.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel"
     )
-    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", fake_run)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.run_bounded", fake_run)
     ev = BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
     assert any("exited 1" in d for d in ev.diagnostics)
 

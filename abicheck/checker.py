@@ -1047,6 +1047,16 @@ def compare(
         two places to keep in sync for no added safety on the supported
         paths.
     """
+    # ADR-049 D7: an explicit contract domain outranks the legacy scope
+    # flag. Header-origin demotion *is* the `public` domain's question, so
+    # under `all` or `exports` it must not run ahead of the evaluator: it
+    # would move findings to the out-of-surface ledger before the stage that
+    # owns the decision ever classified them, and a `--contract all` run
+    # would silently drop an internal break that `--no-scope-public-headers`
+    # (its documented exact alias) reports. Before this, the legacy flag's
+    # *default* value did exactly that whenever the domain was named.
+    if contract_evaluation and contract_mode in ("all", "exports"):
+        scope_to_public_surface = False
     # A contract mismatch is a disagreement *between two sides*; with the
     # baseline declared absent there is no second contract to disagree with.
     mismatch = (

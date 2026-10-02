@@ -22,9 +22,8 @@ this adapter normalizes them into abicheck's own :class:`SourceAbiTu`, and the
 raw dump is preserved only as provenance (``raw/android-header-abi/``).
 
 Default behaviour is **non-executing** (ADR-028 D6): the adapter consumes a
-*pre-captured* dump file produced by an existing Android build. Actually running
-``header-abi-dumper`` is opt-in (:meth:`AndroidHeaderAbiAdapter.run_dumper`),
-since it compiles a header.
+*pre-captured* dump file produced by an existing Android build; it never runs
+``header-abi-dumper`` itself.
 
 The dump JSON shape follows AOSP ``vndk/tools/header-checker`` (records / enums /
 functions / global vars keyed by ``linker_set_key`` mangled names). Parsing is
@@ -179,9 +178,6 @@ class AndroidHeaderAbiAdapter:
 
         >>> adapter = AndroidHeaderAbiAdapter()
         >>> tu = adapter.load(Path("libfoo.lsdump"))
-
-    Running ``header-abi-dumper`` to produce a fresh dump is opt-in via
-    :meth:`run_dumper`, since it compiles a header.
     """
 
     name = "android-header-abi"

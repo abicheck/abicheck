@@ -13,7 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-068 D5 per-option rulings for ``compare`` and ``dump``.
+"""ADR-068 D5 per-option rulings for every option-bearing CLI command.
+
+``compare`` and ``dump`` were ruled first (plan Phase 7k); ``aggregate`` and
+the ``project`` and ``deps`` subcommands followed, closing Phase 7's last
+open item.
+``compat`` is excluded on purpose: its options are frozen ABICC-compatible
+spellings (ADR-068 D7), so D5's guards are not the question there.
 
 **Every** visible option on either command has an entry here saying why it
 is still a CLI option, checked against D5's three guards:
@@ -60,45 +66,21 @@ at import time.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
-
-#: ``per_run_operand`` — clears all three guards; stays on the CLI.
-#: ``deferred`` — ruled demotable/removable, blocked by a named prerequisite.
-Disposition = Literal["per_run_operand", "deferred"]
-
-
-@dataclass(frozen=True)
-class OptionRuling:
-    """One option's ADR-068 D5 ruling.
-
-    *rationale* states which guard lets the option stay (or, for a
-    ``deferred`` ruling, what it would become). *blocker* names the
-    unlanded prerequisite — required for ``deferred``, rejected otherwise,
-    so a keep can never be written as if it were pending someone else's
-    work and a deferral can never lose its owner.
-    """
-
-    disposition: Disposition
-    rationale: str
-    blocker: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.disposition == "deferred" and not self.blocker:
-            raise ValueError("a deferred ruling must name the prerequisite blocking it")
-        if self.disposition != "deferred" and self.blocker:
-            raise ValueError(
-                f"only a deferred ruling may name a blocker (got {self.blocker!r})"
-            )
-
-
-def _keep(rationale: str) -> OptionRuling:
-    return OptionRuling("per_run_operand", rationale)
-
-
-def _deferred(rationale: str, *, blocker: str) -> OptionRuling:
-    return OptionRuling("deferred", rationale, blocker)
-
+from .ruling_model import (
+    Disposition as Disposition,
+    OptionRuling as OptionRuling,
+    _deferred,
+    _keep,
+)
+from .rulings_integration import (
+    AGGREGATE_OPTION_RULINGS,
+    DEPS_COMPARE_OPTION_RULINGS,
+    DEPS_TREE_OPTION_RULINGS,
+    PROJECT_CAPTURE_VARIANTS_OPTION_RULINGS,
+    PROJECT_HISTORY_OPTION_RULINGS,
+    PROJECT_PLAN_OPTION_RULINGS,
+    PROJECT_VALIDATE_OPTION_RULINGS,
+)
 
 #: Every visible ``compare`` option, ruled. Alphabetical, so a reader can
 #: check the table against ``compare --help-all`` without a diff tool.
@@ -476,13 +458,21 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "out of scope for this audit: the governing rule is 'never trade a "
         "possible false negative for a shorter CLI', and pulling it "
         "forward would do exactly that.",
-        blocker="public-contract-default.md Phase 6's open relevance defects",
+        blocker=(
+            "one-comparison-product Phase 9b: unblocked 2026-10-02; the "
+            "mapping is pinned by tests/test_contract_legacy_scope_mapping.py, "
+            "deletion pending the no-flag default decision (legacy scoping "
+            "stays on internally)"
+        ),
     ),
     "--post-manifest": _deferred(
         "A second contract/scope mechanism next to --contract; Phase 9 "
         "re-expresses it as a contract overlay. Same gate and same "
         "reasoning as --scope-public-headers -- not touched here.",
-        blocker="public-contract-default.md Phase 6's open relevance defects",
+        blocker=(
+            "one-comparison-product Phase 9c: a `contract.overlays` config "
+            "home feeding the existing post_manifest provider"
+        ),
     ),
     "--instantiation-manifest": _deferred(
         "A declared contract document is a project property (§4.1's CONFIG "
@@ -619,10 +609,18 @@ DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
 }
 
 
-#: command name → its ruling table, for the gate and its test mirror.
+#: command path below the root (space-separated for a subcommand) → its
+#: ruling table, for the gate and its test mirror.
 RULINGS_BY_COMMAND: dict[str, dict[str, OptionRuling]] = {
     "compare": COMPARE_OPTION_RULINGS,
     "dump": DUMP_OPTION_RULINGS,
+    "aggregate": AGGREGATE_OPTION_RULINGS,
+    "project validate": PROJECT_VALIDATE_OPTION_RULINGS,
+    "project plan": PROJECT_PLAN_OPTION_RULINGS,
+    "project history": PROJECT_HISTORY_OPTION_RULINGS,
+    "project capture-variants": PROJECT_CAPTURE_VARIANTS_OPTION_RULINGS,
+    "deps tree": DEPS_TREE_OPTION_RULINGS,
+    "deps compare": DEPS_COMPARE_OPTION_RULINGS,
 }
 
 #: ADR-037 D10.5's per-command visible-option ceiling, now *exactly* the

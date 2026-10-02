@@ -44,6 +44,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ...build_context import _extract_flags
+from ...deadline import run_bounded
 from ..build_evidence import (
     BuildEvidence,
     CompileUnit,
@@ -194,13 +195,12 @@ class BazelAdapter:
         try:
             # An analysis query of an existing workspace (ADR-028 D6 / D10) —
             # never a build action.
-            proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+            proc = run_bounded(
                 cmd,
                 cwd=str(self.workspace),
                 capture_output=True,
                 text=True,
                 timeout=300,
-                check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             ev.diagnostics.append(f"bazel: {kind} failed: {exc}")
@@ -210,7 +210,8 @@ class BazelAdapter:
                 f"bazel: {kind} exited {proc.returncode}: {proc.stderr.strip()[:200]}"
             )
             return None
-        return proc.stdout
+        stdout: str = proc.stdout
+        return stdout
 
     # -- cquery: configured target graph ------------------------------------
 

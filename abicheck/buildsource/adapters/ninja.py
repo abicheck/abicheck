@@ -35,6 +35,7 @@ import subprocess
 from pathlib import Path
 
 from ...build_context import _extract_flags
+from ...deadline import run_bounded
 from ..build_evidence import BuildEvidence, CompileUnit, Generator
 from ..redaction import DEFAULT_REDACTION, RedactionPolicy
 from .base import (
@@ -124,12 +125,11 @@ class NinjaAdapter:
         cmd = [ninja, "-C", str(self.build_dir), *tool_args]
         try:
             # A query of an existing build (ADR-028 D6) — never a build action.
-            proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+            proc = run_bounded(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
-                check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             ev.diagnostics.append(f"ninja: {' '.join(tool_args)} failed: {exc}")
@@ -139,7 +139,8 @@ class NinjaAdapter:
                 f"ninja: {' '.join(tool_args)} exited {proc.returncode}: {proc.stderr.strip()[:200]}"
             )
             return None
-        return proc.stdout
+        stdout: str = proc.stdout
+        return stdout
 
     # -- normalization ------------------------------------------------------
 
