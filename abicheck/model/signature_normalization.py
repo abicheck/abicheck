@@ -39,7 +39,6 @@ states.
 
 from __future__ import annotations
 
-import functools
 import re
 
 from ..name_classification import canonicalize_type_name
@@ -49,6 +48,7 @@ from .declarator_qualifiers import (
     _is_declarator_group,
     _split_at_trailing_param_list,
 )
+from .execution_cache import memoized
 from .signature_token_scan import (
     _decay_top_level_array,
     _find_matching_paren,
@@ -577,7 +577,7 @@ def canonicalize_function_signature_param_type(name: str, *, _depth: int = 0) ->
     return _canonicalize_param_type_uncached(name, _depth)
 
 
-@functools.lru_cache(maxsize=1 << 16)
+@memoized(maxsize=1 << 16)
 def _canonicalize_top_level_param_type(name: str) -> str:
     """Memoized top-level entry point. The canonicalization is a pure
     function of its input string, and real header surfaces repeat the same

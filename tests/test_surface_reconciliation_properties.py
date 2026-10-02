@@ -291,36 +291,35 @@ class TestReconciliationDoesNotOutliveTheComparison:
     @given(names=_names)
     @settings(deadline=None, max_examples=15)
     def test_no_slot_survives_a_completed_comparison(self, names: list[str]) -> None:
-        from abicheck.compare.surface_reconcile import (
-            RECONCILED_FUNCTIONS,
-            RECONCILED_VARIABLES,
-        )
+        from abicheck.compare.surface_reconcile import PAIR_MEMO
 
         old = _snapshot(names, evidence=True)
         new = _snapshot(names, evidence=False)
         compare(old, new)
-        assert RECONCILED_FUNCTIONS not in old.__dict__
-        assert RECONCILED_VARIABLES not in old.__dict__
+        assert PAIR_MEMO.attr not in old.__dict__
 
     def test_the_slot_is_released_even_when_the_comparison_raises(self) -> None:
         """A `finally`, not a trailing statement: an exception must not leave
         the memo -- and the candidate's declarations -- attached to a
         baseline the caller goes on holding."""
         from abicheck.compare.surface_reconcile import (
+            PAIR_MEMO,
             RECONCILED_FUNCTIONS,
             releases_reconciliation,
+            store_reconciliation,
         )
 
         old = _snapshot(["_Z3foov"], evidence=True)
 
         @releases_reconciliation
         def _boom(old_snap: AbiSnapshot, new_snap: AbiSnapshot) -> None:
-            old_snap.__dict__[RECONCILED_FUNCTIONS] = (new_snap, ({}, {}))
+            store_reconciliation(old_snap, new_snap, RECONCILED_FUNCTIONS, ({}, {}))
+            assert PAIR_MEMO.attr in old_snap.__dict__  # non-vacuous
             raise RuntimeError("detector blew up")
 
         with pytest.raises(RuntimeError):
             _boom(old, _snapshot(["_Z3foov"], evidence=False))
-        assert RECONCILED_FUNCTIONS not in old.__dict__
+        assert PAIR_MEMO.attr not in old.__dict__
 
     def test_the_candidate_is_collectible_once_the_comparison_is_done(self) -> None:
         """The property the slot check stands for, asserted directly: with

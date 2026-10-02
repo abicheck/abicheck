@@ -107,8 +107,18 @@ def _write_pkg(root: Path, src: str) -> Path:
     return pkg
 
 
+#: H5 inventories caches built on the central wrapper (design-hardening plan,
+#: Phase 4), not bare dicts, so the fixture's module-level memo is restated as
+#: one -- the identical line substituted in the real mutmut output, which
+#: keeps every generated-name shape the scan must ignore.
+_WRAPPER_MEMO = ("_pattern_cache = {}", '_pattern_cache = MemoryCache("m.pattern")')
+
+
 def test_f5_inventory_is_invariant_under_mutmut_rewrite(tmp_path: Path) -> None:
-    pristine = scan_optimization_sites(_write_pkg(tmp_path / "a", _SOURCE))
-    mutated = scan_optimization_sites(_write_pkg(tmp_path / "b", _MUTATED))
+    src = _SOURCE.replace(*_WRAPPER_MEMO)
+    mutated_src = _MUTATED.replace(*_WRAPPER_MEMO)
+    assert mutated_src != _MUTATED, "the fixture no longer carries the memo line"
+    pristine = scan_optimization_sites(_write_pkg(tmp_path / "a", src))
+    mutated = scan_optimization_sites(_write_pkg(tmp_path / "b", mutated_src))
     assert pristine, "vacuity guard: the fixture must contain an optimization site"
     assert mutated == pristine

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .extract.cache_header_scan import iter_cache_header_files
+from .model.execution_cache_scoped import DiskCache
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -389,6 +390,11 @@ def _get_cache_dir() -> Path:
 # Module-level reference (can be monkeypatched in tests).
 _CACHE_DIR: Path = _get_cache_dir()
 
+#: The whole-snapshot disk cache's policy and counters (design-hardening
+#: plan, Phase 4): ``ABICHECK_REFERENCE_MODE=1`` makes every lookup a miss
+#: and every store a no-op, so a reference run always dumps afresh.
+SNAPSHOT_DISK_CACHE = DiskCache("abicheck.snapshot_cache.disk")
+
 
 def _hash_include_dir_headers(h: hashlib._Hash, inc: Path) -> None:
     """Fold the (relative path, mtime) of every header-like file under
@@ -539,6 +545,10 @@ def lookup_key(key: str, binary_path: Path) -> AbiSnapshot | None:
     any other read problem here -- never a caller-visible failure."""
     if not key:
         return None
+    return SNAPSHOT_DISK_CACHE.lookup(lambda: _read_entry(key, binary_path))
+
+
+def _read_entry(key: str, binary_path: Path) -> AbiSnapshot | None:
     from .serialization import load_snapshot
 
     for cache_file in (_CACHE_DIR / f"{key}.json.zst", _CACHE_DIR / f"{key}.json"):
@@ -586,6 +596,10 @@ def store_key(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
     keep preferring an old snapshot over a freshly stored one."""
     if not key:
         return
+    SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path))
+
+
+def _write_entry(snap: AbiSnapshot, key: str, binary_path: Path) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file = _CACHE_DIR / f"{key}.json.zst"

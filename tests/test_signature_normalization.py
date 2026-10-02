@@ -825,4 +825,4 @@ class TestCanonicalizeParamTypeMemoization:
                 assert canonicalize_function_signature_param_type(s) == (
                     _canonicalize_param_type_uncached(s, 0)
                 ), s
-        assert _canonicalize_top_level_param_type.cache_info().hits >= len(spellings)
+        assert _canonicalize_top_level_param_type.stats.hits >= len(spellings)

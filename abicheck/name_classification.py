@@ -46,10 +46,11 @@ checks and is left as a follow-up.
 
 from __future__ import annotations
 
-import functools
 import re
 from collections.abc import Callable
 from typing import ClassVar
+
+from .model.execution_cache import memoized
 
 __all__ = [
     "ITANIUM_RTTI_PREFIXES",
@@ -674,7 +675,7 @@ def _quoted_spans(name: str) -> list[tuple[int, int]]:
 # Pure str -> str, called ~1.5M times over ~90k distinct spellings on a
 # oneDAL-scale snapshot load; bounded so a long-lived process cannot grow it
 # without limit.
-@functools.lru_cache(maxsize=1 << 18)
+@memoized(maxsize=1 << 18)
 def strip_anonymous_type_location(name: str) -> str:
     """Strip the checkout-dependent *directory* out of an embedded ``at
     <path>:<line>:<col>`` in an anonymous-tag or lambda-closure type
@@ -782,7 +783,7 @@ def strip_anonymous_type_location(name: str) -> str:
 # Pure str -> str and the hottest leaf of the compare tail (~776k calls on a
 # 2-library release, six regex substitutions each, over far fewer distinct
 # spellings); bounded the same way as `strip_anonymous_type_location`.
-@functools.lru_cache(maxsize=1 << 18)
+@memoized(maxsize=1 << 18)
 def canonicalize_type_name(name: str) -> str:
     """Normalise a C/C++ type name for comparison.
 

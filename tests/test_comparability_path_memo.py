@@ -113,7 +113,7 @@ def _profile(fn, case: dict) -> dict[str, str]:
 @pytest.mark.parametrize("seed", range(40))
 def test_profile_fields_identical_with_and_without_memo(tmp_path, seed):
     case = _case(tmp_path, seed)
-    assert cf._PATH_MEMO.get() is None
+    assert not cf._PATH_MEMO.active()
     expected = _profile(cf._compute_profile_fields.__wrapped__, case)
     assert _profile(cf._compute_profile_fields, case) == expected
 
@@ -131,11 +131,8 @@ def test_ancestor_predicate_agrees_with_memo_on_every_pair(tmp_path):
     case = _case(tmp_path, 7)
     paths = case["dirs"] + case["depfile"]
     plain = {(a, b): cf._is_ancestor_or_equal(a, b) for a in paths for b in paths}
-    token = cf._PATH_MEMO.set({})
-    try:
+    with cf._PATH_MEMO.scope():
         memo = {(a, b): cf._is_ancestor_or_equal(a, b) for a in paths for b in paths}
-    finally:
-        cf._PATH_MEMO.reset(token)
     assert memo == plain
     assert any(plain.values()) and not all(plain.values())  # non-vacuous
 
@@ -143,7 +140,7 @@ def test_ancestor_predicate_agrees_with_memo_on_every_pair(tmp_path):
 def test_memo_is_scoped_to_one_computation(tmp_path):
     case = _case(tmp_path, 3)
     _profile(cf._compute_profile_fields, case)
-    assert cf._PATH_MEMO.get() is None
+    assert not cf._PATH_MEMO.active()
 
 
 def test_memo_sees_a_filesystem_change_between_computations(tmp_path):

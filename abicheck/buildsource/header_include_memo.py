@@ -31,16 +31,18 @@ witness no longer matches the filesystem is recomputed, so a long-lived
 process never serves an include map for files that changed under it.
 
 Concurrent callers of the same key wait for the one computation in flight
-rather than each launching their own ``clang -M`` burst.
+rather than each launching their own ``clang -M`` burst. The memo itself is
+the central cache wrapper's (design-hardening plan, Phase 4), so
+``ABICHECK_REFERENCE_MODE=1`` re-runs every pass.
 """
 
 from __future__ import annotations
 
 import os
-import threading
-from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+
+from ..model.execution_cache import MemoryCache, RequestKey
 
 IncludeResult = tuple[dict[str, list[str]], list[str]]
 
@@ -55,12 +57,18 @@ _Witness = tuple[tuple[str, int, int], ...]
 class _Entry:
     include_map: dict[str, list[str]]
     diagnostics: tuple[str, ...]
-    witness: _Witness
 
 
-_lock = threading.Lock()
-_entries: OrderedDict[tuple[object, ...], _Entry] = OrderedDict()
-_inflight: dict[tuple[object, ...], threading.Lock] = {}
+def _copy_entry(entry: _Entry) -> _Entry:
+    # Callers own what they receive; the memoized value must stay intact.
+    return _Entry({k: list(v) for k, v in entry.include_map.items()}, entry.diagnostics)
+
+
+_MEMO: MemoryCache[_Entry] = MemoryCache(
+    "abicheck.buildsource.header_include_memo",
+    max_entries=_MAX_ENTRIES,
+    copy=_copy_entry,
+)
 
 
 def _stat_witness(paths: Iterable[str]) -> _Witness:
@@ -75,6 +83,10 @@ def _stat_witness(paths: Iterable[str]) -> _Witness:
     return tuple(out)
 
 
+def _still_fresh(witness: _Witness) -> bool:
+    return _stat_witness(p for p, _, _ in witness) == witness
+
+
 def _witness_paths(
     headers: list[str], includes: list[str], include_map: dict[str, list[str]]
 ) -> list[str]:
@@ -84,16 +96,8 @@ def _witness_paths(
     return paths
 
 
-def _copy(entry: _Entry) -> IncludeResult:
-    # Callers own what they receive; the memoized value must stay intact.
-    return (
-        {k: list(v) for k, v in entry.include_map.items()},
-        list(entry.diagnostics),
-    )
-
-
 def memoized_include_extract(
-    key: tuple[object, ...],
+    key: RequestKey,
     headers: list[str],
     includes: list[str],
     compute: Callable[[], IncludeResult],
@@ -110,35 +114,23 @@ def memoized_include_extract(
     run may be transient, and serving it again would pin the pass as
     degraded after the cause cleared.
     """
-    with _lock:
-        gate = _inflight.setdefault(key, threading.Lock())
-    with gate:
-        with _lock:
-            entry = _entries.get(key)
-        if entry is not None:
-            if _stat_witness(p for p, _, _ in entry.witness) == entry.witness:
-                with _lock:
-                    _entries.move_to_end(key)
-                return _copy(entry)
+
+    def run() -> _Entry:
         include_map, diagnostics = compute()
-        if diagnostics:
-            with _lock:
-                _entries.pop(key, None)
-            return {k: list(v) for k, v in include_map.items()}, list(diagnostics)
-        fresh = _Entry(
-            include_map={k: list(v) for k, v in include_map.items()},
-            diagnostics=tuple(diagnostics),
-            witness=_stat_witness(_witness_paths(headers, includes, include_map)),
-        )
-        with _lock:
-            _entries[key] = fresh
-            _entries.move_to_end(key)
-            while len(_entries) > _MAX_ENTRIES:
-                _entries.popitem(last=False)
-        return _copy(fresh)
+        return _Entry({k: list(v) for k, v in include_map.items()}, tuple(diagnostics))
+
+    entry = _MEMO.get_or_compute(
+        key,
+        run,
+        witness_of=lambda e: _stat_witness(
+            _witness_paths(headers, includes, e.include_map)
+        ),
+        still_fresh=_still_fresh,
+        keep=lambda e: not e.diagnostics,
+    )
+    return entry.include_map, list(entry.diagnostics)
 
 
 def clear_include_memo() -> None:
     """Drop every memoized include map (tests; explicit invalidation)."""
-    with _lock:
-        _entries.clear()
+    _MEMO.clear()

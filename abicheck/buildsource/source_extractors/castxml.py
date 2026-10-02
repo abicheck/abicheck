@@ -28,7 +28,6 @@ context→argv builder is pure and unit-testable; only :meth:`extract` shells ou
 
 from __future__ import annotations
 
-import functools
 import re
 import shutil
 import tempfile
@@ -37,6 +36,7 @@ from xml.etree.ElementTree import Element
 
 from ... import deadline
 from ...extract.castxml_compiler_emulation import emulated_compiler_command
+from ...model.execution_cache import memoized
 from ...storage.castxml_xml import parse_castxml_xml
 from ..build_evidence import CompileUnit
 from ..source_abi import SourceAbiTu, coverage_state_for_family, default_fact_set
@@ -154,7 +154,7 @@ def _executable_stat_key(path: str) -> tuple[int, int, int, int]:
     return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_size)
 
 
-@functools.lru_cache(maxsize=8)
+@memoized(maxsize=8)
 def _castxml_tool_version(
     castxml_bin: str,
     _dev: int = -1,
@@ -187,7 +187,7 @@ def _castxml_tool_version(
 
     The ``_dev``/``_ino``/``_mtime_ns``/``_size`` params (see
     :func:`_executable_stat_key`) are cache-key-only -- unused by the probe
-    itself, only by ``lru_cache``, so a same-path executable swap within
+    itself, only by the memo, so a same-path executable swap within
     one process still gets a fresh probe instead of the stale memoized one.
     A caller that omits them (as every existing test does) always keys on
     the same ``-1`` sentinel quadruple, which is a distinct, harmless entry

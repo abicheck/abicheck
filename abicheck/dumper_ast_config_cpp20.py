@@ -34,7 +34,7 @@ from .extract.cpp20_header_prep import (
     _preprocessed_header_content as _preprocessed_header_content,
     _strip_literals_crossing_continuations as _strip_literals_crossing_continuations,
 )
-from .extract.digest_memo import DigestMemo, content_digest
+from .extract.digest_memo import content_digest
 from .extract.header_scan_memo import memoize_header_scan
 
 # Quoted-include expansion (and the raw-string stripper it needs) moved out
@@ -42,6 +42,7 @@ from .extract.header_scan_memo import memoize_header_scan
 from .extract.quoted_include_expansion import (
     _expand_with_quoted_includes as _expand_with_quoted_includes,
 )
+from .model.execution_cache import MemoryCache, request_key
 
 # Structural C++20 patterns — concepts and requires-expressions. When any
 # of these appears in a header, castxml must be invoked with a C++20-aware
@@ -1037,7 +1038,10 @@ def _preprocess_headers(
             continue
         prepared: list[bytes] = []
         file_bits = _SHADOW_MEMO.get_or_compute(
-            (content_digest(raw), for_language_mode_decision),
+            request_key(
+                content=content_digest(raw),
+                for_language_mode_decision=for_language_mode_decision,
+            ),
             partial(_shadow_bits, raw, for_language_mode_decision, prepared),
         )
         per_file.append((path, raw, prepared[0] if prepared else None))
@@ -1159,10 +1163,15 @@ def _scan_header_for_requirements(
     return found
 
 
-#: Per-file scan memo (``extract/digest_memo.py``): one compare scans the
-#: old, new and combined header sets under both language-mode polarities.
-_SCAN_MEMO: DigestMemo[list[Cpp20Requirement]] = DigestMemo()
-_SHADOW_MEMO: DigestMemo[tuple[bool, bool, bool, bool]] = DigestMemo()
+#: Per-file scan memos keyed on content (``extract/digest_memo.py``): one
+#: compare scans the old, new and combined header sets under both
+#: language-mode polarities.
+_SCAN_MEMO: MemoryCache[list[Cpp20Requirement]] = MemoryCache(
+    "abicheck.dumper_ast_config_cpp20.scan", max_entries=4096
+)
+_SHADOW_MEMO: MemoryCache[tuple[bool, bool, bool, bool]] = MemoryCache(
+    "abicheck.dumper_ast_config_cpp20.shadow", max_entries=4096
+)
 
 
 @memoize_header_scan(_expand_with_quoted_includes)
@@ -1221,7 +1230,12 @@ def _find_cpp20_requirements(
     for path, raw, scan in per_file:
         found.extend(
             _SCAN_MEMO.get_or_compute(
-                (str(path), content_digest(raw), flag, shadows),
+                request_key(
+                    path=str(path),
+                    content=content_digest(raw),
+                    for_language_mode_decision=flag,
+                    shadows=shadows,
+                ),
                 partial(_scan_prepared, path, raw, scan, flag, shadows),
             )
         )

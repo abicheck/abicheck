@@ -58,13 +58,16 @@ missing/empty distinction themselves.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
+
+from .execution_cache import request_key
+from .execution_cache_scoped import InstanceMemo
 
 if TYPE_CHECKING:
-    from .elf_facts import ElfMetadata
+    from .elf_facts import ElfMetadata, ElfSymbol
     from .macho_facts import MachoMetadata
     from .pe_facts import PeMetadata
     from .snapshot import AbiSnapshot
@@ -173,11 +176,16 @@ def build_raw_export_index_from_elf(elf_meta: ElfMetadata) -> RawExportIndex:
     and length of ``symbols``, so replacing or growing that list rebuilds.
     """
     symbols = elf_meta.symbols
-    stamp = (id(symbols), len(symbols))
-    cached = elf_meta.__dict__.get(_ELF_INDEX_MEMO)
-    if cached is not None and cached[0] == stamp:
-        return cast("RawExportIndex", cached[1])
-    index = RawExportIndex(
+    return _ELF_INDEX_MEMO.get_or_compute(
+        elf_meta,
+        request_key(symbols=id(symbols), count=len(symbols)),
+        lambda: _raw_export_index_from_elf(symbols),
+        pin=symbols,
+    )
+
+
+def _raw_export_index_from_elf(symbols: Sequence[ElfSymbol]) -> RawExportIndex:
+    return RawExportIndex(
         platform="elf",
         entries=tuple(
             RawExportEntry(
@@ -189,16 +197,16 @@ def build_raw_export_index_from_elf(elf_meta: ElfMetadata) -> RawExportIndex:
             for s in symbols
         ),
     )
-    elf_meta.__dict__[_ELF_INDEX_MEMO] = (stamp, index)
-    return index
 
 
-_ELF_INDEX_MEMO = "_raw_export_index_memo"
+_ELF_INDEX_MEMO = InstanceMemo(
+    "abicheck.model.export_index.raw_elf", "_raw_export_index_memo"
+)
 
 
 def drop_raw_export_index_memo(elf_meta: object) -> None:
     """Forget *elf_meta*'s memoised index (``compare`` scopes it per call)."""
-    getattr(elf_meta, "__dict__", {}).pop(_ELF_INDEX_MEMO, None)
+    _ELF_INDEX_MEMO.drop(elf_meta)
 
 
 def build_raw_export_index_from_pe(pe_meta: PeMetadata) -> RawExportIndex:

@@ -57,6 +57,9 @@ import types
 from collections.abc import Iterator
 from typing import Any
 
+from ..model.execution_cache import request_key
+from ..model.execution_cache_scoped import InstanceMemo
+
 log = logging.getLogger(__name__)
 
 __all__ = [
@@ -325,16 +328,12 @@ class _CuIndex:
 
 def _index_for(CU: Any) -> _CuIndex | None:
     """The unit's index, scanning once on first use (``None`` = not indexable)."""
-    index = CU.__dict__.get(_INDEX_ATTR, _UNSET)
-    if index is _UNSET:
-        index = _build_index(CU)
-        setattr(CU, _INDEX_ATTR, index)
-    return index  # type: ignore[no-any-return]
+    return _INDEX_MEMO.get_or_compute(CU, request_key(), lambda: _build_index(CU))
 
 
 def drop_index(CU: Any) -> None:
     """Forget *CU*'s index (it is rebuilt on next use), for bounded-memory walks."""
-    getattr(CU, "__dict__", {}).pop(_INDEX_ATTR, None)
+    _INDEX_MEMO.drop(CU)
 
 
 def subtree_ends(CU: Any) -> dict[int, int] | None:
@@ -501,12 +500,12 @@ def _stock_children_from(CU: Any, die: Any, current: Any) -> Any:
             started = True
 
 
-_UNSET: Any = object()
-
 #: The one child tag a calling-convention reader wants out of a function body.
 FORMAL_PARAMETER_TAGS = frozenset({"DW_TAG_formal_parameter"})
 
-_INDEX_ATTR = "_abicheck_die_index"
+_INDEX_MEMO = InstanceMemo(
+    "abicheck.extract.dwarf_subtree_index.cu_index", "_abicheck_die_index"
+)
 
 _CU_RELATIVE_REF_FORMS = frozenset(
     {

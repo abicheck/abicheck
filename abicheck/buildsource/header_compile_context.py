@@ -71,7 +71,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -79,6 +78,7 @@ from .._compiler_options import explicit_language_standard, split_gcc_options
 from ..compile_context import CompileContext
 from ..errors import HeaderCompileContextAmbiguousError
 from ..header_utils import forced_include_operands, iter_directory_headers
+from ..model.execution_cache import memoized
 from .adapters.base import (
     _is_msvc_command,
     msvc_driver_token,
@@ -123,7 +123,7 @@ def _resolve_cu_relative_path(raw: str, directory: str) -> Path:
 #: same pattern once per (unit, header) pair — the shape this was called in
 #: before the read/scan refactor below — was pure repeated overhead for an
 #: identical regex.
-@cache
+@memoized
 def _include_pattern(header_name: str) -> re.Pattern[str]:
     return re.compile(rf'#\s*include\s*[<"]([^>"]*{re.escape(header_name)})[>"]')
 

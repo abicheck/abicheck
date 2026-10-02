@@ -763,8 +763,8 @@ class TestFindingA_Phase2BroadExcept:
                 _mod.demangle_batch([sym])
 
         # Symbol should be in OK cache (phase 3 succeeded), not FAIL cache.
-        assert sym not in _mod._BATCH_CACHE_FAIL
-        assert sym in _mod._BATCH_CACHE_OK
+        assert _mod.request_key(mangled=sym) not in _mod._BATCH_CACHE_FAIL
+        assert _mod.request_key(mangled=sym) in _mod._BATCH_CACHE_OK
 
 
 class TestFindingB_Phase3NoPoisonOnFailure:
@@ -781,7 +781,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run", side_effect=FileNotFoundError):
                 _mod.demangle_batch([sym])
-        assert sym not in _mod._BATCH_CACHE_FAIL
+        assert _mod.request_key(mangled=sym) not in _mod._BATCH_CACHE_FAIL
 
     def test_timeout_does_not_cache_fail(self):
         """Timed-out c++filt: FAIL cache stays empty."""
@@ -791,7 +791,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
                 "subprocess.run", side_effect=subprocess.TimeoutExpired("c++filt", 30)
             ):
                 _mod.demangle_batch([sym])
-        assert sym not in _mod._BATCH_CACHE_FAIL
+        assert _mod.request_key(mangled=sym) not in _mod._BATCH_CACHE_FAIL
 
     def test_oserror_does_not_cache_fail(self):
         """OSError from subprocess: FAIL cache stays empty."""
@@ -799,7 +799,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
         with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run", side_effect=OSError("permission denied")):
                 _mod.demangle_batch([sym])
-        assert sym not in _mod._BATCH_CACHE_FAIL
+        assert _mod.request_key(mangled=sym) not in _mod._BATCH_CACHE_FAIL
 
     def test_nonzero_returncode_does_not_cache_fail(self):
         """Non-zero returncode: c++filt ran but failed; FAIL cache stays empty."""
@@ -813,7 +813,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
                     stderr="error",
                 )
                 _mod.demangle_batch([sym])
-        assert sym not in _mod._BATCH_CACHE_FAIL
+        assert _mod.request_key(mangled=sym) not in _mod._BATCH_CACHE_FAIL
 
     def test_nonzero_returncode_retry_succeeds(self):
         """After a non-zero returncode (no FAIL cache), a second call with a
@@ -830,7 +830,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
                 )
                 first = _mod.demangle_batch([sym])
             assert first == {}
-            assert sym not in _mod._BATCH_CACHE_FAIL
+            assert _mod.request_key(mangled=sym) not in _mod._BATCH_CACHE_FAIL
 
             # Second call: c++filt now works.
             with patch("subprocess.run") as mock_run:
@@ -858,7 +858,7 @@ class TestFindingB_Phase3NoPoisonOnFailure:
                 )
                 _mod.demangle_batch([sym])
         # c++filt ran successfully but couldn't demangle → FAIL cache entry is correct.
-        assert sym in _mod._BATCH_CACHE_FAIL
+        assert _mod.request_key(mangled=sym) in _mod._BATCH_CACHE_FAIL
 
 
 class TestDemangleText:
@@ -925,7 +925,7 @@ def test_demangle_reads_warmed_batch_cache(monkeypatch):
 
     dm.demangle.cache_clear()
     sym = "_ZN3FooEv_p11test"  # synthetic; need not be real Itanium
-    dm._BATCH_CACHE_OK[sym] = "Foo::warmed()"
+    dm._batch_cache_record_ok(sym, "Foo::warmed()")
 
     # Any subprocess use here would be a regression — fail loudly if called.
     def _boom(*a, **k):
@@ -936,7 +936,7 @@ def test_demangle_reads_warmed_batch_cache(monkeypatch):
     try:
         assert dm.demangle(sym) == "Foo::warmed()"
     finally:
-        dm._BATCH_CACHE_OK.pop(sym, None)
+        dm._BATCH_CACHE_OK.discard(dm.request_key(mangled=sym))
         dm.demangle.cache_clear()
 
 
@@ -946,7 +946,7 @@ def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
 
     dm.demangle.cache_clear()
     sym = "_Znot_really_mangled_p11"
-    dm._BATCH_CACHE_FAIL[sym] = None
+    dm._batch_cache_record_fail(sym)
 
     def _boom(*a, **k):
         raise AssertionError("demangle() spawned a subprocess for a known-fail name")
@@ -956,7 +956,7 @@ def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
     try:
         assert dm.demangle(sym) is None
     finally:
-        dm._BATCH_CACHE_FAIL.pop(sym, None)
+        dm._BATCH_CACHE_FAIL.discard(dm.request_key(mangled=sym))
         dm.demangle.cache_clear()
 
 

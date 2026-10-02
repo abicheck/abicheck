@@ -42,11 +42,11 @@ from __future__ import annotations
 import functools
 import hashlib
 import os
-import threading
 from collections.abc import Callable, Sequence
-from concurrent.futures import Future
 from pathlib import Path
 from typing import Any, TypeVar
+
+from ..model.execution_cache import MemoryCache, request_key
 
 _R = TypeVar("_R")
 _Stamp = tuple[tuple[str, str], ...]
@@ -122,62 +122,40 @@ def memoize_header_scan(
     """
 
     def decorate(fn: Callable[..., list[_R]]) -> Callable[..., list[_R]]:
-        memo: dict[tuple[Any, ...], tuple[_Stamp, list[_R]]] = {}
-        in_flight: dict[tuple[Any, ...], Future[list[_R]]] = {}
-        lock = threading.Lock()
+        # Single-flight and the bound come from the central wrapper: a release
+        # fan-out starts every member's scan of the one release header set at
+        # once, and a concurrent caller waits for the scan already running.
+        # That scan overlaps this call, so the files it read are no older than
+        # what a scan this call started itself would have read, and its stamp
+        # still makes the next call rescan if a file changed underneath it.
+        memo: MemoryCache[list[_R]] = MemoryCache(
+            f"{fn.__module__}.{fn.__qualname__}.header_scan",
+            max_entries=_MAX_ENTRIES,
+            copy=list,
+        )
 
         @functools.wraps(fn)
         def wrapper(header_paths: list[Path], **kwargs: Any) -> list[_R]:
-            key = (tuple(str(p) for p in header_paths), tuple(sorted(kwargs.items())))
-            with lock:
-                entry = memo.get(key)
-            if entry is not None and _stamp_still_matches(entry[0]):
-                return list(entry[1])
-            # Single-flight: a release fan-out starts every member's scan of
-            # the one release header set at once, and each used to miss the
-            # still-empty memo and repeat the whole scan. A concurrent caller
-            # waits for the scan already running: that scan overlaps this
-            # call, so the files it read are no older than what a scan this
-            # call started itself would have read, and its stamp still makes
-            # the next call rescan if a file changed underneath it.
-            with lock:
-                pending = in_flight.get(key)
-                if pending is None:
-                    future: Future[list[_R]] = Future()
-                    in_flight[key] = future
-            if pending is not None:
-                try:
-                    return list(pending.result())
-                except BaseException:
-                    return wrapper(header_paths, **kwargs)
-            try:
-                result = _scan_and_store(key, header_paths, kwargs)
-            except BaseException as exc:
-                with lock:
-                    in_flight.pop(key, None)
-                future.set_exception(exc)
-                raise
-            with lock:
-                in_flight.pop(key, None)
-            future.set_result(result)
-            return list(result)
+            key = request_key(
+                headers=tuple(str(p) for p in header_paths),
+                options=tuple(sorted(kwargs.items())),
+            )
 
-        def _scan_and_store(
-            key: tuple[Any, ...], header_paths: list[Path], kwargs: dict[str, Any]
-        ) -> list[_R]:
-            # Stamped *before* the scan: a file edited while the scan runs
-            # leaves a stamp that no longer matches, so the next call rescans
-            # rather than trusting a result computed from the edited file.
-            probed: list[Path] = []
-            reached = expand(list(header_paths), **kwargs, unresolved=probed)
-            stamp = stamp_files(reached, probed)
-            result = fn(header_paths, **kwargs)
-            if stamp is not None:
-                with lock:
-                    if key not in memo and len(memo) >= _MAX_ENTRIES:
-                        memo.pop(next(iter(memo)))
-                    memo[key] = (stamp, list(result))
-            return list(result)
+            def stamp() -> _Stamp | None:
+                # Stamped *before* the scan: a file edited while the scan runs
+                # leaves a stamp that no longer matches, so the next call
+                # rescans rather than trusting a result computed from the
+                # edited file. ``None`` (a read failure) is never stored.
+                probed: list[Path] = []
+                reached = expand(list(header_paths), **kwargs, unresolved=probed)
+                return stamp_files(reached, probed)
+
+            return memo.get_or_compute(
+                key,
+                lambda: fn(header_paths, **kwargs),
+                witness=stamp,
+                still_fresh=_stamp_still_matches,
+            )
 
         wrapper.cache_clear = memo.clear  # type: ignore[attr-defined]
         return wrapper

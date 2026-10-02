@@ -23,6 +23,7 @@ import pytest
 
 from abicheck.buildsource import header_include_memo as memo_mod
 from abicheck.model import type_identifiers as ti_mod
+from abicheck.model.execution_cache import request_key
 from abicheck.name_classification import canonicalize_type_name
 
 
@@ -173,10 +174,14 @@ class TestHeaderIncludeMemo:
             n["calls"] += 1
             return {"h": [dep]}, []
 
-        a = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        a = memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
         a[0]["h"].append("junk")
         a[1].append("junk")
-        b = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        b = memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
         assert n["calls"] == 1
         assert b == ({"h": [dep]}, [])
 
@@ -191,9 +196,15 @@ class TestHeaderIncludeMemo:
             n["calls"] += 1
             return results[min(n["calls"], len(results)) - 1]
 
-        first = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
-        second = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
-        third = memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        first = memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
+        second = memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
+        third = memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
         assert first[1] == ["one header failed"]
         assert second == ({"h": [dep]}, []) and third == second
         assert n["calls"] == 2
@@ -201,10 +212,10 @@ class TestHeaderIncludeMemo:
     def test_distinct_keys_do_not_share(self, tmp_path: Path) -> None:
         headers, includes, dep = self._files(tmp_path)
         a = memo_mod.memoized_include_extract(
-            ("k1",), headers, includes, lambda: ({"h": [dep]}, [])
+            request_key(k="k1"), headers, includes, lambda: ({"h": [dep]}, [])
         )
         b = memo_mod.memoized_include_extract(
-            ("k2",), headers, includes, lambda: ({}, ["other"])
+            request_key(k="k2"), headers, includes, lambda: ({}, ["other"])
         )
         assert a != b
 
@@ -217,7 +228,9 @@ class TestHeaderIncludeMemo:
             n["calls"] += 1
             return {"h": [dep]}, []
 
-        memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
         target = {
             "header": headers[0],
             "dependency": dep,
@@ -230,7 +243,9 @@ class TestHeaderIncludeMemo:
         # Force a visible mtime change even on coarse-timestamp filesystems.
         st = os.stat(target)
         os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
-        memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
         assert n["calls"] == 2
 
     def test_a_missing_file_that_appears_invalidates(self, tmp_path: Path) -> None:
@@ -242,11 +257,17 @@ class TestHeaderIncludeMemo:
             n["calls"] += 1
             return {"h": [dep, str(later)]}, []
 
-        memo_mod.memoized_include_extract(("k",), headers, includes, compute)
-        memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
+        memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
         assert n["calls"] == 1
         later.write_text("")
-        memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+        memo_mod.memoized_include_extract(
+            request_key(k="k"), headers, includes, compute
+        )
         assert n["calls"] == 2
 
     def test_concurrent_callers_compute_once(self, tmp_path: Path) -> None:
@@ -264,7 +285,9 @@ class TestHeaderIncludeMemo:
 
         def worker():
             results.append(
-                memo_mod.memoized_include_extract(("k",), headers, includes, compute)
+                memo_mod.memoized_include_extract(
+                    request_key(k="k"), headers, includes, compute
+                )
             )
 
         threads = [threading.Thread(target=worker) for _ in range(16)]

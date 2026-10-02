@@ -14,7 +14,7 @@
 
 """Pointer/cv-token stripping for idiom recognition, with a bounded memo.
 
-A dependency-free leaf (it imports nothing from this package), split out of
+A leaf (it imports only the central cache wrapper), split out of
 :mod:`abicheck.idioms` so the memo and the regex table have an owner of their
 own rather than growing that module past its architecture line budget. It owns
 exactly one transformation -- the *existing* one, unchanged -- plus the cache
@@ -31,8 +31,9 @@ residue two adjacent keywords leave behind) is what the recognisers in
 from __future__ import annotations
 
 import re
-import threading
-from collections import OrderedDict
+from typing import cast
+
+from ..model.execution_cache import MemoryCache, request_key
 
 _POINTER_RE = re.compile(r"[*&]")
 
@@ -74,32 +75,17 @@ def strip_ptr_uncached(type_str: str) -> str:
     return s.strip()
 
 
-# The bounded LRU memo, written out rather than delegated to ``lru_cache``.
-#
-# ``lru_cache`` is faster, but its contents are unreachable except through
-# CPython-internal details, so the "only plain strings are ever retained"
-# guarantee stated above could not be *checked* -- and a guarantee whose test
-# cannot observe it is not a guarantee. An ``OrderedDict`` gives the same
-# semantics (bounded size, least-recently-used eviction) with a retained set a
-# test can read through :func:`strip_ptr_cache_entries`. The measured cost of
-# that choice is recorded in the module's tests; it is small because a
-# recognition pass reaches this function a few thousand times, not millions,
-# once the public-use index removes the per-record rescan.
-#
-# Every read and write goes through ``_CACHE_LOCK``. The individual dict
-# operations are each atomic under the GIL, but the *sequence* is not: a hit
-# that looks up a key, then marks it most-recently-used, can have that key
-# evicted by another thread in between, and ``move_to_end`` then raises
-# ``KeyError``. Independent comparisons do run concurrently (threads, not just
-# processes), so this is reachable rather than theoretical -- and it is a race
-# ``lru_cache`` did not have, introduced by taking the cache into Python to
-# make its contents inspectable. The lock is held across the normalisation
-# too: it keeps the hit/miss counters exact, and the critical section is a few
-# microseconds of pure regex work with no I/O.
-_strip_ptr_memo: OrderedDict[str, str] = OrderedDict()
-_CACHE_LOCK = threading.Lock()
-_strip_ptr_hits = 0
-_strip_ptr_misses = 0
+# The bounded LRU memo, on the central cache wrapper (design-hardening plan,
+# Phase 4) rather than ``lru_cache``: its contents are inspectable, so the
+# "only plain strings are ever retained" guarantee stated above can be
+# *checked* through :func:`strip_ptr_cache_entries`, and reference mode
+# (``ABICHECK_REFERENCE_MODE=1``) bypasses it like every other cache. The
+# wrapper owns the lock that makes lookup-plus-recency-update one transition,
+# so the ``move_to_end`` race a hand-written ``OrderedDict`` memo had (a hit's
+# key evicted by another worker between the two steps) cannot recur here.
+_strip_ptr_memo: MemoryCache[str] = MemoryCache(
+    "abicheck.policy.type_spelling.strip_ptr", max_entries=STRIP_PTR_CACHE_MAXSIZE
+)
 
 
 def strip_ptr(type_str: str) -> str:
@@ -110,24 +96,11 @@ def strip_ptr(type_str: str) -> str:
     pathological machine-generated template spelling from consuming the byte
     budget the bound above is expressed in.
     """
-    global _strip_ptr_hits, _strip_ptr_misses
     if len(type_str) > STRIP_PTR_CACHE_MAX_INPUT:
         return strip_ptr_uncached(type_str)
-    with _CACHE_LOCK:
-        cached = _strip_ptr_memo.get(type_str)
-        if cached is not None:
-            _strip_ptr_memo.move_to_end(type_str)
-            _strip_ptr_hits += 1
-            return cached
-        _strip_ptr_misses += 1
-        result = strip_ptr_uncached(type_str)
-        _strip_ptr_memo[type_str] = result
-        if len(_strip_ptr_memo) > STRIP_PTR_CACHE_MAXSIZE:
-            # Evict the least recently used entry. Deliberately *not* a
-            # clear(): the cache is process-wide, and dropping every entry
-            # would throw away what a sibling worker mid-recognition relies on.
-            _strip_ptr_memo.popitem(last=False)
-        return result
+    return _strip_ptr_memo.get_or_compute(
+        request_key(spelling=type_str), lambda: strip_ptr_uncached(type_str)
+    )
 
 
 def strip_ptr_cache_entries() -> tuple[tuple[str, str], ...]:
@@ -138,19 +111,23 @@ def strip_ptr_cache_entries() -> tuple[tuple[str, str], ...]:
     contract -- that every retained object is a plain ``str``, and that no
     graph, snapshot, record, parser or bound method is reachable from here.
     """
-    with _CACHE_LOCK:
-        return tuple(_strip_ptr_memo.items())
+    keys = _strip_ptr_memo.keys()
+    values = _strip_ptr_memo.values()
+    return tuple(
+        (cast("str", key.fields()["spelling"]), value)
+        for key, value in zip(keys, values, strict=False)
+    )
 
 
 def strip_ptr_cache_stats() -> dict[str, int]:
     """Hits/misses/occupancy for the normalisation cache (tests, benchmarks)."""
-    with _CACHE_LOCK:
-        return {
-            "hits": _strip_ptr_hits,
-            "misses": _strip_ptr_misses,
-            "occupancy": len(_strip_ptr_memo),
-            "maxsize": STRIP_PTR_CACHE_MAXSIZE,
-        }
+    stats = _strip_ptr_memo.stats
+    return {
+        "hits": stats.hits,
+        "misses": stats.misses,
+        "occupancy": len(_strip_ptr_memo),
+        "maxsize": STRIP_PTR_CACHE_MAXSIZE,
+    }
 
 
 def strip_ptr_cache_clear() -> None:
@@ -163,8 +140,6 @@ def strip_ptr_cache_clear() -> None:
     is a pure function of its key -- but the eviction policy is deliberately
     LRU, not "clear on overflow".
     """
-    global _strip_ptr_hits, _strip_ptr_misses
-    with _CACHE_LOCK:
-        _strip_ptr_memo.clear()
-        _strip_ptr_hits = 0
-        _strip_ptr_misses = 0
+    _strip_ptr_memo.clear()
+    stats = _strip_ptr_memo.stats
+    stats.hits = stats.misses = 0

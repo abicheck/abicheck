@@ -1,0 +1,12 @@
+--- a/abicheck/model/execution_cache.py
++++ b/abicheck/model/execution_cache.py
+@@ -296,9 +296,6 @@
+         """
+         if not isinstance(key, RequestKey):
+             raise TypeError(f"{self.name}: cache keys are built by request_key()")
+-        if reference_mode():
+-            self.stats.bypasses += 1
+-            return compute()
+         verified = witness is not None or witness_of is not None
+         with self._lock:
+             hit = self._entries.get(key)

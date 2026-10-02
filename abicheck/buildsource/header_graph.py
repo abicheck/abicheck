@@ -643,6 +643,7 @@ class ClangHeaderIncludeExtractor:
         ``COMPILE_UNIT_INCLUDES_FILE`` edges for the same headers the AST
         pass parsed correctly (Codex review).
         """
+        from ..model.execution_cache import request_key
         from .header_include_memo import memoized_include_extract
 
         if not self.available():
@@ -650,15 +651,15 @@ class ClangHeaderIncludeExtractor:
         # Every argument below is independent of which release member is
         # being dumped, so a directory/package fan-out would otherwise re-run
         # the identical `clang -M` set once per side per member.
-        key = (
-            self.clang_bin,
-            tuple(headers),
-            tuple(includes),
-            language,
-            sysroot,
-            nostdinc,
-            gcc_options,
-            tuple(gcc_option_tokens),
+        key = request_key(
+            clang_bin=self.clang_bin,
+            headers=tuple(headers),
+            includes=tuple(includes),
+            language=language,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            gcc_options=gcc_options,
+            gcc_option_tokens=tuple(gcc_option_tokens),
         )
         from .._compiler_options import split_gcc_options
         from ..header_utils import cache_relevant_operand_paths, deferred_token_dirs
