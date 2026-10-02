@@ -904,6 +904,19 @@ on any option-bearing command with no ruling table — the gap that let these
 commands go unruled after 7k, and that the earlier open-item note (which
 missed `deps`) did not catch either.
 
+**7t — release suppression audit. Done** (2026-10-02). 7o's remaining
+gap, re-measured: the per-library scope ledger was already in the release
+Markdown (`🔕 Disposed Findings`, one row per scoped-out finding with its
+reason), but the suppression audit (stale, expired and near-expiry rules,
+and rules that hid a BREAKING change) reached stderr only — and, contrary to
+the earlier note, the release JSON did not carry it either. Each
+`libraries[]` entry now has the scalar report's `suppression_audit` block
+(same builder, release schema 1.12), and the release Markdown ends with a
+per-library `🧾 Suppression Audit` section rendered from it, after the
+document's demangle pass so rule labels stay verbatim.
+`tests/test_release_suppression_audit.py` uses the single-pair report as the
+oracle across four rule sets.
+
 **What remains in Phase 7.** Nothing executable. Every remaining item is
 gated on a named prerequisite or owned elsewhere — this table is the
 authoritative open list:
@@ -918,7 +931,6 @@ authoritative open list:
 | `--severity-preset` merged into policy selection | declined for now — needs gate-activation convergence first |
 | `--select-required` merged into an expected inventory | ADR-065 P5 (package component inventories) |
 | `dump --compression`, `--dry-run`→`--plan`, `--used-by-manifest`→`--used-by @FILE` | declined with a measurement (7k/7l) |
-| Per-library scope ledger and suppression audit in release human output | missing feature left by 7o (machine projections unaffected) |
 
 ### Phase 8 — `deps` convergence (ADR-068 D6) — done
 
