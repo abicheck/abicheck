@@ -57,7 +57,7 @@ import types
 from collections.abc import Iterator
 from typing import Any
 
-from ..model.execution_cache import request_key
+from ..model.execution_cache import reference_mode, request_key
 from ..model.execution_cache_scoped import InstanceMemo
 
 log = logging.getLogger(__name__)
@@ -327,7 +327,16 @@ class _CuIndex:
 
 
 def _index_for(CU: Any) -> _CuIndex | None:
-    """The unit's index, scanning once on first use (``None`` = not indexable)."""
+    """The unit's index, scanning once on first use (``None`` = not indexable).
+
+    In reference mode the index is *not built at all* (``None``), so every
+    consumer takes pyelftools' own stepping -- the unindexed reference answer.
+    Rebuilding it per lookup instead would rescan the whole unit for every
+    parent DIE, quadratic on a clang unit without ``DW_AT_sibling``.
+    """
+    if reference_mode():
+        _INDEX_MEMO.stats.bypasses += 1
+        return None
     return _INDEX_MEMO.get_or_compute(CU, request_key(), lambda: _build_index(CU))
 
 

@@ -738,6 +738,11 @@ class memoized_property(Generic[_T]):  # noqa: N801 - mirrors cached_property
 
     def __set_name__(self, owner: type, name: str) -> None:
         self.attrname = name
+        # Stored under a private key, not the attribute's own name: an instance
+        # ``__dict__`` entry named like a non-data descriptor shadows it, so
+        # every later access would skip ``__get__`` -- no hit counted, and a
+        # value stored before reference mode was switched on served after it.
+        self._slot = f"_memoized_{name}"
 
     @overload
     def __get__(
@@ -754,12 +759,12 @@ class memoized_property(Generic[_T]):  # noqa: N801 - mirrors cached_property
             self.stats.bypasses += 1
             return self.func(instance)
         cache = instance.__dict__
-        value = cache.get(name, _MISSING)
+        value = cache.get(self._slot, _MISSING)
         if value is not _MISSING:
             self.stats.hits += 1
             return value
         self.stats.misses += 1
         value = self.func(instance)
-        cache[name] = value
+        cache[self._slot] = value
         self.stats.stores += 1
         return value

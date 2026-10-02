@@ -44,8 +44,15 @@ log = logging.getLogger(__name__)
 
 AST_DISK_CACHE = DiskCache("abicheck.dumper_cache.ast_disk")
 
-#: Reference-mode scratch directories, removed at interpreter exit.
+#: The one process-wide reference-mode scratch root (created on first use,
+#: removed at interpreter exit); each call gets a fresh directory under it.
 _REFERENCE_SCRATCH: list[Path] = []
+
+
+def _reference_scratch_root() -> Path:
+    if not _REFERENCE_SCRATCH:
+        _REFERENCE_SCRATCH.append(Path(tempfile.mkdtemp(prefix="abicheck-ref-")))
+    return _REFERENCE_SCRATCH[0]
 
 
 def _remove_reference_scratch() -> None:
@@ -64,8 +71,9 @@ def ast_cache_entry_path(key: str, backend: str = "castxml") -> Path:
     ext = "json" if backend == "clang" else "xml"
     if not AST_DISK_CACHE.enabled():
         AST_DISK_CACHE.record_bypass()
-        scratch = Path(tempfile.mkdtemp(prefix=f"abicheck-ref-{backend}-"))
-        _REFERENCE_SCRATCH.append(scratch)
+        root = _reference_scratch_root()
+        root.mkdir(parents=True, exist_ok=True)
+        scratch = Path(tempfile.mkdtemp(prefix=f"{backend}-", dir=root))
         return scratch / f"{key}.{ext}"
     if sys.platform == "win32":
         local = os.environ.get("LOCALAPPDATA")

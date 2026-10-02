@@ -460,3 +460,25 @@ def test_every_production_cache_is_registered() -> None:
     ):
         assert expected in names, expected
     assert os.environ.get(REFERENCE_MODE_ENV_VAR) is None
+
+
+def test_memoized_property_value_is_reached_through_the_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stored value must not shadow the descriptor: hits are counted, and a
+    value stored before reference mode is switched on is not served after."""
+
+    class C:
+        def __init__(self) -> None:
+            self.n = 0
+
+        @memoized_property
+        def p(self) -> int:
+            self.n += 1
+            return self.n
+
+    c = C()
+    assert c.p == 1 and c.p == 1
+    assert C.p.stats.hits >= 1  # type: ignore[attr-defined]
+    monkeypatch.setenv(REFERENCE_MODE_ENV_VAR, "1")
+    assert c.p == 2  # recomputed despite the stored value
