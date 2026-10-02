@@ -50,9 +50,8 @@ import subprocess
 from collections.abc import Callable
 from typing import Any, cast
 
-from .model.execution_cache import MemoryCache, memoized, reference_mode
-
 from .deadline import run_bounded
+from .model.execution_cache import MemoryCache, memoized, reference_mode
 
 _log = logging.getLogger(__name__)
 
