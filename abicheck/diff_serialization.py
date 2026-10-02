@@ -227,30 +227,86 @@ def _end_marker_on_both_sides(
     )
 
 
+def _changed_values(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> list[tuple[str, _Valued, str]]:
+    """``(name, old entry, new value)`` for every valued declaration whose
+    value differs between *old* and *new*, in the reliability order of
+    :func:`_collect_valued_declarations`.
+
+    Pairs the two sides source by source over the snapshot's own objects, so
+    no per-member record is built for the (common) unchanged value -- the
+    full collection is built only for the rare partner lookup.
+    """
+    out: list[tuple[str, _Valued, str]] = []
+    old_consts = old.declarations.constants or {}
+    new_consts = new.declarations.constants or {}
+    taken: set[str] = set()
+    for name, value in old_consts.items():
+        if value is None:
+            continue
+        taken.add(name)
+        other = new_consts.get(name)
+        if other is not None and str(other) != str(value):
+            out.append((name, _Valued(str(value), _ENTITY_VARIABLE), str(other)))
+    new_vars = {
+        v.name: v.value for v in new.declarations.variables if v.value is not None
+    }
+    for var in old.declarations.variables:
+        if var.value is None or var.name in taken:
+            continue
+        taken.add(var.name)
+        other = new_vars.get(var.name)
+        if other is not None and str(other) != str(var.value):
+            out.append(
+                (var.name, _Valued(str(var.value), _ENTITY_VARIABLE), str(other))
+            )
+    new_enums = {e.name: e for e in new.declarations.enums or []}
+    for enum_t in old.declarations.enums or []:
+        new_e = new_enums.get(enum_t.name)
+        if new_e is None:
+            continue
+        new_members = {m.name: m.value for m in new_e.members}
+        for m in enum_t.members:
+            new_member_value = new_members.get(m.name)
+            if new_member_value is None or new_member_value == m.value:
+                continue
+            key = f"{enum_t.name}::{m.name}"
+            if key in taken:
+                continue
+            out.append(
+                (
+                    key,
+                    _Valued(str(m.value), _ENTITY_ENUM, enum_t.name, m.name),
+                    str(new_member_value),
+                )
+            )
+    return out
+
+
 def detect_serialization_tag_changes(
     old: AbiSnapshot,
     new: AbiSnapshot,
 ) -> list[Change]:
     """Emit ``SERIALIZATION_TAG_CHANGED`` for tag constants whose values
     changed between *old* and *new*, including swaps."""
-    old_vals = _collect_valued_declarations(old)
-    new_vals = _collect_valued_declarations(new)
     findings: list[Change] = []
-    for name, old_entry in old_vals.items():
-        new_entry = new_vals.get(name)
-        # Unchanged values are the common case and can never be confirmed:
-        # skip them before the (costlier) spelling check runs.
-        if new_entry is None or new_entry.value == old_entry.value:
+    new_vals: dict[str, _Valued] | None = None
+    old_vals: dict[str, _Valued] | None = None
+    for name, old_entry, new_val in _changed_values(old, new):
+        if not _is_tag(name, old_entry, new_val):
             continue
-        if not _is_tag(name, old_entry, new_entry.value):
-            continue
+        if new_vals is None or old_vals is None:
+            new_vals = _collect_valued_declarations(new)
+            old_vals = _collect_valued_declarations(old)
+        new_entry = new_vals[name]
         # An end-of-list marker (``*_last``, ``LastSymbol``, ``*_count``) is
         # not a persisted id: its value moves whenever a member is added, and
         # the enum-member detectors already report it. It is excluded only
         # when it is a confirmed end marker on *both* sides.
         if _end_marker_on_both_sides(old, new, old_entry, new_entry):
             continue
-        old_val, new_val = old_entry.value, new_entry.value
+        old_val = old_entry.value
         partner = next(
             (
                 n
