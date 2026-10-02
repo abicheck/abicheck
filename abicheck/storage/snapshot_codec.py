@@ -86,7 +86,6 @@ from ..snapshot_platform_blocks import (
     python_ext_from_dict as _python_ext_from_dict,
     sycl_from_dict as _sycl_from_dict,
 )
-from . import closure_identity
 from .extraction_scope_codec import decode_extraction_scope
 from .fact_codec import (
     apply_legacy_fact_backfill,
@@ -105,7 +104,7 @@ from .snapshot_load_normalization import (
     backfill_missing_elf_binding,
     build_mode_from_dict,
     extraction_contract_from_dict,
-    normalize_anonymous_type_spellings_on_load,
+    normalize_and_renumber_closure_identities_on_load,
 )
 from .snapshot_reliability_flags import decode_reliability_flags
 from .snapshot_schema_versions import (
@@ -568,8 +567,7 @@ def finalize_snapshot(snap: AbiSnapshot) -> AbiSnapshot:
     module's own docstring for why those two steps cannot live here.
     """
     backfill_missing_elf_binding(snap)
-    normalize_anonymous_type_spellings_on_load(snap)
-    return closure_identity.renumber_anonymous_closure_identities(snap)
+    return normalize_and_renumber_closure_identities_on_load(snap)
 
 
 def load_snapshot_document(path: str | Path) -> dict[str, Any]:
@@ -630,15 +628,46 @@ def write_snapshot(
     *,
     compression: str = "auto",
     zstd_level: int | None = None,
+    zstd_content_size: bool = True,
 ) -> SnapshotWriteResult:
     """Save *snap* to *path* and return a :class:`SnapshotWriteResult`
     (compression used, decoded/stored sizes, stored digest) — ADR-059.
-    """
-    from ..snapshot_io import SnapshotCompression, write_snapshot_text
 
-    return write_snapshot_text(
-        snapshot_to_json(snap),
-        path,
-        compression=SnapshotCompression(compression),
-        zstd_level=zstd_level,
+    The document is streamed to disk (`json_stream.iter_json_indented` into
+    `snapshot_stream_write.write_snapshot_text_stream`), so neither the
+    whole JSON text nor its encoded bytes is ever held -- on a 238 MB
+    snapshot that was +0.52 GiB of peak memory, and the streamed write is
+    also slightly faster. Plain and gzip output is byte-identical to the
+    one-shot ``json.dumps`` write.
+
+    *zstd_content_size*: a zstd frame can declare its decoded size only
+    when the size is known before compression starts, which a stream does
+    not know. The default keeps that declaration -- and the reader's
+    "truncated mid-header" cross-check it enables -- by encoding a zstd
+    write in one shot. A caller for which that check adds nothing passes
+    ``False`` to stream zstd too: the snapshot cache, whose entries are
+    private and treat any read failure as a miss.
+    """
+    from ..snapshot_io import (
+        SnapshotCompression,
+        resolve_write_compression,
+        write_snapshot_text,
     )
+
+    resolved = resolve_write_compression(Path(path), SnapshotCompression(compression))
+    if resolved is SnapshotCompression.ZSTD and zstd_content_size:
+        return write_snapshot_text(
+            snapshot_to_json(snap), path, compression=resolved, zstd_level=zstd_level
+        )
+    from .acyclic_json import gc_paused
+    from .json_stream import iter_json_indented
+    from .snapshot_encode import sectioned_document_for_write
+    from .snapshot_stream_write import write_snapshot_text_stream
+
+    with gc_paused():
+        return write_snapshot_text_stream(
+            iter_json_indented(sectioned_document_for_write(snap), indent=2),
+            path,
+            compression=resolved,
+            zstd_level=zstd_level,
+        )

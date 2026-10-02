@@ -95,66 +95,151 @@ def _repad(fragment: str, pad: str) -> str:
     return fragment.replace("\n", "\n" + pad) if pad else fragment
 
 
-#: Subtree size, in JSON nodes, at or below which a subtree is handed to the
-#: one-shot C encoder whole instead of being descended into in Python.
+#: Target size, in characters, of one delegated fragment. Consecutive small
+#: elements of a wide container are encoded together by one ``json.dumps``
+#: call, and the batch size adapts to keep each fragment near this size: the
+#: peak transient is one fragment, not the document, while the C encoder
+#: still does nearly all of the work.
 #:
-#: Without it this encoder is *correct but slow*: descending every dict and
-#: list in Python cost a measured ~18% of the whole run's wall clock on a
-#: six-member baseline, which is a bad trade for the memory it saves --
-#: the saving comes from the *member* boundary, not from splitting the
-#: small objects inside one member. With it, the descent stops as soon as a
-#: subtree is small, so the peak transient is one such subtree rather than
-#: the whole document, at close to one-shot encoding speed.
-#:
-#: Deliberately a node count and not also a byte budget, unlike
-#: ``dumper_cache._write_json_chunked``'s pair of bounds: the documents here
-#: are snapshots of declarations, whose nodes are short spellings, not an
-#: AST full of long template-qualified names where a handful of nodes can
-#: encode to hundreds of MiB.
-_DELEGATE_NODE_LIMIT = 20_000
+#: This replaced a per-subtree node-count probe (``_small_enough``) that
+#: decided delegation by walking each candidate in Python first. On a
+#: snapshot -- tens of thousands of small declarations per list -- that
+#: probe plus one ``json.dumps`` call per element made a streamed write
+#: ~30% slower than the one-shot ``json.dumps`` it stands in for. Batching
+#: by measured output needs no walk at all.
+_TARGET_FRAGMENT_CHARS = 1 << 20
+
+#: Elements a batch starts with; it then doubles while fragments stay small
+#: and halves when one comes out over twice the target.
+_INITIAL_BATCH = 64
+
+#: Containers wider than this are streamed in batches; narrower ones are
+#: structure (a section header, a payload's handful of fields) and are
+#: descended into element by element unless every element is a scalar. A
+#: length check, never a walk: on a real snapshot every large subtree is a
+#: wide list or map below a few narrow structural levels, so descending the
+#: narrow levels and batching the wide ones reaches all of it without ever
+#: encoding a big subtree just to learn that it is big.
+_DESCEND_LEN = 64
 
 
-def _small_enough(obj: Any, limit: int) -> bool:
-    """Whether *obj* is a plain subtree of at most *limit* JSON nodes.
+#: How many narrow levels below a narrow container may still be encoded
+#: whole with it: deep enough that a small document is one fragment, shallow
+#: enough that the check visits at most ``_DESCEND_LEN ** _SHALLOW_DEPTH``
+#: nodes and runs only at the narrow structural levels.
+_SHALLOW_DEPTH = 2
 
-    Stops as soon as the answer is known, so the probe costs
-    ``O(min(size, limit))`` however large the subtree really is -- which is
-    what makes it safe to run on the way down rather than measuring the
-    whole document up front.
 
-    A subtree containing a :class:`LazyItems` anywhere is **never** small
-    enough, whatever its size: delegating it would hand ``json.dumps`` an
-    object it cannot serialise, and, if it could, would materialise every
-    member -- which is the retention this module exists to remove. The
-    tests caught exactly this when the bound was first added.
+def _shallow(obj: dict[str, Any] | list[Any], depth: int) -> bool:
+    """Whether *obj* holds, within *depth* levels, only scalars and narrow
+    containers -- so encoding it whole is one small fragment."""
+    values = obj.values() if type(obj) is dict else obj
+    for value in values:
+        if type(value) is dict or type(value) is list:
+            if depth <= 1 or len(value) > _DESCEND_LEN:
+                return False
+            if not _shallow(value, depth - 1):
+                return False
+        elif isinstance(value, LazyItems):
+            return False
+    return True
+
+
+def _descend_first(value: Any) -> bool:
+    """Whether a wide container's element is streamed on its own rather than
+    joining a batch: a :class:`LazyItems` (which ``json.dumps`` cannot
+    encode, and must not materialise) or a container wide enough to be
+    batched itself."""
+    return isinstance(value, LazyItems) or (
+        type(value) in (dict, list) and len(value) > _DESCEND_LEN
+    )
+
+
+def _batch_body(fragment: str, pad: str) -> str:
+    """The elements of a whole-container ``json.dumps`` fragment, without
+    its brackets, re-indented one level below *pad*.
+
+    ``json.dumps(container, indent=n)`` of a non-empty container is the open
+    bracket, a newline, the elements (each line prefixed by one indent
+    step), a newline and the close bracket; dropping the first two and last
+    two characters leaves exactly the element lines, which are then the
+    same text the per-element path would have produced at this depth.
     """
-    stack: list[Any] = [obj]
-    seen = 0
-    while stack:
-        cur = stack.pop()
-        seen += 1
-        if seen > limit:
-            return False
-        if isinstance(cur, LazyItems):
-            return False
-        if type(cur) is dict:
-            stack.extend(cur.values())
-            seen += len(cur)
-        elif type(cur) is list:
-            stack.extend(cur)
-    return seen <= limit
+    return pad + _repad(fragment[2:-2], pad)
+
+
+def _iter_container(
+    obj: dict[str, Any] | list[Any], *, indent: int, level: int
+) -> Iterator[str]:
+    """``json.dumps(obj, indent=indent)`` at *level*, streamed in batches."""
+    step = " " * indent
+    pad = step * level
+    is_dict = type(obj) is dict
+    items: list[Any] = list(obj.items()) if is_dict else list(obj)  # type: ignore[union-attr]
+    open_, close = ("{", "}") if is_dict else ("[", "]")
+    yield open_
+    first = True
+    batch = _INITIAL_BATCH
+    i = 0
+    n = len(items)
+    while i < n:
+        item = items[i]
+        value = item[1] if is_dict else item
+        if _descend_first(value):
+            head = ("" if first else ",") + "\n" + pad + step
+            if is_dict:
+                head += json.dumps(item[0]) + ": "
+            yield head
+            yield from iter_json_indented(value, indent=indent, _level=level + 1)
+            first = False
+            i += 1
+            continue
+        stop = i + 1
+        while stop < n and stop - i < batch:
+            nxt = items[stop]
+            if _descend_first(nxt[1] if is_dict else nxt):
+                break
+            stop += 1
+        chunk = items[i:stop]
+        try:
+            fragment = _dumps(dict(chunk) if is_dict else chunk, indent)
+        except TypeError:
+            # Something json cannot encode as is (a LazyItems nested deeper
+            # than one level): narrow the batch until the offending element
+            # stands alone, then let the per-element path handle it --
+            # which raises the same TypeError json.dumps would for anything
+            # genuinely unserializable.
+            if stop - i > 1:
+                batch = max(1, (stop - i) // 2)
+                continue
+            head = ("" if first else ",") + "\n" + pad + step
+            if is_dict:
+                head += json.dumps(item[0]) + ": "
+            yield head
+            yield from iter_json_indented(value, indent=indent, _level=level + 1)
+            first = False
+            i += 1
+            continue
+        if len(fragment) > 2 * _TARGET_FRAGMENT_CHARS and stop - i > 1:
+            batch = max(1, (stop - i) // 2)
+            continue
+        yield ("" if first else ",") + "\n" + _batch_body(fragment, pad)
+        first = False
+        i = stop
+        if len(fragment) < _TARGET_FRAGMENT_CHARS // 2:
+            batch *= 2
+    yield "\n" + pad + close
 
 
 def iter_json_indented(obj: Any, *, indent: int = 2, _level: int = 0) -> Iterator[str]:
     """Yield ``json.dumps(obj, indent=indent)`` one fragment at a time.
 
-    Descends only through plain ``dict``/``list`` (and :class:`LazyItems`),
-    delegating everything else to ``json.dumps`` whole. That is deliberate:
-    the shapes that make a baseline large are the member map and the
-    declaration lists inside each member, and the delegated leaves are
-    individually small. A caller wanting a *bound* on the delegated
-    fragments splits the document itself -- which is exactly what
-    :class:`LazyItems` is for.
+    A container wider than :data:`_DESCEND_LEN` is streamed in batches of
+    consecutive elements, each batch one ``json.dumps`` call sized to about
+    :data:`_TARGET_FRAGMENT_CHARS`, streaming on their own only elements that
+    are themselves wide or a :class:`LazyItems`. A narrower container is
+    encoded whole when it holds only scalars and descended into otherwise.
+    The output is byte-identical to ``json.dumps(obj, indent=indent)``.
     """
     step = " " * indent
     pad = step * _level
@@ -177,35 +262,28 @@ def iter_json_indented(obj: Any, *, indent: int = 2, _level: int = 0) -> Iterato
         yield "\n" + pad + "}"
         return
 
-    if type(obj) is dict:
+    if type(obj) is dict or type(obj) is list:
         if not obj:
-            yield "{}"
+            yield "{}" if type(obj) is dict else "[]"
             return
-        if not all(type(k) is str for k in obj):
+        if type(obj) is dict and not all(type(k) is str for k in obj):
             yield _repad(_dumps(obj, indent), pad)
             return
-        if _small_enough(obj, _DELEGATE_NODE_LIMIT):
+        if len(obj) > _DESCEND_LEN:
+            yield from _iter_container(obj, indent=indent, level=_level)
+            return
+        if _shallow(obj, _SHALLOW_DEPTH):
             yield _repad(_dumps(obj, indent), pad)
             return
-        yield "{"
-        for i, (key, value) in enumerate(obj.items()):
-            yield ("," if i else "") + "\n" + inner_pad + json.dumps(key) + ": "
+        items = obj.items() if type(obj) is dict else enumerate(obj)
+        yield "{" if type(obj) is dict else "["
+        for i, (key, value) in enumerate(items):
+            head = ("," if i else "") + "\n" + inner_pad
+            if type(obj) is dict:
+                head += json.dumps(key) + ": "
+            yield head
             yield from iter_json_indented(value, indent=indent, _level=_level + 1)
-        yield "\n" + pad + "}"
-        return
-
-    if type(obj) is list:
-        if not obj:
-            yield "[]"
-            return
-        if _small_enough(obj, _DELEGATE_NODE_LIMIT):
-            yield _repad(_dumps(obj, indent), pad)
-            return
-        yield "["
-        for i, value in enumerate(obj):
-            yield ("," if i else "") + "\n" + inner_pad
-            yield from iter_json_indented(value, indent=indent, _level=_level + 1)
-        yield "\n" + pad + "]"
+        yield "\n" + pad + ("}" if type(obj) is dict else "]")
         return
 
     yield _repad(_dumps(obj, indent), pad)

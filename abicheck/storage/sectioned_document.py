@@ -111,7 +111,10 @@ def is_sectioned_document(document: Mapping[str, Any]) -> bool:
 
 
 def to_sectioned_document(
-    legacy_document: Mapping[str, Any], *, max_known_schema_version: int
+    legacy_document: Mapping[str, Any],
+    *,
+    max_known_schema_version: int,
+    document_encoded_here: bool = False,
 ) -> dict[str, Any]:
     """*legacy_document* (a `serialization.snapshot_to_dict()`-shaped
     mapping) repackaged into this module's single-file sectioned shape.
@@ -120,6 +123,9 @@ def to_sectioned_document(
     already requires -- this build's own `serialization.SCHEMA_VERSION`, for
     every real caller (this function is always packaging a document this
     same build just produced, or one already validated readable by it).
+
+    *document_encoded_here*: see `import_v1.legacy_section_dtos` -- only
+    for a document whose IR keys `snapshot_to_dict` just encoded.
     """
     # Encoded directly, not through a throwaway object store: the store
     # canonicalized, hashed and deep-copied every section only for this
@@ -128,7 +134,9 @@ def to_sectioned_document(
     # is exactly the normalization the store applied, and sections are
     # emitted in the sorted order `ArtifactRef.sections` gave them.
     source_schema_version, section_dtos = legacy_section_dtos(
-        legacy_document, max_known_schema_version=max_known_schema_version
+        legacy_document,
+        max_known_schema_version=max_known_schema_version,
+        document_encoded_here=document_encoded_here,
     )
     section_dtos.sort(key=lambda item: item[0])
     section_dtos.reverse()

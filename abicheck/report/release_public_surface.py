@@ -74,6 +74,14 @@ class SharedFinding:
     description: str
     source_location: str | None
     affected_libraries: tuple[str, ...]
+    #: Known-gaps "-H applied to every member", step 3: for a finding about
+    #: a *type*, the members reporting it partitioned by whether their own
+    #: export surface reaches it (``reaches``/``proven_unreachable``/
+    #: ``unestablished``). ``None`` when no reporting member carried the
+    #: type -- a symbol finding, or a run that computed no attribution.
+    #: ``affected_libraries`` itself is never narrowed: it still names
+    #: every member that reported the finding.
+    attribution: Mapping[str, tuple[str, ...]] | None = None
 
     def to_dict(self) -> dict[str, object]:
         out: dict[str, object] = {
@@ -88,6 +96,8 @@ class SharedFinding:
             out["new_value"] = self.new_value
         if self.source_location is not None:
             out["source_location"] = self.source_location
+        if self.attribution is not None:
+            out["attribution"] = {k: list(v) for k, v in self.attribution.items()}
         return out
 
 
@@ -195,6 +205,25 @@ def compute_release_public_surface(
     )
 
 
+#: Markdown wording per attribution status, in display order.
+_ATTRIBUTION_LABELS = (
+    ("reaches", "reached by"),
+    ("proven_unreachable", "not reached by"),
+    ("unestablished", "reach not established for"),
+)
+
+
+def _attribution_text(shared: SharedFinding) -> str:
+    if shared.attribution is None:
+        return "affects: " + ", ".join(shared.affected_libraries)
+    parts = [
+        f"{label}: {', '.join(shared.attribution[status])}"
+        for status, label in _ATTRIBUTION_LABELS
+        if shared.attribution.get(status)
+    ]
+    return "; ".join(parts)
+
+
 def render_release_public_surface_markdown(terms: ReleasePublicSurfaceTerms) -> str:
     """Format *terms*. Decides nothing -- every number comes from the struct."""
     # Deliberately *not* gated on `evaluated`: a side whose surface could not
@@ -242,10 +271,9 @@ def render_release_public_surface_markdown(terms: ReleasePublicSurfaceTerms) -> 
         ]
         limit = terms.markdown_item_limit
         for shared in terms.shared_findings[:limit]:
-            libs = ", ".join(shared.affected_libraries)
             lines.append(
                 f"- `{shared.symbol}` [{shared.kind}] — {shared.description} "
-                f"(affects: {libs})"
+                f"({_attribution_text(shared)})"
             )
         lines += _omitted_line(len(terms.shared_findings), limit)
     if terms.coverage_warnings:
@@ -273,8 +301,31 @@ class SharedFindingFold:
     folded_by_library: Mapping[str, int] = field(default_factory=dict)
 
 
+def _attribution_for(
+    finding: Mapping[str, object],
+    libraries: Sequence[str],
+    type_attribution: Mapping[str, Mapping[str, str]],
+) -> Mapping[str, tuple[str, ...]] | None:
+    """Partition *libraries* by their own reachability answer for *finding*.
+
+    A member with no answer for the finding's symbol (its snapshots did not
+    carry that type) is filed under ``unestablished`` alongside the members
+    whose evidence could not decide -- "not shown to reach" is never
+    "shown not to reach". ``None`` when no member answered at all.
+    """
+    symbol = str(finding.get("symbol", ""))
+    answers = {lib: type_attribution.get(lib, {}).get(symbol) for lib in libraries}
+    if all(answer is None for answer in answers.values()):
+        return None
+    groups: dict[str, list[str]] = {}
+    for lib, answer in answers.items():
+        groups.setdefault(answer or "unestablished", []).append(lib)
+    return {status: tuple(sorted(libs)) for status, libs in sorted(groups.items())}
+
+
 def dedupe_shared_member_findings(
     library_results: Sequence[dict[str, Any]],
+    type_attribution: Mapping[str, Mapping[str, str]] | None = None,
 ) -> SharedFindingFold:
     """Fold findings several members report identically into one each.
 
@@ -325,6 +376,13 @@ def dedupe_shared_member_findings(
                     else str(rep["source_location"])
                 ),
                 affected_libraries=tuple(sorted(set(occurrences[key]))),
+                attribution=(
+                    _attribution_for(
+                        rep, sorted(set(occurrences[key])), type_attribution
+                    )
+                    if type_attribution
+                    else None
+                ),
             )
         )
 
@@ -357,6 +415,8 @@ def dedupe_shared_member_findings(
 def assemble_release_public_surface(
     stage: Any,
     library_results: Sequence[dict[str, Any]],
+    *,
+    type_attribution: Mapping[str, Mapping[str, str]] | None = None,
 ) -> ReleasePublicSurfaceTerms:
     """Fold duplicated member findings and assemble the section.
 
@@ -366,7 +426,7 @@ def assemble_release_public_surface(
     de-duplication that changes no count, verdict or exit code, so it is
     correct for a release whose surface stage did not run either.
     """
-    fold = dedupe_shared_member_findings(library_results)
+    fold = dedupe_shared_member_findings(library_results, type_attribution)
     return compute_release_public_surface(
         getattr(stage, "reconciliation", None),
         acquisition=stage.ledger.to_dict() if stage is not None else {},

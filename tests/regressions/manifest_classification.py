@@ -120,8 +120,17 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "provable disposition into permanent noise."
         ),
         fixed_by=(1314,),
-        seed_tests=("tests/test_undocumented_export_surface_scope.py",),
-        public_surfaces=("compare --scope-public-headers",),
+        seed_tests=(
+            "tests/test_undocumented_export_surface_scope.py",
+            # A typedef spelled as its own tag (`typedef struct X {...} X;`)
+            # is a second resolution that *agrees* with the record, and was
+            # read as a name collision -- the same shape at type level.
+            "tests/test_release_member_type_attribution.py",
+        ),
+        public_surfaces=(
+            "compare --scope-public-headers",
+            "compare --contract exports",
+        ),
         axes={
             "platform": ("elf", "elf-versioned", "macho", "pe"),
             "evidence": (

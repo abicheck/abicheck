@@ -269,16 +269,29 @@ def run_bounded(
         #   only ever runs a signal handler on the main thread, between
         #   bytecodes, so a window flag it reads is an exact, child-invisible
         #   replacement.
-        # - Holding _active_pgroups_lock across the same window closes the
-        #   cross-thread case: run_bounded() is invoked from
-        #   ThreadPoolExecutor workers on the default L4/L5 paths
-        #   (source_replay, call_graph, type_graph), but CPython only ever
-        #   runs the installed SIGTERM handler on the *main* thread, whose
-        #   own window is closed -- so the handler proceeds, acquires this
-        #   same lock before reading the registry, and genuinely blocks
-        #   until the worker finishes registering.
+        # - An in-flight spawn count closes the cross-thread case:
+        #   run_bounded() is invoked from worker threads (the L4/L5 paths,
+        #   the release fan-out's member jobs), but CPython only ever runs
+        #   the installed SIGTERM handler on the *main* thread, whose own
+        #   window is closed -- so the handler first stops new spawns, then
+        #   waits for every spawn already past Popen() to register before
+        #   it reads the registry (_begin_spawn/_end_spawn).
+        #
+        #   This used to hold _active_pgroups_lock across Popen() itself,
+        #   which gave the same guarantee by serializing every process spawn
+        #   in the interpreter on one lock: on a real release run that lock
+        #   was the hottest wait in the profile. The count is held only for
+        #   the increment and the register-and-decrement, so concurrent
+        #   spawns proceed concurrently, and the handler still never reads
+        #   a registry missing a group some thread has started.
         _enter_registration_window()
-        _active_pgroups_lock.acquire()
+        try:
+            _begin_spawn()
+        except BaseException:
+            _exit_registration_window()
+            raise
+    proc: subprocess.Popen[Any] | None = None
+    pgid: int | None = None
     try:
         proc = subprocess.Popen(  # noqa: S603 — cmd is caller-built argv, never shell text
             cmd,
@@ -289,11 +302,13 @@ def run_bounded(
             text=text,
             start_new_session=use_pgroup,
         )
-        pgid = _register_pgroup(proc) if use_pgroup else None
     finally:
         if use_pgroup:
-            _active_pgroups_lock.release()
-            _exit_registration_window()
+            try:
+                pgid = _end_spawn(proc)
+            finally:
+                _exit_registration_window()
+    assert proc is not None
     try:
         try:
             out, err = proc.communicate(input=input, timeout=effective_timeout)
@@ -374,6 +389,47 @@ def _kill_process_tree(proc: subprocess.Popen[Any], use_pgroup: bool) -> None:
         pass
 
 
+#: Signalled whenever an in-flight spawn finishes registering. Shares
+#: _active_pgroups_lock, so "no spawn in flight" and "the registry holds
+#: every started group" are observed together.
+_spawn_cond = threading.Condition(_active_pgroups_lock)
+#: run_bounded() calls past _begin_spawn() and not yet through _end_spawn().
+_spawns_in_flight = 0
+#: Set by the SIGTERM handler while it tears groups down: no new spawn may
+#: start, or it could begin after the handler read the registry.
+_terminating = False
+#: How long the handler waits for in-flight spawns to register. A spawn is a
+#: fork+exec, normally milliseconds; the bound only keeps a wedged Popen()
+#: from turning a termination request into a hang.
+_SPAWN_DRAIN_TIMEOUT_S = 5.0
+
+
+class ProcessTerminating(subprocess.SubprocessError):
+    """run_bounded() refused to start a child because this process is
+    handling SIGTERM -- a child started now could escape the cleanup."""
+
+
+def _begin_spawn() -> None:
+    global _spawns_in_flight
+    with _spawn_cond:
+        if _terminating:
+            raise ProcessTerminating(
+                "not starting a subprocess: this process is terminating"
+            )
+        _spawns_in_flight += 1
+
+
+def _end_spawn(proc: subprocess.Popen[Any] | None) -> int | None:
+    """Register *proc*'s group (``None``: Popen() raised) and retire the
+    in-flight count in one critical section, then wake a waiting handler."""
+    global _spawns_in_flight
+    with _spawn_cond:
+        pgid = _register_pgroup(proc) if proc is not None else None
+        _spawns_in_flight -= 1
+        _spawn_cond.notify_all()
+    return pgid
+
+
 def _register_pgroup(proc: subprocess.Popen[Any]) -> int:
     """Track *proc*'s process group for :func:`install_sigterm_cleanup`.
 
@@ -449,21 +505,36 @@ def _sigterm_cleanup_handler(signum: int, frame: Any) -> None:  # noqa: ARG001 -
     still exits with normal signal-termination semantics (exit status,
     shell ``$?``, etc.) rather than swallowing the signal.
     """
-    global _deferred_sigterm
+    global _deferred_sigterm, _terminating
     if _registration_window_depth() > 0:
         # This (main) thread is between Popen() and _register_pgroup():
         # the newest group is not tracked yet. Replayed on window exit.
         _deferred_sigterm = True
         return
-    with _active_pgroups_lock:
+    with _spawn_cond:
+        # Stop new spawns, then let every spawn already past Popen() on
+        # another thread register, so the registry read below is complete.
+        # This thread has none in flight (its window is closed), so the
+        # wait cannot be on itself.
+        _terminating = True
+        _spawn_cond.wait_for(
+            lambda: _spawns_in_flight == 0, timeout=_SPAWN_DRAIN_TIMEOUT_S
+        )
         pgids = list(_active_pgroups)
-    for pgid in pgids:
-        try:
-            os.killpg(pgid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    os.kill(os.getpid(), signal.SIGTERM)
+    try:
+        for pgid in pgids:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        os.kill(os.getpid(), signal.SIGTERM)
+    finally:
+        # Reached only if the self-SIGTERM did not end the process (it is
+        # ignored or blocked, or a test stubbed os.kill): spawning is
+        # allowed again rather than refused for the rest of its life.
+        with _spawn_cond:
+            _terminating = False
 
 
 def _is_posix() -> bool:

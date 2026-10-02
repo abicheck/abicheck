@@ -120,6 +120,7 @@ from .export_obligation_linkage import (
     is_static_member_symbol,
     owner_in_internal_namespace,
 )
+from .export_obligation_ownership import obligation_standing
 from .exported_not_public_finding import exported_not_public_finding
 from .template_linkage import names_a_template_specialization
 
@@ -457,6 +458,19 @@ def _check_exported_not_public(
 # ---------------------------------------------------------------------------
 
 
+def _header_name(decl: Any) -> str:
+    """The declaring header's file name -- never its absolute path, which
+    carries the checkout root and would make two identical trees differ."""
+    path = str(decl.source_header or "")
+    return path.replace("\\", "/").rsplit("/", 1)[-1] or "unknown header"
+
+
+_FN_CONSEQUENCE = (
+    "Code that compiles against the header gets an undefined-symbol link error."
+)
+_VAR_CONSEQUENCE = "Consumers linking against it get an undefined-symbol error."
+
+
 def _check_public_not_exported(
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
@@ -501,6 +515,38 @@ def _check_public_not_exported(
     # read through the one graph relation, never re-derived from paths.
     owned = contract_relations(snapshot)
     findings: list[Change] = []
+    unresolved = 0
+
+    def missing(decl: Any, label: str, consequence: str) -> None:
+        nonlocal unresolved
+        if obligation_standing(snapshot, decl).outside_declared_surface:
+            # Reached only through `#include` + an include root: owed by this
+            # binary, or by a sibling sharing the tree -- not established.
+            unresolved += 1
+            text = (
+                f"Public {label or 'declaration '}{decl.name!r} (expected symbol "
+                f"{decl.mangled!r}) is not exported, but its header ({_header_name(decl)}) is not one this "
+                "run's -H set names: it was reached only through #include, so "
+                "whether this library owes the export is not established."
+            )
+            confidence = Confidence.LOW
+        else:
+            text = (
+                f"Public header declares {label}{decl.name!r} (expected symbol "
+                f"{decl.mangled!r}) but the binary does not export it. " + consequence
+            )
+            confidence = Confidence.HIGH
+        findings.append(
+            _change(
+                ChangeKind.PUBLIC_NOT_EXPORTED,
+                decl.mangled or decl.name,
+                text,
+                old_value=decl.mangled,
+                confidence=confidence,
+                source_location=decl.source_location,
+            )
+        )
+
     inline_symbols = inline_declared_symbols(snapshot.declarations.functions)
     for i, fn in enumerate(snapshot.declarations.functions):
         if not _has_export_obligation(
@@ -508,38 +554,22 @@ def _check_public_not_exported(
         ) or owned.function_owes_no_export(i):
             continue
         if fn.mangled not in satisfied:
-            findings.append(
-                _change(
-                    ChangeKind.PUBLIC_NOT_EXPORTED,
-                    fn.mangled or fn.name,
-                    f"Public header declares {fn.name!r} (expected symbol "
-                    f"{fn.mangled!r}) but the binary does not export it. Code that "
-                    "compiles against the header gets an undefined-symbol link error.",
-                    old_value=fn.mangled,
-                    confidence=Confidence.HIGH,
-                    source_location=fn.source_location,
-                )
-            )
+            missing(fn, "", _FN_CONSEQUENCE)
     for i, var in enumerate(snapshot.declarations.variables):
         if not _var_has_export_obligation(var) or owned.variable_owes_no_export(i):
             continue
         if var.mangled not in satisfied:
-            findings.append(
-                _change(
-                    ChangeKind.PUBLIC_NOT_EXPORTED,
-                    var.mangled or var.name,
-                    f"Public header declares extern variable {var.name!r} (expected "
-                    f"symbol {var.mangled!r}) but the binary does not export it. "
-                    "Consumers linking against it get an undefined-symbol error.",
-                    old_value=var.mangled,
-                    confidence=Confidence.HIGH,
-                    source_location=var.source_location,
-                )
-            )
+            missing(var, "extern variable ", _VAR_CONSEQUENCE)
     findings.sort(key=lambda c: c.symbol)
     detail = (
         f"public headers ↔ binary exports: {len(findings)} declaration(s) with an "
         "export obligation the binary does not satisfy"
+        + (
+            f" ({unresolved} unresolved: declared only in headers reached through "
+            "#include, outside the -H set)"
+            if unresolved
+            else ""
+        )
     )
     if getattr(snapshot, "extraction_scope", None) is None:
         # ADR-075 D2: no recorded ownership (a pre-v52 baseline) -- the

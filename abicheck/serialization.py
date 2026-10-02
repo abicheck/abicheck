@@ -260,9 +260,36 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
 def load_snapshot(path: str | Path) -> AbiSnapshot:
     """Load a snapshot from *path*, transparently handling plain, gzip, and
     zstd storage (ADR-059) — detected from magic bytes, not the filename."""
-    from .snapshot_io import read_snapshot_text
+    from contextlib import ExitStack
 
-    return snapshot_from_dict(json.loads(read_snapshot_text(path)))
+    from .snapshot_io import read_snapshot_text
+    from .storage.acyclic_json import gc_paused
+    from .storage.canonical import owned_input
+    from .storage.closure_marking import (
+        json_text_may_hold_marker,
+        markers_absent_from_source,
+    )
+
+    text = read_snapshot_text(path)
+    marker_free = not json_text_may_hold_marker(text)
+    with ExitStack() as stack:
+        # Parsing and decoding allocate millions of containers, none of them
+        # garbage until the load returns; with the cyclic collector running
+        # it re-traverses that growing young set throughout (~30% of a
+        # 238 MB load). Pausing it is scheduling only -- any cycle the
+        # decode leaves is collected at the first collection after.
+        stack.enter_context(gc_paused())
+        document = json.loads(text)
+        del text
+        # The parsed document is this function's alone and is dropped once
+        # the snapshot is built, so the decode may keep its subtrees
+        # uncopied.
+        stack.enter_context(owned_input())
+        if marker_free:
+            # No closure/anonymous marker anywhere in the text: the load-time
+            # spelling normalization and renumbering have nothing to do.
+            stack.enter_context(markers_absent_from_source())
+        return snapshot_from_dict(document)
 
 
 # ADR-061 gap E: BundleFacts (de)serialization is classified `storage`

@@ -1222,7 +1222,8 @@ def dump(
             Ignored for Mach-O and PE binaries.
         symbols_only: For ELF inputs, skip expensive DWARF type expansion and
             build the ABI surface from exported symbols only while still
-            recording cheap debug-info presence. Used by ``scan --depth binary``.
+            recording cheap debug-info presence. No production caller passes it
+            since ``scan`` was removed; ``compare --depth binary`` reads DWARF.
         debug_presence_only: For ELF inputs, skip expensive DWARF type expansion
             while still allowing header parsing. Used by shallow scan depths that
             collect L2/L3 from headers/build evidence.

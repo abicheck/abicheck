@@ -140,12 +140,22 @@ def with_target_roots(
 ) -> OwnershipRequest:
     """*request* (or no configured rules) with this run's target roots.
 
-    ``public_header_dirs`` and each ``-H`` directory, absolute against the
+    ``public_header_dirs`` and each ``-H`` entry, absolute against the
     working directory they were spelled relative to -- the same resolution
     provenance already applies to them. Order-preserving and de-duplicated;
     the recorded form is sorted anyway.
+
+    A ``-H`` *file* is a root too, covering exactly that file. Only
+    directories used to be, so a run naming files recorded no root at all
+    and every declaration -- the named header's and anything it merely
+    includes alike -- read ``unresolved``. That left nothing to tell
+    "the header the user declared" from "a header an ``-I`` root made
+    findable", which is the distinction ``buildsource.
+    export_obligation_ownership`` needs to narrow an export obligation the
+    run never established (known gap: an ``-I`` root makes another library's
+    public headers this component's export obligations).
     """
-    roots = [str(Path(h).resolve()) for h in headers if Path(h).is_dir()]
+    roots = [str(Path(h).resolve()) for h in headers if Path(h).exists()]
     roots += [str(Path(d).resolve()) for d in public_header_dirs]
     base = request or _PROJECT_OWNERSHIP.get() or OwnershipRequest()
     project_root = base.project_root

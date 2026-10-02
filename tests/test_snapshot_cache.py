@@ -474,17 +474,17 @@ class TestStoreErrorPaths:
         cache_dir = tmp_path / "cache"
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
 
-        def _raise_type_error(*args, **kwargs):
+        def _fails_mid_stream(*args, **kwargs):
+            # The cache streams its write, so a serialization failure can
+            # now arrive after bytes were already written: the atomic writer
+            # must still leave no entry behind.
+            yield '{"partial": '
             raise TypeError("Object of type MagicMock is not JSON serializable")
 
-        # ADR-061 gap E: write_snapshot's real implementation (and the
-        # snapshot_to_json name it calls) now lives in
-        # abicheck.storage.snapshot_codec -- abicheck.serialization is a
-        # thin re-export of the same function object, so patching the
-        # facade's own attribute no longer changes what write_snapshot
-        # calls.
+        # write_snapshot's streaming path resolves the encoder from its
+        # owning module at call time, so that is where it is patched.
         monkeypatch.setattr(
-            "abicheck.storage.snapshot_codec.snapshot_to_json", _raise_type_error
+            "abicheck.storage.json_stream.iter_json_indented", _fails_mid_stream
         )
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF content")
