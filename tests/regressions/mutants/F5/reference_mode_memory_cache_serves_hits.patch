@@ -7,6 +7,6 @@
 -        if reference_mode():
 -            self.stats.bypasses += 1
 -            return compute()
-         hit = self._fresh_hit(key, witness, still_fresh)
-         if hit is not _MISSING:
-             return self._out(hit)
+         while True:
+             hit = self._fresh_hit(key, witness, still_fresh)
+             if hit is not _MISSING:
