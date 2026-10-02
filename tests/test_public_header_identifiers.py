@@ -323,3 +323,64 @@ def test_stamping_sets_the_fact_and_the_bridged_field(tmp_path: Path):
     stamp_public_header_identifiers(snap, [tmp_path / "gone.h"], None)
     assert snap.public_header_identifiers_fact.status is FactStatus.FAILED
     assert snap.public_header_identifiers is None
+
+
+@pytest.mark.parametrize(
+    "number",
+    ["1'000", "0xFF'FF", "0b1010'0101", "1'000'000ull", "3.141'59", "0'7"],
+)
+@pytest.mark.parametrize("literal", ["'x'", "L'x'", "u8'x'", "u'x'", "U'x'", "'\\''"])
+def test_digit_separator_never_swallows_following_identifiers(
+    number: str, literal: str
+) -> None:
+    """A digit separator is not a character literal's opening quote: names
+    after it survive, and a later character literal is still stripped."""
+    text = f"int a[{number}]; void helper(char c = {literal}); int tail;"
+    found = identifiers_in_header_text(text)
+    assert found is not None
+    assert {"helper", "char", "c", "tail"} <= found
+    assert "x" not in found
+
+
+@pytest.mark.parametrize("digit", ["²", "٣", "۴", "１"])
+def test_symbol_leaf_rejects_non_ascii_digits(digit: str) -> None:
+    """Non-ASCII digits are not Itanium lengths: unresolved, never a crash."""
+    from abicheck.model.symbol_leaf import symbol_leaf_identifier
+
+    assert symbol_leaf_identifier(f"_Z{digit}foov") is None
+    assert symbol_leaf_identifier(f"_ZN3ns{digit}fooEv") is None
+
+
+@pytest.mark.parametrize("mode", ["public", "exports", "all"])
+@pytest.mark.parametrize("direction", ["grew", "shrank"])
+def test_surface_metric_findings_are_not_applicable(mode: str, direction: str) -> None:
+    """A whole-surface count names no contract entity, so it is never
+    UNKNOWN_UNRESOLVED -- which would floor the exit to 1 on every run whose
+    surface merely changed size."""
+    from abicheck.checker import compare
+    from abicheck.contract_relevance_types import ContractRelevance
+    from abicheck.model import AbiSnapshot, Function, ScopeOrigin, Visibility
+    from abicheck.policy.contract_closed_domain import SURFACE_METRIC_KIND_SLUGS
+
+    def fn(n: str) -> Function:
+        return Function(
+            name=n,
+            mangled=n,
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+
+    small = AbiSnapshot(
+        library="l.so", version="1", from_headers=True, functions=[fn("a")]
+    )
+    big = AbiSnapshot(
+        library="l.so", version="2", from_headers=True, functions=[fn("a"), fn("b")]
+    )
+    old, new = (small, big) if direction == "grew" else (big, small)
+    r = compare(
+        old, new, contract_evaluation=True, contract_mode=mode, surface_metrics=True
+    )
+    metric = [c for c in r.changes if c.kind.value in SURFACE_METRIC_KIND_SLUGS]
+    assert metric, "fixture must produce a surface-metric finding"
+    assert all(c.contract_relevance is ContractRelevance.NOT_APPLICABLE for c in metric)

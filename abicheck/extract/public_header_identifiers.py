@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING
 
 from ..header_utils import CACHE_HEADER_SUFFIXES
 from ..model.fact import Fact
+from .cxx_digit_separator import is_digit_separator
 
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
@@ -63,7 +64,21 @@ _PRODUCER = "public_header_text"
 
 
 def _strip_comments_and_literals(text: str) -> str:
-    return _COMMENT_OR_LITERAL.sub(" ", text)
+    """Blank comments and literals; a C++14 digit separator (``1'000``) is
+    not a character literal's opening quote."""
+    out: list[str] = []
+    pos = 0
+    while (m := _COMMENT_OR_LITERAL.search(text, pos)) is not None:
+        start = m.start()
+        if text[start] == "'" and is_digit_separator(text, start):
+            out.append(text[pos : start + 1])
+            pos = start + 1
+            continue
+        out.append(text[pos:start])
+        out.append(" ")
+        pos = m.end()
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _header_files(

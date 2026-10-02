@@ -48,25 +48,30 @@ def symbol_leaf_identifier(symbol: str) -> str | None:
             i += 1
         leaf: str | None = None
         while i < len(rest) and rest[i] != "E":
-            if rest[i].isdigit():
+            if _is_ascii_digit(rest[i]):
                 parsed = _source_name(rest, i)
                 if parsed is None:
                     return None
                 leaf, i = parsed
-            elif rest[i] in "CD" and i + 1 < len(rest) and rest[i + 1].isdigit():
+            elif rest[i] in "CD" and i + 1 < len(rest) and _is_ascii_digit(rest[i + 1]):
                 i += 2  # constructor/destructor: the class name is the leaf
             else:
                 return None
         return leaf if i < len(rest) else None
-    if rest[:1].isdigit():
+    if _is_ascii_digit(rest[:1]):
         parsed = _source_name(rest, 0)
         return parsed[0] if parsed is not None else None
     return None
 
 
+def _is_ascii_digit(ch: str) -> bool:
+    # str.isdigit() accepts e.g. "²", which int() then rejects.
+    return len(ch) == 1 and "0" <= ch <= "9"
+
+
 def _source_name(text: str, start: int) -> tuple[str, int] | None:
     j = start
-    while j < len(text) and text[j].isdigit():
+    while j < len(text) and _is_ascii_digit(text[j]):
         j += 1
     length = int(text[start:j])
     ident = text[j : j + length]

@@ -23,31 +23,14 @@ from __future__ import annotations
 
 import re
 
+from ..extract.cxx_digit_separator import (
+    is_digit_separator as _is_digit_separator,
+)
+
 #: Hex-digit set used to tell a C++14 digit separator (`1'000`) from a
 #: char-literal opener in the comment/string blanker.
-_HEXDIGITS = frozenset("0123456789abcdefABCDEF")
 
 _RAW_STRING_PREFIXES = ("u8R", "uR", "UR", "LR", "R")
-
-
-def _is_digit_separator(text: str, i: int) -> bool:
-    """True if the ``'`` at ``text[i]`` is a C++14 digit separator, not a literal.
-
-    A digit separator sits between two hex digits *inside a numeric literal*
-    (``1'000``, ``0xFF'FF``). A numeric literal always starts with a decimal
-    digit, so the maximal preceding identifier-run must begin with one — this
-    rejects a prefixed char literal whose prefix happens to end in a hex digit
-    (``u8'a'``, where the run is ``u8`` and starts with ``u``).
-    """
-    prev = text[i - 1] if i > 0 else ""
-    nxt = text[i + 1] if i + 1 < len(text) else ""
-    if prev not in _HEXDIGITS or nxt not in _HEXDIGITS:
-        return False
-    k = i - 1
-    while k >= 0 and (text[k].isalnum() or text[k] in "_'"):
-        k -= 1
-    token_start = text[k + 1] if k + 1 < i else ""
-    return token_start.isdigit()
 
 
 def _raw_string_end(text: str, quote_index: int) -> int:

@@ -38,12 +38,9 @@ that mode, never approximated from the header surface: silently answering an
 export-domain question with header-derived evidence would misrepresent the
 mode rather than implement it.
 
-Deliberately conservative: this evaluator emits
-:data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNPROVEN`
-("the declared evidence domain was searched completely and found no
-commitment", ADR-049's ``closed_domain_no_commitment``) only where
-:mod:`abicheck.policy.contract_closed_domain` proves it: under ``public``, an
-export the complete header domain's raw text never spells. Every other such
+Deliberately conservative: ``UNKNOWN_UNPROVEN`` (``closed_domain_no_commitment``)
+comes only from :mod:`abicheck.policy.contract_closed_domain`'s proof (``public``:
+an export the complete header domain's raw text never spells); every other such
 case is downgraded to the weaker, honestly-hedged
 :data:`~abicheck.contract_relevance_types.ContractRelevance.UNKNOWN_UNRESOLVED`
 with reason ``required_evidence_incomplete`` instead.
@@ -73,7 +70,10 @@ from .model import ScopeOrigin
 from .model.change_catalog.kinds import ChangeKind
 from .model.type_identifiers import type_identifiers as _type_identifiers
 from .policy.classification import ADDITION_KINDS
-from .policy.contract_closed_domain import closed_domain_decision
+from .policy.contract_closed_domain import (
+    SURFACE_METRIC_KIND_SLUGS,
+    closed_domain_decision,
+)
 from .post_processing import _PUBLIC_SOURCE_ABI_KINDS, _change_matches_symbols
 from .surface import (
     _HIDDEN_FRIEND_KIND_NAMES,
@@ -286,8 +286,8 @@ _NOT_APPLICABLE_KINDS: frozenset[ChangeKind] = frozenset(
     }
 )
 
-_NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = frozenset(
-    k.value for k in _NOT_APPLICABLE_KINDS
+_NOT_APPLICABLE_KIND_SLUGS: frozenset[str] = (
+    frozenset(k.value for k in _NOT_APPLICABLE_KINDS) | SURFACE_METRIC_KIND_SLUGS
 )
 
 

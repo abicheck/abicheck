@@ -110,7 +110,11 @@ def validate_corpus(doc: Any) -> list[str]:
             errors.append(f"{name}: expected_break_kinds must be a list")
         elif kinds and p.get("expected") != "BREAKING":
             errors.append(f"{name}: expected_break_kinds on a COMPATIBLE pair")
-        for i_rule, rule in enumerate(p.get("suppressions") or []):
+        rules = p.get("suppressions", [])
+        if not isinstance(rules, list):
+            errors.append(f"{name}: suppressions must be a list")
+            rules = []
+        for i_rule, rule in enumerate(rules):
             if not isinstance(rule, dict) or not all(
                 isinstance(rule.get(k), str) and rule.get(k, "").strip()
                 for k in ("reason", "source")

@@ -55,8 +55,8 @@ from .checker_types import Change
 from .impact.engine import assess_change
 from .model.change_catalog.kinds import ChangeKind
 from .model.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
-from .model.vocabulary import ScopeOrigin
 from .policy.evidence_status import ReachabilityState
+from .policy.layout_visibility import layout_proven_invisible
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType
@@ -1336,25 +1336,6 @@ def _build_leak_change(
     return change
 
 
-def _layout_proven_invisible(tname: str, old: AbiSnapshot, new: AbiSnapshot) -> bool:
-    """Whether consumers provably cannot see *tname*'s layout on either side.
-
-    Proven means: every record for *tname* that a side carries is opaque (only
-    forward-declared to consumers) or defined in a project header outside the
-    public set. A side without the record contributes nothing; no record at
-    all, or any other origin (``UNKNOWN`` included), is not proof.
-    """
-    seen = False
-    for snap in (old, new):
-        for rec in snap.declarations.types:
-            if tname not in (rec.name, rec.qualified_name):
-                continue
-            seen = True
-            if not (rec.is_opaque or rec.origin is ScopeOrigin.PRIVATE_HEADER):
-                return False
-    return seen
-
-
 def detect_internal_leaks(
     changes: list[Change],
     old: AbiSnapshot,
@@ -1423,7 +1404,7 @@ def detect_internal_leaks(
         # finding (a by-value member, or a just-embedded type, carries the layout).
         # The leniency needs a structural fact, not the namespace's name: the
         # layout must be proven invisible to consumers (see
-        # _layout_proven_invisible). Unknown visibility keeps the finding.
+        # policy.layout_visibility). Unknown visibility keeps the finding.
         value_prop = any(_path_is_value_propagating(p, s) for p, s in side_paths)
         all_indirect = bool(side_paths) and all(
             _path_has_indirection(p) for p, _ in side_paths
@@ -1431,7 +1412,7 @@ def detect_internal_leaks(
         if (
             all_indirect
             and not identity_or_vtable
-            and _layout_proven_invisible(tname, old, new)
+            and layout_proven_invisible(tname, old, new)
         ):
             continue
         out.append(

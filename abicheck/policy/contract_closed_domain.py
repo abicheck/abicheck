@@ -94,4 +94,21 @@ def closed_domain_decision(
     )
 
 
-__all__ = ["closed_domain_decision", "header_domain_closes_without_commitment"]
+#: Surface-metric findings (``diff_surface_metrics``): counts over the whole
+#: public surface, spelled with the pseudo-symbol ``<surface>``. Not about any
+#: one contract entity, so ``NOT_APPLICABLE`` in every mode -- never
+#: ``UNKNOWN_UNRESOLVED``, which would now floor the exit to 1.
+SURFACE_METRIC_KIND_SLUGS: frozenset[str] = frozenset(
+    {
+        "public_surface_grew",
+        "public_surface_shrank",
+        "undocumented_export_ratio_increased",
+    }
+)
+
+
+__all__ = [
+    "SURFACE_METRIC_KIND_SLUGS",
+    "closed_domain_decision",
+    "header_domain_closes_without_commitment",
+]

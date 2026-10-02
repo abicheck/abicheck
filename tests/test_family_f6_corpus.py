@@ -377,6 +377,13 @@ def test_a_suppression_without_reason_and_source_is_rejected(rule: dict) -> None
     assert any("suppressions[0]" in e for e in rcc.validate_corpus(doc))
 
 
+@pytest.mark.parametrize("value", [1, "E::x", {"symbol": "E::x"}, True, 0.5])
+def test_non_list_suppressions_is_a_schema_error(value: object) -> None:
+    doc = _corpus_doc()
+    doc["pairs"][0]["suppressions"] = value
+    assert any("suppressions must be a list" in e for e in rcc.validate_corpus(doc))
+
+
 def test_every_committed_suppression_is_cited() -> None:
     doc = json.loads(
         (VALID / "data" / "compat_corpus.json").read_text(encoding="utf-8")

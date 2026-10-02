@@ -52,6 +52,7 @@ import re
 from pathlib import Path
 from xml.etree.ElementTree import Element
 
+from ...cxx_digit_separator import is_digit_separator as _is_digit_separator
 from .context import CastxmlParserContext
 
 __all__ = ["declared_inline_out_of_line", "index_out_of_line_inline"]
@@ -107,16 +108,6 @@ def _top_level_commas(inner: str) -> int:
         elif depth == 0 and angle == 0 and ch == ",":
             commas += 1
     return commas
-
-
-def _is_digit_separator(text: str, i: int) -> bool:
-    """Whether the ``'`` at *i* is a C++14 digit separator (``1'000``,
-    ``0xFF'FF``): the alphanumeric run immediately before it starts with a
-    digit, so it is part of a number literal, not a character literal."""
-    j = i
-    while j > 0 and (text[j - 1].isalnum() or text[j - 1] == "'"):
-        j -= 1
-    return j < i and text[j].isdigit()
 
 
 def _raw_string_end(text: str, i: int) -> int | None:

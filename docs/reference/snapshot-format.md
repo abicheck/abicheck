@@ -341,6 +341,13 @@ for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
 
+(v54) `public_header_identifiers_fact` — every identifier token the public
+header set's raw text spells, every preprocessor branch included (comments and
+literals stripped). `--contract public` reads it to tell "no public header
+names this export" from "the parsed branches did not declare it". An
+evidence-free `not_collected` fact is omitted on write; an absent key loads as
+`not_collected`, on a pre-v54 snapshot as on a current one.
+
 (v52) `extraction_scope` — the ownership rules a header-derived snapshot's
 declarations were classified under (see [Extraction scope and ownership](#extraction-scope-and-ownership-schema-v52)
 below). Declaration lists encode exactly as v51. A pre-v52 snapshot loads with
@@ -528,6 +535,8 @@ gets backfilled, only report on it.
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `frontend_context_kind` | string \| null | `null` | Which AST pass (`"host"` or `"device"`) this header-AST snapshot's clang backend selected via `--frontend-context` (`sycl_context.py`). `null` on any non-SYCL/DPC++ invocation and on any pre-v17 snapshot. |
+
+| `public_header_identifiers_fact` | object \| absent | absent | v54. A `Fact`: `status`, `value` (sorted identifier list when `present`), `diagnostics`, `producer` (`"public_header_text"`). `failed` when a named header is missing or unreadable, `unsupported` when a header uses `##` token pasting. |
 
 ### Extraction scope and ownership (schema v52)
 

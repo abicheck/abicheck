@@ -1021,7 +1021,7 @@ class TestPointerOnlyLeniencyNeedsStructuralProof:
 
     Exhaustive over each side's record state (absent, every ``ScopeOrigin``,
     opaque or not) and three internal namespace spellings. The oracle is
-    stated independently of ``_layout_proven_invisible``: suppressed iff at
+    stated independently of ``policy.layout_visibility.layout_proven_invisible``: suppressed iff at
     least one side carries the record and every carried record is opaque or
     defined in a private header.
     """
@@ -1100,3 +1100,46 @@ class TestPointerOnlyLeniencyNeedsStructuralProof:
         # Vacuity guard: the oracle must exercise both outcomes.
         assert suppressed_seen and fired_seen
         assert disagreements == []
+
+
+def test_unresolved_bare_name_record_needs_proof_too() -> None:
+    """An old record carrying only a bare name (qualified identity unknown)
+    may be the leaked type: a private-header NEW record alone is no proof."""
+    qname = "ns::detail::Impl"
+
+    def side(size: int, rec: RecordType) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="lib.so",
+            version="1",
+            functions=[
+                Function(
+                    name="make",
+                    mangled="make",
+                    return_type="Public*",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[
+                RecordType(
+                    name="Public",
+                    kind="class",
+                    fields=[TypeField(name="impl_", type=f"{qname}*")],
+                ),
+                rec,
+            ],
+        )
+
+    old = side(64, RecordType(name="Impl", kind="struct", size_bits=64))
+    new = side(
+        128,
+        RecordType(
+            name=qname,
+            kind="struct",
+            size_bits=128,
+            origin=ScopeOrigin.PRIVATE_HEADER,
+        ),
+    )
+    change = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol=qname, description="size")
+    assert old.declarations.types[1].qualified_name is None
+    assert detect_internal_leaks([change], old, new) != []
