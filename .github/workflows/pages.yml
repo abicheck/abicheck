@@ -26,8 +26,21 @@ jobs:
           python-version: "3.14"
           cache: pip
 
-      - name: Install MkDocs + Material theme
-        run: pip install mkdocs mkdocs-material mkdocs-redirects
+      # Exactly pyproject.toml's `[docs]` extra -- the one list of mkdocs
+      # requirements, which `lint-and-types` builds the same site with on
+      # every PR -- read from the file rather than hand-copied (the copy here
+      # had already lost pymdown-extensions). Deliberately not `pip install
+      # ".[docs]"`: that would install abicheck too, and the generators below
+      # must keep running without it (verify.py's `examples-docs` step
+      # enforces that on every PR by blocking the import).
+      - name: Install MkDocs + Material theme ([docs] extra)
+        run: |
+          python - <<'PY' > docs-requirements.txt
+          import tomllib
+          with open("pyproject.toml", "rb") as f:
+              print("\n".join(tomllib.load(f)["project"]["optional-dependencies"]["docs"]))
+          PY
+          pip install -r docs-requirements.txt
 
       - name: Regenerate published documentation assets (idempotent)
         run: |

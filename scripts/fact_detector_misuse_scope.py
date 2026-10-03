@@ -97,6 +97,20 @@ def _memoize_per_tree(func: Callable[..., _T]) -> Callable[..., _T]:
 
 
 @_memoize_per_tree
+def walk_tree(tree: ast.Module) -> tuple[ast.AST, ...]:
+    """`tuple(ast.walk(tree))`, computed once per tree.
+
+    The scan's whole-tree helpers each iterated `ast.walk(tree)` themselves
+    -- twelve full walks per file, ~15M `iter_child_nodes` visits over the
+    `abicheck/` tree and the bulk of the scan's runtime. They now share this
+    one materialized walk. Identical nodes, identical (breadth-first)
+    order, so every consumer's output is unchanged; safe to share because
+    no consumer rewrites the tree and a tuple cannot be mutated by a caller.
+    """
+    return tuple(ast.walk(tree))
+
+
+@_memoize_per_tree
 def _enclosing_qualnames(tree: ast.Module) -> _QualnameSpans:
     """Return every named scope's exact `((start_line, start_col),
     (end_line, end_col), qualname)` span in *tree* -- resolve a query
@@ -1195,7 +1209,7 @@ def _locally_bound_constructor_shadow_names(
     def _add(qualname: str, name: str) -> None:
         shadows.setdefault(qualname, set()).add(name)
 
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             # A nested `def Fact(...):`/`class Fact:` binds `Fact` as a
             # local in whatever scope directly *contains* it, not within
@@ -1275,7 +1289,7 @@ def _global_declared_names(
     collectors have any notion of.
     """
     declared: dict[str, set[str]] = {}
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, ast.Global):
             qualname = _qualname_at((node.lineno, node.col_offset), qualnames)
             declared.setdefault(qualname, set()).update(node.names)
@@ -1475,7 +1489,7 @@ def _constructor_alias_names(
     docstrings for exactly what each covers.
     """
     aliases: dict[str, set[str]] = {}
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         pair = _single_target_binding(node)
@@ -1561,7 +1575,7 @@ def _constructor_method_alias_names(
     docstrings for exactly what each covers.
     """
     aliases: dict[str, set[str]] = {}
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         pair = _single_target_binding(node)
