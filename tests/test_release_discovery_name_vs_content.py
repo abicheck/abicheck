@@ -74,9 +74,10 @@ def _is_debug_companion(path: Path) -> bool:
     # Separate debug info: a ``*.debug`` file or anything inside a macOS
     # ``*.dSYM`` bundle. Never a library, even though it is a real binary
     # carrying the library's own name.
-    if path.name.lower().endswith(".debug"):
-        return True
-    return any(part.lower().endswith(".dsym") for part in path.parent.parts)
+    return any(
+        part.lower().endswith((".debug", ".dsym"))
+        for part in (path.name, *path.parent.parts)
+    )
 
 
 def _expected(name: str, content: str, parent: Path = Path("lib")) -> bool:

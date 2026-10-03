@@ -115,10 +115,13 @@ class DebugCompanionClassifier(FileClassifier):
     library. They are evidence about a library, never a library.
     """
 
+    #: A ``*.debug`` file, or a ``*.dSYM`` bundle directory, as a path
+    #: component -- matched against the file's own name and its parents.
+    _COMPANION_RE: re.Pattern[str] = re.compile(r"\.(?:debug|dsym)$")
+
     def accepts(self, path: Path) -> bool | None:
-        if path.name.lower().endswith(".debug"):
-            return False
-        if any(part.lower().endswith(".dsym") for part in path.parent.parts):
+        components = (path.name, *path.parent.parts)
+        if any(self._COMPANION_RE.search(c.lower()) for c in components):
             return False
         return None
 
@@ -136,16 +139,10 @@ class BinaryExtensionClassifier(FileClassifier):
     to load, failing the whole directory comparison.
     """
 
-    _SO_NAME_ONLY_RE: re.Pattern[str] = re.compile(r"\.so(?:\.\d+)*$")
-    _BINARY_EXTS: frozenset[str] = frozenset({".dll", ".dylib", ".pyd"})
+    _NAME_ONLY_RE: re.Pattern[str] = re.compile(r"\.(?:so(?:\.\d+)*|dll|dylib|pyd)$")
 
     def accepts(self, path: Path) -> bool | None:
-        lower = path.name.lower()
-        if self._SO_NAME_ONLY_RE.search(lower):
-            return True
-        if any(lower.endswith(ext) for ext in self._BINARY_EXTS):
-            return True
-        return None
+        return True if self._NAME_ONLY_RE.search(path.name.lower()) else None
 
 
 class MagicByteClassifier(FileClassifier):

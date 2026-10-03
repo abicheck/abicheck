@@ -37,6 +37,9 @@ _S2_EXIT_FIELDS = (
     # this field existed keeps binding the older tail rather than silently
     # feeding it into this one.
     "loadability_contribution",
+    # ADR-067 D6's additions-review axis, appended after loadability for the
+    # identical reason.
+    "additions_review_contribution",
 )
 _S2_BUNDLE_FIELDS = (
     "scope_record",
@@ -104,6 +107,7 @@ def test_exit_decision_positional_tail_binds_the_older_fields() -> None:
     assert decision.incomplete_scope_contribution == 0
     assert decision.no_comparison_completed_contribution == 0
     assert decision.loadability_contribution == 0
+    assert decision.additions_review_contribution == 0
 
 
 def test_bundle_result_seventh_positional_argument_is_still_the_policy_file() -> None:

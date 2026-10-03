@@ -57,6 +57,7 @@ _CLEAN_EXIT_BLOCK = {
     "incomplete_scope_contribution": 0,
     "no_comparison_completed_contribution": 0,
     "loadability_contribution": 0,
+    "additions_review_contribution": 0,
 }
 
 
