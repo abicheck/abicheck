@@ -167,9 +167,6 @@ _CENSUS_ALLOWLIST: dict[str, str] = {
         "clears lru_caches before a traced run; heap census only when gc_census_is_safe(), else a namespace walk"
     ),
     "tests/test_gc_census_thread_safety.py": "the negative control above",
-    "tests/test_mutation_reach_trace.py": (
-        "the oracle census, asserted single-threaded before it runs"
-    ),
     "scripts/mutation_reach_trace.py": (
         "arms sys.monitoring on only_mutate functions; heap census only when gc_census_is_safe(), else a namespace walk retried by a later census"
     ),

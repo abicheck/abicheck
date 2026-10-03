@@ -32,9 +32,10 @@ modules' namespaces, retrying the census at a later test. Contract:
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 import textwrap
-import threading
 import types
 from pathlib import Path
 
@@ -114,26 +115,57 @@ def synthetic(tmp_path: Path) -> types.ModuleType:
     sys.modules.pop(spec.name, None)
 
 
-def _oracle(module: types.ModuleType) -> set[types.FunctionType]:
-    """Every live function compiled from *module*'s file: an independent
-    census, only ever taken while this test is the sole thread."""
-    import gc
+# Runs in a fresh interpreter: the oracle is a real heap census, which is only
+# safe while the process has one thread -- never guaranteed inside a pytest
+# session whose earlier tests may have left threads running.
+_ORACLE_SCRIPT = textwrap.dedent(
+    """
+    import gc, importlib.util, json, sys, threading, types
+
+    script, module_path = sys.argv[1], sys.argv[2]
+    spec = importlib.util.spec_from_file_location("mutation_reach_trace", script)
+    trace = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trace)
+    spec = importlib.util.spec_from_file_location("reach_trace_synthetic", module_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
 
     assert threading.active_count() == 1, "oracle census needs a single thread"
-    path = module.__file__
-    return {
-        o
-        for o in gc.get_objects()
-        if isinstance(o, types.FunctionType) and o.__code__.co_filename == path
+    expected = {
+        o for o in gc.get_objects()
+        if isinstance(o, types.FunctionType) and o.__code__.co_filename == module_path
     }
+    found = set(trace.function_candidates([spec.name], heap_census=False))
+    print(json.dumps({
+        "names": sorted({f.__code__.co_name for f in expected}),
+        "missing": sorted(f.__qualname__ for f in expected - found),
+    }))
+    """
+)
 
 
 def test_namespace_walk_finds_every_function_the_heap_census_finds(
-    trace: types.ModuleType, synthetic: types.ModuleType
+    tmp_path: Path,
 ) -> None:
-    expected = _oracle(synthetic)
+    module_path = tmp_path / "reach_trace_synthetic.py"
+    module_path.write_text(_MODULE_SOURCE, encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _ORACLE_SCRIPT,
+            str(_REPO / "scripts" / "mutation_reach_trace.py"),
+            str(module_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=_REPO,
+    )
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout.strip().splitlines()[-1])
     # Vacuity guard: the oracle must see the shapes this test is about.
-    names = {f.__code__.co_name for f in expected}
     assert {
         "top",
         "wrapper",
@@ -144,10 +176,8 @@ def test_namespace_walk_finds_every_function_the_heap_census_finds(
         "prop",
         "inner_method",
         "<lambda>",
-    } <= names
-    found = set(trace.function_candidates([synthetic.__name__], heap_census=False))
-    missing = {f.__qualname__ for f in expected - found}
-    assert not missing, missing
+    } <= set(result["names"])
+    assert not result["missing"], result["missing"]
 
 
 def test_walk_never_enumerates_the_heap(
