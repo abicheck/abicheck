@@ -34,6 +34,7 @@ from ....model import ParamKind
 from ....name_classification import (
     strip_anonymous_type_location as _strip_anonymous_type_location,
 )
+from ...castxml_header_compat import FLOAT128_SPELLING, FLOAT128_STANDIN
 from .context import CastxmlParserContext
 
 
@@ -129,6 +130,8 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
         # "ElaboratedType").
         return type_name(ctx, el.get("type", ""), depth + 1)
     if tag in ("Struct", "Class", "Union"):
+        if el.get("name") == FLOAT128_STANDIN:
+            return FLOAT128_SPELLING  # extract/castxml_header_compat.py
         # See strip_anonymous_type_location's docstring.
         return _strip_anonymous_type_location(el.get("name", "?"))
     if tag == "Typedef":
@@ -210,6 +213,8 @@ def type_identities(ctx: CastxmlParserContext, id_: str) -> tuple[str, ...]:
             cur = ctx.resolve(inner) if inner else None
             continue
         if tag in ("Struct", "Class", "Union", "Enumeration"):
+            if cur.get("name") == FLOAT128_STANDIN:
+                return ()  # a fundamental type: no record identity
             leaf = _strip_anonymous_type_location(cur.get("name", ""))
             if not leaf and tag != "Enumeration":
                 leaf = alias
