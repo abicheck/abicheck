@@ -53,11 +53,13 @@ import os
 import sys
 import tomllib
 import types
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+from abicheck.workflows.memory_trace import gc_census_is_safe
 
 #: ``sys.monitoring`` (3.12+), typed loosely: mypy here targets 3.11.
 _MON: Any = getattr(sys, "monitoring", None)
@@ -89,6 +91,34 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
+def namespace_functions(modules: Iterable[types.ModuleType]) -> list[object]:
+    """Functions reachable from *modules*' namespaces without a heap census:
+    module-level functions, class members (also static/class methods and
+    properties, nested classes) and anything behind ``__wrapped__``."""
+    found: list[object] = []
+    seen: set[int] = set()
+    stack: list[object] = [v for m in modules for v in vars(m).values()]
+    while stack:
+        obj = stack.pop()
+        if id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        if isinstance(obj, types.FunctionType):
+            found.append(obj)
+        elif isinstance(obj, (staticmethod, classmethod)):
+            stack.append(obj.__func__)
+        elif isinstance(obj, property):
+            stack.extend(f for f in (obj.fget, obj.fset, obj.fdel) if f is not None)
+        elif isinstance(obj, type):
+            stack.extend(vars(obj).values())
+        wrapped = (
+            getattr(obj, "__wrapped__", None) if not isinstance(obj, type) else None
+        )
+        if wrapped is not None:
+            stack.append(wrapped)
+    return found
+
+
 class Monitor:
     def __init__(self, paths: frozenset[str], modules: list[str]) -> None:
         if _MON is None:
@@ -110,12 +140,26 @@ class Monitor:
 
     def arm(self) -> None:
         """Enable PY_START on every only_mutate code object not yet armed,
-        rescanning only when an only_mutate module was (re)imported."""
+        rescanning only when an only_mutate module was (re)imported.
+
+        The complete source is a GC heap census, which also finds functions
+        built at runtime outside any module namespace. A census beside another
+        live Python thread can corrupt a tuple that thread is building
+        (``memory_trace.gc_census_is_safe``), and a test can leave a thread
+        behind, so then only the modules' namespaces are walked and the scan
+        is not marked done: the next safe arm completes it.
+        """
         ids = tuple(id(sys.modules.get(name)) for name in self.modules)
         if ids == self.module_ids:
             return
-        self.module_ids = ids
-        for obj in gc.get_objects():
+        if gc_census_is_safe():
+            functions: Iterable[object] = gc.get_objects()
+            self.module_ids = ids
+        else:
+            functions = namespace_functions(
+                sys.modules[name] for name in self.modules if name in sys.modules
+            )
+        for obj in functions:
             if not isinstance(obj, types.FunctionType):
                 continue
             code = obj.__code__

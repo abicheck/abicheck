@@ -139,6 +139,24 @@ def test_the_trace_records_exactly_the_reaching_tests(
     assert _trace(_project(tmp_path), workers) == _REACHING
 
 
+_LINGERING_THREAD = """
+import threading
+_stop = threading.Event()
+threading.Thread(target=_stop.wait, daemon=True).start()
+def pytest_unconfigure(config):
+    _stop.set()
+"""
+
+
+def test_the_trace_is_complete_with_another_thread_alive(tmp_path: Path) -> None:
+    """A thread alive for the whole session makes every heap census unsafe
+    (``memory_trace.gc_census_is_safe``), so the plugin must arm through its
+    namespace walk alone and still credit every reaching test."""
+    project = _project(tmp_path)
+    (project / "conftest.py").write_text(_LINGERING_THREAD)
+    assert _trace(project, ["-p", "no:randomly", "-n", "0"]) == _REACHING
+
+
 def test_the_trace_is_independent_of_test_order(tmp_path: Path) -> None:
     """A test that is first to import a mutated module must not be the only
     one credited (the plugin imports them before any test)."""
