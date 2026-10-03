@@ -5,8 +5,25 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # Only what this workflow analyses can change its answer on a PR:
+    # first-party Python (CodeQL + bandit), the dependency manifest
+    # (pip-audit), and this workflow/its CodeQL config. tests/ is excluded
+    # because the CodeQL config ignores it and bandit skips it, so a
+    # tests-only PR would re-analyse an unchanged tree. Every other PR
+    # (docs, workflows, fixtures) starts no runner. Advisories published
+    # against unchanged dependencies are caught by the push-to-main and
+    # weekly runs below, which carry no path filter.
+    paths:
+      - '**/*.py'
+      - '!tests/**'
+      - 'pyproject.toml'
+      - '.github/workflows/security.yml'
+      - '.github/codeql/**'
   schedule:
-    - cron: '0 6 * * 1'
+    # Sunday 03:37 UTC: off the Monday 04:00-07:00 pile-up most weekly
+    # crons share, and still weekly so new advisories and CodeQL query-pack
+    # updates reach main without a commit.
+    - cron: '37 3 * * 0'
   workflow_dispatch:
 
 concurrency:
@@ -35,45 +52,46 @@ jobs:
   # reported two check rows for one answer. The surviving job absorbed this
   # one's stricter settings — see that file's comment — so consolidating cost
   # no coverage. Don't re-add a copy here.
+  # One job, one runner: CodeQL plus pip-audit/bandit. These were two
+  # parallel jobs; pip-audit+bandit take ~30 s of a ~45 s job, so a
+  # second runner (and its 10-17 min queue wait, measured 2026-10-02) bought
+  # nothing. pip-audit/bandit run after Analyze under `!cancelled()`, so a
+  # CodeQL failure never hides their result and vice versa.
   security:
-    name: Security Scan
+    name: Security Scan & CodeQL
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
-        with:
-          python-version: '3.14'
-          cache: 'pip'
-      - name: Install dependencies
-        run: |
-          pip install pip-audit bandit
-      - name: pip-audit
-        run: pip-audit .
-      - name: bandit (high severity gate)
-        run: bandit -r abicheck/ -x tests -lll
-
-  codeql:
-    name: CodeQL Analysis
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     permissions:
       security-events: write
       actions: read
       contents: read
-    strategy:
-      matrix:
-        language: [python]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - name: Initialize CodeQL
         uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a  # v4
         with:
-          languages: ${{ matrix.language }}
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@7188fc363630916deb702c7fdcf4e481b751f97a  # v4
+          languages: python
+          # Python needs no build; `none` replaces the no-op Autobuild step.
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
       - name: Analyze
         uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a  # v4
         with:
-          category: "/language:${{ matrix.language }}"
+          # Unchanged category, so code-scanning alert history carries over.
+          category: "/language:python"
+      - name: Set up Python
+        if: ${{ !cancelled() }}
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+      - name: Install dependencies
+        if: ${{ !cancelled() }}
+        run: |
+          pip install pip-audit bandit
+      - name: pip-audit
+        if: ${{ !cancelled() }}
+        run: pip-audit .
+      - name: bandit (high severity gate)
+        if: ${{ !cancelled() }}
+        run: bandit -r abicheck/ -x tests -lll

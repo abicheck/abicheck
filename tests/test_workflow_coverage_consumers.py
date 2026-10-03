@@ -136,6 +136,24 @@ def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     return [s for s in (job.get("steps") or []) if isinstance(s, dict)]
 
 
+def _pytest_arguments(step: dict[str, Any]) -> str:
+    """Everything in one step that can hand pytest an argument: its `run:`
+    body and its `env:` values.
+
+    The env half is not hypothetical. integration.yml routes its lanes through
+    `scripts/verify.py` steps and adds coverage with `PYTEST_ADDOPTS`, which
+    pytest reads from the environment -- so a `run:`-only scan saw no producer
+    there at all, and this guard passed by not looking.
+    """
+    parts = []
+    if isinstance(step.get("run"), str):
+        parts.append(step["run"])
+    env = step.get("env")
+    if isinstance(env, dict):
+        parts.extend(str(v) for v in env.values())
+    return "\n".join(parts)
+
+
 def _orphaned_reports() -> list[str]:
     """Every (workflow, job, matrix combination) that writes a coverage
     report no step in the same combination reads."""
@@ -149,8 +167,8 @@ def _orphaned_reports() -> list[str]:
             for combo in _matrix_combinations(job):
                 ctx = _context(combo)
                 for step in steps:
-                    run = step.get("run")
-                    if not isinstance(run, str):
+                    run = _pytest_arguments(step)
+                    if not run:
                         continue
                     if not condition_holds(step.get("if"), ctx):
                         continue
@@ -203,6 +221,19 @@ def test_the_survey_actually_finds_coverage_producers() -> None:
     assert producers >= 2, (
         f"found {producers} coverage producers; expected the known lanes"
     )
+
+
+def test_a_producer_in_step_env_is_surveyed() -> None:
+    """`PYTEST_ADDOPTS` in a step's `env:` hands pytest `--cov` as surely as
+    the `run:` line does; a `run:`-only survey would miss the integration
+    lane's producer entirely and pass vacuously."""
+    via_env = {
+        "env": {"PYTEST_ADDOPTS": "-n auto --cov=abicheck --cov-report=xml:i.xml"},
+        "run": "python scripts/verify.py --profile full --only integration",
+    }
+    assert _reports_written(_pytest_arguments(via_env)) == ["i.xml"]
+    assert _reports_written(_pytest_arguments({"run": "pytest -q"})) == []
+    assert _pytest_arguments({"uses": "codecov/codecov-action"}) == ""
 
 
 def test_a_platform_scoped_consumer_does_not_cover_every_platform() -> None:

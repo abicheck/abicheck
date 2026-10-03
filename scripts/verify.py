@@ -203,6 +203,23 @@ def _need_linux_and_all_bins(*names: str) -> Callable[[], str | None]:
     return check
 
 
+def _need_platform_and_bins(
+    per_platform: dict[str, tuple[str, ...]],
+) -> Callable[[], str | None]:
+    """Run only on the listed `sys.platform` values, each with its own tools."""
+
+    def check() -> str | None:
+        bins = per_platform.get(sys.platform)
+        if bins is None:
+            return f"needs one of {sorted(per_platform)} (host platform is {sys.platform!r})"
+        missing = [b for b in bins if shutil.which(b) is None]
+        if missing:
+            return f"missing tool(s) on PATH: {', '.join(missing)}"
+        return None
+
+    return check
+
+
 def _need_modules(*names: str) -> Callable[[], str | None]:
     def check() -> str | None:
         missing = [n for n in names if not _module_available(n)]
@@ -286,6 +303,13 @@ class Step:
     cmd: tuple[str, ...]
     profiles: frozenset[str]
     env: dict[str, str] = field(default_factory=dict)
+    #: Like ``env``, but the caller's own environment wins. For a value with a
+    #: sensible local default that a specific CI leg legitimately tightens --
+    #: the `integration` step's ``ABICHECK_MIN_EXECUTED`` floor is "did
+    #: anything run at all" on an arbitrary host, while ci's Linux leg knows
+    #: its real count and raises it. ``env`` itself must stay authoritative:
+    #: most of its entries are part of what the step *is*.
+    env_defaults: dict[str, str] = field(default_factory=dict)
     precondition: Callable[[], str | None] | None = None
     #: ``{returncode: reason}``: a step that ran but could only do part of its
     #: job reports one of these codes, and this maps it to a skip so the
@@ -576,20 +600,72 @@ STEPS: tuple[Step, ...] = (
     ),
     Step(
         # ABICHECK_MIN_EXECUTED (tests/conftest.py's silent-skip guard, also
-        # used by every marker lane in ci.yml): `castxml` being on PATH
+        # used by every marker lane in CI): `castxml` being on PATH
         # doesn't guarantee gcc/g++ is too — without this, a partial
         # toolchain could let pytest collect the `integration` marker, skip
         # every single test, and still exit 0, which `run_step` would then
-        # report as "passed" having verified nothing. '1' (not CI's Linux
-        # '20') because this step runs on whatever OS/toolchain combination
-        # the caller has — the guard's job here is "did anything run at
-        # all", not asserting a platform-specific count.
+        # report as "passed" having verified nothing. The default is '1'
+        # because this step runs on whatever OS/toolchain combination the
+        # caller has — "did anything run at all", not a platform-specific
+        # count — and it is an `env_defaults` entry so integration.yml's
+        # Linux leg, whose count is known, can raise it to '20'.
+        #
+        # This is the one definition of the integration lane: integration.yml
+        # calls this step on every OS (adding xdist/coverage through
+        # PYTEST_ADDOPTS) rather than keeping its own pytest line.
+        # Two files are excluded, everywhere:
+        # - tests/test_abi_examples.py: the legacy cases 01-18 list, superseded
+        #   by tests/test_example_autodiscovery.py, which runs the same 18
+        #   cases with the same expected verdicts (read from
+        #   catalog/ground_truth.json). CI has never run it; this step used to,
+        #   so a local `--profile full` paid a second cmake configure per case
+        #   for no extra assertion.
+        # - tests/test_cross_platform_integration.py: every test in it needs
+        #   Apple clang or MinGW gcc and skips on Linux, so it is the separate
+        #   `native-compare` step below, with its own floor.
         "integration",
-        _py("pytest", "tests/", "-m", "integration", "--tb=short"),
+        _py(
+            "pytest",
+            "tests/",
+            "-m",
+            "integration",
+            "--tb=short",
+            "--ignore=tests/test_abi_examples.py",
+            "--ignore=tests/test_cross_platform_integration.py",
+        ),
         frozenset({FULL}),
-        env={"ABICHECK_MIN_EXECUTED": "1"},
+        env_defaults={"ABICHECK_MIN_EXECUTED": "1"},
         precondition=_need_bins("castxml"),
         description="DWARF/header parsing against real castxml + a C/C++ compiler",
+    ),
+    Step(
+        # G1: native PE/Mach-O `compare` workflows over binaries the host's own
+        # toolchain builds (Apple clang -> .dylib, MinGW gcc -> .dll). Every
+        # test needs that compiler, so if it is missing they all skip and the
+        # floor fails the step — '5' because each platform contributes ~7-9
+        # native tests. macOS/Windows only: on Linux all 20 skip by design.
+        "native-compare",
+        _py(
+            "pytest",
+            "tests/test_cross_platform_integration.py",
+            "-m",
+            "integration",
+            "--tb=short",
+        ),
+        frozenset({FULL}),
+        env={"ABICHECK_MIN_EXECUTED": "5"},
+        precondition=_need_platform_and_bins({"darwin": ("clang",), "win32": ("gcc",)}),
+        description="Native PE/Mach-O compare workflows (macOS clang / Windows MinGW)",
+    ),
+    Step(
+        # MSVC + PDB end-to-end (tests/test_msvc_pdb_e2e.py). Experimental:
+        # the tests self-skip when layout cannot be extracted, and CI runs the
+        # step with `continue-on-error` while the PDB parser matures.
+        "msvc",
+        _py("pytest", "tests/test_msvc_pdb_e2e.py", "-m", "msvc", "--tb=short"),
+        frozenset({FULL}),
+        precondition=_need_platform_and_bins({"win32": ("cl",)}),
+        description="MSVC + PDB end-to-end (Windows, cl.exe on PATH)",
     ),
     Step(
         # Marker-scoped over all of tests/ (not a hardcoded file list): matches
@@ -834,7 +910,7 @@ def run_step(step: Step) -> dict[str, object]:
 
     print(f"\n=== {step.name} === {' '.join(step.cmd)}", flush=True)
     start = time.time()
-    env = {**os.environ, **step.env}
+    env = {**step.env_defaults, **os.environ, **step.env}
     # Diagnostic instrumentation (round 20, Part B) -- capture_output=True
     # instead of the previous bare subprocess.run(...) (which relied on the
     # child inheriting this process's stdout/stderr fds directly). Explicitly
