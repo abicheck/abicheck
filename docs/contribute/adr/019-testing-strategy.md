@@ -105,6 +105,12 @@ intentionally not duplicated with a hardcoded number here.
 
 ### Conditional gating for parity tests
 
+> **Amendment (2026-10-03, PR #1460):** the gate job below no longer exists.
+> The parity lanes are steps of `.github/workflows/integration.yml`'s Linux
+> leg, and the same path set is a trigger-level `paths:` filter on
+> `pull_request` (pushes to `main` stay unfiltered), so the decision costs no
+> runner. The behaviour listed after the block is unchanged.
+
 Parity tests are expensive (require ABICC/libabigail installation + full
 compilation of example cases). They run conditionally:
 

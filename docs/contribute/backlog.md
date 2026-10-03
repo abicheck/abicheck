@@ -18,7 +18,7 @@ same `DwarfMetadata` pipeline the ELF/DWARF path uses. The Windows *unit-test*
 lane still uses MinGW/GCC, but there is now a dedicated end-to-end lane against
 a real Microsoft toolchain:
 
-- **`windows-msvc` CI lane** (`.github/workflows/ci.yml`) on the GitHub-hosted
+- **`msvc` CI step** (`.github/workflows/integration.yml`, Windows leg) on the GitHub-hosted
   `windows-latest` runner. `ilammy/msvc-dev-cmd` puts `cl.exe` on PATH; the lane
   runs `pytest -m msvc`.
 - **`tests/test_msvc_pdb_e2e.py`** compiles a DLL with `cl.exe /Zi` (emitting a

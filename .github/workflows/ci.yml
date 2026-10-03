@@ -435,8 +435,8 @@ jobs:
     # `main` (a platform regression surfaces on the first `main` run after
     # merge), on `workflow_dispatch`, and on PRs labelled `ci:full` -- add it
     # to a PR touching paths, encodings, subprocesses, temp files or anything
-    # else platform-sensitive. `Native PE/Mach-O compare workflows` and the
-    # macOS/Windows `integration-tests` legs still run on every PR. A moved
+    # else platform-sensitive. integration.yml's macOS/Windows legs (integration,
+    # native PE/Mach-O compare, MSVC) still run on every engine PR. A moved
     # detection point, stated: docs/contribute/plans/ci-cost-and-assurance.md,
     # Phase 7.
     if: >-

@@ -28,8 +28,9 @@ subtree — and:
 ``AbiSnapshot`` objects directly and deliberately never invokes a real
 compiler (see ``test_benchmark_scaling.py``), so it cannot exercise DWARF
 parsing at all. This file's ``integration`` marker is what wires it into
-every PR instead — ``ci.yml``'s ``integration-tests`` job runs `-m
-integration` unconditionally on every push/PR, no path filter required.
+every engine PR instead — ``integration.yml``'s ``integration`` job runs
+`-m integration` on every push to main and on every PR touching
+``abicheck/**``/``tests/**`` (its trigger-level path filter).
 
 Requires ``g++`` on Linux (gcc/g++ produce Mach-O/PE elsewhere).
 """
