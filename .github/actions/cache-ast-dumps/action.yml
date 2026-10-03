@@ -1,54 +1,69 @@
 name: Cache AST dumps
 description: >-
   Restores example file mtimes to their last-commit timestamps and wires
-  actions/cache around dumper's on-disk AST cache (~/.cache/abi_check), so
-  castxml/clang header-AST dumps persist across examples-validation runs
-  instead of resetting on every fresh container.
+  actions/cache around dumper's on-disk header-AST cache
+  (~/.cache/abi_check/{castxml,clang}), so castxml/clang header-AST dumps
+  persist across examples-validation runs instead of resetting on every
+  fresh container.
 
 inputs:
   key-suffix:
     description: >-
       Cache-key suffix identifying this job/matrix leg (e.g. "gcc", "clang",
-      "clang-fallback", "artifact-modes", "full-matrix") so parallel jobs
-      don't collide on the same cache key.
+      "artifact-modes") so legs that dump different case sets don't
+      overwrite each other's entry.
     required: true
 
 runs:
   using: composite
   steps:
-    # dumper's on-disk AST cache (~/.cache/abi_check) keys each header on its
-    # mtime, not its content — actions/checkout sets every file's mtime to
-    # checkout time, so a persisted cache would miss on every entry, every
-    # run, without this. Restoring each file's last-commit mtime makes the
-    # cache key stable for unchanged content across checkouts (see
-    # scripts/restore_git_mtimes.py). Requires the calling job's checkout
-    # step to use `fetch-depth: 0` — a shallow (depth-1) clone only has one
-    # commit, so every file would be stamped with that single commit's time
-    # instead of its own last edit, defeating the point.
+    # dumper's on-disk AST cache keys each header on its mtime, not its
+    # content — actions/checkout sets every file's mtime to checkout time, so a
+    # persisted cache would miss on every entry, every run, without this.
+    # Restoring each file's last-commit mtime makes the cache key stable for
+    # unchanged content across checkouts (see scripts/restore_git_mtimes.py).
+    # Requires the calling job's checkout step to use `fetch-depth: 0` — a
+    # shallow (depth-1) clone only has one commit, so every file would be
+    # stamped with that single commit's time instead of its own last edit.
     - name: Restore example file mtimes (stable AST-cache keys across CI runs)
       shell: bash
       run: python3 scripts/restore_git_mtimes.py examples catalog
 
     # Folded into the cache key below so a runner-image castxml/gcc/clang
     # upgrade invalidates the whole cache instead of silently reusing AST
-    # dumps from a different toolchain version (dumper's own cache key does
-    # not capture tool versions, only paths/mtimes/flags). Written under
-    # results/ (already gitignored, and hashFiles() only resolves paths
-    # relative to GITHUB_WORKSPACE — an absolute /tmp path won't match).
+    # dumps from a different toolchain version. Written under results/
+    # (gitignored; hashFiles() only resolves paths under GITHUB_WORKSPACE).
     - name: Record toolchain versions (cache key input)
       shell: bash
       run: |
         mkdir -p results
         { castxml --version; gcc --version; clang --version; } > results/abi-check-toolchain-versions.txt
 
-    # actions/cache only saves under a key that didn't already exist, so the
-    # primary key includes github.run_id (always fresh) and restore-keys
-    # falls back to the most recent cache sharing the same prefix — the
-    # standard "growing cache" idiom.
-    - name: Cache abicheck AST dumps (castxml/clang header-AST cache)
+    # Only the header-AST caches are persisted -- never ~/.cache/abi_check/
+    # snapshots. A header-AST entry is a function of the header bytes, the
+    # toolchain and the AST cache schema, all of which the key below captures.
+    # A whole-snapshot entry is a function of *abicheck's own extraction code*,
+    # which snapshot_cache's key does not capture (binary hash + headers +
+    # params + hand-bumped version), and the example binaries are
+    # reproducible byte for byte (same source, flags and cwd), so a restored
+    # snapshot directory would hand a PR the snapshot an older abicheck
+    # produced -- validating the cache instead of the PR's extractor.
+    #
+    # The key is the content of every input that can change an entry: the
+    # catalog/example sources (headers), the toolchain versions, and the AST
+    # cache schema constants in dumper_ast_config.py. Unchanged inputs mean an
+    # exact hit, and actions/cache skips the save on an exact hit, so a run
+    # that changes none of them neither saves a new entry nor evicts other
+    # caches (the previous key ended in github.run_id, which saved a fresh
+    # entry for every leg of every run). A changed input restores the closest
+    # prefix match and saves once under the new key; entries the dumper's own
+    # key no longer matches are simply never read.
+    - name: Cache abicheck header-AST dumps (castxml/clang)
       uses: actions/cache@v4
       with:
-        path: ~/.cache/abi_check
-        key: abi-check-ast-cache-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt') }}-${{ github.run_id }}
+        path: |
+          ~/.cache/abi_check/castxml
+          ~/.cache/abi_check/clang
+        key: abi-check-ast-v2-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/dumper_ast_config.py') }}-${{ hashFiles('examples/**', 'catalog/**') }}
         restore-keys: |
-          abi-check-ast-cache-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt') }}-
+          abi-check-ast-v2-${{ runner.os }}-${{ inputs.key-suffix }}-${{ hashFiles('results/abi-check-toolchain-versions.txt', 'abicheck/dumper_ast_config.py') }}-
