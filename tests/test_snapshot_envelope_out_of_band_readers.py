@@ -365,6 +365,70 @@ def _reads_a_file(node: ast.AST) -> bool:
     return False
 
 
+def _is_raw_document_call(node: ast.AST) -> bool:
+    """``json.load(...)``/``json.loads(...)``: a document as written, envelope and all."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"load", "loads"}
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "json"
+    )
+
+
+def _one_hop_offenders(tree: ast.Module, rel: str) -> list[str]:
+    """Readers that index a moved key on a *parameter* fed a raw document.
+
+    The function-local scan above skips a function that does not read a file
+    itself, on the assumption that its caller unwrapped. That assumption is
+    the recorded known gap, and it is exactly how the field-eval runner's
+    ``_source_coverage(snap)`` escaped: its same-module caller passed
+    ``json.loads(snap.read_text(...))`` straight in, so every source-tier row
+    read 0 compile units from complete snapshots. This closes the one-hop,
+    same-module case: a caller passing ``json.load(s)(...)`` -- directly, or
+    through a local name bound to it and never unwrapped -- into a parameter
+    the callee indexes a moved key on.
+    """
+    funcs = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    indexed_params: dict[str, dict[int, set[str]]] = {}
+    for func in funcs:
+        params = [a.arg for a in func.args.posonlyargs + func.args.args]
+        unwrapped = _unwrapped_names(func)
+        hits: dict[int, set[str]] = {}
+        for recv, key in _moved_key_receivers(func):
+            if recv in params and recv not in unwrapped:
+                hits.setdefault(params.index(recv), set()).add(key)
+        if hits:
+            indexed_params[func.name] = hits
+    offenders: list[str] = []
+    for caller in funcs:
+        raw_names = {
+            t.id
+            for st in ast.walk(caller)
+            if isinstance(st, ast.Assign) and _is_raw_document_call(st.value)
+            for t in st.targets
+            if isinstance(t, ast.Name)
+        } - _unwrapped_names(caller)
+        for call in ast.walk(caller):
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)):
+                continue
+            for index, keys in indexed_params.get(call.func.id, {}).items():
+                if index >= len(call.args):
+                    continue
+                arg = call.args[index]
+                if _is_raw_document_call(arg) or (
+                    isinstance(arg, ast.Name) and arg.id in raw_names
+                ):
+                    offenders.append(
+                        f"{rel}::{caller.name} -> {call.func.id}() indexes {sorted(keys)}"
+                    )
+    return offenders
+
+
 class TestNoUnguardedOutOfBandReader:
     """What keeps the class closed against a *new* reader."""
 
@@ -409,3 +473,79 @@ class TestNoUnguardedOutOfBandReader:
             "unwrapping it first — they will read None for every real "
             f"`abicheck dump` output: {offenders}"
         )
+
+    @pytest.mark.repo_scan
+    def test_no_caller_hands_a_raw_document_to_a_moved_key_reader(self) -> None:
+        offenders: list[str] = []
+        for root in _SCANNED_ROOTS:
+            for path in sorted((REPO_ROOT / root).rglob("*.py")):
+                rel = path.relative_to(REPO_ROOT).as_posix()
+                if rel in _NOT_SNAPSHOT_DOCUMENT_READERS or "__pycache__" in rel:
+                    continue
+                try:
+                    tree = ast.parse(path.read_text(encoding="utf-8"))
+                except (OSError, SyntaxError):
+                    continue
+                offenders += [
+                    o
+                    for o in _one_hop_offenders(tree, rel)
+                    if o.split(" -> ")[0] not in _NOT_SNAPSHOT_DOCUMENT_READERS
+                ]
+        assert not offenders, (
+            "a raw json.load(s) result reaches a function that indexes a key "
+            f"the snapshot envelope moved under sections/: {offenders}"
+        )
+
+
+_RAW_HANDOFF = """
+import json
+def coverage(snap):
+    return snap.get("build_source") or {}
+def scan(path):
+    return coverage(json.loads(path.read_text()))
+"""
+
+_RAW_VIA_NAME = """
+import json
+def coverage(snap):
+    return snap["build_source"]
+def scan(path):
+    doc = json.loads(path.read_text())
+    return coverage(doc)
+"""
+
+_UNWRAPPED_HANDOFF = """
+import json
+def coverage(snap):
+    return snap.get("build_source") or {}
+def scan(path):
+    doc = from_sectioned_document(json.loads(path.read_text()))
+    return coverage(doc)
+"""
+
+_PACK_HANDOFF = """
+def coverage(bs):
+    return bs.get("build_source") or {}
+def scan(pack):
+    return coverage(pack.to_embedded_dict())
+"""
+
+
+@pytest.mark.parametrize(
+    ("source", "flagged"),
+    [
+        (_RAW_HANDOFF, True),
+        (_RAW_VIA_NAME, True),
+        (_UNWRAPPED_HANDOFF, False),
+        (_PACK_HANDOFF, False),
+    ],
+    ids=["direct", "via-local-name", "unwrapped-first", "not-a-document"],
+)
+def test_one_hop_scan_flags_exactly_a_raw_document_handoff(
+    source: str, flagged: bool
+) -> None:
+    """The scan's own oracle: the field-eval runner's pre-fix shape (both
+    spellings) is flagged; an unwrapped document and a non-document dict are
+    not -- so neither a scan that flags everything nor one that flags nothing
+    passes."""
+    assert bool(_one_hop_offenders(ast.parse(source), "m.py")) is flagged
