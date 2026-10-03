@@ -263,9 +263,6 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # above rests on.
     "bundle_duplicate_provider": "L0",
     "bundle_manifest_entry_unsatisfied": "L0",
-    # G38 Phase 3: pairs BundleFacts (derived from ElfMetadata alone, the
-    # same L0 evidence every other bundle_* kind above rests on).
-    "bundle_variant_coverage_regressed": "L0",
     # G38 Phase 4: tiered L0 to match its confirmed sibling
     # bundle_intra_dep_signature_changed above -- the detectable-at signal
     # is the C-linkage resolution match (ElfMetadata), same as every other

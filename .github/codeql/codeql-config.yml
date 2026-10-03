@@ -1,0 +1,15 @@
+# CodeQL configuration for security.yml's `security` job.
+#
+# What is analysed: every first-party Python file that ships or runs with
+# privileges -- abicheck/ (the package), scripts/ (run by CI with tokens),
+# action/, actions/, contrib/, skills-src/. What is not: the test suite and
+# the example/doc fixtures. tests/ alone is ~65% of the repository's Python
+# (≈820k of ≈1.33M lines on 2026-10-02); none of it ships, and CodeQL's
+# default python suite has no query whose finding in a test body we act on.
+# Dropping it halves the database CodeQL builds and queries on every run.
+name: abicheck CodeQL config
+paths-ignore:
+  - tests
+  - examples
+  - docs
+  - catalog

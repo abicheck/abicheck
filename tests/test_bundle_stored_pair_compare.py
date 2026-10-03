@@ -218,7 +218,7 @@ class TestCompareStoredBundleFactsPair:
         self, tmp_path: Path
     ) -> None:
         """An empty fingerprint carries no real identity evidence --
-        ``variant_fingerprint()`` itself never produces one -- so two
+        no capture path writes one -- so two
         documents both carrying "" must not be treated as a match just
         because they're equal (Codex review, PR #1060, fresh evidence)."""
         old_path = self._facts_path(

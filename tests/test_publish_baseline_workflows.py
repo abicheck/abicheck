@@ -346,80 +346,129 @@ class TestAcceptedMainCacheKeyRotation:
     string itself), and semantically (feeding representative values through
     both and comparing)."""
 
-    def test_compute_cache_key_step_uses_the_documented_template(self) -> None:
+    def _step_run(self) -> str:
         data = _load(UPDATE_MAIN_BASELINE)
         steps = _steps(data["jobs"]["refresh"])
-        step = next(s for s in steps if s.get("name") == "Compute cache key")
-        run = step["run"]
-        assert "${KEY_PREFIX}-${PROFILE_ID}-${HEAD_SHA}" in run
-        assert "${KEY_PREFIX}-${PROFILE_ID}-" in run
+        return next(s for s in steps if s.get("name") == "Compute cache key")["run"]
 
-    def test_template_semantics_match_the_pure_python_mirror(self) -> None:
+    def test_compute_cache_key_step_calls_the_python_owner(self) -> None:
+        # One owner: the step calls the documented functions instead of
+        # restating the key format in bash, which drifted ("03" keyed as
+        # -g03 while the manifest recorded 3; "abc" built a key before
+        # actions/baseline rejected it).
+        run = self._step_run()
+        for name in (
+            "accepted_main_cache_key",
+            "accepted_main_cache_restore_prefix",
+            "parse_baseline_generation",
+        ):
+            assert name in run
+        assert "${KEY_PREFIX}-" not in run
+
+    def test_documented_format_matches_the_python_owner(self) -> None:
         key_prefix, profile_id, head_sha = (
             "abicheck-baseline-main",
             "linux-x86_64-gcc",
             "deadbeef",
         )
-        # Mirrors the bash template's own string interpolation exactly --
-        # if either drifts from the other, this assertion (not a live
-        # GitHub Actions run) is what catches it.
-        bash_equivalent_key = f"{key_prefix}-{profile_id}-{head_sha}"
-        bash_equivalent_prefix = f"{key_prefix}-{profile_id}-"
-        assert bash_equivalent_key == accepted_main_cache_key(
+        # The format docs/reference/publish-baseline.md documents.
+        assert f"{key_prefix}-{profile_id}-{head_sha}" == accepted_main_cache_key(
             key_prefix, profile_id, head_sha
         )
-        assert bash_equivalent_prefix == accepted_main_cache_restore_prefix(
+        assert f"{key_prefix}-{profile_id}-" == accepted_main_cache_restore_prefix(
             key_prefix, profile_id
         )
 
-    def test_compute_cache_key_step_folds_generation_matching_the_python_mirror(
-        self, tmp_path: Path
-    ) -> None:
-        # Executes the REAL "Compute cache key" step script (not a
-        # hand-derived string) with BASELINE_GENERATION set, and checks its
-        # actual GITHUB_OUTPUT against accepted_main_cache_key()/
-        # accepted_main_cache_restore_prefix()'s generation-aware mirror --
-        # closes the gap a purely-structural/hand-derived check can't catch
-        # (Codex review: the bash folding logic itself needs to be run, not
-        # just asserted to contain a template string).
-        require_bash()
+    def _run_step(self, tmp_path: Path, **values: str):
         import subprocess
+        import sys
 
-        data = _load(UPDATE_MAIN_BASELINE)
-        steps = _steps(data["jobs"]["refresh"])
-        step = next(s for s in steps if s.get("name") == "Compute cache key")
+        require_bash()
         github_output = tmp_path / "github_output"
         github_output.write_text("")
         env = os.environ.copy()
         env.update(
             {
                 "KEY_PREFIX": "abicheck-baseline-main",
-                "BASELINE_GENERATION": "3",
+                "BASELINE_GENERATION": "",
                 "PROFILE_ID": "linux-x86_64-gcc",
                 "HEAD_SHA": "deadbeef",
+                **values,
                 "GITHUB_OUTPUT": str(github_output),
+                # `python3` in the step is this interpreter, which has
+                # abicheck installed.
+                "PATH": os.pathsep.join(
+                    [str(Path(sys.executable).parent), env.get("PATH", "")]
+                ),
             }
         )
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        shim = bin_dir / "python3"
+        if not shim.exists():
+            shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+            shim.chmod(0o755)
+        env["PATH"] = os.pathsep.join([str(bin_dir), env["PATH"]])
         result = subprocess.run(
-            [bash_executable(), "-c", step["run"]],
+            [bash_executable(), "-c", self._step_run()],
             capture_output=True,
             text=True,
             env=env,
             cwd=tmp_path,
             check=False,
         )
-        assert result.returncode == 0, result.stdout + result.stderr
         outputs = dict(
             line.split("=", 1)
             for line in github_output.read_text().splitlines()
             if "=" in line
         )
+        return result, outputs
+
+    @pytest.mark.parametrize(
+        "generation_text",
+        ["", "0", "3", "03", "007", "12", "4294967296"],
+    )
+    def test_compute_cache_key_step_matches_the_owner_for_every_accepted_input(
+        self, tmp_path: Path, generation_text: str
+    ) -> None:
+        # Executes the REAL step. The expected generation is derived
+        # independently of parse_baseline_generation: actions/baseline's
+        # acceptance rule (all ASCII digits) and build_manifest.py's int().
+        result, outputs = self._run_step(tmp_path, BASELINE_GENERATION=generation_text)
+        assert result.returncode == 0, result.stdout + result.stderr
+        generation = int(generation_text, 10) if generation_text else None
         assert outputs["cache-key"] == accepted_main_cache_key(
-            "abicheck-baseline-main", "linux-x86_64-gcc", "deadbeef", generation=3
-        )
+            "abicheck-baseline-main", "linux-x86_64-gcc", "deadbeef",
+            generation=generation,
+        )  # fmt: skip
         assert outputs["restore-prefix"] == accepted_main_cache_restore_prefix(
-            "abicheck-baseline-main", "linux-x86_64-gcc", generation=3
+            "abicheck-baseline-main", "linux-x86_64-gcc", generation=generation
         )
+        assert outputs["cache-key"].startswith(outputs["restore-prefix"])
+        if generation is not None:
+            assert f"-g{generation}-" in outputs["cache-key"]
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("BASELINE_GENERATION", "abc"),
+            ("BASELINE_GENERATION", "-1"),
+            ("BASELINE_GENERATION", " 3"),
+            ("BASELINE_GENERATION", "+3"),
+            ("BASELINE_GENERATION", "3_0"),
+            ("BASELINE_GENERATION", "3.0"),
+            ("BASELINE_GENERATION", "\u0663"),  # ARABIC-INDIC DIGIT THREE
+            ("KEY_PREFIX", "p\nrestore-prefix=evil"),
+            ("PROFILE_ID", ""),
+            ("HEAD_SHA", "sha\r"),
+        ],
+    )
+    def test_compute_cache_key_step_rejects_what_actions_baseline_rejects(
+        self, tmp_path: Path, name: str, value: str
+    ) -> None:
+        result, outputs = self._run_step(tmp_path, **{name: value})
+        assert result.returncode != 0
+        assert outputs == {}
 
     def test_restore_step_key_is_this_runs_own_unique_key(self) -> None:
         # `key:` must be THIS run's own (always-unique-by-head-sha) key, not

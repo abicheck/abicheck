@@ -523,7 +523,7 @@
       "learn_pages": ["learn/products-not-libraries.md", "learn/rollout-and-governance.md"],
       "topics": ["bundle-analysis", "compatibility-governance"],
       "catalog_cases": ["case84_bundle_soname_skew", "case93_bundle_manifest_drift"],
-      "detector_kinds": ["bundle_soname_skew", "bundle_manifest_entry_unsatisfied", "bundle_variant_coverage_regressed", "bundle_library_added", "bundle_library_removed"],
+      "detector_kinds": ["bundle_soname_skew", "bundle_manifest_entry_unsatisfied", "bundle_library_added", "bundle_library_removed"],
       "status": "COVERED"
     },
     "product-abi.plugin-interface-break": {

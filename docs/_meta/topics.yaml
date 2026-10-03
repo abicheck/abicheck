@@ -106,7 +106,6 @@ topics:
       - abicheck/serialization.py
       - abicheck/buildsource/baseline_set.py
       - abicheck/buildsource/baseline_publish.py
-      - abicheck/product_baseline.py
       - abicheck/bundle.py
       - actions/baseline/action.yml
       - actions/baseline/build_manifest.py
@@ -208,7 +207,6 @@ topics:
       - abicheck/bundle_manifest.py
       - abicheck/bundle_soname.py
       - abicheck/model/bundle_facts.py
-      - abicheck/product_baseline.py
       - abicheck/bundle_side_input.py
       - abicheck/workflows/bundle_facts_library_overrides.py
       - abicheck/workflows/bundle_stored_pair_compare.py

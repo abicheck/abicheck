@@ -646,7 +646,7 @@ def _parse_clang_ast_result(
                 raise SnapshotError(
                     f"clang AST output was not valid JSON: {exc}{hint}"
                 ) from exc
-        # json.load()/decode_frontend_contexts() above can itself consume the
+        # json.load()/the frontend-context decode above can itself consume the
         # remaining budget on a multi-GB AST; re-check before the (also
         # non-trivial) cache write so an expired deadline doesn't still complete
         # it and hand the caller a result for downstream AST walking

@@ -8,9 +8,9 @@ name: Examples Validation (weekly cross-platform)
 #
 # Windows/MinGW PE is intentionally NOT here: the example autodiscovery harness
 # requires castxml (not reliably installable on the Windows runner), so it could
-# only skip-all. Native PE-on-Windows coverage already lives in ci.yml's BLOCKING
-# `cross-platform-e2e` lane (MinGW gcc + ABICHECK_MIN_EXECUTED=5, castxml-free),
-# which runs on every PR — a nightly duplicate would add no real coverage.
+# only skip-all. Native PE-on-Windows coverage already lives in integration.yml's
+# Windows leg ("Native PE/Mach-O compare workflows": MinGW gcc, castxml-free),
+# which runs on PRs touching its inputs — a duplicate here would add no coverage.
 on:
   # Weekly, not daily (lean-up 2026-10-02). Measured, not guessed: of the 91
   # scheduled runs from 2026-06-14 to 2026-10-02 this lane was red for 80,
@@ -58,14 +58,11 @@ jobs:
       - run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      # Both artifact variants, each split in two (tests/example_shards.py's
-      # round-robin assignment, the same one examples-validation.yml's PR
-      # shards use), run as four concurrent processes on the runner's 4 vCPUs.
-      # validate_examples.py is a single sequential process and every
-      # invocation works in its own TemporaryDirectory, so this is the same
-      # case set with the same verdicts -- verified locally: 208/208 per-case
-      # status/verdict/kinds identical to the serial runs, wall 1266s -> 419s.
-      # The two variants used to run back to back (~9.5 + ~9.2 min on gcc).
+      # Both artifact variants through validate_examples.py's own case
+      # parallelism (`--jobs 0`: one worker per CPU, result order unchanged),
+      # the same flag examples-validation.yml's PR lanes use. The two passes
+      # used to run back to back, single-process (~9.5 + ~9.2 min on gcc).
+      # Both checkers always run; the step fails if either does.
       #
       # ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: repository-owned fixtures only, as
       # in examples-validation.yml; without it the 13 source_smoke cases'
@@ -74,25 +71,14 @@ jobs:
         env:
           ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
         run: |
-          mkdir -p results/shards
+          mkdir -p results
           tc=${{ matrix.toolchain }}
           for variant in debug-headers stripped-headers; do
-            for shard in 1 2; do
-              # Assign first, then use: an empty list would mean "whole catalog".
-              cases="$(python tests/example_shards.py list --shard "$shard" --of 2)"
-              [ -n "$cases" ] || { echo "::error::shard $shard/2 resolved to no cases"; exit 1; }
-              # stdout is the JSON artifact; a non-zero exit is judged by the
-              # checkers below from the recorded per-case statuses.
-              PYTHONPATH=. python tests/validate_examples.py $cases --toolchain "$tc" \
-                --artifact-variant "$variant" --json \
-                > "results/shards/$variant-$shard.json" 2> "results/shards/$variant-$shard.log" &
-            done
-          done
-          wait
-          for variant in debug-headers stripped-headers; do
-            echo "::group::$variant diagnostics"; cat results/shards/$variant-*.log; echo "::endgroup::"
-            python tests/example_shards.py merge results/shards/$variant-1.json results/shards/$variant-2.json \
-              --out "results/validate_examples-aarch64-$tc-$variant.json"
+            # stdout is the JSON artifact; a non-zero exit is judged by the
+            # checkers below from the recorded per-case statuses.
+            PYTHONPATH=. python tests/validate_examples.py --toolchain "$tc" \
+              --artifact-variant "$variant" --jobs 0 --json \
+              > "results/validate_examples-aarch64-$tc-$variant.json" || true
           done
           rc=0
           cp "results/validate_examples-aarch64-$tc-debug-headers.json" results/validate_examples.json
@@ -126,7 +112,7 @@ jobs:
           ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
         run: |
           mkdir -p results
-          PYTHONPATH=. python tests/validate_examples.py --json \
+          PYTHONPATH=. python tests/validate_examples.py --jobs 0 --json \
             > results/validate_examples-macos.json
           cp results/validate_examples-macos.json results/validate_examples.json
           python tests/check_validate_results.py
