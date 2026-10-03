@@ -35,7 +35,12 @@ on those code objects; each reports once and is disabled, and
 ``restart_events()`` re-arms them per test, so every other call in the suite
 costs nothing. (A global ``sys.setprofile`` hook was measured covering about
 2% of the suite in several minutes.) The code objects are found from every
-live function (``gc``) and their nested ``co_consts``. A closure created at
+live function and their nested ``co_consts``. Live functions come from a
+whole-heap ``gc`` walk only when no other thread is alive -- a heap census
+beside a live thread breaks that thread's ``tuple(...)`` construction
+(``abicheck.workflows.memory_trace.gc_census_is_safe``) -- and otherwise
+by following references from every loaded module
+(:func:`namespace_functions`). A closure created at
 run time reuses a nested code object that is already armed, so new code only
 appears when an ``only_mutate`` module is (re)imported: the scan is repeated
 only when those module objects change, not per test.
@@ -46,11 +51,13 @@ saw reach mutated code to ``<dir>/<worker>.json``.
 
 from __future__ import annotations
 
+import functools
 import gc
 import importlib
 import json
 import os
 import sys
+import threading
 import tomllib
 import types
 from collections.abc import Generator
@@ -89,6 +96,79 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
+def _census_is_safe() -> bool:
+    """``abicheck.workflows.memory_trace.gc_census_is_safe``, restated (as
+    ``perf_cache_reset`` does) so this plugin imports nothing it traces."""
+    return threading.active_count() == 1
+
+
+def _slot_values(value: object) -> list[object]:
+    """The values *value* keeps in ``__slots__``, which have no ``__dict__``
+    (the detector registry's entries hold their ``requires_support`` lambda
+    this way)."""
+    if isinstance(value, type):
+        return []
+    out: list[object] = []
+    for klass in type(value).__mro__:
+        slots = klass.__dict__.get("__slots__", ())
+        for name in (slots,) if isinstance(slots, str) else slots:
+            if name.startswith("__") and not name.endswith("__"):
+                name = f"_{klass.__name__.lstrip('_')}{name}"  # mangled
+            if name not in ("__dict__", "__weakref__") and hasattr(value, name):
+                out.append(getattr(value, name))
+    return out
+
+
+def namespace_functions(modules: list[types.ModuleType]) -> list[types.FunctionType]:
+    """Every function reachable from *modules* by following references:
+    module and class namespaces, instance attributes and slots, containers, method
+    descriptors, properties, ``functools.partial`` and ``__wrapped__``
+    (``lru_cache`` included), and closure cells. Pass every loaded module
+    to reach functions stored in another module's object, such as a lambda
+    handed to a registering decorator. Unlike ``gc.get_objects()`` it never
+    holds a reference to an object only another thread can reach, such as a
+    tuple that thread is still building. A container another thread resizes
+    mid-copy is skipped rather than retried."""
+    found: list[types.FunctionType] = []
+    seen: set[int] = set()
+    stack: list[object] = list(modules)
+    while stack:
+        value = stack.pop()
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        try:
+            if isinstance(value, types.FunctionType):
+                found.append(value)
+                stack.extend(c.cell_contents for c in value.__closure__ or ())
+            elif isinstance(value, staticmethod | classmethod):
+                stack.append(value.__func__)
+            elif isinstance(value, property):
+                stack.extend(f for f in (value.fget, value.fset, value.fdel) if f)
+            elif isinstance(value, functools.partial):
+                stack.append(value.func)
+            elif isinstance(value, dict):
+                stack.extend(list(value.values()))
+            elif isinstance(value, list | tuple | set | frozenset):
+                stack.extend(list(value))
+            if not isinstance(value, dict | types.FunctionType):
+                attrs = getattr(value, "__dict__", None)
+                if isinstance(attrs, dict | types.MappingProxyType):
+                    stack.extend(list(attrs.values()))
+                stack.extend(_slot_values(value))
+        except (RuntimeError, ValueError):  # resized mid-copy; empty cell
+            continue
+    return found
+
+
+def live_functions(modules: list[types.ModuleType]) -> list[types.FunctionType]:
+    """Every live function when a heap walk is safe, else every function
+    reachable from *modules*."""
+    if _census_is_safe():
+        return [o for o in gc.get_objects() if isinstance(o, types.FunctionType)]
+    return namespace_functions(modules)
+
+
 class Monitor:
     def __init__(self, paths: frozenset[str], modules: list[str]) -> None:
         if _MON is None:
@@ -115,9 +195,7 @@ class Monitor:
         if ids == self.module_ids:
             return
         self.module_ids = ids
-        for obj in gc.get_objects():
-            if not isinstance(obj, types.FunctionType):
-                continue
+        for obj in live_functions(list(sys.modules.values())):
             code = obj.__code__
             if code.co_filename not in self.paths or code in self.armed:
                 continue
