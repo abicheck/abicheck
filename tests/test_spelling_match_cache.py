@@ -44,6 +44,7 @@ import random
 import re
 
 import pytest
+from _type_token_oracle import type_string_references_name
 
 from abicheck.compare.spelling_match_cache import (
     MATCH_CACHE,
@@ -73,7 +74,6 @@ from abicheck.type_reachability import (
     _finditer_allow_nested,
     directly_referenced_stdlib_types,
     spelling_matches,
-    type_string_references_name,
 )
 
 
@@ -542,6 +542,11 @@ class TestBoundarySemanticsAgree:
             "{0}:",
             "9{0}",
             "{0}9",
+            # Non-ASCII neighbours: production treats them as boundaries
+            # (``_is_boundary_char`` is ASCII-only), and so must the oracle.
+            "é{0}",
+            "{0}é",
+            "{0}\u00b2",
         ]
         return [(ctx.format(name), name) for name in names for ctx in contexts]
 

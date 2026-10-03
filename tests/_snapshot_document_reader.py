@@ -42,26 +42,44 @@ from typing import Any
 _LAYER_TAGS = {"L3_build": "L3", "L4_source_abi": "L4", "L5_source_graph": "L5"}
 
 
-def load_snapshot_document(snap_path: Path) -> dict[str, Any]:
-    """*snap_path*'s JSON, flattened out of the sectioned envelope.
+def read_snapshot_document(path: Path | str) -> dict[str, Any]:
+    """*path*'s flat, ``snapshot_to_dict()``-shaped document: the raw dict a
+    ``dump`` wrote (any compression), unwrapped from the sectioned envelope.
 
-    ``{}`` for an unreadable or non-JSON file, so a caller that treats
-    "nothing found" as a legitimate answer keeps that behaviour. A flat
-    document (an older ``.abi.json``, or a hand-written fixture) passes
-    through untouched, which is what keeps unit fixtures usable here.
+    For document-only keys ``AbiSnapshot`` does not carry (a real ``dump``'s
+    ``dump_provenance``, folded in by the CLI). Raises ``SnapshotError`` for
+    a non-object root rather than surfacing a confusing downstream error.
+    This was ``storage.snapshot_codec.load_snapshot_document`` until
+    production stopped calling it (dead-code plan, Stage D).
     """
+    from abicheck.errors import SnapshotError
+    from abicheck.snapshot_io import read_snapshot_text
     from abicheck.storage.sectioned_document import (
         from_sectioned_document,
         is_sectioned_document,
     )
 
+    parsed: Any = json.loads(read_snapshot_text(path))
+    if not isinstance(parsed, dict):
+        raise SnapshotError(
+            f"{path}: expected a JSON object at the document root, got "
+            f"{type(parsed).__name__}"
+        )
+    return from_sectioned_document(parsed) if is_sectioned_document(parsed) else parsed
+
+
+def load_snapshot_document(snap_path: Path) -> dict[str, Any]:
+    """:func:`read_snapshot_document`, but ``{}`` for an unreadable, non-JSON
+    or non-object file, so a caller that treats "nothing found" as a
+    legitimate answer keeps that behaviour. A flat document (an older
+    ``.abi.json``, or a hand-written fixture) passes through untouched.
+    """
+    from abicheck.errors import SnapshotError
+
     try:
-        data = json.loads(snap_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        return read_snapshot_document(snap_path)
+    except (OSError, ValueError, SnapshotError):
         return {}
-    if not isinstance(data, dict):
-        return {}
-    return from_sectioned_document(data) if is_sectioned_document(data) else data
 
 
 def embedded_present_layers(snap_path: Path) -> set[str]:

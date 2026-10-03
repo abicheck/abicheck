@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import sys
 
+from _type_token_oracle import type_string_references_name
+
 from abicheck.diff_cxx_rules import owner_class_of
 from abicheck.model import (
     AbiSnapshot,
@@ -44,7 +46,6 @@ from abicheck.type_reachability import (
     _typedef_spelling_targets,
     directly_referenced_stdlib_type_spellings,
     directly_referenced_stdlib_types,
-    type_string_references_name,
 )
 
 

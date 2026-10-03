@@ -29,9 +29,9 @@ responsibilities, and the second is the one the reuse cache and the
 boundary semantics belong to. ``type_reachability_spelling`` re-exports
 these by value, so every existing import path still resolves.
 
-:data:`BOUNDARY_CHARS` is shared with ``type_reachability_spelling``'s own
-single-name :func:`type_string_references_name`, kept as one constant so
-the manual check and the compiled alternation cannot silently drift apart.
+:data:`BOUNDARY_CHARS` is shared with the single-name manual check in
+``tests/_type_token_oracle.py``, the independent oracle this alternation is
+checked against, so the two cannot silently drift apart.
 """
 
 from __future__ import annotations
@@ -95,8 +95,7 @@ def spellings_possible_in(
 
 def compile_spelling_pattern(spellings: Collection[str]) -> re.Pattern[str] | None:
     """One compiled alternation matching any of *spellings* as a whole type
-    token — the same boundary semantics as :func:`type_string_references_name`
-    (non-identifier, non-``:``-scope character, or the string boundary, on
+    token (non-identifier, non-``:``-scope character, or the string boundary, on
     both sides), but resolved in a single pass over each declaration's type
     string regardless of how many spellings there are.
 

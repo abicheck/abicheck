@@ -1322,9 +1322,9 @@ def test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header(
             ["dump", str(so), "-H", str(header), "--config", str(cfg), "-o", str(out)],
         )
         assert result.exit_code == 0, result.output
-        from abicheck.serialization import load_snapshot_document
+        from _snapshot_document_reader import read_snapshot_document
 
-        return load_snapshot_document(out)
+        return read_snapshot_document(out)
 
     default_snap = _dump()
     explicit_snap = _dump("c++")

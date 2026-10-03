@@ -18,6 +18,17 @@
   `abicheck.dwarf_unified.parse_dwarf`, which returns both halves from one
   ELF open.
 
+- **More Python helpers no production path called.**
+  `abicheck.serialization.load_snapshot_document` (read the file with
+  `abicheck.snapshot_io.read_snapshot_text` and `json.loads`),
+  `pe_metadata.is_pe`/`macho_metadata.is_macho` (use
+  `abicheck.binary_utils.detect_binary_format`),
+  `policy.severity.classify_change_object` (use
+  `classify_effective_change`), `model.surface_facts.is_unknown`,
+  `AbiSnapshot.func_by_mangled` (use `function_map.get`), and about forty
+  other unreferenced accessors and wrappers; see
+  `docs/contribute/plans/dead-code-and-single-owner.md`, Stage D.
+
 ### Fixed
 
 - **PDB forward references resolve to the same definition the layout comes

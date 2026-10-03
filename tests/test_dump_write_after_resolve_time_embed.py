@@ -234,9 +234,9 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
     # exists to guarantee, now exercised against a real, non-stubbed pack.
     assert embed_calls == []
 
-    from abicheck.serialization import load_snapshot_document
+    from _snapshot_document_reader import read_snapshot_document
 
-    payload = load_snapshot_document(out_path)
+    payload = read_snapshot_document(out_path)
     provenance = payload["dump_provenance"]
     assert provenance["requested_depth"] == "source"
     assert provenance["effective_depth"] == "source"
@@ -482,9 +482,9 @@ def test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_emb
         inputs_pack=flow2_root,
     )
 
-    from abicheck.serialization import load_snapshot_document
+    from _snapshot_document_reader import read_snapshot_document
 
-    payload = load_snapshot_document(out_path)
+    payload = read_snapshot_document(out_path)
     build_source = payload["build_source"]
 
     # L4: the Flow-2 pack's own facts won this layer wholesale (by design --

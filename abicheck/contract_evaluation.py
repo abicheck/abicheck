@@ -804,9 +804,8 @@ def _in_surface_result_is_confirmed(
     spelling back), so intersecting it against a set of full spellings
     could never match.
 
-    Deliberately **not**
-    :func:`~abicheck.type_reachability.type_string_references_name`
-    (boundary-safe *containment*, an earlier revision of this check) --
+    Deliberately **not** boundary-safe *containment* (an earlier revision
+    of this check) --
     reproduced empirically (Codex review, fresh evidence) that containment
     lets an unrelated, *smaller* directly-referenced identity confirm an
     unrelated *larger* finding purely because one spelling is a substring
