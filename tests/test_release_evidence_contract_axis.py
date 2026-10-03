@@ -154,20 +154,29 @@ class TestEveryExitAxisIsDecodedOntoRunOutcome:
     `exit.code: 7`, so a report-driven consumer read a failed run as
     nonblocking (Codex review, P1).
 
-    `unclassified_release_contribution_fields()` is the general fix -- the
-    decoder now states both the axes it maps and the exact complement it
-    deliberately does not, over the field list `ExitDecision` itself
-    publishes. The test below is what makes that mechanical: it does not
+    The general fix: the decoder states both the axes it maps
+    (`_OPERATIONAL_CONTRIBUTIONS`) and the exact complement it deliberately
+    does not (`_NON_OPERATIONAL_CONTRIBUTIONS`), and the test below checks
+    the two cover the field list `ExitDecision` itself publishes. The test below is what makes that mechanical: it does not
     name the evidence axis at all, so it fails for the *next* axis too,
     which is the property the three prior narrow fixes each lacked.
     """
 
     def test_no_contribution_field_is_left_unclassified(self) -> None:
+        from dataclasses import fields
+
+        from abicheck.policy.exit_decision import ExitDecision
         from abicheck.policy.outcome_release import (
-            unclassified_release_contribution_fields,
+            _NON_OPERATIONAL_CONTRIBUTIONS,
+            _OPERATIONAL_CONTRIBUTIONS,
         )
 
-        assert unclassified_release_contribution_fields() == frozenset()
+        published = {
+            f.name for f in fields(ExitDecision) if f.name.endswith("_contribution")
+        }
+        assert published, "ExitDecision publishes no contribution field"
+        classified = {key for key, _ in _OPERATIONAL_CONTRIBUTIONS}
+        assert published - classified - _NON_OPERATIONAL_CONTRIBUTIONS == set()
 
     @pytest.mark.parametrize(
         ("kwargs", "expected_operational"),
@@ -516,25 +525,3 @@ class TestNoContributionPassedToADominantDecisionIsSilentlyDropped:
         for keyword in self._contribution_keywords():
             with pytest.raises(ValueError, match="must strictly exceed"):
                 _dominant_decision(2, ExitReason.NOT_COMPARABLE, **{keyword: 4})
-
-    def test_the_custom_removal_code_case_end_to_end(self) -> None:
-        """Codex's own reproduction, through the public resolver.
-
-        A caller using the documented custom-code support with a removal
-        code *below* the evidence code takes the fallback branch, where the
-        removal contribution was being dropped -- reporting `gate: none`
-        for a release with a proven removed library.
-        """
-        from abicheck.policy.outcome_release import run_outcome_dict_for_release
-
-        decision = _release_decision(
-            removed_required_library=True,
-            severity_scheme_active=True,
-            evidence_contract_error_contribution=7,
-            removed_required_library_code=6,
-        )
-        assert decision.code == 7
-        assert decision.removed_required_library_contribution == 6
-        outcome = run_outcome_dict_for_release("NO_CHANGE", decision.to_dict())
-        assert outcome["gate"] == "abi_breaking"
-        assert outcome["operational"] == "evidence_contract_error"

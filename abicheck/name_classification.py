@@ -61,7 +61,6 @@ __all__ = [
     "INTERNAL_NAMESPACE_COMPONENTS",
     "is_rtti_symbol",
     "is_local_rtti_symbol",
-    "is_local_name_symbol",
     "is_stdlib_local_name_symbol",
     "COMPILER_INTERNAL_TYPES",
     "is_compiler_internal_type",
@@ -142,7 +141,7 @@ LOCAL_NAME_PREFIX = "_ZZ"
 # is not what any real compiler emits and is strictly more permissive than
 # the grammar warrants).
 #
-# Deliberately narrower than :func:`is_local_name_symbol`: a library's OWN
+# Deliberately narrower than every LOCAL_NAME_PREFIX symbol: a library's OWN
 # public inline function's local static (e.g. ``_ZZN4somelib...``) must NOT
 # match here, since its alignment genuinely matters to consumers (see
 # LOCAL_NAME_PREFIX's docstring above).
@@ -345,16 +344,9 @@ def is_local_rtti_symbol(name: str) -> bool:
     return name.startswith(LOCAL_RTTI_PREFIXES)
 
 
-def is_local_name_symbol(name: str) -> bool:
-    """Return True if *name* is the Itanium ``<local-name>`` production — an
-    entity (typically a variable) declared inside a function body, never
-    nameable by any header declaration. See :data:`LOCAL_NAME_PREFIX`."""
-    return name.startswith(LOCAL_NAME_PREFIX)
-
-
 def is_stdlib_local_name_symbol(name: str) -> bool:
     """Return True if *name* is a local-name-production symbol (see
-    :func:`is_local_name_symbol`) whose enclosing function is owned by the
+    :data:`LOCAL_NAME_PREFIX`) whose enclosing function is owned by the
     C++ runtime/standard library, not the library under test. See
     :data:`_STDLIB_LOCAL_NAME_RE`.
 

@@ -87,7 +87,6 @@ __all__ = [
     "GRAPH_TABLE_ENCODING",
     "decode_graph_table",
     "encode_graph_table",
-    "graph_table_to_legacy_dict",
     "is_graph_table",
 ]
 
@@ -367,45 +366,8 @@ def _columns(
     return columns
 
 
-def graph_table_to_legacy_dict(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Re-inflate *payload* into the pre-v49 ``to_dict()`` shape, minus the
-    fields ``from_dict`` never reads. Raises ``ValueError`` for any
-    structural corruption."""
-    if not is_graph_table(payload):
-        raise ValueError(
-            f"graph table: unsupported encoding {payload.get('encoding')!r}"
-        )
-    read = _Reader(payload)
-    node_cols = _columns(payload, "nodes", _NODE_COLUMNS)
-    edge_cols = _columns(payload, "edges", _EDGE_COLUMNS)
-    nodes = [
-        {
-            "id": read.string(i, "nodes.id"),
-            "kind": read.string(k, "nodes.kind"),
-            "label": read.string(lb, "nodes.label"),
-            "facts": read.facts(f, "nodes.facts"),
-        }
-        for i, k, lb, f in zip(*node_cols)
-    ]
-    edges = [
-        {
-            "src": read.string(src, "edges.src"),
-            "dst": read.string(d, "edges.dst"),
-            "edge": read.string(k, "edges.kind"),
-            "facts": read.facts(f, "edges.facts"),
-        }
-        for src, d, k, f in zip(*edge_cols)
-    ]
-    out: dict[str, Any] = {
-        name: payload[name] for name in _SCALAR_FIELDS if name in payload
-    }
-    out["nodes"] = nodes
-    out["edges"] = edges
-    return out
-
-
 def decode_graph_table(payload: Mapping[str, Any]) -> SourceGraphSummary:
-    """The graph *payload* encodes (see :func:`graph_table_to_legacy_dict`)."""
+    """The graph *payload* encodes."""
     from ..model.graph_identity import identity_normalization_memo
     from ..model.source_graph import SourceGraphSummary
 
@@ -417,11 +379,11 @@ def _decode_entities(
     payload: Mapping[str, Any],
 ) -> tuple[dict[str, Any], list[Any], list[Any]]:
     """The graph-level fields, nodes and edges *payload* encodes, built
-    directly rather than through :func:`graph_table_to_legacy_dict`'s
-    per-entity dicts.
+    directly rather than through per-entity pre-v49 ``to_dict()`` dicts.
 
-    Equal by construction to ``from_dict(graph_table_to_legacy_dict(p))``
-    (``tests/test_graph_table_codec.py`` checks it on generated graphs):
+    Equal to ``from_dict`` over those dicts -- ``tests/_graph_table_oracle.py``
+    re-inflates them independently, and ``tests/test_graph_table_codec.py``
+    checks the two on generated graphs:
 
     * each interned fact row is validated and decoded **once** -- a real
       graph has tens of distinct facts across ~10^5 entities -- and every

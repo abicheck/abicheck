@@ -32,7 +32,6 @@ from abicheck.model.export_index import (
     linked_export_names,
     macho_callable_names,
     named_pe_exports,
-    ordinal_only_pe_exports,
     pe_export_ids_with_ordinal_placeholder,
 )
 from abicheck.pe_metadata import PeExport, PeMetadata
@@ -177,17 +176,6 @@ class TestPeOrdinalProjections:
             )
         )
         assert named_pe_exports(index) == {"CreateFoo"}
-
-    def test_ordinal_only_pe_exports_excludes_named(self) -> None:
-        index = build_raw_export_index_from_pe(
-            PeMetadata(
-                exports=[
-                    PeExport(name="CreateFoo", ordinal=1),
-                    PeExport(name="", ordinal=2),
-                ]
-            )
-        )
-        assert ordinal_only_pe_exports(index) == {2}
 
     def test_pe_export_ids_with_ordinal_placeholder(self) -> None:
         index = build_raw_export_index_from_pe(

@@ -1423,7 +1423,7 @@ def _merge_record_alignment(
     populates for a complete definition -- ``alignment_bits`` is captured
     from castxml's ``align`` XML attribute *unconditionally*, including for
     an opaque/incomplete record (`abicheck/dumper_castxml.py`'s
-    ``_build_record_type``), because an explicit
+    ``build_record_type``), because an explicit
     ``__attribute__((aligned(N)))`` on a bare forward declaration is itself
     an ABI-relevant fact independent of the member layout: ``struct
     __attribute__((aligned(16))) X;`` in one TU and a naturally

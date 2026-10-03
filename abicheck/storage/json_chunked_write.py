@@ -123,7 +123,7 @@ def _subtree_exceeds(obj: object, limit: int, byte_limit: int = -1) -> bool:
     return False
 
 
-def _write_json_chunked(obj: object, write: Any, depth: int = 0) -> None:
+def _write_json_chunked(obj: object, write: Any) -> None:
     """Write *obj* as JSON through *write*, one bounded chunk at a time.
 
     Byte-identical to ``json.dump(obj, f)`` -- same default separators
@@ -212,7 +212,7 @@ def _write_json_chunked(obj: object, write: Any, depth: int = 0) -> None:
                 return
         emit(json.dumps(node))
 
-    walk(obj, depth)
+    walk(obj, 0)
     if parts:
         write("".join(parts))
 

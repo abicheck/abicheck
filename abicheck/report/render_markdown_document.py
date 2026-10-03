@@ -407,34 +407,25 @@ def build_markdown_document(
     severity_config: Any = None,
     show_recommendation: bool = False,
     demangle: bool = False,
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
     """The full-mode (``to_markdown`` default view) report as a
     ``ReportDocument``. See this module's own docstring for scope.
 
-    *report_document* (ADR-061 gap C), when given, is the one canonical
-    ``report_mode="full"`` document ``report.build.build_report_document``
-    already built for this render -- ``service_render.render_output``'s
-    markdown branch builds it once (for ``report_mode="full"`` only; ``--stat``
-    and the ``leaf``/``root-cause`` alternate views stay their own separate,
-    legitimate documents per this ADR's own scoping, see this module's
-    docstring) and threads it down through ``to_markdown``. Its
-    ``disposition_audit`` field is reused verbatim here instead of a second,
-    independently-resolved call to ``compute_disposition_audit`` over the
-    same ledger. A direct caller with no such document (an existing
-    Tier-2/test call site) keeps the prior behaviour by passing nothing.
-
-    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` that
-    document belongs to, and supersedes it: besides the document, it carries
-    the per-finding verdict/category set the ``surface_changes`` section
-    below used to resolve for itself. The severity groups, headline table and
+    *envelope* (ADR-061 gap C), when given, is the completed
+    ``ReportEnvelope`` this render projects. Its shared
+    ``report_mode="full"`` document (``--stat`` and the ``root-cause``
+    alternate view stay their own documents, see this module's docstring)
+    supplies ``disposition_audit`` verbatim instead of a second
+    ``compute_disposition_audit`` over the same ledger, and its per-finding
+    verdict/category set drives the ``surface_changes`` section. A direct
+    caller with no envelope (a test, ``compat check``) builds both itself. The severity groups, headline table and
     per-change rows this function assembles stay Markdown's own presentation
     -- an arrangement of already-decided findings, not a second opinion about
     them.
     """
     rm = _reporter_markdown()
-    shared_document = resolved_document(envelope, report_document)
+    shared_document = resolved_document(envelope)
     shared_disposition_audit = (
         shared_document.to_mapping()["disposition_audit"]
         if shared_document is not None
@@ -572,7 +563,7 @@ def build_markdown_document(
         # ADR-067 D3: the counts belong in every projection, and the three
         # Markdown modes reach their renderer through this document, so the
         # block is a document field rather than something a renderer derives.
-        # ADR-061 gap C: reused from the shared `report_document` when the
+        # ADR-061 gap C: reused from the envelope's shared document when the
         # caller passed one (see this function's own docstring) rather than
         # independently resolved here.
         "disposition_audit": (

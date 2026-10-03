@@ -216,7 +216,7 @@ def test_source_graph_summary_from_dict_recomputes_stale_graph_id() -> None:
 
 def test_source_graph_summary_from_dict_migrates_entity_resolver_aliases() -> None:
     # An EntityResolver persisted alongside a pre-normalization graph is
-    # keyed by the OLD, pre-migration node id -- canonical_id_for(node.id)
+    # keyed by the OLD, pre-migration node id -- aliases.get(node.id)
     # must still resolve after load, or a persisted canonical identity goes
     # silently unreachable (Codex review, fresh evidence). The node carries
     # the same "usr" attr resolve_identity_for_node() would have read when
@@ -247,8 +247,8 @@ def test_source_graph_summary_from_dict_migrates_entity_resolver_aliases() -> No
     )
     migrated_id = g.nodes[0].id
     assert migrated_id != old_id
-    assert g.entity_resolver.canonical_id_for(migrated_id) == "usr:c:@S@Widget"
-    assert g.entity_resolver.canonical_id_for(old_id) is None
+    assert g.entity_resolver.aliases.get(migrated_id) == "usr:c:@S@Widget"
+    assert g.entity_resolver.aliases.get(old_id) is None
 
 
 def test_add_node_normalizes_label_for_any_producer() -> None:
@@ -309,7 +309,7 @@ def test_entity_resolver_remap_normalizes_canonical_values_too() -> None:
     # entity_identity.normalized_signature's "sig:<qualified_name>..." form,
     # which embeds the raw, checkout-path-bearing qualified name verbatim --
     # remap_node_ids must normalize that VALUE, not just the v1-id KEY, or
-    # canonical_id_for() keeps returning a directory-tainted id that never
+    # aliases.get() keeps returning a directory-tainted id that never
     # matches a freshly-resolved graph's canonical id (Codex review, fresh
     # evidence, second round).
     from abicheck.model.entity_resolver import EntityResolver
@@ -355,7 +355,7 @@ def test_source_graph_summary_from_dict_rebuilds_resolver_from_coalesced_node() 
         }
     )
     assert len(g.nodes) == 1
-    assert g.entity_resolver.canonical_id_for(g.nodes[0].id) == "usr:c:@S@Widget"
+    assert g.entity_resolver.aliases.get(g.nodes[0].id) == "usr:c:@S@Widget"
 
 
 def test_source_graph_summary_from_dict_recomputes_coverage_after_coalescing() -> None:
@@ -527,8 +527,8 @@ def test_resolve_entities_rebuild_does_not_reintroduce_taint_from_loaded_pack() 
     new_v1 = new_graph.nodes[0].id
     assert old_v1 == new_v1
 
-    old_canonical = old_graph.entity_resolver.canonical_id_for(old_v1)
-    new_canonical = new_graph.entity_resolver.canonical_id_for(new_v1)
+    old_canonical = old_graph.entity_resolver.aliases.get(old_v1)
+    new_canonical = new_graph.entity_resolver.aliases.get(new_v1)
     assert old_canonical is not None
     assert "/old/checkout" not in old_canonical
     assert "/new/checkout" not in new_canonical
@@ -854,7 +854,7 @@ def test_constructor_seeded_entity_resolver_is_rebuilt_after_normalization() -> 
     # normalized/coalesced nodes, the same way from_dict() already rebuilds a
     # persisted resolver after migration (Codex review, fresh evidence, eighteenth
     # round) -- otherwise the resolver stays keyed by the pre-normalization id and
-    # canonical_id_for() on the real (normalized) node id returns None.
+    # aliases.get() on the real (normalized) node id returns None.
     from abicheck.buildsource.source_graph import SourceGraphSummary
     from abicheck.model.entity_resolver import EntityResolver
     from abicheck.model.graph_facts import GraphNode
@@ -870,7 +870,7 @@ def test_constructor_seeded_entity_resolver_is_rebuilt_after_normalization() -> 
     )
     normalized_id = graph.nodes[0].id
     assert normalized_id != raw_id  # sanity: normalization actually happened
-    assert graph.entity_resolver.canonical_id_for(normalized_id) is not None
+    assert graph.entity_resolver.aliases.get(normalized_id) is not None
 
 
 def test_vtable_node_id_strips_checkout_directory_and_migrates() -> None:

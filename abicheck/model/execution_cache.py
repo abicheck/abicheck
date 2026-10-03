@@ -46,7 +46,7 @@ Cache kinds (all registered by name; :func:`cache_stats` reports them):
   policy live in :mod:`abicheck.model.execution_cache_scoped`.
 * :func:`register_cache` -- a cache whose storage engine has its own budget
   logic (the spelling-match caches) registers here and consults
-  :func:`caching_enabled`, so the switch and the accounting stay central.
+  :func:`reference_mode`, so the switch and the accounting stay central.
 
 Lives in ``model/`` because every layer must be able to reach it and
 ``model`` is the only layer every other one may import.
@@ -71,7 +71,6 @@ __all__ = [
     "MemoryCache",
     "RequestKey",
     "cache_stats",
-    "caching_enabled",
     "clear_all_caches",
     "clear_memoized",
     "memoized",
@@ -123,11 +122,6 @@ def reference_mode() -> bool:
     if not raw:
         return False
     return raw.strip().lower() in _TRUE
-
-
-def caching_enabled() -> bool:
-    """The inverse of :func:`reference_mode`, for a registered cache's own use."""
-    return not reference_mode()
 
 
 # ── keys ────────────────────────────────────────────────────────────────────
@@ -207,11 +201,6 @@ def cache_stats() -> dict[str, dict[str, int]]:
     """``{name: {hits, misses, bypasses, stores, stale}}`` for every cache."""
     with _REGISTRY_LOCK:
         return {n: r.stats.as_dict() for n, r in sorted(_REGISTRY.items())}
-
-
-def cache_kinds() -> dict[str, str]:
-    with _REGISTRY_LOCK:
-        return {n: r.stats.kind for n, r in _REGISTRY.items()}
 
 
 def reset_cache_stats() -> None:

@@ -1207,25 +1207,6 @@ class TestBinderEmptyGraph:
         assert bindings == []
 
 
-class TestBinderPreload:
-    """Cover preload path in compute_bindings."""
-
-    def test_preload_searched_first(self):
-        """Preload DSO provides symbol before normal load order."""
-        graph = _make_graph(
-            {
-                "/app": (["libfoo.so"], [], [_imp("my_sym")]),
-                "/lib/libfoo.so": ([], [_sym("my_sym")], []),
-                "/preload/libpre.so": ([], [_sym("my_sym")], []),
-            },
-            edges=[("/app", "/lib/libfoo.so")],
-        )
-        bindings = compute_bindings(graph, preload=["/preload/libpre.so"])
-        resolved = [b for b in bindings if b.status == BindingStatus.RESOLVED_OK]
-        assert len(resolved) == 1
-        assert resolved[0].provider == "/preload/libpre.so"
-
-
 class TestBinderVisibilityBlocked:
     """Cover lines 255-261: visibility_blocked status via _make_not_found_binding."""
 

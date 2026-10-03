@@ -83,8 +83,10 @@ class SourceInputDisposition(str, Enum):
     #: socket, a device node, or a symlink whose target is gone. Distinct from
     #: ``MISSING``, where nothing is at the path at all.
     UNSUPPORTED = "unsupported"
-    #: Deliberately out of scope — the caller's ``changed_paths`` filter
-    #: excluded it. Not a coverage gap: the caller asked for this.
+    #: Deliberately out of scope. Not a coverage gap: the caller asked for
+    #: this. Produced by no resolver since the ``changed_paths`` narrowing
+    #: (whose only caller was the deleted ``scan``) was removed; kept so the
+    #: precedence order and a report reader still name it.
     EXCLUDED = "excluded"
     #: Recorded in a snapshot, but re-reading it is not licensed (see
     #: :class:`SourceReadLicence`). Never stat'd, never opened.
@@ -436,23 +438,20 @@ PRUNED_DIR_SEGMENTS: frozenset[str] = frozenset({".git", ".hg", ".svn"})
 
 def resolve_source_inputs(
     roots: Iterable[str | Path],
-    changed_paths: Iterable[str] | None = None,
     *,
     licence: SourceReadLicence = WITHHELD_FOR_STORED_SNAPSHOT,
     classify_candidate: Any = None,
-    path_changed: Any = None,
     pruned_dirs: frozenset[str] = PRUNED_DIR_SEGMENTS,
 ) -> SourceInputSet:
     """Account for every declared *root* and return the expected-input set.
 
     Unlike a discovery walk, **nothing is silently dropped**: a root that does
     not exist becomes :attr:`SourceInputDisposition.MISSING`, a root that is
-    neither file nor directory becomes ``UNSUPPORTED``, and a candidate the
-    caller's ``changed_paths`` filter rejects becomes ``EXCLUDED``. When
+    neither file nor directory becomes ``UNSUPPORTED``. When
     ``licence`` does not permit reading, every root becomes ``NOT_LICENSED``
     and the filesystem is not touched at all.
 
-    ``classify_candidate``/``path_changed``/``pruned_dirs`` are the caller's own
+    ``classify_candidate``/``pruned_dirs`` are the caller's own
     walk policy, so this module stays free of any one scanner's file-type
     policy. ``classify_candidate`` is deliberately **tri-state**: it returns
     :attr:`SourceInputDisposition.SELECTED` for a real candidate, ``None`` for a
@@ -471,17 +470,6 @@ def resolve_source_inputs(
             ),
             licence=licence,
         )
-
-    changed: set[str] | None = None
-    if changed_paths is not None:
-        changed = {str(p).replace("\\", "/") for p in changed_paths}
-
-    def _keep(candidate: Path) -> bool:
-        if changed is None:
-            return True
-        if path_changed is None:
-            return True
-        return bool(path_changed(candidate, changed))
 
     resolved: dict[str, SourceInputDisposition] = {}
 
@@ -506,12 +494,7 @@ def resolve_source_inputs(
         if is_file:
             # An explicit file root is honored regardless of suffix: the
             # caller pointed at it directly.
-            _record(
-                rp,
-                SourceInputDisposition.SELECTED
-                if _keep(rp)
-                else SourceInputDisposition.EXCLUDED,
-            )
+            _record(rp, SourceInputDisposition.SELECTED)
             continue
         if is_dir:
             # `os.walk` swallows traversal errors by default (`onerror=None`):
@@ -564,12 +547,7 @@ def resolve_source_inputs(
                         # it is, rather than filtered out as uninteresting.
                         _record(cand, verdict)
                         continue
-                    _record(
-                        cand,
-                        SourceInputDisposition.SELECTED
-                        if _keep(cand)
-                        else SourceInputDisposition.EXCLUDED,
-                    )
+                    _record(cand, SourceInputDisposition.SELECTED)
             continue
         try:
             dangling = rp.is_symlink()

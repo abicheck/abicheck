@@ -1108,7 +1108,7 @@ class TestPipelineIntegration:
     def test_default_pipeline_includes_template_step(self) -> None:
         from abicheck.post_processing import DEFAULT_PIPELINE
 
-        assert "detect_template_patterns" in DEFAULT_PIPELINE.step_names
+        assert "detect_template_patterns" in [s.name for s in DEFAULT_PIPELINE.steps]
 
 
 # ---------------------------------------------------------------------------

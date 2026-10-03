@@ -266,53 +266,39 @@ class ResolvedExecutionContext:
         cls,
         plan: AnalysisPlan,
         *,
-        evaluation_config: CompatibilityEvaluationConfig | None = None,
         compile_contexts: Mapping[str, CompileContext] | None = None,
-        assurance: object | None = None,
     ) -> ResolvedExecutionContext:
-        """Compose a context from an already-resolved
-        :class:`~abicheck.workflows.plan.AnalysisPlan` plus whatever
-        evaluation config / compile contexts the caller separately resolved
-        for the same run. Reads *plan.operation* verbatim and
-        *plan.requested_depth* case-normalized (see below) -- it does not
-        re-run planning, and it does not require
-        *plan* to be the source of the other two arguments (a caller that
-        has not resolved a compile context for every side, or any
-        evaluation config at all, simply omits them). *assurance*, when
-        given (a real, already-computed
-        :class:`abicheck.analysis_assurance.AnalysisAssurance`), builds the
-        full post-execution :class:`EvidenceView` via
-        :meth:`EvidenceView.from_assurance` instead of the pre-execution,
-        requested-only view -- for a caller resolving this context *after*
-        a run has already completed, rather than before. *plan.requested_depth*
-        is passed through as :meth:`EvidenceView.from_assurance`'s own
-        fallback, so a ``not_comparable`` assurance (whose own
-        ``requested_depth`` reads ``None``) doesn't discard the genuinely
-        known, already-resolved request (Codex review, PR #1027, fourth
-        round -- see that method's own docstring). *plan.requested_depth*
-        is lower-cased here first (Codex review, PR #1031) -- unlike
-        *plan.operation*, ``AnalysisPlan.requested_depth`` is not itself
-        normalized (a typed-API caller can spell a valid depth
-        case-insensitively, e.g. ``"HEADERS"``, the same way
+        """Compose a pre-execution context from an already-resolved
+        :class:`~abicheck.workflows.plan.AnalysisPlan` plus whatever compile
+        contexts the caller separately resolved for the same run. Reads
+        *plan.operation* verbatim and *plan.requested_depth* case-normalized
+        (see below) -- it does not re-run planning, and it does not require
+        *plan* to be the source of *compile_contexts* (a caller that has not
+        resolved a compile context for every side simply omits them). The
+        evidence view is the requested-only one; the evaluation config and a
+        completed run's assurance attach later, through
+        :meth:`with_evaluation_config`/:meth:`for_classification` and
+        :meth:`with_assurance`. *plan.requested_depth* is lower-cased here
+        (Codex review, PR #1031) -- unlike *plan.operation*,
+        ``AnalysisPlan.requested_depth`` is not itself normalized (a
+        typed-API caller can spell a valid depth case-insensitively, e.g.
+        ``"HEADERS"``, the same way
         :func:`~abicheck.service_compare_pipeline.classify_compare_pair`'s
         ``result.requested_depth = request.depth.lower()`` normalizes it for
         ``DiffResult`` before this context exists), and this class's own
         ``_AVAILABLE_DEPTHS``/:meth:`resolution_digest` (removed) are case-sensitive:
         an unnormalized depth would both fail to appear in its own
         :attr:`EvidenceView.available_depths` and hash differently from an
-        equivalent lower-case request."""
+        equivalent lower-case request. The normalized depth is also what
+        :meth:`with_assurance` later passes as
+        :meth:`EvidenceView.from_assurance`'s fallback (Codex review, PR
+        #1027, fourth round)."""
         normalized_depth = (
             plan.requested_depth.lower() if plan.requested_depth is not None else None
         )
-        evidence = (
-            EvidenceView.from_assurance(assurance, requested_depth=normalized_depth)
-            if assurance is not None
-            else EvidenceView.for_request(normalized_depth)
-        )
         return cls(
             operation=plan.operation,
-            evidence=evidence,
-            evaluation_config=evaluation_config,
+            evidence=EvidenceView.for_request(normalized_depth),
             compile_contexts=compile_contexts or {},
         )
 
@@ -352,15 +338,14 @@ class ResolvedExecutionContext:
         :class:`EvidenceView`, copied off *assurance* via
         :meth:`EvidenceView.from_assurance`. Every other field is carried
         over unchanged -- this exists for a caller that built a
-        pre-execution context (via :meth:`from_plan` with no *assurance*)
-        and only later, once a run completes, has a real
+        pre-execution context (via :meth:`from_plan`) and only later, once a
+        run completes, has a real
         :class:`abicheck.analysis_assurance.AnalysisAssurance` to attach.
         Passes this context's own already-known
         ``self.evidence.requested_depth`` through as
-        :meth:`EvidenceView.from_assurance`'s fallback, for the identical
-        reason :meth:`from_plan` does (Codex review, PR #1027, fourth
-        round): a ``not_comparable`` *assurance* must not silently erase a
-        requested depth this context already had."""
+        :meth:`EvidenceView.from_assurance`'s fallback (Codex review, PR
+        #1027, fourth round): a ``not_comparable`` *assurance* must not
+        silently erase a requested depth this context already had."""
         return dataclasses.replace(
             self,
             evidence=EvidenceView.from_assurance(

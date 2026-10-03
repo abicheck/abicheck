@@ -77,7 +77,6 @@ from .policy.classification import (
     impact_for as impact_for,
     policy_for as policy_for,
     policy_kind_sets as policy_kind_sets,
-    policy_registry_markdown as policy_registry_markdown,
 )
 from .policy.evidence_status import (
     BINARY_EVIDENCE_TIERS as BINARY_EVIDENCE_TIERS,
@@ -128,5 +127,4 @@ __all__ = [
     "is_cross_source_resolved",
     "policy_for",
     "policy_kind_sets",
-    "policy_registry_markdown",
 ]

@@ -139,7 +139,7 @@ class TestFromPlan:
         ctx = ResolvedExecutionContext.from_plan(plan)
         assert ctx.requested_depth == "headers"
 
-    def test_accepts_an_evaluation_config_and_compile_contexts_alongside_the_plan(self):
+    def test_accepts_compile_contexts_alongside_the_plan(self):
         plan = _plan()
         cfg = _evaluation_config()
         compile_contexts = {
@@ -147,8 +147,8 @@ class TestFromPlan:
             "new": CompileContext(),
         }
         ctx = ResolvedExecutionContext.from_plan(
-            plan, evaluation_config=cfg, compile_contexts=compile_contexts
-        )
+            plan, compile_contexts=compile_contexts
+        ).with_evaluation_config(cfg)
         assert ctx.evaluation_config is cfg
         assert dict(ctx.compile_contexts) == compile_contexts
 
@@ -284,7 +284,7 @@ class TestResolvedExecutionContextEvidenceIntegration:
 
         plan = _plan(requested_depth="HEADERS")
         assurance = AnalysisAssurance(requested_depth=None, effective_depth=None)
-        ctx = ResolvedExecutionContext.from_plan(plan, assurance=assurance)
+        ctx = ResolvedExecutionContext.from_plan(plan).with_assurance(assurance)
         assert ctx.evidence.requested_depth == "headers"
 
     def test_from_plan_with_assurance_builds_the_full_post_execution_view(self):
@@ -294,7 +294,7 @@ class TestResolvedExecutionContextEvidenceIntegration:
         assurance = AnalysisAssurance(
             requested_depth="source", effective_depth="build", depth_satisfied=False
         )
-        ctx = ResolvedExecutionContext.from_plan(plan, assurance=assurance)
+        ctx = ResolvedExecutionContext.from_plan(plan).with_assurance(assurance)
         assert ctx.evidence.requested_depth == "source"
         assert ctx.evidence.effective_depth == "build"
         assert ctx.evidence.depth_satisfied is False
@@ -320,8 +320,8 @@ class TestResolvedExecutionContextEvidenceIntegration:
         cfg = _evaluation_config()
         contexts = {"old": CompileContext(gcc_path="/usr/bin/gcc")}
         original = ResolvedExecutionContext.from_plan(
-            plan, evaluation_config=cfg, compile_contexts=contexts
-        )
+            plan, compile_contexts=contexts
+        ).with_evaluation_config(cfg)
         updated = original.with_assurance(
             type(
                 "_A",
@@ -348,7 +348,7 @@ class TestResolvedExecutionContextEvidenceIntegration:
 
         plan = _plan(requested_depth="headers")
         not_comparable = AnalysisAssurance(status="not_comparable")
-        ctx = ResolvedExecutionContext.from_plan(plan, assurance=not_comparable)
+        ctx = ResolvedExecutionContext.from_plan(plan).with_assurance(not_comparable)
         assert ctx.evidence.requested_depth == "headers"
         assert ctx.evidence.effective_depth is None
 

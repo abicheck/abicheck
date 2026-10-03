@@ -81,7 +81,6 @@ def _dominant_decision(
     contract_coverage_contribution: int = 0,
     analysis_assurance_contribution: int = 0,
     evidence_contract_error_contribution: int = 0,
-    removed_required_library_contribution: int = 0,
     operational_error_contribution: int = 0,
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
@@ -116,10 +115,10 @@ def _dominant_decision(
     release's own severity/coverage axes can produce (`0`-`4`) -- so
     carrying a prior/raw value through here can never make `code` stop
     being the maximum contribution -- **enforced**, not merely assumed:
-    every caller's *_code default is safe today, but the two public
-    resolvers below also accept a caller-supplied custom code (for a
-    future command with the same axes but different numbering, per
-    ADR-064's "numbers are not unified across commands" rule), and a
+    every caller's *_code default is safe today, but
+    :func:`resolve_scan_exit_decision` also accepts a caller-supplied custom
+    code (for a future command with the same axes but different numbering,
+    per ADR-064's "numbers are not unified across commands" rule), and a
     custom code that does not exceed a preserved prior/raw contribution
     would silently produce an object violating `ExitDecision`'s own
     `code == max(contributions)` invariant and drop a genuinely tied axis
@@ -142,17 +141,15 @@ def _dominant_decision(
         "contract_coverage_contribution": contract_coverage_contribution,
         "analysis_assurance_contribution": analysis_assurance_contribution,
         "evidence_contract_error_contribution": evidence_contract_error_contribution,
-        "removed_required_library_contribution": (
-            removed_required_library_contribution
-        ),
         "operational_error_contribution": operational_error_contribution,
         "incomplete_scope_contribution": incomplete_scope_contribution,
         "no_comparison_completed_contribution": no_comparison_completed_contribution,
     }
     # A field that is *also* the dominant axis is not a preserved value: it
     # is set to `code` below. Generic, where this was a hand-written special
-    # case for the one field that then applied -- two of the eight are now
-    # both preservable and dominant-capable.
+    # case for the one field that then applied --
+    # `evidence_contract_error_contribution` is both preservable and
+    # dominant-capable.
     if dominant_field in raw:
         raw[dominant_field] = 0
     preserved: tuple[int, ...]
@@ -219,6 +216,14 @@ def _dominant_decision(
 #: reuse the resolver itself). One constant, so the two can never disagree.
 EXIT_EVIDENCE_CONTRACT_ERROR = 7
 
+#: The directory/package release's dominant codes
+#: (``docs/reference/exit-codes.md``'s release table): ``16`` when a member
+#: was ``not_comparable`` -- native ``compare``'s own number for the same
+#: condition -- and ``8`` for a *proven* removed required library
+#: (``gate.fail_on_removed_library``).
+EXIT_RELEASE_NOT_COMPARABLE = 16
+EXIT_REMOVED_REQUIRED_LIBRARY = 8
+
 
 def resolve_scan_exit_decision(
     *,
@@ -243,8 +248,8 @@ def resolve_scan_exit_decision(
     reusing the identical precedence rule rather than a second copy. The
     `*_code` defaults (`7`/`5`) are `scan`'s own numbers, shared as-is --
     ADR-064 assigns the same two codes to the same two conditions regardless
-    of which command raises them, unlike e.g. `not_comparable_code`, which
-    the release resolver below overrides to `16`.
+    of which command raises them, unlike e.g. `not_comparable_code`, whose
+    release counterpart below is :data:`EXIT_RELEASE_NOT_COMPARABLE` (`16`).
 
     Reproduces the retired `scan_engine.run_scan_core`'s (ADR-068 Phase 6) exact raise/check order --
     which, contrary to an earlier revision's simpler "evidence always beats
@@ -395,8 +400,6 @@ def resolve_release_exit_decision(
     operational_error_contribution: int = 0,
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
-    not_comparable_code: int = 16,
-    removed_required_library_code: int = 8,
 ) -> ExitDecision:
     """ADR-064's precedence for a directory/package release comparison,
     reproducing `cli_compare_release_helpers._exit_compare_release` exactly
@@ -477,10 +480,9 @@ def resolve_release_exit_decision(
 
     Pure, additive logic (ADR-064's first stage): not yet called from
     `cli_compare_release_helpers.py`, so no existing release comparison's
-    actually-returned exit code changes because this function exists. As
-    with `resolve_scan_exit_decision`, a custom `not_comparable_code`/
-    `removed_required_library_code` that does not strictly exceed a
-    preserved contribution raises `ValueError`.
+    actually-returned exit code changes because this function exists. The
+    two dominant codes are :data:`EXIT_RELEASE_NOT_COMPARABLE` and
+    :data:`EXIT_REMOVED_REQUIRED_LIBRARY`.
 
     *evidence_contract_error_contribution* (PR #1195) is a member's pinned
     ``--depth build``/``--depth source`` that its own live evidence never
@@ -542,7 +544,7 @@ def resolve_release_exit_decision(
         # operational-error codes cap at `4`, coverage at `1`), so
         # `reasons` still names only `NOT_COMPARABLE`.
         return _dominant_decision(
-            not_comparable_code,
+            EXIT_RELEASE_NOT_COMPARABLE,
             ExitReason.NOT_COMPARABLE,
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
@@ -598,11 +600,9 @@ def resolve_release_exit_decision(
                 and operational_error_contribution == 0
             )
         )
-        if removal_is_active and (
-            removed_required_library_code > evidence_contract_error_contribution
-        ):
+        if removal_is_active:
             return _dominant_decision(
-                removed_required_library_code,
+                EXIT_REMOVED_REQUIRED_LIBRARY,
                 ExitReason.REMOVED_REQUIRED_LIBRARY,
                 compatibility_contribution=verdict_or_severity_contribution,
                 contract_coverage_contribution=contract_coverage_contribution,
@@ -618,9 +618,6 @@ def resolve_release_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
             analysis_assurance_contribution=analysis_assurance_contribution,
-            removed_required_library_contribution=(
-                removed_required_library_code if removal_is_active else 0
-            ),
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
@@ -638,7 +635,7 @@ def resolve_release_exit_decision(
             # cannot affect `code`/`reasons`, only the report's
             # explainability.
             return _dominant_decision(
-                removed_required_library_code,
+                EXIT_REMOVED_REQUIRED_LIBRARY,
                 ExitReason.REMOVED_REQUIRED_LIBRARY,
                 compatibility_contribution=verdict_or_severity_contribution,
                 contract_coverage_contribution=contract_coverage_contribution,
@@ -673,7 +670,7 @@ def resolve_release_exit_decision(
         # returned otherwise); coverage is preserved for the same reason
         # as the severity-scheme branch above.
         return _dominant_decision(
-            removed_required_library_code,
+            EXIT_REMOVED_REQUIRED_LIBRARY,
             ExitReason.REMOVED_REQUIRED_LIBRARY,
             contract_coverage_contribution=contract_coverage_contribution,
             analysis_assurance_contribution=analysis_assurance_contribution,

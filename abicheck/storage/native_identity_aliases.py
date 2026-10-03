@@ -13,32 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The `ArtifactRef.native_identity` key contract for a library's real
-on-disk filename/filesystem aliases, plus the alias list's own encode/decode
-pair -- split out of `bundle_facts_store.py` (ADR-062 A1.4/A1.5's writer)
-into this `storage`-classified leaf module so `abicheck.bundle` can read the
-same evidence back (`build_bundle_snapshot_mixed`, ADR-062 A1.7) without
-creating a `bundle -> bundle_facts_store -> bundle_facts -> bundle` import
-cycle: `bundle_facts_store.py` is `workflows`-classified and imports
-`bundle_facts.py` at module load, which itself reaches back into `bundle.py`
-via a function-local import (`bundle_snapshot_from_facts`) -- so a second,
-*new* `bundle -> bundle_facts_store` edge closes a cycle
-`scripts/check_ai_readiness.py`'s `import-cycle-growth` check rejects
-outright (see `AGENTS.md`'s "Don't ... extend `IMPORT_CYCLE_ALLOWLIST`" —
-the fix is a shared leaf module both sides depend on, not an allowlist
-entry). This module depends on nothing but `storage.json_budget` (same
-package) and the stdlib, so importing it from either side introduces no
-cycle in either direction.
+"""Read-only decoder for the `ArtifactRef.native_identity` filename and
+filesystem-alias keys of older multi-artifact packages.
 
-`bundle_facts_store.py` is still the single writer of these keys
-(`write_bundle_facts_package`) and the sole owner of the *third*,
-unrelated `native_identity` key it also defines
-(`_NATIVE_IDENTITY_LIBRARY_NAME_KEY` — a fact this module doesn't need,
-since it only carries filename/alias evidence, not identity). See that
-module's own docstring for why there are two independent, not-yet-
-reconciled multi-artifact package writers stamping these same two string
-keys (this one and `storage/import_bundle_facts.py`'s `filesystem_aliases`/
-`library_filenames` document fields, a related but distinct contract).
+The writer that stamped these keys (`bundle_facts_store.py`'s
+`write_bundle_facts_package`) is gone: a stored bundle now records filenames
+and aliases as plain lists in its bundle-composition section
+(`storage/bundle_facts_codec.py`, `storage/import_bundle_facts.py`), and
+`storage/bundle_facts_package.py` retires filename/alias facts on
+`native_identity` for that path. `abicheck.bundle` still reads them back from
+an older package (`_stored_library_identity`), which is the only reason this
+module exists. It depends on nothing but `storage.json_budget` and the
+stdlib, so `bundle` can import it without an import cycle.
 """
 
 from __future__ import annotations
@@ -56,36 +42,20 @@ __all__ = [
     "NATIVE_IDENTITY_ALIASES_KEY",
     "NATIVE_IDENTITY_FILENAME_KEY",
     "decode_native_identity_aliases",
-    "encode_native_identity_aliases",
 ]
 
 #: `ArtifactRef.native_identity` keys a library's real on-disk filename and
-#: filesystem aliases (symlink targets, hard-link aliases) are stamped
-#: under -- see `bundle_facts_store.py`'s own module docstring for the full
-#: "genuinely project-level vs. per-artifact" design note these keys come
-#: from. The string values themselves are the real cross-writer/cross-reader
-#: contract, not any one module's own private name for it.
+#: filesystem aliases (symlink targets, hard-link aliases) were stamped
+#: under by older packages. The string values are the on-disk contract.
 NATIVE_IDENTITY_FILENAME_KEY = "library_filename"
 NATIVE_IDENTITY_ALIASES_KEY = "filesystem_aliases"
-
-
-def encode_native_identity_aliases(aliases: tuple[str, ...]) -> str:
-    """*aliases*, folded into one `native_identity` string value.
-
-    JSON, not a delimiter-joined string: POSIX allows a newline (or any
-    byte but NUL/`/`) inside a real filename, so a filesystem-alias
-    basename is not guaranteed delimiter-safe -- a joined-and-split
-    encoding would silently split one alias into two, or merge two into
-    one, changing resolution evidence (Codex review). `json.dumps` of a
-    list of strings has no such ambiguity.
-    """
-    return json.dumps(sorted(aliases))
 
 
 def decode_native_identity_aliases(
     encoded: str, nodes_so_far: int
 ) -> tuple[tuple[str, ...], int]:
-    """The exact inverse of `encode_native_identity_aliases`, returning the
+    """Decode a `native_identity` alias value (a JSON array of strings, as
+    older packages wrote it with `json.dumps(sorted(aliases))`), returning the
     decoded tuple alongside *nodes_so_far* updated with this array's own
     node count.
 
@@ -100,8 +70,7 @@ def decode_native_identity_aliases(
     The pre-scan bounds this one array against what's left of the caller's
     own running budget; the actual decoded element count is then charged
     into that running total, which the caller is responsible for carrying
-    across calls the same way `bundle_facts_store.read_bundle_facts_package`
-    does.
+    across calls.
     """
     remaining_nodes = max(DEFAULT_MAX_JSON_CONTAINER_NODES - nodes_so_far, 0)
     check_json_container_budget(encoded.encode("utf-8"), remaining_nodes)

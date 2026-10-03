@@ -200,9 +200,9 @@ class TestDumpFollowDeps:
             ],
         )
         assert result.exit_code == 0
-        from abicheck.serialization import load_snapshot_document
+        from _snapshot_document_reader import read_snapshot_document
 
-        data = load_snapshot_document(outfile)
+        data = read_snapshot_document(outfile)
         assert "dependency_info" in data
 
     def test_dump_follow_deps_roundtrip(self, runner, real_lib, tmp_path):

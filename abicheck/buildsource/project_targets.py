@@ -1142,13 +1142,6 @@ class ProfileSpec:
             consumer_compile=consumer_compile_spec,
         )
 
-    @property
-    def runner_label(self) -> str | None:
-        """The runner this profile's check cells are scheduled on (G34 Phase
-        C), or ``None`` when its ``os:`` names nothing schedulable — see
-        :func:`runner_label_for_os`."""
-        return runner_label_for_os(self.os)
-
 
 @dataclass
 class BaselineChannelSpec:

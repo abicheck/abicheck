@@ -272,7 +272,7 @@ underlying library functions were *not* deleted, only their Click wiring:
 | `collect` flag (removed) | Library function to call instead |
 |---|---|
 | `--from cmake/ninja/bazel/make` (explicit build-system adapter) | `abicheck.buildsource.adapters.{cmake_file_api,ninja,bazel,make}` — `--sources` already infers one of these automatically for the common case |
-| `--read-compiler-record` | `abicheck.buildsource.compiler_record` (ELF `.GCC.command.line` / DWARF `DW_AT_producer`, advisory) |
+| `--read-compiler-record` | `abicheck.buildsource.compiler_record.extract_compiler_record()` (ELF `.GCC.command.line` / DWARF `DW_AT_producer`, advisory) |
 | `--source-abi-cache` (persistent per-TU replay cache) | `abicheck.buildsource.source_replay.SourceAbiCache` / the `ABICHECK_L4_CACHE_DIR` env var still works with `dump --sources` |
 | `--extractor-manifest` (external CLI extractors) | `abicheck.buildsource.extractor_manifest.load_extractor_manifest()` / `run_external_extractor()` — see "External CLI extractors" below |
 | `--collection-mode {permissive,strict,audit}` | No survivor — a failed producer step degrades coverage silently when scripted directly; call the library function inline in your own producer script if you need one of these behaviors |

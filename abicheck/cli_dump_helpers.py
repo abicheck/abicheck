@@ -188,7 +188,6 @@ def _gated_source_label(build_source: BuildSourcePack | None, snap: AbiSnapshot)
 def check_requested_depth_satisfied(
     depth: str | None,
     snap: AbiSnapshot,
-    build_source: BuildSourcePack | None = None,
 ) -> None:
     """Hard-fail when an *explicitly* requested ``--depth`` was not reached.
 
@@ -207,7 +206,7 @@ def check_requested_depth_satisfied(
     requested_rank = _DEPTH_RANK.get(depth)
     if requested_rank is None:
         return
-    effective_pack = build_source if build_source is not None else snap.build_source
+    effective_pack = snap.build_source
     # _gated_source_label is called unconditionally, not just when
     # reported_depth_label already says "source" -- reported_depth_label's
     # own payload-emptiness check requires *either* L4 *or* L5 to be

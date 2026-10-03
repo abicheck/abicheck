@@ -4,7 +4,7 @@ Targets uncovered lines:
   - checker.py: affected_symbols computation (1807-1915), redundant change
     filtering (2599-2623), enum edge cases (2802-2806), template parsing (3022)
   - reporter.py: to_stat (193-210), ShowOnlyFilter.matches edge cases,
-    _build_impact_table (240-259), to_json/to_markdown with show_only/show_impact/report_mode
+    the impact table, to_json/to_markdown with show_only/show_impact/report_mode
   - stack_report.py: missing symbol truncation (107), stack changes section
     (121-127), empty graph (227-239), cycle/diamond detection (265, 272-273)
 """
@@ -686,11 +686,17 @@ class TestApplyShowOnly:
         assert result == []
 
 
+def _impact_table_lines(result, displayed_changes=None):
+    from abicheck.report.render_markdown import render_impact_table
+    from abicheck.reporter_markdown import compute_impact_table
+
+    return render_impact_table(compute_impact_table(result, displayed_changes))
+
+
 class TestBuildImpactTable:
-    """Exercise _build_impact_table (lines 240-285)."""
+    """Exercise the impact table (compute_impact_table + render_impact_table)."""
 
     def test_impact_table_with_affected_symbols(self):
-        from abicheck.reporter import _build_impact_table
 
         c = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
@@ -700,31 +706,28 @@ class TestBuildImpactTable:
             caused_count=2,
         )
         result = _make_diff(changes=[c], verdict=Verdict.BREAKING)
-        lines = _build_impact_table(result)
+        lines = _impact_table_lines(result)
         text = "\n".join(lines)
         assert "Impact Summary" in text
         assert "3 functions" in text
         assert "+2 collapsed" in text
 
     def test_impact_table_empty_when_no_root_changes(self):
-        from abicheck.reporter import _build_impact_table
 
         c = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="removed")
         result = _make_diff(changes=[c], verdict=Verdict.BREAKING)
-        lines = _build_impact_table(result)
+        lines = _impact_table_lines(result)
         # Should have direct_removals entry
         text = "\n".join(lines)
         assert "removals" in text
 
     def test_impact_table_empty_for_no_changes(self):
-        from abicheck.reporter import _build_impact_table
 
         result = _make_diff(verdict=Verdict.NO_CHANGE)
-        lines = _build_impact_table(result)
+        lines = _impact_table_lines(result)
         assert lines == []
 
     def test_impact_table_with_displayed_changes_subset(self):
-        from abicheck.reporter import _build_impact_table
 
         c1 = Change(
             kind=ChangeKind.TYPE_SIZE_CHANGED,
@@ -739,7 +742,7 @@ class TestBuildImpactTable:
         )
         result = _make_diff(changes=[c1, c2], verdict=Verdict.BREAKING)
         # Only pass c1 as displayed
-        lines = _build_impact_table(result, displayed_changes=[c1])
+        lines = _impact_table_lines(result, displayed_changes=[c1])
         text = "\n".join(lines)
         assert "Foo" in text
         # bar removal should not appear since not in displayed_changes

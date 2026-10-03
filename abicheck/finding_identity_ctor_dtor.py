@@ -125,7 +125,7 @@ is why this stays its own narrowly-scoped module rather than folding into
   a detector could branch on. Nor would a schema bump help here even if
   one existed: cross-checking ``serialization.py``'s full v1-v25 history
   comment against ``dumper_castxml.py``'s own "PR #582" commentary around
-  ``_function_mangled_name``'s ``qualified_scope`` parameter confirms the
+  ``function_mangled_name``'s ``qualified_scope`` parameter confirms the
   ctor/dtor key-format change shipped WITHOUT any accompanying schema
   bump -- so even a hypothetical "reject anything below schema version N"
   rule could not distinguish a bare-format snapshot from a qualified-format
@@ -257,7 +257,7 @@ def _split_synthetic_ctor_key_body(body: str) -> tuple[str, str] | None:
     ``(scope, param_sig)``.
 
     The key format is ``f"{scope}({param_sig})"`` (see
-    ``dumper_castxml._CastxmlParser._function_mangled_name``), where
+    ``extract.headers.castxml.functions.function_mangled_name``), where
     *scope* is a (possibly namespace-qualified, possibly template-
     instantiated) class name and *param_sig* is a comma-joined parameter
     type list that can itself legally contain commas, parens, and angle

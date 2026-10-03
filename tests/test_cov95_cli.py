@@ -44,8 +44,6 @@ from abicheck.cli_compare_release import (
     _resolve_release_severity_config,
 )
 from abicheck.cli_helpers_compare import (
-    _collect_additions,
-    _collect_release_inputs,
     _warn_ignored_flags,
 )
 from abicheck.cli_resolve import (
@@ -517,19 +515,6 @@ class TestSmallHelpers:
         rejected = runner.invoke(main, ["dump", "--depth", "full"])
         assert rejected.exit_code != 0
 
-    def test_collect_additions(self) -> None:
-        result = DiffResult(
-            old_version="1",
-            new_version="2",
-            library="x",
-            changes=[
-                Change(kind=ChangeKind.FUNC_ADDED, symbol="a", description="added"),
-                Change(kind=ChangeKind.FUNC_REMOVED, symbol="b", description="removed"),
-            ],
-        )
-        adds = _collect_additions(result)
-        assert len(adds) == 1
-
 
 # ── _warn_ignored_flags (cli.py:949-971) ──────────────────────────────────────
 
@@ -625,17 +610,24 @@ class TestLoadProbeMatrixChanges:
             _load_probe_matrix_changes(f, None)
 
 
-# ── _collect_release_inputs error path (cli.py:1231) ──────────────────────────
+# ── collect_release_inputs error path ─────────────────────────────────────────
 
 
 class TestCollectReleaseInputs:
     def test_neither_file_nor_dir(self, tmp_path: Path) -> None:
-        with pytest.raises(click.ClickException, match="neither file nor directory"):
-            _collect_release_inputs(tmp_path / "does-not-exist")
+        from abicheck.errors import ReleaseOperandContentError
+        from abicheck.workflows.release_inputs import collect_release_inputs
+
+        with pytest.raises(
+            ReleaseOperandContentError, match="neither file nor directory"
+        ):
+            collect_release_inputs(tmp_path / "does-not-exist")
 
     def test_single_file(self, tmp_path: Path) -> None:
+        from abicheck.workflows.release_inputs import collect_release_inputs
+
         f = _write_snap(tmp_path / "libfoo.json", _snap())
-        assert _collect_release_inputs(f) == [f]
+        assert collect_release_inputs(f) == [f]
 
 
 # ── _announce_exit_scheme / _exit_with_severity_or_verdict (cli.py:1396-1426) ─

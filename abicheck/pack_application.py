@@ -61,7 +61,7 @@ A leaf: nothing here imports a ``cli*`` module, and its consumer
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -70,7 +70,6 @@ from .change_registry_types import Verdict
 from .compatibility_evaluation_frontend import (
     SEVERITY_CATEGORY_FIELDS,
 )
-from .compatibility_evaluation_packs import PackKind
 from .compatibility_evaluation_wiring import (
     INTERNAL_NAMESPACES_FIELD,
     load_selected_packs,
@@ -95,8 +94,8 @@ PACK_SOURCE_KIND = "pack_manifest"
 #: Every entry is a field ``compatibility_evaluation_wiring``'s
 #: ``CONTRACT_PACK_FIELD_ROUTES``/``GATE_PACK_FIELD_ROUTES`` accepts, so the
 #: two together partition the routable vocabulary into "applied" and "not
-#: yet" -- :func:`applied_pack_fields` derives the first half from the second
-#: rather than keeping a second hand-maintained list.
+#: yet" -- the applied half is the routable set minus this one, never a
+#: second hand-maintained list (``tests/test_pack_application.py`` checks it).
 #:
 #: ``contract.unresolved`` left this mapping in Phase 7, when the coverage
 #: exit it configures became real (``contract_coverage_exit.py``). It is
@@ -210,14 +209,6 @@ def _inert_value_error(source: str, field_name: str, reason: str) -> PackManifes
         f"act on ({reason}). Rejected rather than recorded as active "
         "configuration."
     )
-
-
-def applied_pack_fields(kind: PackKind) -> frozenset[str]:
-    """The fields a *kind* pack may assign and this build really applies."""
-    from .compatibility_evaluation_wiring import PACK_FIELD_ROUTES_BY_KIND
-
-    routes = PACK_FIELD_ROUTES_BY_KIND.get(kind, {})
-    return frozenset(routes) - frozenset(UNAPPLIED_PACK_FIELDS)
 
 
 @dataclass(frozen=True)
@@ -590,24 +581,18 @@ CONTRACT_EVALUATION_ONLY_FIELDS: Mapping[str, str] = {
 
 
 def check_resolved_config_applies_packs(
-    config: Any,
-    *,
-    gate_supported: bool = True,
-    gate_reason: str = "",
-    contract_evaluation: bool = True,
+    config: Any, *, contract_evaluation: bool = True
 ) -> None:
-    """Reject a pack this build, command, or invocation cannot apply.
+    """Reject a pack this build or invocation cannot apply.
 
     Every question is answered from the resolved configuration: an unapplied
-    field from ``provenance[field].source_kind``, a selected gate pack from
-    ``gate.packs`` -- which lists exactly the ``kind: gate`` manifests, since
-    :func:`resolve_selected_packs` groups them by kind -- and, when
+    field from ``provenance[field].source_kind`` and, when
     *contract_evaluation* is false, any
     :data:`CONTRACT_EVALUATION_ONLY_FIELDS` a pack supplied.
 
-    The authoritative half, and the *only* place the gate question is asked:
-    :func:`check_pack_fields_applied` re-reads the files, and asking there
-    too would answer one question from two revisions. That is the window
+    The authoritative half: :func:`check_pack_fields_applied` asks the same
+    of the files early enough for ``--dry-run``, but only this check reads
+    the revision that actually configures the run. That is the window
     re-reading leaves open -- the resolver has already loaded the manifests,
     and between that read and any later one a generated or concurrently
     edited pack can change, so a second read validates a revision that is not
@@ -623,12 +608,6 @@ def check_resolved_config_applies_packs(
     threading of loaded manifests through a public signature that exists to
     return a configuration.
     """
-    gate: Any = getattr(config, "gate", None)
-    if not gate_supported and getattr(gate, "packs", None):
-        raise PackManifestError(
-            "a `kind: gate` pack cannot be applied here"
-            + (f" -- {gate_reason}" if gate_reason else "")
-        )
     for field_name, reason in UNAPPLIED_PACK_FIELDS.items():
         if _pack_supplied(config, field_name):
             raise _unapplied_field_error(
@@ -658,17 +637,11 @@ def check_pack_fields_applied(
     *,
     shadowed_fields: frozenset[str] = frozenset(),
     contract_evaluation: bool = True,
-    loaded: Iterable[tuple[str, Any]] | None = None,
 ) -> None:
     """Reject a manifest assigning a field this build does not apply.
 
     The file-level half of :data:`UNAPPLIED_PACK_FIELDS`, asked early enough
     that ``compare --dry-run`` answers it the same way the real run does.
-    Deliberately *not* asked here: whether the selected command has a gate to
-    configure at all. That is a precedence question about the resolution
-    rather than a fact about the file -- ``scan`` asks it of
-    :func:`check_resolved_config_applies_packs`, which reads the resolved
-    ``gate.packs``, so it stays answered in exactly one place.
 
     Raises :class:`~abicheck.errors.PackManifestError`, the same error class
     a malformed manifest raises, since both are "this manifest cannot be
@@ -678,8 +651,7 @@ def check_pack_fields_applied(
     # emptiness rule is asked by the same read that answers everything below
     # -- and, for the real run, by the resolver's own read rather than this
     # earlier one.
-    entries = list(loaded) if loaded is not None else load_selected_packs(pack_paths)
-    for path, pack in entries:
+    for path, pack in load_selected_packs(pack_paths):
         for field_name, value in pack.assignments.items():
             # An *inert value* is a precedence question -- an explicit
             # `--policy-file` stating the same field shadows it, and checking

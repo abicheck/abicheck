@@ -183,8 +183,16 @@ class TestReleaseScopePlanParity:
 
         # 1. compatibility-relevant: the same members reach AVAILABLE.
         assert {
-            m.member for m in cli_shaped.members_in(AcquisitionState.AVAILABLE)
-        } == {m.member for m in plan_shaped.members_in(AcquisitionState.AVAILABLE)}
+            m.member
+            for m in (
+                m for m in cli_shaped.members if m.state is AcquisitionState.AVAILABLE
+            )
+        } == {
+            m.member
+            for m in (
+                m for m in plan_shaped.members if m.state is AcquisitionState.AVAILABLE
+            )
+        }
         # 2. assurance/coverage-relevant: unchecked members agree.
         assert {m.member for m in cli_shaped.unchecked_members} == {
             m.member for m in plan_shaped.unchecked_members
@@ -245,7 +253,9 @@ class TestReleaseScopeResultWiredIntoRealProductionFlow:
         assert len(calls) == 1
         plan, record = calls[0]
         assert isinstance(plan, ReleaseScopePlan)
-        available = record.members_in(AcquisitionState.AVAILABLE)
+        available = tuple(
+            m for m in record.members if m.state is AcquisitionState.AVAILABLE
+        )
         assert len(available) == 1
         assert available[0].name == "libfoo.json"
 

@@ -139,23 +139,6 @@ class TestEveryPublicRendererRejectsARetiredMode:
         with pytest.raises(ValidationError, match="root-cause"):
             to_json(self._result(), report_mode="leaf")
 
-    def test_to_junit_xml_multi_is_an_entry_point_too(self):
-        """`to_junit_xml_multi` takes its own `report_mode` and reaches
-        `_build_testsuite` directly, so validating its single-result sibling
-        left it emitting a full document for a retired mode (Codex review,
-        PR #1284). Its signature differs from the four above, which is
-        precisely why the sweep missed it."""
-        from abicheck.errors import ValidationError
-        from abicheck.junit_report import to_junit_xml_multi
-        from abicheck.model import AbiSnapshot
-
-        pairs = [(self._result(), AbiSnapshot(library="libfoo.so", version="1.0"))]
-        for mode in ("leaf", "not-a-mode", ""):
-            with pytest.raises(ValidationError):
-                to_junit_xml_multi(pairs, report_mode=mode)
-        for mode in ("full", "impact", "root-cause"):
-            assert to_junit_xml_multi(pairs, report_mode=mode), mode
-
 
 class TestARenderedDocumentOnStdoutIsNeverPollutedByALedger:
     """A machine document written to stdout must parse, whatever ledgers the
@@ -681,11 +664,14 @@ class TestDemanglingIsIdempotentAndReachesEveryHumanPath:
         assert "bar() [bar()" not in md, "demangled twice"
 
     def test_the_bypassing_human_path_asks_for_demangling(self):
-        """`compat/cli.py` never reaches `service_render`, so nothing else
-        would apply it for it."""
+        """`compat check` never reaches `service_render`, so nothing else
+        would apply it for it; its report files are written by
+        `frontends/cli/compat_report_file.py`."""
         import pathlib
 
-        src = pathlib.Path("abicheck", "compat/cli.py").read_text(encoding="utf-8")
+        src = pathlib.Path("abicheck", "frontends/cli/compat_report_file.py").read_text(
+            encoding="utf-8"
+        )
         assert "demangle=True" in src
 
 

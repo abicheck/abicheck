@@ -72,6 +72,9 @@ _DEFAULT_DEBUG_ROOTS = [
 # Maximum size for debuginfod downloads (512 MiB)
 _MAX_DEBUGINFOD_SIZE = 512 * 1024 * 1024
 
+# Socket timeout, in seconds, for one debuginfod request
+_DEBUGINFOD_TIMEOUT_SECONDS = 30
+
 
 class DebugResolverBackend(Protocol):
     """Protocol for a single debug resolution strategy."""
@@ -446,7 +449,7 @@ class DebuginfodResolver:
         return [u.strip() for u in env.split() if u.strip()]
 
     @staticmethod
-    def _safe_urlopen(url: str, timeout: int = 30) -> http.client.HTTPResponse:
+    def _safe_urlopen(url: str) -> http.client.HTTPResponse:
         """Open a URL after verifying the scheme is http or https.
 
         This explicit guard satisfies B310 (audit url open for permitted
@@ -460,7 +463,9 @@ class DebuginfodResolver:
             raise ValueError(f"Unsupported URL scheme {parsed_scheme!r}: {url}")
         req = urllib.request.Request(url)
         req.add_header("User-Agent", "abicheck-debuginfod-client")
-        resp: http.client.HTTPResponse = urllib.request.urlopen(req, timeout=timeout)  # nosec B310  # noqa: S310
+        resp: http.client.HTTPResponse = urllib.request.urlopen(  # nosec B310  # noqa: S310
+            req, timeout=_DEBUGINFOD_TIMEOUT_SECONDS
+        )
         return resp
 
     @staticmethod

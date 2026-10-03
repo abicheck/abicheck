@@ -238,12 +238,6 @@ def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
     return out
 
 
-def _candidate_type_names(typename: str) -> list[str]:
-    """Names only (drops the per-hop pointer flag); back-compat for callers that
-    just need reachability, not indirection."""
-    return [name for name, _ in _candidate_type_names_indirect(typename)]
-
-
 def _split_top_level_commas(s: str) -> list[str]:
     """Split *s* on commas that are not nested inside ``<...>``."""
     parts: list[str] = []
@@ -486,7 +480,7 @@ def _seed_queue_from_functions(
         # (the opaque-handle pattern ``void use(ns::detail::Impl*)``) does not
         # embed its layout — record the indirection so a layout-only change is
         # demoted, mirroring the pointer-field case (Codex review). The seed path
-        # otherwise drops the ``*`` (``_candidate_type_names`` strips decorators).
+        # otherwise drops the ``*`` (``_candidate_type_names_indirect`` strips decorators).
         seeds = [(func.return_type, (func.return_pointer_depth or 0) > 0)]
         seeds += [(p.type, (p.pointer_depth or 0) > 0) for p in func.params]
         for t, top_ptr in seeds:
@@ -1104,7 +1098,7 @@ def _format_path(path: list[str]) -> str:
     return " → ".join(s for s in path if not s.startswith("indirect:"))
 
 
-def _path_has_indirection(path: list[str], snap: AbiSnapshot | None = None) -> bool:
+def _path_has_indirection(path: list[str]) -> bool:
     """Return True if *path* crosses a pointer / reference / smart-pointer hop.
 
     Per-hop path model: indirection is recorded **at enqueue time** as an
@@ -1117,15 +1111,11 @@ def _path_has_indirection(path: list[str], snap: AbiSnapshot | None = None) -> b
     ``_Head_base`` (the ``proxy*`` argument marks the edge). A pointer buried in
     an unrelated template argument (``pair<Impl, int*>``) does **not** mark the
     ``Impl`` edge, so by-value members still propagate.
-
-    *snap* is unused now (the marker is precomputed); kept for call-site compat.
     """
     return any(s.startswith("indirect:") for s in path)
 
 
-def _path_is_value_propagating(
-    path: list[str], snap: AbiSnapshot | None = None
-) -> bool:
+def _path_is_value_propagating(path: list[str]) -> bool:
     """Return True if a layout change on the leaf propagates *by value* to the
     public root along *path* — a value-embedding / inheritance chain with no
     pointer edge. Drives the leak's severity-hint wording.
@@ -1337,13 +1327,14 @@ def detect_internal_leaks(
             # Internal type changed but not reachable from public API in
             # either snapshot — this is the "truly private" case; skip.
             continue
-        # Evaluate every path against the snapshot it was discovered in: the
-        # *same* ``field:<name>`` chain can be a pointer in old but an embedded
-        # value in new (a pimpl that switched to by-value), and ``_merge_leak_
+        # Evaluate every path from both snapshots, each carrying the per-hop
+        # ``indirect:`` markers recorded when it was discovered: the *same*
+        # ``field:<name>`` chain can be a pointer in old but an embedded value
+        # in new (a pimpl that switched to by-value), and ``_merge_leak_
         # paths`` dedups the identical chain — so checking only the preferred
-        # sample snapshot would mis-read the indirection (Codex review). A side
-        # with no paths contributes nothing.
-        side_paths = [(p, old) for p in old_pl] + [(p, new) for p in new_pl]
+        # sample would mis-read the indirection (Codex review). A side with no
+        # paths contributes nothing.
+        side_paths = [*old_pl, *new_pl]
         identity_or_vtable = any(c.kind in _IDENTITY_VTABLE_KINDS for c in triggers)
         # P2 (UXL field run), narrowed by decision 2A of the design-hardening
         # plan: an internal type reached **only** behind a pointer
@@ -1357,9 +1348,9 @@ def detect_internal_leaks(
         # The leniency needs a structural fact, not the namespace's name: the
         # layout must be proven invisible to consumers (see
         # policy.layout_visibility). Unknown visibility keeps the finding.
-        value_prop = any(_path_is_value_propagating(p, s) for p, s in side_paths)
+        value_prop = any(_path_is_value_propagating(p) for p in side_paths)
         all_indirect = bool(side_paths) and all(
-            _path_has_indirection(p) for p, _ in side_paths
+            _path_has_indirection(p) for p in side_paths
         )
         if (
             all_indirect

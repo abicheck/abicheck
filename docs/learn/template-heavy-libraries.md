@@ -118,17 +118,11 @@ abicheck compare old.so new.so -H include/ --sources . --depth source \
 
 That seeds the L4/L5 replay to the changed translation units instead of the
 full target, which is where the minutes-versus-hours saving above actually
-comes from. **`--dry-run`'s own cost preview does not reflect this seeding
-yet** — verified live: adding `--dry-run` to the command above still prints
-`source scope: target on each side (compare has no PR change seed)` and
-leaves the "Cost preview" TU counts unchanged, because `--since`'s
-changed-path resolution runs after `--dry-run` has already emitted and
-exited (a documented gap:
-[known-gaps.md](../contribute/known-gaps.md), "`compare --dry-run`'s cost
-preview does not reflect `--since`'s changed-path seeding" entry). So a dry
-run here only ever previews the *unseeded* upper-bound cost; run the
-command above for real (without `--dry-run`) to get the actual seeded,
-cheaper replay. In CI, `--budget`
+comes from. Adding `--dry-run` previews exactly that: it resolves the same
+seed, prints `source scope: changed on each side (changed-path seed:
+--since origin/main)`, and prices only the changed translation units (a
+changed header is priced as touching every unit, since the preview builds
+no include graph). In CI, `--budget`
 fails loudly on overflow rather than shrinking scope, so a scan that
 finished is a scan that did what it claims. Numbers, knobs and the
 reasoning behind the memory cap are owned by

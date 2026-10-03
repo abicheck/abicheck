@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _graph_table_oracle import graph_table_to_legacy_dict
 from hypothesis import given, settings, strategies as st
 
 from abicheck.model.graph_facts import GraphEdge, GraphFact, GraphNode
@@ -37,7 +38,6 @@ from abicheck.storage.graph_section_codec import GraphSection
 from abicheck.storage.graph_table_codec import (
     decode_graph_table,
     encode_graph_table,
-    graph_table_to_legacy_dict,
     is_graph_table,
 )
 

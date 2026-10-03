@@ -100,8 +100,6 @@ __all__ = [
     "audit_gate_enabled_for_severity_preset",
     "compute_no_baseline_document",
     "no_baseline_exit_code",
-    "no_baseline_json_report",
-    "no_baseline_markdown_report",
     "render_no_baseline",
     "render_no_baseline_markdown",
     "render_no_baseline_oneline",
@@ -545,17 +543,6 @@ def no_baseline_report_document(doc: NoBaselineDocument) -> ReportDocument:
     return ReportDocument.from_mapping(_document_json(doc))
 
 
-def no_baseline_json_report(result: NoBaselineCompareResult) -> dict[str, Any]:
-    """The full JSON report for a ``--no-baseline`` audit.
-
-    Deliberately not a projection of the two-sided report's shape padded
-    out with nulls: ``no_baseline: true`` marks the shape up front, there is
-    no ``old_version``/``old_file`` (OLD was never supplied, not merely
-    empty), and ``verdict`` reads as the audit it is.
-    """
-    return _document_json(compute_no_baseline_document(result))
-
-
 _EVOLUTION_NOTE = {
     "persistent": "present in this build",
     "not_evaluated": "not evaluated (insufficient evidence)",
@@ -666,11 +653,6 @@ def _exit_axis_notice_lines(doc: NoBaselineDocument) -> list[str]:
     if not contributing:
         return []
     return ["", *(f"> {notice}" for notice in contributing)]
-
-
-def no_baseline_markdown_report(result: NoBaselineCompareResult) -> str:
-    """The Markdown rendering of a ``--no-baseline`` audit."""
-    return render_no_baseline_markdown(compute_no_baseline_document(result))
 
 
 def render_no_baseline_oneline(doc: NoBaselineDocument) -> str:

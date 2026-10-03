@@ -532,23 +532,23 @@ reclassify:
     assert "COMDAT-inline demotions" in text
 
 
-# --- severity.classify_change_object ----
+# --- severity.classify_effective_change ----
 
 
-def test_reclassified_finding_is_identified_via_classify_change_object(
+def test_reclassified_finding_is_identified_via_classify_effective_change(
     tmp_path: Path,
 ) -> None:
     """A `reclassify:`-demoted BREAKING finding that lands in `diff.compatible`
     (as QUALITY_ISSUES, since func_removed isn't an ADDITION_KINDS member)
     must still be nameable as a gate-relevant finding -- not just correctly
     gated (that already worked; `_build_severity_json` passes `policy_file`)
-    but correctly *classified*, via `severity.classify_change_object` (Codex
+    but correctly *classified*, via `severity.classify_effective_change` (Codex
     review). This test used to also check `cli_scan_baseline.
     _blocking_compatible_changes` reached the identical conclusion --
-    deleted with the `scan` command, ADR-068 Phase 6; `classify_change_object`
+    deleted with the `scan` command, ADR-068 Phase 6; `classify_effective_change`
     itself has no `scan`-specific behavior and is unaffected."""
     from abicheck.checker_types import DiffResult
-    from abicheck.severity import IssueCategory, classify_change_object
+    from abicheck.severity import IssueCategory, classify_effective_change
 
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -574,15 +574,15 @@ reclassify:
     # (DiffResult._effective_verdict_for_change already passes policy_file).
     assert diff.compatible == [reclassified]
 
-    # Without policy_file, classify_change_object can't see the
+    # Without policy_file, classify_effective_change can't see the
     # selector-scoped rule and falls back to the raw kind category.
     assert (
-        classify_change_object(reclassified, kind_sets=diff._effective_kind_sets())
+        classify_effective_change(reclassified, kind_sets=diff._effective_kind_sets())
         == IssueCategory.ABI_BREAKING
     )
     # With it, the reclassification is honored.
     assert (
-        classify_change_object(
+        classify_effective_change(
             reclassified, kind_sets=diff._effective_kind_sets(), policy_file=pf
         )
         == IssueCategory.QUALITY_ISSUES

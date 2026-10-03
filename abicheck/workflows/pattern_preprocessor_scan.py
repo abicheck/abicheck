@@ -397,7 +397,11 @@ def _run_preprocessor_scan_for(
         if licence.permitted
         else []
     )
-    return collect_preprocessor_facts(build, public_headers)
+    return collect_preprocessor_facts(
+        build,
+        public_headers,
+        clang_bin=snapshot.live_preprocessor_clang_bin or "clang++",
+    )
 
 
 def _fold_evolution(

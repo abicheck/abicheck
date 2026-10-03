@@ -1181,7 +1181,7 @@ class TestPipelineIntegration:
     def test_default_pipeline_includes_namespace_step(self) -> None:
         from abicheck.post_processing import DEFAULT_PIPELINE
 
-        assert "detect_namespace_patterns" in DEFAULT_PIPELINE.step_names
+        assert "detect_namespace_patterns" in [s.name for s in DEFAULT_PIPELINE.steps]
 
     def test_findings_appear_via_compare(self) -> None:
         from abicheck.checker import compare

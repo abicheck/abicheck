@@ -51,7 +51,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..severity import SeverityConfig
-    from .document import ReportDocument
     from .envelope import ReportEnvelope
 
 
@@ -70,15 +69,13 @@ def to_markdown(
     # review, PR #1284).
     demangle: bool = False,
     contract_evaluation: bool = False,
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> str:
     """See :func:`~abicheck.report.render_markdown_document.
-    build_markdown_document`'s own docstring for *report_document*/*envelope*
-    (ADR-061 gap C) -- forwarded unchanged to the full-mode
-    (``report_mode="full"``) document build only; ``--stat`` and the
-    ``leaf``/``root-cause`` alternate views ignore both, since those stay
-    their own separate documents."""
+    build_markdown_document`'s own docstring for *envelope* (ADR-061 gap C)
+    -- forwarded unchanged to the full-mode (``report_mode="full"``) document
+    build only; ``--stat`` and the ``root-cause`` alternate view ignore it,
+    since those stay their own separate documents."""
 
     # Every public rendering entry point shares one report-mode check
     # (report_modes.py) -- see its docstring for why enforcing the ``leaf``
@@ -130,7 +127,6 @@ def to_markdown(
             severity_config=severity_config,
             show_recommendation=show_recommendation,
             demangle=demangle,
-            report_document=report_document,
             envelope=envelope,
         )
     )
@@ -211,7 +207,6 @@ def to_review_digest(
     result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> str:
     """Compact GitHub-facing review digest (Markdown).
@@ -227,12 +222,9 @@ def to_review_digest(
     ``report/render_markdown_document.py`` — the same fact/formatting split
     JSON/SARIF/JUnit/``--stat``/HTML already use.
 
-    *report_document* (ADR-061 gap C) is the one shared
-    ``report_mode="full"`` document ``service_render.render_output``'s
-    ``review`` branch builds once via ``report.build.build_report_document``
-    and forwards here -- see ``build_review_digest_document``'s own
-    docstring for exactly what it is reused for. *envelope* is the completed
-    ``ReportEnvelope`` that document belongs to; it additionally supplies the
+    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` this
+    render projects -- see ``build_review_digest_document``'s own docstring
+    for what its shared document is reused for. It also supplies the
     digest's per-finding verdicts, so its "impacted symbols" list reads the
     same resolution every other format does instead of making its own.
     """
@@ -245,7 +237,6 @@ def to_review_digest(
         build_review_digest_document(
             result,
             severity_config=severity_config,
-            report_document=report_document,
             envelope=envelope,
         )
     )

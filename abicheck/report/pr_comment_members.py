@@ -253,7 +253,6 @@ def _load_member(
     *,
     build_member_model: Callable[[dict[str, object]], CommentModel],
     base_dir: Path | None,
-    max_member_bytes: int,
 ) -> tuple[CommentModel | None, Finding | None]:
     """One member's model, or ``(None, limitation)`` stating why not.
 
@@ -275,7 +274,6 @@ def _load_member(
         data = load_member_report(
             base_dir,
             str(raw_path) if raw_path is not None else "",
-            max_bytes=max_member_bytes,
         )
         return build_member_model(data), None
     except MemberReportRefused as exc:

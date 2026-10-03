@@ -130,27 +130,6 @@ class TestGatePolicy:
         r = aggregate_reports_dir(tmp_path, discovered_only=True)
         assert r.policy_source == "default"
 
-    def test_explicit_override_wins_over_manifest_gate(self, tmp_path: Path):
-        # A direct API caller forcing a value (no longer reachable via the
-        # CLI, which has no flags for this) still wins over the manifest's
-        # own gate block -- and is reported as "explicit" source (Codex
-        # review, fresh evidence: an earlier revision reported "default"
-        # here, which is factually wrong -- the resolved value is the
-        # caller's own override, not the hard-coded default).
-        _write_report(tmp_path, LINUX, "COMPATIBLE")
-        manifest = ExpectedTargets.from_manifest_data(
-            {
-                "aggregate_manifest_version": "2.0",
-                "targets": [{"id": LINUX}, {"id": WINDOWS}],
-                "gate": {"missing_required": "warn"},
-            }
-        )
-        r = aggregate_reports_dir(
-            tmp_path, expected=manifest, on_missing_required=OnMissingRequired.FAIL
-        )
-        assert r.on_missing_required is OnMissingRequired.FAIL
-        assert r.policy_source == "explicit"
-
     @pytest.mark.parametrize(
         "bad_gate",
         [
@@ -171,21 +150,6 @@ class TestGatePolicy:
         }
         with pytest.raises(AggregateError):
             ExpectedTargets.from_manifest_data(data)
-
-    def test_explicit_override_reported_even_with_no_manifest_gate(
-        self, tmp_path: Path
-    ):
-        # The "explicit" source label applies whenever the caller passed an
-        # override, independent of whether the manifest carried its own
-        # `gate` block at all.
-        _write_report(tmp_path, LINUX, "COMPATIBLE")
-        r = aggregate_reports_dir(
-            tmp_path,
-            expected=_expect(LINUX),
-            on_unexpected_target=OnUnexpectedTarget.WARN,
-        )
-        assert r.on_unexpected_target is OnUnexpectedTarget.WARN
-        assert r.policy_source == "explicit"
 
     def test_gate_block_requires_major_2(self):
         # A gate block published under the pre-2.0 major would be silently

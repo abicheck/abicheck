@@ -17,8 +17,8 @@ from abicheck.dwarf_advanced import (
     ToolchainInfo,
     _parse_producer,
     diff_advanced_dwarf,
-    parse_advanced_dwarf,
 )
+from abicheck.dwarf_unified import parse_dwarf
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import (
     snapshot_from_dict,
@@ -44,8 +44,6 @@ def _adv(
     packed: set[str] | None = None,
     flags: set[str] | None = None,
     all_structs: set[str] | None = None,
-    frame_regs: dict[str, str] | None = None,
-    callee_saved: dict[str, frozenset[str]] | None = None,
 ) -> AdvancedDwarfMetadata:
     packed_set = packed or set()
     # all_struct_names must include packed structs so diff guards work correctly
@@ -63,8 +61,6 @@ def _adv(
         value_abi_traits=value_traits or {},
         packed_structs=packed_set,
         all_struct_names=struct_names,
-        frame_registers=frame_regs or {},
-        callee_saved_regs=callee_saved or {},
     )
 
 
@@ -205,62 +201,6 @@ def test_target_arch_round_trips_through_serialization() -> None:
     snap = _snap(_adv(target_arch="aarch64", value_traits={"foo": "ret:v(trivial)"}))
     restored = snapshot_from_dict(snapshot_to_dict(snap))
     assert restored.dwarf_advanced.target_arch == "aarch64"  # type: ignore[attr-defined]
-
-
-def test_callee_saved_fallback_detects_calling_convention_drift() -> None:
-    """ELF CFI fallback: saved rdi/rsi indicates ms_abi shift."""
-    old = _snap(_adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12"})}))
-    new = _snap(
-        _adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12", "rdi", "rsi"})})
-    )
-    r = compare(old, new)
-    kinds = {c.kind for c in r.changes}
-    assert ChangeKind.CALLING_CONVENTION_CHANGED in kinds
-    assert r.verdict == Verdict.BREAKING
-
-
-def test_callee_saved_fallback_ignores_non_marker_register_churn() -> None:
-    """rbx/r12 churn alone is not enough to claim calling-convention drift."""
-    old = _snap(_adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12"})}))
-    new = _snap(_adv(callee_saved={"foo": frozenset({"rbx", "rbp", "r12", "r13"})}))
-    r = compare(old, new)
-    kinds = {c.kind for c in r.changes}
-    assert ChangeKind.CALLING_CONVENTION_CHANGED not in kinds
-
-
-def test_extract_callee_saved_regs_mocked() -> None:
-    """Test _extract_callee_saved_regs with a mocked FDE."""
-    from abicheck.dwarf_advanced import _extract_callee_saved_regs
-
-    class MockRow:
-        def __init__(self, pc, regs):
-            self.pc = pc
-            self.regs = regs
-
-        def items(self):
-            return self.regs.items()
-
-    class MockRule:
-        def __init__(self, typ):
-            self.type = typ
-
-    class MockTable:
-        table = [
-            MockRow(pc=0x1000, regs={16: MockRule("offset")}),
-            MockRow(pc=0x1004, regs={3: MockRule("offset"), 4: MockRule("undefined")}),
-        ]
-
-    class MockDecoded:
-        table = MockTable.table
-
-    class MockEntry:
-        def get_decoded(self):
-            return MockDecoded()
-
-    entry = MockEntry()
-    result = _extract_callee_saved_regs(entry, "x86_64")
-    # x86_64: reg 16 = rip, reg 3 = rbx, reg 4 = rsi (but undefined → not saved)
-    assert result == frozenset({"rip", "rbx"})
 
 
 def test_value_abi_trait_unchanged_no_change() -> None:
@@ -472,7 +412,7 @@ PackedCtx g_ctx;
         if result.returncode != 0:
             pytest.skip(f"gcc failed: {result.stderr.decode()[:200]}")
 
-        meta = parse_advanced_dwarf(so)
+        _, meta = parse_dwarf(so)
 
     assert meta.has_dwarf
     assert "PackedCtx" in meta.packed_structs, (
@@ -498,7 +438,7 @@ NormalCtx g;
         if result.returncode != 0:
             pytest.skip(f"gcc failed: {result.stderr.decode()[:200]}")
 
-        meta = parse_advanced_dwarf(so)
+        _, meta = parse_dwarf(so)
 
     assert meta.has_dwarf
     assert "NormalCtx" not in meta.packed_structs

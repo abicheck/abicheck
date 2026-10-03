@@ -139,17 +139,29 @@ def build_compare_dry_run_result(
     lang: str = "c++",
     old_dump_manifest: object | None = None,
     new_dump_manifest: object | None = None,
+    since: str | None = None,
+    changed_paths_opt: tuple[str, ...] = (),
+    config: Path | None = None,
 ) -> Any:
     """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff.
 
     *collect_mode*/*effective_depth_label* are the caller's own already-
     resolved ``cli_compare_helpers._resolve_compare_collect_mode()`` result
     (this module's own docstring explains why they're a parameter here
-    rather than resolved locally).
+    rather than resolved locally). *since*/*changed_paths_opt* are narrowed
+    into it here through the run's own seed resolution, and *config* is the
+    raw ``--config`` (never the auto-discovered one: that is what the run
+    hands each side's build-evidence collection).
     """
     from ...dry_run import DryRunResult, tool_status
+    from ...workflows.changed_paths import localized_collect_mode, replay_scope
+    from .compare_enrichment import resolve_compare_changed_seed
 
     result = DryRunResult(command="compare")
+    seed = resolve_compare_changed_seed(
+        since, changed_paths_opt, new_sources or old_sources
+    )
+    collect_mode = localized_collect_mode(collect_mode, seed.paths)
     from ...model.sided_inputs import compose_sided_paths
     from ...workflows.header_frontend_preflight import operand_parses_headers
 
@@ -180,8 +192,9 @@ def build_compare_dry_run_result(
         + " side (see the cost preview's header TU count)"
         if l2_sides
         else None,
-        "source scope: target on each side (compare has no PR change seed)"
-        if collect_mode in ("source-target", "source-changed", "graph-full")
+        f"source scope: {replay_scope(collect_mode)} on each side "
+        f"(changed-path seed: {seed.source})"
+        if replay_scope(collect_mode) != "off"
         else None,
     )
     from ...workflows.compare_cost_preview import estimate_compare_dry_run_cost
@@ -201,6 +214,9 @@ def build_compare_dry_run_result(
             new_sources=new_sources,
             old_build_info=old_build_info,
             new_build_info=new_build_info,
+            collect_mode=collect_mode,
+            changed_paths=seed.paths,
+            build_config=config,
         ),
     )
     # Each side's *effective* header list, composed by the one shared rule

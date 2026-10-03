@@ -718,30 +718,25 @@ def effective_config_fields_from_raw(
     result: Any,
     *,
     severity_config: SeverityConfig | None,
-    exit_code_scheme: str,
+    exit_code_scheme: str | None,
     require_complete_analysis: bool = False,
-    on_incomplete_scope: str | None = None,
-    fail_on_removed_library: bool | None = None,
 ) -> dict[str, str]:
-    """:func:`effective_config_fields`, for a caller with no already-built
-    ``EffectiveGate`` of its own -- exercising the field-computation logic
-    per raw axis (this module's own test suite) is the intended use; a real
-    production caller should hold (or build once via ``EffectiveGate.
-    from_severity``) a real ``EffectiveGate`` and call
-    :func:`effective_config_fields` directly instead, the way
-    ``reporter_contract_blocks.add_effective_config_digest`` and
-    ``cli_compare_receipt._release_summary_effective_config_block`` do.
+    """:func:`effective_config_fields` for a run's raw gate inputs -- the one
+    place those become an ``EffectiveGate`` for a single comparison's digest
+    (``reporter_contract_blocks.add_effective_config_digest`` calls it).
 
-    Builds the identical ``EffectiveGate`` those two real call sites build
-    (:meth:`~abicheck.policy.effective_gate.EffectiveGate.from_severity`
-    plus :func:`~abicheck.policy.effective_gate.
-    scoped_gate_selection_from_result` for *result*'s own recorded scoped-
-    gate selection, then an ``exit_code_scheme`` override exactly like
-    ``add_effective_config_digest``'s) -- one algorithm, not a second,
-    differently-reasoned one, so this compatibility shape cannot drift from
-    what production actually does (Codex review, PR #1192's follow-up
-    finding: the whole point of this fix is that there is exactly one way
-    raw severity/scope/completeness inputs become an ``EffectiveGate``).
+    Builds the gate with
+    :meth:`~abicheck.policy.effective_gate.EffectiveGate.from_severity` and
+    :func:`~abicheck.policy.effective_gate.scoped_gate_selection_from_result`
+    (*result*'s own recorded scoped-gate selection). *exit_code_scheme*
+    overrides the derived scheme when a caller already resolved one; ``None``
+    or ``""`` keeps the derived one, so the gate cannot carry an empty scheme.
+    The release summary, which has no single *result*, builds its own gate
+    (``cli_compare_receipt._release_summary_effective_config_block``) and
+    calls :func:`effective_config_fields` directly; it is also the only
+    gate carrying the release-only axes (``scope.on_incomplete``,
+    ``gate.fail_on_removed_library``), which no single comparison's exit
+    reads, so a member report's digest leaves them at their defaults.
     """
     import dataclasses
 
@@ -751,9 +746,8 @@ def effective_config_fields_from_raw(
         severity_config,
         require_complete_analysis=require_complete_analysis,
         scope=scoped_gate_selection_from_result(result),
-        on_incomplete_scope=on_incomplete_scope,
-        fail_on_removed_library=fail_on_removed_library,
     )
-    if exit_code_scheme != gate.exit_code_scheme:
-        gate = dataclasses.replace(gate, exit_code_scheme=exit_code_scheme)
+    scheme = exit_code_scheme or gate.exit_code_scheme
+    if scheme != gate.exit_code_scheme:
+        gate = dataclasses.replace(gate, exit_code_scheme=scheme)
     return effective_config_fields(result, gate=gate)

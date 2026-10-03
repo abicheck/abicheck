@@ -44,11 +44,7 @@ import collections
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
-
-from elftools.common.exceptions import ELFError
-from elftools.elf.elffile import ELFFile
 
 from .dwarf_utils import (
     BASE_PRUNE_TAGS,
@@ -56,7 +52,6 @@ from .dwarf_utils import (
     attr_int as _attr_int,
     attr_str as _attr_str,
     decode_member_location as _shared_decode_member_location,
-    has_real_dwarf_info,
     resolve_die_ref as _resolve_die_ref,
     resolve_type_die as _resolve_type_die,
 )
@@ -142,33 +137,6 @@ _PRUNE_TAGS: frozenset[str] = BASE_PRUNE_TAGS
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
-
-def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
-    """Extract Sprint 4 metadata from *so_path*.
-
-    Returns empty AdvancedDwarfMetadata (has_dwarf=False) if binary has no
-    debug info or cannot be parsed. Never raises.
-    """
-    try:
-        with open(so_path, "rb") as f:
-            elf = ELFFile(f)  # type: ignore[no-untyped-call]
-            if not has_real_dwarf_info(elf):
-                return AdvancedDwarfMetadata()
-            meta = AdvancedDwarfMetadata(has_dwarf=True)
-            meta.target_arch = _normalize_arch(elf)
-            dwarf = _dsi.open_indexed_dwarf_info(elf)
-            for CU in dwarf.iter_CUs():
-                try:
-                    _process_cu(CU, meta)
-                except (ELFError, OSError, ValueError, KeyError) as exc:
-                    log.warning("parse_advanced_dwarf: skipping CU: %s", exc)
-            # Parse .eh_frame / .debug_frame CFA register convention (#117)
-            _parse_frame_registers(elf, dwarf, meta)
-            return meta
-    except (ELFError, OSError, ValueError) as exc:
-        log.warning("parse_advanced_dwarf: failed %s: %s", so_path, exc)
-        return AdvancedDwarfMetadata()
 
 
 # ---------------------------------------------------------------------------
@@ -731,54 +699,6 @@ def _decode_member_location(member_die: Any) -> int:
 # DW_AT_producer parsing
 # ---------------------------------------------------------------------------
 
-# Register name tables for common architectures (pyelftools register numbers)
-_REG_NAMES_X86_64: dict[int, str] = {
-    0: "rax",
-    1: "rdx",
-    2: "rcx",
-    3: "rbx",
-    4: "rsi",
-    5: "rdi",
-    6: "rbp",
-    7: "rsp",
-    8: "r8",
-    9: "r9",
-    10: "r10",
-    11: "r11",
-    12: "r12",
-    13: "r13",
-    14: "r14",
-    15: "r15",
-    16: "rip",
-}
-_REG_NAMES_X86: dict[int, str] = {
-    0: "eax",
-    1: "ecx",
-    2: "edx",
-    3: "ebx",
-    4: "esp",
-    5: "ebp",
-    6: "esi",
-    7: "edi",
-    8: "eip",
-}
-_REG_NAMES_AARCH64: dict[int, str] = {
-    **{i: f"x{i}" for i in range(31)},
-    31: "sp",
-    32: "pc",
-}
-
-
-def _reg_name(reg_num: int, arch: str) -> str:
-    """Convert a register number to a human-readable name for the given arch."""
-    if arch in ("x64", "x86_64"):
-        return _REG_NAMES_X86_64.get(reg_num, f"reg{reg_num}")
-    if arch in ("x86", "i386"):
-        return _REG_NAMES_X86.get(reg_num, f"reg{reg_num}")
-    if arch in ("aarch64", "arm64"):
-        return _REG_NAMES_AARCH64.get(reg_num, f"reg{reg_num}")
-    return f"reg{reg_num}"
-
 
 def _normalize_arch(elf: Any) -> str:
     """Normalize ELF machine arch string to internal arch_key for register lookup."""
@@ -791,164 +711,6 @@ def _normalize_arch(elf: Any) -> str:
         "AArch64": "aarch64",
         "aarch64": "aarch64",
     }.get(arch, arch)
-
-
-def _build_addr_to_sym(elf: Any) -> dict[int, str]:
-    """Build address → symbol name map from .dynsym (preferred) and .symtab.
-
-    .dynsym is iterated first to populate exported symbol names.
-    .symtab is iterated second but does NOT overwrite existing .dynsym entries:
-    .dynsym contains only exported ABI symbols; .symtab additionally contains
-    local/static symbols that could shadow exported names at the same address.
-
-    Only STB_GLOBAL and STB_WEAK symbols at non-zero addresses are included.
-    """
-    addr_to_sym: dict[int, str] = {}
-    for section_name in (".dynsym", ".symtab"):
-        sect = elf.get_section_by_name(section_name)
-        if sect is None:
-            continue
-        for sym in sect.iter_symbols():
-            st_value = sym.entry.st_value
-            bind = sym.entry.st_info.bind
-            if bind in ("STB_GLOBAL", "STB_WEAK") and st_value > 0:
-                # .dynsym entries take priority — do not overwrite with .symtab
-                if st_value not in addr_to_sym:
-                    addr_to_sym[st_value] = sym.name
-    return addr_to_sym
-
-
-def _get_cfi_source(dwarf: Any) -> Any:
-    """Return CFI entry iterator, preferring .eh_frame over .debug_frame."""
-    try:
-        src = dwarf.get_EH_CFI_entries()
-        if src is not None:
-            return src
-    except (AttributeError, ELFError):
-        pass
-    try:
-        return dwarf.get_CFI_entries()
-    except (AttributeError, ELFError):
-        return None
-
-
-def _extract_cfa_reg_from_fde(entry: Any, arch_key: str) -> str | None:
-    """Extract the dominant CFA register name from an FDE.
-
-    Returns the register name string (e.g. 'rsp', 'rbp') or None if not found.
-
-    Heuristic:
-    - Build a sequence of (pc, reg_num) rows where CFA is available.
-    - Select the modal CFA register across decoded rows (most frequent), which
-      captures the settled function-body convention and avoids epilogue bias.
-    - Break ties by selecting the register from the highest-PC row among tied
-      candidates (preserves post-prologue behavior for 2-row entry/body tables).
-    """
-    try:
-        decoded = entry.get_decoded()
-        if not decoded.table:
-            return None
-
-        regs_by_pc: list[tuple[int, int]] = []
-        for row in decoded.table:
-            cfa = row.get("cfa")
-            if cfa is None:
-                continue
-            cfa_reg = getattr(cfa, "reg", None)
-            if cfa_reg is None:
-                continue
-            regs_by_pc.append((int(row.get("pc", 0)), int(cfa_reg)))
-
-        if not regs_by_pc:
-            return None
-
-        counts = collections.Counter(reg for _, reg in regs_by_pc)
-        max_count = max(counts.values())
-        tied_regs = {reg for reg, cnt in counts.items() if cnt == max_count}
-        dominant_reg = max((pc, reg) for pc, reg in regs_by_pc if reg in tied_regs)[1]
-
-        return _reg_name(dominant_reg, arch_key)
-    except (ELFError, OSError, ValueError, KeyError, IndexError):
-        return None
-
-
-def _parse_frame_registers(elf: Any, dwarf: Any, meta: AdvancedDwarfMetadata) -> None:
-    """Extract CFA register convention + callee-saved regs for exported functions.
-
-    For each FDE in .eh_frame / .debug_frame:
-    - Records the dominant CFA register (frame_registers): rbp/rsp drift.
-    - Records callee-saved register fingerprint (callee_saved_regs): the set of
-      registers spilled in the prologue via DW_CFA_offset/DW_CFA_rel_offset.
-
-    Callee-saved fingerprint heuristic for calling-convention detection:
-      x86-64 SysV ABI  callee-saved: rbx, rbp, r12–r15
-      x86-64 ms_abi    callee-saved: rbx, rbp, rdi, rsi, r12–r15, xmm6–xmm15
-    Presence of rdi or rsi in the saved-register set is a reliable ELF-level
-    signal that the function uses ms_abi even when DW_AT_calling_convention is
-    absent (GCC does not emit this attribute for __attribute__((ms_abi))).
-
-    Graceful: any parsing error is logged/skipped. Never raises.
-    """
-    try:
-        arch_key = _normalize_arch(elf)
-        addr_to_sym = _build_addr_to_sym(elf)
-        cfi_src = _get_cfi_source(dwarf)
-        if cfi_src is None:
-            return
-
-        for entry in cfi_src:
-            try:
-                if entry.__class__.__name__ != "FDE":
-                    continue
-                pc_begin: int = entry["initial_location"]
-                sym_name = addr_to_sym.get(pc_begin, "")
-                if not sym_name:
-                    continue
-                reg = _extract_cfa_reg_from_fde(entry, arch_key)
-                if reg is not None:
-                    meta.frame_registers[sym_name] = reg
-                # Extract callee-saved register fingerprint from prologue
-                saved = _extract_callee_saved_regs(entry, arch_key)
-                if saved is not None:
-                    meta.callee_saved_regs[sym_name] = saved
-            except (ELFError, OSError, ValueError, KeyError, IndexError) as exc:
-                log.debug("_parse_frame_registers: skipping FDE: %s", exc)
-
-    except (ELFError, OSError, ValueError) as exc:
-        log.warning("_parse_frame_registers: failed: %s", exc)
-
-
-def _extract_callee_saved_regs(entry: Any, arch_key: str) -> frozenset[str] | None:
-    """Extract the set of register names saved in the function prologue.
-
-    Uses DW_CFA_offset and DW_CFA_rel_offset rules (register is spilled to stack)
-    to identify callee-saved registers.
-
-    Returns:
-    - frozenset[str] on successful decode (including empty set), or
-    - None when decoding failed and no trustworthy data is available.
-    """
-    try:
-        decoded = entry.get_decoded()
-        if not decoded.table:
-            return frozenset()
-
-        saved: set[str] = set()
-        for row in decoded.table:
-            for reg_key, rule in row.items():
-                if reg_key in ("pc", "cfa"):
-                    continue
-                # rule is an object with .type; "offset" means register is saved
-                rule_type = getattr(rule, "type", None)
-                if rule_type and str(rule_type).lower() in (
-                    "offset",
-                    "reg_rule_offset",
-                ):
-                    if isinstance(reg_key, int):
-                        saved.add(_reg_name(reg_key, arch_key))
-        return frozenset(saved)
-    except Exception:  # noqa: BLE001
-        return None
 
 
 def _parse_producer(producer: str) -> ToolchainInfo:
@@ -1014,40 +776,6 @@ def _diff_calling_conventions(
         for fname in (old_cc_keys & new_cc_keys)
         if old_meta.calling_conventions[fname] != new_meta.calling_conventions[fname]
     }
-    return results, already_reported_cc
-
-
-def _diff_callee_saved_regs(
-    old_meta: AdvancedDwarfMetadata,
-    new_meta: AdvancedDwarfMetadata,
-    already_reported_cc: set[str],
-) -> tuple[list[tuple[str, str, str, str | None, str | None]], set[str]]:
-    """Diff ELF CFI callee-saved fingerprint. Returns (results, updated already_reported_cc)."""
-    results: list[tuple[str, str, str, str | None, str | None]] = []
-    old_saved_keys = set(old_meta.callee_saved_regs)
-    new_saved_keys = set(new_meta.callee_saved_regs)
-    already_reported_cc = set(already_reported_cc)
-    _MS_ABI_MARKERS = frozenset(("rdi", "rsi"))
-    for fname in sorted((old_saved_keys & new_saved_keys) - already_reported_cc):
-        old_saved = old_meta.callee_saved_regs[fname]
-        new_saved = new_meta.callee_saved_regs[fname]
-        if old_saved != new_saved:
-            old_has_ms_hint = bool(old_saved & _MS_ABI_MARKERS)
-            new_has_ms_hint = bool(new_saved & _MS_ABI_MARKERS)
-            if old_has_ms_hint == new_has_ms_hint:
-                continue
-            results.append(
-                (
-                    "calling_convention_changed",
-                    fname,
-                    f"Calling convention changed (ELF CFI fallback): {fname} "
-                    f"(saved regs: {sorted(old_saved)} → {sorted(new_saved)}) "
-                    f"(ms_abi/sysv_abi drift inferred from CFI saved regs)",
-                    ",".join(sorted(old_saved)),
-                    ",".join(sorted(new_saved)),
-                )
-            )
-            already_reported_cc.add(fname)
     return results, already_reported_cc
 
 
@@ -1309,30 +1037,6 @@ def _diff_wchar_flags(
     ]
 
 
-def _diff_frame_registers(
-    old_meta: AdvancedDwarfMetadata,
-    new_meta: AdvancedDwarfMetadata,
-) -> list[tuple[str, str, str, str | None, str | None]]:
-    """Diff frame/CFA register usage. Returns results list."""
-    results: list[tuple[str, str, str, str | None, str | None]] = []
-    old_fr_keys = set(old_meta.frame_registers)
-    new_fr_keys = set(new_meta.frame_registers)
-    for fname in sorted(old_fr_keys & new_fr_keys):
-        old_reg = old_meta.frame_registers[fname]
-        new_reg = new_meta.frame_registers[fname]
-        if old_reg != new_reg:
-            results.append(
-                (
-                    "frame_register_changed",
-                    fname,
-                    f"Frame/CFA register changed: {fname} ({old_reg} → {new_reg})",
-                    old_reg,
-                    new_reg,
-                )
-            )
-    return results
-
-
 def diff_advanced_dwarf(
     old_meta: AdvancedDwarfMetadata,
     new_meta: AdvancedDwarfMetadata,
@@ -1345,25 +1049,19 @@ def diff_advanced_dwarf(
         return []
 
     cc_results, already_reported_cc = _diff_calling_conventions(old_meta, new_meta)
-    csr_results, already_reported_cc = _diff_callee_saved_regs(
-        old_meta, new_meta, already_reported_cc
-    )
     trait_results = _diff_value_abi_traits(old_meta, new_meta, already_reported_cc)
     pack_results = _diff_struct_packing(old_meta, new_meta)
     flag_results = _diff_toolchain_flags(old_meta, new_meta)
     vec_results = _diff_vector_abi_flags(old_meta, new_meta)
     wchar_results = _diff_wchar_flags(old_meta, new_meta)
-    frame_results = _diff_frame_registers(old_meta, new_meta)
 
     return (
         cc_results
-        + csr_results
         + trait_results
         + pack_results
         + flag_results
         + vec_results
         + wchar_results
-        + frame_results
     )
 
 

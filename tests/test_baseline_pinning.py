@@ -83,9 +83,9 @@ class TestSchemaV4:
         try:
             save_snapshot(snap, tmp)
             # Verify JSON on disk has provenance
-            from abicheck.serialization import load_snapshot_document
+            from _snapshot_document_reader import read_snapshot_document
 
-            raw = load_snapshot_document(tmp)
+            raw = read_snapshot_document(tmp)
             assert raw["git_commit"] == "deadbeef"
             assert raw["schema_version"] == SCHEMA_VERSION
 

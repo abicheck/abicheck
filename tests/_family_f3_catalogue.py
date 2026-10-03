@@ -863,10 +863,6 @@ def entity_id_collisions() -> list[str]:
             ident_mod.entity_id_for_type(s_lib, "Point"),
             ident_mod.entity_id_for_type(s_other, "Point"),
         ),
-        "two anonymous types": (
-            ident_mod.entity_id_for_type(s_lib, "", anonymous_ordinal=0),
-            ident_mod.entity_id_for_type(s_lib, "", anonymous_ordinal=1),
-        ),
         "enum same leaf other namespace": (
             ident_mod.entity_id_for_enum(s_lib, "Mode"),
             ident_mod.entity_id_for_enum(s_other, "Mode"),

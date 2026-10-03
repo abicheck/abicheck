@@ -264,9 +264,9 @@ def _dump_via_cli(
         ],
     )
     assert result.exit_code == 0, result.output
-    from abicheck.serialization import load_snapshot_document
+    from _snapshot_document_reader import read_snapshot_document
 
-    return load_snapshot_document(baseline)
+    return read_snapshot_document(baseline)
 
 
 def _dump_via_typed_api(

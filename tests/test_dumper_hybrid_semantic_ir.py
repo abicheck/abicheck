@@ -244,8 +244,8 @@ class TestCtorDtorSyntheticKeyRewritePropagation:
                 functions=[clang_ctor],
             ),
         )
-        assert merged.func_by_mangled(synthetic) is None
-        assert merged.func_by_mangled(real_mangled) is not None
+        assert merged.function_map.get(synthetic) is None
+        assert merged.function_map.get(real_mangled) is not None
         assert merged.canonical_ir is not None
         # One occurrence, under the real (rewritten) key -- not two, and
         # not left stale under the retired synthetic one.

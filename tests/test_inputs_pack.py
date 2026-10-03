@@ -525,9 +525,9 @@ def test_write_snapshot_output_embeds_inputs_pack(tmp_path: Path) -> None:
     out = tmp_path / "baseline.json"
     _write_snapshot_output(snap, out, inputs_pack=pack)
 
-    from abicheck.serialization import load_snapshot_document
+    from _snapshot_document_reader import read_snapshot_document
 
-    d = load_snapshot_document(out)
+    d = read_snapshot_document(out)
     assert "build_source" in d, "embedded L3/L4/L5 facts should ride inline"
     cov = d["build_source"]["source_abi"]["coverage"]
     assert cov.get("matched_symbols", 0) >= 1

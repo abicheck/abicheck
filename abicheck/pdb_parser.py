@@ -34,6 +34,7 @@ from __future__ import annotations
 import logging
 import math
 import struct
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -757,6 +758,27 @@ class CvBitfield:
     position: int  # bit position
 
 
+def _link_forward_refs(records: Mapping[int, CvStruct | CvEnum]) -> dict[int, int]:
+    """Forward-ref type index -> the definition it names, within one kind.
+
+    The *first* complete definition of a name (in type-index order) wins,
+    the same ODR rule ``pdb_metadata`` applies when it picks a record's
+    canonical layout, so a member typed through a forward ref reports that
+    layout's size and not a later duplicate's. Structs and enums are linked
+    separately: a struct and an enum may share a name.
+    """
+    first_def: dict[str, int] = {}
+    for ti in sorted(records):
+        rec = records[ti]
+        if not rec.is_forward_ref:
+            first_def.setdefault(rec.name, ti)
+    return {
+        ti: first_def[rec.name]
+        for ti, rec in records.items()
+        if rec.is_forward_ref and rec.name in first_def
+    }
+
+
 class TypeDatabase:
     """Indexed collection of parsed CodeView type records.
 
@@ -801,22 +823,9 @@ class TypeDatabase:
                     exc,
                 )
 
-        # Build forward-ref → definition mapping in 2 passes:
-        # Pass 1: collect all definitions (structs + enums) by name
-        name_to_def: dict[str, int] = {}
-        for ti, s in self._structs.items():
-            if not s.is_forward_ref:
-                name_to_def[s.name] = ti
-        for ti, e in self._enums.items():
-            if not e.is_forward_ref:
-                name_to_def[e.name] = ti
-        # Pass 2: link forward refs to definitions (structs + enums)
-        for ti, s in self._structs.items():
-            if s.is_forward_ref and s.name in name_to_def:
-                self._fwd_to_def[ti] = name_to_def[s.name]
-        for ti, e in self._enums.items():
-            if e.is_forward_ref and e.name in name_to_def:
-                self._fwd_to_def[ti] = name_to_def[e.name]
+        self._fwd_to_def = _link_forward_refs(self._structs) | _link_forward_refs(
+            self._enums
+        )
 
     def _parse_record(self, rec: TpiRecord) -> None:
         d = rec.data
@@ -1192,14 +1201,14 @@ class TypeDatabase:
     # --- Public query API ---
 
     def resolve_struct(self, ti: int) -> CvStruct | None:
-        """Resolve a type index to a CvStruct (following forward refs)."""
-        real_ti = self._fwd_to_def.get(ti, ti)
-        return self._structs.get(real_ti)
+        """Resolve a type index to a CvStruct, following a forward ref to the
+        definition :func:`_link_forward_refs` chose; an unlinked forward ref
+        resolves to itself."""
+        return self._structs.get(self._fwd_to_def.get(ti, ti)) or self._structs.get(ti)
 
     def resolve_enum(self, ti: int) -> CvEnum | None:
-        """Resolve a type index to a CvEnum (following forward refs)."""
-        real_ti = self._fwd_to_def.get(ti, ti)
-        return self._enums.get(real_ti)
+        """:meth:`resolve_struct` for enums."""
+        return self._enums.get(self._fwd_to_def.get(ti, ti)) or self._enums.get(ti)
 
     def get_fieldlist(self, ti: int) -> list[Any]:
         """Get the parsed fieldlist members for type index *ti*."""
@@ -1220,12 +1229,6 @@ class TypeDatabase:
     def get_bitfield(self, ti: int) -> CvBitfield | None:
         """Return the CvBitfield for type index *ti*, or None."""
         return self._bitfields.get(ti)
-
-    def all_procedures(self) -> dict[int, CvProcedure]:
-        return self._procedures
-
-    def all_mfunctions(self) -> dict[int, CvMemberFunction]:
-        return self._mfunctions
 
     def type_name(self, ti: int, depth: int = 0) -> str:
         """Resolve a type index to a human-readable name."""
@@ -1261,13 +1264,11 @@ class TypeDatabase:
                 return f"{base} *"
             return f"{base} *"
 
-        s = self._structs.get(ti)
+        s = self.resolve_struct(ti)
         if s:
-            real_ti = self._fwd_to_def.get(ti, ti)
-            real = self._structs.get(real_ti, s)
-            return real.name
+            return s.name
 
-        e = self._enums.get(ti)
+        e = self.resolve_enum(ti)
         if e:
             return f"enum {e.name}"
 
@@ -1323,11 +1324,9 @@ class TypeDatabase:
                 return 8
             return 8  # default pointer size
 
-        s = self._structs.get(ti)
+        s = self.resolve_struct(ti)
         if s:
-            real_ti = self._fwd_to_def.get(ti, ti)
-            real = self._structs.get(real_ti, s)
-            return real.byte_size
+            return s.byte_size
 
         p = self._pointers.get(ti)
         if p:
@@ -1345,7 +1344,7 @@ class TypeDatabase:
         if bf:
             return self.type_size(bf.underlying_ti, depth + 1)
 
-        e = self._enums.get(ti)
+        e = self.resolve_enum(ti)
         if e:
             return self.type_size(e.underlying_type_ti, depth + 1)
 
@@ -1361,10 +1360,10 @@ class TypeDatabase:
         Resolves both member-function (LF_MFUNCTION) and free-function
         (LF_PROCEDURE) type records; ``None`` for anything else.
         """
-        mf = self._mfunctions.get(ti)
+        mf = self.get_mfunction(ti)
         if mf is not None:
             return mf.calling_convention
-        proc = self._procedures.get(ti)
+        proc = self.get_procedure(ti)
         if proc is not None:
             return proc.calling_convention
         return None

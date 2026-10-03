@@ -130,7 +130,7 @@ class _FakeExtractor:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
 
-    def extract(self, cu, *, public_header_roots, target_id):  # noqa: ANN001
+    def extract(self, cu, *, public_header_roots, target_id=""):  # noqa: ANN001
         if self.fail:
             raise SourceExtractionError("boom")
         return SourceAbiTu(
@@ -143,11 +143,11 @@ def _cu(uid: str = "u1") -> CompileUnit:
 
 
 def test_extract_one_returns_tu_or_diagnostic() -> None:
-    tu, err = sr._extract_one(_FakeExtractor(), [], "", _cu())
+    tu, err = sr._extract_one(_FakeExtractor(), [], _cu())
     assert err is None
     assert isinstance(tu, SourceAbiTu)
 
-    tu2, err2 = sr._extract_one(_FakeExtractor(fail=True), [], "", _cu("u2"))
+    tu2, err2 = sr._extract_one(_FakeExtractor(fail=True), [], _cu("u2"))
     assert tu2 is None
     assert err2 is not None and "u2" in err2
 
@@ -155,7 +155,7 @@ def test_extract_one_returns_tu_or_diagnostic() -> None:
 def test_extract_worker_partial_is_picklable() -> None:
     # ProcessPoolExecutor pickles the worker + its bound args; this is the
     # invariant that lets the process executor exist at all.
-    worker = partial(sr._extract_one, _FakeExtractor(), ["/inc"], "tgt")
+    worker = partial(sr._extract_one, _FakeExtractor(), ["/inc"])
     # nosec B301 - round-tripping our own in-process object IS the test: it
     # proves ProcessPoolExecutor can ship the worker to a child process.
     restored = pickle.loads(pickle.dumps(worker))  # noqa: S301  # nosec B301

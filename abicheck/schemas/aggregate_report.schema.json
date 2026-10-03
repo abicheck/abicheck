@@ -184,7 +184,7 @@
         "source": {
           "type": "string",
           "enum": ["manifest", "run-plan", "explicit", "default"],
-          "description": "\"manifest\"/\"run-plan\" when that source's own gate block supplied at least one of the two fields above; \"explicit\" when a direct Python-API caller of aggregate() forced a value (no CLI spelling for this); \"default\" otherwise (including --discovered-only mode, where neither policy is applicable)."
+          "description": "\"manifest\"/\"run-plan\" when that source's own gate block supplied at least one of the two fields above; \"default\" otherwise (including --discovered-only mode, where neither policy is applicable). \"explicit\" is no longer emitted: it marked a direct Python-API caller of aggregate() forcing a value, an override that has been removed. It stays accepted so an aggregate report written by an older version still validates."
         }
       }
     },

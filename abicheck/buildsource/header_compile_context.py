@@ -1270,10 +1270,6 @@ class HeaderCompileContextResolution:
     matched_units: tuple[CompileUnit, ...] = ()
 
     @property
-    def matched_unit_count(self) -> int:
-        return len(self.matched_units)
-
-    @property
     def matched(self) -> bool:
         return self.context is not None
 

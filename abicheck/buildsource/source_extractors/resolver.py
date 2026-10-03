@@ -39,7 +39,7 @@ the whole resolver is unit-testable without clang/castxml installed.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -180,8 +180,6 @@ def resolve_source_extractor(
     requested: str,
     *,
     available: Callable[[str], bool] | None = None,
-    fallback: bool = True,
-    preference: Iterable[str] = AUTO_PREFERENCE,
 ) -> SourceExtractorChoice:
     """Pick a source-ABI backend, evaluating capability + availability.
 
@@ -189,19 +187,16 @@ def resolve_source_extractor(
         requested: ``"auto"``, ``"clang"``, ``"castxml"``, or ``"android"``.
         available: probe ``name -> bool`` (e.g. ``backend.available()``); when
             ``None`` every backend is assumed available.
-        fallback: when True (default), an unavailable explicit request falls
-            back along the capability-ordered chain rather than failing. When
-            False, an unavailable explicit request yields ``selected=None`` so
-            the caller can hard-fail / surface the unavailability verbatim.
-        preference: capability-ordered chain consulted for ``auto`` and as the
-            fallback tail (defaults to clang → castxml).
+
+    An unavailable explicit request falls back along :data:`AUTO_PREFERENCE`
+    (the capability-ordered chain ``auto`` also consults) rather than failing.
 
     Returns:
         A :class:`SourceExtractorChoice` describing the selection, any skipped
         backends, whether a fallback occurred, and the chosen backend's gaps.
     """
     requested = (requested or AUTO).lower()
-    pref = [p for p in preference if p in PROFILES]
+    pref = list(AUTO_PREFERENCE)
 
     # Android is only ever used when explicitly requested (needs a dump file).
     if requested == ANDROID:
@@ -227,11 +222,7 @@ def resolve_source_extractor(
         # semantics for a castxml-specific run. So castxml-absent yields
         # selected=None (unavailable) rather than clang.
         req_rank = PROFILES[requested].rank
-        tail = (
-            [p for p in pref if p != requested and PROFILES[p].rank < req_rank]
-            if fallback
-            else []
-        )
+        tail = [p for p in pref if p != requested and PROFILES[p].rank < req_rank]
         chain = [requested] + tail
         lead = requested
     else:

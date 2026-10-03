@@ -122,9 +122,9 @@ def consumer_impact_explanations(
         join_consumer_graph,
     )
 
-    # No `symbols=` narrowing needed: _scope_app_symbols_to_library already
-    # reduced app_reqs.undefined_symbols to what this library actually
-    # exports, which is exactly the scoping that parameter exists to apply.
+    # _scope_app_symbols_to_library already reduced app_reqs.undefined_symbols
+    # to what this library actually exports, which is the scoping
+    # build_consumer_graph requires of its input.
     consumer_graph = build_consumer_graph(app_path.name, app_reqs)
     joined = join_consumer_graph(library_graph, consumer_graph)
     return joined, explain_required_symbols(joined, symbols, consumer=app_path.name)

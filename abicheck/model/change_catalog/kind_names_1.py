@@ -325,11 +325,6 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "-fshort-enums/-fpack-struct drift",
     ),
     (
-        "FRAME_REGISTER_CHANGED",
-        "frame_register_changed",
-        "CFA/frame-pointer convention changed (#117)",
-    ),
-    (
         "VECTOR_ABI_CHANGED",
         "vector_abi_changed",
         "Vector-function (SIMD clone) ABI selection drifted between versions: -- the vectorized call variants of a function resolve to a different -- ABI. Detected from vector-ABI compiler flags in DW_AT_producer -- (-mveclibabi= GCC, -fveclib= clang, -vecabi= Intel-style).",

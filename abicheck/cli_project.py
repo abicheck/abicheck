@@ -68,7 +68,7 @@ from .buildsource.validation_input import (
     classify_validation_input,
 )
 from .cli import main
-from .cli_options import export_options, verbose_option
+from .cli_options import export_options, policy_option, verbose_option
 from .frontends.cli.options.export import ExportSet
 from .frontends.cli.project_capture_variants import capture_variants_cmd
 from .frontends.cli.runtime import _setup_verbosity, emit_export_set
@@ -656,21 +656,14 @@ def project_plan_cmd(
         "AbiSnapshot.version is used as its release label."
     ),
 )
-@click.option(
-    "--policy",
-    default="strict_abi",
-    show_default=True,
-    help=(
-        "Policy profile passed to each pairwise comparison in the chain "
-        "(same values as `compare --policy`)."
-    ),
-)
+@policy_option
 @export_options(["json", "text", "html"], default_format="json")
 @verbose_option
 def project_history_cmd(
     snapshots: tuple[Path, ...],
     versions: tuple[str, ...],
     policy: str,
+    policy_file_path: Path | None,
     exports: ExportSet,
     verbose: bool,
 ) -> None:
@@ -702,6 +695,11 @@ def project_history_cmd(
     appear in this one). The first pair in a chain has no earlier comparison
     to classify against, so its own findings read ``not_evaluated``.
 
+    ``--policy`` takes what ``compare --policy`` takes, and every pairwise
+    comparison runs under it. A policy document's ``versioning:`` block also
+    populates ``deprecation_compliance``: each removal is checked against its
+    ``deprecation_window``. Without one, that list stays empty.
+
     The report's ``coverage.gaps`` section flags a suspected missing
     intermediate release: two adjacent, SemVer-parseable labels that are not
     consecutive under the ordinary major/minor/patch increment rule. A
@@ -724,11 +722,15 @@ def project_history_cmd(
     """
     _setup_verbosity(verbose)
 
+    from .frontends.cli.options.params import _load_suppression_and_policy
+
+    _, policy_file = _load_suppression_and_policy(None, policy, policy_file_path)
     try:
         result = run_history_request(
             [str(p) for p in snapshots],
             versions=list(versions) if versions else None,
             policy=policy,
+            policy_file=policy_file,
         )
     except HistoryError as exc:
         raise click.UsageError(str(exc)) from exc

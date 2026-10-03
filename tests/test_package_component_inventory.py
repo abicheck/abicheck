@@ -19,8 +19,7 @@ Three primitives get their own contract stated as invariants rather than as
 one worked example each, per the repository's "Primitive-level property
 tests" rule:
 
-* :class:`~abicheck.model.package_inventory.PackageInventory` and
-  :func:`~abicheck.model.package_inventory.merge_unproduced` -- a small
+* :class:`~abicheck.model.package_inventory.PackageInventory` -- a small
   reusable record with a completeness flag whose whole job is to keep
   "declared", "complete" and "unproduced" from collapsing onto each other;
 * :func:`~abicheck.package.package_component_inventory` -- exercised through
@@ -36,7 +35,6 @@ tests" rule:
 
 from __future__ import annotations
 
-import itertools
 import tarfile
 import zipfile
 from pathlib import Path
@@ -47,7 +45,6 @@ from abicheck.model.package_inventory import (
     ComponentKind,
     PackageComponent,
     PackageInventory,
-    merge_unproduced,
 )
 from abicheck.model.scope_acquisition import (
     AcquisitionState,
@@ -169,65 +166,6 @@ class TestPackageInventoryProperties:
             unproduced={"libgone.so": "why"},
         )
         assert PackageInventory.from_dict(inv.to_dict()) == inv
-
-
-class TestMergeUnproducedProperties:
-    """`merge_unproduced`'s contract: declared-minus-produced, and nothing
-    else -- in particular it never touches `complete`, never invents a
-    component, and never depends on input order."""
-
-    @pytest.mark.parametrize("produced_count", range(0, 5))
-    def test_unproduced_is_exactly_declared_minus_produced(
-        self, produced_count: int
-    ) -> None:
-        declared = [f"lib{i}.so" for i in range(4)]
-        inv = PackageInventory(
-            components=tuple(
-                PackageComponent(member=m, path=f"lib/{m}") for m in declared
-            ),
-            complete=True,
-            provenance="p",
-        )
-        for produced in itertools.combinations(declared, produced_count):
-            merged = merge_unproduced(inv, produced)
-            assert merged is not None
-            assert set(merged.unproduced) == set(declared) - set(produced)
-            # Never rewrites what the container proved, nor what it declared.
-            assert merged.complete is inv.complete
-            assert merged.components == inv.components
-            assert merged.provenance == inv.provenance
-
-    def test_order_and_extra_produced_members_do_not_matter(self) -> None:
-        inv = PackageInventory(
-            components=(
-                PackageComponent(member="a.so", path="a.so"),
-                PackageComponent(member="b.so", path="b.so"),
-            ),
-            complete=True,
-        )
-        first = merge_unproduced(inv, ["b.so", "unrelated.so"])
-        second = merge_unproduced(inv, ["unrelated.so", "b.so"])
-        assert first is not None and second is not None
-        assert set(first.unproduced) == {"a.so"} == set(second.unproduced)
-
-    def test_a_non_library_component_is_never_unproduced(self) -> None:
-        """Only comparison operands can be *expected but not produced*: a
-        licence file the container ships is not a member of the release's
-        component set at all."""
-        inv = PackageInventory(
-            components=(
-                PackageComponent(
-                    member="LICENSE", path="LICENSE", kind=ComponentKind.OTHER
-                ),
-            ),
-            complete=True,
-        )
-        merged = merge_unproduced(inv, [])
-        assert merged is not None
-        assert merged.unproduced == {}
-
-    def test_none_passes_through(self) -> None:
-        assert merge_unproduced(None, ["anything"]) is None
 
 
 class TestPackageComponentInventoryFromRealContainers:

@@ -1287,7 +1287,6 @@ def attach_build_context_for_parsed_headers(
     headers: Iterable[Path],
     *,
     live_elf_parse: bool,
-    compile_db: Path | None = None,
     build_info: Path | None = None,
     user_gcc_option_tokens: Iterable[str] = (),
     user_gcc_options: str | None = None,
@@ -1309,11 +1308,9 @@ def attach_build_context_for_parsed_headers(
     Returns whether the collector actually ran. Every gate is a real one, and
     each is recorded here rather than at three call sites:
 
-    * A compile database must be resolvable -- either supplied directly as
-      *compile_db* (the ELF ``dump`` CLI already resolved one) or named by
-      *build_info* (:func:`compile_db_from_build_info`; a pack or a Bazel
-      jsonproto routes through a different adapter and yields ``None``).
-      *compile_db* wins when both are given.
+    * A compile database must be resolvable from *build_info*
+      (:func:`compile_db_from_build_info`; a pack or a Bazel jsonproto routes
+      through a different adapter and yields ``None``).
     * At least one header must survive :func:`expand_collector_headers`. The
       collector has nothing to scan otherwise -- a headerless ``--build-info``
       run is an ordinary L3-only dump, and ``--depth binary`` clears the header
@@ -1360,9 +1357,7 @@ def attach_build_context_for_parsed_headers(
     collector_headers = expand_collector_headers(headers)
     if not collector_headers:
         return False
-    compile_db_path = compile_db or compile_db_from_build_info(
-        build_info, tuple(collector_headers)
-    )
+    compile_db_path = compile_db_from_build_info(build_info, tuple(collector_headers))
     if compile_db_path is None:
         return False
     attach_build_context(

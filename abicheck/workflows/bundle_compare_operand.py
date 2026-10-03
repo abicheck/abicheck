@@ -727,10 +727,6 @@ class BundleCompareRequest:
     old_is_stored: bool
     new_is_stored: bool
 
-    @property
-    def any_stored(self) -> bool:
-        return self.old_is_stored or self.new_is_stored
-
 
 def classify_bundle_compare_operands(
     old_input: Path, new_input: Path

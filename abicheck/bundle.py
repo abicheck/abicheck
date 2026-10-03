@@ -643,20 +643,10 @@ def _stored_library_identity(
 ) -> tuple[Path | None, tuple[str, ...], int]:
     """Best-effort real on-disk filename + filesystem aliases for a stored
     `ProjectSnapshot` sub-package directory at *path*, read from its sole
-    artifact's `ArtifactRef.native_identity` -- the same
-    `library_filename`/`filesystem_aliases` keys `bundle_facts_store.py`'s
-    own writer stamps there, defined in the shared leaf module `storage.
-    native_identity_aliases` rather than read back from `bundle_facts_store`
-    itself: that module is `workflows`-classified and imports `bundle_facts`
-    at module load, which reaches back into this module via a function-local
-    import (`bundle_snapshot_from_facts`) -- so a `bundle ->
-    bundle_facts_store` edge here would close a real
-    `bundle -> bundle_facts_store -> bundle_facts -> bundle` cycle
-    (`scripts/check_ai_readiness.py`'s `import-cycle-growth` check, see
-    `storage/native_identity_aliases.py`'s own docstring for the full
-    account). See `bundle_facts_store.py`'s module docstring for why there
-    are two independent, not-yet-reconciled writers of this native_identity
-    contract.
+    artifact's `ArtifactRef.native_identity` -- the
+    `library_filename`/`filesystem_aliases` keys older multi-artifact packages
+    stamped there (`storage.native_identity_aliases`, which explains why the
+    keys are read-only now).
 
     *nodes_so_far*/the returned `int` thread `decode_native_identity_
     aliases`'s own aggregate JSON-node budget across every artifact a
@@ -842,7 +832,6 @@ def build_bundle_snapshot_from_metadata(
     metadata: dict[str, ElfMetadata],
     *,
     paths: dict[str, Path] | None = None,
-    root: Path | None = None,
     probe_filesystem: bool = False,
     extra_aliases: dict[str, tuple[str, ...]] | None = None,
     probe_filesystem_names: frozenset[str] | None = None,
@@ -878,17 +867,13 @@ def build_bundle_snapshot_from_metadata(
             successful parse) is dropped, the same as a non-ELF/failed
             parse is dropped there.
         paths: Optional ``{library_name: Path}`` map used only for
-            :attr:`BundleSnapshot.libraries`' values and the default
-            *root* computation (both currently used only for their
-            ``.name``/``.parent`` — see ``_detect_soname_skew``'s own
+            :attr:`BundleSnapshot.libraries`' values and the
+            :attr:`BundleSnapshot.root` computation (both currently used
+            only for their ``.name``/``.parent`` — see ``_detect_soname_skew``'s own
             ``path.name`` SONAME fallback). A name with no entry here
             synthesizes ``Path(name)``, which still gives a sensible
             ``.name`` for that same fallback when *name* is (or ends in) a
             real filename — the common case for every caller so far.
-        root: Explicit bundle root. When omitted, derived from the first
-            surviving library's resolved path's parent (matching
-            :func:`build_bundle_snapshot`'s own behavior exactly when
-            *paths* holds real filesystem paths).
         probe_filesystem: Forwarded to :func:`_compute_resolution_graph`.
             Defaults to ``False`` — this function's whole contract is
             metadata-only resolution, so even a caller-supplied *paths*
@@ -965,13 +950,11 @@ def build_bundle_snapshot_from_metadata(
             else probe_filesystem_names
         ),
     )
-    # Use the first library's parent as the root if available; otherwise empty path
+    # The first surviving library's parent is the root (matching
+    # build_bundle_snapshot's own behavior exactly when *paths* holds real
+    # filesystem paths); otherwise an empty path.
     resolved_root = (
-        root
-        if root is not None
-        else (
-            next(iter(surviving_paths.values())).parent if surviving_paths else Path()
-        )
+        next(iter(surviving_paths.values())).parent if surviving_paths else Path()
     )
     return BundleSnapshot(
         root=resolved_root,

@@ -138,8 +138,8 @@ def _families(export_names: Collection[str]) -> list[_Family]:
     return out
 
 
-def split_top_level(text: str, sep: str = ",") -> list[str]:
-    """*text* split on *sep* at bracket depth 0 (a ``pair<int, int>``
+def split_top_level(text: str) -> list[str]:
+    """*text* split on ``,`` at bracket depth 0 (a ``pair<int, int>``
     parameter stays one parameter)."""
     if not text.strip():
         return []
@@ -151,7 +151,7 @@ def split_top_level(text: str, sep: str = ",") -> list[str]:
             depth += 1
         elif ch in ">)]":
             depth = max(0, depth - 1)
-        elif ch == sep and depth == 0:
+        elif ch == "," and depth == 0:
             parts.append(text[start:i])
             start = i + 1
     parts.append(text[start:])

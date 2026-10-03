@@ -161,7 +161,13 @@ class TestJunitRootCauseMode:
         assert fail is not None
         assert fail.get("rootCauseId") is None
 
-    def test_to_junit_xml_multi_forwards_report_mode(self) -> None:
+    def test_to_junit_xml_multi_always_renders_full(self) -> None:
+        """The release fan-out, its one caller, rejects ``--view root-cause``
+        before rendering, so the multi-library renderer takes no mode and
+        never adds root-cause attributes."""
+        import inspect
+
+        assert "report_mode" not in inspect.signature(to_junit_xml_multi).parameters
         c = Change(
             kind=ChangeKind.FUNC_REMOVED,
             symbol="foo",
@@ -169,10 +175,10 @@ class TestJunitRootCauseMode:
             caused_by_type="ns::detail::Impl",
         )
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0")
-        xml = to_junit_xml_multi([(_make_result([c]), snap)], report_mode="root-cause")
+        xml = to_junit_xml_multi([(_make_result([c]), snap)])
         fail = _parse(xml).find(".//failure")
         assert fail is not None
-        assert fail.get("rootCauseId") is not None
+        assert fail.get("rootCauseId") is None
 
 
 class TestRenderOutputForwardsReportModeToJunit:

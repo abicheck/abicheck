@@ -546,7 +546,7 @@ class TestByValueFieldQualifierEndToEndDiff:
 
 class TestUnmangledCtorSyntheticKeyCvStability:
     """A castxml-unmangled constructor's synthesized snapshot key
-    (``_function_mangled_name``) must be stable across a top-level BY-VALUE
+    (``function_mangled_name``) must be stable across a top-level BY-VALUE
     cv-only parameter change: ``Widget(int)`` -> ``Widget(volatile int)`` is
     the very same real Itanium-mangled symbol (cv is dropped from a by-value
     parameter's mangling), so the key must not change either — otherwise the

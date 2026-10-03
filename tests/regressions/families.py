@@ -251,6 +251,7 @@ _F5 = tuple(
         "perf.reuse_key_normalizes_an_ordered_input",
         "perf.shared_projection_read_as_an_owned_copy",
         "perf.shared_resource_gate_keyed_on_a_per_caller_value",
+        "caching.duck_typed_key_attribute_default",
         "perf.streaming_producer_joined_at_the_encoder",
         "cache.bookkeeping_describes_a_different_set_than_it_retains",
         "concurrency.compound_cache_operation_under_fan_out",

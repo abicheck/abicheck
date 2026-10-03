@@ -86,11 +86,10 @@ BINARY_ONLY_KINDS: frozenset[str] = frozenset(
         "symbol_version_required_removed",
         "dwarf_info_missing",
         "toolchain_flag_drift",
-        # DWARF-derived calling convention and frame register changes (#117)
+        # DWARF-derived calling convention changes (#117)
         "calling_convention_changed",
         "value_abi_trait_changed",
         "struct_return_convention_changed",
-        "frame_register_changed",
         # DWARF producer-derived vector-function (SIMD clone) ABI flag drift
         "vector_abi_changed",
         # G23 Phase D2 — long-double representation flip (e.g. -mlong-double-64,

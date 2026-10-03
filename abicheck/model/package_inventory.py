@@ -51,7 +51,7 @@ copy of it is the point.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -61,7 +61,6 @@ __all__ = [
     "ComponentKind",
     "PackageComponent",
     "PackageInventory",
-    "merge_unproduced",
 ]
 
 #: Self-contained sub-object version, the convention
@@ -196,38 +195,3 @@ class PackageInventory:
                 data.get("schema_version", PACKAGE_INVENTORY_SCHEMA_VERSION)
             ),
         )
-
-
-def merge_unproduced(
-    inventory: PackageInventory | None, produced: Iterable[str]
-) -> PackageInventory | None:
-    """*inventory* with :attr:`~PackageInventory.unproduced` recomputed
-    against the members actually *produced* on disk.
-
-    The extractor declares; the discovery pass produces. A declared
-    shared-library member missing from *produced* is recorded here as
-    unproduced, which is what makes it ``EXPECTED_NOT_PRODUCED`` on the
-    acquisition record instead of vanishing -- the exact state ADR-065 S2
-    reserved and left without a producer. ``None`` passes through unchanged
-    (no inventory, nothing to reconcile).
-    """
-    if inventory is None:
-        return None
-    have = set(produced)
-    missing = {
-        c.member: (
-            f"declared by the package inventory as {c.path!r} but not present "
-            "after extraction (expected, not produced)"
-        )
-        for c in inventory.library_components
-        if c.member not in have
-    }
-    if missing == dict(inventory.unproduced):
-        return inventory
-    return PackageInventory(
-        components=inventory.components,
-        complete=inventory.complete,
-        provenance=inventory.provenance,
-        unproduced=missing,
-        schema_version=inventory.schema_version,
-    )

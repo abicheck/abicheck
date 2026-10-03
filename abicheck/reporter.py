@@ -74,16 +74,8 @@ from .reporter_markdown import (
     _VERDICT_LABEL as _VERDICT_LABEL,
     _VERDICT_MERGE_EFFECT as _VERDICT_MERGE_EFFECT,
     ShowOnlyFilter as ShowOnlyFilter,
-    _append_confidence_section as _append_confidence_section,
-    _append_policy_section as _append_policy_section,
-    _append_recommendation_section as _append_recommendation_section,
-    _append_redundancy_note as _append_redundancy_note,
-    _append_suppression_note as _append_suppression_note,
-    _build_impact_table as _build_impact_table,
-    _build_internal_rtti_note as _build_internal_rtti_note,
     _finding_id as _finding_id,
     _fmt_size as _fmt_size,
-    _footer_lines as _footer_lines,
     _format_change_md as _format_change_md,
     _group_changes_by_root_cause as _group_changes_by_root_cause,
     _resolve_scoped_gate_findings as _resolve_scoped_gate_findings,
@@ -403,7 +395,6 @@ def _scoped_only_extra_causes(
 
 def _to_json_root_cause(
     result: DiffResult,
-    indent: int = 2,
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
@@ -550,7 +541,7 @@ def _to_json_root_cause(
     return _reporter_contract_blocks.render_json_with_side_facts(
         d,
         result,
-        indent=indent,
+        indent=2,
         helpers=_SCOPED_GATE_HELPERS,
         severity_config=severity_config,
         gate=gate,
@@ -1052,7 +1043,6 @@ def _add_trailing_fields(
 
 def to_json(
     result: DiffResult,
-    indent: int = 2,
     *,
     show_only: str | None = None,
     report_mode: str = "full",
@@ -1076,7 +1066,6 @@ def to_json(
     if report_mode == "root-cause":
         return _to_json_root_cause(
             result,
-            indent=indent,
             show_only=show_only,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
@@ -1099,7 +1088,7 @@ def to_json(
         include_exit_decision=include_exit_decision,
         contract_evaluation=contract_evaluation,
     )
-    return render_json(doc, indent=indent)
+    return render_json(doc)
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {

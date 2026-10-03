@@ -47,11 +47,10 @@ class TestExplicitWithFallback:
         assert c.fell_back
         assert "fell back" in c.reason
 
-    def test_clang_no_fallback_yields_none(self):
-        c = resolve_source_extractor(
-            "clang", available=_avail("castxml"), fallback=False
-        )
+    def test_clang_with_no_backend_available_yields_none(self):
+        c = resolve_source_extractor("clang", available=_avail())
         assert c.selected is None
+        assert [n for n, _ in c.skipped] == ["clang", "castxml"]
 
     def test_castxml_does_not_upgrade_to_clang(self):
         # An explicit castxml request must stay castxml even when clang exists.

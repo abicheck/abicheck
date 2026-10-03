@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING
 import click
 
 from ..checker import ChangeKind
-from ..model.header_skip_rules import HeaderSkipRule, apply_skip_rules
 from ..policy.classification import (
     API_BREAK_KINDS as _POLICY_API_BREAK_KINDS,
     compute_verdict as _compute_verdict,
@@ -39,8 +38,6 @@ from ..policy.classification import (
 from ._errors import _compat_fail
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from ..checker import DiffResult
     from ..model import AbiSnapshot
     from ..suppression import SuppressionList
@@ -550,10 +547,10 @@ def _merge_suppression(
     return extra
 
 
-def _do_echo(msg: str, quiet: bool, *, err: bool = True) -> None:
-    """Echo a message unless quiet mode is active."""
+def _do_echo(msg: str, quiet: bool) -> None:
+    """Echo a message to stderr unless quiet mode is active."""
     if not quiet:
-        click.echo(msg, err=err)
+        click.echo(msg, err=True)
 
 
 def _detect_compiler_version(gcc_path: str | None = None) -> str:
@@ -657,15 +654,12 @@ def _resolve_headers_from_list(
     headers_list_path: Path | None,
     single_header: str | None,
     base_headers: list[Path],
-    *,
-    skip_rules: Sequence[HeaderSkipRule] = (),
 ) -> list[Path]:
     """Merge headers from -headers-list file and -header flag with descriptor headers.
 
-    *skip_rules* are compiled ABICC skip rules (see
-    :mod:`abicheck.model.header_skip_rules`) -- three real rule classes, not
-    the ``h.name in skip or str(h) in skip`` membership test this used to
-    apply, under which every tree-relative rule matched nothing.
+    Directory operands are expanded; skip rules are applied separately, by
+    ``run_inputs.resolve_and_narrow_headers``, so the universe they are
+    recorded against is the one they were applied to.
     """
     result = list(base_headers)
 
@@ -689,19 +683,12 @@ def _resolve_headers_from_list(
         if p.exists():
             result.append(p)
 
-    # Expand directory operands before filtering: a skip rule naming a header
-    # file can only match once the directory holding it has been walked.
+    # Expand directory operands before any filtering: a skip rule naming a
+    # header file can only match once the directory holding it has been
+    # walked.
     from .descriptor_expansion import expand_descriptor_headers
 
-    result = expand_descriptor_headers(result)
-
-    # Apply the skip rules: a bare name matches a basename, a rule with a
-    # separator matches at component boundaries (including descendants of a
-    # directory rule), and a metacharacter-bearing rule matches as a pattern.
-    if skip_rules:
-        result = apply_skip_rules(result, skip_rules)
-
-    return result
+    return expand_descriptor_headers(result)
 
 
 def _warn_stub_flags(quiet: bool, **kwargs: object) -> None:

@@ -100,11 +100,6 @@ class SnapshotRetention:
     old_consumers: tuple[str, ...] = ()
     new_consumers: tuple[str, ...] = ()
 
-    @property
-    def any_full(self) -> bool:
-        """Whether either side keeps a full snapshot at all."""
-        return self.old_full or self.new_full
-
     def as_counts(self) -> dict[str, object]:
         """A memory-trace-friendly record of this decision."""
         return {

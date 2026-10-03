@@ -92,7 +92,7 @@ class TestResolution:
         # output makes the NEW side full, because none reads it.
         assert got.new_full is False
         assert got.new_consumers == ()
-        assert got.any_full is old_full
+        assert (got.old_full or got.new_full) is old_full
 
     def test_the_default_retains_nothing(self) -> None:
         """A bare ``SnapshotRetention()`` is the compact-only default.
@@ -101,7 +101,7 @@ class TestResolution:
         forgets to pass one gets *less* retention, never more.
         """
         assert SnapshotRetention() == SnapshotRetention(old_full=False, new_full=False)
-        assert SnapshotRetention().any_full is False
+        assert not (SnapshotRetention().old_full or SnapshotRetention().new_full)
 
     def test_the_decision_is_recordable_for_a_memory_trace(self) -> None:
         counts = resolve_snapshot_retention(

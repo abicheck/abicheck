@@ -605,7 +605,7 @@ unknown.
 | `dwarf_advanced` | object \| null | Toolchain, calling conventions, value-ABI traits. |
 | `sycl` | object \| null | SYCL plugin-interface metadata. |
 | `dependency_info` | object \| null | Resolved dependency graph (nodes, edges, unresolved). |
-| `build_mode` | object \| null | Normalized compiler/stdlib/standard capture (ADR build-mode work). |
+| `build_mode` | object \| null | Normalized compiler/stdlib/standard capture (ADR build-mode work). No dump path writes it today; it is read back only from a document that carries one (see `known-gaps.md`). |
 
 ### Embedded build/source evidence (optional)
 

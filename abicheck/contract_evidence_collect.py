@@ -670,9 +670,7 @@ def _public_header_declarations(
     return out
 
 
-def _export_table_declarations(
-    snap: AbiSnapshot, exports: ExportSurface, ids: SnapshotIdentities | None = None
-) -> list[str]:
+def _export_table_declarations(snap: AbiSnapshot, exports: ExportSurface) -> list[str]:
     """Canonical node ids of the declarations the export table rooted.
 
     Derived by asking which declarations
@@ -689,7 +687,7 @@ def _export_table_declarations(
     provably out of (Codex review, fresh evidence -- the identical trap
     ``export_surface._unresolved_type_edges`` already documents avoiding).
     """
-    ids = ids if ids is not None else snapshot_identities(snap)
+    ids = snapshot_identities(snap)
     out: list[str] = []
     for fn, ident in zip(snap.declarations.functions, ids.functions, strict=True):
         # Rootness is decided by *linker* identity (what the export table

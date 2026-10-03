@@ -20,11 +20,11 @@ import struct
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from abicheck.binary_utils import detect_binary_format
 from abicheck.pe_metadata import (
     PeExport,
     PeMetadata,
     PeSymbolType,
-    is_pe,
     parse_pe_metadata,
 )
 
@@ -69,7 +69,7 @@ class TestPeMetadataDataclass:
         assert exp.forwarder == "NTDLL.RtlFoo"
 
 
-# ── is_pe magic detection ───────────────────────────────────────────────
+# ── PE magic detection ───────────────────────────────────────────────
 
 
 def _make_pe_file(tmp_path: Path, pe_offset: int = 0x80) -> Path:
@@ -86,40 +86,26 @@ def _make_pe_file(tmp_path: Path, pe_offset: int = 0x80) -> Path:
 class TestIsPe:
     def test_valid_pe_file(self, tmp_path):
         p = _make_pe_file(tmp_path)
-        assert is_pe(p) is True
+        assert detect_binary_format(p) == "pe"
 
     def test_non_pe_file(self, tmp_path):
         p = tmp_path / "notpe.bin"
         p.write_bytes(b"\x00" * 256)
-        assert is_pe(p) is False
-
-    def test_mz_without_pe_signature(self, tmp_path):
-        p = tmp_path / "fakemz.bin"
-        data = bytearray(256)
-        data[0:2] = b"MZ"
-        struct.pack_into("<I", data, 0x3C, 0x80)
-        # No PE\0\0 at offset 0x80
-        p.write_bytes(bytes(data))
-        assert is_pe(p) is False
-
-    def test_truncated_file(self, tmp_path):
-        p = tmp_path / "short.bin"
-        p.write_bytes(b"MZ")
-        assert is_pe(p) is False
+        assert detect_binary_format(p) != "pe"
 
     def test_nonexistent_file(self, tmp_path):
         p = tmp_path / "nope.dll"
-        assert is_pe(p) is False
+        assert detect_binary_format(p) != "pe"
 
     def test_empty_file(self, tmp_path):
         p = tmp_path / "empty.dll"
         p.write_bytes(b"")
-        assert is_pe(p) is False
+        assert detect_binary_format(p) != "pe"
 
     def test_elf_file_not_pe(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        assert is_pe(p) is False
+        assert detect_binary_format(p) != "pe"
 
 
 # ── Serialization round-trip ─────────────────────────────────────────────

@@ -81,8 +81,8 @@ def read_embedded_manifest(
     `InstantiationManifest`, from the selected variant's own
     `BUNDLE_COMPOSITION_SECTION_KIND` composition section
     (`storage.variant_composition.read_variant_composition_manifest_payload`
-    -- the sole physical layout `bundle_facts_store.write_bundle_facts_
-    package` now writes, since Track 1's reconciliation retired
+    -- the layout stored bundle packages carry, since Track 1's
+    reconciliation retired
     `PackageManifest.project_sections`/`ArtifactRef.native_identity` for
     this path; see `storage-format-v2.md`'s A1.4 entry).
 
@@ -111,14 +111,11 @@ def read_embedded_manifest(
     return None
 
 
-#: The two `ArtifactRef.native_identity` keys used, independently, by both of
-#: today's not-yet-reconciled multi-artifact package writers
-#: (`bundle_facts_store.py`'s `_NATIVE_IDENTITY_FILENAME_KEY`/
-#: `_NATIVE_IDENTITY_LIBRARY_NAME_KEY` and `storage/import_bundle_facts.py`'s
-#: `_LIBRARY_NAME_KEY`) to record a library's real on-disk name -- see
-#: `storage-format-v2.md`'s A1.4 entry for why there are two writers at all.
-#: The string values themselves are the real cross-writer contract, not
-#: either module's own private name for it.
+#: The two `ArtifactRef.native_identity` keys a library's real on-disk name is
+#: read from: `library_filename`, which only older multi-artifact packages
+#: carry (their writer is gone; see `storage.native_identity_aliases`), and
+#: `library_name`, which `storage/import_bundle_facts.py` (`_LIBRARY_NAME_KEY`)
+#: still writes. The string values are the on-disk contract.
 _NATIVE_IDENTITY_FILENAME_KEY = "library_filename"
 _NATIVE_IDENTITY_LIBRARY_NAME_KEY = "library_name"
 
@@ -207,8 +204,8 @@ def _release_match_key(
     read_variant_composition_library_filenames`'s own `{bundle_key: real
     filename}` mapping for the selected variant -- `import_bundle_facts`'s
     own writer never stamps a real filename onto a per-artifact
-    `native_identity` the way `bundle_facts_store.write_bundle_facts_
-    package` does, only the bundle key itself
+    `native_identity` the way the older package writer did, only the bundle
+    key itself
     (`_NATIVE_IDENTITY_LIBRARY_NAME_KEY`), which can differ from the real,
     possibly-versioned filename a live directory operand's own key is
     derived from (e.g. bundle key `"provider"` for on-disk `libfoo.so.1`).

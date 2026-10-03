@@ -85,14 +85,15 @@ abicheck compare libv1.so libv2.so --header old=v1.hpp --header new=v2.hpp
 ```
 
 Reaching that agreement at the castxml layer, on real compiled binaries,
-also needed a fix one level lower: `dumper_castxml.py`'s `_build_vtable()`
+also needed a fix one level lower: the castxml backend's `build_vtable()`
+(`extract/headers/castxml/records.py`)
 previously deduplicated an override against the base slot it reuses only via
 castxml's `vtable_index` attribute. Not every castxml/Clang build emits that
 attribute, and without it the reused slot was never deduplicated at all —
 `Derived`'s reconstructed vtable listed *both* `Base::paint` and
 `Derived::paint`, one entry longer than the real vtable, which
 `vtable_slot_is_override_reuse()` (a same-length, positional check) cannot
-see through. `_build_vtable()` now falls back to castxml's `overrides`
+see through. `build_vtable()` now falls back to castxml's `overrides`
 attribute (resolved through any multi-level override chain) to collapse the
 reused slot in place when `vtable_index` is absent.
 

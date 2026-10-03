@@ -18,8 +18,7 @@ import pytest
 from abicheck.errors import HeaderToolchainError, SnapshotError
 from abicheck.extract.castxml_header_compat import write_castxml_aggregate
 from abicheck.extract.unparseable_header_fallback import (
-    attribute_failing_headers,
-    cross_header_conflicts,
+    _scan_diagnostics,
     parse_excluding_unparseable_headers,
 )
 from abicheck.model.header_exclusion_record import (
@@ -155,7 +154,7 @@ def test_inner_listed_header_used_without_aggregate_frame():
     stderr = f"In file included from {headers[0]}:4:\n{headers[2]}:1:1: error: x"
     # No aggregate frame: the outermost frame is itself listed, so the
     # innermost listed file in the chain is the attribution.
-    assert attribute_failing_headers(stderr, headers) == {2}
+    assert _scan_diagnostics(stderr, headers)[0] == {2}
 
 
 _VERSION_TEXT = "error: unknown type name '_Float128'"
@@ -277,7 +276,7 @@ def test_toolchain_failure_is_not_header_specific():
 def test_attribution_ignores_warnings():
     headers = _headers(2)
     stderr = f"In file included from {AGG}:2:\n{headers[1]}:1:1: warning: deprecated"
-    assert attribute_failing_headers(stderr, headers) == set()
+    assert _scan_diagnostics(stderr, headers)[0] == set()
 
 
 def test_recorded_exclusions_become_warnings():
@@ -373,7 +372,7 @@ def test_cross_header_conflict_is_never_resolved_by_dropping(seed):
         parse_excluding_unparseable_headers(headers, attempt)
     assert calls == [headers]  # no reduced retry was attempted
     stderr = _conflict_stderr(headers, [(a, b)])
-    assert cross_header_conflicts(stderr, headers) == {headers.index(b)}
+    assert _scan_diagnostics(stderr, headers)[1] == {headers.index(b)}
 
 
 @pytest.mark.parametrize("seed", range(20))
@@ -393,8 +392,8 @@ def test_note_in_same_or_unlisted_header_stays_self_contained(seed):
             f"{note_file}:2:1: note: candidate function not viable",
         ]
     )
-    assert attribute_failing_headers(stderr, headers) == {i}
-    assert cross_header_conflicts(stderr, headers) == set()
+    assert _scan_diagnostics(stderr, headers)[0] == {i}
+    assert _scan_diagnostics(stderr, headers)[1] == set()
 
 
 @pytest.mark.skipif(shutil.which("castxml") is None, reason="needs castxml")
@@ -412,7 +411,7 @@ def test_real_castxml_redefinition_is_a_conflict(tmp_path):
         check=False,
     )
     assert proc.returncode != 0
-    assert cross_header_conflicts(proc.stderr, [a, b]) == {1}
+    assert _scan_diagnostics(proc.stderr, [a, b])[1] == {1}
 
 
 def _chain_lines(frames: list[tuple[str, int]], style: str) -> list[str]:
@@ -461,7 +460,7 @@ def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
             "1 error generated.",
         ]
     )
-    assert attribute_failing_headers(stderr, headers) == {target}
+    assert _scan_diagnostics(stderr, headers)[0] == {target}
 
 
 @pytest.mark.parametrize("style", ["clang", "gcc"])
@@ -495,7 +494,7 @@ def test_attribution_is_independent_of_the_aggregate_layout(seed, style):
             leaf = str(h)
         out += [*_chain_lines(frames, style), f"{leaf}:2:1: error: boom"]
     expected = {headers.index(h) for h in bad}
-    assert attribute_failing_headers("\n".join(out), headers) == expected
+    assert _scan_diagnostics("\n".join(out), headers)[0] == expected
 
 
 def test_an_error_in_the_aggregate_preamble_is_attributed_to_no_header():
@@ -511,7 +510,7 @@ def test_an_error_in_the_aggregate_preamble_is_attributed_to_no_header():
     stderr = "\n".join(
         [f"In file included from {AGG}:1:", f"{preamble}:3:1: error: boom"]
     )
-    assert attribute_failing_headers(stderr, headers) == set()
+    assert _scan_diagnostics(stderr, headers)[0] == set()
 
 
 def test_gcc_group_does_not_leak_into_the_next_diagnostic():
@@ -526,7 +525,7 @@ def test_gcc_group_does_not_leak_into_the_next_diagnostic():
             f"{headers[2]}:1:1: error: second",
         ]
     )
-    assert attribute_failing_headers(stderr, headers) == {0, 2}
+    assert _scan_diagnostics(stderr, headers)[0] == {0, 2}
 
 
 @pytest.mark.integration

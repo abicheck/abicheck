@@ -612,7 +612,7 @@ def _check_object_alignment_reduced(
     _declared_alignment_bits can never resolve corroborating evidence for it
     and the address-derived heuristic is always the only signal available —
     observed live on a real pvxs binary. Deliberately NOT the whole
-    is_local_name_symbol set (Codex review, PR #641): a PUBLIC inline/template
+    ``LOCAL_NAME_PREFIX`` set (Codex review, PR #641): a PUBLIC inline/template
     function belonging to the library UNDER TEST can itself own a
     function-local `static` that Itanium's STB_GNU_UNIQUE/weak-symbol
     mechanism cross-TU-deduplicates, so consumers genuinely can bind against

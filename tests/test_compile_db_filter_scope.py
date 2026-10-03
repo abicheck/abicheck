@@ -450,9 +450,9 @@ class TestDumpCliHonorsTheFilterInTheFold:
         out = tmp_path / f"{pick}.json"
         result = self._dump(so_path, header, compile_db, out, db_filter=pick)
         assert result.exit_code == 0, result.output
-        from abicheck.serialization import load_snapshot_document
+        from _snapshot_document_reader import read_snapshot_document
 
-        snapshot = load_snapshot_document(out)
+        snapshot = read_snapshot_document(out)
         fields = [
             f.get("name")
             for t in snapshot.get("types", [])

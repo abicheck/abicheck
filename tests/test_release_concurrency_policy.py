@@ -65,10 +65,8 @@ class TestPythonParallelism:
     ) -> None:
         monkeypatch.setenv(process_resources.MEMBER_JOBS_ENV_VAR, raw)
         monkeypatch.setattr(process_resources, "gil_enabled", lambda: True)
-        diagnostics: list[str] = []
-        got = process_resources.python_parallelism(diagnostics=diagnostics)
+        got = process_resources.python_parallelism()
         assert got == process_resources.GIL_MEMBER_PARALLELISM
-        assert bool(diagnostics) == (raw == "abc")
 
     def test_gil_probe_matches_the_interpreter(self) -> None:
         import sys

@@ -95,7 +95,6 @@ __all__ = [
     "macho_callable_names",
     "match_export",
     "named_pe_exports",
-    "ordinal_only_pe_exports",
     "pe_export_ids_with_ordinal_placeholder",
     "snapshot_export_names",
 ]
@@ -128,7 +127,7 @@ class RawExportEntry:
     """One raw platform export-table row — no filtering, no normalization.
 
     ``name`` may be empty (a PE export-by-ordinal carries no name at all —
-    see :func:`ordinal_only_pe_exports`). ``is_default`` is only a real
+    an ordinal-only export has ``name == ""``). ``is_default`` is only a real
     ELF/COFF-versioning distinction on ELF (``True`` for every PE/Mach-O
     entry — those formats have no symbol-versioning concept, so nothing to
     demote). ``ordinal`` is populated for PE only. ``sym_type`` carries the
@@ -213,7 +212,7 @@ def build_raw_export_index_from_pe(pe_meta: PeMetadata) -> RawExportIndex:
     """*pe_meta*'s export directory as a :class:`RawExportIndex`.
 
     An ordinal-only export (no name in the export directory) still becomes a
-    row, with ``name == ""`` — see :func:`ordinal_only_pe_exports`.
+    row, with ``name == ""``.
     """
     return RawExportIndex(
         platform="pe",
@@ -361,19 +360,6 @@ def pe_export_ids_with_ordinal_placeholder(index: RawExportIndex) -> frozenset[s
     """
     return frozenset(
         e.name if e.name else f"ordinal:{e.ordinal}" for e in index.entries
-    )
-
-
-def ordinal_only_pe_exports(index: RawExportIndex) -> frozenset[int]:
-    """Ordinals of PE exports with **no** name at all (export/import-by-ordinal).
-
-    A PE export directory entry always carries an ordinal; a subset carry no
-    name (``ImportByOrdinal``-style consumption on the importing side, or a
-    deliberately unnamed export on the exporting side). Those never satisfy a
-    *named*-export lookup (:func:`named_pe_exports`) and need their own view.
-    """
-    return frozenset(
-        e.ordinal for e in index.entries if not e.name and e.ordinal is not None
     )
 
 

@@ -435,11 +435,6 @@ class PatternFactsResult:
         triggers.sort(key=lambda t: t.kind.value)
         return triggers
 
-    @property
-    def should_escalate(self) -> bool:
-        """True if any located construct warrants a deeper source-ABI scan."""
-        return any(fact.escalates for fact in self.facts)
-
     def merged(self, other: PatternFactsResult) -> PatternFactsResult:
         """Combine two scans of the same side run under *different* licences.
 
@@ -725,7 +720,6 @@ def _assemble(
 
 def find_pattern_facts(
     roots: Iterable[str | Path],
-    changed_paths: Iterable[str] | None = None,
     *,
     licence: SourceReadLicence = _DIRECT_ROOT_LICENCE,
 ) -> PatternFactsResult:
@@ -740,7 +734,7 @@ def find_pattern_facts(
     concatenated in that order. Any executor failure falls back to serial so a
     constrained sandbox never turns a scan into an error.
     """
-    inputs = resolve_expected_source_inputs(roots, changed_paths, licence=licence)
+    inputs = resolve_expected_source_inputs(roots, licence=licence)
     if not licence.permitted:
         # Nothing was stat'd and nothing will be read: the paths were
         # provenance, not a licence. The result says the evaluation was not

@@ -44,7 +44,6 @@ from abicheck.type_reachability import (
     _typedef_spelling_targets,
     directly_referenced_stdlib_type_spellings,
     directly_referenced_stdlib_types,
-    type_string_references_name,
 )
 
 
@@ -63,23 +62,6 @@ def _fn(
         visibility=visibility,
         origin=origin,
     )
-
-
-class TestTypeStringReferencesName:
-    def test_matches_bare_reference(self) -> None:
-        assert type_string_references_name("const std::string &", "std::string")
-
-    def test_does_not_match_longer_name_prefix(self) -> None:
-        assert not type_string_references_name("std::stringstream", "std::string")
-
-    def test_does_not_match_when_preceded_by_identifier_char(self) -> None:
-        assert not type_string_references_name("xstd::string", "std::string")
-
-    def test_matches_inside_template_args(self) -> None:
-        assert type_string_references_name("std::vector<std::string>", "std::string")
-
-    def test_no_match_at_all(self) -> None:
-        assert not type_string_references_name("int", "std::string")
 
 
 class TestDirectlyReferencedStdlibTypes:
@@ -1555,20 +1537,6 @@ class TestNestedMatchesWithinTheSameSpellingIndex:
             assert len(matches) == len(candidates)
         finally:
             sys.setrecursionlimit(original_limit)
-
-    def test_explicit_end_bound_restricts_the_search_window(self) -> None:
-        """Direct unit coverage for the explicit start/end window this
-        helper's stack-based search is built on -- restricting end excludes
-        a match that starts beyond it."""
-        pattern = _compile_spelling_pattern({"Foo", "Bar"})
-        text = "Foo Bar"
-        assert {m.group(0) for m in _finditer_allow_nested(pattern, text)} == {
-            "Foo",
-            "Bar",
-        }
-        assert {m.group(0) for m in _finditer_allow_nested(pattern, text, end=3)} == {
-            "Foo"
-        }
 
 
 class TestNonStdlibBareAliasCollisionWithStdlibStrippedSpelling:

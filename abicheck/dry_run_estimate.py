@@ -54,6 +54,7 @@ from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 
 if TYPE_CHECKING:
+    from .buildsource.inline import CompileDbPlan
     from .model.evidence_depth_levels import EvidenceDepth, SourceMethod
     from .workflows.request_inputs import InputSpec
 
@@ -143,29 +144,6 @@ def expand_public_header_inputs(headers: Iterable[Path]) -> list[str]:
 # header fan-out, cache state) and returns the projected cost of each L-layer
 # so a maintainer can pick a depth on measured cost, not guesswork — it scans
 # nothing and runs no compiler.
-
-
-def _scan_imports() -> tuple[Any, ...]:
-    """Lazily import the evidence-depth vocabulary (keeps import cheap)."""
-    from .model.evidence_depth_levels import (
-        EvidenceDepth,
-        ScanMode,
-        SourceMethod,
-        SourceScope,
-        level_to_collect_mode,
-        parse_user_depth,
-        resolve_level,
-    )
-
-    return (
-        EvidenceDepth,
-        ScanMode,
-        SourceMethod,
-        level_to_collect_mode,
-        resolve_level,
-        parse_user_depth,
-        SourceScope,
-    )
 
 
 @dataclass(frozen=True)
@@ -359,29 +337,6 @@ def _compile_db_in(root: Path) -> Path | None:
     return _find_compile_db_in_dir(root)
 
 
-def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | None:
-    """The compile DB to estimate against: explicit wins, else discover in
-    *sources*. An explicit ``--compile-db``/``--build-info`` pointing at a
-    *directory* (e.g. ``build/`` holding a ``compile_commands.json``) is
-    resolved to the contained DB -- else it flows into
-    :func:`_count_compile_db_tus`, which fails the read and reports 0 TUs,
-    making L3/L4/L5 near-free even though the real scan replays it (Codex
-    review).
-    """
-    if explicit is not None and explicit.exists():
-        if explicit.is_dir():
-            found = _compile_db_in(explicit)
-            if found is not None:
-                return found
-            # A build dir with no DB at the well-known spots: fall through to the
-            # source-tree discovery rather than returning the unreadable dir.
-        else:
-            return explicit
-    if sources is not None and sources.is_dir():
-        return _compile_db_in(sources)
-    return None
-
-
 def _count_pack_tus(path: Path) -> int | None:
     """TU count of a build-source pack dir, or ``None`` if not a pack.
 
@@ -432,114 +387,106 @@ def _count_bazel_build_info_tus(path: Path) -> int | None:
         return None
 
 
-def _resolve_estimate_level(
-    *,
-    mode: str,
-    source_method: str | None,
-    depth: str | None,
-    changed_paths: Sequence[str],
-    seeded: bool,
-    resolved_level: tuple[SourceMethod, EvidenceDepth] | None,
-) -> tuple[SourceMethod, EvidenceDepth, str]:
-    """Resolve the (method, depth) level and its collect mode for the estimate."""
-    (
-        _EvidenceDepth,
-        ScanMode,
-        SourceMethod,
-        level_to_collect_mode,
-        resolve_level,
-        parse_user_depth,
-        SourceScope,
-    ) = _scan_imports()
+def _side_compile_db_plan(side: InputSpec) -> tuple[CompileDbPlan | None, Any]:
+    """The compile DB the real run would read for *side*, and its build config.
 
-    seeded = seeded or bool(changed_paths)
-    if resolved_level is not None:
-        # The caller (the CLI scan path) already resolved the concrete (method, depth) level. Honor it verbatim so the
-        # estimate matches the real scan: re-resolving from source_method/depth here would re-apply the source-method >
-        # depth precedence and collapse a mode preset that pins a *deeper* depth than its method implies (``pr-deep`` =
-        # (s5, graph) -> graph-full), under-pricing it (Codex review).
-        resolved, eff_depth = resolved_level
-    else:
-        sm = SourceMethod(source_method) if source_method else None
-        dp = parse_user_depth(depth)  # honors the symbols->binary alias (Codex)
-        # ADR-068's second 2026-09-09 amendment rules risk-driven ``auto``
-        # depth selection (b) -- dropped, so no risk score is consulted here
-        # any more. What an *unpinned command* resolves to instead
-        # (``resolve_unpinned_level``'s fixed ``headers`` rung) is deliberately
-        # NOT applied here: this function's own *mode* argument is a caller's
-        # explicit "price this preset" request, not an omitted ``--depth``.
-        # The ``scan`` CLI never relies on this branch for a real run's
-        # preview -- it pre-resolves its own level and passes it as
-        # *resolved_level* above -- so the two cannot disagree about what the
-        # run will execute.
-        resolved, eff_depth = resolve_level(
-            mode=ScanMode(mode), source_method=sm, depth=dp, auto_method=None
-        )
-    # ADR-043 D2/D3 zero-TU fix: pin the S5 replay scope to CHANGED only with a
-    # valid seed, else TARGET -- an unseeded explicit-source estimate must not
-    # under-project to the "source-changed" default (no seed -> no TUs).
-    collect_mode = level_to_collect_mode(
-        resolved,
-        eff_depth,
-        source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
+    Asks :func:`abicheck.buildsource.inline.plan_compile_db`, the order the
+    run's own L3 collection follows, from the same inputs ``embed_build_source``
+    hands it: *side*'s ``build_config`` (the raw ``--config``, which makes the
+    config operator-supplied: its query trusted and its ``build.compile_db``
+    explicit) or else a ``.abicheck.yml`` discovered at the source tree. A
+    config that does not load leaves the plan ``None`` -- the real run stops on
+    it as a usage error, and an estimate only says so.
+    """
+    from .buildsource.build_config import (
+        BuildConfig,
+        discover_build_config,
+        load_build_config,
     )
-    return resolved, eff_depth, collect_mode
+    from .buildsource.inline import plan_compile_db
+
+    cfg_path = side.build_config or discover_build_config(side.sources)
+    try:
+        cfg = load_build_config(cfg_path) if cfg_path is not None else BuildConfig()
+    except ValueError:
+        return None, None
+    operator_config = side.build_config is not None
+    plan = plan_compile_db(
+        side.build_info,
+        side.sources,
+        cfg,
+        trusted_for_query=operator_config,
+        compile_db_explicit=operator_config,
+    )
+    return plan, cfg
 
 
-def _estimate_total_tus(side: InputSpec, compile_db: Path | None) -> tuple[int, str]:
+def _estimate_total_tus(side: InputSpec) -> tuple[int, str]:
     """Project-wide TU count and its provenance note for the estimate."""
-    # Count TUs from the *same* effective build-info the real scan uses (`req.compile_db or req.build_info`) so an
-    # explicit --compile-db wins over a Bazel --build-info here too — else the estimate could price a different
-    # action graph than the scan executes (Codex review). A pack dir supplies its own L3 compile units; a Bazel
-    # aquery/cquery jsonproto is routed through the Bazel adapter; a raw compile DB / source tree is counted
-    # otherwise.
-    eff_build_info = compile_db or side.build_info
-    bazel_tus = (
-        _count_bazel_build_info_tus(eff_build_info)
-        if eff_build_info is not None
-        else None
+    # A pack dir supplies its own L3 compile units and a Bazel aquery/cquery
+    # jsonproto is routed through the Bazel adapter, both ahead of any compile
+    # DB, as in the run; otherwise the DB the run's own plan names is counted.
+    from .buildsource.inline import (
+        VIA_BUILD_QUERY,
+        VIA_EXPLICIT_MISSED,
+        VIA_INFERRED_QUERY,
     )
-    pack_tus = _count_pack_tus(eff_build_info) if eff_build_info is not None else None
-    discovered_db = _discover_compile_db(side.sources, eff_build_info)
+
+    build_info = side.build_info
+    bazel_tus = _count_bazel_build_info_tus(build_info) if build_info else None
+    pack_tus = _count_pack_tus(build_info) if build_info else None
+    targets: tuple[str, ...] = tuple(side.build_targets)
     if bazel_tus is not None:
         total, note = bazel_tus, "Bazel aquery/cquery (build_evidence)"
     elif pack_tus is not None:
         total, note = pack_tus, "build-source pack (build_evidence)"
-    elif discovered_db is not None:
-        total, note = (
-            _count_compile_db_tus(discovered_db),
-            f"compile DB: {discovered_db.name}",
-        )
-    elif side.sources is not None:
-        total, note = (
-            _count_source_tus(side.sources),
-            "counted source files (no compile DB)",
-        )
     else:
-        total, note = (
-            0,
-            (
-                f"build.query: {side.build_config.name} [UNKNOWN: query-only build.query, real run's trusted query determines the actual count]"
-                if side.build_config is not None
-                and _build_config_declares_query(side.build_config)
-                else "no source tree / compile DB"
-            ),
-        )
-    if side.build_targets:
+        plan, cfg = _side_compile_db_plan(side)
+        if cfg is not None:
+            targets = targets or tuple(cfg.targets)
+        if plan is None:
+            total, note = 0, "build config does not load; the run stops on it"
+        elif plan.via == VIA_BUILD_QUERY:
+            total, note = (
+                0,
+                "build.query [UNKNOWN: the run's trusted query determines the "
+                "actual count]",
+            )
+        elif plan.via == VIA_EXPLICIT_MISSED:
+            total, note = (
+                0,
+                "explicit compile DB input holds no compile_commands.json; the "
+                "run collects no L3",
+            )
+        elif plan.via == VIA_INFERRED_QUERY:
+            total, note = (
+                (
+                    _count_source_tus(side.sources),
+                    "counted source files (no compile DB; the run infers one "
+                    "from the build system)",
+                )
+                if side.sources is not None
+                else (0, "no source tree / compile DB")
+            )
+        else:
+            assert plan.path is not None
+            total, note = (
+                _count_compile_db_tus(plan.path),
+                f"compile DB: {plan.path.name}",
+            )
+    if targets:
         note += _UNSCOPED_TU_NOTE_SUFFIX
     return total, note
 
 
 def _estimate_replay_tus(
     changed_paths: Sequence[str],
-    max_tus: int | None,
     collect_mode: str,
     total_tus: int,
 ) -> int:
     """TUs the L4 replay (and its clang call-graph pass) would touch."""
     # The L4 replay scope: a changed-only collection touches at most the changed *source* TUs (POI-focused, D7); a
-    # full/target scope touches every TU. The budget's max_tus is a documented cap (never shrinks scope silently —
-    # it FAILS — but the estimate honestly reflects the cap as the upper bound). A changed *header* fans out:
+    # full/target scope touches every TU. A changed *header* fans out:
     # without an include graph (the common compile-DB-only path), ``source_replay.select_compile_units(scope=
     # 'changed')`` fails open to **all** TUs so header ABI changes are never silently missed, so the estimate must
     # charge ``total_tus`` for a header change rather than the single header path — else it understates L4 cost and
@@ -559,8 +506,6 @@ def _estimate_replay_tus(
     else:
         # graph-full / baseline → full scope; graph-build emits no L4 row.
         replay_tus = total_tus
-    if max_tus:
-        replay_tus = min(replay_tus, max_tus)
     return replay_tus
 
 
@@ -684,38 +629,27 @@ def _source_layer_estimates(
 def estimate_scan(
     side: InputSpec,
     *,
-    mode: str = "pr",
-    source_method: str | None = None,
-    depth: str | None = None,
+    resolved_level: tuple[SourceMethod, EvidenceDepth],
+    collect_mode: str,
     changed_paths: Sequence[str] = (),
-    seeded: bool = False,
-    max_tus: int | None = None,
-    compile_db: Path | None = None,
-    resolved_level: tuple[SourceMethod, EvidenceDepth] | None = None,
 ) -> list[CostEstimate]:
     """Dry-run: projected per-layer cost of one comparison operand for this
-    project. Probes the project (TU count, header fan-out,
-    collect mode) and returns one :class:`CostEstimate` per L-layer the level
-    would touch -- **without running any compiler or parsing any binary**.
-    Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget
-    pick, not a precise wall-clock prediction.
+    project. Probes the project (TU count, header fan-out) and returns one
+    :class:`CostEstimate` per L-layer the level would touch -- **without
+    running any compiler or parsing any binary**. Coarse anchors (see
+    ``_COST_PER_*``): ranks layers for a depth/budget pick, not a precise
+    wall-clock prediction.
 
-    Takes the canonical :class:`~abicheck.workflows.contracts.InputSpec` one side of a
-    comparison is already described by, plus the run-scoped scalars that are
-    not a property of the operand itself. ADR-068's Phase 4 typed-API slice
-    retired the ``ScanRequest`` this used to take: a cost preview is a
-    projection over an *input*, and the request type it lived on is gone.
+    Takes the canonical :class:`~abicheck.workflows.contracts.InputSpec` one
+    side of a comparison is already described by, plus what the run resolved
+    for the pair: its ``(S-method, depth)`` level, its collect mode (already
+    narrowed to *changed_paths* when the run has a seed) and the seed itself.
+    The caller passes the run's own answers rather than this function
+    re-deriving them, so the preview prices what the run executes.
     """
-    resolved, eff_depth, collect_mode = _resolve_estimate_level(
-        mode=mode,
-        source_method=source_method,
-        depth=depth,
-        changed_paths=changed_paths,
-        seeded=seeded,
-        resolved_level=resolved_level,
-    )
-    total_tus, tu_note = _estimate_total_tus(side, compile_db)
-    replay_tus = _estimate_replay_tus(changed_paths, max_tus, collect_mode, total_tus)
+    resolved, eff_depth = resolved_level
+    total_tus, tu_note = _estimate_total_tus(side)
+    replay_tus = _estimate_replay_tus(changed_paths, collect_mode, total_tus)
     estimates = _intrinsic_layer_estimates(side, eff_depth)
     estimates.extend(
         _source_layer_estimates(
@@ -723,18 +657,3 @@ def estimate_scan(
         )
     )
     return estimates
-
-
-def _build_config_declares_query(path: Path) -> bool:
-    """Does *path* declare ``build.query`` -- the only way a bare
-    ``--build-config`` supplies L3 evidence on its own (Codex review: an
-    inert config gives the real run nothing to collect either). ``False`` on
-    any read/parse failure -- a dry-run can't know whether an unparseable
-    query would have succeeded."""
-    from .buildsource.build_config_io import load_build_config_with_digest
-
-    try:
-        config, _digest = load_build_config_with_digest(path)
-    except ValueError:
-        return False
-    return bool(config.query)

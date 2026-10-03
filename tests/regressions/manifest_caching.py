@@ -134,6 +134,46 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="caching.duck_typed_key_attribute_default",
+        invariant=(
+            "A sharing key built from attributes read off an object by name "
+            '(``getattr(parser, "_root", None)``) tells two inputs apart '
+            "only while every object carries those attributes. When one "
+            "does not, the default makes every such input share one key and "
+            "the first input's result is served for all of them -- no "
+            "error, just another side's data. So each attribute read by "
+            "name is carried by every implementation the reader can be "
+            "handed, and a reader whose key would lose its distinguishing "
+            "part declines to share instead of keying on the default."
+        ),
+        # Found on this PR's own branch before merge: the dead-code plan's
+        # Stage D deleted `_CastxmlParser._root`, and a live `compare` gave
+        # the NEW side the OLD side's SemanticIR. Only the castxml
+        # integration lane noticed.
+        fixed_by=(1469,),
+        seed_tests=(
+            "tests/test_header_ast_parser_interface.py",
+            # Its `case40_field_layout` header cell (integration) fails on
+            # the unfixed code: optimized and reference-mode reports differ.
+            "tests/test_family_f5_optimization_reference.py",
+        ),
+        axes={
+            "scope_attributes_exposed": ("none", "each subset", "all"),
+            "same_ast": ("yes", "no"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The interface check covers attributes read off a "
+                    "variable named `parser`; other duck-typed readers "
+                    '(any `getattr(obj, "<literal>", default)` used in a '
+                    "key) are not swept."
+                ),
+                reference="docs/contribute/plans/dead-code-and-single-owner.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="cache.computed_output_keyed_without_code_identity",
         invariant=(
             "A cache entry is served only to the code and generated input "

@@ -297,18 +297,17 @@ def _read_ppid(pid: str) -> int | None:
         return None
 
 
-def _proc_tree_pids(root: int | None = None) -> list[int]:
-    """*root* and every descendant alive at this instant.
+def _proc_tree_pids() -> list[int]:
+    """This process and every descendant alive at this instant.
 
     Best effort by construction: a child can exit mid-walk, and one that
     starts mid-walk may be missed. That is acceptable for a sample -- it is
     a point-in-time reading, not an accounting record -- but it is why the
     benchmark harness samples repeatedly rather than once.
     """
-    root = os.getpid() if root is None else root
     parents: dict[int, list[int]] | None = None
     seen: list[int] = []
-    pending = [root]
+    pending = [os.getpid()]
     while pending:
         pid = pending.pop()
         if pid in seen:

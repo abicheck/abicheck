@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from ....compile_context import CompileContext
     from ....environment_matrix import EnvironmentMatrix
 
+from ....cli_resolve import _click_notify
 from ....model.sided_inputs import compose_sided_paths
 from ....report.no_baseline import (
     NO_BASELINE_SUPPORTED_FORMATS,
@@ -121,6 +122,9 @@ class _EvidenceInputs:
     build_info: Path | None
     build_config: Path | None
     depth: str | None
+    #: The collect mode the same rule two-sided ``compare`` uses resolves to:
+    #: ``--depth`` > ``source.method`` > inferred from the inputs > off.
+    collect_mode: str
 
 
 @dataclass(frozen=True)
@@ -143,6 +147,13 @@ class _CompileChoices:
     #: parse, and, with it, the `.abicheck.yml` `compile:` block this path
     #: passed as `compile=None` and therefore ignored entirely.
     context: CompileContext | None
+    #: The ``debug:`` block (``compare_config_settings``): applied to the
+    #: candidate exactly as two-sided ``compare`` applies it to each side.
+    pdb: Path | None
+    debuginfod: bool
+    debuginfod_url: str | None
+    dwarf_only: bool
+    debug_format: str | None
 
 
 @dataclass(frozen=True)
@@ -168,6 +179,9 @@ class _ScopeChoices:
 
     scope_to_public_surface: bool
     collapse_versioned_symbols: bool
+    #: ``scope.public_symbols``: declarations forced public, the same overlay
+    #: two-sided ``compare`` applies (``resolve_force_public_scope``).
+    force_public_symbols: frozenset[str]
 
 
 @dataclass(frozen=True)
@@ -360,8 +374,6 @@ def _resolve_no_baseline_invocation(
         list(kwargs.get("public_headers") or ()),
         list(kwargs.get("public_header_dirs") or ()),
     )
-    lang_src = ctx.get_parameter_source("lang") if ctx is not None else None
-
     # The project config, resolved exactly as a two-sided `compare` resolves
     # it -- same function, same auto-discovery, same CLI > config > default
     # precedence. Running before this resolution (and never reaching it) is
@@ -382,6 +394,26 @@ def _resolve_no_baseline_invocation(
         # typed. Passing None here would read as "typed nothing".
         scope_public_headers=bool(kwargs.get("scope_public_headers", True)),
     )
+    # The config-only settings, read by the one function two-sided `compare`
+    # reads them through, so the two shapes cannot differ. `--lang`, the
+    # debug flags and `--source-method` have no CLI spelling left; reading
+    # the removed `lang` kwarg here audited a `compile.lang: c` project as C++.
+    from ....cli_compare_helpers import _resolve_compare_collect_mode
+    from ....cli_compare_options import _warn_force_public_ignored
+    from ....cli_helpers_compare import resolve_force_public_scope
+    from ..compare_config_settings import config_run_settings
+
+    run_settings = config_run_settings(resolved_cfg)
+    force_public, _ = resolve_force_public_scope(resolved_cfg.public_symbols, None)
+    _warn_force_public_ignored(force_public, bool(resolved_cfg.scope_public))
+    collect_mode, _ = _resolve_compare_collect_mode(
+        kwargs.get("depth"),
+        run_settings.source_method,
+        None,
+        kwargs.get("new_sources"),
+        None,
+        kwargs.get("new_build_info"),
+    )
     scope = _ScopeChoices(
         scope_to_public_surface=bool(resolved_cfg.scope_public),
         # CLI wins when the flag was typed; otherwise the config's own value,
@@ -390,6 +422,7 @@ def _resolve_no_baseline_invocation(
             kwargs.get("collapse_versioned_symbols")
             or resolved_cfg.collapse_versioned_symbols
         ),
+        force_public_symbols=frozenset(force_public),
     )
 
     # ADR-049: `--contract VALUE` is what activates the evaluator on the CLI,
@@ -433,16 +466,22 @@ def _resolve_no_baseline_invocation(
             build_info=kwargs.get("new_build_info"),
             build_config=kwargs.get("build_config"),
             depth=kwargs.get("depth"),
+            collect_mode=collect_mode,
         ),
         compile=_CompileChoices(
-            lang=kwargs.get("lang") or "c++",
-            lang_explicit=lang_src == click.core.ParameterSource.COMMANDLINE,
+            lang=run_settings.lang,
+            lang_explicit=run_settings.lang_explicit,
             include_dependencies=bool(kwargs.get("include_dependencies", False)),
             version=kwargs.get("new_version") or "",
             debug_roots=list(kwargs.get("debug_roots") or ())
             + list(kwargs.get("debug_roots_new") or ()),
             include_labels=kwargs.get("include_labels") or None,
             context=compile_context,
+            pdb=Path(run_settings.pdb_path) if run_settings.pdb_path else None,
+            debuginfod=run_settings.debuginfod,
+            debuginfod_url=run_settings.debuginfod_url,
+            dwarf_only=run_settings.dwarf_only,
+            debug_format=run_settings.effective_debug_format,
         ),
         scope=scope,
         contract=_ContractChoices(
@@ -520,11 +559,18 @@ def _resolve_candidate_or_fail(candidate: Path, inv: _ResolvedInvocation) -> Any
             build_info=inv.evidence.build_info,
             build_config=inv.evidence.build_config,
             depth=inv.evidence.depth,
+            collect_mode=inv.evidence.collect_mode,
             version=inv.compile.version,
             debug_roots=inv.compile.debug_roots,
+            pdb=inv.compile.pdb,
+            enable_debuginfod=inv.compile.debuginfod,
+            debuginfod_url=inv.compile.debuginfod_url,
+            dwarf_only=inv.compile.dwarf_only,
+            debug_format=inv.compile.debug_format,
             include_labels=inv.compile.include_labels,
             include_dependencies=inv.compile.include_dependencies,
             compile=inv.compile.context,
+            notify=_click_notify,
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -609,6 +655,7 @@ def _run_no_baseline_compare_cmd(
         policy=kwargs.get("policy") or "strict_abi",
         policy_file=policy_file_obj,
         scope_to_public_surface=inv.scope.scope_to_public_surface,
+        force_public_symbols=set(inv.scope.force_public_symbols) or None,
         # ADR-068 D4/Phase 5: pattern-verdict modulation is unconditional on
         # every `compare` path now (no `--pattern-verdicts` flag exists any
         # more) -- this audit-only path gets the identical treatment.

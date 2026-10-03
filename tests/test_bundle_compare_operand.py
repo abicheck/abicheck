@@ -920,7 +920,7 @@ class TestClassifyBundleCompareOperands:
         new.mkdir()
         req = classify_bundle_compare_operands(old, new)
         assert req == BundleCompareRequest(old_is_stored=True, new_is_stored=False)
-        assert req.any_stored is True
+        assert (req.old_is_stored or req.new_is_stored) is True
 
     def test_live_old_live_new(self, tmp_path: Path) -> None:
         old = tmp_path / "old_dir"
@@ -929,7 +929,7 @@ class TestClassifyBundleCompareOperands:
         new.mkdir()
         req = classify_bundle_compare_operands(old, new)
         assert req == BundleCompareRequest(old_is_stored=False, new_is_stored=False)
-        assert req.any_stored is False
+        assert (req.old_is_stored or req.new_is_stored) is False
 
     def test_stored_new_is_classified_too(self, tmp_path: Path) -> None:
         old = tmp_path / "old_dir"

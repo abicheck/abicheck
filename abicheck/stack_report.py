@@ -46,9 +46,9 @@ _VERDICT_EMOJI = {
 }
 
 
-def stack_to_json(result: StackCheckResult, indent: int = 2) -> str:
+def stack_to_json(result: StackCheckResult) -> str:
     """Render a StackCheckResult as JSON — a pure ReportDocument projection."""
-    return render_json(compute_stack_report_document(result), indent=indent)
+    return render_json(compute_stack_report_document(result))
 
 
 def _render_unresolved_section(lines: list[str], graph: DependencyGraph) -> None:

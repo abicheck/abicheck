@@ -85,6 +85,8 @@ log = logging.getLogger(__name__)
 #: is the opt-in signal — unset means "skip this enrichment entirely."
 LAYOUT_TOOL_ENV_VAR = "ABICHECK_CLANG_LAYOUT_TOOL"
 _DEFAULT_BIN_NAME = "abicheck-clang-layout-tool"
+#: Seconds one layout-tool run may take before it degrades to "no enrichment".
+_LAYOUT_TOOL_TIMEOUT_S = 60
 
 _LAYOUT_SCALAR_FIELDS = (
     "size_bits",
@@ -143,7 +145,6 @@ def run_layout_tool(
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
-    timeout: int = 60,
 ) -> list[dict[str, Any]] | None:
     """Run the G28 Phase 4 layout tool over *resolved_headers*.
 
@@ -230,7 +231,7 @@ def run_layout_tool(
             cmd,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=_LAYOUT_TOOL_TIMEOUT_S,
         )
 
     def _run_shimmed(

@@ -312,8 +312,7 @@ class TestParseUnified:
         """parse_dwarf() records the normalized target arch on AdvancedDwarfMetadata.
 
         Regression: the SysV-AMD64 struct-return guard reads adv.target_arch, so
-        the unified dump path (not just the standalone parse_advanced_dwarf) must
-        populate it — otherwise AArch64/i386 dumps keep "" and are mis-treated as
+        the unified dump path must populate it — otherwise AArch64/i386 dumps keep "" and are mis-treated as
         SysV AMD64.
         """
         from abicheck.dwarf_unified import parse_dwarf
@@ -395,93 +394,10 @@ class TestParseUnified:
 
         assert isinstance(result, DwarfMetadata)
 
-    def test_parse_advanced_dwarf_shim(self, tmp_path):
-        """parse_advanced_dwarf delegates to parse_dwarf and returns AdvancedDwarfMetadata."""
-        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
-        from abicheck.dwarf_unified import parse_advanced_dwarf
-
-        fake_path = tmp_path / "fake.so"
-        fake_path.write_bytes(b"\x00")
-
-        fake_stat = MagicMock()
-        fake_stat.st_mode = stat.S_IFREG | 0o644
-
-        with (
-            patch("abicheck.dwarf_unified.os.fstat", return_value=fake_stat),
-            patch(
-                "abicheck.dwarf_unified.ELFFile",
-                side_effect=ELFError("bad"),
-            ),
-        ):
-            result = parse_advanced_dwarf(fake_path)
-
-        assert isinstance(result, AdvancedDwarfMetadata)
-
 
 # ===========================================================================
 # dwarf_advanced tests
 # ===========================================================================
-
-
-class TestParseAdvancedDwarf:
-    """parse_advanced_dwarf edge cases (standalone function)."""
-
-    def test_no_dwarf_info(self, tmp_path):
-        """Line 161-162: ELF with no DWARF info returns empty metadata."""
-        from abicheck.dwarf_advanced import AdvancedDwarfMetadata, parse_advanced_dwarf
-
-        fake_path = tmp_path / "nodwarf.so"
-        fake_path.write_bytes(b"\x00")
-
-        mock_elf = MagicMock()
-        # Strict DWARF check: no .debug_info / .zdebug_info section present.
-        mock_elf.get_section_by_name.return_value = None
-
-        with patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf):
-            result = parse_advanced_dwarf(fake_path)
-
-        assert isinstance(result, AdvancedDwarfMetadata)
-        assert not result.has_dwarf
-
-    def test_elf_open_error(self, tmp_path):
-        """Lines 173-175: ELFFile raises => returns empty metadata."""
-        from abicheck.dwarf_advanced import AdvancedDwarfMetadata, parse_advanced_dwarf
-
-        fake_path = tmp_path / "bad.so"
-        fake_path.write_bytes(b"\x00")
-
-        with patch("abicheck.dwarf_advanced.ELFFile", side_effect=ELFError("nope")):
-            result = parse_advanced_dwarf(fake_path)
-
-        assert isinstance(result, AdvancedDwarfMetadata)
-        assert not result.has_dwarf
-
-    def test_cu_processing_valueerror_skipped(self, tmp_path):
-        """Lines 166-169: CU processing that raises ValueError is skipped."""
-        from abicheck.dwarf_advanced import AdvancedDwarfMetadata, parse_advanced_dwarf
-
-        fake_path = tmp_path / "bad_cu.so"
-        fake_path.write_bytes(b"\x00")
-
-        mock_cu = MagicMock()
-        mock_elf = MagicMock()
-        mock_elf.has_dwarf_info.return_value = True
-        mock_dwarf = MagicMock()
-        mock_dwarf.iter_CUs.return_value = [mock_cu]
-        mock_elf.get_dwarf_info.return_value = mock_dwarf
-
-        with (
-            patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf),
-            patch(
-                "abicheck.dwarf_advanced._process_cu",
-                side_effect=ValueError("bad CU"),
-            ),
-            patch("abicheck.dwarf_advanced._parse_frame_registers"),
-        ):
-            result = parse_advanced_dwarf(fake_path)
-
-        assert isinstance(result, AdvancedDwarfMetadata)
-        assert result.has_dwarf  # has_dwarf=True even though CU was skipped
 
 
 class TestGetTypeAlign:
@@ -1116,140 +1032,6 @@ class TestParseProducer:
         info = _parse_producer("some-unknown-compiler 1.0")
         assert info.compiler == ""
         assert info.producer_string == "some-unknown-compiler 1.0"
-
-
-class TestParseFrameRegisters:
-    """_parse_frame_registers edge cases (lines 748-770)."""
-
-    def test_no_cfi_source(self):
-        """Lines 752-753: no CFI source => return early."""
-        from abicheck.dwarf_advanced import (
-            AdvancedDwarfMetadata,
-            _parse_frame_registers,
-        )
-
-        mock_elf = MagicMock()
-        mock_elf.get_machine_arch.return_value = "x64"
-        mock_elf.get_section_by_name.return_value = None
-
-        mock_dwarf = MagicMock()
-        mock_dwarf.get_EH_CFI_entries.return_value = None
-        mock_dwarf.get_CFI_entries.return_value = None
-
-        meta = AdvancedDwarfMetadata(has_dwarf=True)
-        _parse_frame_registers(mock_elf, mock_dwarf, meta)
-        assert len(meta.frame_registers) == 0
-
-    def test_fde_no_symbol(self):
-        """Lines 761-762: FDE with no matching symbol is skipped."""
-        from abicheck.dwarf_advanced import (
-            AdvancedDwarfMetadata,
-            _parse_frame_registers,
-        )
-
-        mock_elf = MagicMock()
-        mock_elf.get_machine_arch.return_value = "x64"
-        mock_elf.get_section_by_name.return_value = None
-
-        fde = MagicMock()
-        fde.__class__ = type("FDE", (), {})
-        fde.__class__.__name__ = "FDE"
-        fde.__getitem__ = MagicMock(return_value=0x1000)
-
-        mock_dwarf = MagicMock()
-        mock_dwarf.get_EH_CFI_entries.return_value = [fde]
-
-        meta = AdvancedDwarfMetadata(has_dwarf=True)
-        _parse_frame_registers(mock_elf, mock_dwarf, meta)
-        assert len(meta.frame_registers) == 0
-
-    def test_outer_exception(self):
-        """Lines 769-770: outer exception is caught and logged."""
-        from abicheck.dwarf_advanced import (
-            AdvancedDwarfMetadata,
-            _parse_frame_registers,
-        )
-
-        mock_elf = MagicMock()
-        mock_elf.get_machine_arch.side_effect = ELFError("arch fail")
-
-        mock_dwarf = MagicMock()
-        meta = AdvancedDwarfMetadata(has_dwarf=True)
-        # Should not raise
-        _parse_frame_registers(mock_elf, mock_dwarf, meta)
-        assert len(meta.frame_registers) == 0
-
-    def test_fde_inner_exception(self):
-        """Lines 766-767: inner FDE exception is caught per-entry."""
-        from abicheck.dwarf_advanced import (
-            AdvancedDwarfMetadata,
-            _parse_frame_registers,
-        )
-
-        mock_elf = MagicMock()
-        mock_elf.get_machine_arch.return_value = "x64"
-        mock_elf.get_section_by_name.return_value = None
-
-        fde = MagicMock()
-        fde.__class__ = type("FDE", (), {})
-        fde.__class__.__name__ = "FDE"
-        fde.__getitem__ = MagicMock(side_effect=KeyError("no initial_location"))
-
-        mock_dwarf = MagicMock()
-        mock_dwarf.get_EH_CFI_entries.return_value = [fde]
-
-        meta = AdvancedDwarfMetadata(has_dwarf=True)
-        _parse_frame_registers(mock_elf, mock_dwarf, meta)
-        assert len(meta.frame_registers) == 0
-
-
-class TestExtractCfaReg:
-    """_extract_cfa_reg_from_fde edge cases."""
-
-    def test_empty_table(self):
-        from abicheck.dwarf_advanced import _extract_cfa_reg_from_fde
-
-        entry = MagicMock()
-        decoded = MagicMock()
-        decoded.table = []
-        entry.get_decoded.return_value = decoded
-        assert _extract_cfa_reg_from_fde(entry, "x64") is None
-
-    def test_no_cfa_in_rows(self):
-        from abicheck.dwarf_advanced import _extract_cfa_reg_from_fde
-
-        entry = MagicMock()
-        decoded = MagicMock()
-        row = {"pc": 0x1000}  # no 'cfa' key
-        decoded.table = [row]
-        entry.get_decoded.return_value = decoded
-        assert _extract_cfa_reg_from_fde(entry, "x64") is None
-
-    def test_exception_returns_none(self):
-        from abicheck.dwarf_advanced import _extract_cfa_reg_from_fde
-
-        entry = MagicMock()
-        entry.get_decoded.side_effect = ELFError("bad decode")
-        assert _extract_cfa_reg_from_fde(entry, "x64") is None
-
-
-class TestRegName:
-    """_reg_name edge cases."""
-
-    def test_x86_reg(self):
-        from abicheck.dwarf_advanced import _reg_name
-
-        assert _reg_name(5, "x86") == "ebp"
-
-    def test_aarch64_reg(self):
-        from abicheck.dwarf_advanced import _reg_name
-
-        assert _reg_name(31, "aarch64") == "sp"
-
-    def test_unknown_arch(self):
-        from abicheck.dwarf_advanced import _reg_name
-
-        assert _reg_name(99, "mips") == "reg99"
 
 
 # ===========================================================================

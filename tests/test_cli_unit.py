@@ -991,7 +991,7 @@ class TestCompatClassifiedErrorPaths:
         def _raise_write(*_a, **_k):
             raise OSError("write failed")
 
-        monkeypatch.setattr("abicheck.compat.cli.write_html_report", _raise_write)
+        monkeypatch.setattr("abicheck.html_report.write_html_report", _raise_write)
 
         runner = CliRunner()
         result = runner.invoke(

@@ -247,13 +247,6 @@ class ContractSourceConflict:
         )
 
 
-def conflicts_to_dicts(
-    conflicts: Sequence[ContractSourceConflict],
-) -> list[dict[str, object]]:
-    """Serialize a sequence of conflicts, in stable (given) order."""
-    return [c.to_dict() for c in conflicts]
-
-
 __all__ = [
     "ALL_CONFLICT_KINDS",
     "CONFLICT_EXPORTED_BUT_UNDECLARED",
@@ -261,5 +254,4 @@ __all__ = [
     "CONFLICT_PACKAGE_BINARY_MISMATCH",
     "ConflictSourceClaim",
     "ContractSourceConflict",
-    "conflicts_to_dicts",
 ]

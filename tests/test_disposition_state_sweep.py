@@ -40,6 +40,7 @@ from __future__ import annotations
 import itertools
 
 import pytest
+from _disposition_invariants import conservation_holds
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
@@ -49,7 +50,6 @@ from abicheck.contract_scoped_promotion import (
 )
 from abicheck.policy.disposition_close import (
     close_consumer_scope,
-    conservation_holds,
 )
 from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
 
@@ -427,8 +427,10 @@ def test_a_policy_overlay_keeps_its_own_gate_contribution() -> None:
     total honest and dropped that real contribution, so the record exists and
     is excluded from the *counts* instead.
     """
+    from _disposition_invariants import conservation_holds
+
     from abicheck.checker_types import DiffResult
-    from abicheck.policy.disposition_close import conservation_holds, finalize_ledger
+    from abicheck.policy.disposition_close import finalize_ledger
     from abicheck.policy.severity import SeverityConfig, SeverityLevel
 
     result = DiffResult(old_version="1.0", new_version="2.0", library="libmatrix")
@@ -474,7 +476,7 @@ def test_a_late_policy_overlay_is_not_a_detection_either() -> None:
     bypassed the rule entirely — so a consumer-only missing export with a
     withheld broad suppression double-counted exactly as the ordinary path
     used to."""
-    from abicheck.policy.disposition_close import conservation_holds
+    from _disposition_invariants import conservation_holds
 
     result = _sweep_result()
     ledger = DispositionLedger()

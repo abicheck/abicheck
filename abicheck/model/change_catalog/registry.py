@@ -718,10 +718,6 @@ class ChangeKindRegistry:
         e = self._entries.get(kind_value)
         return e.operation if e is not None else None
 
-    def kinds_for_entity(self, entity: ChangeEntity) -> frozenset[str]:
-        """Every kind value declared under *entity*."""
-        return frozenset(e.kind for e in self._entries.values() if e.entity is entity)
-
     def policy_overrides_for(self, policy: str) -> dict[str, Verdict]:
         """Return {kind_value: overridden_verdict} for a given policy name."""
         return {
@@ -738,12 +734,6 @@ class ChangeKindRegistry:
         """Return the description template for a kind, or None if bespoke/unknown."""
         e = self._entries.get(kind_value)
         return e.description_template if e is not None else None
-
-    def templated_kinds(self) -> frozenset[str]:
-        """Return kind values that own a description template (C6 migration set)."""
-        return frozenset(
-            e.kind for e in self._entries.values() if e.description_template is not None
-        )
 
     @property
     def entries(self) -> dict[str, ChangeKindMeta]:

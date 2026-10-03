@@ -160,24 +160,20 @@ def build_check_id(
     baseline_channel: str,
     requested_depth: str,
     *,
-    environment_id: str | None = None,
     explicit_id: str | None = None,
 ) -> str:
     """Build the unconditional ``target@profile#baseline_channel@depth`` id
-    (ADR-047 §7). G42: *environment_id*/*explicit_id* append an optional,
-    composable ``!<environment_id>``/``~<explicit_id>`` tail."""
+    (ADR-047 §7). G42: *explicit_id* appends an optional ``~<explicit_id>``
+    tail. The ``!<environment_id>`` segment the validators and parser accept
+    is reserved and produced by no generator here."""
     validate_identifier("target/bundle", name)
     validate_identifier("profile_id", profile_id)
     validate_identifier("baseline_channel", baseline_channel)
     validate_evidence_depth("requested_depth", requested_depth)
     check_id = f"{name}@{profile_id}#{baseline_channel}@{requested_depth}"
-    for field, prefix, value in (
-        ("environment_id", "!", environment_id),
-        ("explicit_id", "~", explicit_id),
-    ):
-        if value:
-            validate_identifier(field, value)
-            check_id += f"{prefix}{value}"
+    if explicit_id:
+        validate_identifier("explicit_id", explicit_id)
+        check_id += f"~{explicit_id}"
     validate_check_id(check_id)
     return check_id
 

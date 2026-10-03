@@ -42,13 +42,12 @@ def test_exception_during_with_body_still_runs_cleanups():
     assert calls == ["a"]
 
 
-def test_cleanup_registered_after_construction_via_add_cleanup_still_runs():
+def test_cleanup_registered_after_construction_still_runs():
     calls: list[str] = []
     plan = ResolvedArtifactPlan()
     plan.pending_cleanups.append(lambda: calls.append("seeded"))
-    # Discovered only once "execution" (not just "resolution") has run --
-    # the exact case add_cleanup exists for.
-    plan.add_cleanup(lambda: calls.append("discovered-later"))
+    # Discovered only once "execution" (not just "resolution") has run.
+    plan.pending_cleanups.append(lambda: calls.append("discovered-later"))
     plan.run_cleanups()
     assert calls == ["seeded", "discovered-later"]
 
@@ -98,8 +97,8 @@ def test_one_failing_cleanup_does_not_skip_the_rest():
 
     with ResolvedArtifactPlan() as plan:
         plan.pending_cleanups.append(lambda: calls.append("before"))
-        plan.add_cleanup(_bad_cleanup)
-        plan.add_cleanup(lambda: calls.append("after"))
+        plan.pending_cleanups.append(_bad_cleanup)
+        plan.pending_cleanups.append(lambda: calls.append("after"))
     assert calls == ["before", "after"]
 
 
@@ -115,28 +114,12 @@ def test_enter_returns_self():
         assert entered is plan
 
 
-def test_cleanup_added_via_add_cleanup_after_drain_still_runs() -> None:
+def test_cleanup_added_after_drain_still_runs() -> None:
     """Codex review: an earlier revision tracked closure as a single bool, so
     every drain after the first was an unconditional no-op -- a cleanup
-    registered via add_cleanup() on an already-drained plan was silently
+    registered on an already-drained plan was silently
     never run. The next run_cleanups() call (here, a second `with` re-entry)
     must still pick it up."""
-    calls: list[str] = []
-    plan = ResolvedArtifactPlan()
-    plan.add_cleanup(lambda: calls.append("first"))
-    plan.run_cleanups()
-    assert calls == ["first"]
-
-    plan.add_cleanup(lambda: calls.append("late"))
-    with plan:
-        pass
-    assert calls == ["first", "late"]
-
-
-def test_cleanup_appended_to_pending_cleanups_after_drain_still_runs() -> None:
-    """Same invariant as above, via the other registration path (direct
-    `pending_cleanups.append(...)` rather than `add_cleanup()`) -- Codex
-    review asked for both to be covered."""
     calls: list[str] = []
     plan = ResolvedArtifactPlan()
     plan.pending_cleanups.append(lambda: calls.append("first"))
@@ -144,7 +127,8 @@ def test_cleanup_appended_to_pending_cleanups_after_drain_still_runs() -> None:
     assert calls == ["first"]
 
     plan.pending_cleanups.append(lambda: calls.append("late"))
-    plan.run_cleanups()
+    with plan:
+        pass
     assert calls == ["first", "late"]
 
 
@@ -153,7 +137,7 @@ def test_run_cleanups_with_nothing_new_after_a_drain_is_a_true_no_op() -> None:
     no new registrations re-runs nothing."""
     calls: list[str] = []
     plan = ResolvedArtifactPlan()
-    plan.add_cleanup(lambda: calls.append("a"))
+    plan.pending_cleanups.append(lambda: calls.append("a"))
     plan.run_cleanups()
     plan.run_cleanups()
     plan.run_cleanups()
@@ -163,7 +147,7 @@ def test_run_cleanups_with_nothing_new_after_a_drain_is_a_true_no_op() -> None:
 def test_cleanup_registered_during_the_drain_itself_still_runs() -> None:
     """Codex review: an earlier revision snapshotted the pending slice and
     advanced the cursor past it *before* running any of them, so a cleanup
-    that itself calls add_cleanup() while running (discovering a further
+    that itself registers another while running (discovering a further
     owned resource mid-teardown) was silently skipped -- registered strictly
     before run_cleanups() returned, but never drained by that same call, and
     with no second drain guaranteed to ever come."""
@@ -172,9 +156,9 @@ def test_cleanup_registered_during_the_drain_itself_still_runs() -> None:
 
     def _discovers_another_resource() -> None:
         calls.append("outer")
-        plan.add_cleanup(lambda: calls.append("discovered-mid-drain"))
+        plan.pending_cleanups.append(lambda: calls.append("discovered-mid-drain"))
 
-    plan.add_cleanup(_discovers_another_resource)
+    plan.pending_cleanups.append(_discovers_another_resource)
     plan.run_cleanups()
     assert calls == ["outer", "discovered-mid-drain"]
 
