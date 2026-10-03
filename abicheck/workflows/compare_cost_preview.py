@@ -134,6 +134,15 @@ def _merge_layer_estimates(
     ]
 
 
+def _side_config(
+    config: Path | None, sources: Path | None, build_info: Path | None
+) -> Path | None:
+    """The config one side's build-evidence collection is handed: the raw
+    ``--config``, but only for a side with a ``--sources``/``--build-info``
+    to collect from -- a side with neither runs no collection at all."""
+    return config if (sources is not None or build_info is not None) else None
+
+
 def estimate_compare_dry_run_cost(
     *,
     old_input: Path,
@@ -148,8 +157,16 @@ def estimate_compare_dry_run_cost(
     new_sources: Path | None,
     old_build_info: Path | None,
     new_build_info: Path | None,
+    collect_mode: str,
+    changed_paths: tuple[str, ...] = (),
+    build_config: Path | None = None,
 ) -> tuple[list[CostEstimate] | None, str | None]:
     """Combined old+new per-layer cost preview for ``compare --dry-run``.
+
+    *collect_mode* and *changed_paths* are the run's own (already narrowed
+    to its changed-path seed), and *build_config* the raw ``--config`` the
+    run hands each side's build-evidence collection, so the preview counts
+    the compile DB that collection reads.
 
     Returns ``(estimates, None)`` on success or ``(None, error)`` when the
     probe itself raised -- mirroring the retired ``cli_scan.py``'s best-effort
@@ -174,6 +191,7 @@ def estimate_compare_dry_run_cost(
             includes=list(includes),
             sources=old_sources,
             build_info=old_build_info,
+            build_config=_side_config(build_config, old_sources, old_build_info),
         )
         new_side = InputSpec.of(
             new_input,
@@ -181,9 +199,17 @@ def estimate_compare_dry_run_cost(
             includes=list(includes),
             sources=new_sources,
             build_info=new_build_info,
+            build_config=_side_config(build_config, new_sources, new_build_info),
         )
-        old_estimates = estimate_scan(old_side, resolved_level=resolved_level)
-        new_estimates = estimate_scan(new_side, resolved_level=resolved_level)
+        old_estimates, new_estimates = (
+            estimate_scan(
+                side,
+                resolved_level=resolved_level,
+                collect_mode=collect_mode,
+                changed_paths=changed_paths,
+            )
+            for side in (old_side, new_side)
+        )
         return _merge_layer_estimates((old_estimates, new_estimates)), None
     except Exception as exc:  # noqa: BLE001 - best-effort dry-run probe
         return None, str(exc)

@@ -480,6 +480,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # The coverage and scope notices advised the setting the run
             # already had. Oracle: the settings' documented meaning.
             "tests/test_notice_advice_matches_setting.py",
+            # `compare --dry-run` priced a compile DB and a source scope the
+            # run does not use. Oracle: the run's own L3 collector.
+            "tests/test_compare_dry_run_compile_db.py",
         ),
         known_gaps=(
             KnownGap(

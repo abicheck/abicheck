@@ -138,3 +138,12 @@ def localized_collect_mode(
     if changed_paths and collect_mode == _TARGET_COLLECT_MODE:
         return _CHANGED_COLLECT_MODE
     return collect_mode
+
+
+def replay_scope(collect_mode: str) -> str:
+    """The L4 replay scope a collect mode selects (``off``/``changed``/
+    ``target``/``full``), read from the replay's own table so a preview
+    names the scope the run replays."""
+    from ..buildsource.source_replay import scope_for_ci_mode
+
+    return scope_for_ci_mode(collect_mode)

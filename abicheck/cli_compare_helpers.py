@@ -1572,6 +1572,9 @@ def run_compare(
                 select=select,
                 select_required=select_required,
                 exclude_headers=tuple(exclude_headers or ()),
+                since=since,
+                changed_paths_opt=changed_paths_opt,
+                config=config,
             )
         )
 

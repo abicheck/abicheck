@@ -8826,6 +8826,17 @@ invisible to internal tests precisely because nothing exercises the public
 
 ## `compare --dry-run`'s cost preview does not reflect `--since`'s changed-path seeding
 
+**Closed (2026-10-03).** The dry run now resolves the seed through the
+run's own `frontends/cli/compare_enrichment.resolve_compare_changed_seed`
+before it emits, localizes its collect mode with it, names the replay scope
+from the replay's own table (`workflows.changed_paths.replay_scope`), and
+passes the seed and mode to the cost preview. The same pass made the
+preview count the compile DB the run reads (`buildsource.inline.
+plan_compile_db`). `tests/test_compare_dry_run_compile_db.py` asserts the
+stated scope and the L4 TU count change with `--changed-path` (3 of its 16
+scope cases fail on the previous code). The account below is kept as the
+record of what was wrong.
+
 Found during the PR #1220 doc follow-up (Codex review): a two-sided
 `compare old.so new.so --depth source --since origin/main --dry-run`
 example claimed the dry run "prints the translation units the seed selects
