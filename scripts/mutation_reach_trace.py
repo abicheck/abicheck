@@ -138,7 +138,7 @@ class Monitor:
         self.hit = True
         return _MON.DISABLE
 
-    def arm(self) -> None:
+    def arm(self) -> bool:
         """Enable PY_START on every only_mutate code object not yet armed,
         rescanning only when an only_mutate module was (re)imported.
 
@@ -147,12 +147,16 @@ class Monitor:
         live Python thread can corrupt a tuple that thread is building
         (``memory_trace.gc_census_is_safe``), and a test can leave a thread
         behind, so then only the modules' namespaces are walked and the scan
-        is not marked done: the next safe arm completes it.
+        is not marked done: the next safe arm completes it. Returns whether
+        every only_mutate function is known to be armed; the caller credits a
+        test run after an incomplete arm conservatively, since the walk cannot
+        see a function held only in a registry or closure.
         """
         ids = tuple(id(sys.modules.get(name)) for name in self.modules)
         if ids == self.module_ids:
-            return
-        if gc_census_is_safe():
+            return True
+        complete = gc_census_is_safe()
+        if complete:
             functions: Iterable[object] = gc.get_objects()
             self.module_ids = ids
         else:
@@ -169,6 +173,7 @@ class Monitor:
                 if nested.co_name != "<module>" and nested not in self.armed:
                     _MON.set_local_events(_TOOL_ID, nested, _MON.events.PY_START)
                     self.armed.add(nested)
+        return complete
 
     def close(self) -> None:
         _MON.register_callback(_TOOL_ID, _MON.events.PY_START, None)
@@ -196,13 +201,15 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: object) -> Generator[No
     if mon is None:
         yield
         return
-    mon.arm()
+    complete = mon.arm()
     mon.hit = False
     _MON.restart_events()
     try:
         yield
     finally:
-        if mon.hit:
+        # A superset is safe (it only widens mutmut's selection); a missed
+        # reach would silently drop a test that kills mutants.
+        if mon.hit or not complete:
             mon.hits.add(item.nodeid)
 
 

@@ -150,11 +150,14 @@ def pytest_unconfigure(config):
 
 def test_the_trace_is_complete_with_another_thread_alive(tmp_path: Path) -> None:
     """A thread alive for the whole session makes every heap census unsafe
-    (``memory_trace.gc_census_is_safe``), so the plugin must arm through its
-    namespace walk alone and still credit every reaching test."""
+    (``memory_trace.gc_census_is_safe``). The namespace walk cannot prove it
+    armed everything, so every test is credited: the trace may over-select,
+    never miss a reaching test."""
     project = _project(tmp_path)
     (project / "conftest.py").write_text(_LINGERING_THREAD)
-    assert _trace(project, ["-p", "no:randomly", "-n", "0"]) == _REACHING
+    hits = _trace(project, ["-p", "no:randomly", "-n", "0"])
+    assert _REACHING <= hits
+    assert "tests/test_reach.py::test_never_reaches_mutated_code" in hits
 
 
 def test_the_trace_is_independent_of_test_order(tmp_path: Path) -> None:

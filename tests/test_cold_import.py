@@ -69,7 +69,7 @@ def _cold_import_failures(
         lines = proc.stderr.strip().splitlines()
         return module, proc.returncode, lines[-1] if lines else ""
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count() or 2) as pool:
+    with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 2)) as pool:
         results = list(pool.map(attempt, modules))
     return {module: err for module, rc, err in results if rc != 0}
 
