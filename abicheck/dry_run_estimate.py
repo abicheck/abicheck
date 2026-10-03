@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -106,36 +106,6 @@ def expand_header_inputs(inputs: list[Path]) -> list[Path]:
         seen.add(k)
         deduped.append(h)
     return deduped
-
-
-def expand_public_header_inputs(headers: Iterable[Path]) -> list[str]:
-    """Best-effort :func:`expand_header_inputs`, as ``str`` paths.
-
-    The public-header-root variant: a ``-H``/``--public-header-dir`` entry may
-    name a directory, and two consumers need the individual header *files* out
-    of it rather than the directory as one entry -- the S2 leak pass (so clang
-    preprocesses each header instead of a directory as one bogus TU) and L4
-    replay's install-tree-vs-build-tree mirror detection
-    (``clang_public_roots._equivalent_public_roots_for_unit``, whose promotion
-    rule needs two sampled matches for a directory root but only one for a file
-    root, so an un-expanded directory silently loses a real mirror).
-
-    Unlike :func:`expand_header_inputs` this never raises: an empty or missing
-    directory degrades to the raw paths, because both consumers are advisory
-    enrichment on top of a snapshot that has already been built.
-
-    Lives here, in the engine layer, rather than in ``cli_scan_baseline`` where
-    it started, so ``service_input_resolution.embed_side_build_source`` can
-    reach it without an engine-imports-CLI edge (CLI cleanup phase two, PR 3A --
-    the migration that routed ``scan``'s candidate resolution through that
-    shared primitive). ``cli_scan_baseline._expand_public_headers`` was a thin
-    delegate until ADR-068 Phase 6 deleted it, so there is one implementation rather than two.
-    """
-    hdrs = list(headers)
-    try:
-        return [str(p) for p in expand_header_inputs(hdrs)]
-    except Exception:  # noqa: BLE001 - expansion is best-effort for these tiers
-        return [str(h) for h in hdrs]
 
 
 # ── Scan service: typed request/result + per-project cost estimate ───────────
@@ -321,20 +291,6 @@ def _count_source_tus(sources: Path) -> int:
         if p.is_file() and p.suffix.lower() in _SOURCE_TU_EXTS:
             n += 1
     return n
-
-
-def _compile_db_in(root: Path) -> Path | None:
-    """The ``compile_commands.json`` inside a build/source *directory*, if any.
-
-    Reuses the *execution* path's discovery (``inline._find_compile_db_in_dir``:
-    the conventional build-dir hints **plus** the depth-1 ``*/compile_commands.json``
-    glob fallback) so ``scan --estimate`` mirrors what the real scan collects — a
-    DB in a non-hint immediate subdirectory such as ``cmake-build-debug-gcc/`` is
-    priced, not reported as absent / 0 TUs (Codex review).
-    """
-    from .buildsource.inline import _find_compile_db_in_dir
-
-    return _find_compile_db_in_dir(root)
 
 
 def _count_pack_tus(path: Path) -> int | None:

@@ -86,9 +86,10 @@ stopped accepting `--mode`/`--source-method`/`--max` at all; passing any of
 them was a plain "no such option" usage error (exit 64), same as any other
 unrecognized flag. There is no warn-and-map compatibility shim: this table is
 here only for anyone migrating an old command line, not as a live alias list.
-The internal `s0`…`s6` / `ScanMode` vocabulary still exists inside the engine
-(`model/evidence_depth_levels.py`), but it has no public entry point at all
-any more — the typed `ScanRequest` that used to accept it was removed in 0.6 — and it must never leak into the public CLI, `--help`,
+The internal `s0`…`s6` vocabulary still exists inside the engine
+(`model/evidence_depth_levels.py`; the `--mode` presets themselves went with
+`scan`), but it has no public entry point beyond `.abicheck.yml`'s
+`source.method` — the typed `ScanRequest` that used to accept it was removed in 0.6 — and it must never leak into the public CLI, `--help`,
 reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 
 **`--source-method s0…s6`** (the old "how it gathers evidence" axis):

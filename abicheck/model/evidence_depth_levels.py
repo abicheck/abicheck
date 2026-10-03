@@ -18,38 +18,27 @@ G19.3; renamed and moved here from ``buildsource/scan_levels.py`` in the
 Phase 6 rename off the ``scan`` identity, ADR-068 §3 #34 —
 ``docs/contribute/plans/one-comparison-product.md``).
 
-This is the shared depth/method vocabulary both ``compare`` (via
-``cli_compare_helpers.py``, ``service_compare_evidence.py``,
-``workflows/compare_cost_preview.py``, ``workflows/plan.py``) and ``scan``
-resolve through — not scan-only machinery, hence the move out of
-``buildsource/`` (a value-type vocabulary is a ``model/`` responsibility per
-ADR-061's task-routing table, not build-source evidence reading).
+The shared depth/method vocabulary ``compare`` and ``dump`` resolve through
+(``cli_compare_helpers.py``, ``cli_dump_depth.py``, ``service_compare_evidence.py``,
+``workflows/compare_cost_preview.py``, ``workflows/plan.py``). A value-type
+vocabulary is a ``model/`` responsibility per ADR-061's task-routing table.
 
 Two internal axes drive resolution (ADR-035 D1), but only one is public:
 
 - **L = evidence depth** (:class:`EvidenceDepth`, the coarse ``--depth`` knob):
   the *what* + authority. This is the **only** axis exposed on the CLI
-  (ADR-037 D5) — ``binary``/``headers``/``build``/``source``/``full``.
+  (ADR-037 D5) — ``binary``/``headers``/``build``/``source``.
 - **S = source-analysis method** (:class:`SourceMethod`, ``s0..s6`` + ``auto``):
   the *how* — six cost-ordered techniques that produce L3-L5 evidence, used
-  internally to resolve a depth into a concrete collection mode. The old
-  ``--source-method``/``--mode`` CLI flags that let a caller pin an S-method or
-  preset directly are **deprecated, hidden aliases for one release**
-  (the retired ``cli_scan._warn_deprecated_scan_aliases``, ADR-068 Phase 6); they still parse
-  and, for backward compatibility, still resolve through this module's
-  precedence — the S→L map is **lossy** (``build``→S1 not S2, and S3 has no
-  ``--depth`` form), so an explicitly-passed ``--source-method`` is the more
-  precise knob and wins if both are given. New code should use ``--depth``.
+  internally to resolve a depth into a concrete collection mode. The S→L map
+  is **lossy** (``build``→S1 not S2, and S3 has no ``--depth`` form); only
+  ``.abicheck.yml``'s ``source.method`` names an S-method directly. The
+  ``scan`` ``--mode`` presets and their precedence resolver went with
+  ``scan`` (ADR-068 Phase 6).
 
-A ``--mode`` (:class:`ScanMode`) is a **fixed preset** of (S, L) — not
-risk-varying — so a CI gate that pins a mode produces the same scan for the same
-inputs. The numeric risk score (``risk.py``) is consulted **only** for
-``--source-method auto`` (opt-in), never to silently change a pinned level
-(ADR-035 D3).
-
-The resolved S-method maps onto the existing ADR-033 D2 CI evidence mode that
-``embed_build_source`` / ``collect_inline_pack`` already understand, so ``scan``
-adds no new collection machinery — it is a front-end over ``dump``/``compare``.
+An explicit depth maps onto the ADR-033 D2 CI evidence mode that
+``embed_build_source`` / ``collect_inline_pack`` understand through
+:func:`collect_mode_for_depth`, the one owner of that mapping.
 
 Pure functions over enums and strings; fully unit-tested.
 """
@@ -57,15 +46,6 @@ Pure functions over enums and strings; fully unit-tested.
 from __future__ import annotations
 
 from enum import Enum
-
-
-class ScanMode(str, Enum):
-    """A fixed (S, L) preset selecting *when*/*how deep* the scan runs (D9)."""
-
-    PR = "pr"  # always-on tier + targeted S5 (the cheap PR default)
-    PR_DEEP = "pr-deep"  # PR + the L5 graph edges
-    BASELINE = "baseline"  # full S6 dump + full source analysis (amortized once)
-    AUDIT = "audit"  # intra-version single-build hygiene lint, no baseline
 
 
 class SourceMethod(str, Enum):
@@ -114,8 +94,7 @@ USER_DEPTHS: tuple[EvidenceDepth, ...] = (
 #: used by ``ScanRequest``/other programmatic callers, never by the
 #: CLI's own ``--depth`` parsing) keeps the historical ``symbols`` alias and
 #: accepts the internal ``full``/``graph`` rungs verbatim -- those rungs still
-#: exist as real :class:`EvidenceDepth` values for mode-preset-driven internal
-#: callers (e.g. ``pr-deep`` resolves ``GRAPH``).
+#: exist as real :class:`EvidenceDepth` values for internal callers.
 
 #: ``parse_user_depth``'s one remaining alias: the historical ``symbols``
 #: spelling for the CLI-named ``binary`` rung, kept for non-CLI callers.
@@ -155,16 +134,6 @@ _SOURCE_SCOPE_TO_COLLECT_MODE: dict[SourceScope, str] = {
     SourceScope.ALL: "source-target",
 }
 
-
-#: Fixed per-mode preset of (source_method, depth) — ADR-035 D9. ``PR`` pins the
-#: cheap targeted S5; ``BASELINE`` the full S6; ``AUDIT`` reuses the PR depth but
-#: runs intra-version (no baseline). These are deterministic, not risk-varying.
-_MODE_PRESET: dict[ScanMode, tuple[SourceMethod, EvidenceDepth]] = {
-    ScanMode.PR: (SourceMethod.S5, EvidenceDepth.SOURCE),
-    ScanMode.PR_DEEP: (SourceMethod.S5, EvidenceDepth.GRAPH),
-    ScanMode.BASELINE: (SourceMethod.S6, EvidenceDepth.FULL),
-    ScanMode.AUDIT: (SourceMethod.S5, EvidenceDepth.SOURCE),
-}
 
 #: Lossy ``--depth`` → representative S-method (ADR-035 plan table). ``HEADERS``
 #: reaches no S-method (L2 is intrinsic header AST). ``BUILD`` is S1 — S2
@@ -232,11 +201,6 @@ def parse_user_depth(value: str | None) -> EvidenceDepth | None:
     return EvidenceDepth(v)
 
 
-def mode_preset(mode: ScanMode) -> tuple[SourceMethod, EvidenceDepth]:
-    """The fixed (source_method, depth) preset for *mode* (deterministic)."""
-    return _MODE_PRESET[mode]
-
-
 def depth_to_method(depth: EvidenceDepth) -> SourceMethod | None:
     """The representative S-method for a coarse ``--depth`` (lossy; may be None)."""
     return _DEPTH_TO_METHOD[depth]
@@ -246,7 +210,7 @@ def method_to_depth(method: SourceMethod) -> EvidenceDepth:
     """The representative L-depth a *resolved* S-method reaches (for reporting).
 
     ``AUTO`` must be resolved to a concrete method first (via
-    :func:`resolve_source_method`); passing it here is a programming error.
+    no command resolves one any more); passing it here is a programming error.
     """
     if method is SourceMethod.AUTO:
         raise ValueError("method_to_depth requires a resolved S-method, not AUTO")
@@ -257,107 +221,13 @@ def method_to_collect_mode(method: SourceMethod) -> str:
     """Map a *resolved* S-method to its ADR-033 D2 CI evidence collect mode.
 
     ``AUTO`` must be resolved to a concrete method first (via
-    :func:`resolve_source_method`); passing it here is a programming error.
+    no command resolves one any more); passing it here is a programming error.
     """
     if method is SourceMethod.AUTO:
         raise ValueError(
             "method_to_collect_mode requires a resolved S-method, not AUTO"
         )
     return _METHOD_TO_COLLECT_MODE[method]
-
-
-def resolve_source_method(
-    *,
-    mode: ScanMode,
-    source_method: SourceMethod | None = None,
-    depth: EvidenceDepth | None = None,
-    auto_method: str | None = None,
-) -> SourceMethod:
-    """Resolve the explicit, deterministic S-method for a scan (ADR-035 D1/D3).
-
-    ``--depth`` is the only S/L-selecting flag on the public CLI (ADR-037 D5);
-    ``--source-method``/``--mode`` are deprecated, hidden aliases kept for one
-    release of backward compatibility. Precedence when more than one is given
-    (highest first):
-
-    1. an explicit ``--source-method`` (deprecated; the more precise knob, so it
-       wins over ``--depth`` if both are passed);
-    2. an explicit ``--depth`` (coarse, lossy → representative S);
-    3. the ``--mode`` preset (deprecated; the default when neither is given).
-
-    ``AUTO`` is resolved with ``auto_method`` — the risk-driven S-method from
-    :func:`risk.recommend_source_method` — which the caller computes only when the
-    user opted into ``auto`` (it never fires for a pinned level). If ``AUTO`` is
-    selected with no ``auto_method`` supplied, it falls back to the ``mode``
-    preset so the result is always concrete.
-
-    A ``--depth headers`` (no S-method) resolves to ``S0`` — only the intrinsic
-    L0-L2 artifact/header tiers plus the always-on S3 pattern scan run.
-    """
-    if source_method is not None:
-        if source_method is SourceMethod.AUTO:
-            if auto_method:
-                return SourceMethod(auto_method)
-            return mode_preset(mode)[0]
-        return source_method
-    if depth is not None:
-        resolved = depth_to_method(depth)
-        return resolved if resolved is not None else SourceMethod.S0
-    return mode_preset(mode)[0]
-
-
-#: The depth an *omitted* ``--depth`` resolves to (ADR-068's second 2026-09-09
-#: amendment, ruling (b)).
-#:
-#: ``auto`` used to mean "score the risk of the changed paths and pick a rung",
-#: falling back to the ``--mode`` preset when no diff seed was produced. Both
-#: halves of that are retired: the risk scorer no longer selects an evidence
-#: level, and the *preset* is not the replacement -- ``_MODE_PRESET`` maps both
-#: ``PR`` and ``AUDIT`` to ``(S5, SOURCE)``, so falling back to it would run a
-#: full source replay on every unpinned scan, which is both far more expensive
-#: than the risk-scored choice it replaced (a low-risk seeded PR resolved to
-#: ``s0``/off) and not the contract the amendment accepted. That contract is
-#: "the same fixed ``headers`` default ``compare`` always used"; a job wanting
-#: source-level assurance pins ``--depth source`` explicitly.
-#:
-#: Deliberately a named constant shared by every unpinned-depth resolution
-#: (the ``scan`` CLI and :func:`~abicheck.dry_run_estimate.estimate_scan`'s own
-#: dry-run projection) rather than a literal at each, so the cost preview can
-#: never price a different rung than the run executes.
-UNPINNED_DEPTH: EvidenceDepth = EvidenceDepth.HEADERS
-
-
-def resolve_level(
-    *,
-    mode: ScanMode,
-    source_method: SourceMethod | None = None,
-    depth: EvidenceDepth | None = None,
-    auto_method: str | None = None,
-) -> tuple[SourceMethod, EvidenceDepth]:
-    """Resolve both the deterministic S-method **and** its effective L-depth.
-
-    Returning the depth (not just the method) keeps ``--mode`` presets that pin a
-    *deeper* depth than their method implies — notably ``pr-deep`` = ``(S5,
-    GRAPH)`` vs ``pr`` = ``(S5, SOURCE)`` — distinct: collapsing to the method
-    alone made the two modes identical (Codex review). Depth precedence mirrors
-    :func:`resolve_source_method`:
-
-    - an explicit/``auto`` ``--source-method`` reports the *resolved method's*
-      representative depth (so ``s6`` reads ``full``, not the mode preset);
-    - an explicit ``--depth`` is taken verbatim;
-    - otherwise the ``--mode`` preset's depth is preserved (``pr-deep`` keeps
-      ``GRAPH``).
-    """
-    method = resolve_source_method(
-        mode=mode, source_method=source_method, depth=depth, auto_method=auto_method
-    )
-    if source_method is not None:
-        eff_depth = method_to_depth(method)
-    elif depth is not None:
-        eff_depth = depth
-    else:
-        eff_depth = mode_preset(mode)[1]
-    return method, eff_depth
 
 
 def level_to_collect_mode(
@@ -389,3 +259,24 @@ def level_to_collect_mode(
     if source_scope is not None and method is SourceMethod.S5:
         return _SOURCE_SCOPE_TO_COLLECT_MODE[source_scope]
     return base
+
+
+def collect_mode_for_depth(depth: str) -> str:
+    """The ADR-033 D2 collect mode an explicit ``--depth`` value resolves to.
+
+    The one statement of that mapping: ``dump`` (``cli_dump_depth.
+    resolve_dump_depth``), ``compare``'s typed pipeline (``service_compare_
+    evidence``) and the planner (``workflows/plan.py``) each held a copy.
+    ``binary``/``headers`` reach no source method and collect nothing;
+    ``source`` always replays at ``TARGET`` scope (ADR-043 D3), the fix for
+    the zero-TU defect where an explicit deep depth without a change seed
+    selected no translation units. Case-insensitive, since typed-API callers
+    bypass the CLI's own lowercasing.
+    """
+    evidence_depth = EvidenceDepth(depth.lower())
+    method = depth_to_method(evidence_depth)
+    if method is None:
+        return "off"
+    return level_to_collect_mode(
+        method, evidence_depth, source_scope=SourceScope.TARGET
+    )

@@ -450,29 +450,16 @@ def scan_bazel_scoping_failure(
 def _depth_implied_collect_mode(depth: str) -> str:
     """The collect mode an *explicit* ``depth`` value resolves to on its own.
 
-    Mirrors ``service_compare_evidence._resolve_depth_collect_mode``'s
-    explicit-depth branch (duplicated, not imported, for the same
-    leaf-module reason that function's own docstring states) -- with an
-    explicit depth, both ``dump``'s and ``compare``'s own resolvers ignore
-    their differing "omitted depth" defaults and compute identically, so
-    there is exactly one mapping to mirror. ``"binary"`` and ``"headers"``
+    With an explicit depth, ``dump``'s and ``compare``'s resolvers ignore
+    their differing "omitted depth" defaults and both answer
+    :func:`~abicheck.model.evidence_depth_levels.collect_mode_for_depth`,
+    which this asks too. ``"binary"`` and ``"headers"``
     both resolve to ``"off"``; only ``"binary"`` additionally clears headers
     (see :func:`_check_bazel_target_scoping`'s own comment).
     """
-    from ..model.evidence_depth_levels import (
-        EvidenceDepth,
-        SourceScope,
-        depth_to_method,
-        level_to_collect_mode,
-    )
+    from ..model.evidence_depth_levels import collect_mode_for_depth
 
-    evidence_depth = EvidenceDepth(depth.lower())
-    method = depth_to_method(evidence_depth)
-    if method is None:
-        return "off"
-    return level_to_collect_mode(
-        method, evidence_depth, source_scope=SourceScope.TARGET
-    )
+    return collect_mode_for_depth(depth)
 
 
 def _check_bazel_target_scoping(side: SidePlan) -> PlanningFailure | None:
