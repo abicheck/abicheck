@@ -254,7 +254,6 @@ consumer that does not exist yet.
 | `binary_fingerprint.compute_function_fingerprints` | ADR-003 | `diff_symbols_renames.py`'s ELF-only rename path describes fingerprinting when a binary path is available; the call was never made. |
 | `wheel_tags.parse_manylinux_glibc_floor`/`parse_musllinux_floor`/`parse_macos_deployment_target_floor` | [g27-wheel-deployment-verification](g27-wheel-deployment-verification.md) | Auto-derive `runtime_floors` from a compared wheel's own platform tag; today every floor needs an explicit `--env-matrix`. |
 | `wheel_tags.parse_numpy_requirement_from_metadata`, `parse_wheel_numpy_requirement` | [g26-numpy-capi-envelope](g26-numpy-capi-envelope.md) | G26's "declared" side: `diff_numpy_capi` should read the wheel METADATA requirement through these. |
-| `graph_backends.ingest_codeql_extends_results` | ADR-041 (partially phased), ADR-044 | L5 CodeQL collection calls it beside `ingest_codeql_call_results` when an extends-query result exists. |
 | `acknowledgment_gate.fold_additions_review_exit` (live, but always `0`) | ADR-067 D6 | No front end passes `acknowledgments` to `checker.compare`, so the additions-review axis never fires. Wiring it needs an input (config key or flag), the axis inside `ExitDecision` (an `exit` block field and reason; today the CLI folds it after the decision, so the report's `exit.code` and the typed API would disagree with the process exit once it can fire), and the report schema bump that goes with that. |
 
 Two rows first listed here were not wiring gaps. `legacy_record_ir` was a
@@ -265,6 +264,18 @@ is deleted and one-semantic-pipeline now names the real function.
 producers stamp (ADR-063), used by the tests that check that tier; whether
 weaker tiers should stop counting as exported is the separate policy
 question ADR-063 leaves open, so it is kept as that question's inert reader.
+
+`graph_backends.ingest_codeql_extends_results` was listed here as rolling
+out; it is the documented library sibling of `ingest_codeql_call_results`
+(the survivor of `--codeql-results`), which has no production caller
+either. `docs/use/build-evidence-setup.md` now names it beside the call
+graph reader.
+
+`binary_fingerprint.compute_function_fingerprints` stays listed, but the
+wiring is a format decision rather than a call: a detector sees only
+snapshots, so code hashes would have to be computed at dump time and stored
+on `ElfSymbol`, a snapshot schema bump inside ADR-050's comparability
+contract.
 
 `EvidenceView.available_depths` was listed here as rolling out; it was a
 read-only restatement of the `--depth` ladder `evidence_depth.DEPTH_RANK`
