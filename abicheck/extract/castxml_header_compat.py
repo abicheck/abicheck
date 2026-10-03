@@ -82,6 +82,7 @@ __all__ = [
     "CASTXML_HEADER_PREAMBLE",
     "FLOAT128_SPELLING",
     "FLOAT128_STANDIN",
+    "AGGREGATE_FIRST_HEADER_LINE",
     "PREAMBLE_FILENAME",
     "write_castxml_aggregate",
 ]
@@ -116,6 +117,13 @@ typedef __attribute__((__neon_vector_type__(2))) double __Float64x2_t;
 """
 
 
+#: 1-based line of the aggregate on which ``headers[0]`` is included; header
+#: ``i`` is on line ``AGGREGATE_FIRST_HEADER_LINE + i``. The unparseable-header
+#: fallback maps castxml's ``In file included from <aggregate>:N`` frames back
+#: to input headers through this, so the layout has exactly one owner.
+AGGREGATE_FIRST_HEADER_LINE = 2
+
+
 def write_castxml_aggregate(headers: Iterable[Path], suffix: str) -> Path:
     """Write the header castxml parses: the preamble, then every *headers* entry.
 
@@ -127,6 +135,7 @@ def write_castxml_aggregate(headers: Iterable[Path], suffix: str) -> Path:
     preamble = agg_dir / PREAMBLE_FILENAME
     preamble.write_text(CASTXML_HEADER_PREAMBLE)
     lines = [f'#include "{preamble}"\n']
+    assert len(lines) == AGGREGATE_FIRST_HEADER_LINE - 1
     lines += [f'#include "{h.resolve()}"\n' for h in headers]
     agg_path = agg_dir / f"aggregate{suffix}"
     agg_path.write_text("".join(lines))

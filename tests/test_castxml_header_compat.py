@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -256,6 +257,11 @@ def test_aarch64_target_parses_libstdcxx_float_headers(
 @pytest.mark.skipif(
     not (_CASTXML and shutil.which("g++")), reason="needs castxml and g++"
 )
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="the preamble targets glibc/libstdc++; _Float128 is a GNU/Linux type "
+    "(Apple clang and MSVC/mingw hosts cannot build the fixture)",
+)
 def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> None:
     """With and without the preamble, a host dump is byte-identical."""
     header, src = _write_case(tmp_path)
@@ -280,7 +286,7 @@ def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> No
     # Differential test: prove the second configuration really ran without the
     # preamble (separate caches are given by the per-run XDG_CACHE_HOME).
     assert marker.exists(), "sitecustomize did not run; the comparison would be vacuous"
-    if os.uname().machine in ("x86_64", "i686"):
+    if platform.machine() in ("x86_64", "i686"):
         assert (
             with_preamble.declarations.functions,
             with_preamble.declarations.types,

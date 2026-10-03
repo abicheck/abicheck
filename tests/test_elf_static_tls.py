@@ -208,6 +208,9 @@ def test_every_tls_model_is_classified_by_its_semantics(
             # local-exec in a shared object is a link error on some targets;
             # that is the toolchain refusing the model, not a classification.
             continue
+        if so.read_bytes()[:4] != b"\x7fELF":
+            # A mingw gcc on Windows links PE, which has no ELF TLS model.
+            pytest.skip(f"{cc} does not produce ELF on this host")
         built[model] = needs_static
         meta = parse_elf_metadata(so)
         assert meta.has_tls_symbols
