@@ -308,10 +308,18 @@ def run_abicheck(
         f"json={out_path}",
         *extra_args,
     ]
-    subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True)
     try:
         data = json.loads(Path(out_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        # Without this a missing tool (e.g. CastXML for --header) reads only
+        # as "no report", with the cause thrown away.
+        err = (proc.stderr or "").strip()
+        print(
+            f"abicheck compare exited {proc.returncode} with no report for "
+            f"{Path(old).name}: {err[:400]} ... {err[-400:]}",
+            file=sys.stderr,
+        )
         return None
     finally:
         # NamedTemporaryFile(delete=False) leaves the file behind; over a full

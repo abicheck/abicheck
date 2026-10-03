@@ -48,6 +48,11 @@ jobs:
         with:
           packages: binutils zstd
 
+      # Every pair whose packages ship an include/ tree is compared with
+      # --header old=/new= and --contract public (run_compat_corpus.py's
+      # evidence_args), which runs the CastXML header parse.
+      - uses: ./.github/actions/setup-castxml
+
       - name: Install abicheck
         run: |
           python -m pip install --upgrade pip
