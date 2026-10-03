@@ -17,3 +17,20 @@
   `abicheck.dwarf_unified.parse_advanced_dwarf` shim.** Use
   `abicheck.dwarf_unified.parse_dwarf`, which returns both halves from one
   ELF open.
+
+### Fixed
+
+- **PDB forward references resolve to the same definition the layout comes
+  from.** When a PDB carried two definitions of one struct name (an ODR
+  violation), `pdb_metadata` took the first as the struct's layout while the
+  type database linked forward references to the last, so a member typed
+  through a forward reference reported the other definition's size. Struct
+  and enum names also shared one map, so a struct and an enum with the same
+  name could cross-link, and an enum forward reference never followed to
+  its definition's underlying type. Forward references now link per kind to
+  the first complete definition, and every name and size lookup goes
+  through that link.
+- **`compare --dry-run` on a directory pair fails where the real run would.**
+  The release preview repeated input discovery and answered an empty plan
+  for a directory with no supported input; it now uses the same discovery as
+  the comparison and reports the same error.
