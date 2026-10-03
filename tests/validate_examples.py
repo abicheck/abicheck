@@ -1329,7 +1329,7 @@ def _run_source_smoke(
     name: str,
     entry: dict,
     case_dir: Path,
-    tmp_base: Path,
+    work_dir: Path,
     expected_raw: str | None,
 ) -> CaseResult | None:
     """Run optional consumer-source compile/link smoke declared by ground_truth."""
@@ -1375,7 +1375,7 @@ def _run_source_smoke(
     result = run_source_smoke(
         spec,
         case_dir=case_dir,
-        work_dir=tmp_base / f"{name}__source_smoke",
+        work_dir=work_dir,
         compiler=compiler,
         allow_run=allow_run,
     )
@@ -1430,7 +1430,8 @@ def run_case(
     # gate only on failure/skip; a PASS falls through so the verdict is
     # still checked for real, and its proof text is folded into the final
     # result below.
-    smoke_result = _run_source_smoke(name, entry, case_dir, tmp_base, expected_raw)
+    smoke_dir = _case_work_dir(tmp_base, f"{name}__source_smoke", variant)
+    smoke_result = _run_source_smoke(name, entry, case_dir, smoke_dir, expected_raw)
     if smoke_result is not None and smoke_result.status != "PASS":
         return smoke_result._replace(variant=variant)
     smoke_proof = smoke_result.message if smoke_result is not None else None

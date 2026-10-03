@@ -1005,3 +1005,54 @@ class TestParallelRunAllCases:
         ve._run_all_cases(list(verdicts), verdicts, json_out=True, jobs=2)
         assert seen["initializer"] is ve._init_worker
         assert seen["initargs"] == ("clang",)
+
+
+# ---------------------------------------------------------------------------
+# Work directories: one per (case, variant), never shared under --jobs
+# ---------------------------------------------------------------------------
+class TestWorkDirsDistinctPerCaseAndVariant:
+    """With ``--jobs``, two variants of one case may run at the same time, so
+    every directory a case writes must be unique per (case, variant). The
+    oracle is plain set cardinality over every catalog case x variant x
+    {build, source-smoke} on both path flavours -- not the naming formula."""
+
+    @pytest.mark.parametrize("platform_name", ["posix", "nt"])
+    def test_case_work_dir_is_injective(
+        self, tmp_path: Path, platform_name: str
+    ) -> None:
+        names = sorted(json.loads(ve.GROUND_TRUTH.read_text())["verdicts"])
+        keys = [
+            (n, v, smoke)
+            for n in names
+            for v in ARTIFACT_VARIANTS
+            for smoke in (False, True)
+        ]
+        dirs = {
+            ve._case_work_dir(
+                tmp_path,
+                f"{n}__source_smoke" if smoke else n,
+                v,
+                platform_name=platform_name,
+            )
+            for n, v, smoke in keys
+        }
+        assert len(dirs) == len(keys)
+
+    def test_run_case_gives_each_variant_its_own_source_smoke_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gt = json.loads(ve.GROUND_TRUTH.read_text())["verdicts"]
+        name = next(k for k, v in sorted(gt.items()) if v.get("source_smoke"))
+        seen: list[Path] = []
+
+        def _record(spec, *, work_dir, **_kw):
+            seen.append(work_dir)
+            return SourceSmokeResult(ok=False, failures=("stop",), proof="")
+
+        monkeypatch.setenv("ABICHECK_TRUSTED_SOURCE_SMOKE_RUN", "1")
+        monkeypatch.setattr(ve, "_find_compiler", lambda _cxx: "c++")
+        monkeypatch.setattr(ve, "run_source_smoke", _record)
+        for variant in ARTIFACT_VARIANTS:
+            ve.run_case(name, gt[name], tmp_path, variant=variant)
+        assert len(seen) == len(ARTIFACT_VARIANTS)
+        assert len(set(seen)) == len(seen)
