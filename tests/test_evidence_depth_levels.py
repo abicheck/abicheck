@@ -100,9 +100,7 @@ def test_unknown_depth_is_rejected() -> None:
 
 def test_s4_graph_only_avoids_l4_replay():
     assert method_to_collect_mode(SourceMethod.S4) == "graph-build"
-    assert (
-        level_to_collect_mode(SourceMethod.S4, EvidenceDepth.GRAPH) == "graph-build"
-    )
+    assert level_to_collect_mode(SourceMethod.S4, EvidenceDepth.GRAPH) == "graph-build"
 
 
 def test_depth_headers_reaches_no_method():

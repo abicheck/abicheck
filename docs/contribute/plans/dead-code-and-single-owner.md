@@ -229,3 +229,84 @@ functions, and the parameter list is Stage E's 31 plus `run_no_baseline_set`'s
 | `no_baseline_set.resolve_no_baseline_set_plan`'s `make_temp_dir` | **Removed**: no caller, test or production, passed one. |
 | `no_baseline_set.run_no_baseline_set`'s `audit` | **Kept**, test seam: the per-member failure-isolation tests inject an audit that raises for one member. |
 
+
+## Named only by an ADR or plan — rollout map
+
+`usecase_paths.py dead` keeps a function with no production caller out of the
+dead list when an ADR or plan names it. On the Stage F recording that is
+**95** functions: 27 are the test hooks and inert primitives this plan already
+decided above, and the other **68** are mapped here. Each one is in exactly
+one of four groups, so a feature that is still rolling out is not counted as
+dead, and is not mistaken for shipped either. Recompute with the same command;
+a function that gains a production caller leaves this list by itself.
+
+### Rolling out — planned, not yet wired into production
+
+Each row is real remaining work: the owning document plans a production
+consumer that does not exist yet.
+
+| Item | Owner | Remaining work to reach production |
+|---|---|---|
+| `SemanticIR.occurrences_for`, `SemanticIRIndex.occurrences_for` | ADR-063 / [one-semantic-pipeline](one-semantic-pipeline.md) Phase 6 "PR 2" | Consumer cutover: `diff_symbols.py`/`diff_types.py` match through `SemanticIRIndex` instead of `AbiSnapshot.functions`/`variables`/`types`. |
+| `semantic_ir_legacy_adapter.legacy_record_ir` | ADR-063 / one-semantic-pipeline, record-layout T3 rule | The plan says `compare/record_layout.py`'s no-IR fallback reads through it; no code does. Wire it, or correct the plan. |
+| `surface_facts.binary_export_match` | ADR-063; [evidence-entity-model](evidence-entity-model.md) | ADR-063 says the binary-exported fact is read back through it; the `surface_facts` accessors (e.g. `is_export_confirmed_absent`) do not call it yet. |
+| `EvidenceView.available_depths` | ADR-063 / one-semantic-pipeline (`ResolvedExecutionContext`) | The depth floor (`enforce_requested_depth`) should read the resolved `EvidenceView` rather than recompute. |
+| `snapshot_digest_cache.digest_scope` | [design-hardening-from-defect-families](design-hardening-from-defect-families.md) F5, Phase 4 exit pending | No run opens the scope, so the run-scoped digest memo never engages; `compare`/the release fan-out must open it around `snapshot_content_digest`, with an H5 cell covering it. |
+| `GateOptions.effective_gate`, `workflows.gate.effective_gate_for_resolved_compare_config` | ADR-061; [duplication-and-convergence-assessment](duplication-and-convergence-assessment.md) P0 `EffectiveGate` | The release fan-out and native `compare` still gate from their own severity fields; both should read one `EffectiveGate`. |
+| `storage.import_baseline_set.import_baseline_set`/`export_baseline_set`, with `dto.baseline_set_metadata_from_dto`/`_to_dto` | ADR-062 (Proposed); [storage-format-v2](storage-format-v2.md); G40 | A baseline publish/load path in `compare` or `project` that goes through the BundleFacts→ProjectSnapshot adapter (streaming variant is a known gap). |
+| `storage.entity_ids.elf_symbol_occurrence` | ADR-062 Phase 0 (storage-format-v2 A0.2/A0.3) | A storage-v2 ELF symbol-occurrence producer (later ADR-062 phases). |
+| `binary_fingerprint.compute_function_fingerprints` | ADR-003 | `diff_symbols_renames.py`'s ELF-only rename path describes fingerprinting when a binary path is available; the call was never made. |
+| `wheel_tags.parse_numpy_requirement_from_metadata`, `parse_wheel_numpy_requirement` | [g26-numpy-capi-envelope](g26-numpy-capi-envelope.md) | G26's "declared" side: `diff_numpy_capi` should read the wheel METADATA requirement through these. |
+| `graph_backends.ingest_codeql_extends_results` | ADR-041 (partially phased), ADR-044 | L5 CodeQL collection calls it beside `ingest_codeql_call_results` when an extends-query result exists. |
+
+### Kept as library API (undocumented)
+
+Intended as Python API, but no `docs/use`/`docs/reference`/`docs/learn` page
+names them, so the tool sees only the ADR. The work is a reference entry (or a
+decision to delete), not wiring.
+
+| Item | Owner |
+|---|---|
+| `TypeMetadataSource` protocol accessors (`get_enum_info`, `get_struct_layout`, `has_data`, and on BTF/CTF also `get_function_proto`, `get_typedef`) on `BtfMetadata`/`CtfMetadata`/`DwarfMetadata` | ADR-007 (production uses `to_dwarf_metadata()` instead) |
+| `wheel_tags.parse_manylinux_glibc_floor`/`parse_musllinux_floor`/`parse_macos_deployment_target_floor` (re-exported from `package.py`) | [g27-wheel-deployment-verification](g27-wheel-deployment-verification.md) |
+| `buildsource.inputs_emit.write_inputs_pack` | ADR-038 (batch producer for build integrations) |
+| `contract_replay.replay_original_decisions` | ADR-049 D6 / ADR-067 (no replay command is scheduled) |
+| `project_snapshot_store.read_project_manifest` | ADR-062 (eager reader; production uses the lazy one) |
+| `snapshot_io.read_snapshot_storage_info` | ADR-059 |
+| `workflows.input_resolution.load_env_matrix` | ADR-068 (migration path for `env_matrix_path`) |
+| `EntityResolver.v1_id_for` | ADR-046 |
+
+### Test hooks and oracles
+
+Kept for the tests that assert through them; not rollout work.
+`DecisionComparison.is_sound`, `contract_graph_encoding.resolve_graph_node`
+(the slow reference resolver), `coverage_ledger.suppression_reaches_coverage_failures`
+and `SuppressionList.is_suppressed` (the unsuppressibility proof), all under
+[public-contract-default](public-contract-default.md);
+`scope_segments.flat_names`, `legacy_function_ir` (one-semantic-pipeline);
+`evidence_merge.presence_in`, `execution_cache.cache_stats`,
+`model.name_heuristics.heuristic_callables`,
+`policy.name_heuristics.name_heuristic_registry`/`registry_problems`
+(design-hardening); `DetectorRegistry.detector_names` (G31);
+`probe_harness._snapshot_object_file` (duplication-and-convergence, recorded
+exception).
+
+### Stale references — next deletion pass
+
+The document naming these describes a superseded or deleted path, so the
+name keeps dead code alive. Each still needs the same check as Stages C–F
+(read the callers, look for a dropped wiring) before it goes:
+
+| Item | Why stale |
+|---|---|
+| `workflows.plan.scan_bazel_scoping_failure` | its callers went with `scan` (ADR-068 Phase 6); decide whether `compare`/`dump` need the Bazel scoping guard |
+| `evidence_depth_levels.parse_user_depth` | kept for `ScanRequest`, which ADR-068 removed |
+| `Suppression.selector_matches` | one-semantic-pipeline D10 said wrap or remove; no caller, no test |
+| `analysis_assurance.fold_analysis_assurance_exit` | ADR-071's CLI caller was removed; re-exported only |
+| `policy.contract_coverage_exit.fold_coverage_exit` | the fold now lives in `policy/exit_decision.py`; either route through it (one owner) or delete |
+| `ExportSet.destinations` | no reader (ADR-073 is implemented) |
+| `cli_helpers_compare._build_match_map`, `release_variant_operand._resolve_release_package_side` | imported but never called |
+| `storage.atomic_file.atomic_copy` | its `dumper_cache` caller is gone |
+| `binary_fingerprint.compute_section_summary` | named by ADR-003's implementation list only |
+| `fact_provenance.both_castxml_backed_fact`/`is_castxml_backed_fact` | G31 Phase C replaced the gate; G39 is unstarted |
+| `evidence_depth._l5_payload_empty` | a wrapper left after one-semantic-pipeline moved callers to the shared helper |
