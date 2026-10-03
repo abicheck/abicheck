@@ -991,16 +991,15 @@ class TestParallelRunAllCases:
     def test_pool_is_initialized_with_current_preferred_family(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import concurrent.futures as cf
-
-        real = cf.ProcessPoolExecutor
+        runner = sys.modules[ve.run_ordered.__module__]
+        real = runner.ProcessPoolExecutor
         seen: dict[str, object] = {}
 
         def _recording(*args, **kwargs):
             seen.update(kwargs)
             return real(*args, **kwargs)
 
-        monkeypatch.setattr(cf, "ProcessPoolExecutor", _recording)
+        monkeypatch.setattr(runner, "ProcessPoolExecutor", _recording)
         monkeypatch.setattr(ve, "PREFERRED_FAMILY", "clang")
         verdicts = self._verdicts(3)
         ve._run_all_cases(list(verdicts), verdicts, json_out=True, jobs=2)

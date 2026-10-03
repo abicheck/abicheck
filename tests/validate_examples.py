@@ -45,7 +45,13 @@ from abicheck.source_smoke import SourceSmokeSpec, run_source_smoke
 
 REPO_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_DIR / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent))
 import example_catalog  # noqa: E402
+from example_case_runner import (  # noqa: E402
+    print_console_summary,
+    print_progress,
+    run_ordered,
+)
 
 EXAMPLES_DIR = (
     example_catalog.CASES_DIR
@@ -1642,33 +1648,15 @@ def _check_prerequisites() -> str | None:
 
 
 def _init_worker(preferred_family: str | None) -> None:
-    """Pool initializer: carry ``--toolchain`` into a worker process.
-
-    ``CC``/``CXX`` reach a worker through the inherited environment, but the
-    module global does not under the ``spawn``/``forkserver`` start methods
-    (the Linux default from Python 3.14), so it is set explicitly.
-    """
+    """Pool initializer carrying ``--toolchain`` into a worker process."""
     global PREFERRED_FAMILY
     PREFERRED_FAMILY = preferred_family
 
 
 def _timed_run_case(name: str, entry: dict, tmp_base: Path, variant: str) -> CaseResult:
-    """Run one case and stamp its own wall time (measured where it ran)."""
     started = time.perf_counter()
     res = run_case(name, entry, tmp_base, variant=variant)
     return res._replace(seconds=round(time.perf_counter() - started, 3))
-
-
-def _print_progress(res: CaseResult) -> None:
-    icon = {
-        "PASS": "\u2705",
-        "FAIL": "\u274c",
-        "XFAIL": "\u26a0\ufe0f ",
-        "SKIP": "\u23ed\ufe0f ",
-        "ERROR": "\U0001f4a5",
-    }.get(res.status, "?")
-    msg = f"  {res.message}" if res.message else ""
-    print(f"{icon} {res.name:<42}  {res.status} [{res.variant}]{msg}", flush=True)
 
 
 def _run_all_cases(
@@ -1680,44 +1668,22 @@ def _run_all_cases(
     variants: tuple[str, ...] = (DEFAULT_ARTIFACT_VARIANT,),
     jobs: int = 1,
 ) -> list[CaseResult]:
-    """Run each (variant, case) and return results in (variant, name) order.
-
-    Cases are independent -- each builds in its own work directory, and the
-    header-AST/snapshot disk caches write atomically -- so ``jobs > 1`` runs
-    them in a process pool. The result list (and therefore the JSON artifact)
-    keeps the sequential order regardless of completion order. ``fail_fast``
-    stops at the first FAIL and so always runs sequentially.
-    """
-    work = [(variant, name) for variant in variants for name in names]
+    """Run each (variant, case); results keep (variant, name) order for any *jobs*."""
     results: list[CaseResult] = []
     with tempfile.TemporaryDirectory(prefix="validate_examples_") as tmp_root:
-        tmp_base = Path(tmp_root)
-        if jobs <= 1 or fail_fast or len(work) <= 1:
-            for variant, name in work:
-                res = _timed_run_case(name, verdicts[name], tmp_base, variant)
-                results.append(res)
-                if not json_out:
-                    _print_progress(res)
-                if fail_fast and res.status == "FAIL":
-                    return results
-            return results
-
-        from concurrent.futures import ProcessPoolExecutor
-
-        with ProcessPoolExecutor(
-            max_workers=min(jobs, len(work)),
+        calls = [(n, verdicts[n], Path(tmp_root), v) for v in variants for n in names]
+        for res in run_ordered(
+            _timed_run_case,
+            calls,
+            jobs=1 if fail_fast else jobs,
             initializer=_init_worker,
             initargs=(PREFERRED_FAMILY,),
-        ) as pool:
-            futures = [
-                pool.submit(_timed_run_case, name, verdicts[name], tmp_base, variant)
-                for variant, name in work
-            ]
-            for future in futures:
-                res = future.result()
-                results.append(res)
-                if not json_out:
-                    _print_progress(res)
+        ):
+            results.append(res)
+            if not json_out:
+                print_progress(res)
+            if fail_fast and res.status == "FAIL":
+                break
     return results
 
 
@@ -1796,31 +1762,7 @@ def _print_summary(
                 indent=2,
             )
         )
-    else:
-        total = len(results)
-        sep = "\u2500" * 60
-        print(f"\n{sep}")
-        print(
-            f"Total: {total}  "
-            + "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
-        )
-
-    failures = counts.get("FAIL", 0) + counts.get("ERROR", 0)
-    if failures:
-        for r in results:
-            if r.status in ("FAIL", "ERROR"):
-                print(
-                    f"FAIL: {r.name}  expected={r.expected!r} got={r.got!r}  {r.message}",
-                    file=sys.stderr,
-                )
-    if counts.get("KINDS_MISMATCH"):
-        for r in results:
-            if r.kinds_strict == "mismatch":
-                print(
-                    f"KINDS_MISMATCH: {r.name} [{r.status}]  {r.kinds_strict_detail}",
-                    file=sys.stderr,
-                )
-    return 1 if failures else 0
+    return print_console_summary(results, counts, json_out=json_out)
 
 
 def _selected_variants(raw: str) -> tuple[str, ...]:
@@ -1845,10 +1787,7 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=1,
         metavar="N",
-        help=(
-            "Run up to N cases in parallel processes (default: 1; 0 = one per "
-            "CPU). Result order is unchanged. Ignored with --fail-fast."
-        ),
+        help="Parallel cases (0 = one per CPU; result order unchanged; ignored with --fail-fast)",
     )
     ap.add_argument(
         "--json",
