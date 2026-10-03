@@ -655,8 +655,10 @@ It earns its place on three counts the unit tests cannot cover:
    the field is a follow-up once it has run green, deliberately not claimed in
    advance.
 
-It is wired into the `test-action summary` job's `needs` list, without which it
-would gate nothing — and that list is now complete over the workflow's jobs.
+It was wired into the `test-action summary` job's `needs` list. That roll-up job
+was later removed (nothing on `main` is merge-blocking); the cell now runs as the
+`[extra-args-flag-shaped-value]` steps of `test-action-scenarios` and reports
+through that job's own check.
 
 ---
 

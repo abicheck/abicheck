@@ -64,6 +64,14 @@ jobs:
   #   * everything with `dependency-source: none` (`install-deps: false`)
   #     shares `test-action-scenarios`, which never runs an install step and
   #     so never mutates PATH for a later scenario.
+  #
+  # There is no roll-up `summary` job: nothing on `main` is merge-blocking
+  # (`.github/AGENTS.md`, "Required-status-check configuration"), and a
+  # `needs:`-only job spent a full runner queue wait (30 of 43 minutes on its
+  # last measured run) to report what these jobs' own checks already show. If
+  # merge-blocking returns, reinstate one aggregate whose predicate treats
+  # failure, cancelled AND skipped as red (plan `ci-cost-and-assurance.md`,
+  # Phase 1) rather than requiring individual matrix legs.
 
   # ── Snapshot + runner-gcc scenarios (ubuntu, dependency-source: none) ────
   test-action-scenarios:
@@ -820,37 +828,3 @@ jobs:
               print(f"::error::{e}")
           sys.exit(1 if errors else 0)
           PY
-
-  # One stable, always-added-when-triggered required check representing this
-  # whole workflow's pass/fail state (CLI cleanup phase two, PR A/PR 0B) --
-  # requiring every job above individually goes stale on every matrix/job
-  # edit, which is the usual reason a repo's required-check list rots. `if:
-  # always()` so a cancelled/skipped dependency is visible here too, not
-  # silently treated as "didn't run, so nothing to report."
-  test-action-summary:
-    name: test-action summary
-    # `!cancelled()`, not `always()`: `cancel-in-progress` (above) cancels a
-    # run a newer push superseded, and `always()` then started this job, saw
-    # every dependency `cancelled`, and failed -- turning `main` red after
-    # every quick run of merges. A cancelled run now skips this job instead:
-    # never a false green (the `ci.yml` mirror accepts only success/neutral,
-    # so a manually cancelled run without a successor still blocks), never a
-    # false red. `cancelled()` is workflow-level: a dependency that fails or
-    # hits its own timeout leaves it false, so this job still runs and fails.
-    if: ${{ !cancelled() }}
-    needs:
-      - test-action-scenarios
-      - test-dependency-source-conda-forge
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions:
-      contents: read
-    steps:
-      - name: Fail if any test-action.yml job did not succeed
-        run: |
-          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" == "true" ]]; then
-            echo "::error::One or more test-action.yml jobs did not succeed:"
-            echo '${{ toJSON(needs) }}'
-            exit 1
-          fi
-          echo "All test-action.yml jobs succeeded."

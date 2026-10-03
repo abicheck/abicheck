@@ -49,10 +49,17 @@ sequence that invokes these scripts in order:
      `conda-forge-clang20` itself, still no bear anywhere) — L4/L5 source
      scanning degrades gracefully, same as when they're absent on the
      system path.
-3. `action/run.sh` — assembles the `abicheck` CLI invocation from `INPUT_*`
+3. `action/install-abicheck.sh` — installs abicheck from the Action's own
+   source tree, skipping the rebuild when an earlier call of the Action in
+   the same job already installed byte-identical source into the same
+   interpreter (the fingerprint covers the interpreter, its version and
+   every file under `pyproject.toml` + `abicheck/`; only the latest install
+   per interpreter is remembered, so switching sources always reinstalls).
+   Contract tested in `tests/test_action_install_abicheck.py`.
+4. `action/run.sh` — assembles the `abicheck` CLI invocation from `INPUT_*`
    environment variables (one per `action.yml` input), runs it, and sets the
    Action's declared outputs from the exit code / report contents.
-4. `action/report_query.py` — the one JSON-report reader `run.sh`'s
+5. `action/report_query.py` — the one JSON-report reader `run.sh`'s
    `_report_query` shells out to, for every derived value it publishes. A real
    file rather than a heredoc so its query semantics are reachable from
    `pytest`/`mypy`/`ruff`; see the module's own docstring for the exit-code
@@ -71,7 +78,8 @@ rule added to one and not the other reopens the exact silent-fallback bug
 
 `.github/workflows/test-action.yml` exercises the composite Action
 end-to-end (uses `./` as the action reference) against fixtures in
-`tests/fixtures/action/` — compare/scan/appcompat modes, SARIF/JSON output,
+`tests/fixtures/action/` — compare (with and without a baseline, dry run), `--used-by`, and
+`check-target`, SARIF/JSON output,
 severity handling, multi-platform. Scenarios that share an OS and a
 dependency source run as steps of one job (each with its own assertion
 step); add a new scenario as steps there rather than as a new job unless it

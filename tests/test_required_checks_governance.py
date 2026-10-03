@@ -17,9 +17,8 @@
 
 `main` deliberately requires no status checks (`.github/AGENTS.md`,
 "Required-status-check configuration"). These tests keep the ruleset
-artifact honest about that, keep `test-action summary` covering every
-`test-action.yml` job, and keep the retired polling bridge jobs from coming
-back.
+artifact honest about that, and keep the retired polling bridge jobs and
+the retired `test-action summary` roll-up job from coming back.
 """
 
 from __future__ import annotations
@@ -55,7 +54,7 @@ class TestNoPollingBridgeJobs:
     a required-status-checks Ruleset -- and `main` deliberately requires no
     status checks (`.github/AGENTS.md`, "Required-status-check
     configuration"), so they were pure runner occupancy on the most
-    congested pool. `test-action summary` and `build-docs` report directly.
+    congested pool. `test-action.yml`'s jobs and `build-docs` report directly.
 
     If merge-blocking is ever re-enabled, bridge a path-filtered workflow
     with a reusable-workflow call and ordinary `needs:` (plan
@@ -79,45 +78,24 @@ class TestNoPollingBridgeJobs:
         assert "test-action-required" not in jobs
 
 
-class TestTestActionSummaryCoversEveryJob:
-    """`test-action-summary` is the one stable required check standing in for
-    all of `test-action.yml`'s fan-out jobs -- a job added to that workflow
-    without also being added to the summary's `needs:` list would silently
-    never gate anything, exactly the kind of escape a matrix-leg-by-leg
-    required-check list already has a documented history of causing."""
+class TestTestActionHasNoRollUpJob:
+    """`test-action.yml` once carried `test-action summary`, a `needs:`-only job
+    standing in for every fan-out job as one stable required check. With no
+    required checks on `main` it gated nothing, and on its last measured run
+    it queued 30 of the workflow's 43 minutes to report two jobs' results.
+    It was removed; this keeps it from returning silently. If merge-blocking
+    is re-enabled, reinstate a single aggregate whose predicate fails on a
+    failed, cancelled OR skipped dependency (plan `ci-cost-and-assurance.md`,
+    Phase 1) and replace this test with one that pins that predicate."""
 
-    def test_needs_lists_every_other_job(self) -> None:
-        test_action = _load_workflow("test-action.yml")
-        jobs = _jobs(test_action)
-        assert "test-action-summary" in jobs
-        summary = jobs["test-action-summary"]
-        needs = summary.get("needs")
-        assert isinstance(needs, list) and needs, "test-action-summary must list needs"
-        other_jobs = set(jobs) - {"test-action-summary"}
-        assert set(needs) == other_jobs
-
-    def test_runs_even_if_a_dependency_failed_or_was_cancelled(self) -> None:
-        """`!cancelled()` still runs after a failed or timed-out dependency
-        (unlike the implicit `success()`), but skips -- rather than fails --
-        when the whole run was cancelled by a newer push (`cancel-in-progress`).
-        A skipped summary is never a false green."""
-        test_action = _load_workflow("test-action.yml")
-        summary = _jobs(test_action)["test-action-summary"]
-        assert summary.get("if") == "${{ !cancelled() }}"
-
-    def test_fails_on_a_skipped_dependency_too(self) -> None:
-        """`if: always()` (above) makes a skipped dependency visible to this
-        job's `needs.*.result`, but visibility alone doesn't fail the run --
-        the shell check must also treat 'skipped' as unsuccessful, or a
-        partially-skipped fan-out reports a green `test-action summary`."""
-        test_action = _load_workflow("test-action.yml")
-        summary = _jobs(test_action)["test-action-summary"]
-        run_step = next(
-            s
-            for s in summary["steps"]
-            if s.get("name") == "Fail if any test-action.yml job did not succeed"
-        )
-        assert "contains(needs.*.result, 'skipped')" in run_step["run"]
+    def test_no_job_only_aggregates_other_jobs(self) -> None:
+        jobs = _jobs(_load_workflow("test-action.yml"))
+        assert "test-action-summary" not in jobs
+        for job_id, job in jobs.items():
+            assert not (
+                job.get("needs")
+                and not any("uses" in step for step in job.get("steps", []) or [])
+            ), f"{job_id} is a needs-only roll-up job"
 
 
 class TestBranchRulesetArtifact:

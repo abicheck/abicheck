@@ -43,8 +43,10 @@ configured upper bound (60 runner-minutes), not a measured typical cost.
 dependencies, plus one stable aggregate required check. The aggregate must
 distinguish *intentionally unselected* from *unexpectedly missing*: a selected
 job that is missing, skipped, cancelled or failed must not produce a green
-aggregate. `test-action summary` already implements exactly that predicate and
-is the model to follow.
+aggregate. `test-action summary` implemented exactly that predicate and is the
+model to follow; it was removed with nothing left to gate (see
+`tests/test_required_checks_governance.py::TestTestActionHasNoRollUpJob`), so
+recover it from git history if merge-blocking returns.
 
 **Landed (2026-09-30) — by deletion.** The blocker recorded here ("changes
 required-check names, needs a branch-protection update") dissolved when the
