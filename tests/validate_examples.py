@@ -17,6 +17,7 @@ Usage:
     python tests/validate_examples.py case01 case07     # filter by name substring
     python tests/validate_examples.py --fail-fast       # stop on first failure
     python tests/validate_examples.py --json            # machine-readable output
+    python tests/validate_examples.py --jobs 0          # one worker per CPU
 
 Exit codes:
     0  all pass (known gaps are xfail, not failures)
@@ -40,11 +41,16 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from abicheck.source_smoke import SourceSmokeSpec, run_source_smoke
-
 REPO_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_DIR / "scripts"))
+sys.path.insert(0, str(Path(__file__).parent))  # source_smoke lives beside this
 import example_catalog  # noqa: E402
+from example_case_runner import (  # noqa: E402
+    print_console_summary,
+    print_progress,
+    run_ordered,
+)
+from source_smoke import SourceSmokeSpec, run_source_smoke  # noqa: E402
 
 EXAMPLES_DIR = (
     example_catalog.CASES_DIR
@@ -1322,7 +1328,7 @@ def _run_source_smoke(
     name: str,
     entry: dict,
     case_dir: Path,
-    tmp_base: Path,
+    work_dir: Path,
     expected_raw: str | None,
 ) -> CaseResult | None:
     """Run optional consumer-source compile/link smoke declared by ground_truth."""
@@ -1368,7 +1374,7 @@ def _run_source_smoke(
     result = run_source_smoke(
         spec,
         case_dir=case_dir,
-        work_dir=tmp_base / f"{name}__source_smoke",
+        work_dir=work_dir,
         compiler=compiler,
         allow_run=allow_run,
     )
@@ -1423,7 +1429,8 @@ def run_case(
     # gate only on failure/skip; a PASS falls through so the verdict is
     # still checked for real, and its proof text is folded into the final
     # result below.
-    smoke_result = _run_source_smoke(name, entry, case_dir, tmp_base, expected_raw)
+    smoke_dir = _case_work_dir(tmp_base, f"{name}__source_smoke", variant)
+    smoke_result = _run_source_smoke(name, entry, case_dir, smoke_dir, expected_raw)
     if smoke_result is not None and smoke_result.status != "PASS":
         return smoke_result._replace(variant=variant)
     smoke_proof = smoke_result.message if smoke_result is not None else None
@@ -1640,6 +1647,18 @@ def _check_prerequisites() -> str | None:
     return None
 
 
+def _init_worker(preferred_family: str | None) -> None:
+    """Pool initializer carrying ``--toolchain`` into a worker process."""
+    global PREFERRED_FAMILY
+    PREFERRED_FAMILY = preferred_family
+
+
+def _timed_run_case(name: str, entry: dict, tmp_base: Path, variant: str) -> CaseResult:
+    started = time.perf_counter()
+    res = run_case(name, entry, tmp_base, variant=variant)
+    return res._replace(seconds=round(time.perf_counter() - started, 3))
+
+
 def _run_all_cases(
     names: list[str],
     verdicts: dict[str, dict],
@@ -1647,29 +1666,24 @@ def _run_all_cases(
     fail_fast: bool = False,
     json_out: bool = False,
     variants: tuple[str, ...] = (DEFAULT_ARTIFACT_VARIANT,),
+    jobs: int = 1,
 ) -> list[CaseResult]:
-    """Iterate over *names*, run each case, print progress, and return results."""
+    """Run each (variant, case); results keep (variant, name) order for any *jobs*."""
     results: list[CaseResult] = []
     with tempfile.TemporaryDirectory(prefix="validate_examples_") as tmp_root:
-        tmp_base = Path(tmp_root)
-        for variant in variants:
-            for name in names:
-                started = time.perf_counter()
-                res = run_case(name, verdicts[name], tmp_base, variant=variant)
-                res = res._replace(seconds=round(time.perf_counter() - started, 3))
-                results.append(res)
-                if not json_out:
-                    icon = {
-                        "PASS": "\u2705",
-                        "FAIL": "\u274c",
-                        "XFAIL": "\u26a0\ufe0f ",
-                        "SKIP": "\u23ed\ufe0f ",
-                        "ERROR": "\U0001f4a5",
-                    }.get(res.status, "?")
-                    msg = f"  {res.message}" if res.message else ""
-                    print(f"{icon} {res.name:<42}  {res.status} [{res.variant}]{msg}")
-                if fail_fast and res.status == "FAIL":
-                    return results
+        calls = [(n, verdicts[n], Path(tmp_root), v) for v in variants for n in names]
+        for res in run_ordered(
+            _timed_run_case,
+            calls,
+            jobs=1 if fail_fast else jobs,
+            initializer=_init_worker,
+            initargs=(PREFERRED_FAMILY,),
+        ):
+            results.append(res)
+            if not json_out:
+                print_progress(res)
+            if fail_fast and res.status == "FAIL":
+                break
     return results
 
 
@@ -1748,31 +1762,7 @@ def _print_summary(
                 indent=2,
             )
         )
-    else:
-        total = len(results)
-        sep = "\u2500" * 60
-        print(f"\n{sep}")
-        print(
-            f"Total: {total}  "
-            + "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
-        )
-
-    failures = counts.get("FAIL", 0) + counts.get("ERROR", 0)
-    if failures:
-        for r in results:
-            if r.status in ("FAIL", "ERROR"):
-                print(
-                    f"FAIL: {r.name}  expected={r.expected!r} got={r.got!r}  {r.message}",
-                    file=sys.stderr,
-                )
-    if counts.get("KINDS_MISMATCH"):
-        for r in results:
-            if r.kinds_strict == "mismatch":
-                print(
-                    f"KINDS_MISMATCH: {r.name} [{r.status}]  {r.kinds_strict_detail}",
-                    file=sys.stderr,
-                )
-    return 1 if failures else 0
+    return print_console_summary(results, counts, json_out=json_out)
 
 
 def _selected_variants(raw: str) -> tuple[str, ...]:
@@ -1791,6 +1781,14 @@ def main(argv: list[str] | None = None) -> int:
         "filters", nargs="*", help="Name substrings to filter cases (default: all)"
     )
     ap.add_argument("--fail-fast", action="store_true", help="Stop after first FAIL")
+    ap.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Parallel cases (0 = one per CPU; result order unchanged; ignored with --fail-fast)",
+    )
     ap.add_argument(
         "--json",
         action="store_true",
@@ -1862,6 +1860,7 @@ def main(argv: list[str] | None = None) -> int:
         fail_fast=args.fail_fast,
         json_out=args.json_out,
         variants=variants,
+        jobs=args.jobs if args.jobs > 0 else (os.cpu_count() or 1),
     )
     payload = _json_payload(
         results,

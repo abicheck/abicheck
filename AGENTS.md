@@ -39,7 +39,7 @@ file owns development procedure, not direction.
 
 Mechanically: pure Python (3.11+); reads ELF, PE/COFF, and Mach-O binaries
 plus optional debug info, public headers, build data, and sources (L0–L5);
-detects 410 ABI/API change types categorized into `BREAKING_KINDS`,
+detects 409 ABI/API change types categorized into `BREAKING_KINDS`,
 `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`);
 drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -514,9 +514,10 @@ Core pipeline (in order of data flow):
      inputs — `compare`'s own CLI kwargs plus the set of parameters actually
      typed (`--policy`/`--scope-public-headers` carry non-`None` click
      defaults), a typed `CompareRequest`, and the project's `.abicheck.yml`.
-     `cross_front_end_differences()` is this phase's gate as an executable
-     check: equivalent CLI and API input must resolve equally, modulo only
-     which front end stated a value. Resolution only — it changes no verdict,
+     This phase's gate is an executable check in the test suite
+     (`tests/_cross_front_end.py`'s `cross_front_end_differences()`):
+     equivalent CLI and API input must resolve equally, modulo only which
+     front end stated a value. Resolution only — it changes no verdict,
      finding, or exit code (Phase 7 owns the default flip). ADR-049 Phase 5
      wired the native `compare` CLI to it: `cli_compare_receipt.py` resolves
      one object per invocation from the raw CLI values + which parameters
@@ -983,7 +984,7 @@ cover the surrounding first-party trees this file doesn't detail.
 
 - `AbiSnapshot` (`model/snapshot.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
-- `ChangeKind` (`checker_policy.py`) — enum of 410 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
+- `ChangeKind` (`checker_policy.py`) — enum of 409 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)
 - `LibraryMetadata` (`checker.py`) — parsed library info
 

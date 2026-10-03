@@ -78,22 +78,25 @@ CONSUMER_EDGE_KINDS: frozenset[str] = frozenset(
 #: The use-case half of the graph vocabulary (G29 Phase 4 slice 2, ADR-057
 #: amendment) — ``source_graph.NODE_KINDS``/``EDGE_KINDS`` union these in the
 #: same way ``CONSUMER_NODE_KINDS``/``CONSUMER_EDGE_KINDS`` above are unioned
-#: in, and ``abicheck.impact.use_cases`` (which populates them) re-exports
-#: them. Same two reasons for living in this leaf module rather than beside
-#: the rest of the vocabulary: ``source_graph.py`` is at its 2000-line hard
-#: cap, and the producer imports ``source_graph`` (function-local, to avoid a
-#: cycle), so ``source_graph`` cannot import the producer back.
+#: in, and ``abicheck.impact.use_cases`` re-exports them. They live in this
+#: leaf module rather than beside the rest of the vocabulary because
+#: ``source_graph.py`` is at its 2000-line hard cap.
 #:
-#: A ``use_case``/``test_case`` node is declared by an optional, hand-authored
+#: A ``use_case``/``test_case`` node stands for an entry of the optional,
+#: hand-authored
 #: ``impact-use-cases.yaml`` manifest — deliberately a **separate** schema
 #: from ``docs/contribute/usecase-registry.yaml`` (which tracks abicheck's own
 #: feature coverage, not a consumer project's business use cases; conflating
 #: the two would read "abicheck supports header-only analysis" and "the DAL
 #: training workflow uses ``train()``" as the same kind of fact).
 #:
-#: Only ``USE_CASE_USES_ENTRY`` and ``TEST_COVERS_USE_CASE`` are populated in
-#: this slice, both from the manifest alone. ``TRACE_OBSERVED_ENTRY``/
-#: ``TRACE_OBSERVED_EDGE`` are **reserved** — same "registered so a hand-built
+#: All four edge kinds are **reserved**: nothing populates them today.
+#: ``USE_CASE_USES_ENTRY``/``TEST_COVERS_USE_CASE`` were written by a
+#: manifest-to-graph join that no command ever called, so it was removed
+#: (``docs/contribute/plans/dead-code-and-single-owner.md`` Stage C);
+#: use-case impact is answered by ``impact.use_cases.explain_use_case_impact``
+#: over the plain library graph instead. ``TRACE_OBSERVED_ENTRY``/
+#: ``TRACE_OBSERVED_EDGE`` follow the same "registered so a hand-built
 #: or newer graph naming one is never rejected, but no normalized data source
 #: yet" pattern ``CONSUMER_INSTANTIATES_DECL`` etc. use above: runtime-trace
 #: ingestion is explicitly out of scope for this slice (ADR-057's

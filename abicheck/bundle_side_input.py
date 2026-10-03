@@ -13,35 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``BundleSideInput``: one resolution pipeline for a live-or-stored bundle
-side (G38 Phase 13).
+"""Bundle comparison against a stored ``BundleFacts`` baseline (G38
+Phase 13).
 
-Before this module existed, "get a bundle-comparable side" meant two
-independent code paths that never shared a resolution step:
-
-- **Live**: ``cli_compare_release_helpers._run_bundle_analysis`` calls
-  ``bundle.build_bundle_snapshot(dict(old_map))`` directly over a
-  ``{canonical_name: Path}`` map of real, on-disk ``.so`` files, and reads
-  per-library signature evidence out of the ``_old_bundle_evidence``/
-  ``_new_bundle_evidence`` stash ``cli_compare_release._compare_one_library``
-  leaves on each library's release-report entry (G38 Phase 9).
-- **Stored**: ``bundle_facts.compare_bundle_from_facts()`` reconstructs a
-  live-equivalent ``BundleSnapshot`` from a persisted
-  :class:`~abicheck.model.bundle_facts.BundleFacts` document via
-  ``bundle_facts.bundle_snapshot_from_facts()``, and its own mandatory
-  ``per_library_snapshots`` field *is* the OLD-side signature-evidence map.
-
-Both already resolve to the identical shape --
-``(BundleSnapshot, {canonical_name: AbiSnapshot | BundleSignatureEvidence},
-InstantiationManifest | None)`` -- :func:`abicheck.bundle_analysis.
-analyze_bundle` actually consumes. :class:`BundleSideInput` (a
-``LiveBundleInput | StoredBundleFactsInput`` union) and
-:func:`resolve_bundle_side` make that shape explicit and give live/live,
-stored/live, and stored/stored comparisons one shared resolution step
-instead of hand-assembling the tuple twice per caller.
-
-:func:`compare_release_against_bundle_facts` is the concrete unblocking this
-module exists for: G38 Phase 2/12 already made ``compare_bundle_from_facts()``
+:func:`compare_release_against_bundle_facts` is what this module is for: G38 Phase 2/12 already made ``compare_bundle_from_facts()``
 fully implemented and parity-tested, but the plan's own Phase 2 status note
 records that no CLI surface feeds it a real stored OLD side --
 ``cli_compare_release.py`` (the release fan-out's Click entry point) and its
@@ -78,9 +53,8 @@ per-library diff plus the same shared
 reachable from ``abicheck compare ...`` (via ``compare_bundle_facts.py``,
 once NEW_INPUT classifies as stored too). Lives in the real
 ``abicheck/workflows/`` package rather than here -- it coordinates a
-compare workflow rather than sharing this module's own "one live/stored
-resolution primitive" scope, so it doesn't extend this file's own
-grandfathered-legacy footprint (Codex review). The remaining operand
+compare workflow, so it doesn't extend this file's own grandfathered-legacy
+footprint (Codex review). The remaining operand
 shape -- live/stored (OLD_INPUT live, NEW_INPUT a stored document) -- has
 no driver yet and is rejected outright by
 ``compare_bundle_operand_dispatch.py``; see that module's own docstring
@@ -89,165 +63,17 @@ and PR I's tracking in ``docs/contribute/plans/cli-cleanup-phase-two.md``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .bundle_manifest import InstantiationManifest
-    from .bundle_models import BundleDiffResult, BundleSignatureEvidence, BundleSnapshot
+    from .bundle_models import BundleDiffResult, BundleSignatureEvidence
     from .checker_types import DiffResult
     from .compile_context import CompileContext
     from .environment_matrix import EnvironmentMatrix
-    from .model import AbiSnapshot
     from .policy_file import PolicyFile
     from .workflows.suppression import SuppressionList
-
-
-@dataclass(frozen=True)
-class LiveBundleInput:
-    """One bundle side resolved from real, on-disk ``.so`` files.
-
-    *libraries* is a ``{canonical_name: Path}`` map -- the same shape
-    ``cli_helpers_compare._build_match_map``/``bundle.build_bundle_snapshot``
-    already use. *signature_evidence*, when given, is a pre-resolved
-    ``{canonical_name: AbiSnapshot | BundleSignatureEvidence}`` map (e.g. the
-    Phase 9 compact projections a release fan-out already stashed per
-    library) -- resolving it fresh from *libraries* would mean re-dumping
-    every binary a caller has typically already dumped once for its own
-    per-library diff. Omitted (the default): :func:`resolve_bundle_side`
-    returns an empty evidence map for this side, so the Phase 4
-    signature-evidence gate simply does not run for it (identical to every
-    pre-Phase-13 caller that never passed one).
-    """
-
-    libraries: dict[str, Path]
-    signature_evidence: dict[str, AbiSnapshot | BundleSignatureEvidence] = field(
-        default_factory=dict
-    )
-    manifest: InstantiationManifest | None = None
-
-
-@dataclass(frozen=True)
-class StoredBundleFactsInput:
-    """One bundle side resolved from a persisted
-    :class:`~abicheck.model.bundle_facts.BundleFacts` file (G38 Phase 2/13).
-
-    No binaries are read -- see ``bundle_facts.bundle_snapshot_from_facts``.
-
-    *max_json_object_nodes*, when given, overrides
-    ``bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`` for this side's load --
-    forwarded to ``serialization.load_bundle_facts``. A real per-library
-    facts blob can legitimately need well over the default budget to decode
-    (see that constant's own docstring); ``None`` (the default) uses the
-    library default, unchanged from before this field existed.
-    """
-
-    path: Path
-    max_json_object_nodes: int | None = None
-
-
-#: A bundle side is either a live, on-disk library set or a stored,
-#: persisted ``BundleFacts`` document -- see the module docstring.
-BundleSideInput = LiveBundleInput | StoredBundleFactsInput
-
-
-@dataclass(frozen=True)
-class ResolvedBundleSide:
-    """One side's resolution, in the shape :func:`abicheck.bundle_analysis.
-    analyze_bundle` actually consumes -- the common target both
-    :class:`LiveBundleInput` and :class:`StoredBundleFactsInput` resolve to.
-    """
-
-    snapshot: BundleSnapshot
-    signature_evidence: dict[str, AbiSnapshot | BundleSignatureEvidence]
-    manifest: InstantiationManifest | None
-
-
-def resolve_bundle_side(side: BundleSideInput) -> ResolvedBundleSide:
-    """Resolve *side* (live or stored) into one :class:`ResolvedBundleSide`.
-
-    Neither branch performs new *ABI* extraction: the live branch parses
-    only ``ElfMetadata`` (``bundle.build_bundle_snapshot``, the same
-    resolution-graph computation ``_run_bundle_analysis`` already uses for a
-    live release), and the stored branch reads no binaries at all
-    (``bundle_facts.bundle_snapshot_from_facts``).
-    """
-    from .bundle import build_bundle_snapshot
-    from .serialization import load_bundle_facts
-    from .workflows.bundle_facts_capture import bundle_snapshot_from_facts
-
-    if isinstance(side, StoredBundleFactsInput):
-        facts = load_bundle_facts(
-            side.path, max_json_object_nodes=side.max_json_object_nodes
-        )
-        return ResolvedBundleSide(
-            snapshot=bundle_snapshot_from_facts(facts),
-            signature_evidence=dict(facts.per_library_snapshots),
-            manifest=facts.manifest,
-        )
-    return ResolvedBundleSide(
-        snapshot=build_bundle_snapshot(dict(side.libraries)),
-        signature_evidence=dict(side.signature_evidence),
-        manifest=side.manifest,
-    )
-
-
-def compare_bundle_sides(
-    old: BundleSideInput,
-    new: BundleSideInput,
-    per_library_results: list[DiffResult],
-    *,
-    manifest: InstantiationManifest | None = None,
-    system_providers: list[str] | None = None,
-    cohorts: list[str] | None = None,
-    policy: str = "strict_abi",
-    policy_file: PolicyFile | None = None,
-) -> BundleDiffResult:
-    """Bundle-level comparison over any live/stored pairing of *old*/*new*.
-
-    Resolves both sides via :func:`resolve_bundle_side` and delegates to
-    :func:`abicheck.bundle_analysis.analyze_bundle` -- the single orchestrator
-    every other bundle-comparison entry point in this codebase already
-    shares (``_run_bundle_analysis`` for live/live,
-    ``bundle_facts.compare_bundle_from_facts`` for stored/live) -- so
-    live/live, stored/live, live/stored, and stored/stored all run the
-    identical detector suite (the core graph-native/diff-derived checks plus
-    the Phase 4 C-boundary signature-evidence gate) and can never
-    independently drift.
-
-    *manifest*, given explicitly, overrides either side's own resolved
-    manifest, mirroring ``compare_bundle()``'s/``compare_bundle_from_facts()``'s
-    own ``manifest=`` precedence: an explicit manifest always wins over
-    whatever either resolved side happened to carry.
-
-    *per_library_results* must already be diffed old-vs-new for every
-    library this bundle-level pass should reason about -- this function
-    performs no per-library diffing itself (mirroring every existing bundle-
-    analysis entry point, which all take an already-computed diff list
-    rather than re-deriving one).
-    """
-    from .bundle_analysis import analyze_bundle
-
-    old_resolved = resolve_bundle_side(old)
-    new_resolved = resolve_bundle_side(new)
-    effective_manifest = (
-        manifest
-        if manifest is not None
-        else (old_resolved.manifest or new_resolved.manifest)
-    )
-    return analyze_bundle(
-        old_resolved.snapshot,
-        new_resolved.snapshot,
-        per_library_results,
-        manifest=effective_manifest,
-        system_providers=system_providers,
-        cohorts=cohorts,
-        policy=policy,
-        policy_file=policy_file,
-        old_signature_evidence=old_resolved.signature_evidence or None,
-        new_signature_evidence=new_resolved.signature_evidence or None,
-    )
 
 
 def compare_release_against_bundle_facts(

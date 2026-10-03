@@ -189,14 +189,12 @@ def write_bundle_facts_package(
             "itself then refuse to reconstruct"
         )
     if not facts.variant_fingerprint:
-        # `bundle_multibuild._index_by_fingerprint` already rejects an
-        # empty `variant_fingerprint` outright; a directly-constructed
-        # `BundleFacts(variant_fingerprint="")` must not silently pair with
-        # a legitimate "default" variant it was never actually part of.
+        # A directly-constructed `BundleFacts(variant_fingerprint="")` must
+        # not silently pair with a legitimate "default" variant it was never
+        # actually part of.
         raise ValueError(
-            "facts.variant_fingerprint must not be empty -- "
-            "bundle_multibuild._index_by_fingerprint already rejects an "
-            "empty, non-identifying fingerprint the same way"
+            "facts.variant_fingerprint must not be empty -- an empty "
+            "fingerprint identifies no variant"
         )
     alias_nodes = _alias_element_count(facts.filesystem_aliases)
     if alias_nodes > DEFAULT_MAX_JSON_CONTAINER_NODES:
