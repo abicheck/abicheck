@@ -413,6 +413,28 @@ _dir_tools = pytest.mark.skipif(
 )
 
 
+def rejected_header_violations(alone, in_dir) -> list[str]:
+    """The oracle: the directory dump must yield what the library header alone
+    yields -- the same owned surface and the same declaration count. Relative
+    to *alone*, not to `_SURFACE_BOUND`: how much toolchain surface a dump
+    keeps is the scoping question the other cells ask (and is not filtered
+    for MinGW, docs/contribute/known-gaps.md), not this one."""
+    if in_dir is None:
+        return ["directory dump failed"]
+    out = []
+    if _owned_surface(in_dir) != _owned_surface(alone):
+        out.append(
+            f"owned surface differs: {sorted(_owned_surface(alone) ^ _owned_surface(in_dir))}"
+        )
+    n_alone, n_dir = (
+        len(alone.declarations.functions),
+        len(in_dir.declarations.functions),
+    )
+    if n_dir != n_alone:
+        out.append(f"{n_dir} functions in the directory dump, {n_alone} alone")
+    return out
+
+
 @pytest.mark.integration
 @_dir_tools
 @pytest.mark.parametrize(
@@ -423,13 +445,14 @@ def test_rejected_header_in_a_directory_keeps_the_owned_surface(
 ) -> None:
     alone = _dump(tmp_path, HEADER_SETS[0], target)
     assert alone is not None and _owned_surface(alone), "vacuity guard"
-    assert not parity_violations(alone, _dump_dir(tmp_path, target))
+    assert not rejected_header_violations(alone, alone)
+    assert not rejected_header_violations(alone, _dump_dir(tmp_path, target))
 
 
 @pytest.mark.integration
 @_dir_tools
 def test_seeded_mutant_aggregate_line_attribution_is_reported(tmp_path: Path) -> None:
     alone = _dump(tmp_path, HEADER_SETS[0], None)
-    assert parity_violations(
+    assert rejected_header_violations(
         alone, _dump_dir(tmp_path, None, mutant="aggregate_line_attribution")
     )
