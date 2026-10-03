@@ -1369,7 +1369,9 @@ SCENARIOS: dict[str, Scenario] = {
     "versioned_rename_churn": Scenario(
         _build_versioned_rename_churn,
         run=_run_compare_collapse,
-        sizes=(500, 1000, 2000),
+        # One step up for the same reason as TAIL_ABOVE_FLOOR_SIZES: its 1000
+        # point measured 0.17-0.20 s, on the exponent gate's floor.
+        sizes=(1000, 2000, 4000),
         max_size=8000,
     ),
     "nested_types": Scenario(

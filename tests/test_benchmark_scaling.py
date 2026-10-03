@@ -355,7 +355,15 @@ def test_cheap_gated_scenarios_sweep_one_step_up() -> None:
         assert bench.SCENARIOS[name].gate_exponent is True, name
     assert bench.SCENARIOS["fuzzy_rename_churn"].sizes[-2:] == (4000, 8000)
     assert bench.SCENARIOS["onedal_mass_removal"].sizes[-2:] == (2000, 4000)
-    for name in (*shifted, "fuzzy_rename_churn", "onedal_mass_removal"):
+    # Its 1000 point read 0.17 s on CI and 0.20 s locally: on the floor, so it
+    # would flip between gated and inactive run to run (Copilot review).
+    assert bench.SCENARIOS["versioned_rename_churn"].sizes[-2:] == (2000, 4000)
+    for name in (
+        *shifted,
+        "fuzzy_rename_churn",
+        "onedal_mass_removal",
+        "versioned_rename_churn",
+    ):
         spec = bench.SCENARIOS[name]
         assert max(spec.sizes) <= spec.max_size, name
 
