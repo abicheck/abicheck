@@ -53,8 +53,8 @@ jobs:
   # filter is ANDed with the activity `types:`, so applying the `mutation`
   # label to a PR that touches none of these files would not start the
   # workflow at all — the documented label override could never fire
-  # (Codex review). Same dorny/paths-filter shape ci.yml's
-  # former heavy-parity-gate used (integration.yml now filters at trigger
+  # (Codex review). Same dorny/paths-filter shape as the one
+  # ci.yml's former heavy-parity-gate used (integration.yml now filters at trigger
   # level, which it can because it has no label override).
   resolve:
     runs-on: ubuntu-latest
