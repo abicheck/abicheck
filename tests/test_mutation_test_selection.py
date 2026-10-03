@@ -103,10 +103,13 @@ def _project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _trace(project: Path, extra: list[str]) -> set[str]:
+def _trace(
+    project: Path, extra: list[str], inherited: dict[str, str] | None = None
+) -> set[str]:
     out = project / "reach"
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if not k.startswith("PYTEST_XDIST")},
+        **(inherited or {}),
         "MUTATION_REACH_OUT": str(out),
         "PYTHONPATH": os.pathsep.join([str(REPO / "scripts"), str(project)]),
     }
@@ -137,6 +140,17 @@ def test_the_trace_records_exactly_the_reaching_tests(
     """Every reach path is recorded and nothing else is, serial or under
     xdist. The oracle is the fixture's own construction, not the plugin."""
     assert _trace(_project(tmp_path), workers) == _REACHING
+
+
+@pytest.mark.parametrize("workers", [[], ["-n", "2"]])
+def test_a_run_nested_in_an_xdist_worker_keeps_every_worker_file(
+    tmp_path: Path, workers: list[str]
+) -> None:
+    """A trace launched from inside an xdist worker inherits that worker's
+    ``PYTEST_XDIST_*`` variables; its controller must not write the file its
+    own ``gw0`` writes (which dropped every hit ``gw0`` recorded)."""
+    inherited = {"PYTEST_XDIST_WORKER": "gw0", "PYTEST_XDIST_WORKER_COUNT": "4"}
+    assert _trace(_project(tmp_path), workers, inherited) == _REACHING
 
 
 def test_the_trace_is_independent_of_test_order(tmp_path: Path) -> None:

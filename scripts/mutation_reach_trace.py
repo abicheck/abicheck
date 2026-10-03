@@ -209,7 +209,11 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     mon = session.config.stash.get(_STATE, None)
     if not out or mon is None:
         return
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    # xdist's own record of this process's role, not $PYTEST_XDIST_WORKER:
+    # a run nested inside an xdist worker inherits that variable, so its
+    # controller would write the same file one of its own workers writes.
+    workerinput = getattr(session.config, "workerinput", None)
+    worker = workerinput["workerid"] if workerinput else "main"
     Path(out).mkdir(parents=True, exist_ok=True)
     (Path(out) / f"{worker}.json").write_text(
         json.dumps(sorted(mon.hits)), encoding="utf-8"
