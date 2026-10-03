@@ -266,12 +266,21 @@ _FAILED_RE = re.compile(r"^(?:FAILED|ERROR) (\S+)", re.MULTILINE)
 
 
 def run_nodes(
-    root: Path, node_ids: tuple[str, ...], basetemp: Path
+    root: Path,
+    node_ids: tuple[str, ...],
+    basetemp: Path,
+    *,
+    stop_at_first_failure: bool = False,
 ) -> tuple[int, list[str], str]:
     """Run *node_ids* in a nested pytest session inside *root*. Returns the
     exit code, the failed node ids (from ``-rfE``), and the combined output.
     The nested session gets its own ``--basetemp`` (#1396: a nested session
-    sharing the parent's temp root deletes it out from under the parent)."""
+    sharing the parent's temp root deletes it out from under the parent).
+
+    ``stop_at_first_failure`` adds ``-x``: a mutant replay only has to show
+    that *some* named node fails, so the rest of the session after the first
+    failure proves nothing more. A run with no failure is unaffected, so a
+    surviving mutant still runs every node before it is reported."""
     argv = [
         sys.executable,
         "-m",
@@ -285,6 +294,7 @@ def run_nodes(
         "-o",
         "addopts=",
         f"--basetemp={basetemp}",
+        *(("-x",) if stop_at_first_failure else ()),
         "-m",
         "not integration and not libabigail and not abicc",
         *node_ids,
