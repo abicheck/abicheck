@@ -25,6 +25,7 @@ from abicheck.dumper import (
     dump,
 )
 from abicheck.elf_metadata import ElfMetadata
+from abicheck.extract.headers.castxml.type_resolution import pointer_depth
 
 # ── _castxml_dump internal branches ────────────────────────────────────
 
@@ -426,7 +427,7 @@ class TestCastxmlParserPointerDepth:
         p2 = Element("PointerType", id="t3", type="t2")
         root = _xml_root(ft, p1, p2)
         p = _CastxmlParser(root, set(), set())
-        assert p._pointer_depth("t3") == 2
+        assert pointer_depth(p._ctx, "t3") == 2
 
     def test_pointer_through_typedef(self):
         ft = _fund_type("t1", "int")
@@ -434,7 +435,7 @@ class TestCastxmlParserPointerDepth:
         ptr = Element("PointerType", id="t3", type="t2")
         root = _xml_root(ft, td, ptr)
         p = _CastxmlParser(root, set(), set())
-        assert p._pointer_depth("t3") == 1
+        assert pointer_depth(p._ctx, "t3") == 1
 
     def test_pointer_through_cv_qualified(self):
         ft = _fund_type("t1", "int")
@@ -442,18 +443,18 @@ class TestCastxmlParserPointerDepth:
         ptr = Element("PointerType", id="t3", type="t2")
         root = _xml_root(ft, cv, ptr)
         p = _CastxmlParser(root, set(), set())
-        assert p._pointer_depth("t3") == 1
+        assert pointer_depth(p._ctx, "t3") == 1
 
     def test_non_pointer_returns_zero(self):
         ft = _fund_type("t1", "int")
         root = _xml_root(ft)
         p = _CastxmlParser(root, set(), set())
-        assert p._pointer_depth("t1") == 0
+        assert pointer_depth(p._ctx, "t1") == 0
 
     def test_missing_returns_zero(self):
         root = _xml_root()
         p = _CastxmlParser(root, set(), set())
-        assert p._pointer_depth("missing") == 0
+        assert pointer_depth(p._ctx, "missing") == 0
 
 
 class TestCastxmlParserUnderlyingType:

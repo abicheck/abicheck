@@ -15,7 +15,7 @@
 """Regression tests for constructor-overload visibility (case78/case111).
 
 CastXML may omit the ``mangled`` attribute for a user-declared, overloaded
-constructor. ``_function_mangled_name`` already synthesizes a stable
+constructor. ``function_mangled_name`` already synthesizes a stable
 per-overload snapshot key (``__abicheck_ctor__Class(params)``) so the
 overloads don't collapse into one ``function_map`` entry — but the plain
 ELF-symbol-table visibility lookup (``_visibility``) can never match that
@@ -27,7 +27,7 @@ That silently hid:
   since ``_public_functions()`` filters to PUBLIC/ELF_ONLY visibility only;
 - an *added* one (case111: the new ``int_factory_t`` overload).
 
-``_ctor_or_dtor_visibility`` restores this signal from source access when
+``ctor_or_dtor_visibility`` restores this signal from source access when
 castxml gives no mangled name to check — but only for a genuinely
 user-declared constructor (not compiler-generated default/copy/move ctors,
 which carry no source declaration of their own to compare and would
@@ -180,7 +180,7 @@ def _make_root_with_virtual_destructor(*, mangled: str = "") -> Element:
 
 class TestDestructorOverloadKeyExemptFromElfNarrowing:
     """Regression guard (Codex review, PR #582): PUBLIC visibility from
-    _ctor_or_dtor_visibility was necessary but not sufficient — without
+    ctor_or_dtor_visibility was necessary but not sufficient — without
     is_synthetic_dtor_key, _public_functions() still silently dropped a
     genuinely public virtual destructor whenever ELF metadata was present,
     since its synthesized "~ClassName" key could never match a real export."""

@@ -102,7 +102,6 @@ from .model import (
     EnumType,
     Fact,
     Function,
-    Param,
     RecordType,
     Variable,
     Visibility,
@@ -134,11 +133,9 @@ class _CastxmlParser:
         # All parser state now lives on a shared context object (ADR-061 D9
         # "context.py") so entity-parsing modules under
         # ``extract.headers.castxml`` can read it without depending on this
-        # class. Each field below is still reachable as ``self._xxx`` via the
-        # read-only properties following this method, so every method in
-        # this class not yet migrated to a shared-context module -- and every
-        # external caller (tests included) that reads a parser's private
-        # state directly -- keeps working unchanged.
+        # class. The fields this class's own not-yet-migrated methods read
+        # stay reachable as ``self._xxx`` via the read-only properties
+        # following this method; anything else reads ``self._ctx`` directly.
         self._ctx = _castxml_context.CastxmlParserContext(
             root,
             exported_dynamic,
@@ -152,10 +149,6 @@ class _CastxmlParser:
     # ── shared-context state, exposed for methods not yet migrated ─────────
 
     @property
-    def _root(self) -> Element:
-        return self._ctx.root
-
-    @property
     def _exported_dynamic(self) -> set[str]:
         return self._ctx.exported_dynamic
 
@@ -164,24 +157,8 @@ class _CastxmlParser:
         return self._ctx.exported_static
 
     @property
-    def _pub_header_segs(self) -> Any:
-        return self._ctx.pub_header_segs
-
-    @property
-    def _pub_dir_segs(self) -> Any:
-        return self._ctx.pub_dir_segs
-
-    @property
     def _have_public_set(self) -> bool:
         return self._ctx.have_public_set
-
-    @property
-    def _id_map(self) -> dict[str, Element]:
-        return self._ctx.id_map
-
-    @property
-    def _virtual_methods_by_class(self) -> dict[str, list[Element]]:
-        return self._ctx.virtual_methods_by_class
 
     @property
     def _variable_els(self) -> list[Element]:
@@ -191,22 +168,12 @@ class _CastxmlParser:
     def _typedef_els(self) -> list[Element]:
         return self._ctx.typedef_els
 
-    @property
-    def _type_name_cache(self) -> dict[str, str]:
-        return self._ctx.type_name_cache
-
-    def _resolve(self, id_: str) -> Element | None:
-        return self._ctx.resolve(id_)
-
     # ── type-graph resolution, delegated to extract.headers.castxml.type_resolution ──
     # (ADR-061 D9 "type_resolution.py": entity modules and the still-unmigrated
     # methods below share one context object rather than reading `self`.)
 
     def _type_name(self, id_: str, depth: int = 0) -> str:
         return _castxml_type_resolution.type_name(self._ctx, id_, depth)
-
-    def _type_name_uncached(self, id_: str, depth: int = 0) -> str:
-        return _castxml_type_resolution.type_name_uncached(self._ctx, id_, depth)
 
     def _type_alignment_bits(self, id_: str, depth: int = 0) -> int | None:
         return _castxml_type_resolution.type_alignment_bits(self._ctx, id_, depth)
@@ -216,9 +183,6 @@ class _CastxmlParser:
 
     def _is_global_scope(self, el: Any) -> bool:
         return _castxml_type_resolution.is_global_scope(self._ctx, el)
-
-    def _pointer_depth(self, id_: str, depth: int = 0) -> int:
-        return _castxml_type_resolution.pointer_depth(self._ctx, id_, depth)
 
     @staticmethod
     def _access_level(el: Element) -> AccessLevel:
@@ -242,60 +206,6 @@ class _CastxmlParser:
         """Determine visibility based on ELF symbol tables."""
         return _castxml_location.visibility(self._ctx, mangled, name)
 
-    def _ctor_or_dtor_visibility(
-        self,
-        raw_mangled: str,
-        name: str,
-        access: AccessLevel,
-        is_deleted: bool,
-        is_artificial: bool,
-    ) -> Visibility:
-        """Visibility for a Constructor or Destructor element, with a
-        source-access fallback.
-
-        ``_visibility()`` is an ELF-symbol-table lookup: it needs a real
-        mangled name to check. When castxml omits the mangled name for a
-        user-declared, overloaded constructor (a documented castxml gap —
-        see :func:`_function_mangled_name`'s synthesis comment), the ELF
-        lookup can never match *any* overload of that constructor — the
-        class's bare name never appears as its own exported symbol (Itanium
-        mangling always applies to constructors), so every such overload
-        would silently classify HIDDEN regardless of whether it is genuinely
-        callable from outside the library. That hid both a removed public
-        constructor overload (case78: FUNC_REMOVED never fired for
-        ``task_arena(attach_mode_t)``) and an added one (case111: FUNC_ADDED
-        never fired for the new ``std::function<int()>`` overload) behind
-        `_public_functions()`'s PUBLIC/ELF_ONLY filter.
-
-        castxml ALSO omits the mangled name for every ``<Destructor>``
-        (never just user-declared/overloaded ones — a class has at most one
-        destructor, so there's no overload-collision risk the way there is
-        for constructors), so the exact same problem applies there: a
-        removed or added virtual destructor would silently classify HIDDEN
-        (Phase 2 castxml↔clang parity gate, PR #582 — discovered by
-        comparing real castxml/clang dumps of a multiple/virtual-inheritance
-        hierarchy: clang correctly reports a base's virtual destructor as
-        PUBLIC while castxml reported it HIDDEN).
-
-        Falls back to the real ELF lookup first (it stays authoritative
-        whenever it can actually resolve something); only when that lookup
-        has no mangled name to work with does a public, non-deleted,
-        **user-declared** (``is_artificial`` false) constructor/destructor
-        default to PUBLIC — the same "declared public in a public header,
-        without contrary evidence" principle already used for source-graph
-        public-surface classification
-        (:data:`abicheck.model.source_graph_query.PUBLIC_VISIBILITIES`).
-        Compiler-generated implicit constructors/destructors (marked
-        ``artificial="1"``) are excluded: they have no source declaration of
-        their own to compare across versions, so promoting them would treat
-        every trivial aggregate's synthesized ctor/dtor as a churny "added"/
-        "removed" API surface instead of staying silent like the clang
-        header backend already does for them.
-        """
-        return _castxml_functions.ctor_or_dtor_visibility(
-            self._ctx, raw_mangled, name, access, is_deleted, is_artificial
-        )
-
     def _variable_visibility(self, el: Element, mangled: str, name: str) -> Visibility:
         """Visibility for a namespace-scope Variable element, with a
         no-symbol-emitted fallback for genuine customisation point objects.
@@ -315,7 +225,8 @@ class _CastxmlParser:
         ``constexpr`` variable with no ``extern`` — internal linkage by
         default, mangled with an ``L`` marker rather than exported) — the
         same "declared public, without contrary evidence" principle already
-        applied to constructors/destructors (:meth:`_ctor_or_dtor_visibility`).
+        applied to constructors/destructors
+        (:func:`~.extract.headers.castxml.functions.ctor_or_dtor_visibility`).
         """
         vis = self._visibility(mangled, name)
         if vis is not Visibility.HIDDEN:
@@ -332,56 +243,8 @@ class _CastxmlParser:
         """Return True if element originates from a compiler built-in pseudo-file."""
         return _castxml_location.is_builtin_element(self._ctx, el)
 
-    # castxml emits non-member operator overloads as <OperatorFunction>
-    # (e.g. `bool operator==(const Foo&, const Foo&)` at namespace scope,
-    # including hidden friends declared inside a class body). Single source
-    # of truth is now `extract.headers.castxml.context.FUNCTION_TAGS`, which
-    # `CastxmlParserContext.build_id_map` itself uses; kept as a class
-    # attribute of the same name for any external reader of it.
-    _FUNCTION_TAGS: tuple[str, ...] = _castxml_context.FUNCTION_TAGS
-
     def parse_functions(self) -> list[Function]:
         return _castxml_functions.parse_functions(self._ctx)
-
-    def _function_display_name(self, el: Element) -> str:
-        """Resolve a function element's display name, synthesizing/normalizing operator forms."""
-        return _castxml_functions.function_display_name(self._ctx, el)
-
-    def _ctor_param_identity_type(self, type_id: str) -> str:
-        """Type spelling for a synthesized constructor identity key. See
-        :func:`~.extract.headers.castxml.functions.ctor_param_identity_type`."""
-        return _castxml_functions.ctor_param_identity_type(self._ctx, type_id)
-
-    def _parse_function_params(
-        self, el: Element
-    ) -> tuple[list[Param], bool, list[str]]:
-        """Collect a function element's parameters. See
-        :func:`~.extract.headers.castxml.functions.parse_function_params`."""
-        return _castxml_functions.parse_function_params(self._ctx, el)
-
-    @staticmethod
-    def _function_mangled_name(
-        el: Element,
-        name: str,
-        ctor_identity_types: list[str],
-        raw_mangled: str,
-        qualified_scope: str = "",
-    ) -> str:
-        """Pick the snapshot key for a function. See
-        :func:`~.extract.headers.castxml.functions.function_mangled_name`."""
-        return _castxml_functions.function_mangled_name(
-            el, name, ctor_identity_types, raw_mangled, qualified_scope
-        )
-
-    def _parse_function_element(
-        self, el: Element, hidden_friend_owner_by_id: dict[str, str]
-    ) -> Function | None:
-        """Build a Function from a castxml function-like element, or None if
-        filtered. See
-        :func:`~.extract.headers.castxml.functions.parse_function_element`."""
-        return _castxml_functions.parse_function_element(
-            self._ctx, el, hidden_friend_owner_by_id
-        )
 
     def parse_variables(self) -> list[Variable]:
         variables = []
@@ -403,7 +266,7 @@ class _CastxmlParser:
                 continue
             # Real ELF export evidence overrides castxml's language-mode guess
             # — the same "case141" fallback already applied to functions
-            # above (_parse_function_element): castxml ALWAYS emits a
+            # above (parse_function_element): castxml ALWAYS emits a
             # pseudo-Itanium `mangled` attribute for a Variable too, even
             # when the header is actually a plain C API compiled with a C
             # linkage that never mangles at all (confirmed empirically —
@@ -513,7 +376,7 @@ class _CastxmlParser:
                     # See RecordType.deprecated for the message-text convention.
                     deprecated=_deprecation_marker(el),
                     # See Variable.is_static's own comment -- mirrors
-                    # `_parse_function_element`'s identical `el.get("static")
+                    # `parse_function_element`'s identical `el.get("static")
                     # == "1"` read for the same XML attribute castxml emits
                     # on a Variable element too (confirmed empirically).
                     is_static=el.get("static") == "1",
@@ -656,44 +519,12 @@ class _CastxmlParser:
     def parse_types(self) -> list[RecordType]:
         return _castxml_records.parse_types(self._ctx)
 
-    def _build_record_type(
-        self, el: Any, override_name: str | None = None
-    ) -> RecordType:
-        return _castxml_records.build_record_type(self._ctx, el, override_name)
-
     def _source_location(self, el: Any) -> str | None:
         """Resolve a declaration's ``file:line`` source location."""
         return _castxml_location.source_location(self._ctx, el)
 
     def _optional_int_attr(self, el: Any, attr: str) -> int | None:
         return _castxml_location.optional_int_attr(el, attr)
-
-    def _build_vtable(self, class_id: str) -> list[str]:
-        return _castxml_records.build_vtable(self._ctx, class_id)
-
-    def _collect_virtual_methods(
-        self,
-        cid: str,
-        seen: set[str] | None = None,
-    ) -> dict[int | str, tuple[int | None, str]]:
-        """Ordered mapping of *canonical vtable-slot key* ->
-        ``(vtable_index, mangled)``. See
-        :func:`~.extract.headers.castxml.records.collect_virtual_methods`,
-        this primitive's real home since ADR-061 Phase 5."""
-        return _castxml_records.collect_virtual_methods(self._ctx, cid, seen)
-
-    def _inherited_vtable_slots(
-        self, class_el: Any, seen: set[str]
-    ) -> dict[int | str, tuple[int | None, str]]:
-        """Every base class's slots, in base-declaration order. See
-        :func:`~.extract.headers.castxml.records.inherited_vtable_slots`."""
-        return _castxml_records.inherited_vtable_slots(self._ctx, class_el, seen)
-
-    def _resolved_override_keys(self, overrides_id: str) -> list[int | str]:
-        """Every existing slot key the ``overrides`` attribute resolves to.
-        See
-        :func:`~.extract.headers.castxml.records.resolved_override_keys`."""
-        return _castxml_records.resolved_override_keys(self._ctx, overrides_id)
 
     def parse_enums(self) -> list[EnumType]:
         return _castxml_enums.parse_enums(self._ctx)

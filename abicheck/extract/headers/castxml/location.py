@@ -272,7 +272,7 @@ def visibility(ctx: CastxmlParserContext, mangled: str, name: str = "") -> Visib
     (a genuine unexported/internal declaration). Falls back to PUBLIC in
     that case instead of HIDDEN -- the identical "declared public in a
     public header, without contrary evidence" principle
-    :func:`_variable_visibility`/:func:`_ctor_or_dtor_visibility`
+    :func:`_variable_visibility`/:func:`ctor_or_dtor_visibility`
     (``dumper_castxml.py``) already apply for their own no-symbol-emitted
     fallback cases. Unreachable for any snapshot with real ELF/PE/Mach-O
     evidence: ``ctx.no_binary_evidence`` is only ever set by the header-only

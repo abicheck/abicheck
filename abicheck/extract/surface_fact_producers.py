@@ -98,7 +98,7 @@ def header_ast_surface_facts(
     ODR-used has no emitted symbol at all
     (``dumper_castxml._variable_visibility``), and a constructor/destructor
     with no contrary attribute is "declared public without contrary
-    evidence" (``_ctor_or_dtor_visibility``). Recording only the export
+    evidence" (``ctor_or_dtor_visibility``). Recording only the export
     lookup for those left (b) unknown *and* (c) confirmed false, which made
     ``in_public_surface`` answer ``False`` and silently dropped the CPO from
     ``detect_cpo_kind_changed`` (CodeRabbit review). A pre-v46 snapshot did

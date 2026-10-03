@@ -171,7 +171,7 @@ def _qualified_by_mangled(entries: list[tuple[str, object]]) -> dict[str, str]:
     (a frontend/hand-built snapshot that qualifies names directly), but that
     is not the common case: the default CastXML backend stores only the
     bare declaration name (``dumper_castxml.py``'s ``parse_variables()``/
-    ``_function_display_name()`` both read the raw castxml ``name``
+    ``function_display_name()`` both read the raw castxml ``name``
     attribute, never walking namespace ``context`` the way
     ``_CastxmlParser._qualified_name()`` does for constants) — so trusting
     ``decl.name`` alone left this whole mechanism a no-op against real

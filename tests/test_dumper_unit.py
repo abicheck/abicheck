@@ -27,6 +27,7 @@ from abicheck.dumper import (
     _safe_size,
     _vt_sort_key,
 )
+from abicheck.extract.headers.castxml.records import collect_virtual_methods
 from abicheck.model import Visibility
 from abicheck.name_classification import canonicalize_type_name
 
@@ -1897,13 +1898,13 @@ class TestCastxmlParserVtable:
         assert derived_t.vtable == []
 
     def test_collect_virtual_methods_unresolvable_cid_returns_empty(self):
-        """_collect_virtual_methods() called directly with a class id that
+        """collect_virtual_methods() called directly with a class id that
         isn't in the id map (defensive guard -- unreachable through the
         normal _resolve()-gated recursive call, since _resolve already
         filters out dangling Base references before recursing)."""
         root = _xml_root(Element("Class", id="c1", name="C"))
         p = _CastxmlParser(root, set(), set())
-        assert p._collect_virtual_methods("does-not-exist") == {}
+        assert collect_virtual_methods(p._ctx, "does-not-exist") == {}
 
     def test_vtable_method_without_id_attribute_is_not_registered_as_slot_root(self):
         """A virtual method element missing its own `id` attribute (malformed

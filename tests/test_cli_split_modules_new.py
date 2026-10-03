@@ -19,6 +19,7 @@ from abicheck.diff_platform_templates import (
     _split_top_level_args,
     _template_outer,
 )
+from abicheck.extract.headers.castxml.records import collect_virtual_methods
 
 # ── suppression.suggest_suppressions: library-level coverage ───────────────
 # The `suggest-suppressions` CLI command (cli_suggest.py) was deleted in the
@@ -382,7 +383,7 @@ class TestCastxmlVtableUnindexed:
             )
         )
         parser = _CastxmlParser(root, set(), set())
-        slots = parser._collect_virtual_methods("c1")
+        slots = collect_virtual_methods(parser._ctx, "c1")
         # Pre-fix, both methods would land on the same `None` key in a dict and
         # one would silently overwrite the other. Neither overrides the other
         # (no `overrides` attribute), so both must survive as distinct slots
