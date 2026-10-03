@@ -228,7 +228,9 @@ success means one `COVERED` row per current ground-truth entry, with no
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, `case129_struct_return_convention`, and
-`case60_base_class_position_changed`.
+`case60_base_class_position_changed`. `case89_inline_accessor_renamed_pimpl_member`
+left this list when the pimpl inline-body detector stopped depending on DWARF
+for the record's namespace (#1470); it is `BREAKING` without debug info now.
 
 Release and stripped full-catalog lanes remain reported-only plus false-positive
 guarded. The fixed ten-case build/source proof is blocking. A complete

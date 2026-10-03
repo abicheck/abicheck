@@ -50,6 +50,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -113,6 +114,38 @@ def trace(workers: str) -> list[str]:
             "tracing run recorded no reaching test: refusing an empty list"
         )
     return sorted(hits)
+
+
+def selection_problems(lines: list[str], exists: Callable[[str], bool]) -> list[str]:
+    """Why *lines* is not a valid stats-pass selection; empty when it is.
+
+    The one rule for both shapes the file legitimately takes: the committed
+    narrowed list (sorted, unique, every entry an existing
+    ``tests/**/test_*.py``) and the whole-suite sentinel
+    :data:`FULL_SELECTION` that ``mutation_scope.extend_selection`` writes
+    when a PR changes a shared test module. The suite checks the file
+    *after* CI has rewritten it -- mutmut's stats pass runs that check -- so
+    a rule that knew only the committed shape aborted every shard of such a
+    PR.
+    """
+    if not lines:
+        return ["an empty selection would make the stats pass run nothing"]
+    if lines == FULL_SELECTION:
+        return []
+    problems = []
+    if lines != sorted(set(lines)):
+        problems.append("entries are not sorted and unique")
+    missing = [p for p in lines if not exists(p)]
+    if missing:
+        problems.append(f"selection names files that do not exist: {missing}")
+    odd = [
+        p
+        for p in lines
+        if not (p.startswith("tests/") and Path(p).name.startswith("test_"))
+    ]
+    if odd:
+        problems.append(f"entries that are not tests/**/test_*.py files: {odd}")
+    return problems
 
 
 def read_selection(path: Path = SELECTION_FILE) -> list[str]:
