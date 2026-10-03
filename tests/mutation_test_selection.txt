@@ -90,7 +90,6 @@ tests/test_canonical_finding_id_completeness.py
 tests/test_castxml_anonymous_type_location.py
 tests/test_castxml_compiler_generated.py
 tests/test_castxml_constructor_visibility.py
-tests/test_castxml_elaborated_type.py
 tests/test_castxml_enum_underlying_type.py
 tests/test_castxml_fact_construction.py
 tests/test_castxml_free_examples.py
@@ -172,6 +171,7 @@ tests/test_compare_inline_embed_config_trust.py
 tests/test_compare_input_modes.py
 tests/test_compare_no_baseline_cli.py
 tests/test_compare_no_baseline_options.py
+tests/test_compare_no_baseline_set.py
 tests/test_compare_pdb_path_shared_rejection.py
 tests/test_compare_public_entity_ids_threading_e2e.py
 tests/test_compare_release.py
@@ -448,6 +448,7 @@ tests/test_new_detectors.py
 tests/test_no_baseline_compare.py
 tests/test_no_baseline_d3_properties.py
 tests/test_no_baseline_report_formats.py
+tests/test_no_baseline_set_record.py
 tests/test_no_baseline_suppression_provenance.py
 tests/test_non_elf_artifact_membership.py
 tests/test_numpy_capi.py
@@ -484,6 +485,7 @@ tests/test_policy_monotonicity.py
 tests/test_policy_override_matrix.py
 tests/test_policy_project_config.py
 tests/test_policy_registry_and_summary.py
+tests/test_post_manifest_config_overlay.py
 tests/test_post_manifest_scope.py
 tests/test_pr89_hard_gaps_schema.py
 tests/test_presentation_analysis_separation.py
@@ -682,6 +684,7 @@ tests/unit/report/test_result_counts.py
 tests/unit/report/test_review_groups.py
 tests/unit/report/test_review_sections_html.py
 tests/unit/storage/test_decode_fast_path.py
+tests/unit/storage/test_entity_id_domain_bridge.py
 tests/unit/storage/test_import_baseline_set.py
 tests/unit/storage/test_import_bundle_facts.py
 tests/unit/storage/test_import_v1.py
