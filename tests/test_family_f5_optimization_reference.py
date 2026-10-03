@@ -137,6 +137,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.policy.reclassify::memory_cache::_KIND_BUCKETS": "UNCOVERED: reached only when a policy carries two or more reclassify rules",
     "abicheck.policy.type_spelling::memory_cache::_strip_ptr_memo": R,
     # ---- request-scoped and instance memos ----
+    "abicheck.buildsource.type_graph::scoped_cache::_AST_DERIVED": H,
     "abicheck.comparability_fields::scoped_cache::_PATH_MEMO": H,
     "abicheck.compare.detection_memo::scoped_cache::_MEMO": R,
     "abicheck.model.comparison_memo::scoped_cache::_MEMO": R,
