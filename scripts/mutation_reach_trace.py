@@ -40,6 +40,14 @@ run time reuses a nested code object that is already armed, so new code only
 appears when an ``only_mutate`` module is (re)imported: the scan is repeated
 only when those module objects change, not per test.
 
+The heap census runs only while this is the process's sole Python thread
+(``memory_trace.gc_census_is_safe``): a census beside a live thread can break
+that thread's ``tuple(...)`` construction. With another thread alive the scan
+walks the ``only_mutate`` modules' namespaces instead (functions, classes,
+descriptors, ``__wrapped__`` chains and containers), arms what it finds, and
+leaves the modules marked unscanned so the next test retries the full census.
+
+
 Activated by ``MUTATION_REACH_OUT=<dir>``: each worker writes the node ids it
 saw reach mutated code to ``<dir>/<worker>.json``.
 """
@@ -59,6 +67,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from abicheck.workflows.memory_trace import gc_census_is_safe
 
 #: ``sys.monitoring`` (3.12+), typed loosely: mypy here targets 3.11.
 _MON: Any = getattr(sys, "monitoring", None)
@@ -90,6 +100,54 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
+def _namespace_functions(modules: list[str]) -> list[object]:
+    """Every function reachable from the named modules' namespaces.
+
+    The fallback when a heap census is unsafe. Follows class bodies (nested
+    classes too), ``staticmethod``/``classmethod``/``property`` wrappers,
+    ``functools.wraps`` ``__wrapped__`` chains and plain containers, so a
+    handler kept in a module-level registry is still found. Only a function
+    created inside another call and kept nowhere in a namespace is missed,
+    and :meth:`Monitor.arm` retries the full census for that.
+    """
+    found: list[object] = []
+    seen: set[int] = set()
+    stack: list[object] = []
+    for name in modules:
+        module = sys.modules.get(name)
+        if module is not None:
+            stack.extend(list(vars(module).values()))
+    while stack:
+        obj = stack.pop()
+        if id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        if isinstance(obj, types.FunctionType):
+            found.append(obj)
+            wrapped = getattr(obj, "__wrapped__", None)
+            if wrapped is not None:
+                stack.append(wrapped)
+        elif isinstance(obj, (staticmethod, classmethod)):
+            stack.append(obj.__func__)
+        elif isinstance(obj, property):
+            stack.extend(f for f in (obj.fget, obj.fset, obj.fdel) if f is not None)
+        elif isinstance(obj, type):
+            stack.extend(list(vars(obj).values()))
+        elif isinstance(obj, dict):
+            stack.extend(list(obj.values()))
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            stack.extend(list(obj))
+    return found
+
+
+def function_candidates(modules: list[str], *, heap_census: bool) -> list[object]:
+    """Objects that may be ``only_mutate`` functions: the whole heap when a
+    census is safe, else :func:`_namespace_functions`."""
+    if heap_census:
+        return gc.get_objects()
+    return _namespace_functions(modules)
+
+
 class Monitor:
     def __init__(self, paths: frozenset[str], modules: list[str]) -> None:
         if _MON is None:
@@ -109,7 +167,9 @@ class Monitor:
         self.hit = True
         return _MON.DISABLE
 
-    def _live_functions(self) -> Generator[types.FunctionType]:
+    def _live_functions(
+        self, census: bool | None = None
+    ) -> Generator[types.FunctionType]:
         """Every live function, or -- when another thread exists -- every
         function reachable from the ``only_mutate`` modules' namespaces.
 
@@ -128,12 +188,12 @@ class Monitor:
         mutation lane's ``selection-check`` job, which compares the
         selection with mutmut's own association, is the backstop.
         """
-        from abicheck.workflows.memory_trace import gc_census_is_safe
-
-        if gc_census_is_safe():
-            for obj in gc.get_objects():
-                if isinstance(obj, types.FunctionType):
-                    yield obj
+        if census is None:
+            census = gc_census_is_safe()
+        for obj in function_candidates(self.modules, heap_census=census):
+            if isinstance(obj, types.FunctionType):
+                yield obj
+        if census:
             return
         seen: set[int] = set()
         # By file, not by name: the same only_mutate file can be imported
@@ -212,14 +272,13 @@ class Monitor:
         )
         if ids == self.module_ids:
             return
-        from abicheck.workflows.memory_trace import gc_census_is_safe
-
-        if gc_census_is_safe():
+        census = gc_census_is_safe()
+        if census:
             # Only a full census marks this module set done: after a partial
             # namespace walk (another thread alive) the next test retries,
             # so the census runs once this is the sole thread again.
             self.module_ids = ids
-        for obj in self._live_functions():
+        for obj in self._live_functions(census):
             code = obj.__code__
             if code.co_filename not in self.paths or code in self.armed:
                 continue

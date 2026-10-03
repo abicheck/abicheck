@@ -96,6 +96,7 @@ from .ast_special_members import collect_special_member_names
 from .call_graph import augment_graph_with_calls, parse_clang_ast_calls
 from .inline_graph_fold import _mark_role_coverage
 from .type_graph import (
+    ast_derived_scope,
     augment_graph_with_types,
     index_declared_entity_files,
     index_declared_type_files,
@@ -155,11 +156,16 @@ class HeaderGraphAstProjection:
 
 def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjection:
     """Read *ast_root* once into the compact form the graph builder needs."""
-    type_files = index_declared_type_files(ast_root)
-    type_edges = parse_clang_ast_types(ast_root)
+    # The type-file index, the type edges and the entity-file index all come
+    # from one whole-TU index walk (type_graph.ast_derived_scope).
+    with ast_derived_scope():
+        type_files = index_declared_type_files(ast_root)
+        type_edges = parse_clang_ast_types(ast_root)
+        needs_entity_files = any(e.kind == "DECL_REFERENCES_DECL" for e in type_edges)
+        entity_files = (
+            index_declared_entity_files(ast_root) if needs_entity_files else {}
+        )
     call_edges = parse_clang_ast_calls(ast_root)
-    needs_entity_files = any(e.kind == "DECL_REFERENCES_DECL" for e in type_edges)
-    entity_files = index_declared_entity_files(ast_root) if needs_entity_files else {}
     special: set[str] = set()
     collect_special_member_names(ast_root, special)
     return HeaderGraphAstProjection(

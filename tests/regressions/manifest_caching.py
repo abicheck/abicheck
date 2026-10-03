@@ -133,4 +133,39 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="cache.computed_output_keyed_without_code_identity",
+        invariant=(
+            "A cache entry is served only to the code and generated input "
+            "that produced it. An entry abicheck computed (a snapshot, "
+            "normalized build evidence, a per-TU source-ABI dump, a "
+            "header-graph projection) is keyed or stamped by "
+            "`storage.code_identity.abicheck_code_fingerprint()`, so any "
+            "package edit misses and reverting it hits again. An external "
+            "tool's output (the castxml/clang header AST) is keyed by the exact "
+            "aggregate header and command line abicheck generates, plus -- for "
+            "clang, whose stored entry abicheck shapes -- the source of the "
+            "modules that shape it. Every `DiskCache` in the package is "
+            "classified as one or the other."
+        ),
+        fixed_by=(1466, 1476),
+        seed_tests=(
+            "tests/test_code_identity.py",
+            "tests/test_header_ast_cache_key_inputs.py",
+            "tests/test_family_f5_optimization_reference.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The trace that keeps `CLANG_AST_OUTPUT_MODULES` complete "
+                    "observes the plain clang path and the failing-header "
+                    "retry, not the DPC++ multi-document path: `sycl_context` "
+                    "is listed from reading the code, since exercising it needs "
+                    "a DPC++ driver the test does not provision, so a new "
+                    "module on that path would not be caught automatically."
+                ),
+                reference="tests/test_header_ast_cache_key_inputs.py",
+            ),
+        ),
+    ),
 )

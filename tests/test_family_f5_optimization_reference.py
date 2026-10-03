@@ -86,6 +86,8 @@ R, B, H = "release.memo", "binary.memo", "headers.memo"
 _NEEDS_L5 = "UNCOVERED: L3-L5 build-source graph extraction (needs a compile database + clang); no in-process fixture reaches it"
 COVERAGE: dict[str, str] = {
     # ---- memoized functions ----
+    "abicheck.storage.code_identity::memoized::abicheck_code_fingerprint": B,
+    "abicheck.storage.code_identity::memoized::abicheck_modules_fingerprint": H,
     "abicheck.buildsource.header_compile_context::memoized::_include_pattern": _NEEDS_L5,
     "abicheck.buildsource.source_extractors.castxml::memoized::_castxml_tool_version": "UNCOVERED: L4 castxml source extractor tool probe; build-source path only",
     "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_family": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",
@@ -137,6 +139,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.policy.reclassify::memory_cache::_KIND_BUCKETS": "UNCOVERED: reached only when a policy carries two or more reclassify rules",
     "abicheck.policy.type_spelling::memory_cache::_strip_ptr_memo": R,
     # ---- request-scoped and instance memos ----
+    "abicheck.buildsource.type_graph::scoped_cache::_AST_DERIVED": H,
     "abicheck.comparability_fields::scoped_cache::_PATH_MEMO": H,
     "abicheck.compare.detection_memo::scoped_cache::_MEMO": R,
     "abicheck.model.comparison_memo::scoped_cache::_MEMO": R,

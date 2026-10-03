@@ -289,8 +289,13 @@ _CASTXML_FALLBACK = Path(
     "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin"
 )
 
+# Includes what it uses, like a real header: the reversed-order test parses
+# ``[extra, api]`` for real. It used to depend on ``lib::`` from whatever came
+# first in the aggregate, and passed only because the header-AST cache key was
+# blind to header order and served the ``[api, extra]`` parse instead.
 _EXTRA_HEADER = """
 #pragma once
+#include "api.h"
 namespace other {
 struct Point { int v; };
 int add(int a, int b) noexcept;

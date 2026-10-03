@@ -397,9 +397,7 @@ def test_namespace_walk_reaches_every_code_object_of_the_file(
     mon = object.__new__(trace.Monitor)
     mon.paths = frozenset({str(src.resolve())})
     mon.modules = ["pkg.never_imported"]
-    import abicheck.workflows.memory_trace as mt
-
-    monkeypatch.setattr(mt, "gc_census_is_safe", lambda: False)
+    monkeypatch.setattr(trace, "gc_census_is_safe", lambda: False)
     reached = {
         c.co_qualname
         for f in mon._live_functions()
@@ -428,7 +426,9 @@ def test_arm_rescans_when_a_matching_module_appears_under_another_name(
     mon.module_ids = ()
     mon.armed = set()
     scans: list[int] = []
-    monkeypatch.setattr(mon, "_live_functions", lambda: scans.append(1) or iter(()))
+    monkeypatch.setattr(
+        mon, "_live_functions", lambda census=None: scans.append(1) or iter(())
+    )
 
     mon.arm()
     mon.arm()
