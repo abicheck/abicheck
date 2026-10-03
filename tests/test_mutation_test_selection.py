@@ -275,6 +275,20 @@ def test_namespace_walk_reaches_every_code_object_of_the_file(
         + "    @classmethod\n    def c(cls):\n        return 2\n"
         + "    @property\n    def p(self):\n        return 3\n"
         + "    class Nested:\n        def deep(self):\n            return 4\n"
+        # Reachable only through a container, a closure without
+        # functools.wraps, a partial, a bound method or a default.
+        + "def _in_list():\n    return 5\n"
+        + "CALLBACKS = [(_in_list,)]\n"
+        + "def _plain(f):\n    def g():\n        return f()\n    return g\n"
+        + "def _hidden():\n    return 6\n"
+        + "exposed = _plain(_hidden)\n"
+        + "def _partial_target(a, b):\n    return a + b\n"
+        + "PARTIAL = functools.partial(_partial_target, 1)\n"
+        + "def _bound_target(self):\n    return 7\n"
+        + "BOUND = _bound_target.__get__(object())\n"
+        + "def _default_target():\n    return 8\n"
+        + "def uses_default(cb=_default_target):\n    return cb()\n"
+        + "del _in_list, _hidden, _partial_target, _bound_target, _default_target\n"
     )
     src.write_text(text)
     # Imported under a name module_names() would not predict, the way a
@@ -300,6 +314,11 @@ def test_namespace_walk_reaches_every_code_object_of_the_file(
         "helper.<locals>.inner",
         "Thing.method",
         "Props.Nested.deep",
+        "_in_list",
+        "_hidden",
+        "_partial_target",
+        "_bound_target",
+        "_default_target",
     } <= expected
 
     mon = object.__new__(trace.Monitor)

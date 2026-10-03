@@ -394,16 +394,19 @@ def _one_hop_offenders(tree: ast.Module, rel: str) -> list[str]:
         for n in ast.walk(tree)
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
-    indexed_params: dict[str, dict[int, set[str]]] = {}
-    param_names: dict[str, list[str]] = {}
+    # Keyed by parameter *name*, so a keyword-only parameter is covered too;
+    # only positional parameters can also be filled by position.
+    indexed_params: dict[str, dict[str, set[str]]] = {}
+    positional: dict[str, list[str]] = {}
     for func in funcs:
-        params = [a.arg for a in func.args.posonlyargs + func.args.args]
-        param_names[func.name] = params
+        pos = [a.arg for a in func.args.posonlyargs + func.args.args]
+        named = {*pos, *(a.arg for a in func.args.kwonlyargs)}
+        positional[func.name] = pos
         unwrapped = _unwrapped_names(func)
-        hits: dict[int, set[str]] = {}
+        hits: dict[str, set[str]] = {}
         for recv, key in _moved_key_receivers(func):
-            if recv in params and recv not in unwrapped:
-                hits.setdefault(params.index(recv), set()).add(key)
+            if recv in named and recv not in unwrapped:
+                hits.setdefault(recv, set()).add(key)
         if hits:
             indexed_params[func.name] = hits
     offenders: list[str] = []
@@ -418,13 +421,13 @@ def _one_hop_offenders(tree: ast.Module, rel: str) -> list[str]:
         for call in ast.walk(caller):
             if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)):
                 continue
-            names = param_names.get(call.func.id, [])
+            pos = positional.get(call.func.id, [])
             by_keyword = {kw.arg: kw.value for kw in call.keywords if kw.arg}
-            for index, keys in indexed_params.get(call.func.id, {}).items():
-                if index < len(call.args):
-                    arg = call.args[index]
-                elif names[index] in by_keyword:
-                    arg = by_keyword[names[index]]
+            for name, keys in indexed_params.get(call.func.id, {}).items():
+                if name in by_keyword:
+                    arg = by_keyword[name]
+                elif name in pos and pos.index(name) < len(call.args):
+                    arg = call.args[pos.index(name)]
                 else:
                     continue
                 if _is_raw_document_call(arg) or (
@@ -525,6 +528,14 @@ _RAW_BY_KEYWORD = _RAW_HANDOFF.replace(
     "coverage(json.loads", "coverage(snap=json.loads"
 )
 _RAW_NAME_BY_KEYWORD = _RAW_VIA_NAME.replace("coverage(doc)", "coverage(snap=doc)")
+_RAW_TO_KEYWORD_ONLY = """
+import json
+def coverage(*, snap):
+    return snap.get("build_source") or {}
+def scan(path):
+    return coverage(snap=json.loads(path.read_text()))
+"""
+
 _UNWRAPPED_BY_KEYWORD = """
 import json
 def coverage(snap):
@@ -561,6 +572,7 @@ def scan(pack):
         (_RAW_BY_KEYWORD, True),
         (_RAW_NAME_BY_KEYWORD, True),
         (_UNWRAPPED_BY_KEYWORD, False),
+        (_RAW_TO_KEYWORD_ONLY, True),
     ],
     ids=[
         "direct",
@@ -570,6 +582,7 @@ def scan(pack):
         "direct-keyword",
         "via-local-name-keyword",
         "unwrapped-keyword",
+        "keyword-only-parameter",
     ],
 )
 def test_one_hop_scan_flags_exactly_a_raw_document_handoff(

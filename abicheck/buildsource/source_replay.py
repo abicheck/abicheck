@@ -244,12 +244,18 @@ def select_compile_units(
 #: ``huf_decompress_amd64.S`` in its library target). Case-sensitive on
 #: purpose: ``.S`` (preprocessed asm) and ``.s`` are both assembly, while
 #: ``.C`` is a C++ suffix.
-_ASSEMBLY_SUFFIXES = (".s", ".S", ".sx", ".asm")
+_ASSEMBLY_SUFFIXES = (".s", ".S")
+#: Assembler suffixes no C-family suffix shares in any case, so they are
+#: matched case-insensitively (MASM sources are often spelled ``.ASM``).
+_ASSEMBLY_SUFFIXES_ANY_CASE = (".sx", ".asm")
 
 
 def is_assembly_unit(compile_unit: CompileUnit) -> bool:
     """Whether *compile_unit* compiles an assembler source (not C-family)."""
-    return str(compile_unit.source).endswith(_ASSEMBLY_SUFFIXES)
+    source = str(compile_unit.source)
+    return source.endswith(_ASSEMBLY_SUFFIXES) or source.lower().endswith(
+        _ASSEMBLY_SUFFIXES_ANY_CASE
+    )
 
 
 def _select_headers_only(

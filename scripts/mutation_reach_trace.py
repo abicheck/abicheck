@@ -46,6 +46,7 @@ saw reach mutated code to ``<dir>/<worker>.json``.
 
 from __future__ import annotations
 
+import functools
 import gc
 import importlib
 import json
@@ -116,6 +117,16 @@ class Monitor:
         a tuple that thread is still building (bug class
         ``gc-census-concurrent-thread``), so it is taken only when
         ``gc_census_is_safe()``; the namespace walk is the fallback.
+
+        The walk follows namespaces, classes, containers, closures, partials,
+        bound methods, defaults and ``__wrapped__`` from every module whose
+        file is an only_mutate file. Its one structural limit: a function of
+        an only_mutate file loaded *without* registering a module in
+        ``sys.modules`` (a bare ``exec_module``) has no root it can start
+        from, so a test reaching only that copy is under-reported. No
+        thread-safe enumeration of the heap exists to close that; the
+        mutation lane's ``selection-check`` job, which compares the
+        selection with mutmut's own association, is the backstop.
         """
         from abicheck.workflows.memory_trace import gc_census_is_safe
 
@@ -138,6 +149,13 @@ class Monitor:
             seen.add(id(obj))
             if isinstance(obj, dict):
                 stack.extend(obj.values())
+            elif isinstance(obj, (list, tuple, set, frozenset)):
+                # A callback table or registry held only in a container.
+                stack.extend(obj)
+            elif isinstance(obj, functools.partial):
+                stack.extend((obj.func, *obj.args, *obj.keywords.values()))
+            elif isinstance(obj, types.MethodType):
+                stack.append(obj.__func__)
             elif isinstance(obj, type):
                 # The class's values directly: a temporary copy pushed here
                 # would be freed after its turn, and a later copy reusing
@@ -156,6 +174,15 @@ class Monitor:
                 yield obj
                 if (wrapped := getattr(obj, "__wrapped__", None)) is not None:
                     stack.append(wrapped)
+                # A decorator's wrapper reaches the decorated function only
+                # through its closure (no functools.wraps, no __wrapped__).
+                for cell in obj.__closure__ or ():
+                    try:
+                        stack.append(cell.cell_contents)
+                    except ValueError:  # an empty cell
+                        pass
+                stack.extend(obj.__defaults__ or ())
+                stack.extend((obj.__kwdefaults__ or {}).values())
 
     def _is_only_mutate(self, module: object) -> bool:
         path = getattr(module, "__file__", None)

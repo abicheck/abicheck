@@ -155,7 +155,7 @@ def test_malformed_castxml_output_is_a_per_unit_failure(
 # ── replay selection never includes an assembler unit ────────────────────────
 
 #: Independent of the implementation's own suffix tuple on purpose.
-_ASM = (".s", ".S", ".sx", ".asm")
+_ASM = (".s", ".S", ".sx", ".asm", ".ASM", ".Asm", ".SX")
 _C_FAMILY = (".c", ".C", ".cc", ".cpp", ".cxx", ".m", ".mm", ".cu")
 
 
@@ -178,6 +178,9 @@ def test_no_scope_selects_an_assembler_unit(scope: str) -> None:
         build, scope=scope, changed_paths=changed, target_id="target://lib"
     )
     assert not [cu.source for cu in picked if cu.source.endswith(_ASM)], scope
+    assert build.compile_units[0].source.endswith(_ASM), (
+        "assembler units must sort first"
+    )
     if scope in ("full", "target", "changed"):
         # These scopes select every unit of the target / every changed source,
         # so the C-family units must all survive the filter.
