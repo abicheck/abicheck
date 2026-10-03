@@ -181,8 +181,8 @@ def depth_to_method(depth: EvidenceDepth) -> SourceMethod | None:
 def method_to_depth(method: SourceMethod) -> EvidenceDepth:
     """The representative L-depth a *resolved* S-method reaches (for reporting).
 
-    ``AUTO`` must be resolved to a concrete method first (via
-    no command resolves one any more); passing it here is a programming error.
+    ``AUTO`` is never resolved by any command any more, so passing it here
+    is a programming error.
     """
     if method is SourceMethod.AUTO:
         raise ValueError("method_to_depth requires a resolved S-method, not AUTO")
@@ -192,8 +192,8 @@ def method_to_depth(method: SourceMethod) -> EvidenceDepth:
 def method_to_collect_mode(method: SourceMethod) -> str:
     """Map a *resolved* S-method to its ADR-033 D2 CI evidence collect mode.
 
-    ``AUTO`` must be resolved to a concrete method first (via
-    no command resolves one any more); passing it here is a programming error.
+    ``AUTO`` is never resolved by any command any more, so passing it here
+    is a programming error.
     """
     if method is SourceMethod.AUTO:
         raise ValueError(
