@@ -195,5 +195,3 @@ def audit_gate_exit_contribution(findings: Iterable[Any], *, enabled: bool) -> i
         if isinstance(verdict, Verdict) and _gates(verdict):
             return AUDIT_GATE_EXIT_CODE
     return 0
-
-

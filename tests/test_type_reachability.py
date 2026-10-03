@@ -24,8 +24,6 @@ from __future__ import annotations
 
 import sys
 
-from _type_token_oracle import type_string_references_name
-
 from abicheck.diff_cxx_rules import owner_class_of
 from abicheck.model import (
     AbiSnapshot,
@@ -64,23 +62,6 @@ def _fn(
         visibility=visibility,
         origin=origin,
     )
-
-
-class TestTypeStringReferencesName:
-    def test_matches_bare_reference(self) -> None:
-        assert type_string_references_name("const std::string &", "std::string")
-
-    def test_does_not_match_longer_name_prefix(self) -> None:
-        assert not type_string_references_name("std::stringstream", "std::string")
-
-    def test_does_not_match_when_preceded_by_identifier_char(self) -> None:
-        assert not type_string_references_name("xstd::string", "std::string")
-
-    def test_matches_inside_template_args(self) -> None:
-        assert type_string_references_name("std::vector<std::string>", "std::string")
-
-    def test_no_match_at_all(self) -> None:
-        assert not type_string_references_name("int", "std::string")
 
 
 class TestDirectlyReferencedStdlibTypes:

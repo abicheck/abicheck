@@ -682,5 +682,3 @@ def scope_reasons(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
             tally[record.reason_code] = 0
         tally[record.reason_code] += 1
     return tuple((reason, tally[reason]) for reason in ordered)
-
-

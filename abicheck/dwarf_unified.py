@@ -249,5 +249,3 @@ def parse_dwarf_metadata(so_path: Path) -> DwarfMetadata:
     """
     meta, _ = parse_dwarf(so_path)
     return meta
-
-

@@ -1142,6 +1142,7 @@ class ProfileSpec:
             consumer_compile=consumer_compile_spec,
         )
 
+
 @dataclass
 class BaselineChannelSpec:
     """One ``baseline: channels:`` entry (ADR-047 §3/§10)."""

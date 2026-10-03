@@ -699,6 +699,7 @@ def _decode_member_location(member_die: Any) -> int:
 # DW_AT_producer parsing
 # ---------------------------------------------------------------------------
 
+
 def _normalize_arch(elf: Any) -> str:
     """Normalize ELF machine arch string to internal arch_key for register lookup."""
     arch = str(elf.get_machine_arch())

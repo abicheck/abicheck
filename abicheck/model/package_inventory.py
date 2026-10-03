@@ -195,5 +195,3 @@ class PackageInventory:
                 data.get("schema_version", PACKAGE_INVENTORY_SCHEMA_VERSION)
             ),
         )
-
-

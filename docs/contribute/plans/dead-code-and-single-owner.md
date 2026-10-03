@@ -2,7 +2,7 @@
 
 Status: Stage A done (PR #1448); Stage B item 1 and Stage C done; Stage B
 items 2-3 continue in [usecase-path-tracing](usecase-path-tracing.md);
-Stage D open.
+Stage D's first pass done, one item open.
 
 ## Why
 
@@ -103,7 +103,7 @@ with the ADR or page that names it:
 The removed Python names are registered in `scripts/retired_surfaces.py`, so
 a page that still presents one as live is flagged.
 
-## Stage D — the recomputed list (in progress)
+## Stage D — the recomputed list (first pass done)
 
 `python scripts/usecase_paths.py record --source scenarios --source flows
 --build-catalog DIR` followed by `usecase_paths.py dead` listed **127** dead
@@ -126,6 +126,24 @@ recording.
 | The CFI pass in `dwarf_advanced.py` (frame registers, callee-saved fallback), `parse_advanced_dwarf` (both copies), `ChangeKind.FRAME_REGISTER_CHANGED`, `AdvancedDwarfMetadata.frame_registers`/`callee_saved_regs` | **Deleted** (409 → 408 kinds). The unified DWARF parse never called the pass, and it asked pyelftools for `get_EH_CFI_entries`/`get_CFI_entries`, which do not exist, so it returned nothing even when called; its tests used mocks with those names. Measured before deciding: a corrected pass wired into production changed one of the 169 built catalog cases, a false `frame_register_changed` turning `case15_noexcept_change` from `COMPATIBLE_WITH_RISK` into `BREAKING`, and still missed case64's GCC `ms_abi` change (the callee-saved set at that optimisation level carries no `rdi`/`rsi` spill, and the heuristic counted the return-address column as a saved register). `test_dwarf_unified.py`'s advanced-half "unified equals separate" tests compared `parse_dwarf` with a shim of itself; they now compare against `tests/_dwarf_advanced_oracle.py`, a separate ELF open. |
 | `service_compare_evidence.explicit_source_extractor` and `L4_SOURCE_EXTRACTORS` | **Deleted** (scan's resolver). Its test module claimed `compare`/`dump` never pass an explicit `--ast-frontend` to L4 replay; they do, through `effective_frontend` in `workflows/artifact/embed_side.py`. The exhaustive frontend x env oracle now checks that live resolver (`tests/test_l4_frontend_propagation.py`), and the `config.propagation_completeness` manifest entry says so. |
 | About thirty single accessors and wrappers: `BinarySummary.has_text`/`text_size`, `HeaderCompileContextResolution.matched_unit_count`, `BundleSnapshot.library_names`, `_collect_additions`, `_ClangAstParser._specialization_record_index`, `_castxml_available`, `DebugArtifact.has_dsym`/`has_pdb`/`has_split_dwarf`, `_candidate_type_names`, `BundleVariantsConfig.required_names`, `ChangeKindRegistry.kinds_for_entity`/`templated_kinds`, `conflicts_to_dicts`, `is_unresolved_node_id`, `ScopeAcquisitionRecord.members_in`, `AbiSnapshot.func_by_mangled`, `surface_facts.is_unknown`, `is_local_name_symbol`, `policy_registry_markdown`, `coverage_diagnostic_from_summary`, `PostProcessingPipeline.step_names`, `PipelineContext.baseline_present`, `package_declares_full_dependency_scope`, `variant_and_artifact_ids`, `ChangeInventorySplit.has_hygiene`, `_charge_document_bytes`, `ExpectedTargets.from_manifest_file`, `ResolvedArtifactPlan.add_cleanup`, `BundleCompareRequest.any_stored`, `SnapshotRetention.any_full`, `ordinal_only_pe_exports`, `execution_cache.caching_enabled`/`cache_kinds` | **Deleted.** Tests that used one now state the same expectation on the data it read. |
+| `merge_unproduced`, `override_suppression`/`override_suppressed_change`, `no_baseline_json_report`/`no_baseline_markdown_report`, `fold_audit_gate_exit`, `classify_change_object`, `is_pe`/`is_macho`, `PatternFactsResult.should_escalate`, `ProfileSpec.runner_label`, `EntityResolver.canonical_id_for`, `attribute_failing_headers`/`cross_header_conflicts`, `encode_native_identity_aliases`, `TypeDatabase.all_procedures`/`all_mfunctions` | **Deleted.** `package_component_inventory` is ADR-065's real producer of unproduced members; the override pair served the deleted `scan --against`; the report wrappers bypassed the CLI's own `render_no_baseline` (tests read that now, and the audit-gate property tests drive the real fold, `no_baseline_exit_code`); production sniffs formats through `binary_utils.classify_magic` and rejects an MZ-only file with a clear PE parse error; the alias encoder's writer is gone and the surviving decoder reads older packages only. |
+| `classify_aapcs64_aggregate`/`_is_short_vector` | **Deleted, gap recorded.** An unwired AAPCS64 HFA/HVA classifier whose wiring plan (G1) closed without wiring it, while three docs cited it as modeled coverage. The docs are corrected and `docs/contribute/known-gaps.md` records what a real detector needs. |
+| `conservation_holds`, `unclassified_release_contribution_fields`, `applied_pack_fields`, `count_visible_options`, `graph_table_to_legacy_dict`, `type_string_references_name`, `load_snapshot_document` | **Moved to `tests/`** (`_disposition_invariants.py`, `_graph_table_oracle.py`, `_type_token_oracle.py`, `_snapshot_document_reader.py`, or the one test that asserts it). Each was a test oracle or helper. The type-token oracle now states production's ASCII-only boundary rule, with non-ASCII cases in its agreement sweep. |
+
+### Single owners found while deciding
+
+Several "dead" functions turned out to be the one correct implementation of
+something production computed a second way. Each was wired or the copy
+removed, with a test over generated inputs that fails on the old code:
+
+| Question | Owner now | Former divergence |
+|---|---|---|
+| Discover a directory's comparable inputs for `compare --dry-run` | `workflows.release_inputs.collect_release_inputs` | the preview repeated the discovery inline and answered an empty plan for a side with no supported input, where the real run refuses it |
+| Raw gate inputs → the effective-config digest's `EffectiveGate` | `effective_config_digest.effective_config_fields_from_raw` (called by `add_effective_config_digest`) | the report block rebuilt the gate inline; the function's copy, used by ~90 tests, recorded an empty scheme literally |
+| Which definition a PDB forward reference names | `pdb_parser._link_forward_refs`, read through `resolve_struct`/`resolve_enum` | last definition won and structs and enums shared one map, while `pdb_metadata` takes the first complete definition as the layout; enum forward refs never followed |
+| Is a fact a completed read | `model.evidence_merge.is_completed_read` | the merge functions and `diff_cxx_rules` re-spelled the status check |
+| Relabel recorded findings `SUPPRESSED` after a ledger closed | `DispositionLedger.with_suppressed`, resolving through `indices_for` | matched by object, so an alias of a recorded observation kept its old disposition (the deleted `override_suppression` resolved aliases) |
+| Format a snapshot's JSON text | `storage.json_stream.iter_json_indented` (`join_json_indented` for the one-shot zstd write) | the default zstd write used `json.dumps`, a second formatting path |
 
 ### Kept
 
@@ -134,6 +152,10 @@ recording.
 | `buildsource/compiler_record.extract_compiler_record` and its helpers | Documented Python API: `docs/use/build-evidence-setup.md` names it as the replacement for the removed `--read-compiler-record` flag (the page now names the function, not only the module, so the tool can see it). |
 | `header_include_memo.clear_include_memo`, `spelling_match_cache.clear_caches`, `cache_header_scan.reset_header_scan_statistics`, `path_aliases.clear_path_alias_caches`, `execution_cache.clear_memoized`/`reset_cache_stats`, `type_spelling.strip_ptr_cache_clear` | Test hooks: cache resets for test isolation and cold-cache benchmarks. |
 | `type_spelling.strip_ptr_cache_entries`/`strip_ptr_cache_stats`, `_PatternRegistry.is_held`/`pattern_for`/`reference_counts`, `_ProbeGate.in_flight`, `MemoryAdmission.estimate_gib`, `lazy_graph.is_graph_decoded`, `SurfaceAcquisitionLedger.acquisitions_by_key`/`total_acquisitions`/`total_reuses` | Test hooks: the observation points the retention, single-flight, admission, lazy-decode and acquire-once tests assert through. |
+| `policy/name_heuristics.severity_raising_heuristics` | The H4 catalogue is the test oracle design-hardening-from-defect-families.md assigns it (runtime registration lives in `model/`). |
+| `extract/wheel_tags.parse_wheel_architecture_claim` | The planned entry point for G27's wheel-tag auto-derivation, with the three floor parsers g27-wheel-deployment-verification.md names. |
+| `extract/dwarf_subtree_index.subtree_ends` | Test hook: the oracle probe the subtree-index tests compare against pyelftools' own terminators. |
+| `storage/fact_availability.FactAvailability.establishes_absence`, `storage/identity.OccurrenceSet.is_ambiguous`/`occurrences_of` | The inert ADR-062 Phase 0 primitives (D3/D4) one-semantic-pipeline Phase 8 wires, kept for the same reason as Stage C's `for_entity`. |
 
 ### Still open
 
