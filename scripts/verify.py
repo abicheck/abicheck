@@ -203,6 +203,23 @@ def _need_linux_and_all_bins(*names: str) -> Callable[[], str | None]:
     return check
 
 
+def _need_platform_and_bins(
+    per_platform: dict[str, tuple[str, ...]],
+) -> Callable[[], str | None]:
+    """Run only on the listed `sys.platform` values, each with its own tools."""
+
+    def check() -> str | None:
+        bins = per_platform.get(sys.platform)
+        if bins is None:
+            return f"needs one of {sorted(per_platform)} (host platform is {sys.platform!r})"
+        missing = [b for b in bins if shutil.which(b) is None]
+        if missing:
+            return f"missing tool(s) on PATH: {', '.join(missing)}"
+        return None
+
+    return check
+
+
 def _need_modules(*names: str) -> Callable[[], str | None]:
     def check() -> str | None:
         missing = [n for n in names if not _module_available(n)]
@@ -242,6 +259,23 @@ def _pyscript(path: str, *args: str) -> tuple[str, ...]:
     return (sys.executable, path, *args)
 
 
+def _pyscript_without_abicheck(path: str, *args: str) -> tuple[str, ...]:
+    """`_pyscript`, with the `abicheck` package made unimportable.
+
+    ``sys.modules["abicheck"] = None`` makes every ``import abicheck`` (and
+    any ``abicheck.*`` submodule import) raise ``ModuleNotFoundError`` even
+    though the dev venv has the package installed -- the condition a
+    docs-only install produces, reproduced without a second environment.
+    """
+    code = (
+        "import runpy, sys; "
+        "sys.modules['abicheck'] = None; "
+        "sys.argv = sys.argv[1:]; "
+        "runpy.run_path(sys.argv[0], run_name='__main__')"
+    )
+    return (sys.executable, "-c", code, path, *args)
+
+
 #: `check_bugfix_test_contract.py` exits 2 when its structural half passed but
 #: no PR body was available, so the declared half never ran. Mapping that to a
 #: skip is what keeps a local `--profile pr` from claiming CI parity over half
@@ -269,6 +303,13 @@ class Step:
     cmd: tuple[str, ...]
     profiles: frozenset[str]
     env: dict[str, str] = field(default_factory=dict)
+    #: Like ``env``, but the caller's own environment wins. For a value with a
+    #: sensible local default that a specific CI leg legitimately tightens --
+    #: the `integration` step's ``ABICHECK_MIN_EXECUTED`` floor is "did
+    #: anything run at all" on an arbitrary host, while ci's Linux leg knows
+    #: its real count and raises it. ``env`` itself must stay authoritative:
+    #: most of its entries are part of what the step *is*.
+    env_defaults: dict[str, str] = field(default_factory=dict)
     precondition: Callable[[], str | None] | None = None
     #: ``{returncode: reason}``: a step that ran but could only do part of its
     #: job reports one of these codes, and this maps it to a skip so the
@@ -544,21 +585,91 @@ STEPS: tuple[Step, ...] = (
         description="mkdocs strict build (dangling refs, nav coverage)",
     ),
     Step(
+        # Generated example pages + catalog/README.md are current, checked
+        # with the `abicheck` package made unimportable. The generator must
+        # stay runnable without abicheck installed (pages.yml installs only
+        # the [docs] requirements before regenerating), and a PR once broke
+        # that while every dev-venv gate passed (PR #1279, see
+        # scripts/catalog_subjects.py). That guarantee used to rest on
+        # docs-pr.yml's lean install alone; blocking the import here makes
+        # it hold in every environment that runs this step, local included.
+        "examples-docs",
+        _pyscript_without_abicheck("scripts/gen_examples_docs.py", "--check"),
+        frozenset({PR, FULL}),
+        description="docs/reference/examples/ + catalog/README.md match gen_examples_docs.py (abicheck import blocked)",
+    ),
+    Step(
         # ABICHECK_MIN_EXECUTED (tests/conftest.py's silent-skip guard, also
-        # used by every marker lane in ci.yml): `castxml` being on PATH
+        # used by every marker lane in CI): `castxml` being on PATH
         # doesn't guarantee gcc/g++ is too — without this, a partial
         # toolchain could let pytest collect the `integration` marker, skip
         # every single test, and still exit 0, which `run_step` would then
-        # report as "passed" having verified nothing. '1' (not CI's Linux
-        # '20') because this step runs on whatever OS/toolchain combination
-        # the caller has — the guard's job here is "did anything run at
-        # all", not asserting a platform-specific count.
+        # report as "passed" having verified nothing. The default is '1'
+        # because this step runs on whatever OS/toolchain combination the
+        # caller has — "did anything run at all", not a platform-specific
+        # count — and it is an `env_defaults` entry so integration.yml's
+        # Linux leg, whose count is known, can raise it to '20'.
+        #
+        # This is the one definition of the integration lane: integration.yml
+        # calls this step on every OS (adding xdist/coverage through
+        # PYTEST_ADDOPTS) rather than keeping its own pytest line.
+        # Two files are excluded, everywhere:
+        # - tests/test_abi_examples.py: the legacy cases 01-18 list, superseded
+        #   by tests/test_example_autodiscovery.py, which runs the same 18
+        #   cases with the same expected verdicts (read from
+        #   catalog/ground_truth.json). CI has never run it; this step used to,
+        #   so a local `--profile full` paid a second cmake configure per case
+        #   for no extra assertion.
+        # - tests/test_cross_platform_integration.py: every test in it needs
+        #   Apple clang or MinGW gcc and skips on Linux, so it is the separate
+        #   `native-compare` step below, with its own floor.
         "integration",
-        _py("pytest", "tests/", "-m", "integration", "--tb=short"),
+        _py(
+            "pytest",
+            "tests/",
+            "-m",
+            # A test that also carries a tool-lane marker (libabigail/abicc/
+            # msvc) belongs to that lane, which runs it with the tool
+            # installed; selecting it here too ran it twice wherever the tool
+            # is present (tests/test_surface_scope_parity.py on Linux).
+            "integration and not libabigail and not abicc and not msvc",
+            "--tb=short",
+            "--ignore=tests/test_abi_examples.py",
+            "--ignore=tests/test_cross_platform_integration.py",
+        ),
         frozenset({FULL}),
-        env={"ABICHECK_MIN_EXECUTED": "1"},
+        env_defaults={"ABICHECK_MIN_EXECUTED": "1"},
         precondition=_need_bins("castxml"),
         description="DWARF/header parsing against real castxml + a C/C++ compiler",
+    ),
+    Step(
+        # G1: native PE/Mach-O `compare` workflows over binaries the host's own
+        # toolchain builds (Apple clang -> .dylib, MinGW gcc -> .dll). Every
+        # test needs that compiler, so if it is missing they all skip and the
+        # floor fails the step — '5' because each platform contributes ~7-9
+        # native tests. macOS/Windows only: on Linux all 20 skip by design.
+        "native-compare",
+        _py(
+            "pytest",
+            "tests/test_cross_platform_integration.py",
+            "-m",
+            "integration",
+            "--tb=short",
+        ),
+        frozenset({FULL}),
+        env={"ABICHECK_MIN_EXECUTED": "5"},
+        precondition=_need_platform_and_bins({"darwin": ("clang",), "win32": ("gcc",)}),
+        description="Native PE/Mach-O compare workflows (macOS clang / Windows MinGW)",
+    ),
+    Step(
+        # MSVC + PDB end-to-end (tests/test_msvc_pdb_e2e.py). Experimental:
+        # the tests self-skip when layout cannot be extracted, and CI runs the
+        # step with `continue-on-error` while the PDB parser matures.
+        "msvc",
+        _py("pytest", "tests/test_msvc_pdb_e2e.py", "-m", "msvc", "--tb=short"),
+        frozenset({FULL}),
+        precondition=_need_platform_and_bins({"win32": ("cl",)}),
+        description="MSVC + PDB end-to-end (Windows, cl.exe on PATH)",
     ),
     Step(
         # Marker-scoped over all of tests/ (not a hardcoded file list): matches
@@ -588,7 +699,10 @@ STEPS: tuple[Step, ...] = (
     ),
     Step(
         "slow",
-        # -n auto --dist worksteal, matching ci.yml's "Run slow tests" step:
+        # ci.yml's `slow-tests` job runs this step and "slow-perf" below via
+        # `verify.py --profile full --only slow,slow-perf --junit-dir .`, so
+        # this catalog entry is the one definition of the slow lane.
+        # -n auto --dist worksteal:
         # most `slow`-marked tests here are independent (Hypothesis/property-
         # based suites plus the production-scale snapshot-compression round
         # trips), so a serial run was pure wasted wall time on a multi-core
@@ -617,6 +731,9 @@ STEPS: tuple[Step, ...] = (
             "auto",
             "--dist",
             "worksteal",
+            "-q",
+            "-r",
+            "fE",
         ),
         frozenset({FULL}),
         description="Hypothesis / perf-benchmark tests (parallel; excludes wall-clock-timed tests)",
@@ -633,9 +750,9 @@ STEPS: tuple[Step, ...] = (
         # (2s/5s/30s and 60s respectively) or fits a scaling exponent --
         # running them concurrently with other CPU-heavy tests makes
         # scheduler contention part of the measurement, which can fail (or
-        # distort) the gate with no actual product regression. ci.yml's
-        # "Run slow tests" step keeps both files serial, together, for the
-        # identical reason (Codex review, PR #1036); performance.yml's own
+        # distort) the gate with no actual product regression (Codex review,
+        # PR #1036). ci.yml's `slow-tests` job runs this step as-is, after
+        # "slow", never alongside it; performance.yml's own
         # dedicated job only covers the first -- an acknowledged, separate
         # gap in that workflow, not fixed here.
         _py(
@@ -645,6 +762,9 @@ STEPS: tuple[Step, ...] = (
             "-m",
             "slow",
             "--tb=short",
+            "-q",
+            "-r",
+            "fE",
         ),
         frozenset({FULL}),
         description='Wall-clock-timed perf-benchmark tests (serial, unlike "slow")',
@@ -789,7 +909,22 @@ def _git_commit() -> str:
     return proc.stdout.strip() if proc.returncode == 0 else "unknown"
 
 
-def run_step(step: Step) -> dict[str, object]:
+def _is_pytest_step(step: Step) -> bool:
+    return "pytest" in step.cmd
+
+
+def step_command(step: Step, junit_dir: str | None = None) -> tuple[str, ...]:
+    """The command `run_step` executes: `step.cmd`, plus a per-step JUnit XML
+    record for a pytest step when `--junit-dir` was given. Named after the
+    step (`test-results-<step>.xml`), so two steps in one invocation can never
+    overwrite each other's results."""
+    if junit_dir is None or not _is_pytest_step(step):
+        return step.cmd
+    path = Path(junit_dir) / f"test-results-{step.name}.xml"
+    return (*step.cmd, f"--junitxml={path}")
+
+
+def run_step(step: Step, junit_dir: str | None = None) -> dict[str, object]:
     if step.precondition is not None:
         reason = step.precondition()
         if reason is not None:
@@ -801,9 +936,10 @@ def run_step(step: Step) -> dict[str, object]:
                 "duration_s": 0.0,
             }
 
-    print(f"\n=== {step.name} === {' '.join(step.cmd)}", flush=True)
+    cmd = step_command(step, junit_dir)
+    print(f"\n=== {step.name} === {' '.join(cmd)}", flush=True)
     start = time.time()
-    env = {**os.environ, **step.env}
+    env = {**step.env_defaults, **os.environ, **step.env}
     # Diagnostic instrumentation (round 20, Part B) -- capture_output=True
     # instead of the previous bare subprocess.run(...) (which relied on the
     # child inheriting this process's stdout/stderr fds directly). Explicitly
@@ -815,7 +951,7 @@ def run_step(step: Step) -> dict[str, object]:
     # see this module's own top-of-file comment for the full reasoning. This
     # also means a caller with `--json` gets the raw text available even when
     # the terminal itself scrolled it out of view.
-    proc = subprocess.run(step.cmd, cwd=ROOT, env=env, capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
     duration = time.time() - start
     # Echo the child's captured stdout/stderr BEFORE the partial-result
     # early return below (CodeRabbit review, fresh evidence): this used to
@@ -873,6 +1009,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--list", action="store_true", help="List the steps for --profile and exit"
     )
     parser.add_argument(
+        "--junit-dir",
+        metavar="DIR",
+        default=None,
+        help="Write each pytest step's JUnit XML to DIR/test-results-<step>.xml",
+    )
+    parser.add_argument(
         "--json",
         metavar="PATH",
         default=None,
@@ -896,12 +1038,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.list:
         for s in selected:
-            print(f"{s.name}\t{' '.join(s.cmd)}\t{s.description}")
+            print(
+                f"{s.name}\t{' '.join(step_command(s, args.junit_dir))}\t{s.description}"
+            )
         return 0
 
     results = []
     for step in selected:
-        results.append(run_step(step))
+        results.append(run_step(step, args.junit_dir))
 
     n_passed = sum(1 for r in results if r["status"] == "passed")
     n_failed = sum(1 for r in results if r["status"] == "failed")

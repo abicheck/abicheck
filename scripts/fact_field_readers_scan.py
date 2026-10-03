@@ -42,6 +42,7 @@ from fact_field_readers_scope import (  # noqa: E402
     _itemgetter_matched_name,
     _outermost_containing_expr,
     _target_bound_names,
+    walk_tree,
 )
 
 #: The five `Fact[T]`-bridged legacy field names this phase converted
@@ -218,7 +219,7 @@ class ReaderScan:
         )
 
     def run(self) -> list[ReaderMatch]:
-        for node in ast.walk(self.tree):
+        for node in walk_tree(self.tree):
             self._visit(node)
         return self.matches
 

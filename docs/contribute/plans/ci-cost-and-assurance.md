@@ -43,8 +43,10 @@ configured upper bound (60 runner-minutes), not a measured typical cost.
 dependencies, plus one stable aggregate required check. The aggregate must
 distinguish *intentionally unselected* from *unexpectedly missing*: a selected
 job that is missing, skipped, cancelled or failed must not produce a green
-aggregate. `test-action summary` already implements exactly that predicate and
-is the model to follow.
+aggregate. `test-action summary` implemented exactly that predicate and is the
+model to follow; it was removed with nothing left to gate (see
+`tests/test_required_checks_governance.py::TestTestActionHasNoRollUpJob`), so
+recover it from git history if merge-blocking returns.
 
 **Landed (2026-09-30) — by deletion.** The blocker recorded here ("changes
 required-check names, needs a branch-protection update") dissolved when the
@@ -70,6 +72,11 @@ But the two jobs do **not** run on the same platforms:
 |---|---|
 | `integration-tests` (generic selector) | `ubuntu-24.04`, `macos-latest`, `windows-latest` |
 | Native PE/Mach-O compare workflows (dedicated) | `macos-latest`, `windows-latest` |
+
+> **Correction (2026-10-03, PR #1460):** every test in that file skips on
+> Linux (each needs Apple clang or MinGW gcc), so the Linux leg never executed
+> them — 20 skipped, 0 run. The file is now `verify.py`'s `native-compare`
+> step on macOS/Windows only, and the integration step excludes it everywhere.
 
 The audit recommended giving the file to the dedicated native jobs. Doing that
 as stated would **silently drop Linux execution of those 20 tests**, because the

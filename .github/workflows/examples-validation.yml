@@ -27,7 +27,7 @@ on:
       # through `scripts/verify.py`. A change to one of those
       # decides how this workflow runs, so omitting it let such a change
       # merge without a single job that depends on it having run --
-      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # `integration.yml`'s `paths:` filter already names the same set for the
       # same reason ("re-pinning CastXML in action/install-castxml.sh ...
       # would otherwise land without a single job that uses CastXML having
       # run"). Enforced by tests/test_workflow_path_filter_closure.py,
@@ -62,7 +62,7 @@ on:
       # through `scripts/verify.py`. A change to one of those
       # decides how this workflow runs, so omitting it let such a change
       # merge without a single job that depends on it having run --
-      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # `integration.yml`'s `paths:` filter already names the same set for the
       # same reason ("re-pinning CastXML in action/install-castxml.sh ...
       # would otherwise land without a single job that uses CastXML having
       # run"). Enforced by tests/test_workflow_path_filter_closure.py,
@@ -90,61 +90,241 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The curated, task-oriented workflow examples under examples/workflows/
-  # (Phase 5 of the examples/catalog split). Unlike every job above, this one
-  # does not touch the caseNN_* calibration catalog at all -- it runs the
-  # exact commands each workflow's own README documents and checks the exit
-  # code and verdict the walkthrough claims. Deliberately *not*
-  # continue-on-error: there is no artifact-collecting step downstream to
-  # re-derive its result from, and a rotted walkthrough is a user-facing
-  # defect. `--require` (one per workflow, below) fails the job if any of
-  # them is skipped, so a toolchain regression can't turn this lane green
-  # with zero work done (the same silent-skip guard tests/conftest.py's
-  # ABICHECK_MIN_EXECUTED provides for the marker lanes).
-  workflow-examples:
-    name: Validate workflow examples
+  # Layout (measured 2026-10-02, see the PR that introduced it): GitHub
+  # Actions queueing, not execution, dominated this workflow's wall time --
+  # it fanned out to 14 runners, of which the two shard-merge jobs waited ~5
+  # minutes for 10 seconds of work and the collector ~9 minutes for 2. So the
+  # work is packed into three toolchain legs plus one toolchain-free
+  # collector, each leg running its catalog with `validate_examples.py
+  # --jobs 0` (one case per CPU, result order unchanged) instead of six
+  # one-case-at-a-time shards.
+  #
+  # Every independent step in a leg is `if: ${{ !cancelled() }}`, so one
+  # failing check still fails the leg without skipping the checks after it --
+  # the per-check isolation the separate jobs used to provide.
+  #
+  # Case-coverage ownership (who runs which assertion), so nothing here is
+  # re-added as a duplicate:
+  #   * Python-API pipeline (tests/test_example_autodiscovery.py), gcc on
+  #     Linux/macOS/Windows: ci.yml `integration-tests` (it collects the whole
+  #     file). Only its clang run lives here (the `clang` leg).
+  #   * CLI pipeline + expected kinds (validate_examples.py): gcc and clang
+  #     legs here, debug-headers; release/stripped/build-source variants in
+  #     the `reduced-evidence` and `gcc` legs.
+  examples-gcc:
+    name: Examples (gcc; debug-headers, runtime smoke, build-source, owner lanes)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
+    timeout-minutes: 45
+    env:
+      # This workflow checks out and executes repository-owned fixtures only.
+      # Without it every source_smoke run-mode case silently SKIPs.
+      ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
     steps:
+      # fetch-depth: 0 is required by cache-ast-dumps:
+      # scripts/restore_git_mtimes.py needs each file's last-commit time.
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
 
-      # compare-release's, audit-release's, suppressions's, python-api's,
-      # and github-actions's documented commands all pass a public header
-      # (CLI `--header` or `run_compare`'s `old_headers`/`new_headers`),
-      # which goes through the default CastXML AST backend -- `pip install
-      # -e ".[dev]"` alone leaves the runner without it, and each
-      # manifest's `requires:` lists castxml, so the job would skip rather
-      # than fail silently. Both halves are needed: the toolchain here,
-      # and `--require` below turning a skip into a failure if this step
-      # ever stops providing it. compare-project's own `compare` step passes
-      # no headers (it demonstrates the symbols-only, directory-vs-directory
-      # bundle/cross-library path), so it needs gcc but not castxml -- its
-      # manifest's `requires:` reflects that. evidence-depth needs both:
-      # castxml for its header/source-evidence steps and python3 for its
-      # compile_commands.json generator. Every workflow's own
-      # `build_shared_lib.py` (a portable `gcc -shared`/`-dynamiclib`
-      # wrapper, since Apple's system compiler has no `-shared`) also needs
-      # python3, already on this runner for the harness itself.
       - name: Install system deps
         uses: ./.github/actions/install-system-deps
         with:
-          packages: gcc g++ cmake curl ca-certificates
+          packages: gcc g++ clang cmake binutils curl ca-certificates
 
       - uses: ./.github/actions/setup-castxml
+
+      - uses: ./.github/actions/cache-ast-dumps
+        with:
+          key-suffix: gcc
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14"
           cache: "pip"
 
-      - name: Install abicheck
+      - name: Install test deps
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Validate ground_truth.json
+        run: |
+          test -f catalog/ground_truth.json || { echo "::error::ground_truth.json missing"; exit 1; }
+          python -c "import json; d=json.load(open('catalog/ground_truth.json')); print('ground_truth.json OK:', len(d['verdicts']), 'cases')"
+
+      # The whole catalog in one process pool. The gcc run of the Python-API
+      # pytest pass is not repeated here: ci.yml's integration-tests Linux leg
+      # runs that identical file under gcc on every PR this workflow runs on.
+      - name: Validate examples via CLI (gcc, debug-headers)
+        if: ${{ !cancelled() }}
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          mkdir -p results
+          PYTHONPATH=. python tests/validate_examples.py --toolchain gcc --jobs 0 --json \
+            > results/validate_examples-gcc.json
+          # check/summarize_validate_results.py read this fixed path.
+          cp results/validate_examples-gcc.json results/validate_examples.json
+          python tests/summarize_validate_results.py >> "$GITHUB_STEP_SUMMARY" || true
+          python tests/check_validate_results.py
+
+      - name: Runtime smoke examples
+        if: ${{ !cancelled() }}
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json \
+            > results/example-runtime-smoke.json
+
+      # build-source runs castxml source-replay per case (expensive), so it
+      # stays a representative fixed set rather than the full catalog. It is a
+      # required proof lane: the only release evidence that detects the C++
+      # floor/concept/uninstantiated-template regressions in cases 98/105/122,
+      # so a non-zero validator exit is never masked here.
+      - name: Build-source release proof
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p results
+          CASES="case01 case04 case98 case105 case122 case129 case130 case131 case132 case133"
+          PYTHONPATH=. python tests/validate_examples.py $CASES --artifact-variant build-source --jobs 0 --json \
+            > results/validate_examples-build-source.json
+          cp results/validate_examples-build-source.json results/validate_examples.json
+          ABICHECK_STRICT_KINDS=1 python tests/check_validate_results.py
+          python scripts/verify.py --profile full --only build-source-release-proof
+
+      # These runners exit non-zero when any owned case fails, but write a
+      # complete artifact first. continue-on-error keeps a per-case failure
+      # from hiding the others; the collector job re-derives pass/fail from
+      # the recorded per-case statuses, so a real failure still fails the run.
+      - name: Validate non-default example owners
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_owner_proofs.py --json \
+            > results/example-owner-proofs.json
+
+      - name: Validate bundle examples
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_bundle_examples.py --json \
+            > results/bundle-examples.json
+
+      - name: Validate special-shape examples through public CLI
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_special_cli_examples.py --json \
+            > results/special-cli-examples.json
+
+      - name: Upload gcc results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: examples-gcc
+          path: results/
+          retention-days: 14
+
+  examples-clang:
+    name: Examples (clang; debug-headers, header fallback, workflow examples)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install system deps
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ clang cmake curl ca-certificates
+
+      - uses: ./.github/actions/setup-castxml
+
+      - uses: ./.github/actions/cache-ast-dumps
+        with:
+          key-suffix: clang
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # Clang is a first-class validator so producer-sensitive cases (e.g.
+      # case64 ms_abi, which GCC cannot emit DW_AT_calling_convention for) are
+      # gated, not just benchmarked. This is the only clang run of the
+      # Python-API pipeline anywhere in CI (ci.yml's integration legs use the
+      # platform-native compiler), so it stays; xdist parallelises it the way
+      # ci.yml's Windows leg already does (builds share a filelock'd dir).
+      - name: Run example cases (pytest autodiscovery, clang)
+        if: ${{ !cancelled() }}
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          mkdir -p results
+          PYTHONPATH=. pytest tests/test_example_autodiscovery.py -v --tb=short -m integration \
+            -n auto --dist worksteal \
+            --junit-xml=results/examples-autodiscovery-clang.xml
+
+      - name: Validate examples via CLI (clang, debug-headers)
+        if: ${{ !cancelled() }}
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          mkdir -p results
+          PYTHONPATH=. python tests/validate_examples.py --toolchain clang --jobs 0 --json \
+            > results/validate_examples-clang.json
+          cp results/validate_examples-clang.json results/validate_examples.json
+          python tests/summarize_validate_results.py >> "$GITHUB_STEP_SUMMARY" || true
+          python tests/check_validate_results.py
+
+      # Formerly its own job (clang-header-fallback): regressions for the
+      # clang header-AST backend, forced on the cases where it once diverged.
+      - name: Clang header fallback — unit and live regressions
+        if: ${{ !cancelled() }}
+        run: |
+          PYTHONPATH=. pytest -q \
+            tests/test_dumper_clang.py::test_parse_anonymous_typedef_enum_uses_typedef_name \
+            tests/test_clang_header_backend_integration.py::test_clang_backend_recovers_c_anonymous_typedef_enum
+
+      - name: Clang header fallback — forced backend on remote-gap examples
+        if: ${{ !cancelled() }}
+        env:
+          ABICHECK_AST_FRONTEND: clang
+        run: |
+          mkdir -p results
+          PYTHONPATH=. pytest -q --tb=short -m integration \
+            'tests/test_example_autodiscovery.py::test_example_pipeline[case31_enum_rename]' \
+            'tests/test_example_autodiscovery.py::test_example_pipeline[case62_type_field_added_compatible]'
+          PYTHONPATH=. python tests/validate_examples.py \
+            case31_enum_rename case62_type_field_added_compatible \
+            --toolchain gcc --json > results/validate_examples-clang-fallback.json
+          cp results/validate_examples-clang-fallback.json results/validate_examples.json
+          python tests/check_validate_results.py
+          # Leave the fixed path holding the leg's own whole-catalog result.
+          cp results/validate_examples-clang.json results/validate_examples.json 2>/dev/null || true
+
+      # Formerly its own job (workflow-examples): the curated walkthroughs
+      # under examples/workflows/, run exactly as each README documents.
+      # `--require` (one per workflow) fails the step if any is skipped, so a
+      # toolchain regression can't turn it green with zero work done.
       - name: Run workflow examples
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p results
           PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_workflow_examples.py \
@@ -154,353 +334,31 @@ jobs:
             --require evidence-depth \
             --json results/workflow-examples.json
 
-      - name: Upload workflow-example receipt
+      - name: Upload clang results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: workflow-examples
+          name: examples-clang
           path: results/
           retention-days: 14
 
-  # Blocking core matrix: the full debug-headers catalog under both producers.
-  # GCC is the historical lane; Clang is promoted to a first-class validator so
-  # producer-sensitive cases (e.g. case64 ms_abi calling convention, which GCC
-  # cannot emit DW_AT_calling_convention for) are gated, not just benchmarked.
-  #
-  # Sharded 3 ways per toolchain. The cross-check step below runs the ~195-case
-  # catalog through one sequential process; measured on real runs it took
-  # 5m21s (gcc) / 8m10s (clang), and once the artifact-mode job was split it
-  # became this workflow's critical path. The runner needs no changes to be
-  # shardable -- it already takes a positional case-name filter -- so a shard
-  # is just "the same command over a third of the names".
-  # tests/example_shards.py owns which names those are (round-robin over the
-  # sorted catalog, so each leg gets a mix of cheap and expensive cases rather
-  # than one leg inheriting the whole expensive tail), and the
-  # merge-validate-examples job below reassembles the pieces into the single
-  # whole-catalog artifact the downstream collector requires.
-  validate-examples:
-    name: Validate examples (${{ matrix.toolchain }}, debug-headers, shard ${{ matrix.shard }}/3)
+  # release-headers / stripped-headers: the full catalog with DWARF reduced or
+  # removed. Verdicts are reported-only (a downgrade like case129 is expected
+  # evidence loss); the blockable invariant is the false-positive guard -- a
+  # case the debug ground truth calls COMPATIBLE/NO_CHANGE must never become
+  # BREAKING (check_stripped_fp.py). The two modes share one runner: they
+  # have no data dependency, and with --jobs each takes a few minutes.
+  examples-reduced-evidence:
+    name: Examples (reduced evidence; release-headers, stripped-headers)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [gcc, clang]
-        shard: [1, 2, 3]
-
-    steps:
-      # fetch-depth: 0 (full history) is required by the AST-cache step below:
-      # scripts/restore_git_mtimes.py needs each file's real last-commit time,
-      # which a shallow (default depth-1) clone can't see — every file would
-      # resolve to the single boundary commit's timestamp instead.
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Create results dir
-        run: mkdir -p results
-
-      - name: Install system deps
-        uses: ./.github/actions/install-system-deps
-        with:
-          packages: gcc g++ clang cmake curl ca-certificates
-
-      - uses: ./.github/actions/setup-castxml
-
-      # Per-shard cache key: the six legs dump disjoint case sets, so a shared
-      # key would have them overwrite each other's cache every run.
-      - uses: ./.github/actions/cache-ast-dumps
-        with:
-          key-suffix: ${{ matrix.toolchain }}-shard${{ matrix.shard }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-          cache: "pip"
-
-      - name: Install test deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Select toolchain
-        run: |
-          if [ "${{ matrix.toolchain }}" = "clang" ]; then
-            echo "CC=clang" >> "$GITHUB_ENV"
-            echo "CXX=clang++" >> "$GITHUB_ENV"
-          else
-            echo "CC=gcc" >> "$GITHUB_ENV"
-            echo "CXX=g++" >> "$GITHUB_ENV"
-          fi
-
-      - name: Validate ground_truth.json
-        run: |
-          test -f catalog/ground_truth.json || { echo "::error::ground_truth.json missing"; exit 1; }
-          python -c "import json; d=json.load(open('catalog/ground_truth.json')); print('ground_truth.json OK:', len(d['verdicts']), 'cases')"
-
-      # Both consumers below take the *same* shard assignment from one source,
-      # so the pytest lane and the cross-check lane can never drift onto
-      # different case subsets.
-      - name: Resolve this shard's case list
-        run: |
-          # Assign first, THEN echo. `echo "V=$(cmd)" >> $GITHUB_ENV` exits 0
-          # even when cmd fails -- the echo succeeds -- so a failing resolver
-          # would silently export an EMPTY value. Empty is the worst possible
-          # value here: an empty positional filter means "the whole catalog"
-          # and an empty -k means "every test", so all six legs would quietly
-          # run all 195 cases and still report green, turning the shard split
-          # into a 6x duplication. It would also defeat example_shards.py's own
-          # assert_names_are_unambiguous guard, whose whole job is to fail
-          # loudly here rather than as a puzzling "duplicate case ids" error in
-          # the merge two jobs later. A plain assignment propagates the
-          # command's exit status under the default `bash -e`, and the explicit
-          # emptiness check covers a resolver that exits 0 with no output.
-          cases="$(python tests/example_shards.py list --shard ${{ matrix.shard }} --of 3)"
-          pytest_k="$(python tests/example_shards.py list --shard ${{ matrix.shard }} --of 3 --pytest-k)"
-          if [ -z "$cases" ] || [ -z "$pytest_k" ]; then
-            echo "::error::shard ${{ matrix.shard }}/3 resolved to an empty case list"
-            exit 1
-          fi
-          echo "resolved $(printf '%s' "$cases" | wc -w) cases for shard ${{ matrix.shard }}/3"
-          echo "SHARD_CASES=$cases" >> "$GITHUB_ENV"
-          echo "SHARD_K=$pytest_k" >> "$GITHUB_ENV"
-
-      # NOTE on the -k filter's source of truth: the shard list comes from
-      # catalog/ground_truth.json, while test_example_pipeline is parametrized
-      # from the examples/case*/ directory listing. Those agree today, and the
-      # ai-readiness `examples-ground-truth` check (ERROR severity) is what
-      # keeps them agreeing — it fails when a case directory has no ground-truth
-      # entry. Without that check a case dir missing from ground truth would be
-      # deselected in *every* shard, i.e. silently lose coverage rather than
-      # fail. Don't relax that check without giving this filter its own guard.
-      - name: Run example cases (pytest autodiscovery)
-        env:
-          # This workflow checks out and executes repository-owned fixtures only.
-          ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
-        run: |
-          PYTHONPATH=. pytest tests/test_example_autodiscovery.py -v --tb=short -m integration \
-            -k "$SHARD_K" \
-            --junit-xml=results/examples-autodiscovery-${{ matrix.toolchain }}-shard${{ matrix.shard }}.xml
-
-      - name: Cross-check via validate_examples.py (this shard)
-        if: always()
-        env:
-          # Preserve the safe default for all other validator invocations.
-          ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
-        run: |
-          PYTHONPATH=. python tests/validate_examples.py $SHARD_CASES --toolchain ${{ matrix.toolchain }} --json \
-            > results/validate_examples-${{ matrix.toolchain }}-shard${{ matrix.shard }}.json
-          # check_validate_results.py / summarize_validate_results.py both read
-          # this fixed path; per-shard it gives each leg its own fail-fast.
-          cp results/validate_examples-${{ matrix.toolchain }}-shard${{ matrix.shard }}.json results/validate_examples.json
-          python tests/check_validate_results.py
-
-      # Not sharded: this walks its own case list, costs under a minute, and
-      # produces one artifact the collector reads whole.
-      - name: Runtime smoke examples
-        if: ${{ always() && matrix.toolchain == 'gcc' && matrix.shard == 1 }}
-        run: |
-          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
-
-      - name: Upload shard results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: examples-shard-${{ matrix.toolchain }}-${{ matrix.shard }}
-          path: results/
-          retention-days: 14
-
-      - name: Job summary
-        if: always()
-        run: |
-          echo "## Examples Validation (${{ matrix.toolchain }}, shard ${{ matrix.shard }}/3)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          test -f results/validate_examples.json && python tests/summarize_validate_results.py >> $GITHUB_STEP_SUMMARY || true
-
-  # Reassembles the sharded legs into the one whole-catalog artifact per
-  # toolchain that everything downstream expects. This is not bookkeeping:
-  # skills-src/evaluation/validation/scripts/collect_full_example_matrix.py deliberately rejects an
-  # artifact whose case set isn't exactly the catalog (no missing ids, no
-  # duplicates, selected_cases == catalog size), so a bare shard artifact
-  # cannot be consumed and the merge is what restores that contract.
-  # Artifact names are unchanged from before the split, so the collector and
-  # the README-sync check needed no edits.
-  merge-validate-examples:
-    name: Merge example shards (${{ matrix.toolchain }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    needs: [validate-examples]
-    # Merge whatever the legs produced even if one *failed* — a failed leg
-    # still uploads its artifact, the collector re-derives pass/fail from the
-    # recorded per-case statuses, and a genuinely missing shard fails the merge
-    # loudly (missing case ids). Deliberately `!cancelled()` and not
-    # `always()`: always() also fires when the whole run is superseded by a
-    # newer push (concurrency cancel-in-progress), where every shard is
-    # cancelled and no artifact exists at all — that turned an ordinary
-    # superseded run into two spurious red checks.
-    if: ${{ !cancelled() }}
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [gcc, clang]
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-          cache: "pip"
-
-      - name: Create results dir
-        run: mkdir -p results shards
-
-      - name: Download this toolchain's shards
-        uses: actions/download-artifact@v8
-        with:
-          path: shards
-          pattern: examples-shard-${{ matrix.toolchain }}-*
-
-      - name: Merge shard artifacts into the whole-catalog artifact
-        run: |
-          # Carried through untouched: the per-shard junit XMLs (named per
-          # shard, so they don't collide) and the gcc runtime-smoke JSON the
-          # collector reads. Deliberately NOT copied: each shard's own
-          # results/validate_examples.json, which is the same fixed filename in
-          # every shard and is superseded by the merged file written below.
-          cp shards/*/examples-autodiscovery-*.xml results/ 2>/dev/null || true
-          cp shards/*/example-runtime-smoke.json results/ 2>/dev/null || true
-          # nullglob + an explicit count: without it a non-matching glob is
-          # passed through literally and surfaces as a FileNotFoundError naming
-          # a path with a '*' in it, which says nothing about what went wrong.
-          shopt -s nullglob
-          shard_files=(shards/*/validate_examples-${{ matrix.toolchain }}-shard*.json)
-          if [ ${#shard_files[@]} -eq 0 ]; then
-            echo "::error::no ${{ matrix.toolchain }} shard artifacts were downloaded — every shard leg must upload one"
-            exit 1
-          fi
-          echo "merging ${#shard_files[@]} shard artifact(s): ${shard_files[*]}"
-          python tests/example_shards.py merge "${shard_files[@]}" \
-            --out results/validate_examples-${{ matrix.toolchain }}.json
-          cp results/validate_examples-${{ matrix.toolchain }}.json results/validate_examples.json
-
-      - name: Upload merged results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: examples-validation-results-${{ matrix.toolchain }}
-          path: results/
-          retention-days: 14
-
-      - name: Job summary
-        if: always()
-        run: |
-          echo "## Examples Validation Summary (${{ matrix.toolchain }}, merged)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          test -f results/validate_examples.json && python tests/summarize_validate_results.py >> $GITHUB_STEP_SUMMARY || true
-
-  clang-header-fallback:
-    name: Clang header fallback regressions
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-
+    env:
+      ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
           fetch-depth: 0
-
-      - name: Create results dir
-        run: mkdir -p results
-
-      - name: Install system deps
-        uses: ./.github/actions/install-system-deps
-        with:
-          packages: gcc g++ clang cmake curl ca-certificates
-
-      - uses: ./.github/actions/setup-castxml
-
-      - uses: ./.github/actions/cache-ast-dumps
-        with:
-          key-suffix: clang-fallback
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-          cache: "pip"
-
-      - name: Install test deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Unit and live clang-backend regressions
-        run: |
-          PYTHONPATH=. pytest -q \
-            tests/test_dumper_clang.py::test_parse_anonymous_typedef_enum_uses_typedef_name \
-            tests/test_clang_header_backend_integration.py::test_clang_backend_recovers_c_anonymous_typedef_enum
-
-      - name: Force clang header backend on remote-gap examples
-        run: |
-          export ABICHECK_AST_FRONTEND=clang
-          PYTHONPATH=. pytest -q --tb=short -m integration \
-            'tests/test_example_autodiscovery.py::test_example_pipeline[case31_enum_rename]' \
-            'tests/test_example_autodiscovery.py::test_example_pipeline[case62_type_field_added_compatible]'
-          PYTHONPATH=. python tests/validate_examples.py \
-            case31_enum_rename case62_type_field_added_compatible \
-            --toolchain gcc --json > results/validate_examples.json
-          python tests/check_validate_results.py
-
-      - name: Upload clang fallback results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: examples-clang-header-fallback
-          path: results/
-          retention-days: 14
-
-  # Non-default artifact modes (release / stripped full-catalog / build-source
-  # smoke). All three change the available evidence — release/stripped binaries
-  # drop the DWARF a layout/calling-convention break needs — so verdicts are
-  # reported-only (a downgrade like case129 is expected evidence loss). The
-  # blockable invariant across all three is the false-positive guard: a case the
-  # debug ground truth calls COMPATIBLE/NO_CHANGE must never become BREAKING.
-  #
-  # Split as a 3-way matrix (one leg per mode) rather than one job running all
-  # three modes sequentially. Measured on a real run (workflow run 31317496678,
-  # 2026-08-09) the combined job took 15m33s wall-clock, of which
-  # release-headers (7m06s) and stripped-headers (6m58s) each ran back-to-back
-  # on the *same* runner despite having no data dependency on one another —
-  # only build-source (42s, a 10-case smoke subset — see its own comment
-  # below for why it isn't the full catalog) was cheap. Splitting these onto
-  # separate runners overlaps that ~14m of sequential work; the ~35s of
-  # per-leg setup (checkout/apt/castxml/python/deps) that gets duplicated
-  # three times instead of once is the trade-off, and is small next to the
-  # ~7-8m saved off the workflow's critical path (this job, not the gcc/clang
-  # `validate-examples` legs, was what `full-example-matrix` was waiting on).
-  artifact-modes:
-    name: Artifact modes (${{ matrix.mode }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [release-headers, stripped-headers, build-source]
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Create results dir
-        run: mkdir -p results
 
       - name: Install system deps
         uses: ./.github/actions/install-system-deps
@@ -511,7 +369,7 @@ jobs:
 
       - uses: ./.github/actions/cache-ast-dumps
         with:
-          key-suffix: artifact-modes-${{ matrix.mode }}
+          key-suffix: reduced-evidence
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -524,190 +382,112 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      # Non-default artifact modes change the available evidence: a release or
-      # stripped binary drops the DWARF a layout/calling-convention break needs,
-      # so a verdict downgrade (e.g. case129 BREAKING→COMPATIBLE) is expected
-      # evidence loss, NOT a failure. The verdict run is therefore reported-only;
-      # the blockable invariant across all three modes is the false-positive
-      # guard — a reduced/changed-evidence run must never manufacture a spurious
-      # BREAKING on a case the debug ground truth calls compatible.
-      #
-      # build-source runs castxml source-replay per case (expensive), so it
-      # stays a representative fixed set rather than the full catalog. Unlike
-      # release/stripped artifact lanes, it is a required proof lane: it is the
-      # only release evidence that detects the C++ floor/concept/uninstantiated
-      # template regressions in cases 98/105/122, so do not mask a non-zero
-      # validator exit behind the reduced-evidence reported-only policy.
-      - name: Run artifact-mode validation (build-source release proof + reported-only FP guard)
-        if: always()
-        env:
-          # This workflow checks out and executes repository-owned fixtures
-          # only (same justification as the sharded debug-headers job's own
-          # identical setting) -- without it, every source_smoke-run-mode
-          # example case (7 across the catalog) silently SKIPs under this
-          # job's release-headers/stripped-headers legs instead of actually
-          # running, a real coverage loss this job's own reported-only
-          # false-positive guard cannot detect since a SKIP never reaches it.
-          ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
+      - name: release-headers (reported-only verdicts + FP guard)
+        if: ${{ !cancelled() }}
         run: |
-          if [ "${{ matrix.mode }}" = "build-source" ]; then
-            CASES="case01 case04 case98 case105 case122 case129 case130 case131 case132 case133"
-            PYTHONPATH=. python tests/validate_examples.py $CASES --artifact-variant build-source --json \
-              > results/validate_examples-build-source.json
-            cp results/validate_examples-build-source.json results/validate_examples.json
-            ABICHECK_STRICT_KINDS=1 python tests/check_validate_results.py
-            python scripts/verify.py --profile full --only build-source-release-proof
-          else
-            set +e
-            PYTHONPATH=. python tests/validate_examples.py --artifact-variant ${{ matrix.mode }} --json \
-              > results/validate_examples-${{ matrix.mode }}.json
-            echo "${{ matrix.mode }} run rc=$?"
-            set -e
-            python tests/check_stripped_fp.py results/validate_examples-${{ matrix.mode }}.json ${{ matrix.mode }}
-          fi
+          mkdir -p results
+          set +e
+          PYTHONPATH=. python tests/validate_examples.py --artifact-variant release-headers --jobs 0 --json \
+            > results/validate_examples-release-headers.json
+          echo "release-headers run rc=$?"
+          set -e
+          python tests/check_stripped_fp.py results/validate_examples-release-headers.json release-headers
 
-      - name: Upload artifact-mode results
+      - name: stripped-headers (reported-only verdicts + FP guard)
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p results
+          set +e
+          PYTHONPATH=. python tests/validate_examples.py --artifact-variant stripped-headers --jobs 0 --json \
+            > results/validate_examples-stripped-headers.json
+          echo "stripped-headers run rc=$?"
+          set -e
+          python tests/check_stripped_fp.py results/validate_examples-stripped-headers.json stripped-headers
+
+      - name: Upload reduced-evidence results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: examples-validation-artifact-modes-${{ matrix.mode }}
+          name: examples-reduced-evidence
           path: results/
           retention-days: 14
 
-      - name: Job summary
-        if: always()
-        run: |
-          echo "## Artifact-mode Summary (${{ matrix.mode }})" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          f="results/validate_examples-${{ matrix.mode }}.json"
-          test -f "$f" && \
-            python -c "import json;d=json.load(open('$f'));print('summary:',json.dumps(d['summary']))" >> $GITHUB_STEP_SUMMARY || true
-
+  # Builds the whole-catalog matrix from the three legs' artifacts and checks
+  # examples/README.md's status table against it. Pure stdlib Python over JSON
+  # (collect_full_example_matrix.py, check_examples_validation_status_sync.py
+  # import only scripts/example_catalog.py), so no toolchain or package
+  # install. `!cancelled()` rather than `always()`: still collect when a leg
+  # *failed* (the collector re-derives pass/fail from per-case statuses), but
+  # not when a newer push superseded the run and no artifact exists.
   full-example-matrix:
     name: Full example matrix
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    needs: [merge-validate-examples, artifact-modes, clang-header-fallback]
-    # Same reasoning as merge-validate-examples above: still collect when an
-    # upstream job *failed* (the collector re-derives pass/fail from the
-    # recorded per-case statuses, which is the whole point of running anyway),
-    # but not when the run was cancelled. `always()` fires on cancellation too,
-    # so a run superseded by a newer push reached this job with no artifacts at
-    # all and turned an ordinary supersede into a red check. Pre-dates the
-    # sharding work, but it is the identical failure mode fixed one job up.
+    timeout-minutes: 15
+    needs: [examples-gcc, examples-clang, examples-reduced-evidence]
     if: ${{ !cancelled() }}
-
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          fetch-depth: 0
-
-      - name: Create results dir
-        run: mkdir -p results downloaded
-
-      - name: Download validation artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: downloaded
-          pattern: examples-validation-*
-
-      - name: Install system deps
-        uses: ./.github/actions/install-system-deps
-        with:
-          packages: gcc g++ clang cmake binutils curl ca-certificates
-
-      - uses: ./.github/actions/setup-castxml
-
-      # The owner-proofs/bundle/special-cli validators below also dump
-      # bundle/G20/special-shape example headers through the same castxml/
-      # clang AST cache as the other jobs.
-      - uses: ./.github/actions/cache-ast-dumps
-        with:
-          key-suffix: full-matrix
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.14"
-          cache: "pip"
 
-      - name: Install test deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      # These runners exit non-zero when any owned case fails, but they still
-      # write a complete artifact before doing so. continue-on-error keeps a
-      # per-case failure here from skipping the collector below — the
-      # collector re-derives the job's pass/fail from the recorded per-case
-      # statuses in each artifact, so a real failure still fails the job.
-      - name: Validate non-default example owners
-        continue-on-error: true
-        run: |
-          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_owner_proofs.py --json \
-            > results/example-owner-proofs.json
-
-      - name: Validate bundle examples
-        continue-on-error: true
-        run: |
-          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_bundle_examples.py --json \
-            > results/bundle-examples.json
-
-      - name: Validate special-shape examples through public CLI
-        continue-on-error: true
-        run: |
-          PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_special_cli_examples.py --json \
-            > results/special-cli-examples.json
+      - name: Download leg artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: downloaded
+          pattern: examples-*
 
       - name: Build full example matrix
-        if: always()
         run: |
+          mkdir -p results
+          d=downloaded
           PYTHONPATH=. python skills-src/evaluation/validation/scripts/collect_full_example_matrix.py \
-            --gcc downloaded/examples-validation-results-gcc/validate_examples-gcc.json \
-            --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
-            --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \
-            --build-source downloaded/examples-validation-artifact-modes-build-source/validate_examples-build-source.json \
-            --bundle results/bundle-examples.json \
-            --special-cli results/special-cli-examples.json \
-            --proofs results/example-owner-proofs.json \
+            --gcc $d/examples-gcc/validate_examples-gcc.json \
+            --clang $d/examples-clang/validate_examples-clang.json \
+            --runtime $d/examples-gcc/example-runtime-smoke.json \
+            --build-source $d/examples-gcc/validate_examples-build-source.json \
+            --bundle $d/examples-gcc/bundle-examples.json \
+            --special-cli $d/examples-gcc/special-cli-examples.json \
+            --proofs $d/examples-gcc/example-owner-proofs.json \
             --out results/full-example-matrix.json
 
       - name: Upload full matrix
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: examples-full-matrix
+          name: full-example-matrix
           path: results/
           retention-days: 14
 
       # examples/README.md's "Current Validation Status" table is hand-typed
-      # prose summarizing these same artifacts; nothing previously checked it
-      # against a real run, so it silently drifted for several releases. This
-      # step is the fix: fail the job (rather than warn) when the table's
-      # Result cells don't match the JSON artifacts just produced above.
+      # prose summarizing these same artifacts; fail rather than warn when its
+      # Result cells don't match the JSON just produced.
       - name: Check examples/README.md validation-status table is in sync
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
+          d=downloaded
           PYTHONPATH=. python scripts/check_examples_validation_status_sync.py \
-            --gcc downloaded/examples-validation-results-gcc/validate_examples-gcc.json \
-            --clang downloaded/examples-validation-results-clang/validate_examples-clang.json \
-            --runtime downloaded/examples-validation-results-gcc/example-runtime-smoke.json \
-            --release downloaded/examples-validation-artifact-modes-release-headers/validate_examples-release-headers.json \
-            --stripped downloaded/examples-validation-artifact-modes-stripped-headers/validate_examples-stripped-headers.json \
-            --build-source downloaded/examples-validation-artifact-modes-build-source/validate_examples-build-source.json \
+            --gcc $d/examples-gcc/validate_examples-gcc.json \
+            --clang $d/examples-clang/validate_examples-clang.json \
+            --runtime $d/examples-gcc/example-runtime-smoke.json \
+            --release $d/examples-reduced-evidence/validate_examples-release-headers.json \
+            --stripped $d/examples-reduced-evidence/validate_examples-stripped-headers.json \
+            --build-source $d/examples-gcc/validate_examples-build-source.json \
             --full-matrix results/full-example-matrix.json \
             --check
 
       - name: Job summary
         if: always()
         run: |
-          echo "## Full Example Matrix" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          test -f results/full-example-matrix.json && \
-            python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          test -f results/full-example-matrix.json || exit 0
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
           d=json.load(open("results/full-example-matrix.json"))
+          print("## Full Example Matrix\n")
           print("summary:", json.dumps(d["summary"], sort_keys=True))
           print("coverage by provenance:", json.dumps(d["coverage_by_provenance"], sort_keys=True))
           print("direct coverage:", json.dumps(d["direct_coverage"], sort_keys=True))

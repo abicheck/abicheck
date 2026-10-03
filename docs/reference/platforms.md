@@ -47,9 +47,9 @@ for why those last two are independent axes, not one.
 > which toolchain you used to get there. The Windows PE "Full" type/param
 > cell nominally means the `castxml` + `cl.exe` header-AST path (see
 > Dependency Summary below); neither Windows CI lane actually exercises that
-> path: the required `cross-platform-e2e` lane runs `compare` on MinGW-built
+> path: the `native-compare` CI step runs `compare` on MinGW-built
 > DLLs without headers or castxml (symbol/DWARF data only), and the
-> non-blocking `windows-msvc` lane validates MSVC+PDB debug-info parsing, not
+> non-blocking `msvc` step validates MSVC+PDB debug-info parsing, not
 > the castxml+`cl.exe` header route either. See
 > [Validation status](#validation-status-what-is-actually-exercised-in-ci)
 > and the [Windows Toolchain Support Matrix](#windows-toolchain-support-matrix)
@@ -66,12 +66,12 @@ accordingly:
 | Platform | Binary/metadata parsing | Workflow end-to-end (compare / appcompat / …) |
 |----------|:-----------------------:|:---------------------------------------------:|
 | **Linux / ELF** | Unit **and** integration tests | **Validated in CI** (the baseline) |
-| **Windows / PE+PDB** | Unit tests for the PE/PDB parsers | **Validated in CI** for MinGW: `cross-platform-e2e` lane runs `compare` on MinGW-built DLLs. The `windows-msvc` lane additionally asserts MSVC+PDB verdicts (PDB layout depth best-effort) but runs **non-blocking** (`continue-on-error`, informational) until proven stable |
-| **macOS / Mach-O** | Unit tests for the Mach-O/ARM64 layer | **Validated in CI**: `cross-platform-e2e` lane runs `compare` on Apple-clang-built dylibs; AArch64 AAPCS64 HFA/HVA passing drift is not detected (see below) |
+| **Windows / PE+PDB** | Unit tests for the PE/PDB parsers | **Validated in CI** for MinGW: the `native-compare` step (`integration.yml`, Windows leg) runs `compare` on MinGW-built DLLs. The `msvc` step additionally asserts MSVC+PDB verdicts (PDB layout depth best-effort) but runs **non-blocking** (`continue-on-error`, informational) until proven stable |
+| **macOS / Mach-O** | Unit tests for the Mach-O/ARM64 layer | **Validated in CI**: the `native-compare` step (`integration.yml`, macOS leg) runs `compare` on Apple-clang-built dylibs; AArch64 AAPCS64 HFA/HVA passing drift is not detected (see below) |
 
 Concretely: the core `compare` workflow is now exercised end-to-end on native
 PE and Mach-O binaries (built by the platform's own toolchain) in the
-`cross-platform-e2e` CI lane (gap **G1** closed). What remains a deliberate
+`native-compare` CI step (gap **G1** closed). What remains a deliberate
 Linux-anchored subset is the **example catalog**: every entry in
 [`catalog/ground_truth.json`](https://github.com/abicheck/abicheck/blob/main/catalog/ground_truth.json)
 is validated on Linux, and a `platforms` tag of `macos`/`windows` expresses

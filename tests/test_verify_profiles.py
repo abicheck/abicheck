@@ -155,6 +155,8 @@ def test_python_tool_steps_use_isolated_module_lookup() -> None:
         "unit-pr",
         "docs-build",
         "integration",
+        "native-compare",
+        "msvc",
         "libabigail-parity",
         "abicc-parity",
         "slow",
@@ -381,27 +383,75 @@ def test_pre_commit_runs_ai_readiness() -> None:
 
 
 def test_ci_ai_readiness_job_calls_verify_py() -> None:
-    ci = _read(".github/workflows/ci.yml")
-    assert "scripts/verify.py --profile pr --only ai-readiness" in ci
-    assert (
-        "fp-rate" in ci
-        and "tier-accuracy" in ci
-        and "usecase-docs-sync" in ci
-        and "docs-contract" in ci
+    """Every structural gate this job owns is wired into *this job*.
+
+    Read from the job's own steps rather than one literal command line, so
+    regrouping the invocations (they were six, then one) cannot drop a gate
+    while a substring elsewhere in the file keeps the assertion green."""
+    pytest.importorskip("yaml")
+    workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
+    run = " ".join(
+        str(step.get("run", "")) for step in workflow["jobs"]["ai-readiness"]["steps"]
     )
-    assert (
-        "scripts/verify.py --profile pr --only fp-rate,tier-accuracy,"
-        "usecase-docs-sync,docs-contract,learning-ladder,agent-skills-generated,"
-        "repo-facts" in ci
-    )
+    wired = {
+        name
+        for lst in re.findall(r"verify\.py --profile pr --only ([\w,-]+)", run)
+        for name in lst.split(",")
+    }
+    expected = {
+        "ai-readiness",
+        "architecture",
+        "fp-rate",
+        "tier-accuracy",
+        "usecase-docs-sync",
+        "docs-contract",
+        "learning-ladder",
+        "agent-skills-generated",
+        "repo-facts",
+        "action-cli-surface",
+        "skill-eval-pack",
+        "skill-eval-freshness",
+        "harbor-tasks",
+        "repo-scan-tests",
+    }
+    assert expected <= wired, sorted(expected - wired)
+    # `--only ai-readiness` alone is also what pre-commit and `pixi run
+    # ai-readiness` spell; the CI job must reach the same step name.
+    assert "--profile full --only harbor-schema" in run
 
 
 def test_ci_lint_and_types_job_calls_verify_py() -> None:
     ci = _read(".github/workflows/ci.yml")
     assert (
-        "scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build"
+        "scripts/verify.py --profile pr --only lint,fmt-check,typecheck,docs-build,examples-docs"
         in ci
     )
+
+
+def test_examples_docs_step_runs_with_abicheck_unimportable(tmp_path: Path) -> None:
+    """`examples-docs` is the only PR-time guard that `gen_examples_docs.py`
+    stays runnable without `abicheck` installed (pages.yml regenerates the
+    site with only the `[docs]` requirements, and PR #1279 broke exactly
+    that while every dev-venv gate passed). The guard is the wrapper, so
+    prove it bites: a script that imports `abicheck` must fail under it and
+    a script that does not must still run, with argv passed through."""
+    cmd = _step("examples-docs").cmd
+    assert "scripts/gen_examples_docs.py" in cmd and "--check" in cmd
+    wrap = verify._pyscript_without_abicheck
+
+    importing = tmp_path / "imports_abicheck.py"
+    importing.write_text("import abicheck.model\n", encoding="utf-8")
+    proc = subprocess.run(wrap(str(importing)), capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "ModuleNotFoundError" in proc.stderr
+
+    plain = tmp_path / "plain.py"
+    plain.write_text(
+        "import sys\nprint(sys.argv[1:])\nraise SystemExit(3)\n", encoding="utf-8"
+    )
+    proc = subprocess.run(wrap(str(plain), "--check"), capture_output=True, text=True)
+    assert proc.returncode == 3
+    assert proc.stdout.strip() == "['--check']"
 
 
 def test_ci_actually_runs_every_shared_gate_step() -> None:
@@ -855,11 +905,11 @@ class TestUnitTestsPerPlatformTimeout:
 
 # --- ci.yml's test-running jobs: log volume --------------------------------
 
-#: Every ci.yml job that runs the pytest suite. `slow-tests` was a step of
-#: `unit-tests` until it was split into its own concurrently-running job; the
-#: guards below are written over both so the split did not quietly drop the
-#: slow lane's invocations out of their coverage.
-_PYTEST_JOBS = ("unit-tests", "unit-tests-other-os", "slow-tests")
+#: Every ci.yml job that runs the pytest suite inline. `slow-tests` is not
+#: listed: it runs verify.py's `slow`/`slow-perf` steps rather than inline
+#: pytest lines, so the same guards are applied to those catalog entries in
+#: tests/test_verify_slow_lane.py.
+_PYTEST_JOBS = ("unit-tests", "unit-tests-other-os")
 
 
 class TestUnitTestJobLogVolume:
@@ -953,23 +1003,6 @@ class TestUnitTestJobLogVolume:
                     f"collide in the upload artifact: {path}"
                 )
 
-    def test_the_slow_job_writes_its_own_distinct_result_files(self) -> None:
-        pytest.importorskip("yaml")
-        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
-        paths = [
-            self._junit_path(line.strip())
-            for step in workflow["jobs"]["slow-tests"]["steps"]
-            for line in str(step.get("run", "")).splitlines()
-            if line.strip().startswith("pytest ")
-        ]
-        assert paths, "the slow-tests job writes no JUnit XML"
-        assert len(set(paths)) == len(paths), f"results would overwrite: {paths}"
-        for path in paths:
-            assert path.startswith("test-results-slow"), (
-                "the slow job's results must be distinguishable from the unit "
-                f"lane's in the uploaded artifacts: {path}"
-            )
-
     def test_the_coverage_table_skips_fully_covered_modules(self) -> None:
         # The shards only collect data; the table is printed once, by the
         # fan-in job's `coverage report`.
@@ -980,52 +1013,89 @@ class TestUnitTestJobLogVolume:
         assert "coverage report --skip-covered" in _read(".github/workflows/ci.yml")
 
 
-class TestTheSlowLaneHasExactlyOneOwner:
-    """The `slow` marker lane is required, runs once, and runs on its own.
+# --- .github/workflows/integration.yml -------------------------------------
 
-    Splitting it out of `unit-tests` is only a critical-path win if it is not
-    *also* still run there; and it is only safe if something still runs it at
-    all. Both halves are asserted structurally rather than trusted to review,
-    because a partial revert of either side is invisible in a green run --
-    duplicating the work looks like a pass, and dropping it looks like a pass
-    too.
-    """
+#: The lanes integration.yml owns. Each one is a verify.py step, so CI and a
+#: local `--profile full --only <step>` run one definition rather than two.
+_INTEGRATION_WORKFLOW_STEPS = {
+    "integration",
+    "native-compare",
+    "msvc",
+    "libabigail-parity",
+    "abicc-parity",
+}
 
-    @staticmethod
-    def _job_invocations(job: str) -> list[str]:
-        pytest.importorskip("yaml")
-        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
-        return [
-            line.strip()
-            for step in workflow["jobs"][job]["steps"]
-            for line in str(step.get("run", "")).splitlines()
-            if line.strip().startswith("pytest ")
-        ]
 
-    def test_the_slow_tests_job_runs_both_slow_invocations(self) -> None:
-        commands = self._job_invocations("slow-tests")
-        parallel = [c for c in commands if '-m "slow"' in c and "-n auto" in c]
-        serial = [
-            c
-            for c in commands
-            if '-m "slow"' in c and "-n auto" not in c and "test_performance.py" in c
-        ]
-        assert parallel, f"the parallel slow lane is not run anywhere: {commands}"
-        assert serial, (
-            "the wall-clock-timed perf tests must still run, and serially "
-            f"(concurrency makes scheduler contention part of the measurement): {commands}"
-        )
+def test_integration_workflow_routes_every_lane_through_verify_py() -> None:
+    """The integration lanes used to be inline pytest lines in ci.yml that
+    had drifted from verify.py's own `integration` step (CI ignored
+    tests/test_abi_examples.py, the step ran it). No inline copy is left to
+    drift: every pytest the workflow runs goes through a step."""
+    workflow = _yaml_fast.safe_load(_read(".github/workflows/integration.yml"))
+    runs = [
+        step["run"]
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if isinstance(step.get("run"), str)
+    ]
+    assert not [r for r in runs if re.search(r"\bpytest\b", r)], runs
+    wired = {
+        name
+        for r in runs
+        for lst in re.findall(r"verify\.py --profile full --only ([\w,-]+)", r)
+        for name in lst.split(",")
+    }
+    assert wired == _INTEGRATION_WORKFLOW_STEPS
+    for name in _INTEGRATION_WORKFLOW_STEPS:
+        assert verify.FULL in _step(name).profiles, name
 
-    def test_unit_tests_no_longer_runs_the_slow_lane(self) -> None:
-        offenders = [c for c in self._job_invocations("unit-tests") if '-m "slow"' in c]
-        assert not offenders, (
-            "the slow lane moved to its own `slow-tests` job; running it in "
-            f"`unit-tests` too puts it back on that job's critical path: {offenders}"
-        )
 
-    def test_the_unit_lane_still_excludes_slow_tests(self) -> None:
-        # The complement: `unit-tests` must keep *excluding* the marker, or the
-        # split silently turns into the slow tests running twice.
-        commands = self._job_invocations("unit-tests")
-        offenders = [c for c in commands if "not slow" not in c]
-        assert not offenders, f"unit-tests must exclude the slow marker: {offenders}"
+def test_integration_step_excludes_the_files_other_lanes_own() -> None:
+    cmd = _step("integration").cmd
+    assert "--ignore=tests/test_abi_examples.py" in cmd
+    assert "--ignore=tests/test_cross_platform_integration.py" in cmd
+    assert "tests/test_cross_platform_integration.py" in _step("native-compare").cmd
+
+
+def test_env_defaults_yield_to_the_caller_but_env_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Linux leg raises the integration floor to 20 through its own
+    environment; a step's fixed `env` must still win over the caller."""
+    seen: dict[str, str] = {}
+
+    def fake_run(cmd, cwd, env, capture_output, text):  # noqa: ANN001
+        seen.update(env)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(verify.subprocess, "run", fake_run)
+    step = verify.Step(
+        "probe",
+        ("true",),
+        frozenset({verify.FULL}),
+        env={"FIXED": "step"},
+        env_defaults={"FLOOR": "1", "OTHER": "d"},
+    )
+    monkeypatch.setenv("FLOOR", "20")
+    monkeypatch.setenv("FIXED", "caller")
+    monkeypatch.delenv("OTHER", raising=False)
+    verify.run_step(step)
+    assert (seen["FLOOR"], seen["FIXED"], seen["OTHER"]) == ("20", "step", "d")
+    assert _step("integration").env_defaults == {"ABICHECK_MIN_EXECUTED": "1"}
+    assert "ABICHECK_MIN_EXECUTED" not in _step("integration").env
+
+
+def test_integration_step_leaves_tool_lane_tests_to_their_lanes() -> None:
+    """A test marked both `integration` and a tool-lane marker runs once, in
+    its tool's lane: the integration step's marker expression must exclude
+    every tool lane the full profile also runs."""
+    cmd = _step("integration").cmd
+    expr = cmd[cmd.index("-m") + 1]
+    for marker, lane in (
+        ("libabigail", "libabigail-parity"),
+        ("abicc", "abicc-parity"),
+        ("msvc", "msvc"),
+    ):
+        assert f"not {marker}" in expr, marker
+        lane_cmd = _step(lane).cmd
+        assert lane_cmd[lane_cmd.index("-m") + 1] == marker, lane

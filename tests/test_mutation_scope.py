@@ -388,6 +388,63 @@ def test_full_run_is_sharded_and_later_shards_skip_a_scoped_run(
     assert seen == []
 
 
+_PLAN_MODES = {
+    "full": ["--run"],
+    "require-baseline": ["--run", "--require-baseline"],
+    "write-baseline": ["--run", "--write-baseline"],
+    "diff-scoped": ["--run", "--diff-scoped", "--scope-run-to-diff",
+                    "--scope-run-to-functions"],
+    "diff-scoped-required": ["--run", "--diff-scoped", "--scope-run-to-diff",
+                             "--scope-run-to-functions", "--require-baseline"],
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 4])
+@pytest.mark.parametrize("mode", sorted(_PLAN_MODES))
+def test_planned_shards_are_exactly_the_shards_that_run_mutmut(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+    n: int,
+) -> None:
+    """`--plan-shards N` is what the workflow starts runners from, so it must
+    name every shard with work (a missing one silently drops modules from the
+    measurement) and no shard without (a runner started only to skip). The
+    oracle is independent of the planner: run each of the N shards for real
+    (mutmut faked) and record which ones invoked it. A run every shard fails
+    before reaching mutmut still needs one runner to report the failure."""
+    args = [*_PLAN_MODES[mode], "--baseline-file", str(repo / "none.json")]
+    if "--diff-scoped" in args:
+        args += ["--diff-file", str(repo / "d.diff")]
+    seen: list[list[str]] = []
+    monkeypatch.setattr(gate, "_run_mutmut", _fake_mutmut(seen))
+    monkeypatch.setattr(gate, "load_cicd_stats", lambda _d: {"total": 4, "survived": 0})
+    working, failed, patterns = [], [], []
+    for k in range(1, n + 1):
+        seen.clear()
+        rc = gate.main([*args, "--shard", f"{k}/{n}"])
+        runs = [c for c in seen if c[:2] == ["mutmut", "run"]]
+        if runs:
+            working.append(k)
+            patterns.append(runs[0][2:])
+        elif rc != 0:
+            failed.append(k)
+    if not working and failed:
+        working = [1]
+    # No mutant population is measured twice: patterns of the shards that ran
+    # are disjoint (an unscoped `mutmut run` would overlap every other shard).
+    if len(patterns) > 1:
+        assert all(patterns), "an unscoped shard measures every other shard's mutants"
+        flat = list(itertools.chain(*patterns))
+        assert len(flat) == len(set(flat))
+    capsys.readouterr()
+    assert gate.main([*args, "--plan-shards", str(n)]) == 0
+    planned = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert planned == working
+    assert planned, "a plan with no shard would start no job and gate nothing"
+
+
 def test_sharded_baseline_parts_merge_into_a_full_baseline(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

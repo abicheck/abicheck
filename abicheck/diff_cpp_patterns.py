@@ -58,6 +58,7 @@ from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     _has_sycl_queue_first_param as _has_sycl_queue_first_param,
     _isa_token_in_symbol as _isa_token_in_symbol,
 )
+from .compare.record_qualified_name import qualify_record_name
 from .compare.template_surface import (
     qualified_declaration_name as _qualified_function_name,
     reconciled_abi_visible_functions,
@@ -856,7 +857,11 @@ def _emit_inline_body_findings(
     """
     findings: list[Change] = []
     seen: set[tuple[str, str, str]] = set()
-    for internal_type, old_field, new_field in rename_candidates:
+    records = [*old_types.values(), *new_types.values()]
+    for leaf_or_qualified, old_field, new_field in rename_candidates:
+        # A header-AST rename names the leaf; the internal-namespace test
+        # needs the scope (compare/record_qualified_name.py).
+        internal_type = qualify_record_name(leaf_or_qualified, records)
         public_holders = _find_public_pimpl_holders(
             new_types.values(), internal_type, namespaces
         )

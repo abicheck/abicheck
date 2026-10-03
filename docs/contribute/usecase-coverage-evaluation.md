@@ -76,8 +76,8 @@ A real invocation is a point in this space:
 | **Release recommendation (semver + SONAME)** | `complete` | semver bump + SONAME action emitted in reports |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |
-| Windows PE/MSVC | `complete` | **G1 closed**: `cross-platform-e2e` lane runs `compare` on MinGW DLLs; MSVC+PDB lane asserts struct-growth + removed-export verdicts |
-| macOS Mach-O/ARM64 | `complete` | **G1 closed**: `cross-platform-e2e` lane runs `compare` on Apple-clang dylibs; AAPCS64 HFA/HVA passing drift not modeled (known gap) |
+| Windows PE/MSVC | `complete` | **G1 closed**: `native-compare` CI step runs `compare` on MinGW DLLs; MSVC+PDB lane asserts struct-growth + removed-export verdicts |
+| macOS Mach-O/ARM64 | `complete` | **G1 closed**: `native-compare` CI step runs `compare` on Apple-clang dylibs; AAPCS64 HFA/HVA passing drift not modeled (known gap) |
 | `compare`/release/baseline/Debian/ABICC | `complete` | dedicated CLIs + tests |
 | Reporting: JSON/SARIF/JUnit | `complete` | versioned schema + 34 SARIF / 55 JUnit tests |
 | Reporting: Markdown/HTML | `complete` | structural coverage across verdict tiers + sections + escaping (G3 done) |

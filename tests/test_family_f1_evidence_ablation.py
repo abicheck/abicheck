@@ -120,6 +120,7 @@ import abicheck.model.entities as entities_mod
 import abicheck.model.fact as fact_mod
 import abicheck.model.surface_facts as surface_facts_mod
 from abicheck.model import Fact, FactStatus
+from abicheck.model.snapshot import AbiSnapshot
 
 # --------------------------------------------------------------------------
 # Inventory bookkeeping
@@ -171,6 +172,23 @@ def _full(case: str, config: str = "default") -> Outcome:
     return _FULL[key]
 
 
+def _ablated_pairs(
+    case: str, site: str, status: str
+) -> dict[str, tuple[AbiSnapshot, AbiSnapshot]]:
+    """The (OLD, NEW) pair each side ablation of one (case, site, status)
+    compares. An ablated snapshot depends only on the side snapshot, the
+    site and the status, so OLD and NEW are each ablated once and shared by
+    the ``old``/``new``/``both`` pairs -- two rebuilds instead of four.
+    Sharing is sound because ``compare()`` does not mutate its inputs, which
+    this harness already relies on: the unablated side of every cell is the
+    same ``CORPUS`` object throughout."""
+    old, new = CORPUS[case]
+    fact = UNKNOWN_FACTS[status]()
+    a_old = ablate_fact(old, _FACT_SITES[site], fact)[0]
+    a_new = ablate_fact(new, _FACT_SITES[site], fact)[0]
+    return {"old": (a_old, new), "new": (old, a_new), "both": (a_old, a_new)}
+
+
 def _fact_cell(
     case: str, site: str, status: str, side: str, config: str = "default"
 ) -> list[str]:
@@ -179,19 +197,6 @@ def _fact_cell(
         *CORPUS[case], side, lambda s: ablate_fact(s, _FACT_SITES[site], fact)[0]
     )
     return oracle_violations(case, _full(case, config), outcome(old, new, config))
-
-
-def _sweep(
-    sites: list[str], statuses_for: Any, config: str
-) -> set[tuple[str, str, str]]:
-    found = set()
-    for case in CORPUS:
-        for i, site in enumerate(sites):
-            for status in statuses_for(i, case):
-                for side in SIDES:
-                    if _fact_cell(case, site, status, side, config):
-                        found.add((case, site, side))
-    return found
 
 
 # --------------------------------------------------------------------------
@@ -256,36 +261,97 @@ def test_fact_ablation_oracles(site: str) -> None:
     violations = {}
     for j, case in enumerate(CORPUS):
         status = _STATUSES[(idx + j) % len(_STATUSES)]
+        pairs = _ablated_pairs(case, site, status)
         for side in SIDES:
             if (case, site, side) in KNOWN_VIOLATIONS:
                 continue
-            v = _fact_cell(case, site, status, side)
+            v = oracle_violations(case, _full(case), outcome(*pairs[side]))
             if v:
                 violations[(case, status, side)] = v
     assert not violations, violations
 
 
+#: What each configuration's full status product must find, per case. Under
+#: ``contract_exports`` both known cells are out of the export domain in the
+#: full run already (NO_CHANGE), so nothing is left to silence; under
+#: ``contract_public`` -- the domain that reads the header-identifier index
+#: and every captured ``*.type_identities_fact`` -- an unknown fact must never
+#: let a break through as clean without a stated gap.
+_FULL_PRODUCT_EXPECTED: dict[str, Any] = {
+    "default": lambda case: {cell for cell in KNOWN_VIOLATIONS if cell[0] == case},
+    "contract_exports": lambda case: set(),
+    "contract_public": lambda case: set(),
+}
+
+
+def _full_product_cells(case: str, sites: list[str] | None = None) -> Any:
+    """Yield ``(config, site, status, side, Outcome)`` for every cell of *case*.
+
+    The same cells ``_fact_cell`` defines; the ablated pair of each
+    (site, status) is built once (``_ablated_pairs``) and shared by all
+    three configurations too -- 396 rebuilds per case instead of 2,376.
+    """
+    for site in sorted(_EXERCISED_FACTS) if sites is None else sites:
+        for status in _STATUSES:
+            pairs = _ablated_pairs(case, site, status)
+            for config in CONFIGS:
+                for side in SIDES:
+                    yield config, site, status, side, outcome(*pairs[side], config)
+
+
+def _full_product_sweep(case: str) -> dict[str, set[tuple[str, str, str]]]:
+    found: dict[str, set[tuple[str, str, str]]] = {c: set() for c in CONFIGS}
+    for config, site, _status, side, result in _full_product_cells(case):
+        if oracle_violations(case, _full(case, config), result):
+            found[config].add((case, site, side))
+    return found
+
+
+# One test per corpus case, all three configurations inside it. As three
+# whole-corpus tests these took ~180-210s each and pinned one xdist worker
+# while the others idled; per case the 27 units spread across workers, and
+# keeping the configurations together is what lets them share ablations.
+# The per-case assertion is that case's slice of the original set equality,
+# so the union over cases is exactly the original claim.
 @pytest.mark.slow
-def test_fact_ablation_full_product_default_config() -> None:
-    found = _sweep(sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "default")
-    assert found == set(KNOWN_VIOLATIONS)
+@pytest.mark.parametrize("case", list(CORPUS))
+def test_fact_ablation_full_product(case: str) -> None:
+    assert set(_FULL_PRODUCT_EXPECTED) == set(CONFIGS)
+    found = _full_product_sweep(case)
+    expected = {c: _FULL_PRODUCT_EXPECTED[c](case) for c in CONFIGS}
+    assert found == expected
 
 
-@pytest.mark.slow
-def test_fact_ablation_contract_exports_config() -> None:
-    found = _sweep(sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "contract_exports")
-    # Under contract=exports both known cells are out of the export domain in
-    # the full run already (NO_CHANGE), so nothing is left to silence.
-    assert found == set()
-
-
-@pytest.mark.slow
-def test_fact_ablation_contract_public_config() -> None:
-    """The domain that reads the header-identifier index and every captured
-    ``*.type_identities_fact``: an unknown one must never let a break through
-    as clean without a stated gap."""
-    found = _sweep(sorted(_EXERCISED_FACTS), lambda i, c: _STATUSES, "contract_public")
-    assert found == set()
+def test_shared_ablations_match_independently_built_cells() -> None:
+    """Every shared-ablation cell's ``Outcome`` equals the one built the
+    unshared way (``apply_sided`` + a fresh ``ablate_fact`` per cell).
+    Compared on outcomes, not on oracle violations: with no known violation
+    left, violation sets are empty either way and would prove nothing. A
+    slice chosen so that a mis-paired side or configuration changes the
+    outcome."""
+    case = "header_record_changed"
+    old, new = CORPUS[case]
+    # Sites whose ablation gives the three sides different outcomes, on a
+    # case whose configurations already disagree -- so a swapped side or a
+    # swapped configuration changes the compared Outcome.
+    sites = ["RecordType.qualified_name_fact", "RecordType.source_header_fact"]
+    assert set(sites) <= _EXERCISED_FACTS
+    cells = list(_full_product_cells(case, sites))
+    assert len(cells) == len(sites) * len(_STATUSES) * len(SIDES) * len(CONFIGS)
+    by_config: dict[str, set[Outcome]] = {c: set() for c in CONFIGS}
+    by_side: dict[tuple[str, str, str], set[Outcome]] = {}
+    for config, site, status, side, shared in cells:
+        fact = UNKNOWN_FACTS[status]()
+        o, n = apply_sided(
+            old, new, side, lambda snap: ablate_fact(snap, _FACT_SITES[site], fact)[0]
+        )
+        assert shared == outcome(o, n, config), (config, site, status, side)
+        by_config[config].add(shared)
+        by_side.setdefault((config, site, status), set()).add(shared)
+    # Non-vacuity: sides and configurations really produce different
+    # outcomes on this slice, so mis-pairing either would be caught above.
+    assert any(len(v) > 1 for v in by_side.values())
+    assert len({frozenset(v) for v in by_config.values()}) > 1
 
 
 @pytest.mark.parametrize(("case", "site", "side"), HEADER_ORIGIN_SEED_CELLS)

@@ -34,6 +34,7 @@ from ....model import AccessLevel, ScopeOrigin, Visibility
 from ....model.export_index import ExportMatch, match_export
 from ....name_classification import strip_anonymous_type_location
 from ....provenance import classify_origin, header_from_location
+from ...castxml_header_compat import PREAMBLE_FILENAME
 from .context import CastxmlParserContext
 
 
@@ -49,6 +50,9 @@ def is_builtin_element(ctx: CastxmlParserContext, el: Element) -> bool:
     - ``<builtin>``       (clang/castxml built-in declarations)
     - ``<built-in>``      (older castxml / GCC)
     - ``<command-line>``  (preprocessor command-line defines)
+
+    plus abicheck's own castxml compatibility preamble, written to a file of
+    the reserved basename ``castxml_header_compat.PREAMBLE_FILENAME``.
     """
     file_id = el.get("file", "")
     if not file_id:
@@ -57,7 +61,10 @@ def is_builtin_element(ctx: CastxmlParserContext, el: Element) -> bool:
     if file_el is None:
         return False
     fname = file_el.get("name", "")
-    return fname in ("<builtin>", "<built-in>", "<command-line>")
+    if fname in ("<builtin>", "<built-in>", "<command-line>"):
+        return True
+    # abicheck's own compatibility preamble (extract/castxml_header_compat.py).
+    return fname.replace("\\", "/").rsplit("/", 1)[-1] == PREAMBLE_FILENAME
 
 
 def source_location(ctx: CastxmlParserContext, el: Any) -> str | None:

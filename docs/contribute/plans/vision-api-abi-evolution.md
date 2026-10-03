@@ -815,9 +815,11 @@ and without `-o html`; generated documents check escaping and the cap) and
   JSON change carries `affected_use_cases` (report schema 5.10), derived as
   the exact inverse of `use_case_impact.by_use_case`; Markdown and the review
   digest render it (`tests/test_use_case_per_finding.py`).
-- *Real Action run.* `.github/workflows/test-action.yml` job
-  `test-report-policy-and-consumer-impact` runs the composite Action twice
-  (with and without a versioning policy) on a real breaking pair and asserts
+- *Real Action run.* The `[report-policy]` steps in
+  `.github/workflows/test-action.yml` (the ubuntu `conda-forge` cell of
+  `test-dependency-source-conda-forge`; formerly their own job,
+  `test-report-policy-and-consumer-impact`) run the composite Action twice
+  (with and without a versioning policy) on a real breaking pair and assert
   the policy acceptance, the HTML sections, an unchanged verdict/exit code,
   and no ADR numbers in the report files.
 

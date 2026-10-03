@@ -1,0 +1,3 @@
+### Fixed
+
+- **CastXML header dumps on AArch64 and other binary128 `long double` targets** — every C++ header reaching `<string>`, `<memory>` or `<cwchar>`, and every C or C++ header reaching `<math.h>`, failed to parse on AArch64 (`unknown type name '_Float128'`, `'__Float32x4_t'`): castxml emulates GCC, so glibc assumes builtin types castxml's Clang lacks there. abicheck now supplies those types through a self-guarded preamble that is inert wherever castxml already provides them (a host x86-64 dump is byte-identical), drops the preamble's own declarations like castxml's builtins, and reports a library's `_Float128` parameters as `_Float128` on every target.

@@ -647,6 +647,21 @@ class TestDerivedFromRealImports:
         )
 
 
+def _header_graph_gate_steps(jobs: dict) -> list[dict]:
+    """The header-graph PR-vs-base gate's steps, wherever the gate lives.
+
+    It was the `header-graph-regression` job until it moved onto the
+    `l2-cli-perf` runner; its steps there carry a "Header-graph:" name prefix.
+    """
+    steps = [
+        s
+        for s in jobs["l2-cli-perf"]["steps"]
+        if str(s.get("name", "")).startswith("Header-graph:")
+    ]
+    assert steps, "the header-graph PR gate has no steps in l2-cli-perf"
+    return steps
+
+
 class TestTheHeaderGraphGateRequiresAllMetrics:
     """The PR lane must gate every metric its own summary claims to cover.
 
@@ -672,7 +687,7 @@ class TestTheHeaderGraphGateRequiresAllMetrics:
         doc = _yaml_fast.safe_load(
             (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
         )
-        return doc["jobs"]["header-graph-regression"]["steps"]
+        return _header_graph_gate_steps(doc["jobs"])
 
     def test_the_baseline_gated_invocation_requires_all_metrics(self):
         # Asserted on the step that actually passes `--baseline`: a run with no
@@ -691,7 +706,9 @@ class TestTheHeaderGraphGateRequiresAllMetrics:
         # The premise the fix rests on. If this ever stops being true, the flag's
         # justification changes and this test is where that surfaces.
         text = self._workflow_text()
-        assert "./base_env/bin/python head/scripts/check_header_graph_perf.py" in text
+        assert (
+            "./hg_base_env/bin/python head/scripts/check_header_graph_perf.py" in text
+        )
 
     def test_the_script_supports_the_flag(self):
         root = _PATH.resolve().parent.parent
@@ -700,6 +717,160 @@ class TestTheHeaderGraphGateRequiresAllMetrics:
         )
         assert '"--require-all-metrics"' in source
         assert "args.require_all_metrics and ungated" in source
+
+
+class TestThePrTrendPointComesFromTheRegressionJob:
+    """On a PR, head's header-graph trend point is the regression job's run.
+
+    `header-graph-perf` used to start a runner on every perf-sensitive PR to
+    measure the same head (`--sizes 25 100 400 --require-castxml`) that
+    the header-graph PR gate measures again with more repeats. It now runs
+    on schedule/dispatch only, which is safe only while the regression job
+    writes and uploads the same report on *both* of its branches (gated and
+    report-only) -- otherwise a PR would silently lose its trend artifact.
+    """
+
+    @staticmethod
+    def _jobs() -> dict:
+        pytest.importorskip("yaml")
+        root = _PATH.resolve().parent.parent
+        return _yaml_fast.safe_load(
+            (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
+        )["jobs"]
+
+    def test_trend_job_skips_pull_requests_only(self):
+        cond = self._jobs()["header-graph-perf"]["if"]
+        assert "github.event_name != 'pull_request'" in cond
+        assert "needs.classify.outputs.run == 'true'" in cond
+
+    def test_regression_job_measures_the_same_head_on_both_branches(self):
+        steps = _header_graph_gate_steps(self._jobs())
+        head = next(
+            s
+            for s in steps
+            if s.get("name") == "Header-graph: Measure head and compare to base"
+        )
+        invocations = [
+            chunk
+            for chunk in head["run"].split("./hg_head_env/bin/python")[1:]
+            if "check_header_graph_perf.py" in chunk.split("\n", 1)[0]
+        ]
+        assert len(invocations) == 2, "gated and report-only branches"
+        trend = self._jobs()["header-graph-perf"]
+        trend_run = "\n".join(str(s.get("run", "")) for s in trend["steps"])
+        for inv in invocations:
+            assert "--sizes 25 100 400" in inv and "--sizes 25 100 400" in trend_run
+            assert "--require-castxml" in inv
+            assert "--json-out reports/perf/header_graph.json" in inv, inv
+
+    def test_regression_job_uploads_under_the_trend_artifact_name(self):
+        steps = _header_graph_gate_steps(self._jobs())
+        uploads = [s for s in steps if "upload-artifact" in str(s.get("uses", ""))]
+        assert any(
+            s["with"]["name"] == "performance-header-graph"
+            and "reports/perf/header_graph.json" in s["with"]["path"]
+            and str(s.get("if", "")).startswith("always()")
+            for s in uploads
+        ), uploads
+
+
+class TestTheHeaderGraphGateSharesTheL2RunnerSafely:
+    """Sharing a runner must not change what either gate measures.
+
+    The header-graph PR gate used to be its own job. On `l2-cli-perf`'s runner
+    it is safe only while: it runs after every L2 step (never interleaved with a
+    timed L2 measurement); it keeps measuring on Python 3.14 while the L2 steps
+    keep 3.13; its venvs never reuse an L2 venv name (the L2 base step builds
+    `base_env` from base_tree on 3.13, and `python -m venv` over it would
+    rebuild that venv with another interpreter); and it still runs only on a
+    pull_request, and still runs when an L2 step failed.
+    """
+
+    @staticmethod
+    def _job() -> dict:
+        pytest.importorskip("yaml")
+        root = _PATH.resolve().parent.parent
+        return _yaml_fast.safe_load(
+            (root / ".github/workflows/performance.yml").read_text(encoding="utf-8")
+        )["jobs"]
+
+    def test_the_standalone_job_is_gone(self):
+        assert "header-graph-regression" not in self._job()
+
+    def test_header_graph_steps_all_come_after_the_l2_steps(self):
+        steps = self._job()["l2-cli-perf"]["steps"]
+        hg = [
+            i
+            for i, s in enumerate(steps)
+            if str(s.get("name", "")).startswith("Header-graph:")
+        ]
+        assert hg
+        assert hg == list(range(hg[0], hg[0] + len(hg))), "contiguous block"
+        l2_measurements = [
+            i for i, s in enumerate(steps) if "check_l2_" in str(s.get("run", ""))
+        ]
+        assert l2_measurements and max(l2_measurements) < hg[0]
+
+    def test_interpreters_are_unchanged(self):
+        steps = self._job()["l2-cli-perf"]["steps"]
+        pythons = [
+            (i, str(s["with"]["python-version"]))
+            for i, s in enumerate(steps)
+            if "setup-python" in str(s.get("uses", ""))
+        ]
+        assert [v for _, v in pythons] == ["3.13", "3.14"], pythons
+        first_hg = next(
+            i
+            for i, s in enumerate(steps)
+            if str(s.get("name", "")).startswith("Header-graph:")
+        )
+        # 3.13 serves every L2 step; 3.14 is set up inside the header-graph block.
+        assert pythons[0][0] < first_hg <= pythons[1][0]
+
+    def test_venv_names_do_not_collide(self):
+        import re
+
+        steps = self._job()["l2-cli-perf"]["steps"]
+
+        def venvs(selected):
+            out = set()
+            for s in selected:
+                out |= set(re.findall(r"python -m venv (\S+)", str(s.get("run", ""))))
+            return out
+
+        hg = [s for s in steps if str(s.get("name", "")).startswith("Header-graph:")]
+        l2 = [s for s in steps if s not in hg]
+        assert venvs(hg) and venvs(l2)
+        assert venvs(hg).isdisjoint(venvs(l2)), (venvs(hg), venvs(l2))
+
+    def test_header_graph_steps_stay_pr_only_and_survive_an_l2_failure(self):
+        steps = _header_graph_gate_steps(self._job())
+        for s in steps:
+            cond = str(s.get("if", ""))
+            assert "github.event_name == 'pull_request'" in cond, s["name"]
+            assert "always()" in cond or (
+                "success()" in cond and "failure()" in cond
+            ), s["name"]
+
+    def test_the_gating_invocation_is_unchanged(self):
+        head = next(
+            s
+            for s in _header_graph_gate_steps(self._job())
+            if s["name"] == "Header-graph: Measure head and compare to base"
+        )
+        for flag in (
+            "--baseline base_header_graph.json",
+            "--regress-tolerance 0.3",
+            "--regress-min-delta-ms 10",
+            "--regress-min-delta-ms-dump 30",
+            "--regress-min-delta-ms-total 40",
+            "--regress-min-delta-ms-attach_peak_rss 48",
+            "--regress-min-delta-ms-attach_end_rss 48",
+            "--require-all-metrics",
+            "--require-castxml",
+            "--repeat 5",
+        ):
+            assert flag in head["run"], flag
 
 
 class TestTheCanonicalOwnerIsClassifiedNotJustTheFacade:

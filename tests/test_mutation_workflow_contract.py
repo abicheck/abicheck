@@ -96,6 +96,15 @@ _INFRASTRUCTURE_PATHS = {
     "tests/test_mutation_results.py",
     "scripts/mutation_scope.py",
     "tests/test_mutation_scope.py",
+    # Loaded into every pytest session mutmut runs; a regression here aborts
+    # the clean run before any mutant is tested.
+    "scripts/mutmut_stable_param_ids.py",
+    "tests/test_mutmut_stable_param_ids.py",
+    # The narrowed stats selection: its data, generator, trace and tests.
+    "scripts/mutation_reach_trace.py",
+    "scripts/gen_mutation_test_selection.py",
+    "tests/mutation_test_selection.txt",
+    "tests/test_mutation_test_selection.py",
     ".github/workflows/mutation.yml",
 }
 
@@ -155,11 +164,17 @@ def test_pyproject_starts_the_lane_only_through_its_relevance_check() -> None:
 
 
 def test_every_gating_run_is_sharded_and_rolled_up_under_one_check() -> None:
-    wf = _workflow()["jobs"]
-    shards = wf["mutmut"]["strategy"]["matrix"]["shard"]
-    count = len(shards)
-    assert shards == list(range(1, count + 1))
+    doc = _workflow()
+    wf = doc["jobs"]
+    count = int(doc["env"]["SHARD_COUNT"])
+    # The matrix is the resolve job's plan, not a literal: a run that is not
+    # split starts one runner rather than SHARD_COUNT.
+    assert wf["mutmut"]["strategy"]["matrix"]["shard"] == (
+        "${{ fromJSON(needs.resolve.outputs.shards) }}"
+    )
+    assert wf["resolve"]["outputs"]["shards"] == "${{ steps.plan.outputs.shards }}"
     assert wf["mutmut"]["env"]["SHARD"] == f"${{{{ matrix.shard }}}}/{count}"
+    assert wf["mutmut"]["name"].endswith(f"/{count}")
     runs = [
         s["run"]
         for s in wf["mutmut"]["steps"]
@@ -168,8 +183,60 @@ def test_every_gating_run_is_sharded_and_rolled_up_under_one_check() -> None:
     assert runs and all(r.count("--run") == r.count('--shard "$SHARD"') for r in runs)
     gate = wf["gate"]
     assert gate["name"] == "mutmut (detector core)"
-    assert "mutmut" in gate["needs"] and "always()" in gate["if"]
+    assert "mutmut" in gate["needs"] and "!cancelled()" in gate["if"]
+    assert "always()" not in gate["if"]
     assert "needs.resolve.outputs.run == 'true'" in gate["if"]
+
+
+def test_the_shard_plan_asks_the_question_each_run_step_answers() -> None:
+    """resolve's plan and the shard steps must take the same scoping
+    decision: a plan made without --diff-scoped would start four runners for
+    a PR run that only shard 1 executes, and one made without
+    --require-baseline would split a run that fails before mutmut."""
+    wf = _workflow()["jobs"]
+    plan = next(s for s in wf["resolve"]["steps"] if s.get("id") == "plan")["run"]
+    assert "--plan-shards" in plan and "| tail -n 1" in plan
+    by_event = {
+        "pull_request": "Run mutation testing (diff-scoped)",
+        "schedule": "Run mutation testing (baseline drift)",
+    }
+    for event, step_name in by_event.items():
+        step = next(s for s in wf["mutmut"]["steps"] if s.get("name") == step_name)
+        branch = plan.split(f"{event})", 1)[1].split(";;", 1)[0]
+        for flag in ("--diff-scoped", "--scope-run-to-diff",
+                     "--scope-run-to-functions", "--require-baseline"):  # fmt: skip
+            assert (flag in step["run"]) == (flag in branch), (event, flag)
+    assert "--write-baseline" in plan.split("workflow_dispatch)", 1)[1]
+
+
+def test_the_selection_check_covers_every_run_that_could_stale_it() -> None:
+    """Completeness is checked on every full run and on any PR touching the
+    selection machinery, and the roll-up only tolerates it being skipped."""
+    wf = _workflow()["jobs"]
+    selection = set(_filters()["selection"])
+    assert selection == {
+        "scripts/mutation_reach_trace.py",
+        "scripts/gen_mutation_test_selection.py",
+        "tests/mutation_test_selection.txt",
+    }
+    assert selection <= set(_filters()["mutated"])
+    cond = wf["resolve"]["outputs"]["check_selection"]
+    assert "github.event_name != 'pull_request'" in cond
+    assert "steps.changed.outputs.selection == 'true'" in cond
+    job = wf["selection-check"]
+    assert "gen_mutation_test_selection.py --check" in job["steps"][-1]["run"]
+    assert "selection-check" in wf["gate"]["needs"]
+    gate_run = wf["gate"]["steps"][0]["run"]
+    assert '[ "$SELECTION" = "success" ] || [ "$SELECTION" = "skipped" ]' in gate_run
+
+
+def test_a_pr_run_widens_the_selection_before_mutmut_copies_the_tree() -> None:
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    run = next(
+        s for s in steps if s.get("name") == "Run mutation testing (diff-scoped)"
+    )["run"]
+    assert run.index("extend-selection") < run.index("check_mutation_score.py --run")
+    assert "--selection tests/mutation_test_selection.txt" in run
 
 
 def test_no_step_expands_a_github_expression_inside_its_script() -> None:

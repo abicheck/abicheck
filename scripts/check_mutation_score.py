@@ -94,8 +94,10 @@ from mutation_results import (  # noqa: E402
 from mutation_scope import (  # noqa: E402
     NOTHING_MATCHES_MARKER,
     function_run_scope,
+    is_splittable,
     module_scope_pattern,
     parse_shard,
+    planned_shards,
     shard_modules,
 )
 
@@ -1309,6 +1311,17 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--plan-shards",
+        type=int,
+        metavar="N",
+        help=(
+            "Print, as a JSON list, the shard indices (of N) that would have "
+            "work under the other arguments, and exit 0 without running "
+            "mutmut. The workflow's resolve job uses it so a run that is not "
+            "split starts one runner instead of N, N-1 of which only skip."
+        ),
+    )
+    parser.add_argument(
         "--require-baseline",
         action="store_true",
         help=(
@@ -1360,6 +1373,10 @@ def main(argv: list[str] | None = None) -> int:
         # Keyed on the baseline, not on --diff-scoped: that gate only sees the
         # functions this branch changed, so a weakened test covering another
         # function would otherwise exit 0 (Codex review).
+        if args.plan_shards:
+            # One job is enough to report this failure; N would report it N times.
+            print(json.dumps([1]))
+            return 0
         print(
             "ERROR: --require-baseline was passed but no baseline is available "
             f"({args.baseline_file} is missing/invalid and SURVIVOR_BASELINE is "
@@ -1461,6 +1478,17 @@ def main(argv: list[str] | None = None) -> int:
             )
             scope_mode = "diff"
 
+    # A global-total-only baseline cannot be scored per shard.
+    global_total_only = total_baseline is not None and baseline_modules is None
+    if args.plan_shards:
+        if args.plan_shards < 1:
+            print("ERROR: --plan-shards must be >= 1")
+            return 1
+        only = load_only_mutate_globs()
+        splittable = is_splittable(scope_patterns, only, global_total_only)
+        print(json.dumps(planned_shards(args.plan_shards, only, splittable, REPO_ROOT)))
+        return 0
+
     if args.shard and not args.results_file:
         try:
             shard_k, shard_n = parse_shard(args.shard)
@@ -1468,18 +1496,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: --shard: {e}")
             return 1
         shard_only_mutate = load_only_mutate_globs()
-        # A diff-scoped run is already small, and a global-total-only
-        # baseline cannot be scored per shard: both run whole in shard 1.
-        unsplittable = (
-            scope_patterns is not None
-            or not shard_only_mutate
-            or (total_baseline is not None and baseline_modules is None)
+        unsplittable = not is_splittable(
+            scope_patterns, shard_only_mutate, global_total_only
         )
         if unsplittable and shard_k > 1:
             print(f"mutation-score: shard {args.shard} has nothing to run")
             return 0
         if not unsplittable and shard_only_mutate:
             mods = shard_modules(shard_only_mutate, shard_k, shard_n, REPO_ROOT)
+            if not mods:
+                # More shards than modules. An empty pattern list would make
+                # `mutmut run` measure the *whole* population, not none of it.
+                print(f"mutation-score: shard {args.shard} has no module assigned")
+                return 0
             scope_patterns = [module_scope_pattern(m) for m in mods]
             scope_modules, scope_mode = set(mods), "shard"
             print(f"mutation-score: shard {args.shard} measures: " + ", ".join(mods))

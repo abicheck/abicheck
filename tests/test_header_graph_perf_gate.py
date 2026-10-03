@@ -767,8 +767,8 @@ class TestMainEntryPoint:
         self, monkeypatch, capsys
     ):
         # A castxml *version-policy* rejection under --require-castxml must
-        # print a message a caller (header-graph-regression's base-branch
-        # step) can grep for specifically -- distinct from any other
+        # print a message a caller (the base-branch step of the header-graph
+        # gate in performance.yml's l2-cli-perf job) can grep for specifically -- distinct from any other
         # extraction failure below, so the two are never conflated by a
         # shared message prefix (Codex review, fresh evidence).
         from abicheck.errors import UnsupportedCastxmlVersionError
