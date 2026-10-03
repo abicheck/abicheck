@@ -59,6 +59,10 @@ _ARCHIVE_MAGIC_LEN: int = 8
 _LD_SCRIPT_RE = re.compile(r"\b(?:INPUT|GROUP|OUTPUT_FORMAT)\s*\(")
 _LD_KEYWORDS = frozenset({"AS_NEEDED", "INPUT", "GROUP", "OUTPUT_FORMAT"})
 
+#: How many linker-script hops :func:`resolve_linker_script_chain` follows
+#: before giving up -- a guard against a pathological cyclic chain.
+_MAX_LINKER_SCRIPT_HOPS = 32
+
 
 def classify_magic(magic: bytes) -> str | None:
     """Classify binary format from the first 4 (or more) magic bytes.
@@ -129,7 +133,7 @@ def resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
     return None, True
 
 
-def resolve_linker_script_chain(path: Path, max_hops: int = 32) -> Path:
+def resolve_linker_script_chain(path: Path) -> Path:
     """Follow a chain of GNU ld linker scripts to the final real artifact.
 
     ``resolve_linker_script`` only ever resolves one hop; a linker script
@@ -140,12 +144,12 @@ def resolve_linker_script_chain(path: Path, max_hops: int = 32) -> Path:
     needs the final resolved path (not a full snapshot) -- e.g. hashing an
     operand for the same-binary coverage warning -- needs the identical
     multi-hop behavior rather than a single-hop copy of it (Codex review,
-    fresh evidence). ``max_hops`` guards against a pathological cyclic
-    chain; returns *path* itself once no further hop resolves (including
-    immediately, for an ordinary non-script input).
+    fresh evidence). ``_MAX_LINKER_SCRIPT_HOPS`` guards against a
+    pathological cyclic chain; returns *path* itself once no further hop
+    resolves (including immediately, for an ordinary non-script input).
     """
     current = path
-    for _ in range(max_hops):
+    for _ in range(_MAX_LINKER_SCRIPT_HOPS):
         target, is_ld = resolve_linker_script(current)
         if not is_ld or target is None:
             return current

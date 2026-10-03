@@ -922,16 +922,13 @@ class TestInternalLeakReachability:
         # the path is value-propagating; an `indirect:` marker flips it.
         from abicheck.internal_leak import _path_is_value_propagating
 
-        snap = _snap()  # type map unused now (markers are precomputed)
         assert (
-            _path_is_value_propagating(
-                ["Public", "field:impl_", "ns::detail::Impl"], snap
-            )
+            _path_is_value_propagating(["Public", "field:impl_", "ns::detail::Impl"])
             is True
         )
         assert (
             _path_is_value_propagating(
-                ["Public", "field:impl_", "indirect:edge", "ns::detail::Impl"], snap
+                ["Public", "field:impl_", "indirect:edge", "ns::detail::Impl"]
             )
             is False
         )

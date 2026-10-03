@@ -183,7 +183,6 @@ def apply_pattern_verdicts(
     new: AbiSnapshot,
     *,
     evidence_tier: EvidenceTier,
-    enabled: bool = True,
     protected_kinds: frozenset[ChangeKind] = frozenset(),
     old_public_entity_ids: frozenset[EntityId] | None = None,
     new_public_entity_ids: frozenset[EntityId] | None = None,
@@ -212,9 +211,6 @@ def apply_pattern_verdicts(
     site outside ``compare()``'s own pipeline) preserves the exact
     pre-Phase-3 ``Visibility.PUBLIC``-derived behavior on that side.
     """
-    if not enabled:
-        return []
-
     old_graph = build_surface_graph(old, public_entity_ids=old_public_entity_ids)
     new_graph = build_surface_graph(new, public_entity_ids=new_public_entity_ids)
     old_idioms = recognise_idioms(old_graph)

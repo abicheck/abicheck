@@ -79,7 +79,7 @@ def _uncached(pattern: re.Pattern[str], text: str) -> tuple[SpellingMatch, ...]:
     """The oracle: matches computed with no cache in the path at all."""
     return tuple(
         SpellingMatch(m.group(0), m.start(), m.end())
-        for m in finditer_allow_nested(pattern, text, 0, len(text))
+        for m in finditer_allow_nested(pattern, text)
     )
 
 

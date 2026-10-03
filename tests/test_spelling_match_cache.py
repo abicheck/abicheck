@@ -26,10 +26,9 @@ The oracle throughout is the **uncached** matcher
 that agreed with itself would assert nothing. The invariants are:
 
 * reuse is *lexically transparent* -- cached and uncached results agree on
-  text, span and order, for every vocabulary/text/window, empty results
-  included;
-* reuse is *vocabulary-scoped* and *window-scoped* -- two vocabularies, or
-  two windows over one text, never serve each other's answer;
+  text, span and order, for every vocabulary/text, empty results included;
+* reuse is *vocabulary-scoped* and *text-scoped* -- two vocabularies, or
+  two texts, never serve each other's answer;
 * reuse does not skip the *reachability operation* -- the same lexical
   result consumed under two different provenance origins still produces the
   two different findings it would have without any cache;
@@ -93,7 +92,7 @@ class TestLexicalTransparency:
     """Cached results agree with the uncached matcher, always."""
 
     @staticmethod
-    def _random_case(rng: random.Random) -> tuple[list[str], str, int, int]:
+    def _random_case(rng: random.Random) -> tuple[list[str], str]:
         atoms = ["Foo", "Bar", "std::string", "Inner", "Wrapper", "ns::Baz", "T"]
         vocab = rng.sample(atoms, rng.randint(1, len(atoms)))
         if rng.random() < 0.5:
@@ -121,23 +120,20 @@ class TestLexicalTransparency:
                     ]
                 )
             )
-        text = "".join(pieces)
-        start = rng.randint(0, len(text)) if text else 0
-        end = rng.randint(start, len(text)) if text else 0
-        return vocab, text, start, end
+        return vocab, "".join(pieces)
 
     def test_cached_matches_equal_uncached_over_randomized_inputs(self) -> None:
         rng = random.Random(20260917)
         empties = 0
         nested = 0
         for _ in range(1000):
-            vocab, text, start, end = self._random_case(rng)
+            vocab, text = self._random_case(rng)
             pattern = _compile_spelling_pattern(vocab)
             assert pattern is not None
-            expected = _shape(_finditer_allow_nested(pattern, text, start, end))
+            expected = _shape(_finditer_allow_nested(pattern, text))
             # Cold, then warm: both must equal the uncached oracle.
-            cold = _shape(spelling_matches(pattern, text, start, end))
-            warm = _shape(spelling_matches(pattern, text, start, end))
+            cold = _shape(spelling_matches(pattern, text))
+            warm = _shape(spelling_matches(pattern, text))
             assert cold == expected
             assert warm == expected
             if not expected:
@@ -174,17 +170,6 @@ class TestKeyScoping:
         assert foo is not None and bar is not None
         assert _shape(spelling_matches(foo, text)) == [("Foo", 0, 3)]
         assert _shape(spelling_matches(bar, text)) == [("Bar", 4, 7)]
-
-    def test_cache_key_includes_the_window_bounds(self) -> None:
-        # The "an untested key component is not an unnecessary one" lesson:
-        # every production caller today passes the default full window, so a
-        # key that dropped start/end would pass every other test here.
-        text = "Foo Foo"
-        pattern = _compile_spelling_pattern(["Foo"])
-        assert pattern is not None
-        assert _shape(spelling_matches(pattern, text)) == [("Foo", 0, 3), ("Foo", 4, 7)]
-        assert _shape(spelling_matches(pattern, text, 1)) == [("Foo", 4, 7)]
-        assert _shape(spelling_matches(pattern, text, 0, 3)) == [("Foo", 0, 3)]
 
     def test_cache_key_includes_the_text(self) -> None:
         pattern = _compile_spelling_pattern(["Foo"])

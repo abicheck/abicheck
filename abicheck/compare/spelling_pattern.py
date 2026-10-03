@@ -311,16 +311,14 @@ def _build_flat_spelling_pattern(
     return re.compile(_bounded(alternation))
 
 
-def spelling_matches(
-    pattern: re.Pattern[str], text: str, start: int = 0, end: int | None = None
-) -> tuple[SpellingMatch, ...]:
+def spelling_matches(pattern: re.Pattern[str], text: str) -> tuple[SpellingMatch, ...]:
     """:func:`finditer_allow_nested`'s result, reused from a bounded cache.
 
     The matching itself is unchanged -- this is purely reuse of a *lexical*
     result (which registered spellings occur as whole type tokens in this
-    text window), which is a pure function of the vocabulary, the text and
-    the window. The scan's own state updates still run over every reused
-    match exactly as they would over a freshly computed one, because the
+    text), which is a pure function of the vocabulary and the text. The
+    scan's own state updates still run over every reused match exactly as
+    they would over a freshly computed one, because the
     same text reached directly, through one typedef, and through another
     typedef contributes different alias/provenance evidence; only the
     regex work is skipped, never the consumption of its result. See
@@ -328,32 +326,27 @@ def spelling_matches(
     and for why an oversized input bypasses it rather than evicting the
     working set to make room.
     """
-    if end is None:
-        end = len(text)
     return matches_for(
         pattern,
         text,
-        start,
-        end,
-        lambda: finditer_allow_nested(pattern, text, start, end),
+        0,
+        len(text),
+        lambda: finditer_allow_nested(pattern, text),
     )
 
 
-def finditer_allow_nested(
-    pattern: re.Pattern[str], text: str, start: int = 0, end: int | None = None
-) -> list[re.Match[str]]:
-    """Every whole-token occurrence of a registered spelling in
-    ``text[start:end]`` -- including one nested strictly inside another
-    match (``std::string`` inside ``std::vector<std::string>``) **and** a
-    shorter spelling that begins at the *same* offset as a longer one
-    (``Foo`` inside ``Foo<int>``, ``dal::Table`` inside
-    ``dal::Table<float>``, ``Node`` inside ``Node*``).
+def finditer_allow_nested(pattern: re.Pattern[str], text: str) -> list[re.Match[str]]:
+    """Every whole-token occurrence of a registered spelling in *text* --
+    including one nested strictly inside another match (``std::string``
+    inside ``std::vector<std::string>``) **and** a shorter spelling that
+    begins at the *same* offset as a longer one (``Foo`` inside
+    ``Foo<int>``, ``dal::Table`` inside ``dal::Table<float>``, ``Node``
+    inside ``Node*``).
 
     An occurrence is a registered spelling at ``[i, e)`` whose left and
     right boundaries the pattern's own lookarounds accept against the
-    **real** text, except that ``e == end`` counts as a boundary, as it
-    always has for the caller's window. Returned in ``(start, -end)``
-    order.
+    **real** text, where ``e == len(text)`` counts as a boundary. Returned
+    in ``(start, -end)`` order.
 
     **Why every offset is probed.** Plain ``finditer`` returns only
     non-overlapping matches, and the alternation always takes the
@@ -381,10 +374,9 @@ def finditer_allow_nested(
 
     Iterative: no recursion however deeply spellings nest.
     """
-    if end is None:
-        end = len(text)
+    end = len(text)
     matches: list[re.Match[str]] = []
-    for i in range(start, end):
+    for i in range(end):
         limit = end
         while limit > i:
             m = pattern.match(text, i, limit)

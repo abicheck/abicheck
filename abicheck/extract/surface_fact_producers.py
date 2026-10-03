@@ -148,9 +148,7 @@ def header_ast_surface_facts(
     }
 
 
-def debug_info_surface_facts(
-    *, exported: bool | ExportMatch, producer: str | None = "dwarf"
-) -> dict[str, Any]:
+def debug_info_surface_facts(*, exported: bool | ExportMatch) -> dict[str, Any]:
     """Facts for a declaration recovered from debug info (DWARF/BTF/CTF).
 
     Debug info records where a definition was compiled, which is not
@@ -168,6 +166,7 @@ def debug_info_surface_facts(
     fact (``binary_exported``, bundle signature evidence, the report's
     ``surface_facts``) would trust it (Codex review, P2).
     """
+    producer = "dwarf"
     return {
         "declared_in_headers_fact": Fact.not_collected(
             "debug info carries no public-header evidence", producer=producer
@@ -188,26 +187,22 @@ def debug_info_surface_facts(
     }
 
 
-def export_table_surface_facts(
-    *, headers_parsed: bool = False, producer: str | None = None
-) -> dict[str, Any]:
+def export_table_surface_facts() -> dict[str, Any]:
     """Facts for an entry synthesized from an export table alone.
 
-    *headers_parsed* says whether this run parsed headers at all. Only
-    then is "absent from the headers" an observation; without it, (a) is
-    unknown — the whole point of the split, since a headerless dump must
-    not start claiming every symbol is undeclared.
+    (a) is unknown: every caller synthesizes these entries in a dump that
+    parsed no headers, so "absent from the headers" is not an observation
+    -- the whole point of the split, since a headerless dump must not start
+    claiming every symbol is undeclared.
     """
     return {
-        "declared_in_headers_fact": (
-            Fact.present(False, producer=producer)
-            if headers_parsed
-            else Fact.not_collected("no headers parsed in this dump", producer=producer)
+        "declared_in_headers_fact": Fact.not_collected(
+            "no headers parsed in this dump"
         ),
         "in_public_contract_fact": Fact.not_collected(
-            "export-table entry with no contract evidence", producer=producer
+            "export-table entry with no contract evidence"
         ),
-        "binary_exported_fact": Fact.present(True, producer=producer),
+        "binary_exported_fact": Fact.present(True),
     }
 
 

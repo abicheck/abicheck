@@ -286,59 +286,27 @@ def _scope_path(scope: ScopePath) -> ScopePath:
     return tuple(scope)
 
 
-def _anonymous_self_extra(
-    leaf_name: str, anonymous_ordinal: int | None
-) -> tuple[str, ...]:
-    """``extra`` for an anonymous record/enum declaration's OWN identity --
-    distinct from :class:`Anonymous`'s ``ordinal``, which disambiguates a
-    *descendant's* containing scope, not the anonymous declaration itself.
-    ``ScopePath`` explicitly names only the containing scope, never the
-    leaf declaration (this module's own docstring), so two anonymous
-    sibling records/enums both passing ``leaf_name=""`` would otherwise
-    collide onto one identical ``EntityId`` regardless of which one is
-    meant (Codex review, PR #941). Only meaningful when *leaf_name* is
-    empty -- a named declaration already disambiguates via ``leaf_name``,
-    so *anonymous_ordinal* is ignored there rather than adding a second,
-    redundant discriminator. Same deterministic per-parent sequence-number
-    semantics, and the identical within-one-parse-only accepted
-    limitation, as :class:`Anonymous`'s own ``ordinal``.
-    """
-    if leaf_name or anonymous_ordinal is None:
-        return ()
-    return ("anonymous", str(anonymous_ordinal))
-
-
-def entity_id_for_type(
-    scope: ScopePath, leaf_name: str, *, anonymous_ordinal: int | None = None
-) -> EntityId:
+def entity_id_for_type(scope: ScopePath, leaf_name: str) -> EntityId:
     """``EntityId`` for a record/class/struct/union type. No kind-specific
-    discriminator beyond *anonymous_ordinal*: a bare name is unambiguous
-    once ``ScopePath`` disambiguates the containing scope, since two named
-    types cannot share one name in one scope in valid C/C++ -- but an
-    *anonymous* struct/union has no name to disambiguate with at all; see
-    :func:`_anonymous_self_extra` for why *anonymous_ordinal* exists and
-    when it applies.
+    discriminator: a bare name is unambiguous once ``ScopePath``
+    disambiguates the containing scope, since two named types cannot share
+    one name in one scope in valid C/C++.
+
+    An *anonymous* struct/union has no name to disambiguate with at all, and
+    ``ScopePath`` names only the containing scope, never the leaf
+    declaration (this module's own docstring) -- so two anonymous sibling
+    records both passing ``leaf_name=""`` share one ``EntityId``.
+    :class:`Anonymous`'s ``ordinal`` disambiguates a *descendant's*
+    containing scope, not the anonymous declaration itself, and no producer
+    supplies a per-declaration ordinal for the latter.
     """
-    return EntityId(
-        scope=_scope_path(scope),
-        kind=EntityKind.TYPE,
-        leaf_name=leaf_name,
-        extra=_anonymous_self_extra(leaf_name, anonymous_ordinal),
-    )
+    return EntityId(scope=_scope_path(scope), kind=EntityKind.TYPE, leaf_name=leaf_name)
 
 
-def entity_id_for_enum(
-    scope: ScopePath, leaf_name: str, *, anonymous_ordinal: int | None = None
-) -> EntityId:
+def entity_id_for_enum(scope: ScopePath, leaf_name: str) -> EntityId:
     """``EntityId`` for an enum type. See :func:`entity_id_for_type`,
-    including for *anonymous_ordinal* -- an anonymous enum is exactly as
-    real a case as an anonymous struct/union."""
-    return EntityId(
-        scope=_scope_path(scope),
-        kind=EntityKind.ENUM,
-        leaf_name=leaf_name,
-        extra=_anonymous_self_extra(leaf_name, anonymous_ordinal),
-    )
+    including for two anonymous sibling enums sharing one identity."""
+    return EntityId(scope=_scope_path(scope), kind=EntityKind.ENUM, leaf_name=leaf_name)
 
 
 def entity_id_for_typedef(scope: ScopePath, leaf_name: str) -> EntityId:

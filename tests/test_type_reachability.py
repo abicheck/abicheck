@@ -1538,20 +1538,6 @@ class TestNestedMatchesWithinTheSameSpellingIndex:
         finally:
             sys.setrecursionlimit(original_limit)
 
-    def test_explicit_end_bound_restricts_the_search_window(self) -> None:
-        """Direct unit coverage for the explicit start/end window this
-        helper's stack-based search is built on -- restricting end excludes
-        a match that starts beyond it."""
-        pattern = _compile_spelling_pattern({"Foo", "Bar"})
-        text = "Foo Bar"
-        assert {m.group(0) for m in _finditer_allow_nested(pattern, text)} == {
-            "Foo",
-            "Bar",
-        }
-        assert {m.group(0) for m in _finditer_allow_nested(pattern, text, end=3)} == {
-            "Foo"
-        }
-
 
 class TestNonStdlibBareAliasCollisionWithStdlibStrippedSpelling:
     def test_non_stdlib_signature_spellings_includes_bare_alias(self) -> None:

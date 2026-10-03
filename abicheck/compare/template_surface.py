@@ -195,8 +195,6 @@ def _reconciled_public_functions(
 def reconciled_public_function_maps(
     old: AbiSnapshot,
     new: AbiSnapshot,
-    *,
-    key: Callable[[Function], str] = lambda f: f.mangled,
 ) -> tuple[dict[str, Function], dict[str, Function]]:
     """:func:`reconciled_public_functions`, as the mangled-keyed maps the
     type-spelling and integer-model detectors join on.
@@ -209,8 +207,8 @@ def reconciled_public_function_maps(
     carry contract evidence, and an ``int`` -> ``long`` group likewise lost
     ``INTEGER_MODEL_CHANGED`` (Codex review, P2).
 
-    *key* is used for the reconciliation join as well as for the returned
-    maps, so the two cannot disagree about what counts as the same
+    The mangled name is used for the reconciliation join as well as for the
+    returned maps, so the two cannot disagree about what counts as the same
     declaration. Later wins on a duplicate key, matching the dict
     comprehensions this replaces.
     """
@@ -224,7 +222,7 @@ def reconciled_public_function_maps(
         public_functions(new),
         old_all=old.declarations.functions,
         new_all=new.declarations.functions,
-        key=key,
+        key=lambda f: f.mangled,
         # The mangled key is exactly what a realistic change here moves, so
         # the declared name is the second tier -- the same "single peer or
         # nothing" rule the detectors' own demangled-name fallback applies to
@@ -242,8 +240,8 @@ def reconciled_public_function_maps(
         new,
         RECONCILED_FUNCTION_MAPS,
         (
-            {key(f): f for f in reconciled_old},
-            {key(f): f for f in reconciled_new},
+            {f.mangled: f for f in reconciled_old},
+            {f.mangled: f for f in reconciled_new},
         ),
     )
 

@@ -193,11 +193,11 @@ class _CastxmlParser:
     def _type_name(self, id_: str, depth: int = 0) -> str:
         return _castxml_type_resolution.type_name(self._ctx, id_, depth)
 
-    def _type_alignment_bits(self, id_: str, depth: int = 0) -> int | None:
-        return _castxml_type_resolution.type_alignment_bits(self._ctx, id_, depth)
+    def _type_alignment_bits(self, id_: str) -> int | None:
+        return _castxml_type_resolution.type_alignment_bits(self._ctx, id_)
 
-    def _resolve_cv_restrict(self, id_: str, depth: int = 0) -> tuple[bool, bool, bool]:
-        return _castxml_type_resolution.resolve_cv_restrict(self._ctx, id_, depth)
+    def _resolve_cv_restrict(self, id_: str) -> tuple[bool, bool, bool]:
+        return _castxml_type_resolution.resolve_cv_restrict(self._ctx, id_)
 
     def _is_global_scope(self, el: Any) -> bool:
         return _castxml_type_resolution.is_global_scope(self._ctx, el)

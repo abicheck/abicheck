@@ -123,23 +123,18 @@ def symbol_node_id(symbol: str) -> str:
 
 
 def build_consumer_graph(
-    consumer_name: str,
-    reqs: ConsumerRequirements,
-    *,
-    symbols: frozenset[str] | set[str] | None = None,
+    consumer_name: str, reqs: ConsumerRequirements
 ) -> SourceGraphSummary:
     """Promote one consumer's requirement set (in practice an
     ``appcompat.AppRequirements``; see :class:`ConsumerRequirements`) to graph
     facts.
 
-    *symbols*, when given, restricts the emitted ``CONSUMER_REQUIRES_SYMBOL``
-    edges to that subset — the caller's already-library-scoped requirement set
-    (``appcompat._scope_app_symbols_to_library`` narrows a consumer's raw
-    undefined-symbol table to the symbols the *target* library actually
-    exports). Omitted, every undefined symbol is recorded; an ELF consumer
-    with many ``DT_NEEDED`` entries would then contribute requirements that
-    belong to some other library, which is exactly the over-collection that
-    scoping exists to avoid.
+    Every undefined symbol in *reqs* is recorded, so *reqs* must already be
+    scoped to the target library (``appcompat._scope_app_symbols_to_library``
+    narrows a consumer's raw undefined-symbol table to the symbols the
+    *target* library actually exports). Unscoped, an ELF consumer with many
+    ``DT_NEEDED`` entries would contribute requirements that belong to some
+    other library.
 
     Confidence is ``CONF_HIGH`` for symbol requirements — an undefined symbol
     in a real linked binary is a fact about that binary, not an inference —
@@ -162,10 +157,7 @@ def build_consumer_graph(
         )
     )
 
-    required = set(reqs.undefined_symbols)
-    if symbols is not None:
-        required &= set(symbols)
-    for sym in sorted(required):
+    for sym in sorted(set(reqs.undefined_symbols)):
         sym_id = symbol_node_id(sym)
         graph.add_node(
             GraphNode(

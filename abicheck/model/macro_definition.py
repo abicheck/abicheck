@@ -29,7 +29,7 @@ is parsed once, at the CLI boundary, and never re-parsed.
 
 **Why this cannot inject an unrelated compiler option** (ADR-074 D4): a
 ``MacroDefinition`` renders to exactly ONE argv token, always prefixed with
-the frontend's define switch (``-D``/``/D``). A user-supplied string is never
+the define switch ``-D``. A user-supplied string is never
 placed in argv on its own, and :func:`parse_macro_definition` additionally
 rejects any spelling whose *name* is not a bare C identifier -- which is what
 turns ``--define=-Xclang``, ``--define=@resp.txt`` and ``--define=-DFOO`` into
@@ -94,20 +94,19 @@ class MacroDefinition:
         the resolved-request/dry-run receipt reports."""
         return self.name if self.value is None else f"{self.name}={self.value}"
 
-    def token(self, style: str = "gnu") -> str:
-        """This definition as ONE frontend argv token.
+    def token(self) -> str:
+        """This definition as ONE GNU-style frontend argv token (``-D``).
 
-        *style* is ``"gnu"`` (``-D``; GCC, Clang, and castxml in **either**
-        ``--castxml-cc-gnu`` or ``--castxml-cc-msvc`` emulation mode -- see
-        ADR-074's compatibility matrix and the identical unconditional
-        ``-D`` in ``buildsource/source_extractors/castxml.py``) or ``"cl"``
-        (``/D``; a driver actually invoked in MSVC/clang-cl mode, which
-        today is only ``buildsource/source_extractors/clang.py``'s
-        ``--driver-mode=cl`` L4 replay).
+        Every frontend these definitions reach takes ``-D``: GCC, Clang, and
+        castxml in **either** ``--castxml-cc-gnu`` or ``--castxml-cc-msvc``
+        emulation mode -- see ADR-074's compatibility matrix and the
+        identical unconditional ``-D`` in
+        ``buildsource/source_extractors/castxml.py``. The one driver that
+        takes ``/D`` (``buildsource/source_extractors/clang.py``'s
+        ``--driver-mode=cl`` L4 replay) spells its own defines from the
+        compile database and never renders a :class:`MacroDefinition`.
         """
-        if style not in ("gnu", "cl"):
-            raise ValueError(f"unknown define token style {style!r}")
-        return ("-D" if style == "gnu" else "/D") + self.spelling
+        return "-D" + self.spelling
 
 
 def parse_macro_definition(text: str) -> MacroDefinition:
@@ -220,12 +219,10 @@ def merge_macro_definitions(
     return tuple(out)
 
 
-def macro_definition_tokens(
-    definitions: Iterable[MacroDefinition], style: str = "gnu"
-) -> list[str]:
+def macro_definition_tokens(definitions: Iterable[MacroDefinition]) -> list[str]:
     """One argv token per definition, in order. See
-    :meth:`MacroDefinition.token` for what *style* selects."""
-    return [d.token(style) for d in definitions]
+    :meth:`MacroDefinition.token`."""
+    return [d.token() for d in definitions]
 
 
 def define_spellings_from_tokens(tokens: Iterable[str]) -> tuple[str, ...]:
@@ -294,7 +291,7 @@ def defines_receipt_line(tokens: Iterable[str]) -> str | None:
 
 
 def tokens_with_defines(
-    tokens: Iterable[str], defines: Iterable[str], style: str = "gnu"
+    tokens: Iterable[str], defines: Iterable[str]
 ) -> tuple[str, ...]:
     """*tokens* plus a rendered entry for every definition not already
     defined in them, by macro name.
@@ -320,5 +317,5 @@ def tokens_with_defines(
     already = {s.partition("=")[0] for s in define_spellings_from_tokens(rendered)}
     for definition in merge_macro_definitions((), parse_macro_definitions(defines)):
         if definition.name not in already:
-            rendered.append(definition.token(style))
+            rendered.append(definition.token())
     return tuple(rendered)
