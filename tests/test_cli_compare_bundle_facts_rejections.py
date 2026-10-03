@@ -1035,30 +1035,6 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--probe-matrix" in out
 
-    def test_post_manifest_is_rejected(self, tmp_path: Path) -> None:
-        # Codex review: --post-manifest's public_surface_allowlist is
-        # applied via a parameter compare_release_against_bundle_facts()
-        # doesn't have.
-        facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
-        new_dir = tmp_path / "new"
-        new_dir.mkdir()
-        manifest_path = tmp_path / "post_manifest.json"
-        manifest_path.write_text("{}")
-
-        code, out = _invoke(
-            "compare",
-            str(facts_path),
-            str(new_dir),
-            "--post-manifest",
-            str(manifest_path),
-            "-o",
-            "json=-",
-        )
-
-        assert code == 64
-        assert "--post-manifest" in out
-
     def test_config_scope_collapse_versioned_symbols_is_rejected(
         self, tmp_path: Path
     ) -> None:

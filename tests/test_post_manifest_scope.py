@@ -1,4 +1,5 @@
-"""Tests for POST-manifest surface scoping (`compare --post-manifest`).
+"""Tests for POST-manifest surface scoping (`.abicheck.yml` `contract.overlays.post_manifest`;
+the retired `compare --post-manifest` flag's config home, one-comparison-product Phase 9c/9d).
 
 The manifest's committed `pp_*`/ufunc-loop set is fed to compare() as an
 explicit ``public_surface_allowlist``: an export finding whose symbol is not
@@ -12,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from _legacy_scope import no_scope_config_args
+from _legacy_scope import post_manifest_config_args
 from click.testing import CliRunner
 
 from abicheck.checker import compare
@@ -340,7 +341,7 @@ def test_is_symbol_level_finding_partitions_kinds() -> None:
 def test_compare_cli_post_manifest_flag_scopes_to_committed_surface(
     tmp_path: Path,
 ) -> None:
-    # End-to-end: `compare old.json new.json --post-manifest m.json` loads the
+    # End-to-end: `compare old.json new.json` with contract.overlays.post_manifest loads the
     # manifest, scopes to its pp_* surface, and demotes private kernel churn.
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
@@ -374,8 +375,7 @@ def test_compare_cli_post_manifest_flag_scopes_to_committed_surface(
             "compare",
             str(old_p),
             str(new_p),
-            "--post-manifest",
-            str(manifest),
+            *post_manifest_config_args(tmp_path, manifest),
             "-o",
             "json=-",
         ],
@@ -425,9 +425,7 @@ def test_post_manifest_ledger_shown_even_with_no_scope_public_headers(
             "compare",
             str(old_p),
             str(new_p),
-            "--post-manifest",
-            str(manifest),
-            *no_scope_config_args(tmp_path),
+            *post_manifest_config_args(tmp_path, manifest, scoped=False),
             "-o",
             "json=-",
         ],
@@ -482,9 +480,7 @@ def test_compare_cli_post_manifest_keeps_omitted_old_pp_symbol_in_scope(
             "compare",
             str(old_p),
             str(new_p),
-            "--post-manifest",
-            str(manifest),
-            *no_scope_config_args(tmp_path),
+            *post_manifest_config_args(tmp_path, manifest, scoped=False),
             "-o",
             "json=-",
         ],
@@ -562,7 +558,7 @@ def test_contract_scope_allowlist_excludes_removed_data_variables() -> None:
 def test_compare_cli_malformed_post_manifest_is_clean_usage_error(
     tmp_path: Path,
 ) -> None:
-    # A malformed --post-manifest must produce a clean usage error, not a raw
+    # A malformed contract.overlays.post_manifest must produce a clean usage error, not a raw
     # traceback (the load is wrapped in click.UsageError).
     old_p = tmp_path / "old.json"
     new_p = tmp_path / "new.json"
@@ -573,10 +569,11 @@ def test_compare_cli_malformed_post_manifest_is_clean_usage_error(
 
     res = CliRunner().invoke(
         main,
-        ["compare", str(old_p), str(new_p), "--post-manifest", str(bad)],
+        ["compare", str(old_p), str(new_p), *post_manifest_config_args(tmp_path, bad)],
     )
-    assert res.exit_code != 0
-    assert "--post-manifest" in res.output and "invalid JSON" in res.output
+    assert res.exit_code == 64
+    assert "contract.overlays.post_manifest" in res.output
+    assert "invalid JSON" in res.output
     assert res.exception is None or isinstance(res.exception, SystemExit)
 
 
@@ -646,8 +643,7 @@ def test_compare_cli_removed_committed_wrapper_still_breaks(tmp_path: Path) -> N
             "compare",
             str(old_p),
             str(new_p),
-            "--post-manifest",
-            str(manifest),
+            *post_manifest_config_args(tmp_path, manifest),
             "-o",
             "json=-",
         ],

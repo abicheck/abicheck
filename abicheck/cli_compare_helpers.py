@@ -94,8 +94,8 @@ from .frontends.cli.compare_report import (
 )
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
 from .frontends.cli.contract_overlays import (
+    note_unapplied_post_manifest,
     post_manifest_allowlist_for,
-    reject_or_note_unapplied_post_manifest,
 )
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.ownership_config import project_ownership_request
@@ -1159,7 +1159,6 @@ def run_compare(
     ld_library_path: str,
     include_dependencies: bool,
     show_only: str | None,
-    post_manifest_path: Path | None,
     report_mode: str,
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],
@@ -1382,8 +1381,7 @@ def run_compare(
             budget=budget,
             pdb_path=pdb_path,
         )
-        reject_or_note_unapplied_post_manifest(
-            post_manifest_path,
+        note_unapplied_post_manifest(
             project_cfg,
             route="a directory/package comparison",
             reason="the per-library fan-out has no contract-overlay channel",
@@ -2056,7 +2054,7 @@ def run_compare(
     # --post-manifest: scope the comparison to the POST manifest's committed
     # `pp_*`/ufunc-loop surface (private __pp_* kernel churn is demoted).
     post_manifest_allowlist = post_manifest_allowlist_for(
-        post_manifest_path, project_cfg, cfg_path, old, new
+        project_cfg, cfg_path, old, new
     )
 
     # ADR-068 D4 (the correctness fix this phase exists for): pattern-verdict

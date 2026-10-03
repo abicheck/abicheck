@@ -149,7 +149,7 @@ class TestCompareHelpAllDisclosure:
         # A representative long-tail option from each folded panel.
         for advanced_flag in (
             "--dump-manifest",
-            "--post-manifest",
+            "--instantiation-manifest",
             "--diagnostic-comparison",
         ):
             assert advanced_flag not in out, (
@@ -239,7 +239,7 @@ class TestCompareHelpAllDisclosure:
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
             "--dump-manifest",
-            "--post-manifest",
+            "--instantiation-manifest",
             "--diagnostic-comparison",
         ):
             assert advanced_flag in out

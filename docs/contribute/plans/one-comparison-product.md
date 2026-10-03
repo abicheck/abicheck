@@ -20,8 +20,10 @@ relevance-defect blockers in
 the lane-coverage bound was accepted (2026-10-02), and slices 9a (the
 `--contract all` scope fix) and 9b (`--scope-public-headers`/`--no-` deleted,
 2026-10-03) and 9c (`--post-manifest`'s config home,
-`contract.overlays.post_manifest`, 2026-10-03) are done. What remains is 9d,
-deleting `--post-manifest`.
+`contract.overlays.post_manifest`, 2026-10-03) and 9d (`--post-manifest`
+deleted, 2026-10-03) are done: `--contract` is `compare`'s one contract
+mechanism and Phase 9 has no executable slice left. Retiring
+`CompareRequest.scope_public` is a separate, deferred Python-API decision.
 **Effort:** XL · **Risk:** high — this deleted a public command and moved
 capabilities between analysis paths. Phase ordering was the safety mechanism.
 
@@ -402,7 +404,7 @@ Click parameter, excluding `--help`/`--help-all`):
 
 | Command | Live | Audit end state (7l) | 2026-09-06 audit |
 |---|---|---|---|
-| `compare` | **42** (9b, 2026-10-03) | 25 | 78 accepted (4 hidden) |
+| `compare` | **41** (9b + 9d, 2026-10-03) | 25 | 78 accepted (4 hidden) |
 | `dump` | **20** | 13 | 39 |
 | `aggregate` | **5** | 4 | 6 |
 | `deps tree` | **6** | 6 | — |
@@ -925,7 +927,7 @@ authoritative open list:
 
 | Item | Where it is |
 |---|---|
-| `--post-manifest` deleted (config home landed in 9c; `--scope-public-headers` was retired in 9b) | Phase 9d — unblocked, next |
+| ~~`--scope-public-headers`, `--post-manifest`~~ | **Done** — Phase 9b/9c/9d (2026-10-03); `--contract` is the one contract mechanism |
 | `--instantiation-manifest`, `--use-cases`, `--bundle-facts-library-manifest`, `--bundle-facts-out` | `deferred`/keep rulings with named blockers in `rulings.py` |
 | `--follow-deps`/`--search-path`/`--ld-library-path` → one `--environment` operand | G42 |
 | `--abi3` armed from a declared floor | G26 |
@@ -1041,10 +1043,20 @@ uses the flag as the oracle across three sibling pair shapes. The resolved
 and a pack assigning it stays rejected (`UNAPPLIED_PACK_FIELDS`); the
 persisted `post_manifest` provider record (under `--contract`) carries the applied allowlist and its digest, identically for either spelling — it does not record which spelling or path selected it.
 
-**Remaining slices.** 9d deletes `--post-manifest` (exit 64), leaving
-`contract.overlays.post_manifest` as its only spelling. Extending overlays
-to the release fan-out would need a per-library manifest shape, which no
-project has asked for. Retiring `scope.public`/`CompareRequest.scope_public` is a separate
+**9d — `--post-manifest` deleted. Done** (2026-10-03). Exit 64 (`No such
+option`, no alias); `contract.overlays.post_manifest` is the only spelling.
+With the flag gone, 9c's "flag is exit 64 on the release fan-out/audit"
+branch went too: `frontends/cli/contract_overlays.py` now reads the config
+alone and only ever notes, never rejects. Removed with it: the option, its
+`rulings.py` entry, the audit's and stored-bundle driver's flag rejections,
+and the F2 route-parity row. The tests' oracle moved from the flag to
+`service.compare_snapshots(..., public_surface_allowlist=...)` called
+directly; `tests/_legacy_scope.post_manifest_config_args` is the one test
+spelling.
+
+**Remaining (not slices of this plan).** Extending overlays to the release
+fan-out would need a per-library manifest shape, which no project has asked
+for. Retiring `scope.public`/`CompareRequest.scope_public` is a separate
 Python-API decision. One asymmetry that decision should settle: the typed
 API always states `scope_public` (default `True`) at the `legacy_alias`
 layer, while a no-flag CLI run now resolves `contract.mode` from the

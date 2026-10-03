@@ -48,3 +48,18 @@ def scope_args(scope_public_headers: bool) -> list[str]:
     for scoped (the default), ``--config`` naming :data:`NO_SCOPE_CONFIG`
     for unscoped."""
     return [] if scope_public_headers else ["--config", str(NO_SCOPE_CONFIG)]
+
+
+def post_manifest_config_args(
+    directory: Path, manifest: Path, *, scoped: bool = True
+) -> list[str]:
+    """``["--config", <path>]`` for ``contract.overlays.post_manifest`` --
+    the only spelling of the retired ``--post-manifest`` (one-comparison-
+    product Phase 9d) -- plus ``scope.public: false`` when *scoped* is
+    false, in one document since ``--config`` names exactly one."""
+    cfg = directory / "post-manifest.abicheck.yml"
+    text = f"contract:\n  overlays:\n    post_manifest: {str(manifest)!r}\n"
+    if not scoped:
+        text += "scope:\n  public: false\n"
+    cfg.write_text(text, encoding="utf-8")
+    return ["--config", str(cfg)]

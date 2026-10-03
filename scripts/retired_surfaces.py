@@ -1084,6 +1084,22 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        # one-comparison-product.md Phase 9d: a POST manifest is a stable
+        # project property; .abicheck.yml's contract.overlays.post_manifest
+        # (Phase 9c) is its only spelling.
+        "compare --post-manifest (contract.overlays.post_manifest in .abicheck.yml)",
+        ("--post-manifest",),
+        frozenset(
+            {
+                "contribute/known-gaps.md",
+                "contribute/config-key-review.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/public-contract-default.md",
+                "start/upgrading-to-0.6.md",
+            }
+        ),
+    ),
 )
 
 

@@ -13,22 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``compare``'s POST-manifest contract overlay: flag or project config.
+"""``compare``'s POST-manifest contract overlay, from project config.
 
-One-comparison-product Phase 9c gives ``--post-manifest`` a config home,
-``.abicheck.yml``'s ``contract.overlays.post_manifest`` (see
-``buildsource/build_config_contract.py``). This module is the one place a
-``compare`` route decides which of the two applies:
+``.abicheck.yml``'s ``contract.overlays.post_manifest`` (one-comparison-
+product Phase 9c; ``buildsource/build_config_contract.py``) is the only
+spelling: Phase 9d deleted ``--post-manifest``, which exits 64. This module
+is the one place a ``compare`` route decides what to do with it:
 
-- a single-pair ``compare`` applies the flag when given, else the config key
-  (CLI > config, ADR-037 D4), with a relative config path resolved against
-  the project root (``config_paths.project_root_for_config``);
+- a single-pair ``compare`` applies it, a relative path resolved against the
+  project root (``config_paths.project_root_for_config``);
 - a route that cannot apply an overlay (the directory/package release
-  fan-out, the ``--no-baseline`` audit) rejects the *flag* as a usage error
-  and states on stderr that the *config key* was not applied. The flag used
-  to be silently ignored on the release fan-out. A project-wide key is not a
-  usage error there: it is a property of the project, not of this
-  invocation, and an unapplied narrowing overlay can only add findings.
+  fan-out, the ``--no-baseline`` audit) states on stderr that it was not
+  applied. It is a property of the project, not of this invocation, so it is
+  not a usage error there, and an unapplied narrowing overlay can only add
+  findings, never hide one.
 
 Split out of ``cli_compare_helpers.py``, which sits at its ADR-061
 ``no_growth`` baseline.
@@ -36,7 +34,6 @@ Split out of ``cli_compare_helpers.py``, which sits at its ADR-061
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -47,26 +44,18 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CONFIG_KEY",
-    "PostManifestOverlay",
+    "note_unapplied_post_manifest",
     "post_manifest_allowlist_for",
-    "reject_or_note_unapplied_post_manifest",
-    "resolve_post_manifest_overlay",
+    "resolve_post_manifest_path",
 ]
 
 CONFIG_KEY = "contract.overlays.post_manifest"
 
 
-@dataclass(frozen=True)
-class PostManifestOverlay:
-    """The manifest a run applies, and the spelling that selected it."""
-
-    path: Path
-    #: ``"--post-manifest"`` or :data:`CONFIG_KEY` -- named in every error
-    #: about the document, so a user knows which input to fix.
-    source: str
-
-
-def _configured(project_cfg: object, cfg_path: Path | None) -> Path | None:
+def resolve_post_manifest_path(
+    project_cfg: object, cfg_path: Path | None
+) -> Path | None:
+    """The configured manifest, project-root-relative paths resolved."""
     raw = getattr(project_cfg, "contract_post_manifest", None)
     if not raw:
         return None
@@ -78,25 +67,10 @@ def _configured(project_cfg: object, cfg_path: Path | None) -> Path | None:
     return project_root_for_config(cfg_path) / path
 
 
-def resolve_post_manifest_overlay(
-    flag_path: Path | None, project_cfg: object, cfg_path: Path | None
-) -> PostManifestOverlay | None:
-    """The overlay a single-pair ``compare`` applies: flag, else config."""
-    if flag_path is not None:
-        return PostManifestOverlay(flag_path, "--post-manifest")
-    configured = _configured(project_cfg, cfg_path)
-    return None if configured is None else PostManifestOverlay(configured, CONFIG_KEY)
-
-
-def reject_or_note_unapplied_post_manifest(
-    flag_path: Path | None, project_cfg: object, *, route: str, reason: str
+def note_unapplied_post_manifest(
+    project_cfg: object, *, route: str, reason: str
 ) -> None:
-    """For a *route* that applies no overlay: a typed flag is exit 64, a
-    configured key is a stderr note."""
-    if flag_path is not None:
-        raise click.UsageError(
-            f"--post-manifest is not supported on {route}: {reason}."
-        )
+    """For a *route* that applies no overlay: a stderr note when one is set."""
     if getattr(project_cfg, "contract_post_manifest", None):
         click.echo(
             f"Note: .abicheck.yml's {CONFIG_KEY} is not applied on {route} "
@@ -106,29 +80,27 @@ def reject_or_note_unapplied_post_manifest(
 
 
 def post_manifest_allowlist_for(
-    flag_path: Path | None,
     project_cfg: object,
     cfg_path: Path | None,
     old: AbiSnapshot,
     new: AbiSnapshot,
 ) -> set[str] | None:
-    """The committed public surface of the overlay a single-pair ``compare``
-    applies (:func:`resolve_post_manifest_overlay`), or ``None``.
+    """The committed public surface of the configured overlay, or ``None``.
 
     The manifest *is* the authoritative public surface, so this drives
     FilterNonPublicSurface directly (no header provenance needed) -- private
     ``__pp_*`` kernel churn is demoted. Union with the binaries' committed
     (``pp_*``) exports so a *removed* wrapper -- absent from a new manifest --
     stays in-surface instead of being silently demoted. A document that does
-    not load is exit 64 naming the input that selected it.
+    not load is exit 64 naming the config key.
     """
-    overlay = resolve_post_manifest_overlay(flag_path, project_cfg, cfg_path)
-    if overlay is None:
+    path = resolve_post_manifest_path(project_cfg, cfg_path)
+    if path is None:
         return None
     from ...post_manifest import contract_scope_allowlist, load_manifest
 
     try:
-        manifest = load_manifest(overlay.path)
+        manifest = load_manifest(path)
     except (ValueError, OSError) as exc:
-        raise click.UsageError(f"{overlay.source} {overlay.path}: {exc}") from exc
+        raise click.UsageError(f"{CONFIG_KEY} {path}: {exc}") from exc
     return contract_scope_allowlist(manifest, old, new)

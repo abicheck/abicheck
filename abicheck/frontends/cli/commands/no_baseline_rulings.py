@@ -235,10 +235,6 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "use-case attribution maps a comparison's findings to declared use "
         "cases; an audit's findings are not changes",
     ),
-    "post_manifest_path": (
-        "--post-manifest",
-        "a post-manifest overlays contract scope across two sides",
-    ),
     "diagnostic_comparison": (
         "--diagnostic-comparison",
         "this escape hatch downgrades an incomparable-pair failure; with "

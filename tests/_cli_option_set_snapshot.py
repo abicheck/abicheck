@@ -71,6 +71,8 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # --contract all is the measured replacement for the opt-out, and
         # header-origin scoping stays on for a run with no --contract
         # (.abicheck.yml's scope.public is its config spelling).
+        # Phase 9d deleted --post-manifest: .abicheck.yml's
+        # contract.overlays.post_manifest (Phase 9c) is its only spelling.
         "--abi3",
         "--budget",
         "--bundle-facts-library-manifest",
@@ -99,7 +101,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--pack",
         "--performance-profile",
         "--policy",
-        "--post-manifest",
         "--required-symbol",
         "--search-path",
         "--select",

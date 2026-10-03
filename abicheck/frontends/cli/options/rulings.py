@@ -452,17 +452,6 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
     # entries here used to track. No entry remains for either, matching
     # the precedent of every other fully-retired option (e.g.
     # `--build-target`, PR #1219) never appearing in this dict at all.
-    "--post-manifest": _deferred(
-        "A second contract/scope mechanism next to --contract; Phase 9 "
-        "re-expresses it as a contract overlay, the way Phase 9b already "
-        "retired --scope-public-headers into --contract. Same rule: never "
-        "trade a possible false negative for a shorter CLI.",
-        blocker=(
-            "one-comparison-product Phase 9d: delete the option now that "
-            "Phase 9c gave it a config home (.abicheck.yml's "
-            "contract.overlays.post_manifest)"
-        ),
-    ),
     "--instantiation-manifest": _deferred(
         "A declared contract document is a project property (§4.1's CONFIG "
         "row), but its config home needs the ADR-049 contract-vocabulary "

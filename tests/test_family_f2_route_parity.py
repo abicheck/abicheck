@@ -149,10 +149,6 @@ CLICK_ROUTING: dict[str, tuple[str, Any]] = {
     "defines": (_UC, "preprocessor defines only act on a live header dump"),
     "search_paths": (_UC, "dependency search paths need real binaries"),
     "ld_library_path": (_UC, "dependency search paths need real binaries"),
-    "post_manifest_path": (
-        _UC,
-        "maps to public_surface_allowlist through a manifest parser; not yet a cell",
-    ),
     "debug_info": (_UC, "external debug roots need real stripped binaries"),
     "build_info": (_UC, "L3 build evidence needs a build tree"),
     "sources": (_UC, "L4/L5 source evidence needs a source tree"),
@@ -209,7 +205,7 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     ),
     "public_surface_allowlist": (
         _UC,
-        "CLI spelling is --post-manifest; not yet a cell",
+        "CLI reaches it through .abicheck.yml contract.overlays.post_manifest; not yet a cell",
     ),
     "enable_debuginfod": (_UC, "network"),
     "debuginfod_url": (_UC, "network"),
@@ -294,7 +290,6 @@ DEFAULT_UNMAPPED: dict[str, str] = {
     "used_by_manifests": "applied after compare() by the CLI; no request field",
     "config": ".abicheck.yml is folded into several request fields",
     "defines": "folded into InputSpec.compile (a context object)",
-    "post_manifest_path": "a path parsed into public_surface_allowlist; default None on both, different types",
     "since": "git-ref operand sugar",
     "dry_run": "CLI-only planning mode",
     "pack_paths": "folded into pack_* request projections",

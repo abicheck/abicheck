@@ -108,7 +108,7 @@ PACK_SOURCE_KIND = "pack_manifest"
 UNAPPLIED_PACK_FIELDS: Mapping[str, str] = {
     "contract.overlays": (
         "the public domain's overlays come from .abicheck.yml's "
-        "contract.overlays.post_manifest (or --post-manifest) and "
+        "contract.overlays.post_manifest and "
         "scope.public_symbols, which name concrete inputs; a pack naming an "
         "overlay kind has nothing to point those at"
     ),

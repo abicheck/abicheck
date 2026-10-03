@@ -14,15 +14,17 @@
 # limitations under the License.
 
 """``.abicheck.yml``'s ``contract.overlays.post_manifest`` (one-comparison-
-product Phase 9c): the config home of ``compare --post-manifest``.
+product Phase 9c), the only spelling of the POST manifest overlay since
+Phase 9d deleted ``compare --post-manifest``.
 
-The oracle for "the key does what the flag does" is the flag itself, run on
-the same pair: several independently-shaped pairs (demoted kernel churn, a
-committed wrapper's real break, a wrapper the new manifest omits) must give
-the same verdict, exit code, findings and scope ledger through either
-spelling. The rest pins precedence (flag > config), project-root-relative
-resolution, which input an error names, and the routes that cannot apply an
-overlay: a typed flag is exit 64 there, a configured key is a stderr note.
+The oracle for "the key applies the overlay" is the Tier-2 comparison called
+with the manifest's allowlist directly (``service.compare_snapshots(...,
+public_surface_allowlist=contract_scope_allowlist(...))``), not the CLI's
+own resolution: several independently-shaped pairs (demoted kernel churn, a committed
+wrapper's real break, a wrapper the new manifest omits) must give the same
+verdict and findings through the CLI key. The rest pins project-root-relative
+resolution, the error naming the key, the retired flag, and the routes that
+cannot apply an overlay (a stderr note, never a usage error).
 """
 
 from __future__ import annotations
@@ -37,7 +39,9 @@ from abicheck.action_config_overlay import rebase_relative_config_paths
 from abicheck.buildsource.build_config import BuildConfig
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.post_manifest import contract_scope_allowlist, load_manifest
 from abicheck.serialization import snapshot_to_json
+from abicheck.service import compare_snapshots
 
 
 def _fn(name: str, ret: str = "void", params: tuple[str, ...] = ()) -> Function:
@@ -115,20 +119,33 @@ def _outcome(doc: dict) -> tuple:
     )
 
 
+_KEY = "contract:\n  overlays:\n    post_manifest: m.json\n"
+
+
 @pytest.mark.parametrize("name", sorted(PAIRS))
-def test_the_config_key_scopes_exactly_like_the_flag(tmp_path: Path, name: str) -> None:
+def test_the_config_key_applies_the_manifest_overlay(tmp_path: Path, name: str) -> None:
     old_p, new_p = _pair(tmp_path, name)
     manifest = _manifest(tmp_path / "m.json")
-    flag = _run(str(old_p), str(new_p), "--post-manifest", str(manifest))
-    cfg = _config(tmp_path, "contract:\n  overlays:\n    post_manifest: m.json\n")
-    keyed = _run(str(old_p), str(new_p), "--config", str(cfg))
+    old, new = (_snap(fns) for fns in PAIRS[name])
+    oracle = compare_snapshots(
+        old,
+        new,
+        public_surface_allowlist=contract_scope_allowlist(
+            load_manifest(manifest), old, new
+        ),
+    )
+    code, doc, err = _run(
+        str(old_p), str(new_p), "--config", str(_config(tmp_path, _KEY))
+    )
+    assert doc.get("verdict") == oracle.verdict.value, err
+    assert sorted(c["kind"] for c in doc.get("changes", [])) == sorted(
+        c.kind.value for c in oracle.changes
+    )
     unscoped = _run(str(old_p), str(new_p))
-    assert flag[0] == keyed[0], (flag[2], keyed[2])
-    assert _outcome(flag[1]) == _outcome(keyed[1])
     if name == "kernel_churn_demoted":
         # Vacuity guard: the overlay really changed something on this pair.
-        assert _outcome(keyed[1]) != _outcome(unscoped[1])
-        assert keyed[0] == 0 and unscoped[0] != 0
+        assert _outcome(doc) != _outcome(unscoped[1])
+        assert code == 0 and unscoped[0] != 0
 
 
 def test_a_relative_path_resolves_against_the_project_root(tmp_path: Path) -> None:
@@ -140,47 +157,31 @@ def test_a_relative_path_resolves_against_the_project_root(tmp_path: Path) -> No
     gh = tmp_path / ".github"
     gh.mkdir()
     cfg = gh / ".abicheck.yml"
-    cfg.write_text(
-        "contract:\n  overlays:\n    post_manifest: m.json\n", encoding="utf-8"
-    )
+    cfg.write_text(_KEY, encoding="utf-8")
     code, _doc, err = _run(str(old_p), str(new_p), "--config", str(cfg))
     assert code == 0, err
 
 
-def test_the_flag_outranks_the_config_key(tmp_path: Path) -> None:
+def test_an_unreadable_document_is_a_usage_error_naming_the_key(tmp_path: Path) -> None:
+    old_p, new_p = _pair(tmp_path, "kernel_churn_demoted")
+    (tmp_path / "bad.json").write_text("{not json", encoding="utf-8")
+    cfg = _config(tmp_path, "contract:\n  overlays:\n    post_manifest: bad.json\n")
+    res = CliRunner().invoke(
+        main, ["compare", str(old_p), str(new_p), "--config", str(cfg)]
+    )
+    assert res.exit_code == 64, res.output
+    assert "contract.overlays.post_manifest" in res.output
+
+
+def test_the_retired_flag_is_a_usage_error(tmp_path: Path) -> None:
+    """Phase 9d (plan F-27): no alias, no silent ignore."""
     old_p, new_p = _pair(tmp_path, "kernel_churn_demoted")
     manifest = _manifest(tmp_path / "m.json")
-    cfg = _config(tmp_path, "contract:\n  overlays:\n    post_manifest: missing.json\n")
-    code, _doc, err = _run(
-        str(old_p), str(new_p), "--config", str(cfg), "--post-manifest", str(manifest)
+    res = CliRunner().invoke(
+        main, ["compare", str(old_p), str(new_p), "--post-manifest", str(manifest)]
     )
-    assert code == 0, err
-
-
-@pytest.mark.parametrize(
-    ("via_flag", "named"),
-    [(False, "contract.overlays.post_manifest"), (True, "--post-manifest")],
-)
-def test_an_unreadable_document_is_a_usage_error_naming_its_input(
-    tmp_path: Path, via_flag: bool, named: str
-) -> None:
-    old_p, new_p = _pair(tmp_path, "kernel_churn_demoted")
-    bad = tmp_path / "bad.json"
-    bad.write_text("{not json", encoding="utf-8")
-    if via_flag:
-        args = ["--post-manifest", str(bad)]
-    else:
-        args = [
-            "--config",
-            str(
-                _config(
-                    tmp_path, "contract:\n  overlays:\n    post_manifest: bad.json\n"
-                )
-            ),
-        ]
-    res = CliRunner().invoke(main, ["compare", str(old_p), str(new_p), *args])
     assert res.exit_code == 64, res.output
-    assert named in res.output
+    assert "No such option" in res.output and "--post-manifest" in res.output
 
 
 def _dirs(tmp_path: Path) -> tuple[Path, Path]:
@@ -193,26 +194,12 @@ def _dirs(tmp_path: Path) -> tuple[Path, Path]:
     return old_d, new_d
 
 
-def test_the_flag_is_rejected_on_a_directory_comparison(tmp_path: Path) -> None:
-    """It used to be accepted and silently ignored by the release fan-out."""
-    old_d, new_d = _dirs(tmp_path)
-    manifest = _manifest(tmp_path / "m.json")
-    res = CliRunner().invoke(
-        main, ["compare", str(old_d), str(new_d), "--post-manifest", str(manifest)]
-    )
-    assert res.exit_code == 64, res.output
-    assert (
-        "--post-manifest is not supported on a directory/package comparison"
-        in res.output
-    )
-
-
 def test_the_config_key_is_noted_not_applied_on_a_directory_comparison(
     tmp_path: Path,
 ) -> None:
     old_d, new_d = _dirs(tmp_path)
     _manifest(tmp_path / "m.json")
-    cfg = _config(tmp_path, "contract:\n  overlays:\n    post_manifest: m.json\n")
+    cfg = _config(tmp_path, _KEY)
     keyed = CliRunner().invoke(
         main, ["compare", str(old_d), str(new_d), "--config", str(cfg)]
     )
@@ -226,7 +213,7 @@ def test_the_config_key_is_noted_not_applied_on_a_no_baseline_audit(
 ) -> None:
     _old_p, new_p = _pair(tmp_path, "kernel_churn_demoted")
     _manifest(tmp_path / "m.json")
-    cfg = _config(tmp_path, "contract:\n  overlays:\n    post_manifest: m.json\n")
+    cfg = _config(tmp_path, _KEY)
     res = CliRunner().invoke(
         main, ["compare", "--no-baseline", str(new_p), "--config", str(cfg)]
     )
@@ -260,7 +247,7 @@ def test_the_config_key_is_noted_not_applied_on_a_no_baseline_audit(
 def test_malformed_blocks_fail_strict_loading(block: str, fragment: str) -> None:
     import yaml
 
-    with pytest.raises(ValueError, match="") as info:
+    with pytest.raises(ValueError) as info:
         BuildConfig.from_dict(yaml.safe_load(block))
     assert fragment in str(info.value)
 

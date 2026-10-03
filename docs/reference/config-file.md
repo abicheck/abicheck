@@ -327,13 +327,12 @@ contract:
 ```
 
 A relative path resolves against the project root, like
-`compile.include_dirs`. `compare --post-manifest PATH` overrides the key for
-one run. The overlay applies to a single-pair `compare` only. A
-directory/package comparison and a `--no-baseline` audit do not apply it and
-say so on stderr (an unapplied narrowing overlay can only add findings, never
-hide one); passing `--post-manifest` explicitly to either is a usage error
-(exit `64`). A stored-bundle-facts baseline rejects the `contract:` block like
-the other blocks it cannot honour.
+`compile.include_dirs`. This key is the overlay's only spelling (the former
+per-run flag was removed). The overlay applies to a single-pair `compare`
+only. A directory/package comparison and a `--no-baseline` audit do not
+apply it and say so on stderr (an unapplied narrowing overlay can only add
+findings, never hide one). A stored-bundle-facts baseline rejects the
+`contract:` block like the other blocks it cannot honour.
 
 ### `suppression:`
 
