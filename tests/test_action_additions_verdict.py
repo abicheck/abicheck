@@ -111,3 +111,23 @@ def test_a_real_break_keeps_its_verdict_and_still_reports_the_axis(
     outputs = _action_outputs(tmp_path, code, report, INPUT_FAIL_ON_BREAKING="false")
     assert outputs["verdict"] == "BREAKING", outputs
     assert outputs["_exit"] == 1, outputs
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    ["1", True, 1.0, 2, "1\nverdict=COMPATIBLE", ["1"], {"v": 1}],
+    ids=["str", "bool", "float", "two", "newline-injection", "list", "dict"],
+)
+def test_a_malformed_contribution_neither_gates_nor_injects_outputs(
+    tmp_path: Path, hostile: object
+) -> None:
+    """A report whose ``additions_review_contribution`` is anything but the
+    integer ``0``/``1`` the schema allows is "cannot tell": it must not gate
+    the step, and a newline in it must not reach ``$GITHUB_OUTPUT`` as an
+    extra record."""
+    code, report = _real_report(tmp_path, action="allow", break_it=False)
+    report["exit"]["additions_review_contribution"] = hostile
+    outputs = _action_outputs(tmp_path, code, report)
+    assert outputs["verdict"] != "ADDITIONS_UNACKNOWLEDGED", outputs
+    assert outputs["_exit"] == 0, outputs
+    assert "additions" not in outputs["_summary"].lower(), outputs
