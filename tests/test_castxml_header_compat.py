@@ -256,6 +256,10 @@ def test_aarch64_target_parses_libstdcxx_float_headers(
 @pytest.mark.skipif(
     not (_CASTXML and shutil.which("g++")), reason="needs castxml and g++"
 )
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="builds and parses an ELF shared object; ELF is Linux-only",
+)
 def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> None:
     """With and without the preamble, a host dump is byte-identical."""
     header, src = _write_case(tmp_path)

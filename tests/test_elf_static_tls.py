@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -181,6 +182,10 @@ def _has_any_tls_dynamic_evidence(so: Path) -> bool:
     not shutil.which("readelf"), reason="readelf required as the oracle"
 )
 @pytest.mark.skipif(not _COMPILERS, reason="no C compiler")
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="builds and parses an ELF shared object; ELF is Linux-only",
+)
 @pytest.mark.parametrize("cc", _COMPILERS)
 def test_every_tls_model_is_classified_by_its_semantics(
     cc: str, tmp_path: Path

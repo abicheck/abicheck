@@ -451,3 +451,32 @@ def test_gcc_group_does_not_leak_into_the_next_diagnostic():
         ]
     )
     assert attribute_failing_headers(stderr, headers) == {0, 2}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("castxml") is None, reason="needs castxml")
+@pytest.mark.parametrize(
+    ("n", "bad"), [(n, bad) for n in (2, 3, 4) for bad in range(n)]
+)
+def test_real_castxml_attributes_the_failing_header_at_every_position(tmp_path, n, bad):
+    """The aggregate header castxml parses must keep header ``i`` on line ``i+1``.
+
+    Bug class: anything the aggregate writer emits ahead of the listed headers
+    (the ``_Float128`` preamble include did) shifts every line by one, so the
+    fallback blamed the *next* header -- or none -- and the whole dump failed.
+    Enumerates every failing position over 2-4 headers, through real castxml;
+    the oracle is the index the test chose, not the attribution arithmetic.
+    """
+    from abicheck.dumper import _castxml_dump
+    from abicheck.dumper_castxml_probe import castxml_dump_excluding_unparseable
+
+    headers = []
+    for i in range(n):
+        h = tmp_path / f"h{i}.h"
+        body = '#error "unparseable"\n' if i == bad else ""
+        h.write_text(f"#pragma once\n{body}int fn{i}(int);\n")
+        headers.append(h)
+    _root, excluded = castxml_dump_excluding_unparseable(
+        _castxml_dump, headers, [tmp_path], "cc", lang="c"
+    )
+    assert excluded == [headers[bad]]

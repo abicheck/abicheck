@@ -126,7 +126,11 @@ def write_castxml_aggregate(headers: Iterable[Path], suffix: str) -> Path:
     agg_dir = Path(tempfile.mkdtemp(prefix="abicheck_castxml_"))
     preamble = agg_dir / PREAMBLE_FILENAME
     preamble.write_text(CASTXML_HEADER_PREAMBLE)
-    lines = [f'#include "{preamble}"\n']
+    # ``#line 1`` restores the aggregate-TU layout every diagnostic consumer
+    # relies on -- header ``i`` on line ``i+1`` -- so the preamble include
+    # costs no line (``unparseable_header_fallback._attribute`` maps a failing
+    # aggregate frame back to its header by that line number alone).
+    lines = [f'#include "{preamble}"\n', "#line 1\n"]
     lines += [f'#include "{h.resolve()}"\n' for h in headers]
     agg_path = agg_dir / f"aggregate{suffix}"
     agg_path.write_text("".join(lines))

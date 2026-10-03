@@ -112,6 +112,10 @@ _PROFILES = {
     not (shutil.which("castxml") and shutil.which("c++")),
     reason="needs castxml and c++",
 )
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="builds and parses an ELF shared object; ELF is Linux-only",
+)
 def test_case89_finding_is_independent_of_debug_evidence(tmp_path: Path) -> None:
     results: dict[str, tuple[str, list[tuple[str, str]]]] = {}
     for profile, (flags, strip) in _PROFILES.items():
