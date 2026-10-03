@@ -45,10 +45,7 @@ Keeping this as a pure, additive function elsewhere costs nothing: it reads
 the identical ``BundleSnapshot``/``DiffResult`` shapes ``compare_bundle``
 already produces/consumes, and a caller wanting both simply calls both and
 concatenates the finding lists (see this module's own tests for the exact
-pattern). This also matches G38 Phase 3's `bundle_multibuild.py` precedent
-(`pair_variants`/`coverage_regression_findings` are equally standalone, not
-wired into `compare_bundle`) — no CLI/config surface yet calls this
-function either; see this phase's status note in the plan doc.
+pattern).
 
 This is a leaf module with respect to :mod:`abicheck.bundle`: it does not
 import that module (only :mod:`abicheck.bundle_models` for ``BundleFinding``/

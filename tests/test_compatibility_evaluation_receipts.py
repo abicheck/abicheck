@@ -31,6 +31,7 @@ from _compat_eval_fixtures import (
     resolve as _resolve,
     write_pack as _write_pack,
 )
+from _cross_front_end import cross_front_end_differences
 
 from abicheck.change_registry_types import Verdict
 from abicheck.compatibility_evaluation_frontend import (
@@ -48,7 +49,6 @@ from abicheck.compatibility_evaluation_frontend import (
     SuppressionSource,
     compare_cli_inputs,
     compatibility_config_from_compare_request,
-    cross_front_end_differences,
 )
 from abicheck.contract_relevance_types import SelectorLayer
 from abicheck.policy_file import PolicyFile

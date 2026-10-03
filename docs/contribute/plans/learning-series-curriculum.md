@@ -424,7 +424,7 @@ writing a second explanation next to a registered one:
    `baseline-lifecycle` → `use/baseline-management.md` (front matter
    `doc_type: explanation`; its sections are exactly the model above). No
    new page, and no tab move either: the page carries Action inputs and
-   internal names (`abicheck.product_baseline`), which the educational tab
+   internal module names, which the educational tab
    forbids in prose, so it stays in the tool track and the ladder *links*
    to it as the Practice tier's baseline entry — the same treatment §5
    gives the evidence trio. "Baselines as contracts" is therefore a

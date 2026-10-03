@@ -272,7 +272,9 @@ success failure mode this ADR exists to close.
 
 `abicheck.buildsource.baseline_publish.accepted_main_cache_key(key_prefix,
 profile_id, head_sha)` / `accepted_main_cache_restore_prefix(key_prefix,
-profile_id)` are this format's pure-Python mirror.
+profile_id)` own this format: the workflow's "Compute cache key" step calls
+them, so a consumer calling the same functions computes the key the
+workflow wrote.
 
 **When `baseline-generation` is set, the key gets an extra segment.**
 `update-main-baseline.yml`'s "Compute cache key" step folds
@@ -285,11 +287,14 @@ cache-key namespace:
 <key-prefix>-g<generation>-<profile-id>-<head-sha>
 ```
 
-Both mirror functions accept this as an explicit keyword argument --
+Both functions accept this as an explicit keyword argument --
 `accepted_main_cache_key(key_prefix, profile_id, head_sha,
 generation=3)` / `accepted_main_cache_restore_prefix(key_prefix,
 profile_id, generation=3)` — rather than requiring a consumer to
-pre-fold `-g3` into `key_prefix` themselves. **A consumer restoring this
+pre-fold `-g3` into `key_prefix` themselves. The workflow parses the
+input with `parse_baseline_generation`, the same acceptance rule
+`actions/baseline` applies (ASCII digits only), and folds the integer the
+manifest records, so `baseline-generation: 03` keys as `-g3`. **A consumer restoring this
 cache (`restore-keys: <key-prefix>-<profile-id>-`) must pass the exact
 same `generation` this workflow was run with**, or the restore misses
 entirely: the un-generation-scoped prefix is a *different* cache-key

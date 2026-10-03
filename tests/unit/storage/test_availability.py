@@ -534,9 +534,9 @@ class TestRequiredFamiliesMustBeACollection:
         collection whose items are not strings — `extend("abc")` raises on
         `"a"`. That reasoning holds only for a *non-empty* string.
         `extend("")` iterated zero times and silently produced an empty
-        set, and `group_by_entity("")` returned `{}` (Codex review; the
-        second was not reported, and came out of re-checking the claim the
-        first falsified).
+        set, and a since-removed `group_by_entity("")` returned `{}` (Codex
+        review; the second was not reported, and came out of re-checking
+        the claim the first falsified).
 
         **A per-item guard is never a container guard, because an empty
         container has no items.** Both doors now check the container, so
@@ -544,13 +544,11 @@ class TestRequiredFamiliesMustBeACollection:
         the point, since testing only the non-empty one is what let the
         original claim look proven.
         """
-        from abicheck.storage.identity import OccurrenceSet, group_by_entity
+        from abicheck.storage.identity import OccurrenceSet
 
         for scalar in ("abc", "", b"ab", b""):
             with pytest.raises(TypeError):
                 OccurrenceSet().extend(scalar)
-            with pytest.raises(TypeError):
-                group_by_entity(scalar)
 
 
 class TestUnknownFamilyFallbackCannotBeComparable:

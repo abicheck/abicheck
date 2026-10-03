@@ -60,6 +60,14 @@ coverage is low.
 - runs whose path changed, grouped by the change they share (goal 3);
 - newly reached functions, and runs that failed.
 
+`dead RECORDING` classifies every unreached function by production
+reference (`scripts/production_references.py`): **dead** when every
+reference to its name in `abicheck/`, `scripts/`, `action/`, `actions/`,
+`.github/` or `pyproject.toml` lies inside another dead function (a
+greatest fixpoint), with documented API and ADR/plan-named functions listed
+apart and treated as roots. It is the recomputed form of the hand-made list
+[dead-code-and-single-owner](dead-code-and-single-owner.md) started from.
+
 `record --root` measures another checkout with this tool, so CI records
 the PR base and head with one recorder.
 
@@ -83,8 +91,8 @@ read back a dump it wrote under a `.dump` name (fixed in PR #1448).
 
 ## Status and next steps
 
-Landed: the recorder, the three reports, the PR and weekly workflow, and
-the attribution and diff tests.
+Landed: the recorder, the four reports, the PR and weekly workflow, and
+the attribution, diff and dead-code fixpoint tests.
 
 Open, in order:
 

@@ -400,6 +400,13 @@ its baseline live, in-job, so it never needs to pair two already-captured
 `BundleFacts` documents in the first place; see Phase 15's "Why
 `bundle_variants_config.py`/`pair_variants`/`BundleVariantSpec` stay
 unwired" note. This deferral is therefore permanent, not pending.)*
+*(Removed (2026-10): with the deferral permanent, `bundle_multibuild.py`
+and `ChangeKind.BUNDLE_VARIANT_COVERAGE_REGRESSED` were code no command,
+Action or workflow could reach, and the kind could never be emitted. Both
+were deleted by `dead-code-and-single-owner.md` Stage C; the variant
+pairing that does run is `compare/variant_pairing.pair_variant_views`
+(storage-format-v2 A1.6), report-only by design. The bullets below are the
+historical record of what this phase shipped.)*
 
 - `abicheck/bundle_multibuild.py` implements `variant_fingerprint`,
   `VariantOutcome`, `VariantComparison`, `pair_variants`, and
@@ -1712,7 +1719,12 @@ attempted, for one concrete, measured reason — see "Known gap" below.**
   through `bundle_analysis.analyze_bundle()` so none of the four can
   independently drift on which detectors ran (Phase 12's own guarantee,
   extended here to the two pairings — live/stored and stored/stored — that
-  didn't exist as callable shapes before this phase).
+  didn't exist as callable shapes before this phase). *(Later removed:
+  `BundleSideInput`/`resolve_bundle_side()`/`compare_bundle_sides()` never
+  gained a command, Action or workflow caller — the CLI got one driver per
+  operand shape instead, `compare_release_against_bundle_facts()` and
+  `workflows/bundle_stored_pair_compare.py` — and were deleted by
+  `dead-code-and-single-owner.md` Stage C.)*
   `compare_release_against_bundle_facts()` is the concrete unblocking:
   given a stored OLD-side `BundleFacts` path and a live NEW-side directory,
   it discovers the NEW side's `.so` files, dumps and diffs each matched
@@ -2308,7 +2320,7 @@ verified against current source, not assumed. `compare_bundle()`/
 None` (see this plan's own docstring excerpt for `compare_bundle`'s
 `policy_file` parameter above), and the stored-`BundleFacts` Python-API
 driver (`bundle_facts.compare_bundle_from_facts()`,
-`bundle_side_input.compare_bundle_sides()`/
+`bundle_side_input.compare_bundle_sides()` (since deleted)/
 `compare_release_against_bundle_facts()`) already resolves and forwards a
 real one. **The CLI's directory/package `compare-release` fan-out does
 not**: `cli_compare_release_helpers._run_bundle_analysis()` calls

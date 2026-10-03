@@ -7,10 +7,11 @@
 
 Some compatibility risks are deliberately outside a producer binary/header
 snapshot: macro-conditioned consumer API, C++20 concept constraint tightening,
-and overload-resolution ambiguity at downstream call sites.  This module keeps
-that proof lane in the library (not only in the examples runner) so callers can
-exercise the same compile/link checks from tests, validation, or future CLI
-wiring.
+and overload-resolution ambiguity at downstream call sites.  This module is
+that proof lane: the examples ground-truth harness (``validate_examples.py``)
+runs a case's hand-authored ``source_smoke`` spec through it. It is a fixture
+oracle, not a product capability (ADR-060), so it lives with the tests rather
+than in the ``abicheck`` package.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from .deadline import run_bounded
+from abicheck.deadline import run_bounded
 
 SmokeMode = Literal["syntax", "link", "run"]
 SmokeExpectation = Literal["success", "failure"]

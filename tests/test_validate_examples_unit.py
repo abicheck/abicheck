@@ -16,8 +16,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from source_smoke import SourceSmokeResult  # noqa: E402
+
 import tests.validate_examples as ve  # noqa: E402
-from abicheck.source_smoke import SourceSmokeResult  # noqa: E402
 from tests.validate_examples import (  # noqa: E402
     ARTIFACT_VARIANTS,
     DEFAULT_ARTIFACT_VARIANT,
