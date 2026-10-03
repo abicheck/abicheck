@@ -290,9 +290,8 @@ use_cases:
       export and COMPATIBLE on identical builds
       (tests/test_cross_platform_integration.py). AArch64 AAPCS64 by-value
       aggregate passing (HFA/HVA, the 16-byte small-struct → indirect boundary)
-      is modeled by macho_metadata.classify_aapcs64_aggregate and unit-tested in
-      tests/test_macos_arm64_abi.py; the calling-convention divergence from SysV
-      x86-64 is documented in docs/reference/platforms.md. Example-catalog
+      is not modeled (docs/contribute/known-gaps.md); the calling-convention
+      divergence from SysV x86-64 is documented in docs/reference/platforms.md. Example-catalog
       platform tags remain a deliberate subset of Linux
       (tests/test_platform_coverage_honesty.py).
     evidence:
