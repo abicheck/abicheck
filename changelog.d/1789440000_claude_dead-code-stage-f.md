@@ -25,3 +25,5 @@
   `buildsource.inputs_emit.write_inputs_pack` and
   `project_snapshot_store.read_project_manifest`, which only tests called,
   moved to `tests/`.
+- Removed `EvidenceView.available_depths`, an unread restatement of the
+  `--depth` ladder `evidence_depth.DEPTH_RANK` owns.

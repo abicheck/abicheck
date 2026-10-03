@@ -48,12 +48,9 @@ module's docstring). Recomputing "effective"/"available" independently here
 would be exactly the "two independently constructible representations of
 the same fact" shape the Governing Invariant forbids. :class:`EvidenceView`
 resolves this by construction rather than by omission: it always carries
-``requested_depth`` (knowable pre-execution) and ``available_depths`` (the
-static four-rung ``--depth`` ladder, read through
-:data:`~abicheck.evidence_depth.DEPTH_RANK` (the shared leaf
-`workflows/AGENTS.md` names for this vocabulary) and restated as plain
-values -- build-time vocabulary, not a per-run computed fact, so stating it
-here duplicates nothing); ``effective_depth``/``depth_satisfied`` stay
+``requested_depth`` (knowable pre-execution; the ladder it is drawn from is
+:data:`~abicheck.evidence_depth.DEPTH_RANK`, not restated here);
+``effective_depth``/``depth_satisfied`` stay
 ``None`` until :meth:`EvidenceView.from_assurance` copies them verbatim off
 a real, already-computed ``AnalysisAssurance`` -- never re-derived. A
 :class:`ResolvedExecutionContext` built before execution therefore carries
@@ -99,8 +96,6 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from ..evidence_depth import DEPTH_RANK
-
 if TYPE_CHECKING:
     from ..compatibility_evaluation_config import (
         CompatibilityEvaluationConfig,
@@ -109,20 +104,6 @@ if TYPE_CHECKING:
     from .plan import AnalysisPlan
 
 __all__ = ["EvidenceView", "ResolvedExecutionContext"]
-
-#: The public ``--depth`` ladder, restated as plain string values -- read
-#: through :mod:`abicheck.evidence_depth` (Codex review, PR #1027, fifth
-#: round), the one shared leaf `workflows/AGENTS.md` names for this exact
-#: vocabulary ("Shared vocabulary ... lives in leaves any layer may depend
-#: on: `abicheck/evidence_depth.py` (the depth ladder) ... Prefer them over
-#: re-deriving") -- not `model.evidence_depth_levels.USER_DEPTHS` directly, which
-#: would restore the workflow-to-buildsource coupling that module exists to
-#: isolate. `DEPTH_RANK`'s keys are already this exact ordered ladder (that
-#: module derives it from `USER_DEPTHS` itself, once); a plain `dict`
-#: preserves insertion order, so `tuple(DEPTH_RANK)` is the ladder's values in
-#: rank order, verbatim. Module-level so it is computed once, not once per
-#: :class:`EvidenceView` construction.
-_AVAILABLE_DEPTHS: tuple[str, ...] = tuple(DEPTH_RANK)
 
 
 def _sha256_of(*parts: str) -> str:
@@ -146,14 +127,8 @@ class EvidenceView:
 
     *requested_depth* is knowable pre-execution (the same value
     :attr:`abicheck.workflows.plan.AnalysisPlan.requested_depth` already
-    carries). *available_depths* is the static four-rung public ladder
-    (read through :data:`abicheck.evidence_depth.DEPTH_RANK`) -- always
-    populated, since it names what a request *could* have asked for, not
-    what this run resolved; a **read-only property**, not a constructor
-    parameter or dataclass field (Codex review, PR #1027, fourth round) --
-    a plain field would let a caller construct a value like
-    ``EvidenceView(available_depths=("bogus",))``, competing with the one
-    real ladder this class exists to state invariantly. *effective_depth*/
+    carries); the ladder it is drawn from is
+    :data:`abicheck.evidence_depth.DEPTH_RANK`. *effective_depth*/
     *depth_satisfied* are ``None`` until :meth:`from_assurance` copies them
     off a real :class:`abicheck.analysis_assurance.AnalysisAssurance` --
     this class never computes them itself (see module docstring)."""
@@ -161,14 +136,6 @@ class EvidenceView:
     requested_depth: str | None = None
     effective_depth: str | None = None
     depth_satisfied: bool | None = None
-
-    @property
-    def available_depths(self) -> tuple[str, ...]:
-        """The static four-rung public ``--depth`` ladder -- the same value
-        for every instance, so it is a computed property over the one
-        module-level constant rather than a per-instance field a caller
-        could override."""
-        return _AVAILABLE_DEPTHS
 
     @classmethod
     def for_request(cls, requested_depth: str | None) -> EvidenceView:
@@ -221,8 +188,8 @@ class ResolvedExecutionContext:
     *operation* mirrors :attr:`abicheck.workflows.plan.AnalysisPlan.operation`
     (``"dump"``/``"compare"``/``"scan"``). *evidence* is the
     :class:`EvidenceView` for this run -- built pre-execution via
-    :meth:`EvidenceView.for_request` (only ``requested_depth``/
-    ``available_depths`` known), or post-execution via
+    :meth:`EvidenceView.for_request` (only ``requested_depth``
+    known), or post-execution via
     :meth:`EvidenceView.from_assurance` once a real
     :class:`abicheck.analysis_assurance.AnalysisAssurance` exists (see
     :meth:`with_assurance`). *evaluation_config* is the ADR-049 D7 resolved
@@ -285,10 +252,9 @@ class ResolvedExecutionContext:
         ``"HEADERS"``, the same way
         :func:`~abicheck.service_compare_pipeline.classify_compare_pair`'s
         ``result.requested_depth = request.depth.lower()`` normalizes it for
-        ``DiffResult`` before this context exists), and this class's own
-        ``_AVAILABLE_DEPTHS``/:meth:`resolution_digest` (removed) are case-sensitive:
-        an unnormalized depth would both fail to appear in its own
-        :attr:`EvidenceView.available_depths` and hash differently from an
+        ``DiffResult`` before this context exists), and the ladder
+        (:data:`~abicheck.evidence_depth.DEPTH_RANK`) is case-sensitive: an
+        unnormalized depth would fail to appear in it and differ from an
         equivalent lower-case request. The normalized depth is also what
         :meth:`with_assurance` later passes as
         :meth:`EvidenceView.from_assurance`'s fallback (Codex review, PR

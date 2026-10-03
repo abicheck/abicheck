@@ -1136,6 +1136,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             "TypeMetadataSource",
             "v1_id_for",
             "legacy_record_ir",
+            "available_depths",
         ),
         frozenset({"contribute/known-gaps.md"}),
     ),
