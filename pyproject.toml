@@ -493,6 +493,13 @@ only_mutate = [
 ]
 pytest_add_cli_args_test_selection = ["tests/"]
 pytest_add_cli_args = [
+    # mutmut runs every pytest session in one process and selects tests by
+    # the node ids its stats pass recorded. pytest re-escapes an explicit
+    # parametrize id in each later in-process session, so a recorded id
+    # stops existing and the clean run aborts with exit 4. This plugin keeps
+    # ids identical across sessions (see its docstring).
+    "-p",
+    "scripts.mutmut_stable_param_ids",
     "-x",
     "-q",
     # `--tb=line`, not `--tb=no`: with `-x`, the first failure ends the whole

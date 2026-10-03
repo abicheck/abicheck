@@ -96,6 +96,10 @@ _INFRASTRUCTURE_PATHS = {
     "tests/test_mutation_results.py",
     "scripts/mutation_scope.py",
     "tests/test_mutation_scope.py",
+    # Loaded into every pytest session mutmut runs; a regression here aborts
+    # the clean run before any mutant is tested.
+    "scripts/mutmut_stable_param_ids.py",
+    "tests/test_mutmut_stable_param_ids.py",
     ".github/workflows/mutation.yml",
 }
 

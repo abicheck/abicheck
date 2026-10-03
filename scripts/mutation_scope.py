@@ -167,6 +167,38 @@ def shard_modules(
     return sorted(assigned[k - 1])
 
 
+def is_splittable(
+    scope_patterns: list[str] | None,
+    only_mutate: list[str] | None,
+    global_total_only: bool,
+) -> bool:
+    """Whether a run measures the whole population and can be split.
+
+    A diff-scoped run (``scope_patterns`` set) is already small, and a
+    global-total-only baseline cannot be scored per shard: both run whole in
+    shard 1. ``--shard`` and ``--plan-shards`` both answer through here, so
+    the plan the workflow starts runners from cannot disagree with what each
+    shard then does.
+    """
+    return scope_patterns is None and bool(only_mutate) and not global_total_only
+
+
+def planned_shards(
+    n: int,
+    only_mutate: list[str] | None,
+    splittable: bool,
+    repo_root: Path = REPO_ROOT,
+) -> list[int]:
+    """The 1-based shard indices of *n* that have work (``--plan-shards``).
+
+    A shard that would be assigned no module (``n > len(only_mutate)``) is
+    not started at all.
+    """
+    if not splittable or not only_mutate:
+        return [1]
+    return [k for k in range(1, n + 1) if shard_modules(only_mutate, k, n, repo_root)]
+
+
 def merge_baseline_parts(
     parts: list[dict[str, object]], only_mutate: Iterable[str]
 ) -> dict[str, object]:
