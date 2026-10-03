@@ -44,6 +44,8 @@ from elftools.elf.gnuversions import (
 )
 from elftools.elf.sections import SymbolTableSection
 
+from .extract.elf_static_tls import has_static_tls_relocation
+
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.elf_metadata import ElfImport`` spelling keeps resolving.
@@ -164,6 +166,9 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     )
 
     _postprocess_metadata(meta, ver_index_map, ver_sym_section, dynsym_section, so_path)
+    # DF_STATIC_TLS is a linker summary that AArch64 GNU ld omits; the
+    # relocation is the requirement itself (extract/elf_static_tls.py).
+    meta.has_static_tls = meta.has_static_tls or has_static_tls_relocation(elf)
 
     # Finalize derived hardening properties now that segments, dynamic flags,
     # and the symbol table have all been parsed.
