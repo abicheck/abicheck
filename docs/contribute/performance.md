@@ -241,6 +241,21 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
   inherently super-linear embedding chain, so it carries `gate_exponent=False`
   and is exempted (its tail slope is still printed for visibility, just not
   gated). Every other scenario is gated.
+- **The exponent gate has a noise floor, checked on the slope's lower
+  endpoint.** A tail slope is only as precise as the smaller of its two
+  points, so the gate applies only when *both* tail points take at least
+  `EXPONENT_FLOOR_SECONDS` (0.2 s, `scripts/perf_measurement.py`). Until
+  2026-10 the floor was checked against the scenario's *peak*. A cheap
+  scenario whose 4000 point had just crossed 0.2 s was then gated on a slope
+  whose 2000 point sat at ~0.1 s in runner jitter, and `report_sarif` read
+  1.48 against the 1.4 budget on unchanged code (locally the same code read
+  1.18–1.35). The cheap gated scenarios (`pe_churn`, `macho_churn`,
+  `var_churn`, the three `report_*`, `fuzzy_rename_churn`,
+  `onedal_mass_removal`) now sweep one size step higher
+  (`TAIL_ABOVE_FLOOR_SIZES`), so both tail points clear the floor and they
+  stay gated. A scenario whose lower tail point later drifts under the floor
+  prints `exponent gate inactive` with its tail value, never silently;
+  raise that scenario's sizes to re-arm it.
 - Publishes the scaling table to the job summary and uploads the JSON.
 
 `slow` regression guards also live in

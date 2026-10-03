@@ -248,18 +248,116 @@ def test_exponent_gate_exempts_inherently_superlinear() -> None:
 
 
 def test_check_exponent_gate_flags_quadratic() -> None:
-    # Over budget with a meaningful (above-floor) timing → flagged.
-    assert bench._check_exponent_gate("s", 2.0, 1.4, peak_seconds=1.0)
-    assert bench._check_exponent_gate("s", 1.1, 1.4, peak_seconds=1.0) == []  # linear
-    assert bench._check_exponent_gate("s", None, 1.4, peak_seconds=1.0) == []  # no data
+    # Over budget with both tail points above the floor -> flagged.
+    assert bench._check_exponent_gate("s", 2.0, 1.4, tail_low_seconds=1.0)
+    assert bench._check_exponent_gate("s", 1.1, 1.4, tail_low_seconds=1.0) == []
+    assert bench._check_exponent_gate("s", None, 1.4, tail_low_seconds=1.0) == []
 
 
 def test_check_exponent_gate_skips_sub_floor_noise() -> None:
-    """A sub-50 ms scenario's exponent is noise — never gated, even if huge."""
-    assert bench._check_exponent_gate("s", 5.0, 1.4, peak_seconds=0.001) == []
-    # Default peak_seconds is inf, so omitting it keeps the old (always-gate)
+    """A slope whose lower endpoint is noise is never gated, even if huge."""
+    assert bench._check_exponent_gate("s", 5.0, 1.4, tail_low_seconds=0.001) == []
+    # Default tail_low_seconds is inf, so omitting it keeps the always-gate
     # behaviour for callers that don't pass timings.
     assert bench._check_exponent_gate("s", 5.0, 1.4)
+
+
+# ── The floor binds the slope's NOISIER endpoint, not its peak ───────────────
+#
+# Bug class: the noise floor was checked against the scenario's peak time, so
+# a scenario whose largest point had just crossed it was gated on a slope
+# whose other endpoint sat deep in jitter. report_sarif (0.10 s / 0.25 s)
+# then read 1.48 against a 1.4 budget on unchanged code. The invariant, for
+# ANY two tail points: the gate may fire only when BOTH are at or above the
+# floor. Enumerated exhaustively over a small domain spanning both sides of the
+# floor, every input order, and an extra smaller point that must never matter.
+
+_FLOOR = bench.EXPONENT_FLOOR_SECONDS
+_TIMES = (0.001, 0.05, 0.1, _FLOOR - 1e-9, _FLOOR, 0.25, 0.5, 2.0)
+
+
+def _oracle_low(points: list[tuple[int, float]]) -> float:
+    """Independent derivation: the lower time of the two largest sizes."""
+    by_size = {}
+    for size, seconds in points:
+        if seconds > 0:
+            by_size[size] = seconds
+    sizes = sorted(by_size)
+    if len(sizes) < 2:
+        return 0.0
+    return min(by_size[sizes[-1]], by_size[sizes[-2]])
+
+
+@pytest.mark.parametrize("t_small", (0.001, 0.3))
+@pytest.mark.parametrize("t_a", _TIMES)
+@pytest.mark.parametrize("t_b", _TIMES)
+@pytest.mark.parametrize("reverse", (False, True))
+def test_tail_low_seconds_is_the_lower_of_the_two_largest_points(
+    t_small: float, t_a: float, t_b: float, reverse: bool
+) -> None:
+    raw = [(500, t_small), (2000, t_a), (4000, t_b)]
+    pts = [bench.Point(s, sec, s) for s, sec in (reversed(raw) if reverse else raw)]
+    assert bench.tail_low_seconds(pts) == _oracle_low(raw)
+
+
+@pytest.mark.parametrize("t_a", _TIMES)
+@pytest.mark.parametrize("t_b", _TIMES)
+def test_exponent_gate_fires_only_when_both_tail_points_clear_the_floor(
+    t_a: float, t_b: float
+) -> None:
+    # A wildly super-linear slope, so only the floor can keep it from firing.
+    pts = [bench.Point(2000, t_a, 2000), bench.Point(4000, t_b, 4000)]
+    fired = bool(
+        bench._check_exponent_gate(
+            "s", 3.0, 1.4, tail_low_seconds=bench.tail_low_seconds(pts)
+        )
+    )
+    assert fired == (t_a >= _FLOOR and t_b >= _FLOOR), (t_a, t_b)
+
+
+def test_floor_oracle_is_not_vacuous() -> None:
+    """Both outcomes must occur in the domain, or the sweep above proves nothing."""
+    outcomes = {(a >= _FLOOR and b >= _FLOOR) for a in _TIMES for b in _TIMES}
+    assert outcomes == {True, False}
+
+
+def test_tail_low_seconds_with_no_tail_pair_is_below_any_floor() -> None:
+    assert bench.tail_low_seconds([]) == 0.0
+    assert bench.tail_low_seconds([bench.Point(1000, 5.0, 1000)]) == 0.0
+    assert bench.tail_low_seconds([bench.Point(1000, 0.0, 1000)] * 2) == 0.0
+
+
+def test_every_gated_scenario_has_a_tail_pair() -> None:
+    """A gated scenario whose default sweep has <2 sizes can never be gated."""
+    for name, spec in bench.SCENARIOS.items():
+        if spec.gate_exponent:
+            sizes = [s for s in spec.sizes if s <= spec.max_size]
+            assert len(set(sizes)) >= 2, name
+
+
+def test_cheap_gated_scenarios_sweep_one_step_up() -> None:
+    """The scenarios that straddled the floor on DEFAULT_SIZES measure higher.
+
+    Measured 2026-10-03 (repeat 5): each had its 2000-point under 0.15 s, so
+    its tail slope rested on jitter. Moving the sweep keeps them gated; this
+    pins it so a later edit cannot quietly put them back on the noisy ladder.
+    """
+    shifted = (
+        "pe_churn",
+        "macho_churn",
+        "var_churn",
+        "report_html",
+        "report_sarif",
+        "report_junit",
+    )
+    for name in shifted:
+        assert bench.SCENARIOS[name].sizes == bench.TAIL_ABOVE_FLOOR_SIZES, name
+        assert bench.SCENARIOS[name].gate_exponent is True, name
+    assert bench.SCENARIOS["fuzzy_rename_churn"].sizes[-2:] == (4000, 8000)
+    assert bench.SCENARIOS["onedal_mass_removal"].sizes[-2:] == (2000, 4000)
+    for name in (*shifted, "fuzzy_rename_churn", "onedal_mass_removal"):
+        spec = bench.SCENARIOS[name]
+        assert max(spec.sizes) <= spec.max_size, name
 
 
 def test_check_rss_gate_flags_over_budget() -> None:

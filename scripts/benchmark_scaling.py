@@ -150,10 +150,14 @@ from perf_baseline import (  # noqa: E402
 )
 from perf_cache_reset import clear_process_caches as _clear_process_caches  # noqa: E402
 from perf_measurement import (  # noqa: E402
+    EXPONENT_FLOOR_SECONDS,
     SampleStats,
+    check_exponent_gate as _check_exponent_gate,
     finite_nonnegative_float_arg,
     positive_int_arg,
     summarize_samples,
+    tail_exponent,
+    tail_low_seconds,
 )
 
 from abicheck.checker import (  # noqa: E402
@@ -196,6 +200,16 @@ from abicheck.severity import categorize_changes  # noqa: E402
 from abicheck.suppression import Suppression, SuppressionList  # noqa: E402
 
 DEFAULT_SIZES = (500, 1000, 2000, 4000)
+#: The default ladder shifted one step up, for gated scenarios that are cheap
+#: per element. The tail exponent is a slope between the two largest points,
+#: and its noise is set by the *smaller* of the two: on DEFAULT_SIZES these
+#: scenarios put their 2000 point at ~0.1 s, where a few tens of ms of runner
+#: jitter swing the slope by +-0.3 (report_sarif read 1.18-1.35 locally and
+#: 1.48 on CI over identical code, against a 1.4 budget). One step up puts both
+#: tail points above _check_exponent_gate's floor, so they stay gated on
+#: measurements that can actually carry a slope. The 500 point is dropped to
+#: pay for the 8000 one.
+TAIL_ABOVE_FLOOR_SIZES = (1000, 2000, 4000, 8000)
 
 
 # ── Snapshot builders (one per scenario) ──────────────────────────────────────
@@ -1309,13 +1323,13 @@ SCENARIOS: dict[str, Scenario] = {
     "internal_leak": Scenario(_build_internal_leak),
     "vtable_churn": Scenario(_build_vtable_churn),
     "elf_namespace": Scenario(_build_elf_namespace, needs_demangler=True),
-    "pe_churn": Scenario(_build_pe_churn),
-    "macho_churn": Scenario(_build_macho_churn),
-    "var_churn": Scenario(_build_var_churn),
+    "pe_churn": Scenario(_build_pe_churn, sizes=TAIL_ABOVE_FLOOR_SIZES),
+    "macho_churn": Scenario(_build_macho_churn, sizes=TAIL_ABOVE_FLOOR_SIZES),
+    "var_churn": Scenario(_build_var_churn, sizes=TAIL_ABOVE_FLOOR_SIZES),
     # Genuine size-only rename matches (the ICU/LLVM cost driver) — distinct from
     # rename_churn, which exercises only the reject path. Reaches ICU scale (8 k).
     "fuzzy_rename_churn": Scenario(
-        _build_fuzzy_rename_churn, sizes=(1000, 2000, 4000), max_size=8000
+        _build_fuzzy_rename_churn, sizes=(2000, 4000, 8000), max_size=8000
     ),
     # Version-node migration fan-out (the LLVM 17→18 shape, 37 k moved findings).
     "version_node_churn": Scenario(
@@ -1333,9 +1347,15 @@ SCENARIOS: dict[str, Scenario] = {
     # the same runner with the same fixture, so a cost present on both sides
     # needs no tolerance; what it needed was a refreshed baseline, a one-off.
     "serialize": Scenario(_build_serialize, run=_run_serialize),
-    "report_html": Scenario(_build_report, run=_run_report_html),
-    "report_sarif": Scenario(_build_report, run=_run_report_sarif),
-    "report_junit": Scenario(_build_report, run=_run_report_junit),
+    "report_html": Scenario(
+        _build_report, run=_run_report_html, sizes=TAIL_ABOVE_FLOOR_SIZES
+    ),
+    "report_sarif": Scenario(
+        _build_report, run=_run_report_sarif, sizes=TAIL_ABOVE_FLOOR_SIZES
+    ),
+    "report_junit": Scenario(
+        _build_report, run=_run_report_junit, sizes=TAIL_ABOVE_FLOOR_SIZES
+    ),
     # Quadratic paths — keep the sweeps small so a default run stays bounded.
     "opaque_filter": Scenario(
         _build_opaque_filter, sizes=(250, 500, 1000), max_size=1500
@@ -1370,7 +1390,8 @@ SCENARIOS: dict[str, Scenario] = {
     "onedal_mass_removal": Scenario(
         _build_onedal_mass_removal,
         run=_run_compare_verify_breaking,
-        sizes=(500, 1000, 2000),
+        # One step up for the same reason as TAIL_ABOVE_FLOOR_SIZES.
+        sizes=(1000, 2000, 4000),
         max_size=5000,
     ),
 }
@@ -1522,23 +1543,6 @@ def scaling_exponent(points: list[Point]) -> float | None:
     if denom == 0:
         return None
     return (n * sxy - sx * sy) / denom
-
-
-def tail_exponent(points: list[Point]) -> float | None:
-    """Local log-log slope between the two largest sizes.
-
-    Fixed per-run costs (imports, demangler warm-up) flatten the full-range
-    least-squares fit at small sizes, hiding super-linear growth. The slope
-    between the two largest points is a cleaner asymptotic signal, so the
-    optional ``--max-exponent`` gate keys off this value.
-    """
-    usable = sorted((p for p in points if p.seconds > 0), key=lambda p: p.size)
-    if len(usable) < 2:
-        return None
-    a, b = usable[-2], usable[-1]
-    if a.size == b.size or a.seconds <= 0 or b.seconds <= 0:
-        return None
-    return math.log(b.seconds / a.seconds) / math.log(b.size / a.size)
 
 
 # ── Baseline regression ───────────────────────────────────────────────────────
@@ -1714,38 +1718,6 @@ def _check_seconds_gate(
     return []
 
 
-def _check_exponent_gate(
-    scenario: str,
-    tail: float | None,
-    max_exponent: float,
-    *,
-    peak_seconds: float = math.inf,
-    floor_seconds: float = 0.2,
-) -> list[str]:
-    """Return a failure message if *tail* exponent exceeds *max_exponent*.
-
-    Sub-``floor_seconds`` timings are dominated by fixed/overhead noise, so an
-    exponent computed from them is meaningless and would flag spuriously (e.g.
-    ``var_churn`` peaks at ~50 ms and its 15 µs→25 µs/change jitter reads as a
-    1.7 slope). The floor is higher than the baseline-regression noise floor
-    (50 ms) on purpose: a slope across two sizes amplifies jitter more than a
-    single-point comparison does. Every genuinely expensive O(n²)-*risk*
-    scenario (type/enum/typedef/union/vtable/opaque, fuzzy/version-node/versioned
-    rename) clears 200 ms at the tracked sizes, so they stay gated, while the
-    cheap-and-linear ones (severity, reporting, serialize, PE/Mach-O, var_churn)
-    are correctly skipped — a regression that makes one of *them* quadratic would
-    blow past 200 ms long before the largest tracked size and re-arm the gate.
-    """
-    if peak_seconds < floor_seconds:
-        return []
-    if tail is not None and tail > max_exponent:
-        return [
-            f"{scenario}: tail scaling exponent {tail:.2f} "
-            f"exceeds --max-exponent={max_exponent}"
-        ]
-    return []
-
-
 def _run_scenario(
     scenario: str,
     args: argparse.Namespace,
@@ -1790,12 +1762,21 @@ def _run_scenario(
     if args.max_seconds is not None:
         failures.extend(_check_seconds_gate(scenario, points, args.max_seconds))
     if args.max_exponent is not None and spec.gate_exponent:
-        peak_seconds = max((p.seconds for p in points), default=0.0)
+        tail_low = tail_low_seconds(points)
         failures.extend(
             _check_exponent_gate(
-                scenario, tail, args.max_exponent, peak_seconds=peak_seconds
+                scenario, tail, args.max_exponent, tail_low_seconds=tail_low
             )
         )
+        if tail is not None and tail_low < EXPONENT_FLOOR_SECONDS:
+            # Visible, never silent: a scenario whose lower tail point drifts
+            # under the floor (the code got faster, or a runner did) is
+            # reported as not gated rather than gated on noise.
+            print(
+                f"  (exponent gate inactive: lower tail point {tail_low:.3f}s < "
+                f"{EXPONENT_FLOOR_SECONDS}s floor; tail={tail:.2f} reported, "
+                "not gated -- raise this scenario's sizes to re-arm it)"
+            )
     elif args.max_exponent is not None and not spec.gate_exponent:
         print(
             f"  (exponent gate exempt: {scenario} is inherently super-linear; "
