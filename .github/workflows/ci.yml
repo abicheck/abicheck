@@ -617,70 +617,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Run slow tests (hypothesis / property-based)
-        # -n auto --dist worksteal, matching every other step in this job:
-        # this step ran fully serial (no `-n`) while its siblings didn't,
-        # and most `slow`-marked tests it selects are independent
-        # (Hypothesis/property-based suites plus the production-scale
-        # snapshot-compression round trips in
-        # tests/test_snapshot_compression_public_api_scale.py, individually
-        # 90-195s), so running them one at a time was pure wasted wall time
-        # on a multi-core runner and a real contributor to this leg
-        # repeatedly running past its own timeout-minutes (see that
-        # comment's own incident history above). (This step used to collect
-        # coverage into coverage-slow.xml; nothing ever read that file --
-        # not the Codecov upload, not an artifact, not a gate -- so the
-        # instrumentation was dropped and every test kept.)
-        #
-        # tests/test_performance.py is carved out and run separately,
-        # serially, unchanged (Codex review, PR #1036). It measures real
-        # elapsed time, so running it concurrently with the CPU-heavy tests
-        # above makes xdist scheduler contention part of the measurement,
-        # and this required job could fail (or a scaling fit could distort)
-        # with no actual product regression. .github/workflows/
-        # performance.yml's own dedicated job already runs it the identical
-        # serial way on its own schedule; this invocation is this job's
-        # copy, for every PR. (tests/test_perf_binary_scan.py used to be
-        # carved out here too, for the identical reason -- it measured
-        # `scan --depth binary`/`--depth headers` staying fast; deleted
-        # with the `scan` command itself, ADR-068 Phase 6, since it invoked
-        # the CLI directly with `["scan", ...]` and asserted scan's own
-        # JSON `coverage`/`pattern_scan` shape. No `compare`-side
-        # equivalent perf guard exists yet for the identical concern under
-        # `compare --depth binary`/`--depth headers` -- a real, tracked
-        # capability gap, not silently dropped.)
-        #
-        # No --cov on that second invocation, matching performance.yml's own
-        # (uninstrumented) "Run slow perf tests" step -- fresh evidence
-        # (this same PR): coverage.py fell back from the sysmon core to the
-        # much slower trace-based one for this specific invocation ("Can't
-        # use core=sysmon: sys.monitoring can't measure branches in this
-        # version"), which alone pushed
-        # test_serialization_roundtrip_under_2_seconds from its normal
-        # well-under-budget time to 6.70s against a hard 2s ceiling -- a
-        # confirmed pre-existing flake (reproduced identically on PR #1033's
-        # CI before this PR existed), not scheduler contention this time.
-        # Instrumentation overhead corrupting the very wall-clock
-        # measurement a test asserts on is exactly why performance.yml never
-        # instruments this file either. That carve-out now matches the rest
-        # of this step, which no longer instruments anything at all: the
-        # coverage it collected gated nothing and nobody read it.
-        #
-        # tests/test_header_scan_deadline_integration.py is carved out the
-        # same way, for the same reason (Codex review, PR #1036, a third
-        # independent trigger site): its lone `@pytest.mark.slow` test,
-        # test_pathological_header_natural_cost_is_tracked, measures real
-        # elapsed time against a 60s ceiling -- collected here (not by
-        # performance.yml's own dedicated job, which only runs
-        # test_performance.py; this file is a gap in that job too, not
-        # fixed here) whenever clang/g++ are present, which they are on
-        # this canonical Ubuntu lane. Its sibling tests in the same file
-        # aren't `slow`-marked, so excluding the whole file from this
-        # `-m "slow"` selector (and re-including it in the serial
-        # invocation, where `-m "slow"` again narrows it to just this one
-        # test) has no effect on them either way.
-        run: |
-          pytest tests/ -q --tb=short -r fE -m "slow" --ignore=tests/test_performance.py --ignore=tests/test_header_scan_deadline_integration.py -n auto --dist worksteal --junitxml=test-results-slow-Linux-py3.13.xml
-          pytest tests/test_performance.py tests/test_header_scan_deadline_integration.py -q --tb=short -r fE -m "slow" --junitxml=test-results-slow-perf-Linux-py3.13.xml
+        # Routed through scripts/verify.py (CLAUDE.md "M0-3"): its `slow`
+        # step (xdist-parallel) and `slow-perf` step (serial -- every test in
+        # it asserts on wall-clock time, so it must not share the CPU with
+        # the parallel lane, Codex review PR #1036) are the one definition of
+        # this lane; this job used to carry a hand-copied pair of pytest
+        # lines that could drift from them. No coverage: it had no consumer,
+        # and instrumentation distorts slow-perf's timing assertions.
+        # --junit-dir writes test-results-slow.xml / test-results-slow-perf.xml
+        # for the upload below.
+        run: python scripts/verify.py --profile full --only slow,slow-perf --junit-dir .
       - name: Upload JUnit test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4

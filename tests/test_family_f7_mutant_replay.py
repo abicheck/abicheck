@@ -166,7 +166,12 @@ def _replay(
         cat.imported_abicheck_path(root)
         == (root / "abicheck" / "__init__.py").resolve()
     )
-    return cat.run_nodes(root, nodes, tmp_path / "nested-basetemp")
+    return cat.run_nodes(
+        root,
+        nodes,
+        tmp_path / "nested-basetemp",
+        stop_at_first_failure=mutant is not None,
+    )
 
 
 def _slow_params() -> list[object]:
@@ -200,8 +205,25 @@ def test_harness_kills_replayed_mutant(mutant: cat.Mutant, tmp_path: Path) -> No
     )
 
 
+#: Every node any mutant names, grouped by harness module. The unpatched
+#: control runs once per module rather than once over the whole set: the
+#: union is the same node set and each part must pass, so the claim is
+#: unchanged, but the parts can run on different xdist workers -- as one
+#: session the control was the longest single test in the ``slow`` lane.
+_CONTROL_NODES: dict[str, tuple[str, ...]] = {}
+for _node in sorted({n for m in cat.MUTANTS for n in m.must_fail}):
+    _module = _node.split("::", 1)[0]
+    _CONTROL_NODES[_module] = (*_CONTROL_NODES.get(_module, ()), _node)
+
+
+def test_control_partition_covers_every_named_node() -> None:
+    named = {n for m in cat.MUTANTS for n in m.must_fail}
+    parts = [n for nodes in _CONTROL_NODES.values() for n in nodes]
+    assert sorted(parts) == sorted(named)
+
+
 @pytest.mark.slow
-def test_unpatched_control_passes_every_named_node(tmp_path: Path) -> None:
-    nodes = tuple(sorted({n for m in cat.MUTANTS for n in m.must_fail}))
-    rc, failed, output = _replay(None, tmp_path, nodes)
+@pytest.mark.parametrize("module", sorted(_CONTROL_NODES))
+def test_unpatched_control_passes_every_named_node(module: str, tmp_path: Path) -> None:
+    rc, failed, output = _replay(None, tmp_path, _CONTROL_NODES[module])
     assert rc == 0 and not failed, output[-3000:]

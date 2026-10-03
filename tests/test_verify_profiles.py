@@ -905,11 +905,11 @@ class TestUnitTestsPerPlatformTimeout:
 
 # --- ci.yml's test-running jobs: log volume --------------------------------
 
-#: Every ci.yml job that runs the pytest suite. `slow-tests` was a step of
-#: `unit-tests` until it was split into its own concurrently-running job; the
-#: guards below are written over both so the split did not quietly drop the
-#: slow lane's invocations out of their coverage.
-_PYTEST_JOBS = ("unit-tests", "unit-tests-other-os", "slow-tests")
+#: Every ci.yml job that runs the pytest suite inline. `slow-tests` is not
+#: listed: it runs verify.py's `slow`/`slow-perf` steps rather than inline
+#: pytest lines, so the same guards are applied to those catalog entries in
+#: tests/test_verify_slow_lane.py.
+_PYTEST_JOBS = ("unit-tests", "unit-tests-other-os")
 
 
 class TestUnitTestJobLogVolume:
@@ -1003,23 +1003,6 @@ class TestUnitTestJobLogVolume:
                     f"collide in the upload artifact: {path}"
                 )
 
-    def test_the_slow_job_writes_its_own_distinct_result_files(self) -> None:
-        pytest.importorskip("yaml")
-        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
-        paths = [
-            self._junit_path(line.strip())
-            for step in workflow["jobs"]["slow-tests"]["steps"]
-            for line in str(step.get("run", "")).splitlines()
-            if line.strip().startswith("pytest ")
-        ]
-        assert paths, "the slow-tests job writes no JUnit XML"
-        assert len(set(paths)) == len(paths), f"results would overwrite: {paths}"
-        for path in paths:
-            assert path.startswith("test-results-slow"), (
-                "the slow job's results must be distinguishable from the unit "
-                f"lane's in the uploaded artifacts: {path}"
-            )
-
     def test_the_coverage_table_skips_fully_covered_modules(self) -> None:
         # The shards only collect data; the table is printed once, by the
         # fan-in job's `coverage report`.
@@ -1028,57 +1011,6 @@ class TestUnitTestJobLogVolume:
         for command in covered:
             assert "--cov-report=term-missing" not in command, command
         assert "coverage report --skip-covered" in _read(".github/workflows/ci.yml")
-
-
-class TestTheSlowLaneHasExactlyOneOwner:
-    """The `slow` marker lane is required, runs once, and runs on its own.
-
-    Splitting it out of `unit-tests` is only a critical-path win if it is not
-    *also* still run there; and it is only safe if something still runs it at
-    all. Both halves are asserted structurally rather than trusted to review,
-    because a partial revert of either side is invisible in a green run --
-    duplicating the work looks like a pass, and dropping it looks like a pass
-    too.
-    """
-
-    @staticmethod
-    def _job_invocations(job: str) -> list[str]:
-        pytest.importorskip("yaml")
-        workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
-        return [
-            line.strip()
-            for step in workflow["jobs"][job]["steps"]
-            for line in str(step.get("run", "")).splitlines()
-            if line.strip().startswith("pytest ")
-        ]
-
-    def test_the_slow_tests_job_runs_both_slow_invocations(self) -> None:
-        commands = self._job_invocations("slow-tests")
-        parallel = [c for c in commands if '-m "slow"' in c and "-n auto" in c]
-        serial = [
-            c
-            for c in commands
-            if '-m "slow"' in c and "-n auto" not in c and "test_performance.py" in c
-        ]
-        assert parallel, f"the parallel slow lane is not run anywhere: {commands}"
-        assert serial, (
-            "the wall-clock-timed perf tests must still run, and serially "
-            f"(concurrency makes scheduler contention part of the measurement): {commands}"
-        )
-
-    def test_unit_tests_no_longer_runs_the_slow_lane(self) -> None:
-        offenders = [c for c in self._job_invocations("unit-tests") if '-m "slow"' in c]
-        assert not offenders, (
-            "the slow lane moved to its own `slow-tests` job; running it in "
-            f"`unit-tests` too puts it back on that job's critical path: {offenders}"
-        )
-
-    def test_the_unit_lane_still_excludes_slow_tests(self) -> None:
-        # The complement: `unit-tests` must keep *excluding* the marker, or the
-        # split silently turns into the slow tests running twice.
-        commands = self._job_invocations("unit-tests")
-        offenders = [c for c in commands if "not slow" not in c]
-        assert not offenders, f"unit-tests must exclude the slow marker: {offenders}"
 
 
 # --- .github/workflows/integration.yml -------------------------------------
