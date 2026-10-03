@@ -3,6 +3,18 @@ name: Dependency Review
 on:
   pull_request:
     branches: [main]
+    # dependency-review only diffs dependency manifests between base and
+    # head; a PR changing none of them has nothing to review. These are all
+    # the manifest kinds the dependency graph reads in this repository:
+    # Python (pyproject/requirements), pixi's lockfile, and GitHub Actions
+    # references (workflows and composite action.yml files).
+    paths:
+      - '**/pyproject.toml'
+      - '**/requirements*.txt'
+      - 'pixi.lock'
+      - '**/action.yml'
+      - '**/action.yaml'
+      - '.github/workflows/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}

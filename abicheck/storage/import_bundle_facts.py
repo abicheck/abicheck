@@ -776,7 +776,7 @@ def export_bundle_facts(
     # via `str(...)`, so a stored non-string (e.g. the JSON number `1`)
     # would otherwise silently become `"1"` -- possibly colliding with a
     # genuinely distinct, already-string `"1"` fingerprint elsewhere and
-    # letting `pair_variants()` compare the wrong variants (Codex review).
+    # letting variant pairing compare the wrong variants (Codex review).
     raw_variant_fingerprint = composition.get(
         "variant_fingerprint", _DEFAULT_VARIANT_FINGERPRINT
     )

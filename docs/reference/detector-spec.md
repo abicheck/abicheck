@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (410 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (409 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -38,7 +38,6 @@ One row per `ChangeKind` (410 total). Columns fuse the verdict partition (`check
 | `bundle_provider_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_provider_changed` | [case92](examples/case92_bundle_provider_changed.md) |
 | `bundle_soname_skew` | breaking | `BREAKING` | `error` | L0 | `bundle_soname_skew` | [case84](examples/case84_bundle_soname_skew.md) |
 | `bundle_unresolved_intra_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_unresolved_intra_dependency` | — |
-| `bundle_variant_coverage_regressed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `bundle_variant_coverage_regressed` | — |
 | `call_graph_public_entry_reachability_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `call_graph_public_entry_reachability_changed` | — |
 | `calling_convention_changed` | breaking | `BREAKING` | `error` | L1 | `calling_convention_changed` | [case64](examples/case64_calling_convention_changed.md) |
 | `cet_protection_improved` | quality | `COMPATIBLE` | `warning` | L0 | `cet_protection_improved` | — |

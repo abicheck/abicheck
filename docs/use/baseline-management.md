@@ -9,7 +9,6 @@ canonical_for:
 depends_on:
   - abicheck/model/snapshot.py
   - abicheck/serialization.py
-  - abicheck/product_baseline.py
   - abicheck/bundle.py
 lifecycle: active
 generated: false
@@ -45,26 +44,17 @@ breaking changes before they ship.
 > a previous build" without managing a baseline file yourself, see
 > [a one-off comparison with side-scoped headers](create-baseline.md#a-one-off-comparison-with-side-scoped-headers).
 
-> **A whole-product (multi-library) baseline is a separate, library-only
-> module, not a CLI feature.** Everything above is per-library. A product
-> shipping several interdependent shared libraries — where a symbol one
-> library imports from a sibling disappearing is a real cross-DSO ABI
-> break no single-library `compare` can see — has its own storage
-> format and comparison entry point in
-> `abicheck.product_baseline`: `pack_product_baseline`/
-> `unpack_product_baseline` archive/restore an entire product directory
-> as one deterministic `.tar.zst`, and `compare_product_directories`
-> runs the bundle-aware comparison directly, in Python, with
-> no CLI subprocess. `abicheck.bundle.build_bundle_snapshot_from_metadata`
-> is the underlying primitive that lets that cross-DSO analysis run from
-> already-parsed `ElfMetadata` (e.g. a stored `AbiSnapshot.elf`) instead
-> of requiring the old release's binaries on disk. See each function's
-> own docstring for the full contract; there is no CLI wiring for this
-> module and none is planned without a concrete use case (the one
-> follow-up slice implemented so far — per-library header roots for
-> `compare_product_directories`, PR #829 — is recorded in
-> `abicheck/product_baseline.py` and its test file; the implementation
-> plan that tracked it is retired now that it shipped).
+> **A whole-product (multi-library) baseline is a stored bundle-facts
+> document.** Everything above is per-library. A product shipping several
+> interdependent shared libraries — where a symbol one library imports
+> from a sibling disappearing is a real cross-DSO ABI break no
+> single-library `compare` can see — is compared with directory or
+> package `compare`, and `--bundle-facts-out` stores that release's
+> cross-library facts so a later release can be compared against it
+> without its binaries: see
+> [Comparing against a stored bundle baseline](multi-binary.md#comparing-against-a-stored-bundle-baseline-g38-phase-2).
+> (A library-only `abicheck.product_baseline` module once offered a second,
+> Python-only route; it had no CLI caller and was removed.)
 
 This page covers the **lifecycle model**: what a baseline is, why most
 projects need two of them, and what makes a baseline comparable across
@@ -162,8 +152,7 @@ pack](github-action-source-scans.md#recommended-flow-a-multi-library-release-wit
 for a concrete per-library baseline-set walkthrough (build once, one facts
 pack, one baseline file per library). This per-library baseline-set is still
 the right workflow for checking each library's own ABI — it is not
-superseded by the whole-product `pack_product_baseline`/
-`compare_product_directories` module described above, which answers a
+superseded by the stored bundle baseline described above, which answers a
 different question (cross-library, bundle-aware breakage) rather than
 replacing the per-library one.
 

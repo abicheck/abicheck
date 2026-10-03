@@ -25,7 +25,6 @@ from abicheck.storage.identity import (
     OccurrenceId,
     OccurrenceSet,
     elf_symbol_occurrence,
-    group_by_entity,
 )
 
 
@@ -348,25 +347,30 @@ class TestElfSymbolOccurrences:
         assert len(occurrences) == 2
 
 
-class TestGroupByEntity:
+class TestGroupingByEntity:
     @given(st.permutations([("f", "a.cpp"), ("f", "b.cpp"), ("g", "a.cpp")]))
     def test_grouping_preserves_every_occurrence(
         self, raw: list[tuple[str, str]]
     ) -> None:
         built = [_occurrence(name, container=c) for name, c in raw]
 
-        grouped = group_by_entity(built)
+        grouped = OccurrenceSet()
+        grouped.extend(built)
 
-        assert sum(len(v) for v in grouped.values()) == len(built)
+        assert sum(len(grouped.occurrences_of(e)) for e in grouped.entities()) == len(
+            built
+        )
 
     def test_grouping_returns_tuples_not_winners(self) -> None:
         """The return shape must make a "pick one" call site unwritable."""
-        grouped = group_by_entity(
+        grouped = OccurrenceSet()
+        grouped.extend(
             [_occurrence("f", container="a.cpp"), _occurrence("f", container="b.cpp")]
         )
 
-        assert all(isinstance(v, tuple) for v in grouped.values())
-        assert list(grouped.values()) == [
+        values = [grouped.occurrences_of(e) for e in grouped.entities()]
+        assert all(isinstance(v, tuple) for v in values)
+        assert values == [
             (_occurrence("f", container="a.cpp"), _occurrence("f", container="b.cpp"))
         ]
 

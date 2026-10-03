@@ -93,8 +93,8 @@ Baseline-set resolution has a typed outcome vocabulary including
 (`abicheck/buildsource/baseline_set.py`, `actions/resolve-baseline`).
 Multibuild variant pairing is exact-fingerprint, never a union, with
 same-side collision detection (`abicheck/bundle_multibuild.py`).
-`compare_product_directories` has identity-tiered pairing
-(`abicheck/product_baseline.py`). Comparability refusal exists
+`compare_product_directories` had identity-tiered pairing
+(`abicheck/product_baseline.py`, since deleted). Comparability refusal exists
 (`abicheck/comparability.py`, `ScopeMismatchError`/`ProfileMismatchError`).
 `RunOutcome`/`ExitDecision` carry compatibility, assurance, gate,
 operational, lifecycle, coverage axes (`abicheck/policy/outcome.py`,
@@ -110,10 +110,7 @@ returns directories); the Action's typed outcomes ending at the composite
 boundary; the degraded stranded-library snapshot.
 
 **Still missing after S1-S4** (the list above is the 2026-09-05 assessment,
-kept verbatim; this is what it has *not* closed): `compare_product_
-directories`' canonical fallback still leaves an ambiguous group silently
-unpaired rather than emitting D3's `ambiguous` diagnostic
-(`abicheck/product_baseline.py`), and no `CompareRequest`/`BundleCompareRequest`
+kept verbatim; this is what it has *not* closed): no `CompareRequest`/`BundleCompareRequest`
 carries a selection or expected inventory as a typed field -- the release
 fan-out's selection and inventory reach the engine as CLI parameters, which
 is why scalar-versus-bundle operand convergence stays with
@@ -214,17 +211,15 @@ Action/aggregate parity this slice names had already landed with S2
 (`action/run.sh`'s `SCOPE_INCOMPLETE` verdict tier, aggregate report schema
 1.8's `scope_completeness` axis), so S4 added no second copy.
 
-**Still open in S4, deliberately.** Two items keep their existing owners
+**Still open in S4, deliberately.** Two items kept their existing owners
 rather than being duplicated here: the **scalar/bundle operand
 convergence** is `cli-cleanup-phase-two.md`'s PR I (live/stored driver plus
 one evaluation/gate/report/dry-run path across all four operand shapes),
 still open there and explicitly cross-referenced by that plan's own row as
 overlapping this workstream; and **the silent canonical fallback** in
-`compare_product_directories` (`abicheck/product_baseline.py`) is not yet
-D3's `ambiguous` diagnostic — the deletion gate below covers
-`_match_release_keys`'s set difference, and turning an ambiguity into a
-refusal-to-compare in the whole-product path is a behaviour change of its
-own that needs its own slice and migration note.
+`compare_product_directories` was closed by deleting
+`abicheck/product_baseline.py`, which no command, Action or workflow called
+(`dead-code-and-single-owner.md` Stage C).
 
 **Deletion gates.** `_match_release_keys`'s set-difference removal path was
 **deleted in S4** (2026-09-06), once every removal finding flowed from proven
