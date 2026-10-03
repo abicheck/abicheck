@@ -26,7 +26,9 @@ registered in the schema with nothing populating them. This module is that
 missing introspection pass: it opens the archives the graph already names
 and answers "which member, and which symbols does that member define",
 so a removed-symbol finding can localize to ``cache_dispatch.o`` **in**
-``libinternal_dispatch.a`` rather than only to a whole target.
+``libinternal_dispatch.a`` rather than only to a whole target
+(:func:`abicheck.model.source_graph_query.defining_members`, read by
+``localize_symbol``).
 
 Evidence source: the archive's **own symbol index** — the ``/`` (GNU),
 ``/SYM64/`` (GNU 64-bit), or ``__.SYMDEF`` (BSD/Mach-O) member that ``ar s``/
@@ -1346,28 +1348,3 @@ def augment_graph_with_archives(
             )
             result.symbol_edges += 1
     return result
-
-
-def defining_members(graph: SourceGraphSummary, symbol: str) -> list[tuple[str, str]]:
-    """``(archive label, member name)`` for every archive member *graph* records
-    as defining *symbol* — the localization read view
-    ("``cache_dispatch.o`` in ``libinternal_dispatch.a``").
-
-    Returns every match rather than one: an archive set may genuinely define
-    a symbol in more than one member, and picking one would be a guess.
-    Empty when the pass never ran, the archive wasn't readable, or the
-    symbol isn't index-backed — an absence of evidence, which a caller must
-    not render as "defined nowhere".
-    """
-    target = _symbol_node_id(symbol)
-    by_id = {n.id: n for n in graph.nodes}
-    out: list[tuple[str, str]] = []
-    for edge in graph.edges:
-        if edge.kind != EDGE_OBJECT_DEFINES_SYMBOL or edge.dst != target:
-            continue
-        member = by_id.get(edge.src)
-        if member is None:
-            continue
-        archive = str((member.resolved or member.attrs).get("archive", ""))
-        out.append((archive, member.label or ""))
-    return sorted(set(out))

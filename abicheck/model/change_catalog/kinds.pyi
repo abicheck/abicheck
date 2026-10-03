@@ -224,7 +224,6 @@ class ChangeKind(str, Enum):
     BUNDLE_LIBRARY_ADDED = 'bundle_library_added'
     BUNDLE_INTRA_DEP_VERSION_DRIFT = 'bundle_intra_dep_resolved_to_different_version'
     BUNDLE_UNRESOLVED_INTRA_DEPENDENCY = 'bundle_unresolved_intra_dependency'
-    BUNDLE_VARIANT_COVERAGE_REGRESSED = 'bundle_variant_coverage_regressed'
     BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED = 'bundle_intra_dep_signature_unverified'
     BUNDLE_DUPLICATE_PROVIDER = 'bundle_duplicate_provider'
     BUNDLE_MANIFEST_ENTRY_UNSATISFIED = 'bundle_manifest_entry_unsatisfied'

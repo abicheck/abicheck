@@ -154,23 +154,38 @@ def derive_baseline_libraries(
     return report
 
 
+def parse_baseline_generation(text: str) -> int | None:
+    """The ``baseline-generation`` workflow input as the generation the
+    manifest records: ``""`` is ``None``, a string of ASCII digits is its
+    integer value, and anything else is a ``ValueError``.
+
+    The same acceptance rule as ``actions/baseline/run.sh`` (every
+    character a digit), deliberately stricter than ``int()``, which also
+    takes ``" 3"``, ``"+3"``, ``"3_0"`` and non-ASCII digits. ``"03"`` is 3
+    here, as it is in ``build_manifest.py``'s manifest -- the cache key
+    folds the *recorded* generation, not the input's spelling.
+    """
+    if text == "":
+        return None
+    if not (text.isascii() and text.isdigit()):
+        raise ValueError(f"baseline-generation {text!r} is not a non-negative integer.")
+    return int(text)
+
+
 def _fold_generation(key_prefix: str, generation: int | None) -> str:
     """Shared ``-g<generation>`` folding both functions below apply to
-    ``key_prefix`` -- must match ``update-main-baseline.yml``'s own
-    "Compute cache key" step's bash exactly (``[[ -n "$BASELINE_GENERATION"
-    ]] && KEY_PREFIX="${KEY_PREFIX}-g${BASELINE_GENERATION}"``), or a
-    consumer computing an expected key/restore-prefix from this pure-Python
-    mirror would silently disagree with what that workflow actually wrote.
+    ``key_prefix``. ``update-main-baseline.yml``'s "Compute cache key" step
+    calls those functions, so this is the one definition of the key a
+    consumer reproduces.
 
     Raises ``ValueError`` for anything other than ``None`` or a genuine
     non-negative ``int`` -- the producer side (``actions/baseline/
-    build_manifest.py``, the bash step above) can never actually publish a
-    ``True``/negative generation, so a caller passing one here would
-    silently compute a namespace (``"p-gTrue-..."``, ``"p-g-1-..."``) no
-    real cache entry can ever occupy, instead of getting a usage error
-    (Codex review; mirrors the same validation
-    ``baseline_set._schema_and_profile_check`` applies to
-    ``expected_baseline_generation``).
+    build_manifest.py``, :func:`parse_baseline_generation`) can never
+    publish a ``True``/negative generation, so a caller passing one here
+    would silently compute a namespace (``"p-gTrue-..."``, ``"p-g-1-..."``)
+    no real cache entry can ever occupy, instead of getting a usage error
+    (mirrors the same validation ``baseline_set._schema_and_profile_check``
+    applies to ``expected_baseline_generation``).
     """
     if generation is None:
         return key_prefix

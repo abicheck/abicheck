@@ -34,6 +34,7 @@ from _compat_eval_fixtures import (
     resolve as _resolve,
     write_pack as _write_pack,
 )
+from _cross_front_end import cross_front_end_differences, unstatable_selectors
 
 from abicheck.buildsource.inline import load_build_config
 from abicheck.change_registry_types import Verdict
@@ -58,9 +59,7 @@ from abicheck.compatibility_evaluation_frontend import (
     compare_cli_inputs,
     compare_request_inputs,
     compatibility_config_from_compare_request,
-    cross_front_end_differences,
     severity_preset_identity,
-    unstatable_selectors,
 )
 from abicheck.compatibility_evaluation_packs import PackKind
 from abicheck.compatibility_evaluation_resolver import (

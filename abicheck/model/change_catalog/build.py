@@ -248,21 +248,6 @@ BUILD_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
-        "bundle_variant_coverage_regressed",
-        _R,
-        impact="A build variant present in the old release's variant set "
-        "(e.g. the CPU-only build alongside an ONEDAL_DATA_PARALLEL/"
-        "DPC build) has no matching variant in the new release. This "
-        "is a build-coverage gap, not by itself proof the missing "
-        "variant's ABI broke -- it may have been dropped from the "
-        "release intentionally -- but a consumer pinned to that "
-        "variant can no longer be evaluated and needs to see the "
-        "gap.",
-        description_template="Build variant '{name}' present in the old release has no matching variant in the new release ({detail}).",
-        entity=_ENT.BUILD,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
         "compile_context_conflict",
         _R,
         impact="Two or more L3 compile units attributed to the same build target "

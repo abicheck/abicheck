@@ -223,7 +223,9 @@ evidence.** The problems are in the logical and container model:
   inside a `BundleFacts` that embeds every library, repeats project-wide
   source graphs, compile databases, and toolchain data once per artifact.
   The oneDAL graph section alone is roughly 57-59 MB decoded per snapshot.
-- **Multibuild is modelled but not captured.** `bundle_multibuild.py` gets
+- **Multibuild is modelled but not captured.** `bundle_multibuild.py` (since
+  deleted as unreachable; `compare/variant_pairing.py` is the pairing that
+  runs) gets
   the semantics right — variants are paired, never unioned, and a same-side
   fingerprint collision is an error — but the ordinary capture pipeline
   still writes the `default` variant fingerprint, `bundle_variants:` is not

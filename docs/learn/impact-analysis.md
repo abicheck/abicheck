@@ -121,9 +121,9 @@ use cases, or a coverage summary. The consumer *graph* exists (above), but as
 evidence a finding is enriched from — not as its own
 `affected_consumers`/`affected_use_cases` fields. Declared use cases
 (an optional `impact-use-cases.yaml` manifest, `abicheck.impact.use_cases`)
-are now also graph-buildable and joinable the same way — see
-[Use-Case Impact](../contribute/use-case-impact.md) — but, same as the consumer
-graph, only as evidence, with no report field or finding reading it yet.
+are reported by `compare --use-cases` as their own `use_case_impact`
+section rather than as a per-finding field — see
+[Use-Case Impact](../contribute/use-case-impact.md).
 Runtime-trace ingestion (for either graph) and the per-role coverage matrix
 being wired through the impact layer are the remainder of G29 Phase 4. `root_cause_id`/`impact_group_id` (documented above) are implemented,
 but `impact_group_id` is currently only ever an alias of `root_cause_id` —

@@ -663,8 +663,8 @@ class TestDamagedMarkerSectionFailsClosed:
 
 
 class TestDirectBundleApiHonorsDegradation:
-    """`bundle_snapshot_from_facts` (and so `compare_bundle_from_facts` and
-    `compare_bundle_sides`) refuses facts carrying a degraded marker: the
+    """`bundle_snapshot_from_facts` (and so `compare_bundle_from_facts`)
+    refuses facts carrying a degraded marker: the
     stand-in is not evidence, and a direct caller must resolve the scope
     first as the drivers do (Codex review, thirteenth round)."""
 
@@ -689,20 +689,6 @@ class TestDirectBundleApiHonorsDegradation:
         )
         with pytest.raises(ValueError, match="libcore.so.*not bundle evidence"):
             compare_bundle_from_facts(self._facts(), new_snapshot, [])
-
-    def test_compare_bundle_sides_refuses(self, tmp_path: Path) -> None:
-        from abicheck.bundle_side_input import (
-            StoredBundleFactsInput,
-            compare_bundle_sides,
-        )
-        from abicheck.serialization import save_bundle_facts
-
-        path = tmp_path / "old.bundlefacts.json"
-        save_bundle_facts(self._facts(), path)
-        with pytest.raises(ValueError, match="degraded"):
-            compare_bundle_sides(
-                StoredBundleFactsInput(path), StoredBundleFactsInput(path), []
-            )
 
     def test_a_resolved_scope_passes(self) -> None:
         from abicheck.workflows.bundle_facts_capture import bundle_snapshot_from_facts

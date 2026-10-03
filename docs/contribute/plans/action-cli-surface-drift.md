@@ -300,7 +300,7 @@ query is available — which is how this class of drift started.
 ### B2. Cross-surface equivalence check
 
 An executable analogue of
-`compatibility_evaluation_frontend.cross_front_end_differences()`: equivalent
+`cross_front_end_differences()` (`tests/_cross_front_end.py`): equivalent
 Action inputs and CLI invocation must resolve to the same request.
 
 - **Catches:** A1 and A3 in principle — this is the only candidate that

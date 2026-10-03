@@ -254,7 +254,8 @@ def project_ownership_inputs(cfg: Any) -> OwnershipRules | None:
 def header_dir_spellings(headers: Sequence[object]) -> tuple[str, ...]:
     """The ``-H`` *directories* among *headers*, resolved -- the one spelling
     the CLI and the typed API both record, so equivalent invocations resolve
-    equal (``cross_front_end_differences``). A ``-H`` file is not a root."""
+    equal (``tests/_cross_front_end.py``'s ``cross_front_end_differences``).
+    A ``-H`` file is not a root."""
     from pathlib import Path
 
     return tuple(
