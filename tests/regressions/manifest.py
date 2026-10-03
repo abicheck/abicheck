@@ -470,6 +470,10 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # `project history --policy DOC` read the path as a profile name.
             # Oracle: the deprecation-window rule as the docs state it.
             "tests/test_cli_project_history_policy.py",
+            # The pimpl inline-accessor detector never received the policy's
+            # internal_namespaces. Oracle: the documented convention, and
+            # agreement with internal_type_leaks_via_public_api.
+            "tests/test_inline_body_internal_namespaces.py",
         ),
         known_gaps=(
             KnownGap(

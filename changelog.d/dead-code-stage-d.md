@@ -49,6 +49,14 @@
 
 ### Fixed
 
+- **`inline_body_references_renamed_member` follows the policy's
+  `internal_namespaces`.** The pimpl inline-accessor detector used its own
+  three-name list (`detail`, `impl`, `internal`) instead of the run's
+  convention: a project declaring `internal_namespaces: [priv]` never got the
+  finding, and neither did `__detail::`/`_impl::` types with no
+  configuration, although every other internal-namespace check treats them
+  as internal.
+
 - **`project history --policy` takes a policy document, as `compare --policy`
   does.** A document path was passed on as a profile name and read as
   `strict_abi`, so its `overrides:` never reached the pairwise comparisons

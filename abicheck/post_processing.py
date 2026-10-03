@@ -1178,7 +1178,16 @@ class DetectCppPatterns:
 
         new_findings.extend(detect_tag_type_renamed(old, ctx.new))
         new_findings.extend(detect_default_template_arg_changed(old, ctx.new))
-        new_findings.extend(detect_inline_body_renamed_member(old, ctx.new, changes))
+        from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
+
+        new_findings.extend(
+            detect_inline_body_renamed_member(
+                old,
+                ctx.new,
+                changes,
+                ctx.internal_namespaces or DEFAULT_INTERNAL_NAMESPACES,
+            )
+        )
 
         return new_findings, sycl_suppressed | isa_suppressed
 
