@@ -179,9 +179,6 @@ class TestDumpSymbolFiltering:
         monkeypatch.setattr(
             "abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None
         )
-        monkeypatch.setattr(
-            "abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None
-        )
 
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
@@ -208,9 +205,6 @@ class TestDumpSymbolFiltering:
         monkeypatch.setattr(
             "abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None
         )
-        monkeypatch.setattr(
-            "abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None
-        )
 
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
@@ -232,9 +226,6 @@ class TestDumpSymbolFiltering:
         )
         monkeypatch.setattr(
             "abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None
-        )
-        monkeypatch.setattr(
-            "abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None
         )
 
         with warnings.catch_warnings(record=True):

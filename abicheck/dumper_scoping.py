@@ -939,12 +939,6 @@ def _scoped_dwarf_advanced(
         all_struct_names={
             k for k in adv.all_struct_names if _name_matches(k, kept_identifiers)
         },
-        frame_registers={
-            k: v for k, v in adv.frame_registers.items() if k not in excluded_symbols
-        },
-        callee_saved_regs={
-            k: v for k, v in adv.callee_saved_regs.items() if k not in excluded_symbols
-        },
     )
 
 

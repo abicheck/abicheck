@@ -396,13 +396,11 @@ def test_compare_json_layer_coverage_matches_actual_debug_info(
 #: `toolchain` flag sets were missed exactly that way in the first revision.
 _CONSUMED_ADVANCED_FIELDS = {
     "_diff_calling_conventions": {"calling_conventions": {"_Z1fv": "fastcall"}},
-    "_diff_callee_saved_regs": {"callee_saved_regs": {"_Z1fv": frozenset({"rbx"})}},
     "_diff_value_abi_traits/traits": {"value_abi_traits": {"_Z1fv": "trivial"}},
     "_diff_value_abi_traits/sizes": {"return_value_sizes": {"_Z1fv": 16}},
     "_diff_value_abi_traits/sret": {"return_memory_classified": {"_Z1fv"}},
     "_diff_struct_packing/packed": {"packed_structs": {"S"}},
     "_diff_struct_packing/names": {"all_struct_names": {"S"}},
-    "_diff_frame_registers": {"frame_registers": {"_Z1fv": "rbp"}},
     "_diff_toolchain_flags": {"toolchain": ToolchainInfo(abi_flags={"-fshort-enums"})},
     "_diff_vector_abi_flags": {
         "toolchain": ToolchainInfo(vector_abi_flags={"simdlen"})

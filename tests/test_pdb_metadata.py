@@ -562,7 +562,6 @@ class TestDataModelConsistency:
         assert isinstance(adv.packed_structs, set)
         assert isinstance(adv.all_struct_names, set)
         assert isinstance(adv.value_abi_traits, dict)
-        assert isinstance(adv.frame_registers, dict)
 
     def test_toolchain_info_fields_present(
         self, pdb_with_struct_and_enum: Path

@@ -106,7 +106,6 @@ they are controlled by the build system rather than the library ABI contract.
 | Change Kind | Description |
 |-------------|-------------|
 | `calling_convention_changed` | DWARF DW_AT_calling_convention drift |
-| `frame_register_changed` | CFA/frame-pointer register changed (.eh_frame) |
 | `value_abi_trait_changed` | DWARF triviality heuristic (pass-by-reg vs pointer) |
 
 All `BREAKING` kinds that are not calling-convention-related remain `BREAKING`.

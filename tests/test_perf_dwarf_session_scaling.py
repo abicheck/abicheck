@@ -128,7 +128,8 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
     relying on the byte-identical correctness tests (which don't check speed).
     """
     _require_tool("g++")
-    from abicheck.dwarf_advanced import parse_advanced_dwarf
+    from _dwarf_advanced_oracle import parse_advanced_dwarf_separately
+
     from abicheck.dwarf_metadata import parse_dwarf_metadata
     from abicheck.dwarf_unified import open_dwarf_session, parse_dwarf_from_session
     from abicheck.elf_metadata import parse_elf_metadata
@@ -141,7 +142,7 @@ def test_session_reuse_faster_than_independent_opens(tmp_path: Path) -> None:
         # Legacy: three independent ELF opens (pre-DwarfSession behaviour).
         t0 = time.perf_counter()
         dwarf_meta = parse_dwarf_metadata(so)
-        dwarf_adv = parse_advanced_dwarf(so)
+        dwarf_adv = parse_advanced_dwarf_separately(so)
         snap = build_snapshot_from_dwarf(
             so, elf_meta, dwarf_meta, dwarf_adv, version="legacy"
         )

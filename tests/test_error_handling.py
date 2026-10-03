@@ -12,8 +12,9 @@ import json
 import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.dwarf_advanced import AdvancedDwarfMetadata, parse_advanced_dwarf
+from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.dwarf_metadata import DwarfMetadata, parse_dwarf_metadata
+from abicheck.dwarf_unified import parse_dwarf
 from abicheck.elf_metadata import ElfMetadata, parse_elf_metadata
 from abicheck.model import (
     AbiSnapshot,
@@ -94,13 +95,13 @@ class TestDwarfParserErrorHandling:
     def test_advanced_dwarf_non_elf(self, tmp_path):
         bad_file = tmp_path / "bad.so"
         bad_file.write_bytes(b"garbage")
-        meta = parse_advanced_dwarf(bad_file)
+        _, meta = parse_dwarf(bad_file)
         assert isinstance(meta, AdvancedDwarfMetadata)
         assert not meta.has_dwarf
 
     def test_advanced_dwarf_nonexistent(self, tmp_path):
         missing = tmp_path / "missing.so"
-        meta = parse_advanced_dwarf(missing)
+        _, meta = parse_dwarf(missing)
         assert isinstance(meta, AdvancedDwarfMetadata)
 
 

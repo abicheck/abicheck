@@ -288,10 +288,6 @@ def dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         return_memory_classified=set(d.get("return_memory_classified", [])),
         packed_structs=set(d.get("packed_structs", [])),
         all_struct_names=set(d.get("all_struct_names", [])),
-        frame_registers=d.get("frame_registers", {}),
-        callee_saved_regs={
-            k: frozenset(v) for k, v in d.get("callee_saved_regs", {}).items()
-        },
     )
 
 

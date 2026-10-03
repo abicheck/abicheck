@@ -111,7 +111,9 @@ risk       = ∅                                              (empty)
 ```
 
 Downgraded kinds: `CALLING_CONVENTION_CHANGED`, `FRAME_REGISTER_CHANGED`,
-`VALUE_ABI_TRAIT_CHANGED`.
+`VALUE_ABI_TRAIT_CHANGED`. (2026-10: `FRAME_REGISTER_CHANGED` was removed with
+the CFI pass that never ran on a real comparison -- see
+[dead-code-and-single-owner](../plans/dead-code-and-single-owner.md), Stage D.)
 
 RISK promotion rationale: In a plugin scenario, the host and plugin load into
 the same process. A deployment-floor risk (e.g., new GLIBC requirement) can

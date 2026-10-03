@@ -1,8 +1,7 @@
-"""Follow-up tests for PR #100 (FRAME_REGISTER_CHANGED) and PR #101 (--policy CLI).
+"""Follow-up tests for PR #101 (--policy CLI).
 
 Covers:
-- _extract_cfa_reg_from_fde helper behavior (including epilogue edge case)
-- _normalize_arch, _build_addr_to_sym, _get_cfi_source helpers
+- _normalize_arch
 - policy-aware compute_verdict: sdk_vendor, plugin_abi
 - CLI/report filtering honoring --policy
 """
@@ -22,13 +21,7 @@ from abicheck.checker_policy import (
     Verdict,
     compute_verdict,
 )
-from abicheck.dwarf_advanced import (
-    _build_addr_to_sym,
-    _extract_cfa_reg_from_fde,
-    _get_cfi_source,
-    _normalize_arch,
-    _reg_name,
-)
+from abicheck.dwarf_advanced import _normalize_arch
 from abicheck.model import AbiSnapshot
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -40,49 +33,7 @@ def _change(kind: ChangeKind) -> Any:
     return c
 
 
-def _make_fde(rows: list[dict[str, Any]]) -> MagicMock:
-    decoded = MagicMock()
-    decoded.table = rows
-    fde = MagicMock()
-    fde.get_decoded.return_value = decoded
-    return fde
-
-
-def _make_symbol(name: str, value: int, bind: str) -> MagicMock:
-    sym = MagicMock()
-    sym.name = name
-    sym.entry.st_value = value
-    sym.entry.st_info.bind = bind
-    return sym
-
-
-def _make_section(symbols: list[MagicMock]) -> MagicMock:
-    sect = MagicMock()
-    sect.iter_symbols.return_value = symbols
-    return sect
-
-
-# ── _reg_name helpers ─────────────────────────────────────────────────────────
-
-
-class TestRegNameHelpers:
-    def test_x86_64_rbp(self) -> None:
-        assert _reg_name(6, "x64") == "rbp"
-
-    def test_x86_64_rsp(self) -> None:
-        assert _reg_name(7, "x64") == "rsp"
-
-    def test_x86_ebp(self) -> None:
-        assert _reg_name(5, "x86") == "ebp"
-
-    def test_aarch64_sp(self) -> None:
-        assert _reg_name(31, "aarch64") == "sp"
-
-    def test_unknown_arch_fallback(self) -> None:
-        assert _reg_name(7, "mips") == "reg7"
-
-    def test_unknown_regnum_fallback(self) -> None:
-        assert _reg_name(99, "x64") == "reg99"
+# ── _normalize_arch ───────────────────────────────────────────────────────────
 
 
 class TestNormalizeArch:
@@ -102,118 +53,7 @@ class TestNormalizeArch:
         assert _normalize_arch(elf) == "riscv"
 
 
-class TestBuildAddrToSym:
-    def test_dynsym_precedence_same_address(self) -> None:
-        elf = MagicMock()
-        dyn = _make_section([_make_symbol("exported", 0x1000, "STB_GLOBAL")])
-        sym = _make_section([_make_symbol("local_shadow", 0x1000, "STB_GLOBAL")])
-        elf.get_section_by_name.side_effect = lambda name: {
-            ".dynsym": dyn,
-            ".symtab": sym,
-        }.get(name)
-
-        out = _build_addr_to_sym(elf)
-        assert out[0x1000] == "exported"
-
-    def test_ignores_local_and_zero(self) -> None:
-        elf = MagicMock()
-        dyn = _make_section(
-            [
-                _make_symbol("zero", 0, "STB_GLOBAL"),
-                _make_symbol("local", 0x2000, "STB_LOCAL"),
-                _make_symbol("weak_ok", 0x3000, "STB_WEAK"),
-            ]
-        )
-        elf.get_section_by_name.side_effect = lambda name: {
-            ".dynsym": dyn,
-            ".symtab": None,
-        }.get(name)
-
-        out = _build_addr_to_sym(elf)
-        assert 0x2000 not in out
-        assert 0 not in out
-        assert out[0x3000] == "weak_ok"
-
-
-class TestGetCfiSource:
-    def test_prefers_eh_frame(self) -> None:
-        dwarf = MagicMock()
-        eh_entries = [object()]
-        dwarf.get_EH_CFI_entries.return_value = eh_entries
-        assert _get_cfi_source(dwarf) is eh_entries
-
-    def test_fallbacks_to_debug_frame(self) -> None:
-        dwarf = MagicMock()
-        dbg_entries = [object(), object()]
-        dwarf.get_EH_CFI_entries.return_value = None
-        dwarf.get_CFI_entries.return_value = dbg_entries
-        assert _get_cfi_source(dwarf) is dbg_entries
-
-    def test_returns_none_on_missing_both(self) -> None:
-        dwarf = MagicMock()
-        dwarf.get_EH_CFI_entries.side_effect = AttributeError("no eh")
-        dwarf.get_CFI_entries.side_effect = AttributeError("no dbg")
-        assert _get_cfi_source(dwarf) is None
-
-
 # ── _extract_cfa_reg_from_fde ─────────────────────────────────────────────────
-
-
-class TestExtractCfaRegFromFde:
-    def test_tie_break_by_highest_pc(self) -> None:
-        """2-row table: entry rbp, body rsp -> tie => higher PC row wins (rsp)."""
-        cfa_entry = MagicMock()
-        cfa_entry.reg = 6  # rbp — entry-state (lower PC)
-        cfa_post = MagicMock()
-        cfa_post.reg = 7  # rsp — post-prologue (higher PC)
-
-        rows = [
-            {"pc": 0x1000, "cfa": cfa_entry},
-            {"pc": 0x1010, "cfa": cfa_post},
-        ]
-        assert _extract_cfa_reg_from_fde(_make_fde(rows), "x64") == "rsp"
-
-    def test_modal_register_avoids_epilogue_bias(self) -> None:
-        """3-row table: entry/body rbp, epilogue rsp -> dominant should be rbp."""
-        cfa_entry = MagicMock()
-        cfa_entry.reg = 6  # rbp
-        cfa_body = MagicMock()
-        cfa_body.reg = 6  # rbp
-        cfa_epi = MagicMock()
-        cfa_epi.reg = 7  # rsp
-
-        rows = [
-            {"pc": 0x1000, "cfa": cfa_entry},
-            {"pc": 0x1010, "cfa": cfa_body},
-            {"pc": 0x1020, "cfa": cfa_epi},
-        ]
-        assert _extract_cfa_reg_from_fde(_make_fde(rows), "x64") == "rbp"
-
-    def test_single_row_used(self) -> None:
-        cfa = MagicMock()
-        cfa.reg = 6
-        assert (
-            _extract_cfa_reg_from_fde(_make_fde([{"pc": 0x1000, "cfa": cfa}]), "x64")
-            == "rbp"
-        )
-
-    def test_empty_table_returns_none(self) -> None:
-        assert _extract_cfa_reg_from_fde(_make_fde([]), "x64") is None
-
-    def test_no_cfa_key_returns_none(self) -> None:
-        assert _extract_cfa_reg_from_fde(_make_fde([{"pc": 0x1000}]), "x64") is None
-
-    def test_cfa_no_reg_attr_returns_none(self) -> None:
-        cfa = MagicMock(spec=[])
-        assert (
-            _extract_cfa_reg_from_fde(_make_fde([{"pc": 0x1000, "cfa": cfa}]), "x64")
-            is None
-        )
-
-    def test_decode_exception_returns_none(self) -> None:
-        fde = MagicMock()
-        fde.get_decoded.side_effect = ValueError("parse error")
-        assert _extract_cfa_reg_from_fde(fde, "x64") is None
 
 
 # ── compute_verdict — sdk_vendor ──────────────────────────────────────────────

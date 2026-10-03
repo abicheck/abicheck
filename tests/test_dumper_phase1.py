@@ -24,7 +24,6 @@ def test_dump_without_headers_logs_info_and_returns_exported_symbols(
         "abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata()
     )
     monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
-    monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
 
     # ADR-035 P6: the header-less advisory is now an info log (no stderr spam on
     # every run), not a UserWarning. It must not warn, and must log the notice.
@@ -99,7 +98,6 @@ def test_dump_with_headers_uses_castxml_parser_results(tmp_path, monkeypatch):
         "abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata()
     )
     monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
-    monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
 
     # Pin the castxml backend: this test exercises the castxml parser path
     # specifically (auto would pick clang on a clang-only host).
@@ -134,7 +132,6 @@ def test_dump_with_headers_propagates_castxml_error(tmp_path, monkeypatch):
         "abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata()
     )
     monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
-    monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
 
     with pytest.raises(RuntimeError, match="castxml failed"):
         dump(so_path=so_path, headers=[header], version="1.0", header_backend="castxml")

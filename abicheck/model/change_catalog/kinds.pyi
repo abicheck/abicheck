@@ -120,7 +120,6 @@ class ChangeKind(str, Enum):
     STRUCT_PACKING_CHANGED = 'struct_packing_changed'
     TYPE_VISIBILITY_CHANGED = 'type_visibility_changed'
     TOOLCHAIN_FLAG_DRIFT = 'toolchain_flag_drift'
-    FRAME_REGISTER_CHANGED = 'frame_register_changed'
     VECTOR_ABI_CHANGED = 'vector_abi_changed'
     FUNC_DELETED = 'func_deleted'
     VAR_BECAME_CONST = 'var_became_const'

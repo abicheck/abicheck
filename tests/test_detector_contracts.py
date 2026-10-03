@@ -116,7 +116,6 @@ def test_advanced_dwarf_detector_no_changes_when_identical() -> None:
         ChangeKind.CALLING_CONVENTION_CHANGED,
         ChangeKind.STRUCT_PACKING_CHANGED,
         ChangeKind.TOOLCHAIN_FLAG_DRIFT,
-        ChangeKind.FRAME_REGISTER_CHANGED,
         ChangeKind.VALUE_ABI_TRAIT_CHANGED,
     }
     assert not any(c.kind in dwarf_kinds for c in result.changes)

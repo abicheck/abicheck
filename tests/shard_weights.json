@@ -679,7 +679,6 @@
   "tests/test_followup_100_101.py": 0.45,
   "tests/test_format_compliance.py": 0.11,
   "tests/test_fp_rate_gate.py": 1.07,
-  "tests/test_frame_register.py": 0.08,
   "tests/test_frozen_namespace.py": 0.17,
   "tests/test_func_deleted.py": 0.19,
   "tests/test_function_case_b_facts.py": 0.21,

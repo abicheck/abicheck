@@ -416,24 +416,6 @@ PLATFORM_ENTRIES_1: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
-        "frame_register_changed",
-        _B,
-        impact="The dominant canonical-frame-address register recorded in "
-        "the function's CFI (.eh_frame/.debug_frame) changed — e.g. "
-        "rbp vs. rsp, commonly from a `-fomit-frame-pointer` "
-        "rebuild. A tool that reads the real CFI (a standard "
-        "DWARF-aware debugger or unwinder) walks the new frame "
-        "correctly regardless, since the new CFI describes it; only "
-        "a tool that assumes a frame-pointer chain instead of "
-        "reading CFI, or one working from stale/cached unwind "
-        "information for this function, can misinterpret the new "
-        "convention. Ordinary calls into the function are "
-        "unaffected either way.",
-        policy_overrides={"plugin_abi": _C},
-        entity=_ENT.FUNCTION,
-        operation=_OP.MODIFIED,
-    ),
-    _E(
         "func_deleted_elf_fallback",
         _B,
         impact="The exported symbol vanished from the dynamic symbol table "

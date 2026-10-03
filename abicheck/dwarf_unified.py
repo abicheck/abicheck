@@ -14,9 +14,8 @@
 
 """dwarf_unified.py — single-pass DWARF extraction.
 
-Combines the work of ``dwarf_metadata.parse_dwarf_metadata`` and
-``dwarf_advanced.parse_advanced_dwarf`` into one ELF open + one CU
-iteration, cutting file I/O and CU-header parsing overhead roughly in half.
+Runs the basic (``dwarf_metadata``) and advanced (``dwarf_advanced``) per-CU
+passes over one ELF open + one CU iteration.
 Note: each module still performs its own DIE-tree walk per CU; a unified
 DIE walker (further ~30-40% CPU gain) is a planned follow-up.
 
@@ -36,9 +35,8 @@ open_dwarf_session(so_path) -> DwarfSession | None
 parse_dwarf_from_session(session) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]
     Run the metadata passes over an already-open session.
 
-Backward-compatible shims (used by existing callers / tests):
+Backward-compatible shim (used by existing callers / tests):
     parse_dwarf_metadata(so_path) -> DwarfMetadata
-    parse_advanced_dwarf(so_path) -> AdvancedDwarfMetadata
 
 The two legacy modules (dwarf_metadata.py, dwarf_advanced.py) keep their
 internal helpers unchanged and are re-exported here so no import sites
@@ -206,10 +204,6 @@ def parse_dwarf(
 ) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
     """Open *so_path* once and extract both DwarfMetadata and AdvancedDwarfMetadata.
 
-    Replaces two separate calls to ``parse_dwarf_metadata(so_path)`` and
-    ``parse_advanced_dwarf(so_path)`` that each open the file and iterate
-    over all CUs independently.
-
     Returns (DwarfMetadata(), AdvancedDwarfMetadata()) on any error.
     Never raises.
 
@@ -257,12 +251,3 @@ def parse_dwarf_metadata(so_path: Path) -> DwarfMetadata:
     return meta
 
 
-def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
-    """Thin shim — delegates to parse_dwarf() and returns only AdvancedDwarfMetadata.
-
-    .. note::
-        If you also need ``DwarfMetadata``, call ``parse_dwarf()``
-        directly to avoid opening the file twice.
-    """
-    _, adv = parse_dwarf(so_path)
-    return adv
