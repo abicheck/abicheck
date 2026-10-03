@@ -191,6 +191,12 @@ def test_the_committed_selection_is_well_formed() -> None:
     always-on check; completeness itself is the weekly --check."""
     lines = gen.read_selection()
     assert lines, "an empty selection would make the stats pass run nothing"
+    if lines == gen.FULL_SELECTION:
+        # The one non-file value a selection may hold: the mutation lane's
+        # `extend-selection` writes it in the CI workspace when a PR changes a
+        # test helper, and this test then runs *inside* that widened stats
+        # pass -- rejecting it there aborted mutmut on every such PR.
+        return
     assert lines == sorted(set(lines))
     missing = [p for p in lines if not (REPO / p).is_file()]
     assert not missing, f"selection names files that do not exist: {missing}"
@@ -370,3 +376,14 @@ def test_arm_rescans_when_a_matching_module_appears_under_another_name(
     assert len(scans) == 2, "a newly loaded only_mutate module must trigger a rescan"
     mon.arm()
     assert len(scans) == 2
+
+
+def test_the_widened_selection_is_the_value_the_well_formed_check_accepts() -> None:
+    """``extend-selection`` writes its own spelling of "the whole suite";
+    ``test_the_committed_selection_is_well_formed`` runs inside that widened
+    stats pass and must accept exactly that value. Pinned together so a
+    change to either spelling cannot reopen the abort."""
+    widened = scope.extend_selection(
+        ["tests/test_a.py"], ["tests/_some_helper.py"], lambda p: True
+    )
+    assert widened == gen.FULL_SELECTION
