@@ -83,6 +83,7 @@ __all__ = [
     "FLOAT128_SPELLING",
     "FLOAT128_STANDIN",
     "PREAMBLE_FILENAME",
+    "castxml_aggregate_text",
     "write_castxml_aggregate",
 ]
 
@@ -126,12 +127,17 @@ def write_castxml_aggregate(headers: Iterable[Path], suffix: str) -> Path:
     agg_dir = Path(tempfile.mkdtemp(prefix="abicheck_castxml_"))
     preamble = agg_dir / PREAMBLE_FILENAME
     preamble.write_text(CASTXML_HEADER_PREAMBLE)
-    # ``#line 1`` restores the aggregate-TU layout every diagnostic consumer
-    # relies on -- header ``i`` on line ``i+1`` -- so the preamble include
-    # costs no line (``unparseable_header_fallback._attribute`` maps a failing
-    # aggregate frame back to its header by that line number alone).
-    lines = [f'#include "{preamble}"\n', "#line 1\n"]
-    lines += [f'#include "{h.resolve()}"\n' for h in headers]
     agg_path = agg_dir / f"aggregate{suffix}"
-    agg_path.write_text("".join(lines))
+    agg_path.write_text(castxml_aggregate_text(headers, preamble))
     return agg_path
+
+
+def castxml_aggregate_text(headers: Iterable[Path], preamble: Path) -> str:
+    """The aggregate header's text, given where the preamble lives.
+
+    The one spelling both :func:`write_castxml_aggregate` and the header-AST
+    cache key use, so a change to what castxml is fed is a key change.
+    """
+    lines = [f'#include "{preamble}"\n']
+    lines += [f'#include "{h.resolve()}"\n' for h in headers]
+    return "".join(lines)

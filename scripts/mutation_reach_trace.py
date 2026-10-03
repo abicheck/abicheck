@@ -35,13 +35,18 @@ on those code objects; each reports once and is disabled, and
 ``restart_events()`` re-arms them per test, so every other call in the suite
 costs nothing. (A global ``sys.setprofile`` hook was measured covering about
 2% of the suite in several minutes.) The code objects are found from every
-live function and their nested ``co_consts``: a ``gc`` heap census when no
-other thread is alive, else the ``only_mutate`` modules' own namespaces (a
-census beside a live thread can break that thread's ``tuple(...)`` -- bug
-class ``gc-census-concurrent-thread``). A closure created at
+live function (``gc``) and their nested ``co_consts``. A closure created at
 run time reuses a nested code object that is already armed, so new code only
 appears when an ``only_mutate`` module is (re)imported: the scan is repeated
 only when those module objects change, not per test.
+
+The heap census runs only while this is the process's sole Python thread
+(``memory_trace.gc_census_is_safe``): a census beside a live thread can break
+that thread's ``tuple(...)`` construction. With another thread alive the scan
+walks the ``only_mutate`` modules' namespaces instead (functions, classes,
+descriptors, ``__wrapped__`` chains and containers), arms what it finds, and
+leaves the modules marked unscanned so the next test retries the full census.
+
 
 Activated by ``MUTATION_REACH_OUT=<dir>``: each worker writes the node ids it
 saw reach mutated code to ``<dir>/<worker>.json``.
@@ -51,11 +56,9 @@ from __future__ import annotations
 
 import gc
 import importlib
-import inspect
 import json
 import os
 import sys
-import threading
 import tomllib
 import types
 from collections.abc import Generator
@@ -63,6 +66,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from abicheck.workflows.memory_trace import gc_census_is_safe
 
 #: ``sys.monitoring`` (3.12+), typed loosely: mypy here targets 3.11.
 _MON: Any = getattr(sys, "monitoring", None)
@@ -94,54 +99,52 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
-def census_is_safe() -> bool:
-    """``abicheck.workflows.memory_trace.gc_census_is_safe``, restated.
+def _namespace_functions(modules: list[str]) -> list[object]:
+    """Every function reachable from the named modules' namespaces.
 
-    Not imported: this plugin loads before (and independently of) the
-    package under test, which may not be importable at that point.
-    """
-    return threading.active_count() == 1
-
-
-def namespace_functions(modules: list[str]) -> list[object]:
-    """Every function reachable from *modules*' globals, without a heap census.
-
-    Module-level functions, and methods (plain, ``staticmethod``,
-    ``classmethod``, ``property`` accessors) of classes defined there, each
-    unwrapped through ``__wrapped__``. Nested closures, lambdas and
-    comprehensions are not listed: ``code_objects`` reaches them from the
-    enclosing function's ``co_consts``.
+    The fallback when a heap census is unsafe. Follows class bodies (nested
+    classes too), ``staticmethod``/``classmethod``/``property`` wrappers,
+    ``functools.wraps`` ``__wrapped__`` chains and plain containers, so a
+    handler kept in a module-level registry is still found. Only a function
+    created inside another call and kept nowhere in a namespace is missed,
+    and :meth:`Monitor.arm` retries the full census for that.
     """
     found: list[object] = []
-
-    def add(value: object) -> None:
-        if isinstance(value, (staticmethod, classmethod)):
-            value = value.__func__
-        if isinstance(value, property):
-            for accessor in (value.fget, value.fset, value.fdel):
-                if accessor is not None:
-                    add(accessor)
-            return
-        seen: set[int] = set()
-        while value is not None and id(value) not in seen:
-            seen.add(id(value))
-            found.append(value)
-            # Static lookup: an unrelated global's own ``__getattr__`` (a lazy
-            # proxy, a mock) must not run -- or raise -- inside ``arm()``.
-            # ``functools.wraps`` stores ``__wrapped__`` in the instance
-            # dict, which a static lookup still finds.
-            value = inspect.getattr_static(value, "__wrapped__", None)
-
+    seen: set[int] = set()
+    stack: list[object] = []
     for name in modules:
         module = sys.modules.get(name)
-        if module is None:
+        if module is not None:
+            stack.extend(list(vars(module).values()))
+    while stack:
+        obj = stack.pop()
+        if id(obj) in seen:
             continue
-        for value in list(vars(module).values()):
-            add(value)
-            if isinstance(value, type):
-                for member in list(vars(value).values()):
-                    add(member)
+        seen.add(id(obj))
+        if isinstance(obj, types.FunctionType):
+            found.append(obj)
+            wrapped = getattr(obj, "__wrapped__", None)
+            if wrapped is not None:
+                stack.append(wrapped)
+        elif isinstance(obj, (staticmethod, classmethod)):
+            stack.append(obj.__func__)
+        elif isinstance(obj, property):
+            stack.extend(f for f in (obj.fget, obj.fset, obj.fdel) if f is not None)
+        elif isinstance(obj, type):
+            stack.extend(list(vars(obj).values()))
+        elif isinstance(obj, dict):
+            stack.extend(list(obj.values()))
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            stack.extend(list(obj))
     return found
+
+
+def function_candidates(modules: list[str], *, heap_census: bool) -> list[object]:
+    """Objects that may be ``only_mutate`` functions: the whole heap when a
+    census is safe, else :func:`_namespace_functions`."""
+    if heap_census:
+        return gc.get_objects()
+    return _namespace_functions(modules)
 
 
 class Monitor:
@@ -169,14 +172,12 @@ class Monitor:
         ids = tuple(id(sys.modules.get(name)) for name in self.modules)
         if ids == self.module_ids:
             return
-        if census_is_safe():
-            candidates: list[object] = gc.get_objects()
-            # Only a full census may mark this module set done; a namespace
-            # walk is retried until one runs.
+        census = gc_census_is_safe()
+        if census:
+            # Only a full census marks these modules scanned; a namespace
+            # walk (another thread alive) is retried at the next test.
             self.module_ids = ids
-        else:
-            candidates = namespace_functions(self.modules)
-        for obj in candidates:
+        for obj in function_candidates(self.modules, heap_census=census):
             if not isinstance(obj, types.FunctionType):
                 continue
             code = obj.__code__

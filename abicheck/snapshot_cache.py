@@ -14,7 +14,9 @@
 
 """Snapshot-level cache for avoiding redundant binary analysis.
 
-Cache key = SHA-256 of (binary content hash + header mtimes + compiler params).
+Cache key = SHA-256 of (binary content hash + header mtimes + compiler params
++ the identity of the abicheck code that produced the snapshot,
+``storage.code_identity.abicheck_code_fingerprint``).
 Cache location = ``$XDG_CACHE_HOME/abi_check/snapshots/<key>.json`` or
 ``~/.cache/abi_check/snapshots/<key>.json``.
 """
@@ -31,6 +33,7 @@ from typing import TYPE_CHECKING
 
 from .extract.cache_header_scan import iter_cache_header_files
 from .model.execution_cache_scoped import DiskCache
+from .storage.code_identity import abicheck_code_fingerprint
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -480,6 +483,9 @@ def _cache_key(
     # this build's answer. Folding it in closes that whole class instead of
     # relying on a hand bump of _SNAPSHOT_CACHE_VERSION for each field.
     h.update(f"schema={_snapshot_schema_version()}".encode())
+    # And the code that produced it: a snapshot is extraction *output*, so an
+    # extractor change with no matching version bump must still miss.
+    h.update(f"code={abicheck_code_fingerprint()}".encode())
     return h.hexdigest()
 
 

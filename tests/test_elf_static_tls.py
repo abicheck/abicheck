@@ -24,7 +24,6 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -182,10 +181,6 @@ def _has_any_tls_dynamic_evidence(so: Path) -> bool:
     not shutil.which("readelf"), reason="readelf required as the oracle"
 )
 @pytest.mark.skipif(not _COMPILERS, reason="no C compiler")
-@pytest.mark.skipif(
-    sys.platform != "linux",
-    reason="builds and parses an ELF shared object; ELF is Linux-only",
-)
 @pytest.mark.parametrize("cc", _COMPILERS)
 def test_every_tls_model_is_classified_by_its_semantics(
     cc: str, tmp_path: Path
@@ -213,6 +208,10 @@ def test_every_tls_model_is_classified_by_its_semantics(
             # local-exec in a shared object is a link error on some targets;
             # that is the toolchain refusing the model, not a classification.
             continue
+        if so.read_bytes()[:4] != b"\x7fELF":
+            # A host toolchain whose shared objects are not ELF (MinGW emits
+            # PE) has no ELF TLS relocations to classify.
+            pytest.skip(f"{cc} does not produce ELF shared objects")
         built[model] = needs_static
         meta = parse_elf_metadata(so)
         assert meta.has_tls_symbols

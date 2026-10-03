@@ -112,10 +112,6 @@ _PROFILES = {
     not (shutil.which("castxml") and shutil.which("c++")),
     reason="needs castxml and c++",
 )
-@pytest.mark.skipif(
-    sys.platform != "linux",
-    reason="builds and parses an ELF shared object; ELF is Linux-only",
-)
 def test_case89_finding_is_independent_of_debug_evidence(tmp_path: Path) -> None:
     results: dict[str, tuple[str, list[tuple[str, str]]]] = {}
     for profile, (flags, strip) in _PROFILES.items():
@@ -140,7 +136,9 @@ def test_case89_finding_is_independent_of_debug_evidence(tmp_path: Path) -> None
                 check=True,
             )
             if strip:
-                subprocess.run(["strip", "-g", str(lib)], check=True)
+                # -S is --strip-debug in GNU strip and the only spelling
+                # Apple's strip accepts; -g exists only in GNU strip.
+                subprocess.run(["strip", "-S", str(lib)], check=True)
             subprocess.run(
                 [
                     sys.executable,

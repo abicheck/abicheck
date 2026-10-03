@@ -238,6 +238,7 @@ _F5 = tuple(
         "perf.bounded_cache_budget_omits_what_it_retains",
         "perf.cache_fast_path_bypasses_shared_coordination",
         "perf.derived_cache_must_match_what_recomputing_would_give",
+        "cache.computed_output_keyed_without_code_identity",
         "perf.enumerable_value_space_allocated_per_occurrence",
         "perf.evidence_released_before_its_consumer_runs",
         "perf.fixed_layout_fast_path_field_decoding",
@@ -259,6 +260,7 @@ _F5 = tuple(
     ]
 )
 _F8 = (
+    "extraction.aggregate_layout_inverted_by_line",
     "extraction.emulated_compiler_builtin_absent_from_frontend",
     "extraction.linker_summary_flag_read_as_the_fact",
     "scoping.system_header_layout_unrecognized",
