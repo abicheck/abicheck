@@ -254,3 +254,62 @@ def test_every_disk_cache_is_classified() -> None:
     assert keyed == set(_PROVED)
     for test_name in _PROVED.values():
         assert hasattr(TestCachesMissAcrossCodeIdentity, test_name)
+
+
+# -- edge branches of the primitives ------------------------------------------
+
+
+class TestModuleFingerprintEdges:
+    def test_module_source_path_resolves_root_package_module_and_package(
+        self, tmp_path: Path
+    ) -> None:
+        root = _write(
+            tmp_path / "pkg",
+            {"__init__.py": b"", "a.py": b"", "sub/__init__.py": b""},
+        )
+        assert (
+            code_identity.module_source_path(root, "abicheck") == root / "__init__.py"
+        )
+        assert code_identity.module_source_path(root, "abicheck.a") == root / "a.py"
+        assert (
+            code_identity.module_source_path(root, "abicheck.sub")
+            == root / "sub" / "__init__.py"
+        )
+        assert code_identity.module_source_path(root, "abicheck.nope") is None
+
+    def test_missing_module_is_a_distinct_marker_not_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        root = _write(tmp_path / "pkg", {"a.py": b"x = 1\n"})
+        fp = code_identity.compute_modules_fingerprint
+        only_a = fp(root, ("abicheck.a",))
+        with_gone = fp(root, ("abicheck.a", "abicheck.gone"))
+        with_other_gone = fp(root, ("abicheck.a", "abicheck.other"))
+        # A missing name changes the fingerprint, and which name is missing matters.
+        assert len({only_a, with_gone, with_other_gone}) == 3
+        # Listing order and duplicates are irrelevant.
+        assert fp(root, ("abicheck.gone", "abicheck.a", "abicheck.a")) == with_gone
+
+    def test_unreadable_file_hashes_as_marker(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _write(tmp_path / "pkg", {"a.py": b"x = 1\n"})
+        before = compute_code_fingerprint(root)
+        real = Path.read_bytes
+
+        def boom(self: Path) -> bytes:
+            if self.name == "a.py":
+                raise OSError("unreadable")
+            return real(self)
+
+        monkeypatch.setattr(Path, "read_bytes", boom)
+        unreadable = compute_code_fingerprint(root)
+        assert unreadable != before
+        assert unreadable == compute_code_fingerprint(root)
+
+
+def test_running_package_modules_fingerprint_matches_primitive() -> None:
+    mods = ("abicheck.storage.code_identity",)
+    assert code_identity.abicheck_modules_fingerprint(
+        mods
+    ) == code_identity.compute_modules_fingerprint(code_identity.PACKAGE_ROOT, mods)
