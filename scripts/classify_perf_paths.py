@@ -16,7 +16,7 @@
 """Classifies a PR's changed files for ``.github/workflows/performance.yml``.
 
 The Performance workflow's PR-triggered jobs (``scaling``, ``regression``,
-``header-graph-regression``, ``l2-cli-perf``) only need to run when a PR
+``l2-cli-perf``, which also runs the header-graph gate) only need to run when a PR
 actually touches performance-sensitive code -- previously this was a
 ``pull_request.paths:`` YAML filter on the whole workflow trigger. That has a
 real structural cost this module exists to remove: a *trigger-level* path

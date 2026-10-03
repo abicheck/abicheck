@@ -172,7 +172,7 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
 - Triggers: weekly schedule, manual `workflow_dispatch` (with size / budget
   inputs), and every PR (`opened`/`reopened`/`synchronize`/`labeled`) — but
   the expensive jobs (`scaling`, `regression`, `header-graph-perf` —
-  schedule/dispatch only, see below — `header-graph-regression`, `l2-cli-perf`)
+  schedule/dispatch only, see below — and `l2-cli-perf`, which also runs the header-graph PR-vs-base gate)
   only actually run when a `classify` job decides
   the PR touches performance-sensitive code, the **classifier-job pattern**
   (`scripts/classify_perf_paths.py`, `tests/test_classify_perf_paths.py`).
@@ -271,13 +271,13 @@ G31 Phase D header-graph attach-cost gate
 ([`scripts/check_header_graph_perf.py`](https://github.com/abicheck/abicheck/blob/main/scripts/check_header_graph_perf.py),
 see [the G31 Phase D follow-up plan](plans/g31-header-graph-default-on-followup.md)):
 `header-graph-perf` is report-only trend data on schedule/dispatch (on a
-pull request the trend point is `header-graph-regression`'s own head
+pull request the trend point is the header-graph gate's own head
 measurement, uploaded under the same `performance-header-graph` artifact
 name, so a PR does not spend a second runner re-measuring the same head;
 no stable committed baseline
 number would survive a runner/toolchain change, the same reasoning
 `check_mutation_score.py`'s `SURVIVOR_BASELINE` bootstrap avoids);
-`header-graph-regression` follows this page's own `--baseline`/`--regress-tolerance`
+The header-graph PR-vs-base gate (steps of the `l2-cli-perf` job since 2026-10, formerly its own `header-graph-regression` job on a separate runner) follows this page's own `--baseline`/`--regress-tolerance`
 same-runner base-vs-head pattern (see [Baseline regression](#baseline-regression)
 below) and gates from day one, since that pattern never needs a stale
 committed number to begin with.

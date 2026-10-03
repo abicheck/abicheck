@@ -490,8 +490,8 @@ jobs:
   header-graph-perf:
     name: Header-graph attach-cost (trend)
     needs: classify
-    # Schedule/dispatch only. On a pull_request the `header-graph-regression`
-    # job below measures the identical head (same --sizes, same
+    # Schedule/dispatch only. On a pull_request the header-graph steps of the
+    # `l2-cli-perf` job below measure the identical head (same --sizes, same
     # --require-castxml, --repeat 5 rather than this job's 3), writes the same
     # --json-out report and uploads it under this job's artifact name, so a
     # second runner re-measuring head here bought nothing a PR reads.
@@ -558,199 +558,6 @@ jobs:
           name: performance-header-graph
           path: reports/perf/header_graph.*
 
-  # PR-vs-base regression for the same gate — same base-vs-head pattern as the
-  # `regression` job above, avoiding a stale committed-baseline number
-  # entirely: base and head are measured on the identical runner/toolchain in
-  # the same job, so drift between runners can never masquerade as a
-  # regression (or hide one). Gating from day one (unlike header-graph-perf's
-  # own report-only trend job above) since a same-run base-vs-head comparison
-  # needs no bootstrap period the way a committed number would.
-  header-graph-regression:
-    name: Header-graph attach-cost regression (PR vs base)
-    needs: classify
-    if: github.event_name == 'pull_request' && needs.classify.outputs.run == 'true'
-    # Pinned, not `ubuntu-latest`: this job runs the checksum-pinned
-    # CastXML Superbuild, which hard-fails on any Ubuntu release it has no
-    # asset for. The floating alias silently moves between releases, so it
-    # would break this job the day GitHub repoints it. Enforced by
-    # tests/test_castxml_installer.py's runner allowlist, which only began
-    # covering this workflow once it learned to recognise composite
-    # consumers (Codex review on PR #685).
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Checkout base
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: base
-          persist-credentials: false
-
-      - name: Checkout head
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-        with:
-          path: head
-          persist-credentials: false
-
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: "3.14"
-
-      - name: Install toolchain
-        # base/ + head/ checkouts, no repo at the workspace root -- see the
-        # identical note on the other split-checkout job above.
-        env:
-          INPUT_PACKAGES: clang g++
-        run: bash head/.github/actions/install-system-deps/install.sh
-
-      - name: Set up pinned CastXML
-        # A system binary, not a per-venv package -- installing it once
-        # (from either checkout's copy of the script; run from head/ since
-        # that's guaranteed to exist and be current) covers both the base
-        # and head measurement steps below. Without this, the runner's
-        # castxml would be entirely absent, so this job's comparison would
-        # never actually exercise the default backend's genuine second
-        # `clang` invocation on either side (Codex review, same gap as the
-        # header-graph-perf trend job above).
-        run: bash head/action/install-castxml.sh
-
-      - name: Measure base branch
-        run: |
-          set -euo pipefail
-          python -m venv base_env
-          ./base_env/bin/pip install -q --upgrade pip
-          ./base_env/bin/pip install -q -e "./base[dev]"
-          # Run HEAD's own copy of the gate (not base's stale one) against
-          # base's installed abicheck package -- see benchmark_scaling.py's
-          # identical fix (and its own, more detailed comment) for the full
-          # reasoning: comparing a median computed by head's harness against
-          # a min() a stale base-branch copy of this same script would
-          # compute biases every comparison independent of any real
-          # performance change, and a base script predating a flag this PR
-          # just added would simply crash the step outright (Codex review on
-          # PR #768).
-          set +e
-          ./base_env/bin/python head/scripts/check_header_graph_perf.py \
-            --sizes 25 100 400 --repeat 5 --require-castxml \
-            --json-out base_header_graph.json 2>&1 | tee base_measure.log
-          status=${PIPESTATUS[0]}
-          set -e
-          if [ "$status" -ne 0 ]; then
-            # Two legitimate, non-regression reasons head's harness can fail
-            # against base's installed package -- both degrade to report-only
-            # exactly like a genuinely absent base measurement; every OTHER
-            # failure (a fixture-compile crash, a clang crash, the AST-attach
-            # verification catching a degraded pass) still propagates and
-            # fails this job rather than being silently swallowed (Codex
-            # review, fresh evidence):
-            # (1) --require-castxml turns any castxml unusability into a hard
-            #     failure -- including a legitimate cross-checkout mismatch: a
-            #     PR that bumps the pinned castxml version together with its
-            #     supported-range policy leaves base's *older*
-            #     castxml_policy.py rejecting the one system castxml this job
-            #     installed (from head's install script) for both sides;
-            # (2) base's installed abicheck package predates the header-graph
-            #     feature this gate measures entirely -- head's harness
-            #     imports service._attach_header_graph unconditionally, so a
-            #     base commit from before that existed (G31 Phase A) surfaces
-            #     as an ImportError rather than the old "script file not
-            #     present on base" signal (which no longer applies now that
-            #     head's copy always exists).
-            if grep -q "^FAIL: castxml version rejected by this build's policy:" base_measure.log; then
-              echo "Base branch's castxml policy rejects the installed pinned castxml (cross-checkout version-policy mismatch) -- report-only." >&2
-            elif grep -qE "(ImportError|ModuleNotFoundError):.*_attach_header_graph" base_measure.log; then
-              echo "Base branch's installed abicheck predates the header-graph feature this gate measures -- report-only." >&2
-            else
-              exit "$status"
-            fi
-          fi
-
-      - name: Measure head and compare to base
-        run: |
-          set -euo pipefail
-          python -m venv head_env
-          ./head_env/bin/pip install -q --upgrade pip
-          ./head_env/bin/pip install -q -e "./head[dev]"
-          if [ -s base_header_graph.json ]; then
-            ./head_env/bin/python head/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 5 --require-castxml \
-              --baseline base_header_graph.json \
-              --regress-tolerance 0.3 --regress-min-delta-ms 10 \
-              --regress-min-delta-ms-dump 30 \
-              --regress-min-delta-ms-total 40 \
-              --regress-min-delta-ms-attach_peak_rss 48 \
-              --regress-min-delta-ms-attach_end_rss 48 \
-              --require-all-metrics \
-              --json-out reports/perf/header_graph.json \
-              | tee header_graph_regression.txt
-            # Every metric is gated independently: the three time ones
-            # (dump_ms/attach_ms/total_ms) plus the two memory ones
-            # (attach_peak_rss_mib/attach_end_rss_mib). The absolute floors
-            # differ per metric because the metrics differ by roughly an order
-            # of magnitude in size: a shared 10ms floor is right for attach_ms
-            # but is well inside runner noise for the ~100ms+ dump and total
-            # windows, where it would reduce the gate to the relative
-            # tolerance alone.
-            #
-            # The two memory floors are in MiB (the flag keeps its historical
-            # `-ms-` spelling; the value is read in the metric's own unit) and
-            # are raised above the script's own 32 MiB default because a
-            # shared CI runner's page accounting is noisier than the reference
-            # host the default was measured on. They exist at all because the
-            # attach's memory was measured-but-ungated: PR #1335 localised a
-            # release member's whole peak inside this step while this job
-            # watched only its wall time, so holding one more copy of the
-            # parsed clang AST cost ~0ms and would have passed every gate
-            # here.
-            #
-            # --require-all-metrics IS passed. An earlier version of this comment
-            # argued the opposite -- that the base branch writes its report with
-            # its own older copy of this script, so across the commit introducing
-            # total_ms the base report could legitimately lack that field. That
-            # reasoning was simply wrong about this job: the base measurement a
-            # few steps above runs `head/scripts/check_header_graph_perf.py`
-            # (head's harness) against base's *installed package*, deliberately,
-            # because one harness measuring two products is the only way the two
-            # numbers are comparable. So the base report is always written by
-            # head's script and always carries all three metrics, and omitting
-            # the flag only meant a missing or non-gateable metric degraded to a
-            # printed note while the job still exited 0 -- a gate that does not
-            # gate everything its own summary claims to cover (Codex review).
-          else
-            echo "No base measurement available (base predates this gate's feature, or a cross-checkout castxml-policy mismatch) -- report-only." \
-              | tee header_graph_regression.txt
-            ./head_env/bin/python head/scripts/check_header_graph_perf.py \
-              --sizes 25 100 400 --repeat 5 --require-castxml \
-              --json-out reports/perf/header_graph.json \
-              | tee -a header_graph_regression.txt
-          fi
-
-      - name: Write job summary
-        if: always()
-        run: |
-          {
-            echo "## Header-graph L2 dump+attach regression (PR vs base)"
-            echo ""
-            echo '```'
-            cat header_graph_regression.txt 2>/dev/null || echo "(no output captured)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload performance artifacts
-        # The head report the PR-time trend job used to upload: on a
-        # pull_request `header-graph-perf` no longer runs, and this job's head
-        # measurement (a superset of that job's: repeat 5 vs 3) is the trend
-        # data point instead. Same artifact name, so a consumer keyed on it is
-        # unaffected.
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: performance-header-graph
-          path: |
-            reports/perf/header_graph.json
-            header_graph_regression.txt
-          if-no-files-found: warn
-
   # The full-CLI L2 lane (scripts/check_l2_cli_perf.py). Distinct from the two
   # in-process jobs above: this one starts a real interpreter, resolves real
   # config, and writes a real report, so it is the only lane that would see a
@@ -763,13 +570,15 @@ jobs:
   # compilation) and ~45s at --repeat 3, against ~64s for the extended suite.
   # The axis sweep and the real-project profiles are the periodic jobs below.
   l2-cli-perf:
-    name: Full-CLI L2 perf (PR gate)
+    name: L2 perf, full-CLI + header-graph attach (PR gate)
     needs: classify
     if: needs.classify.outputs.run == 'true'
     # Pinned for the same reason as the header-graph jobs: the checksum-pinned
     # CastXML Superbuild has no asset for an arbitrary Ubuntu release.
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # 45, not 30: this job also runs the header-graph PR-vs-base gate
+    # (formerly its own 20-minute job); measured ~11 min for both together.
+    timeout-minutes: 45
     steps:
       # SHA-pinned, and persist-credentials disabled: this job checks out and
       # then RUNS pull-request code (it builds a fixture and executes the CLI),
@@ -927,6 +736,197 @@ jobs:
           name: performance-l2-cli
           path: reports/perf/l2_cli_*
           retention-days: 30
+
+      # ── Header-graph attach-cost regression (PR vs base) ──────────────────
+      # Formerly its own `header-graph-regression` job, on a second runner. It
+      # needs the same pinned castxml (installed above by setup-castxml, the
+      # identical action/install-castxml.sh pin) and the same ubuntu-24.04
+      # image, so it shares this runner instead. It keeps its own base/ and
+      # head/ checkouts, so its measurement commands are unchanged from the
+      # standalone job; its venvs are hg_base_env/hg_head_env, never the L2
+      # steps' base_env (a 3.13 venv of base_tree), and it keeps its own
+      # Python (3.14, set up below). Steps run
+      # after every L2 step, never interleaved with one, and under
+      # success() || failure() so an L2 failure never hides this verdict.
+      #
+      # PR-vs-base regression for the same gate — same base-vs-head pattern as the
+      # `regression` job above, avoiding a stale committed-baseline number
+      # entirely: base and head are measured on the identical runner/toolchain in
+      # the same job, so drift between runners can never masquerade as a
+      # regression (or hide one). Gating from day one (unlike header-graph-perf's
+      # own report-only trend job above) since a same-run base-vs-head comparison
+      # needs no bootstrap period the way a committed number would.
+
+      - name: "Header-graph: Checkout base"
+        if: (success() || failure()) && github.event_name == 'pull_request'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: "Header-graph: Checkout head"
+        if: (success() || failure()) && github.event_name == 'pull_request'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          path: head
+          persist-credentials: false
+
+      - name: "Header-graph: set up Python 3.14"
+        if: (success() || failure()) && github.event_name == 'pull_request'
+        # A second setup-python, AFTER every L2 step above: from here on
+        # `python` is 3.14, the interpreter this gate has always measured
+        # on; the L2 steps keep measuring on 3.13. Neither gate changes
+        # interpreter by sharing the runner.
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.14"
+
+      - name: "Header-graph: Install toolchain"
+        if: (success() || failure()) && github.event_name == 'pull_request'
+        # Run from head/ (this gate's own checkout), as the standalone job did.
+        env:
+          INPUT_PACKAGES: clang g++
+        run: bash head/.github/actions/install-system-deps/install.sh
+
+      - name: "Header-graph: Measure base branch"
+        if: (success() || failure()) && github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          python -m venv hg_base_env
+          ./hg_base_env/bin/pip install -q --upgrade pip
+          ./hg_base_env/bin/pip install -q -e "./base[dev]"
+          # Run HEAD's own copy of the gate (not base's stale one) against
+          # base's installed abicheck package -- see benchmark_scaling.py's
+          # identical fix (and its own, more detailed comment) for the full
+          # reasoning: comparing a median computed by head's harness against
+          # a min() a stale base-branch copy of this same script would
+          # compute biases every comparison independent of any real
+          # performance change, and a base script predating a flag this PR
+          # just added would simply crash the step outright (Codex review on
+          # PR #768).
+          set +e
+          ./hg_base_env/bin/python head/scripts/check_header_graph_perf.py \
+            --sizes 25 100 400 --repeat 5 --require-castxml \
+            --json-out base_header_graph.json 2>&1 | tee base_measure.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            # Two legitimate, non-regression reasons head's harness can fail
+            # against base's installed package -- both degrade to report-only
+            # exactly like a genuinely absent base measurement; every OTHER
+            # failure (a fixture-compile crash, a clang crash, the AST-attach
+            # verification catching a degraded pass) still propagates and
+            # fails this job rather than being silently swallowed (Codex
+            # review, fresh evidence):
+            # (1) --require-castxml turns any castxml unusability into a hard
+            #     failure -- including a legitimate cross-checkout mismatch: a
+            #     PR that bumps the pinned castxml version together with its
+            #     supported-range policy leaves base's *older*
+            #     castxml_policy.py rejecting the one system castxml this job
+            #     installed (from head's install script) for both sides;
+            # (2) base's installed abicheck package predates the header-graph
+            #     feature this gate measures entirely -- head's harness
+            #     imports service._attach_header_graph unconditionally, so a
+            #     base commit from before that existed (G31 Phase A) surfaces
+            #     as an ImportError rather than the old "script file not
+            #     present on base" signal (which no longer applies now that
+            #     head's copy always exists).
+            if grep -q "^FAIL: castxml version rejected by this build's policy:" base_measure.log; then
+              echo "Base branch's castxml policy rejects the installed pinned castxml (cross-checkout version-policy mismatch) -- report-only." >&2
+            elif grep -qE "(ImportError|ModuleNotFoundError):.*_attach_header_graph" base_measure.log; then
+              echo "Base branch's installed abicheck predates the header-graph feature this gate measures -- report-only." >&2
+            else
+              exit "$status"
+            fi
+          fi
+
+      - name: "Header-graph: Measure head and compare to base"
+        if: (success() || failure()) && github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          python -m venv hg_head_env
+          ./hg_head_env/bin/pip install -q --upgrade pip
+          ./hg_head_env/bin/pip install -q -e "./head[dev]"
+          if [ -s base_header_graph.json ]; then
+            ./hg_head_env/bin/python head/scripts/check_header_graph_perf.py \
+              --sizes 25 100 400 --repeat 5 --require-castxml \
+              --baseline base_header_graph.json \
+              --regress-tolerance 0.3 --regress-min-delta-ms 10 \
+              --regress-min-delta-ms-dump 30 \
+              --regress-min-delta-ms-total 40 \
+              --regress-min-delta-ms-attach_peak_rss 48 \
+              --regress-min-delta-ms-attach_end_rss 48 \
+              --require-all-metrics \
+              --json-out reports/perf/header_graph.json \
+              | tee header_graph_regression.txt
+            # Every metric is gated independently: the three time ones
+            # (dump_ms/attach_ms/total_ms) plus the two memory ones
+            # (attach_peak_rss_mib/attach_end_rss_mib). The absolute floors
+            # differ per metric because the metrics differ by roughly an order
+            # of magnitude in size: a shared 10ms floor is right for attach_ms
+            # but is well inside runner noise for the ~100ms+ dump and total
+            # windows, where it would reduce the gate to the relative
+            # tolerance alone.
+            #
+            # The two memory floors are in MiB (the flag keeps its historical
+            # `-ms-` spelling; the value is read in the metric's own unit) and
+            # are raised above the script's own 32 MiB default because a
+            # shared CI runner's page accounting is noisier than the reference
+            # host the default was measured on. They exist at all because the
+            # attach's memory was measured-but-ungated: PR #1335 localised a
+            # release member's whole peak inside this step while this job
+            # watched only its wall time, so holding one more copy of the
+            # parsed clang AST cost ~0ms and would have passed every gate
+            # here.
+            #
+            # --require-all-metrics IS passed. An earlier version of this comment
+            # argued the opposite -- that the base branch writes its report with
+            # its own older copy of this script, so across the commit introducing
+            # total_ms the base report could legitimately lack that field. That
+            # reasoning was simply wrong about this job: the base measurement a
+            # few steps above runs `head/scripts/check_header_graph_perf.py`
+            # (head's harness) against base's *installed package*, deliberately,
+            # because one harness measuring two products is the only way the two
+            # numbers are comparable. So the base report is always written by
+            # head's script and always carries all three metrics, and omitting
+            # the flag only meant a missing or non-gateable metric degraded to a
+            # printed note while the job still exited 0 -- a gate that does not
+            # gate everything its own summary claims to cover (Codex review).
+          else
+            echo "No base measurement available (base predates this gate's feature, or a cross-checkout castxml-policy mismatch) -- report-only." \
+              | tee header_graph_regression.txt
+            ./hg_head_env/bin/python head/scripts/check_header_graph_perf.py \
+              --sizes 25 100 400 --repeat 5 --require-castxml \
+              --json-out reports/perf/header_graph.json \
+              | tee -a header_graph_regression.txt
+          fi
+
+      - name: "Header-graph: Write job summary"
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          {
+            echo "## Header-graph L2 dump+attach regression (PR vs base)"
+            echo ""
+            echo '```'
+            cat header_graph_regression.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "Header-graph: Upload performance artifacts"
+        # The head report the PR-time trend job used to upload: on a
+        # pull_request `header-graph-perf` no longer runs, and this job's head
+        # measurement (a superset of that job's: repeat 5 vs 3) is the trend
+        # data point instead. Same artifact name, so a consumer keyed on it is
+        # unaffected.
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: performance-header-graph
+          path: |
+            reports/perf/header_graph.json
+            header_graph_regression.txt
+          if-no-files-found: warn
 
   # The extended axis sweep: shape, header count (1/8/32 over a shared
   # dependency closure), library count (1/2/5, shared and distinct header
