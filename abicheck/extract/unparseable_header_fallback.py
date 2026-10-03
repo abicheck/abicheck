@@ -168,8 +168,8 @@ def _attribute(
     # under a macro A set, the input to drop is A, not B.
     outer_file, outer_line = located[0]
     if len(located) > 1 and _norm(outer_file) not in index:
-        idx = outer_line - AGGREGATE_FIRST_HEADER_LINE
-        return idx if 0 <= idx < n_headers else None
+        pos = outer_line - AGGREGATE_FIRST_HEADER_LINE
+        return pos if 0 <= pos < n_headers else None
     # No aggregate frame: the innermost listed header in the chain.
     for file, _line in reversed(located):
         idx = index.get(_norm(file))
