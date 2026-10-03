@@ -3642,6 +3642,27 @@ def _run_one_check(name: str) -> tuple[list[tuple[str, str]], list[tuple[str, st
     return findings.errors, findings.warnings
 
 
+def _workers_can_import_this_module() -> bool:
+    """Whether a worker process can unpickle :func:`_run_one_check`.
+
+    A forked worker inherits this module; a spawned one (the only start
+    method on Windows, the default on macOS) re-imports it by ``__name__``.
+    That works when run as a script (``__main__`` is re-run from its path)
+    or imported under a findable name, but not when loaded from a path under
+    an invented name, as the tests do -- the pool then dies with
+    ``BrokenProcessPool``. Serial gives the identical report, so fall back.
+    """
+    import importlib.machinery
+    import multiprocessing
+
+    if multiprocessing.get_start_method() == "fork" or __name__ == "__main__":
+        return True
+    # Search sys.path as the fresh worker will -- not importlib.util.find_spec,
+    # which answers from sys.modules and so says yes to the invented name.
+    top = __name__.partition(".")[0]
+    return importlib.machinery.PathFinder.find_spec(top) is not None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -3676,7 +3697,7 @@ def main(argv: list[str] | None = None) -> int:
     findings = Findings()
     selected = [n for n in (args.only or list(CHECKS)) if n not in args.skip]
     jobs = args.jobs if args.jobs > 0 else (os.cpu_count() or 1)
-    if jobs > 1 and len(selected) > 1:
+    if jobs > 1 and len(selected) > 1 and _workers_can_import_this_module():
         from concurrent.futures import ProcessPoolExecutor
 
         with ProcessPoolExecutor(max_workers=min(jobs, len(selected))) as pool:

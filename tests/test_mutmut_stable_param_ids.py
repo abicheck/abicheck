@@ -87,8 +87,10 @@ for session in range(3):
     # Sessions after the first select by the first session's ids, as mutmut's
     # clean and per-mutant runs select by the stats pass's ids.
     args = ["tests"] if first is None else first
+    # An empty config of our own, not /dev/null: that path does not exist on
+    # Windows, where pytest would exit 4 before collecting anything.
     rc = int(pytest.main(["-q", "-p", "no:cacheprovider", "--rootdir=.", "-c",
-                          "/dev/null", *plugin_args, *args], plugins=[rec]))
+                          "pytest.ini", *plugin_args, *args], plugins=[rec]))
     if first is None:
         first = rec.collected
     out.append({"rc": rc, "collected": rec.collected, "ran": rec.ran})
@@ -101,6 +103,7 @@ def _sessions(tmp_path: Path, plugin: bool) -> list[dict]:
     tests.mkdir(parents=True, exist_ok=True)
     (tests / "test_ids.py").write_text(_FIXTURE)
     (tests / "test_module_mark.py").write_text(_MODULE_MARK)
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
     driver = tmp_path / "driver.py"
     driver.write_text(_DRIVER)
     args = ["-p", "mutmut_stable_param_ids"] if plugin else []

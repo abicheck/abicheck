@@ -40,3 +40,10 @@ skills-src/evaluation/agents/skills/fixtures/**/*.hh text eol=lf
 skills-src/evaluation/agents/skills/fixtures/**/*.json text eol=lf
 skills-src/evaluation/agents/skills/fixtures/**/*.md text eol=lf
 skills-src/evaluation/agents/skills/fixtures/**/*.so binary
+
+# Category A Harbor tasks copy their library straight from catalog/cases/
+# (scripts/gen_harbor_tasks.py `_prepared_library`), and a file it does not
+# rewrite is copied byte-for-byte -- so a CRLF checkout of the catalog made
+# the regenerated tree differ from the committed LF one on Windows.
+# text=auto: binaries (prebuilt .so fixtures) are left alone.
+catalog/cases/** text=auto eol=lf

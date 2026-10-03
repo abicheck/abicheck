@@ -70,7 +70,7 @@ def _oracle_public(header: str, *, file_root: str | None, dir_root: str | None) 
     norm = os.path.normpath(header)
     if file_root is not None and norm == os.path.normpath(file_root):
         return True
-    return dir_root is not None and norm.startswith(os.path.normpath(dir_root) + "/")
+    return dir_root is not None and norm.startswith(os.path.normpath(dir_root) + os.sep)
 
 
 @pytest.mark.parametrize("spell", range(len(_SPELLINGS)))

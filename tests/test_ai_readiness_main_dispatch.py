@@ -224,3 +224,18 @@ def test_parallel_jobs_report_matches_serial(car, capsys) -> None:
     parallel = capsys.readouterr().out
     assert rc_serial == rc_parallel
     assert serial == parallel
+
+
+def test_jobs_under_spawn_never_breaks_the_pool(car, capsys, monkeypatch) -> None:
+    """Windows and macOS spawn workers, which re-import this module by name.
+    The fixture loads it under an invented one, so a spawned pool could not
+    unpickle the task: the run must fall back to serial, same report."""
+    import multiprocessing
+
+    monkeypatch.setattr(multiprocessing, "get_start_method", lambda *a, **k: "spawn")
+    assert car._workers_can_import_this_module() is False
+    argv = ["--only", "claude-md-coverage", "--only", "test-ratio", "--json"]
+    rc_serial = car.main(argv)
+    serial = capsys.readouterr().out
+    rc_jobs = car.main([*argv, "--jobs", "2"])
+    assert (rc_jobs, capsys.readouterr().out) == (rc_serial, serial)
