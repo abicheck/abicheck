@@ -145,7 +145,7 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             "keyed by `storage.code_identity.abicheck_code_fingerprint()` or "
             "classified as storing an external tool's own output."
         ),
-        fixed_by=(1466,),
+        fixed_by=(1466, 1476),
         seed_tests=(
             "tests/test_code_identity.py",
             "tests/test_family_f5_optimization_reference.py",
