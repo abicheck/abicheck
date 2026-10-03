@@ -296,6 +296,10 @@ def _armed(monkeypatch: pytest.MonkeyPatch, *, safe: bool):  # type: ignore[no-u
 
     import mutation_reach_trace as trace
 
+    if trace._MON.get_tool(trace._TOOL_ID) is not None:
+        # The run is itself traced by this plugin (`gen_mutation_test_
+        # selection.py`), which holds the one tool slot a Monitor claims.
+        pytest.skip("mutation_reach_trace is already tracing this run")
     paths = trace.only_mutate_paths(REPO)
     names = trace.module_names(REPO, paths)
     for name in names:
