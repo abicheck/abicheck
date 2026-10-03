@@ -52,7 +52,7 @@ echo "$2" >> "$STATE/pip.log"
 touch "$STATE/installed"
 """
 _FAKE_PYTHON = """#!/usr/bin/env bash
-case "$2" in
+case "${@: -1}" in
   'import abicheck') [ -f "$STATE/installed" ] ;;
   *) echo "3.13.0 (fake)" ;;
 esac
