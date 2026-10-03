@@ -167,6 +167,9 @@ _CENSUS_ALLOWLIST: dict[str, str] = {
         "clears lru_caches before a traced run; heap census only when gc_census_is_safe(), else a namespace walk"
     ),
     "tests/test_gc_census_thread_safety.py": "the negative control above",
+    "scripts/mutation_reach_trace.py": (
+        "finds only_mutate functions to arm; heap census only when gc_census_is_safe(), else a namespace walk"
+    ),
 }
 _CENSUS_CALLS = {"get_objects", "get_referrers"}
 

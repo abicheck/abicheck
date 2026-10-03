@@ -238,3 +238,76 @@ def test_extend_selection_never_narrows() -> None:
         for path in changed:
             if path.startswith("tests/test_") and out != ["tests/"]:
                 assert path in out
+
+
+# ── census safety: the namespace fallback (gc-census-concurrent-thread) ─────
+
+
+def _armed(monkeypatch: pytest.MonkeyPatch, *, safe: bool):  # type: ignore[no-untyped-def]
+    import importlib
+
+    import mutation_reach_trace as trace
+
+    paths = trace.only_mutate_paths(REPO)
+    names = trace.module_names(REPO, paths)
+    for name in names:
+        importlib.import_module(name)
+    monkeypatch.setattr(trace, "gc_census_is_safe", lambda: safe)
+    mon = trace.Monitor(paths, names)
+    try:
+        mon.arm()
+        return paths, set(mon.armed), mon.module_ids
+    finally:
+        mon.close()
+
+
+@pytest.mark.skipif(
+    not hasattr(sys, "monitoring"), reason="the plugin needs sys.monitoring (3.12+)"
+)
+def test_fallback_arms_every_def_without_a_heap_census(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With another thread alive the plugin must not enumerate the heap, and
+    the namespace walk it uses instead must still arm every function and
+    method not nested inside another function, in every only_mutate file.
+
+    The oracle is the files' own AST, not the walker: one expected entry per
+    such ``def``, matched by file, name and first line (a decorator's line
+    when decorated). Nested defs, lambdas and comprehensions come from
+    ``co_consts`` either way, so they are not what the fallback risks
+    missing."""
+    import ast
+
+    import mutation_reach_trace as trace
+
+    def census_forbidden() -> list[object]:
+        raise AssertionError("heap census taken while unsafe")
+
+    monkeypatch.setattr(trace.gc, "get_objects", census_forbidden)
+    paths, fallback, module_ids = _armed(monkeypatch, safe=False)
+    monkeypatch.undo()
+    _, census, _ = _armed(monkeypatch, safe=True)
+
+    assert module_ids == (), "an unsafe arm must leave the census to retry later"
+    assert fallback <= census
+
+    missing = []
+    for path in sorted(paths):
+        tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+        todo: list[tuple[ast.AST, bool]] = [(tree, False)]
+        while todo:
+            node, nested = todo.pop()
+            for child in ast.iter_child_nodes(node):
+                is_def = isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                if is_def and not nested:
+                    lines = {child.lineno, *(d.lineno for d in child.decorator_list)}
+                    if not any(
+                        c.co_filename == path
+                        and c.co_name == child.name
+                        and c.co_firstlineno in lines
+                        for c in fallback
+                    ):
+                        missing.append(f"{path}:{child.lineno} {child.name}")
+                todo.append((child, nested or is_def or isinstance(child, ast.Lambda)))
+    assert not missing, missing
+    assert len(fallback) > 100  # vacuity guard: the walk found the real tree
