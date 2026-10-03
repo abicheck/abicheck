@@ -241,26 +241,6 @@ from .workflows.extraction import (  # noqa: E402,I001
 )
 
 
-def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
-    """Build key->path map with version-aware duplicate resolution.
-
-    The CLI-facing wrapper over :func:`abicheck.binary_utils.build_match_map`
-    (the pure, Click-free primitive -- ADR-061: it lives there so
-    ``bundle_side_input.py``, classified ``workflows``, can call it without a
-    forbidden ``workflows -> frontends`` import): translates
-    :class:`~abicheck.errors.AmbiguousLibraryMatchError` into
-    ``click.ClickException`` with the identical message, so every existing
-    ``compare``/``compare-release`` call site is unaffected.
-    """
-    from .errors import AmbiguousLibraryMatchError
-    from .workflows.extraction import build_match_map
-
-    try:
-        return build_match_map(paths)
-    except AmbiguousLibraryMatchError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-
 # ── ADR-037 D4: CLI ↔ config precedence resolver ─────────────────────────────
 
 

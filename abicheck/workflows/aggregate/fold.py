@@ -194,7 +194,7 @@ class AggregateResult:
 
         The max of every gated target's own contribution, folded into
         :meth:`exit_code` the same way and for the same reason the two CLIs
-        fold theirs (``contract_coverage_exit.fold_coverage_exit``): a ledger
+        fold theirs (``policy.exit_decision.resolve_exit_decision``): a ledger
         that gates ``compare`` and ``scan --against`` but not the command that
         aggregates their reports is exactly the cross-command divergence plan
         Section 6.4 forbids — a matrix build could exit ``0`` while a target

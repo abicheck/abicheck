@@ -202,8 +202,8 @@ def additions_review_exit_contribution(result: DiffResult) -> int:
 def fold_additions_review_exit(base: int, result: DiffResult) -> int:
     """*base* raised to the additions-review floor — D6's orthogonal fold.
 
-    ``max()``, exactly like :func:`abicheck.policy.contract_coverage_exit.
-    fold_coverage_exit`: the axis can raise a clean ``0`` to ``1`` and can
+    ``max()``, exactly like :class:`~abicheck.policy.exit_decision.ExitDecision`'s fold of
+    the coverage floor: the axis can raise a clean ``0`` to ``1`` and can
     never lower a real ``2``/``4`` compatibility-gate exit.
     """
     return max(base, additions_review_exit_contribution(result))

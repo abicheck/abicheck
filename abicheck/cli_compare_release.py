@@ -1140,7 +1140,7 @@ def compare_release_cmd(
             # ADR-049 Phase 7's orthogonal contract-coverage floor, aggregated
             # across every library with max() -- one library's incomplete
             # evidence must still raise the release's exit code, the same rule
-            # contract_coverage_exit.fold_coverage_exit applies to a single pair.
+            # ExitDecision applies to a single pair.
             # `0` (the default fold value) when --contract was never
             # given, or every library's own selected domain closed cleanly.
             contract_coverage_exit_contribution = max(

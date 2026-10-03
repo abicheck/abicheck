@@ -137,7 +137,7 @@ class TestReleaseContractCoverageFold:
     own aggregated contract-coverage floor (0/1, max()-folded across every
     library) must obey the same "raises a clean 0, never lowers a real
     2/4/8" rule single-pair `compare` applies via
-    `contract_coverage_exit.fold_coverage_exit` -- and must not mask, or be
+    `policy.exit_decision.resolve_exit_decision` -- and must not mask, or be
     masked by, the separately-aggregated removed-library exit 8 (AGENTS.md:
     "не смешивая его с entity contract relevance")."""
 

@@ -90,17 +90,8 @@ USER_DEPTHS: tuple[EvidenceDepth, ...] = (
 #: ``DEPTH_PARAM`` (``cli_params.py``) checks membership in ``USER_DEPTHS`` and
 #: raises a plain "not one of ..." error for anything else (``symbols``/
 #: ``full``/``graph`` included) -- there is no CLI-visible alias/translation
-#: (ADR-043 D2). The internal Python service API (:func:`parse_user_depth`,
-#: used by ``ScanRequest``/other programmatic callers, never by the
-#: CLI's own ``--depth`` parsing) keeps the historical ``symbols`` alias and
-#: accepts the internal ``full``/``graph`` rungs verbatim -- those rungs still
-#: exist as real :class:`EvidenceDepth` values for internal callers.
-
-#: ``parse_user_depth``'s one remaining alias: the historical ``symbols``
-#: spelling for the CLI-named ``binary`` rung, kept for non-CLI callers.
-_SERVICE_DEPTH_ALIASES: dict[str, EvidenceDepth] = {
-    "symbols": EvidenceDepth.BINARY,
-}
+#: (ADR-043 D2). ``full``/``graph`` remain real :class:`EvidenceDepth` values
+#: for internal callers.
 
 
 class SourceScope(str, Enum):
@@ -180,25 +171,6 @@ _METHOD_TO_DEPTH: dict[SourceMethod, EvidenceDepth] = {
     SourceMethod.S5: EvidenceDepth.SOURCE,
     SourceMethod.S6: EvidenceDepth.FULL,
 }
-
-
-def parse_user_depth(value: str | None) -> EvidenceDepth | None:
-    """Resolve a ``ScanRequest.depth`` string to an ``EvidenceDepth`` (service API).
-
-    ``None``/empty → ``None``. Honors the historical ``symbols`` alias so
-    non-CLI callers (``service.run_scan``/``estimate_scan``, and internal
-    mode-preset-driven callers) keep working; the internal ``full``/``graph``
-    rungs are accepted verbatim here too. This is the Python service layer,
-    not the public CLI: the ``--depth`` *flag* only ever accepts the four
-    public rungs, enforced independently by ``cli_params.DEPTH_PARAM`` (ADR-043
-    D2), which never calls this function.
-    """
-    if not value:
-        return None
-    v = str(value).lower()
-    if v in _SERVICE_DEPTH_ALIASES:
-        return _SERVICE_DEPTH_ALIASES[v]
-    return EvidenceDepth(v)
 
 
 def depth_to_method(depth: EvidenceDepth) -> SourceMethod | None:

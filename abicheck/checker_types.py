@@ -631,7 +631,7 @@ class DiffResult(ReportSideFacts):
     # ``DiffResult``. Audit data as far as *compatibility* policy and the
     # change gate are concerned -- they read the per-finding fields above,
     # never this block -- but not inert: ``contract_coverage_exit.
-    # fold_coverage_exit`` derives the orthogonal coverage contribution from
+    # coverage_exit_floor`` derives the orthogonal coverage contribution from
     # it, so a run carrying one can exit ``1`` on that axis (ADR-049 §7).
     contract_context: object | None = None
     # E-S3 — multi-source contract conflicts (exported-but-undeclared,

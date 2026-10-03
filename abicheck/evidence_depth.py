@@ -99,8 +99,8 @@ def resolve_l5_source_graph(
 ) -> SourceGraphSummary | None:
     """The L5 evidence graph for *snap*/*pack* (ADR-063 Phase 10), the one
     shared resolver every migrated reader (``internal_leak.py``,
-    ``buildsource/cross_source_checks.py``, ``buildsource/evidence_report.py``,
-    this module's own :func:`_l5_payload_empty`) goes through, so the same
+    ``buildsource/cross_source_checks.py``, ``buildsource/evidence_report.py``)
+    goes through, so the same
     fallback rule can't independently drift per call site the way it did
     across three earlier review rounds on this migration.
 
@@ -218,13 +218,6 @@ def header_graph_coverage(graph: SourceGraphSummary) -> list[LayerCoverage]:
             else LayerConfidence.UNKNOWN,
         ),
     ]
-
-
-def _l5_payload_empty(snap: AbiSnapshot, pack: BuildSourcePack | None) -> bool:
-    """:func:`layer_payload_empty`'s ``"L5"`` case, via
-    :func:`resolve_l5_source_graph` (ADR-063 Phase 10)."""
-    graph = resolve_l5_source_graph(snap, pack)
-    return graph is None or not graph.nodes
 
 
 def l4_source_abi_was_attempted(pack: BuildSourcePack) -> bool:

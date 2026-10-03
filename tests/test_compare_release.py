@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from abicheck.binary_utils import build_match_map as _build_match_map
 from abicheck.cli import main
 from abicheck.cli_compare_release import (
     _discover_include_roots,
@@ -16,7 +17,6 @@ from abicheck.cli_compare_release import (
     _prepare_compare_release_inputs,
 )
 from abicheck.cli_helpers_compare import (
-    _build_match_map,
     _canonical_library_key,
     _version_sort_key,
     strip_vendor_hash,
@@ -366,9 +366,9 @@ class TestBuildMatchMapEncodingOnlyDuplicates:
         zst = tmp_path / "libfoo.so.1.abicheck.json.zst"
         plain.write_text("{}")
         zst.write_bytes(b"\x28\xb5\x2f\xfd")
-        import click.exceptions
+        from abicheck.errors import AmbiguousLibraryMatchError
 
-        with pytest.raises(click.exceptions.ClickException, match="indistinguishable"):
+        with pytest.raises(AmbiguousLibraryMatchError, match="indistinguishable"):
             _build_match_map([plain, zst])
 
     def test_all_three_encodings_duplicate_is_rejected(self, tmp_path: Path) -> None:
@@ -377,9 +377,9 @@ class TestBuildMatchMapEncodingOnlyDuplicates:
         zst = tmp_path / "libfoo.so.1.abicheck.json.zst"
         for p in (plain, gz, zst):
             p.write_bytes(b"{}")
-        import click.exceptions
+        from abicheck.errors import AmbiguousLibraryMatchError
 
-        with pytest.raises(click.exceptions.ClickException, match="indistinguishable"):
+        with pytest.raises(AmbiguousLibraryMatchError, match="indistinguishable"):
             _build_match_map([plain, gz, zst])
 
     def test_genuinely_different_versions_still_only_warn(self, tmp_path: Path) -> None:

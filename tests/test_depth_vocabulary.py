@@ -157,17 +157,16 @@ def test_depth_monotone() -> None:
 
 
 def test_graph_excluded_from_user_ladder_but_kept_internal() -> None:
-    """``graph`` is dropped from the user dial (D6) yet survives for the
-    service API, where it still names S4's graph-only collection."""
+    """``graph`` is dropped from the user dial (D6) yet survives internally,
+    where it still names S4's graph-only collection."""
     from abicheck.model.evidence_depth_levels import (
         USER_DEPTHS,
         EvidenceDepth,
         collect_mode_for_depth,
-        parse_user_depth,
     )
 
     assert EvidenceDepth.GRAPH not in USER_DEPTHS
-    assert parse_user_depth("graph") is EvidenceDepth.GRAPH
+    assert EvidenceDepth("graph") is EvidenceDepth.GRAPH
     assert collect_mode_for_depth("graph") == "graph-build"
 
 

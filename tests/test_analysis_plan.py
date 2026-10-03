@@ -634,7 +634,7 @@ class TestBazelBuildTargetScoping:
         headers are present -- the L2 seed's own independent header-seeding
         pass (``_seeded_includes_and_compile_context``/``collect_inline_pack``)
         still consumes ``build_info`` regardless of collect mode, mirroring
-        the identical gap already fixed for ``scan_bazel_scoping_failure``.
+        the identical gap the retired ``scan`` guard already closed.
         Exempting this on the strength of collect mode alone would let
         resolution/``--dry-run`` succeed, then fail later inside
         ``collect_inline_pack`` as a flattened ``ValidationError`` instead of

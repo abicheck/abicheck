@@ -37,7 +37,7 @@ import logging
 import os
 import stat
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
@@ -69,32 +69,6 @@ class FunctionFingerprint:
     size: int
     code_hash: str
     section_index: int = 0
-
-
-@dataclass(frozen=True)
-class SectionSummary:
-    """Coarse-grained summary of an ELF section.
-
-    Used for quick triage: if .text didn't change, ABI probably didn't either.
-    """
-
-    name: str
-    size: int
-    content_hash: str  # SHA-256 of raw section bytes
-
-
-_EMPTY_HASH = hashlib.sha256(b"").hexdigest()
-
-
-@dataclass(frozen=True)
-class BinarySummary:
-    """Section-level summary of an entire binary.
-
-    Provides a coarse "binary changed significantly" vs "binary barely changed"
-    signal for triage before running full diff.
-    """
-
-    sections: dict[str, SectionSummary] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -138,20 +112,6 @@ _SIZE_TOLERANCE_RATIO = 0.05  # 5%
 # size-unique passes (1 and 2) still run.
 _FUZZY_MAX_PAIRS = 2_000_000
 
-# Sections to include in BinarySummary for ABI-relevant triage.
-_ABI_SECTIONS = frozenset(
-    {
-        ".text",
-        ".rodata",
-        ".data",
-        ".bss",
-        ".data.rel.ro",
-        ".init_array",
-        ".fini_array",
-        ".dynamic",
-    }
-)
-
 # Maximum section size (bytes) to read into memory for hashing.
 # Prevents OOM from crafted ELF files with enormous sh_size values.
 _MAX_SECTION_SIZE = 256 * 1024 * 1024  # 256 MiB
@@ -191,31 +151,6 @@ def compute_function_fingerprints(
     except (OSError, ELFError) as exc:
         log.warning("compute_function_fingerprints: %s: %s", binary_path, exc)
         return {}
-
-
-def compute_section_summary(binary_path: str | Path) -> BinarySummary:
-    """Compute section-level summary for ABI-relevant ELF sections.
-
-    Returns a BinarySummary with hashes for .text, .rodata, .data, etc.
-    Useful for quick triage: if .text hash matches, code hasn't changed.
-    """
-    try:
-        with open(binary_path, "rb") as f:
-            # Verify regular file after open to avoid TOCTOU (symlink/FIFO).
-            st = os.fstat(f.fileno())
-            if not stat.S_ISREG(st.st_mode):
-                log.warning(
-                    "compute_section_summary: not a regular file: %s", binary_path
-                )
-                return BinarySummary()
-            magic = f.read(4)
-            if magic != b"\x7fELF":
-                return BinarySummary()
-            f.seek(0)
-            return _extract_section_summary(f)
-    except (OSError, ELFError) as exc:
-        log.warning("compute_section_summary: %s: %s", binary_path, exc)
-        return BinarySummary()
 
 
 def match_renamed_functions(
@@ -595,40 +530,3 @@ def _compute_code_hash(
     except (IndexError, KeyError, ValueError, OSError) as exc:
         log.debug("_compute_code_hash: failed for symbol at shndx=%s: %s", shndx, exc)
         return ""
-
-
-def _extract_section_summary(f: IO[bytes]) -> BinarySummary:
-    """Extract section-level summary from an open ELF file."""
-    elf = ELFFile(f)
-    sections: dict[str, SectionSummary] = {}
-
-    for section in elf.iter_sections():
-        name = section.name
-        if name not in _ABI_SECTIONS:
-            continue
-        size = section.header.sh_size
-        if section.header.sh_type == "SHT_NOBITS":
-            # .bss — no file content; use stable sentinel hash.
-            # Size differences are caught by differs_from() via size comparison.
-            content_hash = _EMPTY_HASH
-        elif size > _MAX_SECTION_SIZE:
-            log.warning(
-                "compute_section_summary: section %s too large "
-                "(%d bytes > %d limit), skipping",
-                name,
-                size,
-                _MAX_SECTION_SIZE,
-            )
-            continue
-        else:
-            try:
-                content_hash = hashlib.sha256(section.data()).hexdigest()
-            except (OSError, ValueError):
-                continue
-        sections[name] = SectionSummary(
-            name=name,
-            size=size,
-            content_hash=content_hash,
-        )
-
-    return BinarySummary(sections=sections)

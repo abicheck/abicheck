@@ -19,8 +19,8 @@
 single-pair `compare` invocation's exit code is folded from
 several independently-computed, orthogonal contributions today
 (`severity.compute_exit_code`/`severity.legacy_exit_code`,
-`contract_coverage_exit.fold_coverage_exit`,
-`analysis_assurance.fold_analysis_assurance_exit`), each folded in with
+`contract_coverage_exit.coverage_exit_floor`,
+`analysis_assurance.analysis_assurance_exit_contribution`), each folded in with
 `max()` at the call site (`cli._exit_with_severity_or_verdict`) rather than
 through one shared, explainable object. That is fine for computing *a*
 number, but leaves no answer to "why is this exit 1" when more than one axis

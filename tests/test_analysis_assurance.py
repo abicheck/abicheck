@@ -38,7 +38,6 @@ from abicheck.analysis_assurance import (
     TranslationUnitAccounting,
     analysis_assurance_exit_contribution,
     compute_analysis_assurance,
-    fold_analysis_assurance_exit,
 )
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change, DiffResult
@@ -1292,7 +1291,7 @@ class TestAnalysisAssuranceExitFold:
             library="libfoo",
             analysis_assurance=AnalysisAssurance(status="failed"),
         )
-        assert fold_analysis_assurance_exit(4, result, require_complete=True) == 4
+        assert _folded(4, result) == 4
 
     def test_fold_raises_a_clean_zero_to_one(self) -> None:
         result = DiffResult(
@@ -1301,13 +1300,13 @@ class TestAnalysisAssuranceExitFold:
             library="libfoo",
             analysis_assurance=AnalysisAssurance(status="not_comparable"),
         )
-        assert fold_analysis_assurance_exit(0, result, require_complete=True) == 1
+        assert _folded(0, result) == 1
 
     def test_missing_analysis_assurance_contributes_nothing(self) -> None:
         """Defensive: a hand-built DiffResult with no analysis_assurance at
         all (e.g. an older in-memory object) must not crash the fold."""
         result = DiffResult(old_version="1.0", new_version="2.0", library="libfoo")
-        assert fold_analysis_assurance_exit(0, result, require_complete=True) == 0
+        assert _folded(0, result) == 0
 
 
 class TestAnalysisAssuranceCliIntegration:
@@ -1939,3 +1938,16 @@ class TestDwarfChannelAsymmetry:
             *_assurance_config_args(tmp_path, scoped=False),
         )
         assert res.exit_code != 0, res.output
+
+
+def _folded(base: int, result: DiffResult) -> int:
+    """The exit a run with compatibility exit *base* ends with under
+    ``assurance.require_complete``, through the one fold every command uses."""
+    from abicheck.policy.exit_decision import resolve_exit_decision
+
+    return resolve_exit_decision(
+        compatibility_contribution=base,
+        analysis_assurance_contribution=analysis_assurance_exit_contribution(
+            result, require_complete=True
+        ),
+    ).code

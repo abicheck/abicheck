@@ -14,16 +14,11 @@ import pytest
 from elftools.elf.sections import SymbolTableSection
 
 from abicheck.binary_fingerprint import (
-    _EMPTY_HASH,
     _MAX_SECTION_SIZE,
-    BinarySummary,
     FunctionFingerprint,
-    SectionSummary,
     _compute_code_hash,
     _extract_fingerprints,
-    _extract_section_summary,
     compute_function_fingerprints,
-    compute_section_summary,
     match_renamed_functions,
 )
 from abicheck.checker import ChangeKind, Verdict, compare
@@ -348,7 +343,7 @@ class TestMatchRenamedFunctions:
 
 
 # ---------------------------------------------------------------------------
-# compute_function_fingerprints / compute_section_summary — file-level tests
+# compute_function_fingerprints — file-level tests
 # ---------------------------------------------------------------------------
 
 
@@ -382,34 +377,6 @@ class TestComputeFunctionFingerprints:
         with open(p, "wb") as f:
             f.write(b"\x7fELF")  # just the magic, nothing else
         assert compute_function_fingerprints(p) == {}
-
-
-class TestComputeSectionSummary:
-    def test_non_elf_file_returns_empty(self, tmp_path: object) -> None:
-        """Non-ELF file returns empty BinarySummary."""
-        p = os.path.join(str(tmp_path), "test.dll")
-        with open(p, "wb") as f:
-            f.write(b"MZ" + b"\x00" * 100)
-        result = compute_section_summary(p)
-        assert result.sections == {}
-
-    def test_missing_file_returns_empty(self) -> None:
-        """Non-existent path returns empty BinarySummary."""
-        result = compute_section_summary("/nonexistent/path/libfoo.so")
-        assert result.sections == {}
-
-    def test_directory_returns_empty(self, tmp_path: object) -> None:
-        """Directory is not a regular file and is rejected."""
-        result = compute_section_summary(str(tmp_path))
-        assert result.sections == {}
-
-    def test_empty_file_returns_empty(self, tmp_path: object) -> None:
-        """Empty file returns empty BinarySummary."""
-        p = os.path.join(str(tmp_path), "empty.so")
-        with open(p, "wb"):
-            pass
-        result = compute_section_summary(p)
-        assert result.sections == {}
 
 
 # ---------------------------------------------------------------------------
@@ -1211,91 +1178,9 @@ class TestComputeCodeHash:
         assert _compute_code_hash(elf, _make_sym("x"), 99, {}) == ""
 
 
-class TestExtractSectionSummary:
-    def _section(self, name, *, sh_type="SHT_PROGBITS", sh_size=64, data=b"\x01" * 64):
-        sec = MagicMock()
-        sec.name = name
-        sec.header.sh_type = sh_type
-        sec.header.sh_size = sh_size
-        sec.data.return_value = data
-        return sec
-
-    def test_collects_abi_sections(self) -> None:
-
-        elf = MagicMock()
-        elf.iter_sections.return_value = [
-            self._section(".text"),
-            self._section(".note.foo"),  # ignored — not ABI relevant
-        ]
-        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
-            summary = _extract_section_summary(MagicMock())
-        assert ".text" in summary.sections
-        assert ".note.foo" not in summary.sections
-        assert (
-            summary.sections[".text"].content_hash
-            == hashlib.sha256(b"\x01" * 64).hexdigest()
-        )
-
-    def test_bss_uses_empty_hash(self) -> None:
-
-        elf = MagicMock()
-        elf.iter_sections.return_value = [
-            self._section(".bss", sh_type="SHT_NOBITS", sh_size=128),
-        ]
-        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
-            summary = _extract_section_summary(MagicMock())
-        assert summary.sections[".bss"].content_hash == _EMPTY_HASH
-        assert summary.sections[".bss"].size == 128
-
-    def test_oversize_section_skipped(self) -> None:
-
-        elf = MagicMock()
-        elf.iter_sections.return_value = [
-            self._section(".data", sh_size=_MAX_SECTION_SIZE + 1),
-        ]
-        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
-            summary = _extract_section_summary(MagicMock())
-        assert ".data" not in summary.sections
-
-    def test_unreadable_section_skipped(self) -> None:
-        elf = MagicMock()
-        sec = self._section(".rodata")
-        sec.data.side_effect = ValueError("cannot read")
-        elf.iter_sections.return_value = [sec]
-        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
-            summary = _extract_section_summary(MagicMock())
-        assert ".rodata" not in summary.sections
-
-
 class TestPublicFunctionsNonRegularFile:
     def test_fingerprints_char_device_returns_empty(self) -> None:
         # /dev/null is a character device — not a regular file (TOCTOU guard).
         if not os.path.exists("/dev/null"):
             pytest.skip("/dev/null not available")
         assert compute_function_fingerprints("/dev/null") == {}
-
-    def test_section_summary_char_device_returns_empty(self) -> None:
-        if not os.path.exists("/dev/null"):
-            pytest.skip("/dev/null not available")
-        assert compute_section_summary("/dev/null").sections == {}
-
-    def test_section_summary_truncated_elf_returns_empty(
-        self, tmp_path: object
-    ) -> None:
-        p = os.path.join(str(tmp_path), "trunc.so")
-        with open(p, "wb") as f:
-            f.write(b"\x7fELF")
-        assert compute_section_summary(p).sections == {}
-
-    def test_section_summary_success_path(self, tmp_path: object) -> None:
-        # ELF magic so the seek/extract path runs; patch the extractor.
-        p = os.path.join(str(tmp_path), "ok.so")
-        with open(p, "wb") as f:
-            f.write(b"\x7fELF" + b"\x00" * 60)
-        sentinel = BinarySummary(sections={".text": SectionSummary(".text", 1, "h")})
-        with patch(
-            "abicheck.binary_fingerprint._extract_section_summary",
-            return_value=sentinel,
-        ):
-            result = compute_section_summary(p)
-        assert result is sentinel

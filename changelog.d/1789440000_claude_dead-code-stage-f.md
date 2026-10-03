@@ -7,3 +7,13 @@
   `model.evidence_depth_levels.collect_mode_for_depth`, instead of three
   copies in `dump`, `compare`'s typed pipeline and the planner. No behavior
   change.
+- Dead-code plan Stage G: removed the stale helpers that a plan or ADR still
+  named after their path was replaced: the `fold_coverage_exit`/
+  `fold_analysis_assurance_exit` wrappers (`policy.exit_decision.
+  resolve_exit_decision` is the one fold), the Click-translating
+  `_build_match_map`/`_resolve_release_package_side` wrappers (and
+  `frontends/cli/release_variant_operand.py`), `atomic_copy`,
+  `compute_section_summary` and its `BinarySummary` types, the castxml-only
+  provenance predicates, `parse_user_depth`, `Suppression.selector_matches`,
+  `ExportSet.destinations`, `scan_bazel_scoping_failure` and
+  `_l5_payload_empty`. No behavior change.

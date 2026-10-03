@@ -215,8 +215,7 @@ def test_internal_leak_prefers_the_richer_build_source_graph() -> None:
 
 def test_internal_leak_honors_a_depth_projected_l5_exclusion() -> None:
     """Fourth review-round regression: this reader must go through the same
-    projection-aware coverage guard as ``_side_source_graph``/
-    ``_l5_payload_empty`` -- a ``--depth build`` comparison's retained,
+    projection-aware coverage guard as ``_side_source_graph`` -- a ``--depth build`` comparison's retained,
     header-only ``surface_graph`` must not resurrect a leak path the
     excluded, richer L5 graph would have shown."""
     from abicheck.internal_leak import compute_call_graph_leak_paths

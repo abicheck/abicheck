@@ -13,12 +13,10 @@ from unittest.mock import patch
 from abicheck.dumper_castxml import SYNTHETIC_CTOR_KEY_PREFIX
 from abicheck.dumper_hybrid import merge_snapshots
 from abicheck.fact_provenance import (
-    both_castxml_backed_fact,
     enum_fact_key,
     fact_producer,
     field_fact_key,
     func_fact_key,
-    is_castxml_backed_fact,
     type_fact_key,
     var_fact_key,
 )
@@ -32,6 +30,16 @@ from abicheck.model import (
     TypeField,
     Variable,
 )
+
+
+def _castxml_backed(snap, key: str) -> bool:
+    """Whether the merge recorded *key* as castxml-sourced on *snap*, read
+    through the production predicate (``fact_producer``)."""
+    return fact_producer(snap, key) == "castxml"
+
+
+def _both_castxml_backed(old, new, key: str) -> bool:
+    return _castxml_backed(old, key) and _castxml_backed(new, key)
 
 
 def _snap(
@@ -228,7 +236,7 @@ class TestMergeSnapshotsBasics:
         assert merged.function_map.get("_Z3barv") is not None
         # No castxml confirmation exists for a clang-only entity.
         key = func_fact_key("_Z3barv", "deprecated")
-        assert not is_castxml_backed_fact(merged, key)
+        assert not _castxml_backed(merged, key)
 
 
 class TestMergeSnapshotsContract:
@@ -305,7 +313,7 @@ class TestFunctionFactBackfill:
         merged = merge_snapshots(castxml, clang)
         f = merged.function_map.get("_Z3foov")
         assert f.deprecated == "msg"
-        assert is_castxml_backed_fact(merged, func_fact_key("_Z3foov", "deprecated"))
+        assert _castxml_backed(merged, func_fact_key("_Z3foov", "deprecated"))
 
     def test_backfill_from_clang_when_castxml_is_none(self):
         # Forward-looking: a no-op today (dumper_clang doesn't populate
@@ -332,7 +340,7 @@ class TestFunctionFactBackfill:
         castxml = _snap(functions=[old_f], ast_producer="castxml")
         clang = _snap(ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        assert is_castxml_backed_fact(merged, func_fact_key("_Z3foov", "deprecated"))
+        assert _castxml_backed(merged, func_fact_key("_Z3foov", "deprecated"))
 
     def test_is_override_backfill_independent_of_deprecated(self):
         old_f = Function(
@@ -343,7 +351,7 @@ class TestFunctionFactBackfill:
         merged = merge_snapshots(castxml, clang)
         f = merged.function_map.get("_Z3foov")
         assert f.is_override is True
-        assert is_castxml_backed_fact(merged, func_fact_key("_Z3foov", "is_override"))
+        assert _castxml_backed(merged, func_fact_key("_Z3foov", "is_override"))
 
 
 class TestCtorDtorReconciliation:
@@ -917,7 +925,7 @@ class TestParamDefaultsProvenance:
             merged.fact_provenance[func_fact_key("_Z3bari", "param_defaults")]
             == "clang"
         )
-        assert not both_castxml_backed_fact(
+        assert not _both_castxml_backed(
             merged, merged, func_fact_key("_Z3bari", "param_defaults")
         )
 
@@ -1027,8 +1035,8 @@ class TestTypeAndFieldFactBackfill:
         merged_t = merged.type_by_name("Shape")
         assert merged_t.is_abstract is True
         assert merged_t.deprecated == "msg"
-        assert is_castxml_backed_fact(merged, type_fact_key("Shape", "is_abstract"))
-        assert is_castxml_backed_fact(merged, type_fact_key("Shape", "deprecated"))
+        assert _castxml_backed(merged, type_fact_key("Shape", "is_abstract"))
+        assert _castxml_backed(merged, type_fact_key("Shape", "deprecated"))
 
     def test_has_anonymous_aggregate_fields_or_merged_from_clang(self):
         """G31 Phase C follow-up (PR #719): unlike is_abstract/deprecated
@@ -1192,7 +1200,7 @@ class TestEnumFactBackfill:
         merged_e = next(x for x in merged.declarations.enums if x.name == "Color")
         assert merged_e.is_scoped is True
         assert merged_e.deprecated == "msg"
-        assert is_castxml_backed_fact(merged, enum_fact_key("Color", "is_scoped"))
+        assert _castxml_backed(merged, enum_fact_key("Color", "is_scoped"))
 
 
 class TestClangOnlyDeclarationProvenance:
@@ -1630,40 +1638,40 @@ class TestConstantEntityIdSidecarStaysAlignedWithConstants:
 class TestFactProvenanceHelpers:
     def test_castxml_producer_is_always_backed(self):
         snap = _snap(ast_producer="castxml")
-        assert is_castxml_backed_fact(snap, "anything:not:recorded")
+        assert _castxml_backed(snap, "anything:not:recorded")
 
     def test_clang_producer_is_never_backed(self):
         snap = _snap(ast_producer="clang")
-        assert not is_castxml_backed_fact(snap, "anything:not:recorded")
+        assert not _castxml_backed(snap, "anything:not:recorded")
 
     def test_none_producer_is_never_backed(self):
         snap = _snap(ast_producer=None)
-        assert not is_castxml_backed_fact(snap, "anything:not:recorded")
+        assert not _castxml_backed(snap, "anything:not:recorded")
 
     def test_not_header_aware_is_never_backed(self):
         snap = _snap(ast_producer="castxml", from_headers=False)
-        assert not is_castxml_backed_fact(snap, "anything:not:recorded")
+        assert not _castxml_backed(snap, "anything:not:recorded")
 
     def test_inferred_header_awareness_is_never_backed(self):
         snap = _snap(ast_producer="castxml", from_headers_inferred=True)
-        assert not is_castxml_backed_fact(snap, "anything:not:recorded")
+        assert not _castxml_backed(snap, "anything:not:recorded")
 
     def test_hybrid_producer_checks_provenance_map(self):
         key = func_fact_key("_Z3foov", "deprecated")
         backed = _snap(ast_producer="hybrid", fact_provenance={key: "castxml"})
         unbacked = _snap(ast_producer="hybrid", fact_provenance={})
         clang_backed = _snap(ast_producer="hybrid", fact_provenance={key: "clang"})
-        assert is_castxml_backed_fact(backed, key)
-        assert not is_castxml_backed_fact(unbacked, key)
-        assert not is_castxml_backed_fact(clang_backed, key)
+        assert _castxml_backed(backed, key)
+        assert not _castxml_backed(unbacked, key)
+        assert not _castxml_backed(clang_backed, key)
 
-    def test_both_castxml_backed_fact_requires_both_sides(self):
+    def test_castxml_backing_requires_both_sides(self):
         key = func_fact_key("_Z3foov", "deprecated")
         old = _snap(ast_producer="castxml")
         new_backed = _snap(ast_producer="hybrid", fact_provenance={key: "castxml"})
         new_unbacked = _snap(ast_producer="hybrid", fact_provenance={})
-        assert both_castxml_backed_fact(old, new_backed, key)
-        assert not both_castxml_backed_fact(old, new_unbacked, key)
+        assert _both_castxml_backed(old, new_backed, key)
+        assert not _both_castxml_backed(old, new_unbacked, key)
 
     def test_fact_producer_single_backend_snapshots(self):
         key = func_fact_key("_Z3foov", "param_defaults")

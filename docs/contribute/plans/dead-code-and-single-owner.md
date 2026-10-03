@@ -291,22 +291,25 @@ and `SuppressionList.is_suppressed` (the unsuppressibility proof), all under
 `probe_harness._snapshot_object_file` (duplication-and-convergence, recorded
 exception).
 
-### Stale references — next deletion pass
+### Stale references — decided in Stage G
 
-The document naming these describes a superseded or deleted path, so the
-name keeps dead code alive. Each still needs the same check as Stages C–F
-(read the callers, look for a dropped wiring) before it goes:
+The documents naming these described a superseded or deleted path, so the
+name kept dead code alive. Each was checked for a dropped wiring first; see
+Stage G below for the decisions.
 
-| Item | Why stale |
+## Stage G — the stale references
+
+| Item | Decision |
 |---|---|
-| `workflows.plan.scan_bazel_scoping_failure` | its callers went with `scan` (ADR-068 Phase 6); decide whether `compare`/`dump` need the Bazel scoping guard |
-| `evidence_depth_levels.parse_user_depth` | kept for `ScanRequest`, which ADR-068 removed |
-| `Suppression.selector_matches` | one-semantic-pipeline D10 said wrap or remove; no caller, no test |
-| `analysis_assurance.fold_analysis_assurance_exit` | ADR-071's CLI caller was removed; re-exported only |
-| `policy.contract_coverage_exit.fold_coverage_exit` | the fold now lives in `policy/exit_decision.py`; either route through it (one owner) or delete |
-| `ExportSet.destinations` | no reader (ADR-073 is implemented) |
-| `cli_helpers_compare._build_match_map`, `release_variant_operand._resolve_release_package_side` | imported but never called |
-| `storage.atomic_file.atomic_copy` | its `dumper_cache` caller is gone |
-| `binary_fingerprint.compute_section_summary` | named by ADR-003's implementation list only |
-| `fact_provenance.both_castxml_backed_fact`/`is_castxml_backed_fact` | G31 Phase C replaced the gate; G39 is unstarted |
-| `evidence_depth._l5_payload_empty` | a wrapper left after one-semantic-pipeline moved callers to the shared helper |
+| `contract_coverage_exit.fold_coverage_exit`, `analysis_assurance.fold_analysis_assurance_exit` | **Deleted, superseded.** `policy.exit_decision.resolve_exit_decision` is the one fold: it takes `coverage_exit_floor` and `analysis_assurance_exit_contribution` and applies the `max`, so the wrappers were a second statement of that fold with no caller. Their tests now assert through `resolve_exit_decision`. (`acknowledgment_gate.fold_additions_review_exit` is still folded *outside* `ExitDecision`, in `frontends/cli/runtime.py`, after the decision is made, so `ExitDecision.reasons` cannot name the additions-review axis. It is live and is recorded here as the next single-owner item.) |
+| `workflows.plan.scan_bazel_scoping_failure` | **Deleted.** Its callers went with `scan`; `compare`/`dump` carry the same guard as `_check_bazel_target_scoping`, with the same headers-or-collection rule. |
+| `evidence_depth_levels.parse_user_depth` and its `symbols` alias | **Deleted.** It served `ScanRequest`; `collect_mode_for_depth` rejects `symbols`, as the three copies it replaced did. |
+| `Suppression.selector_matches` | **Deleted.** Its named consumer, `ReclassifyRule`, matches through its own `SelectorSet`. |
+| `ExportSet.destinations` | **Deleted** (no reader). |
+| `cli_helpers_compare._build_match_map`, `frontends/cli/release_variant_operand.py` (`_resolve_release_package_side`) | **Deleted.** Both were Click-translating wrappers whose callers moved to the engine (`binary_utils.build_match_map`, `workflows.release_inputs.resolve_release_package_side`) with translation at `frontends.cli.release_compare_request`; five modules imported them without calling them. Their tests now assert the typed error from the engine function. |
+| `storage.atomic_file.atomic_copy` | **Deleted.** It existed to stream the clang AST cache write; that write now streams through `storage/json_compact.py` and `json_chunked_write.py`, so the memory property it protected still holds. |
+| `binary_fingerprint.compute_section_summary` with `BinarySummary`, `SectionSummary`, `_ABI_SECTIONS`, `_extract_section_summary` | **Deleted.** ADR-003 listed a section-hash triage that no detector or command consumed. |
+| `fact_provenance.is_castxml_backed_fact`/`both_castxml_backed_fact` | **Deleted.** G31 Phase C replaced the castxml-only gate with `both_known_backed_fact`/`fact_producer`; the hybrid-merge tests now read provenance through `fact_producer`. |
+| `evidence_depth._l5_payload_empty` | **Deleted.** It was a wrapper over `resolve_l5_source_graph`, and the callers already use that resolver directly. `layer_payload_empty`'s own L5 case reads `pack.source_graph` directly; its one caller (`cli_buildsource`) has a pack and no snapshot, so the resolver's snapshot fallback does not apply. |
+
+The names are registered in `scripts/retired_surfaces.py`.

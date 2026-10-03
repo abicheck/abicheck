@@ -461,10 +461,8 @@ def build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
     AmbiguousLibraryMatchError`'s own docstring for why) -- lives here, not
     ``cli_helpers_compare.py``, so ``bundle_side_input.py`` can call it
     without a ``frontends``-legacy import (ADR-061: ``workflows`` may not
-    import ``frontends``). ``cli_helpers_compare._build_match_map`` is now a
-    thin wrapper translating :class:`AmbiguousLibraryMatchError` into
-    ``click.ClickException`` with the identical message, so every existing
-    CLI-facing caller (``compare``/``compare-release``) is unaffected.
+    import ``frontends``). The CLI boundary translates
+    :class:`AmbiguousLibraryMatchError`; there is no Click-raising wrapper.
     """
     from .errors import AmbiguousLibraryMatchError
 

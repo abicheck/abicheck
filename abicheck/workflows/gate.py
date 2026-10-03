@@ -69,7 +69,6 @@ from ..analysis_assurance import (
     analysis_assurance_report_dict,
     assurance_floor_diagnostic,
     compute_analysis_assurance,
-    fold_analysis_assurance_exit,
 )
 from ..confidence import note_if_same_binary_compared
 from ..policy.acknowledgment_gate import (
@@ -79,7 +78,6 @@ from ..policy.contract_coverage_exit import (
     announce_coverage_floor,
     coverage_exit_floor,
     coverage_exit_for_context,
-    fold_coverage_exit,
 )
 from ..policy.coverage_ledger import coverage_failures_for_context
 from ..policy.effective_gate import (
@@ -184,8 +182,6 @@ __all__ = [
     "coverage_exit_for_context",
     "coverage_failure_count",
     "effective_gate_for_resolved_compare_config",
-    "fold_analysis_assurance_exit",
-    "fold_coverage_exit",
     "fold_gate_pack_severity",
     "gate_decision_for_result",
     "gate_exit_code_scheme",
