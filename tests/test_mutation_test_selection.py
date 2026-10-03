@@ -281,7 +281,8 @@ def _exists(paths: set[str]):
         ([], set(), _SEL),
         (["abicheck/diff_types.py", "README.md"], {"abicheck/diff_types.py"}, _SEL),
         (["tests/test_new.py"], {"tests/test_new.py"}, [*_SEL, "tests/test_new.py"]),
-        (["tests/sub/test_deep.py"], {"tests/sub/test_deep.py"}, [*_SEL, "tests/sub/test_deep.py"]),
+        (["tests/sub/test_deep.py"], {"tests/sub/test_deep.py"}, ["tests/sub/test_deep.py", *_SEL]),
+        (["tests/test_0_first.py"], {"tests/test_0_first.py"}, ["tests/test_0_first.py", *_SEL]),
         (["tests/test_a.py"], {"tests/test_a.py"}, _SEL),
         (["tests/test_gone.py"], set(), _SEL),
         (["tests/conftest.py"], {"tests/conftest.py"}, ["tests/"]),
@@ -307,3 +308,21 @@ def test_extend_selection_never_narrows() -> None:
         for path in changed:
             if path.startswith("tests/test_") and out != ["tests/"]:
                 assert path in out
+
+
+def test_extended_selection_keeps_the_committed_file_contract() -> None:
+    """Whatever the diff, the extended file is sorted and unique -- the same
+    invariant ``test_the_committed_selection_is_well_formed`` asserts, which
+    the stats pass runs against the *extended* file. Exhaustive over every
+    ordered subset of new test paths that sort before, between and after the
+    committed entries; the oracle is ``sorted(set(...))`` of what must be
+    present, not the function's own construction."""
+    import itertools
+
+    committed = ["tests/test_b.py", "tests/test_d.py"]
+    pool = ["tests/test_a.py", "tests/test_c.py", "tests/test_e.py",
+            "tests/test_b.py", "tests/sub/test_z.py"]  # fmt: skip
+    for r in range(len(pool) + 1):
+        for changed in itertools.permutations(pool, r):
+            out = scope.extend_selection(committed, list(changed), _exists(set(pool)))
+            assert out == sorted(set(committed) | set(changed)), changed
