@@ -11,6 +11,9 @@ name: clang-plugin
 
 on:
   push:
+    # main only: on a PR branch the pull_request trigger below already runs
+    # this matrix, and an unfiltered push ran all 9 legs a second time.
+    branches: [main]
     paths:
       - "contrib/abicheck-clang-plugin/**"
       - ".github/workflows/clang-plugin.yml"

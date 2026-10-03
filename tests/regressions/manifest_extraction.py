@@ -199,4 +199,41 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         },
     ),
+    BugClass(
+        id="extraction.aggregate_layout_inverted_by_line",
+        invariant=(
+            "A diagnostic raised while parsing the multi-header aggregate "
+            "translation unit is attributed to the input whose include chain "
+            "produced it by the file the aggregate frame includes, never by "
+            "inverting the aggregate's line layout: the aggregate's writer "
+            "owns that layout, and when castxml's gained a preamble include "
+            "on its first line, the fallback's `line N -> header N-1` rule "
+            "excluded the healthy neighbour of the failing header and the "
+            "directory dump still failed. An error inside the preamble "
+            "itself attributes to no header."
+        ),
+        fixed_by=(1470,),
+        seed_tests=(
+            "tests/test_unparseable_header_fallback.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "frontend": ("castxml",),
+            "diagnostic_style": ("clang", "gcc"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The clang backend's direct-inclusion-guard retry "
+                    "(extract/headers/clang/error_header_retry.py) still maps "
+                    "an aggregate line N to header N-1. It agrees with its two "
+                    "writers today (dumper.py, clang_layout_tool.py: one "
+                    "include per line, no preamble); a preamble there would "
+                    "repeat this defect."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

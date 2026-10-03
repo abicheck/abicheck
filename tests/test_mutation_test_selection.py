@@ -28,10 +28,11 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -133,6 +134,39 @@ _REACHING = {
 }
 
 
+#: A conftest that keeps a second Python thread alive for the whole session
+#: and makes any heap census taken beside it fail loudly -- the condition
+#: under which ``gc.get_objects()`` corrupts another thread's ``tuple(...)``
+#: (``memory_trace.gc_census_is_safe``).
+_LINGERING_THREAD_CONFTEST = """
+import gc
+import threading
+
+threading.Thread(target=threading.Event().wait, daemon=True).start()
+_census = gc.get_objects
+
+
+def _guarded_census(*args, **kwargs):
+    assert threading.active_count() == 1, "heap census beside a live thread"
+    return _census(*args, **kwargs)
+
+
+gc.get_objects = _guarded_census
+"""
+
+
+@pytest.mark.parametrize("workers", [[], ["-n", "2"]])
+def test_the_trace_never_takes_a_census_beside_another_thread(
+    tmp_path: Path, workers: list[str]
+) -> None:
+    """With a second thread alive throughout, the plugin must not enumerate
+    the heap, and its namespace walk must still find every reaching test --
+    nested functions, methods and lambdas included. Same oracle as below."""
+    project = _project(tmp_path)
+    (project / "tests" / "conftest.py").write_text(_LINGERING_THREAD_CONFTEST)
+    assert _trace(project, workers) == _REACHING
+
+
 @pytest.mark.parametrize("workers", [[], ["-n", "2"], ["-p", "no:randomly", "-n", "0"]])
 def test_the_trace_records_exactly_the_reaching_tests(
     tmp_path: Path, workers: list[str]
@@ -196,37 +230,33 @@ def test_the_mutmut_lane_reads_the_committed_selection() -> None:
     assert gen.FULL_SELECTION == ["tests/"]
 
 
-def _well_formed_problems(lines: list[str], is_file) -> list[str]:  # type: ignore[no-untyped-def]
-    """Why *lines* is not a selection the stats pass can run, or ``[]``.
-
-    Either the whole suite, spelled ``gen.FULL_SELECTION`` (what a PR's
-    ``extend-selection`` widens to when it changes a shared test module), or
-    a sorted, unique list of existing ``tests/**/test_*.py`` files."""
-    if not lines:
-        return ["an empty selection would make the stats pass run nothing"]
-    if lines == gen.FULL_SELECTION:
-        return []
-    problems = []
-    if lines != sorted(set(lines)):
-        problems.append("not sorted and unique")
-    missing = [p for p in lines if not is_file(p)]
-    if missing:
-        problems.append(f"selection names files that do not exist: {missing}")
-    if not all(
-        Path(p).name.startswith("test_") and p.startswith("tests/") for p in lines
-    ):
-        problems.append("an entry is not a tests/**/test_*.py file")
-    return problems
-
-
 def test_the_committed_selection_is_well_formed() -> None:
-    """A cheap always-on check; completeness itself is the weekly --check.
-    The mutation lane rewrites this file in place (``extend-selection``)
-    before its stats pass, which may run this very test against the result."""
-    problems = _well_formed_problems(
+    """Sorted, unique, and every entry an existing test file -- or the
+    whole-suite sentinel a PR touching a shared test module widens it to
+    (this check runs inside mutmut's stats pass, against the widened file).
+    A cheap always-on check; completeness itself is the weekly --check."""
+    assert not gen.selection_problems(
         gen.read_selection(), lambda p: (REPO / p).is_file()
     )
-    assert not problems, problems
+
+
+def test_extend_selection_widens_to_the_generators_own_sentinel() -> None:
+    """mutation_scope restates FULL_SELECTION rather than importing its
+    sibling at module load; the two spellings must stay one value."""
+    assert list(scope._FULL_SELECTION) == gen.FULL_SELECTION
+
+
+def test_selection_rule_accepts_both_legitimate_shapes_and_nothing_else() -> None:
+    every = lambda p: True  # noqa: E731
+    assert gen.FULL_SELECTION == ["tests/"]
+    assert not gen.selection_problems(list(gen.FULL_SELECTION), every)
+    assert not gen.selection_problems(["tests/a/test_x.py", "tests/test_y.py"], every)
+    assert gen.selection_problems([], every)
+    assert gen.selection_problems(["tests/test_b.py", "tests/test_a.py"], every)
+    assert gen.selection_problems(["tests/test_a.py", "tests/test_a.py"], every)
+    assert gen.selection_problems(["tests/conftest.py"], every)
+    assert gen.selection_problems(["tests/", "tests/test_a.py"], every)
+    assert gen.selection_problems(["tests/test_a.py"], lambda p: False)
 
 
 # --------------------------------------------------------------------------
@@ -260,6 +290,26 @@ def test_extend_selection(
     assert scope.extend_selection(_SEL, changed, _exists(present)) == expected
 
 
+@pytest.mark.parametrize("seed", range(25))
+def test_the_widened_selection_passes_the_committed_files_own_check(seed: int) -> None:
+    """Whatever a branch changes, the file ``extend-selection`` writes must
+    satisfy the invariant the suite asserts about the committed file
+    (sorted, unique, ``tests/**/test_*.py``) -- the stats pass runs that
+    assertion against the widened file, inside mutmut. Inputs are random
+    names in random order, including ones sorting before every committed
+    entry; the oracle is the well-formedness rule, not extend_selection."""
+    rng = random.Random(seed)
+    pool = [f"tests/{d}test_{rng.choice('abcxyz')}{i}.py"
+            for i, d in enumerate(rng.choices(["", "sub/", "unit/a/"], k=12))]  # fmt: skip
+    committed = sorted(set(rng.sample(pool, 4)))
+    changed = rng.sample(pool, rng.randint(0, len(pool)))
+    out = scope.extend_selection(committed, changed, lambda p: True)
+    assert not gen.selection_problems(out, lambda p: True)
+    assert out == sorted(set(out))
+    assert set(committed) | set(changed) == set(out)
+    assert all(PurePosixPath(p).name.startswith("test_") for p in out)
+
+
 def test_extend_selection_never_narrows() -> None:
     """Exhaustive over every subset of a small path universe: the result
     always contains the committed selection, or is the whole suite."""
@@ -269,97 +319,9 @@ def test_extend_selection_never_narrows() -> None:
         changed = [p for i, p in enumerate(universe) if mask >> i & 1]
         out = scope.extend_selection(_SEL, changed, _exists(set(universe)))
         assert out == ["tests/"] or set(_SEL) <= set(out)
+        # The widened file is checked by the suite it feeds, under the same
+        # rule as the committed one (test_the_committed_selection_is_well_formed).
+        assert not gen.selection_problems(out, lambda p: True), out
         for path in changed:
             if path.startswith("tests/test_") and out != ["tests/"]:
                 assert path in out
-
-
-def test_every_extended_selection_is_one_the_lane_accepts() -> None:
-    """Exhaustive over a small universe: whatever `extend-selection` writes
-    over the committed file must pass the well-formedness check, since the
-    widened stats pass runs that check against it (a PR touching a test
-    helper once failed the mutation lane on its own `tests/` sentinel)."""
-    universe = ["tests/test_new.py", "tests/sub/test_deep.py", "tests/test_0.py",
-                "tests/conftest.py", "tests/_h.py", "abicheck/x.py"]  # fmt: skip
-    for mask in range(1 << len(universe)):
-        changed = [p for i, p in enumerate(universe) if mask >> i & 1]
-        out = scope.extend_selection(_SEL, changed, _exists(set(universe)))
-        exists = set(universe) | set(_SEL)
-        assert not _well_formed_problems(out, exists.__contains__), (changed, out)
-
-
-# ── census safety: the namespace fallback (gc-census-concurrent-thread) ─────
-
-
-def _armed(monkeypatch: pytest.MonkeyPatch, *, safe: bool):  # type: ignore[no-untyped-def]
-    import importlib
-
-    import mutation_reach_trace as trace
-
-    if trace._MON.get_tool(trace._TOOL_ID) is not None:
-        # The run is itself traced by this plugin (`gen_mutation_test_
-        # selection.py`), which holds the one tool slot a Monitor claims.
-        pytest.skip("mutation_reach_trace is already tracing this run")
-    paths = trace.only_mutate_paths(REPO)
-    names = trace.module_names(REPO, paths)
-    for name in names:
-        importlib.import_module(name)
-    monkeypatch.setattr(trace, "gc_census_is_safe", lambda: safe)
-    mon = trace.Monitor(paths, names)
-    try:
-        mon.arm()
-        return paths, set(mon.armed), mon.module_ids
-    finally:
-        mon.close()
-
-
-@pytest.mark.skipif(
-    not hasattr(sys, "monitoring"), reason="the plugin needs sys.monitoring (3.12+)"
-)
-def test_fallback_arms_every_def_without_a_heap_census(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With another thread alive the plugin must not enumerate the heap, and
-    the namespace walk it uses instead must still arm every function and
-    method not nested inside another function, in every only_mutate file.
-
-    The oracle is the files' own AST, not the walker: one expected entry per
-    such ``def``, matched by file, name and first line (a decorator's line
-    when decorated). Nested defs, lambdas and comprehensions come from
-    ``co_consts`` either way, so they are not what the fallback risks
-    missing."""
-    import ast
-
-    import mutation_reach_trace as trace
-
-    def census_forbidden() -> list[object]:
-        raise AssertionError("heap census taken while unsafe")
-
-    monkeypatch.setattr(trace.gc, "get_objects", census_forbidden)
-    paths, fallback, module_ids = _armed(monkeypatch, safe=False)
-    monkeypatch.undo()
-    _, census, _ = _armed(monkeypatch, safe=True)
-
-    assert module_ids == (), "an unsafe arm must leave the census to retry later"
-    assert fallback <= census
-
-    missing = []
-    for path in sorted(paths):
-        tree = ast.parse(Path(path).read_text(encoding="utf-8"))
-        todo: list[tuple[ast.AST, bool]] = [(tree, False)]
-        while todo:
-            node, nested = todo.pop()
-            for child in ast.iter_child_nodes(node):
-                is_def = isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                if is_def and not nested:
-                    lines = {child.lineno, *(d.lineno for d in child.decorator_list)}
-                    if not any(
-                        c.co_filename == path
-                        and c.co_name == child.name
-                        and c.co_firstlineno in lines
-                        for c in fallback
-                    ):
-                        missing.append(f"{path}:{child.lineno} {child.name}")
-                todo.append((child, nested or is_def or isinstance(child, ast.Lambda)))
-    assert not missing, missing
-    assert len(fallback) > 100  # vacuity guard: the walk found the real tree

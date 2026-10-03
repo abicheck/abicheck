@@ -168,7 +168,7 @@ _CENSUS_ALLOWLIST: dict[str, str] = {
     ),
     "tests/test_gc_census_thread_safety.py": "the negative control above",
     "scripts/mutation_reach_trace.py": (
-        "finds only_mutate functions to arm; heap census only when gc_census_is_safe(), else a namespace walk"
+        "arms sys.monitoring on every only_mutate function; heap census only when gc_census_is_safe(), else a namespace walk"
     ),
 }
 _CENSUS_CALLS = {"get_objects", "get_referrers"}
@@ -212,8 +212,13 @@ class TestNoUnguardedCensus:
             f"use abicheck.workflows.memory_trace.gc_object_count(): {offenders}"
         )
 
-    def test_allowlisted_benchmark_still_checks_the_guard(self) -> None:
-        text = (_REPO / "scripts/perf_cache_reset.py").read_text(encoding="utf-8")
+    @pytest.mark.parametrize(
+        "rel", sorted(p for p in _CENSUS_ALLOWLIST if p.startswith("scripts/"))
+    )
+    def test_allowlisted_script_still_checks_the_guard(self, rel: str) -> None:
+        """Every allowlisted census outside the guard and its negative control
+        is allowlisted *because* it consults the guard first."""
+        text = (_REPO / rel).read_text(encoding="utf-8")
         assert "gc_census_is_safe()" in text
 
 

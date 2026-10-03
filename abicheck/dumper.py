@@ -50,6 +50,7 @@ from .dumper_ast_config import (
     _cache_key as _cache_key,
     _detect_cpp_headers as _detect_cpp_headers,
     _resolve_compiler_binary as _resolve_compiler_binary,
+    clang_aggregate_text,
 )
 from .dumper_ast_config_cpp20 import _detect_cpp20_headers as _detect_cpp20_headers
 from .dumper_cache import (
@@ -330,6 +331,12 @@ def _clang_header_dump(
             force_cpp=fcpp,
             force_cpp20=fcpp20,
             frontend_context=frontend_context,
+            invocation_tool=(
+                clang_bin,
+                cc_id,
+                str(dpcpp_multi_context),
+                str(dpcpp_host_context),
+            ),
         )
 
     key = _make_key(
@@ -393,9 +400,7 @@ def _clang_header_dump(
     active_headers = list(headers)
 
     def _write_agg(hdrs: list[Path]) -> None:
-        agg_path.write_text(
-            "".join(f'#include "{h.resolve()}"\n' for h in hdrs), encoding="utf-8"
-        )
+        agg_path.write_text(clang_aggregate_text(hdrs), encoding="utf-8")
 
     _write_agg(active_headers)
 
@@ -920,6 +925,7 @@ def _castxml_dump(
             compiler_identity=compiler_identity,
             force_cpp=force_cpp,
             force_cpp20=force_cpp20,
+            invocation_tool=(cc_bin, cc_id, castxml_bin),
         )
 
     key = _make_key()

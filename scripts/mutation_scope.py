@@ -258,6 +258,11 @@ def _section(doc: Mapping[str, object], keys: tuple[str, ...]) -> object:
     return node
 
 
+#: ``gen_mutation_test_selection.FULL_SELECTION``, restated: that module is a
+#: sibling script, imported lazily where the CLI needs its validator.
+_FULL_SELECTION = ("tests/",)
+
+
 def extend_selection(
     selection: list[str], changed: list[str], exists: Callable[[str], bool]
 ) -> list[str]:
@@ -269,12 +274,12 @@ def extend_selection(
     can change which files reach mutated code in ways no path rule can see,
     so it widens the run back to the whole suite. Never narrows.
 
-    The result is written back over the committed selection, which the
-    widened run itself checks (``test_the_committed_selection_is_well_formed``):
-    so it stays sorted, and the whole suite is spelled exactly as
-    ``gen_mutation_test_selection.FULL_SELECTION`` spells it.
+    The result is sorted and unique, like the committed file: the widened
+    file is written over it before mutmut copies ``tests/``, and the stats
+    pass runs the suite's own well-formedness check against it -- an
+    appended entry out of order failed that check and aborted every shard.
     """
-    out = list(selection)
+    out = set(selection)
     for path in changed:
         if (
             not path.startswith("tests/")
@@ -283,11 +288,10 @@ def extend_selection(
         ):
             continue
         if PurePosixPath(path).name.startswith("test_"):
-            if path not in out:
-                out.append(path)
+            out.add(path)
         else:
-            return ["tests/"]
-    return sorted(set(out))
+            return list(_FULL_SELECTION)
+    return sorted(out)
 
 
 def pyproject_mutation_config_changed(old_text: str | None, new_text: str) -> bool:
@@ -380,6 +384,15 @@ def main(argv: list[str] | None = None) -> int:
         new_sel = extend_selection(
             old_sel, changed, lambda p: (REPO_ROOT / p).is_file()
         )
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from gen_mutation_test_selection import selection_problems  # noqa: PLC0415
+
+        problems = selection_problems(new_sel, lambda p: (REPO_ROOT / p).is_file())
+        if problems:
+            # Fail here, at the step that produced it, not 20 minutes later
+            # inside mutmut's stats pass where the suite checks the same rule.
+            print(f"ERROR: widened selection is malformed: {problems}")
+            return 1
         path.write_text("\n".join(new_sel) + "\n", encoding="utf-8")
         added = [p for p in new_sel if p not in old_sel]
         print(

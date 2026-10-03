@@ -194,12 +194,12 @@ def _is_bare_bash(node: ast.expr | None) -> bool:
 
 def _bare_bash_call_sites(source: str) -> list[int]:
     tree = ast.parse(source)
-    scopes: list[ast.AST] = [tree] + [
-        n
-        for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
-    ]
-    bare_names = {name for scope in scopes for name in _literal_argvs(scope)}
+    # The module-level walk already reaches every binding in every nested
+    # function (`_literal_argvs` only skips the nested `def` node itself, which
+    # binds no argv), so the union over all function scopes this used to take
+    # equals the module scope's own result. Re-walking each function was
+    # quadratic in nesting depth and the slowest repo-scan test in the suite.
+    bare_names = set(_literal_argvs(tree))
     hits = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -660,3 +660,32 @@ class TestTheGuardedPairIsNotAnAlias:
         monkeypatch.setattr(_workflow_exec, "_real_bash", lambda: "/usr/bin/bash")
         _workflow_exec.require_bash()  # does not raise
         assert _workflow_exec.have_bash() is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "cmd = ['bash', '-c', 'x']\n",
+        "def f():\n    cmd = ['bash', 'x']\n    def g():\n        inner = ('bash',)\n",
+        "class C:\n    def m(self):\n        a: list[str] = ['bash']\n        async def h():\n            b = ['bash']\n",
+        "def f():\n    def g():\n        def h():\n            deep = ['bash', '-e']\n    other = ['sh']\n",
+        "x = ['sh']\ndef f():\n    y = ['bash']\n    x = ['bash']\n",
+    ],
+)
+def test_module_scope_bindings_equal_the_union_over_every_function_scope(
+    source: str,
+) -> None:
+    """`_bare_bash_call_sites` reads `_literal_argvs` once, at module scope,
+    instead of once per function scope and taking the union. That is only
+    sound if the module-level walk already reaches every function's bindings,
+    which this states directly over nested defs, async defs, methods and
+    annotated bindings."""
+    tree = ast.parse(source)
+    scopes = [tree] + [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+    ]
+    union = {name for scope in scopes for name in _literal_argvs(scope)}
+    assert set(_literal_argvs(tree)) == union
+    assert union, "fixture binds no bash argv; the comparison is vacuous"

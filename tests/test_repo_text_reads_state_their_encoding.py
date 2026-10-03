@@ -92,7 +92,11 @@ def _own_nodes(scope: ast.AST) -> list[ast.AST]:
     return own
 
 
-def _repo_rooted_aliases(scope: ast.AST, inherited: frozenset[str]) -> frozenset[str]:
+def _repo_rooted_aliases(
+    scope: ast.AST,
+    inherited: frozenset[str],
+    nodes: list[ast.AST] | None = None,
+) -> frozenset[str]:
     """Names in *scope* that hold a repository-rooted path.
 
     Walking only the call target missed the two spellings this suite reaches
@@ -107,7 +111,8 @@ def _repo_rooted_aliases(scope: ast.AST, inherited: frozenset[str]) -> frozenset
     resolves regardless of statement order.
     """
     aliases = set(inherited)
-    nodes = _own_nodes(scope)
+    if nodes is None:
+        nodes = _own_nodes(scope)
     while True:
         grown = False
         for node in nodes:
@@ -163,11 +168,22 @@ def _encoding_is_stated(call: ast.Call) -> bool:
     return len(call.args) >= 4
 
 
-def _reads_in_scope(scope: ast.AST, aliases: frozenset[str], name: str) -> list[str]:
+def _reads_in_scope(
+    scope: ast.AST,
+    aliases: frozenset[str],
+    name: str,
+    nodes: list[ast.AST] | None = None,
+) -> list[str]:
     """Unencoded repository-rooted reads written directly in *scope*, then
-    recursively in each function nested inside it under its own aliases."""
+    recursively in each function nested inside it under its own aliases.
+
+    *nodes* is ``_own_nodes(scope)`` when the caller already computed it: each
+    scope's own-node list is built once and shared by the alias fixpoint and
+    both passes here, rather than rebuilt three times per scope."""
+    if nodes is None:
+        nodes = _own_nodes(scope)
     findings = []
-    for node in _own_nodes(scope):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
@@ -182,9 +198,15 @@ def _reads_in_scope(scope: ast.AST, aliases: frozenset[str], name: str) -> list[
         if _encoding_is_stated(node):
             continue
         findings.append(f"{name}:{node.lineno}: {ast.unparse(node)[:90]}")
-    for node in _own_nodes(scope):
+    for node in nodes:
         if isinstance(node, _SCOPES):
-            findings += _reads_in_scope(node, _repo_rooted_aliases(node, aliases), name)
+            child_nodes = _own_nodes(node)
+            findings += _reads_in_scope(
+                node,
+                _repo_rooted_aliases(node, aliases, child_nodes),
+                name,
+                child_nodes,
+            )
     return sorted(findings, key=lambda f: int(f.split(":")[1]))
 
 
@@ -192,7 +214,10 @@ def _unencoded_repo_reads(path: Path) -> list[str]:
     """Every repository-rooted text read in *path* that leaves the encoding
     to the host's locale, as `file:line: source` strings."""
     tree = ast.parse(path.read_text(encoding=ENCODING))
-    return _reads_in_scope(tree, _repo_rooted_aliases(tree, frozenset()), path.name)
+    nodes = _own_nodes(tree)
+    return _reads_in_scope(
+        tree, _repo_rooted_aliases(tree, frozenset(), nodes), path.name, nodes
+    )
 
 
 @pytest.mark.repo_scan

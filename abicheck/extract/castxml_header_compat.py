@@ -83,6 +83,7 @@ __all__ = [
     "FLOAT128_SPELLING",
     "FLOAT128_STANDIN",
     "PREAMBLE_FILENAME",
+    "castxml_aggregate_text",
     "write_castxml_aggregate",
 ]
 
@@ -126,8 +127,17 @@ def write_castxml_aggregate(headers: Iterable[Path], suffix: str) -> Path:
     agg_dir = Path(tempfile.mkdtemp(prefix="abicheck_castxml_"))
     preamble = agg_dir / PREAMBLE_FILENAME
     preamble.write_text(CASTXML_HEADER_PREAMBLE)
+    agg_path = agg_dir / f"aggregate{suffix}"
+    agg_path.write_text(castxml_aggregate_text(headers, preamble))
+    return agg_path
+
+
+def castxml_aggregate_text(headers: Iterable[Path], preamble: Path) -> str:
+    """The aggregate header's text, given where the preamble lives.
+
+    The one spelling both :func:`write_castxml_aggregate` and the header-AST
+    cache key use, so a change to what castxml is fed is a key change.
+    """
     lines = [f'#include "{preamble}"\n']
     lines += [f'#include "{h.resolve()}"\n' for h in headers]
-    agg_path = agg_dir / f"aggregate{suffix}"
-    agg_path.write_text("".join(lines))
-    return agg_path
+    return "".join(lines)
