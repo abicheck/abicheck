@@ -184,9 +184,17 @@ class Monitor:
                 stack.extend(obj.__defaults__ or ())
                 stack.extend((obj.__kwdefaults__ or {}).values())
 
+    @functools.cached_property
+    def _basenames(self) -> frozenset[str]:
+        return frozenset(os.path.basename(p) for p in self.paths)
+
     def _is_only_mutate(self, module: object) -> bool:
         path = getattr(module, "__file__", None)
         if not isinstance(path, str):
+            return False
+        # Called for every loaded module before every test: rule out the
+        # common case by basename before paying for a filesystem resolve.
+        if os.path.basename(path) not in self._basenames:
             return False
         try:
             return str(Path(path).resolve()) in self.paths
@@ -196,7 +204,12 @@ class Monitor:
     def arm(self) -> None:
         """Enable PY_START on every only_mutate code object not yet armed,
         rescanning only when an only_mutate module was (re)imported."""
-        ids = tuple(id(sys.modules.get(name)) for name in self.modules)
+        # Every loaded module of an only_mutate file, not only the predicted
+        # names: one imported later under another name (a test's own
+        # importlib load) must trigger a rescan too.
+        ids = tuple(id(sys.modules.get(name)) for name in self.modules) + tuple(
+            sorted(id(m) for m in list(sys.modules.values()) if self._is_only_mutate(m))
+        )
         if ids == self.module_ids:
             return
         self.module_ids = ids

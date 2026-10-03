@@ -334,3 +334,39 @@ def test_namespace_walk_reaches_every_code_object_of_the_file(
         for c in trace.code_objects(f.__code__)
     }
     assert reached == expected
+
+
+def test_arm_rescans_when_a_matching_module_appears_under_another_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``arm()`` runs before every test and skips the walk while nothing it
+    tracks changed. A module of an only_mutate file imported *later* under a
+    name ``module_names`` did not predict must count as a change -- else its
+    functions are never armed and the tests reaching them go unrecorded."""
+    import importlib.util
+
+    import mutation_reach_trace as trace
+
+    src = tmp_path / "late.py"
+    src.write_text("def f():\n    return 1\n")
+    mon = object.__new__(trace.Monitor)
+    mon.paths = frozenset({str(src.resolve())})
+    mon.modules = ["pkg.never_imported"]
+    mon.module_ids = ()
+    mon.armed = set()
+    scans: list[int] = []
+    monkeypatch.setattr(mon, "_live_functions", lambda: scans.append(1) or iter(()))
+
+    mon.arm()
+    mon.arm()
+    assert len(scans) == 1, "an unchanged module set must not rescan"
+
+    spec = importlib.util.spec_from_file_location("loaded_late_under_new_name", src)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "loaded_late_under_new_name", module)
+    spec.loader.exec_module(module)
+    mon.arm()
+    assert len(scans) == 2, "a newly loaded only_mutate module must trigger a rescan"
+    mon.arm()
+    assert len(scans) == 2

@@ -249,8 +249,8 @@ Recent build/source and ABI-mode examples:
 
 Current mode-specific backlog: stripped headers under-classifies
 `case103_toolchain_flag_drift`, `case117_no_unique_address`,
-`case129_struct_return_convention`, `case60_base_class_position_changed`,
-`case69_trivial_to_nontrivial`, and `case89_inline_accessor_renamed_pimpl_member`;
+`case129_struct_return_convention`, `case60_base_class_position_changed`, and
+`case69_trivial_to_nontrivial`;
 default/debug and release-header modes classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:
