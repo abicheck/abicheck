@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import gc
 import importlib
+import inspect
 import json
 import os
 import sys
@@ -125,7 +126,11 @@ def namespace_functions(modules: list[str]) -> list[object]:
         while value is not None and id(value) not in seen:
             seen.add(id(value))
             found.append(value)
-            value = getattr(value, "__wrapped__", None)
+            # Static lookup: an unrelated global's own ``__getattr__`` (a lazy
+            # proxy, a mock) must not run -- or raise -- inside ``arm()``.
+            # ``functools.wraps`` stores ``__wrapped__`` in the instance
+            # dict, which a static lookup still finds.
+            value = inspect.getattr_static(value, "__wrapped__", None)
 
     for name in modules:
         module = sys.modules.get(name)

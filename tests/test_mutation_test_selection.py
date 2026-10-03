@@ -208,6 +208,35 @@ def test_the_namespace_walk_finds_methods_wrappers_and_accessors() -> None:
     assert {"plain", "w", "wrapped", "m", "s", "c", "p", "_deco"} <= names
 
 
+def test_the_namespace_walk_never_runs_a_globals_getattr() -> None:
+    """A module global whose ``__getattr__`` raises (a lazy proxy, a mock)
+    must neither abort the walk nor hide the functions next to it."""
+    import functools
+    import types as _types
+
+    import mutation_reach_trace as trace
+
+    class Exploding:
+        def __getattr__(self, name: str) -> object:
+            raise RuntimeError(f"__getattr__({name!r}) must not be called")
+
+    def original() -> None:
+        pass
+
+    mod = _types.ModuleType("_reach_probe_proxy")
+    mod.proxy = Exploding()
+    mod.wrapped = functools.wraps(original)(lambda: original())
+    mod.cached = functools.lru_cache(maxsize=None)(original)
+    sys.modules["_reach_probe_proxy"] = mod
+    try:
+        found = trace.namespace_functions(["_reach_probe_proxy"])
+    finally:
+        del sys.modules["_reach_probe_proxy"]
+    assert mod.proxy in found
+    # Both wrapper kinds are still followed to the function they wrap.
+    assert sum(f is original for f in found) == 2
+
+
 def test_the_trace_is_independent_of_test_order(tmp_path: Path) -> None:
     """A test that is first to import a mutated module must not be the only
     one credited (the plugin imports them before any test)."""
