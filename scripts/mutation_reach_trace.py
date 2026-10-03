@@ -108,6 +108,64 @@ class Monitor:
         self.hit = True
         return _MON.DISABLE
 
+    def _live_functions(self) -> Generator[types.FunctionType]:
+        """Every live function, or -- when another thread exists -- every
+        function reachable from the ``only_mutate`` modules' namespaces.
+
+        A heap census while another thread runs can hand out (and so break)
+        a tuple that thread is still building (bug class
+        ``gc-census-concurrent-thread``), so it is taken only when
+        ``gc_census_is_safe()``; the namespace walk is the fallback.
+        """
+        from abicheck.workflows.memory_trace import gc_census_is_safe
+
+        if gc_census_is_safe():
+            for obj in gc.get_objects():
+                if isinstance(obj, types.FunctionType):
+                    yield obj
+            return
+        seen: set[int] = set()
+        # By file, not by name: the same only_mutate file can be imported
+        # under a name `module_names` did not predict (another sys.path
+        # entry, a test's own importlib load), and the census found those.
+        stack: list[object] = [
+            vars(m) for m in list(sys.modules.values()) if self._is_only_mutate(m)
+        ]
+        while stack:
+            obj = stack.pop()
+            if id(obj) in seen:
+                continue
+            seen.add(id(obj))
+            if isinstance(obj, dict):
+                stack.extend(obj.values())
+            elif isinstance(obj, type):
+                # The class's values directly: a temporary copy pushed here
+                # would be freed after its turn, and a later copy reusing
+                # its id() would be skipped as already seen.
+                stack.extend(vars(obj).values())
+            elif isinstance(obj, (staticmethod, classmethod, property)):
+                stack.extend(
+                    f
+                    for f in (
+                        getattr(obj, a, None)
+                        for a in ("__func__", "fget", "fset", "fdel")
+                    )
+                    if f
+                )
+            elif isinstance(obj, types.FunctionType):
+                yield obj
+                if (wrapped := getattr(obj, "__wrapped__", None)) is not None:
+                    stack.append(wrapped)
+
+    def _is_only_mutate(self, module: object) -> bool:
+        path = getattr(module, "__file__", None)
+        if not isinstance(path, str):
+            return False
+        try:
+            return str(Path(path).resolve()) in self.paths
+        except OSError:
+            return False
+
     def arm(self) -> None:
         """Enable PY_START on every only_mutate code object not yet armed,
         rescanning only when an only_mutate module was (re)imported."""
@@ -115,9 +173,7 @@ class Monitor:
         if ids == self.module_ids:
             return
         self.module_ids = ids
-        for obj in gc.get_objects():
-            if not isinstance(obj, types.FunctionType):
-                continue
+        for obj in self._live_functions():
             code = obj.__code__
             if code.co_filename not in self.paths or code in self.armed:
                 continue

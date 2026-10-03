@@ -11,3 +11,10 @@
   A castxml run whose output is unparseable or that defusedxml refuses (an
   entity declaration) is now that unit's own extraction failure, instead of
   aborting the whole dump.
+- When castxml cannot parse one public header, the unparseable-header
+  fallback now drops *that* header. It used to infer the header from the
+  aggregate's line number ("header i is on line i+1"), and castxml's aggregate
+  now starts with a compatibility-preamble include, so every attribution was
+  off by one: the fallback dropped a parseable header, kept the broken one, and
+  the dump still failed. The header is now taken from the file the aggregate
+  included on that line, so no aggregate layout can shift it.

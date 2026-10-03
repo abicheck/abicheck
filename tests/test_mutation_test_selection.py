@@ -105,8 +105,12 @@ def _project(tmp_path: Path) -> Path:
 
 def _trace(project: Path, extra: list[str]) -> set[str]:
     out = project / "reach"
+    # The nested run is its own session: an outer xdist worker's identity
+    # (PYTEST_XDIST_WORKER=gwN) would otherwise be inherited by the nested
+    # *controller*, whose output file then collides with -- and overwrites --
+    # the nested worker of the same name, dropping that worker's hits.
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if not k.startswith("PYTEST_XDIST_")},
         "MUTATION_REACH_OUT": str(out),
         "PYTHONPATH": os.pathsep.join([str(REPO / "scripts"), str(project)]),
     }
@@ -238,3 +242,76 @@ def test_extend_selection_never_narrows() -> None:
         for path in changed:
             if path.startswith("tests/test_") and out != ["tests/"]:
                 assert path in out
+
+
+# --------------------------------------------------------------------------
+# The census-free fallback finds what the census finds
+# --------------------------------------------------------------------------
+
+
+def test_namespace_walk_reaches_every_code_object_of_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With another thread alive the plugin may not take a heap census
+    (bug class gc-census-concurrent-thread) and walks the only_mutate
+    modules instead; it must still arm every code object the file defines.
+
+    Oracle: the file's own compiled code tree (``compile`` + nested
+    ``co_consts``), matched by qualified name -- independent of both the walk
+    and the census, and taking no census itself.
+    """
+    import importlib.util
+
+    import mutation_reach_trace as trace
+
+    src = tmp_path / "walked.py"
+    text = (
+        _MUTATED
+        + "import functools\n"
+        + "def _deco(f):\n    @functools.wraps(f)\n    def w(*a):\n        return f(*a)\n    return w\n"
+        + "@_deco\ndef wrapped(x):\n    return x\n"
+        + "class Props:\n"
+        + "    @staticmethod\n    def s():\n        return 1\n"
+        + "    @classmethod\n    def c(cls):\n        return 2\n"
+        + "    @property\n    def p(self):\n        return 3\n"
+        + "    class Nested:\n        def deep(self):\n            return 4\n"
+    )
+    src.write_text(text)
+    # Imported under a name module_names() would not predict, the way a
+    # test's own importlib load can.
+    spec = importlib.util.spec_from_file_location("unpredicted_name", src)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "unpredicted_name", module)
+    spec.loader.exec_module(module)
+
+    def is_function_code(code: object) -> bool:
+        # Class bodies are code objects too, but no function object owns
+        # one; arm() only needs the code that functions run.
+        return code.co_name != "<module>" and bool(code.co_flags & 0x2)  # CO_NEWLOCALS
+
+    expected = {
+        c.co_qualname
+        for c in trace.code_objects(compile(text, str(src), "exec"))
+        if is_function_code(c)
+    }
+    assert {
+        "helper",
+        "helper.<locals>.inner",
+        "Thing.method",
+        "Props.Nested.deep",
+    } <= expected
+
+    mon = object.__new__(trace.Monitor)
+    mon.paths = frozenset({str(src.resolve())})
+    mon.modules = ["pkg.never_imported"]
+    import abicheck.workflows.memory_trace as mt
+
+    monkeypatch.setattr(mt, "gc_census_is_safe", lambda: False)
+    reached = {
+        c.co_qualname
+        for f in mon._live_functions()
+        if f.__code__.co_filename == str(src.resolve())
+        for c in trace.code_objects(f.__code__)
+    }
+    assert reached == expected

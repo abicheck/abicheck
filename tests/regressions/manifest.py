@@ -662,6 +662,33 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="extract.aggregate_layout_header_attribution",
+        invariant=(
+            "When one header in a multi-header aggregate parse fails, the "
+            "unparseable-header fallback must drop exactly the header whose "
+            "include chain raised the error, for any aggregate layout. The "
+            "header is the file the aggregate included at the failing frame "
+            "(the chain's next location), never one derived from the "
+            "frame's line number: castxml's aggregate gained a leading "
+            "compatibility-preamble include, which silently shifted the "
+            "'header i is on line i+1' arithmetic by one, so the fallback "
+            "dropped a parseable header, kept the broken one, and the dump "
+            "failed on every platform. An error reached only through the "
+            "preamble names no listed header and drops nothing."
+        ),
+        fixed_by=(1463,),
+        seed_tests=(
+            "tests/test_unparseable_header_fallback.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "preamble_lines": ("0", "1", "3"),
+            "chain_depth": ("0", "1-4"),
+            "frame_style": ("clang", "gcc"),
+        },
+    ),
+    BugClass(
         id="registry.kind_completeness",
         invariant=(
             "Every declared ChangeKind/evidence-kind/provider is accounted "

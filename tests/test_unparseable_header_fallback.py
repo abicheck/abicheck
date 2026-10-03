@@ -411,14 +411,24 @@ def _chain_lines(frames: list[tuple[str, int]], style: str) -> list[str]:
 
 @pytest.mark.parametrize("style", ["clang", "gcc"])
 @pytest.mark.parametrize("seed", range(30))
-def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
-    """Oracle: the aggregate frame's line names the input, regardless of how
-    deep the chain is, whether intermediate files are listed, or which
-    compiler's frame layout is used."""
+@pytest.mark.parametrize("preamble_lines", [0, 1, 3])
+def test_multi_level_chains_attribute_to_the_aggregate_input(
+    seed, style, preamble_lines
+):
+    """Oracle: the input the aggregate frame included names the header,
+    regardless of how deep the chain is, whether intermediate files are
+    listed, which compiler's frame layout is used, or how many lines precede
+    the header includes in the aggregate (castxml's prepends a compatibility
+    preamble; "header i is on line i+1" named the wrong header once it did).
+
+    The chain is modelled on real compiler output: the frame after
+    ``aggregate:N`` is always the file the aggregate included on line N.
+    """
     rng = random.Random(seed)
     headers = _headers(rng.randint(2, 10))
     target = rng.randrange(len(headers))
     depth = rng.randint(0, 4)
+    # Below the top-level input, any file may include any other.
     inner = [
         (
             str(rng.choice(headers)) if rng.random() < 0.5 else f"/inc/detail/d{j}.h",
@@ -426,8 +436,13 @@ def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
         )
         for j in range(depth)
     ]
-    frames = [(AGG, target + 1), *inner]
-    err_file = f"/inc/detail/leaf{seed}.h" if depth else str(headers[target])
+    agg_line = preamble_lines + target + 1
+    if depth:
+        frames = [(AGG, agg_line), (str(headers[target]), 2), *inner]
+        err_file = f"/inc/detail/leaf{seed}.h"
+    else:
+        frames = [(AGG, agg_line)]
+        err_file = str(headers[target])
     stderr = "\n".join(
         [
             "some preamble",
@@ -440,11 +455,26 @@ def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
     assert attribute_failing_headers(stderr, headers) == {target}
 
 
+def test_an_error_in_the_aggregate_preamble_is_unattributed():
+    """An error reached through the aggregate's own preamble include names no
+    listed header, so no header is dropped for it."""
+    headers = _headers(3)
+    stderr = "\n".join(
+        [
+            *_chain_lines([(AGG, 1)], "clang"),
+            "/tmp/abicheck_castxml_x/preamble.h:4:2: error: boom",
+        ]
+    )
+    assert attribute_failing_headers(stderr, headers) == set()
+
+
 def test_gcc_group_does_not_leak_into_the_next_diagnostic():
     headers = _headers(3)
     stderr = "\n".join(
         [
-            *_chain_lines([(AGG, 1), ("/inc/detail/a.h", 2)], "gcc"),
+            *_chain_lines(
+                [(AGG, 1), (str(headers[0]), 4), ("/inc/detail/a.h", 2)], "gcc"
+            ),
             "/inc/detail/b.h:1:1: error: first",
             "    1 | x",
             f"{headers[2]}:1:1: error: second",

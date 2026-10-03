@@ -90,8 +90,8 @@ def attribute_failing_headers(stderr: str, headers: Sequence[Path]) -> set[int]:
     """0-based indices into *headers* whose ``#include`` chain raised an error.
 
     Each error is attributed through its include chain: an outermost frame
-    in the aggregate (a file that is none of *headers*) at line ``N`` names
-    ``headers[N-1]`` (the aggregate includes header ``i`` on line ``i+1``);
+    in the aggregate (a file that is none of *headers*) names the listed
+    header it included there -- the chain's next location, matched by file;
     only without such a frame does the innermost listed file in the chain
     name it. An error nothing in the chain attributes is skipped, never
     guessed at.
@@ -160,13 +160,18 @@ def _scan_diagnostics(
 def _attribute(
     located: list[tuple[str, int]], index: dict[str, int], n_headers: int
 ) -> int | None:
-    # The aggregate TU's own frame names the top-level input directly: the
-    # aggregate includes header ``i`` on line ``i+1``. Prefer it over any
-    # inner listed header -- when listed A includes listed B and B fails only
-    # under a macro A set, the input to drop is A, not B.
-    outer_file, outer_line = located[0]
+    # The aggregate TU's own frame names the top-level input: the file it
+    # included at that line is the chain's *next* location. Prefer it over
+    # any inner listed header -- when listed A includes listed B and B fails
+    # only under a macro A set, the input to drop is A, not B. Resolved by
+    # file, never by line arithmetic: the aggregate's layout is not fixed
+    # (castxml's prepends a compatibility preamble include), so "header i is
+    # on line i+1" silently named the wrong header once that line existed.
+    # A next file that is no listed header (the preamble itself) is
+    # unattributed, never guessed at.
+    outer_file, _outer_line = located[0]
     if len(located) > 1 and _norm(outer_file) not in index:
-        return outer_line - 1 if 1 <= outer_line <= n_headers else None
+        return index.get(_norm(located[1][0]))
     # No aggregate frame: the innermost listed header in the chain.
     for file, _line in reversed(located):
         idx = index.get(_norm(file))

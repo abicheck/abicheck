@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -252,9 +253,23 @@ def test_aarch64_target_parses_libstdcxx_float_headers(
     assert any(f.name == "g" for f in c_payload.declarations.functions)
 
 
+def _host_gxx_is_gnu_linux() -> bool:
+    """Whether the host ``g++`` targets GNU/Linux (glibc + libstdc++).
+
+    The case builds a shared object using ``_Float128`` and libstdc++'s float
+    headers -- the toolchain the preamble exists for. Apple's ``g++`` (clang,
+    no ``_Float128`` on arm64) and MinGW's (PE) lack that capability.
+    """
+    if not shutil.which("g++"):
+        return False
+    r = subprocess.run(["g++", "-dumpmachine"], capture_output=True, text=True)
+    return r.returncode == 0 and "linux-gnu" in r.stdout
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(
-    not (_CASTXML and shutil.which("g++")), reason="needs castxml and g++"
+    not (_CASTXML and _host_gxx_is_gnu_linux()),
+    reason="needs castxml and a GNU/Linux-targeting g++ (_Float128, libstdc++)",
 )
 def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> None:
     """With and without the preamble, a host dump is byte-identical."""
@@ -280,7 +295,7 @@ def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> No
     # Differential test: prove the second configuration really ran without the
     # preamble (separate caches are given by the per-run XDG_CACHE_HOME).
     assert marker.exists(), "sitecustomize did not run; the comparison would be vacuous"
-    if os.uname().machine in ("x86_64", "i686"):
+    if platform.machine() in ("x86_64", "i686"):
         assert (
             with_preamble.declarations.functions,
             with_preamble.declarations.types,
