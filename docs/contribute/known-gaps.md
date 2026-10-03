@@ -10997,3 +10997,30 @@ semantic analysis and could emit the same per-slot identity. DWARF's
 `DW_AT_type` references a DIE whose scope chain is known, so the DWARF
 snapshot path could populate the fields too. Either is additive: the
 consumer side already reads the fields from any producer.
+
+### Local-exec TLS in an AArch64 shared object leaves no binary evidence
+
+`has_static_tls` is read from `DF_STATIC_TLS` *or* a TP-relative dynamic
+relocation (`extract/elf_static_tls.py`), which covers initial-exec on every
+architecture, including AArch64, where GNU ld writes no `DF_STATIC_TLS`. One
+case stays invisible: `-ftls-model=local-exec` in a **shared object** on
+AArch64. GNU ld (binutils 2.42) links it with the TP offset fixed at link time,
+emitting neither a TLS dynamic relocation nor the flag, so nothing in the
+binary records the requirement (`tests/test_elf_static_tls.py` asserts the
+fact stays `False` there rather than fabricating a positive). Local-exec is
+only valid for executables, so this is toolchain misuse rather than a
+supported configuration. Closing it would need instruction-level evidence
+(the `tprel` relocations in the object files, i.e. L3 build evidence).
+
+### A library's own `_Float128` API has no correct mangled name from castxml
+
+Found while fixing castxml on binary128 `long double` targets (`extract/
+castxml_header_compat.py`). The **type** spelling is right on every target
+(`_Float128`), but castxml's `mangled` attribute for a function taking one is
+not the Itanium name the compiler emits (`_Z2qfDF128_P1Q`): on x86-64 castxml
+reports the bare name (`qf`), on AArch64 a name embedding the stand-in record
+(`_Z2qf19__abicheck_Float128P1Q`). Either way the export join misses, so such a
+function reads as not exported on both architectures. A token substitution is
+not a fix (Itanium substitution numbering differs between a class name and a
+builtin type), so it was not attempted. glibc's own `*f128` declarations are
+system headers and unaffected.

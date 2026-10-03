@@ -1008,4 +1008,37 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "since": ("absent", "present"),
         },
     ),
+    BugClass(
+        id="evidence.optional_layer_prerequisite_for_a_stated_fact",
+        invariant=(
+            "A finding the always-present evidence supports must not depend "
+            "on an optional layer: with the same headers, the verdict and the "
+            "finding are identical whether DWARF is present, absent or "
+            "stripped. `inline_body_references_renamed_member` read a record's "
+            "`detail::` namespace from the finding's leaf name, so only a "
+            "DWARF-contributed qualified duplicate made it fire -- the finding "
+            "vanished for release builds, stripped libraries and every macOS "
+            "dylib, while the headers stated the namespace all along."
+        ),
+        fixed_by=(1470,),
+        seed_tests=(
+            "tests/test_record_qualified_name.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "debug_evidence": ("dwarf", "no-debug-info", "stripped"),
+            "frontend": ("castxml",),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Shown for one detector. Other detectors that judge a "
+                    "record's namespace from a finding's `symbol` have not "
+                    "been audited for the same DWARF dependency."
+                ),
+                reference="abicheck/compare/record_qualified_name.py",
+            ),
+        ),
+    ),
 )

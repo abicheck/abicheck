@@ -54,6 +54,11 @@ from .extract.path_aliases import (
 from .extract.path_segments import _contiguous_subsequence, _suffix_match
 from .extract.public_header_identifiers import stamp_public_header_identifiers
 from .extract.public_root_ownership import compile_only_roots, retain_owning_roots
+from .extract.system_header_layout import (  # noqa: F401 -- _TARGET_TRIPLE_RE re-read by tests
+    _TARGET_TRIPLE_RE,
+    _cross_sysroot_includes,
+    _looks_like_multiarch_component,
+)
 from .model import AbiSnapshot, Fact, ScopeOrigin
 from .model.surface_facts import (
     SurfaceFactBearing,
@@ -145,14 +150,6 @@ def _matches_any_dir(
     return any(_contiguous_subsequence(d, parent_segs) for d in (dir_segs or []))
 
 
-#: A real GCC/Clang target triple: 2-4 non-empty ``-``-joined components,
-#: each alphanumeric (plus ``_``) -- e.g. ``x86_64-conda-linux-gnu``,
-#: ``x86_64-pc-linux-gnu``, ``aarch64-linux-gnu``, ``arm-none-eabi``. A
-#: non-leading component may also carry dots, since a real OS component can
-#: embed a dotted version (Solaris/AIX-style: ``x86_64-pc-solaris2.11``,
-#: matching this same repo's own ``toolchain_probe.py`` recognition of that
-#: shape -- Codex review, round 4).
-_TARGET_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_]+(-[A-Za-z0-9_][A-Za-z0-9_.]*){1,3}$")
 #: A real GCC/Clang version directory: digits, optionally dotted (``14``,
 #: ``14.3``, ``14.3.0``) -- never a bare word like ``v1``/``backend``.
 _TOOLCHAIN_VERSION_RE = re.compile(r"^\d+(\.\d+){0,2}$")
@@ -229,56 +226,6 @@ def _looks_like_gcc_target(component: str) -> bool:
     docstring)."""
     return bool(_TARGET_TRIPLE_RE.match(component)) or (
         component.lower() in _SINGLE_COMPONENT_GCC_TARGETS
-    )
-
-
-#: A genuine Debian/Ubuntu multiarch tuple always names a real OS or
-#: libc/environment family as one of its hyphen-separated words (``linux``,
-#: ``gnu``/``gnueabihf``/``musl``/...) -- an ordinary project directory that
-#: merely happens to be triple-shaped (``my-lib``) never does.
-#: ``_TARGET_TRIPLE_RE`` alone is deliberately loose (built to validate a
-#: GCC/Clang *toolchain*-controlled triple, where "any 2-4 alnum components"
-#: is a reasonable bar), so reusing it unmodified for a directory reached
-#: under a widely-installable prefix like ``/usr/include`` accepted an
-#: arbitrary two-word project directory too, silently discarding an
-#: explicitly-declared ``-I`` as though it were a system path (Codex
-#: review, round 6). Not a full Debian arch-name enumeration -- just enough
-#: real OS/environment vocabulary to exclude an ordinary project name.
-_MULTIARCH_OS_ENV_MARKERS: frozenset[str] = frozenset(
-    {
-        "linux",
-        "gnu",
-        "gnueabi",
-        "gnueabihf",
-        "gnux32",
-        "gnuabi64",
-        "gnuabin32",
-        "musl",
-        "android",
-        "bsd",
-        "freebsd",
-        "netbsd",
-        "openbsd",
-        "darwin",
-        "windows",
-        "mingw",
-        "mingw32",
-        "msvc",
-        "eabi",
-        "eabihf",
-    }
-)
-
-
-def _looks_like_multiarch_component(component: str) -> bool:
-    """True when *component* is both target-triple-shaped
-    (``_TARGET_TRIPLE_RE``) AND names a real OS/libc-environment family as
-    one of its hyphen-separated words (see ``_MULTIARCH_OS_ENV_MARKERS``'s
-    own docstring for why the shape check alone isn't enough here)."""
-    if not _TARGET_TRIPLE_RE.match(component):
-        return False
-    return any(
-        word in _MULTIARCH_OS_ENV_MARKERS for word in component.lower().split("-")
     )
 
 
@@ -401,13 +348,15 @@ def _is_toolchain_compiler_include_dir(header_segs: tuple[str, ...]) -> bool:
             return True
     return any(
         _prefix_then_optional_multiarch_cxx(prefix, header_segs)
-        for prefix in _SYSTEM_HEADER_DIRS
+        for prefix in (*_SYSTEM_HEADER_DIRS, *_cross_sysroot_includes(header_segs))
         if prefix and prefix[-1] == "include"
     )
 
 
 def _is_system_header(header_segs: tuple[str, ...]) -> bool:
-    if _is_toolchain_compiler_include_dir(header_segs):
+    if _is_toolchain_compiler_include_dir(header_segs) or _cross_sysroot_includes(
+        header_segs
+    ):
         return True
     return any(_contiguous_subsequence(d, header_segs) for d in _SYSTEM_HEADER_DIRS)
 
@@ -449,7 +398,10 @@ def _is_bare_system_dir(dir_segs: tuple[str, ...]) -> bool:
     underneath be classified ``PUBLIC_HEADER``, since ``classify_origin``
     checks the public match before the system-header one).
     """
-    if any(_suffix_match(d, dir_segs) for d in _SYSTEM_HEADER_DIRS):
+    if any(
+        _suffix_match(d, dir_segs)
+        for d in (*_SYSTEM_HEADER_DIRS, *_cross_sysroot_includes(dir_segs))
+    ):
         return True
     return _is_toolchain_compiler_include_dir(dir_segs)
 

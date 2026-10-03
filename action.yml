@@ -1340,7 +1340,9 @@ runs:
     # ── 3. Install abicheck ──────────────────────────────────────────────────
     - name: Install abicheck
       shell: bash
-      run: pip install "${{ github.action_path }}"
+      # Skips the rebuild when an earlier call of this Action in the same job
+      # already installed identical source into the same interpreter.
+      run: bash "${{ github.action_path }}/action/install-abicheck.sh" "${{ github.action_path }}"
 
     # ── 4. Run abicheck ──────────────────────────────────────────────────────
     - name: Run abicheck

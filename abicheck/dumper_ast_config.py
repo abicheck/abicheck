@@ -53,7 +53,11 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: flags (`extract.castxml_compiler_emulation`): an entry written before that
 #: was parsed under the host compiler's default-standard macros, with the
 #: same key inputs, so it must not be served afterwards.
-_CASTXML_CACHE_SCHEMA_VERSION = 2
+#: Bumped to 3 when every aggregate started including
+#: `extract.castxml_header_compat.CASTXML_HEADER_PREAMBLE`: on a target
+#: whose `long double` is binary128 the same inputs now parse to a different
+#: (complete) AST.
+_CASTXML_CACHE_SCHEMA_VERSION = 3
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.

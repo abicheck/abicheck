@@ -693,10 +693,12 @@ class TestPyBinResolvedAsAbsolute:
 #: checkout, and so must isolate with `-I` instead. Both are scanned: the
 #: first version of this guard read only `run.sh`, and the one unprotected
 #: invocation in the tree was in the file it did not open.
-ACTION_SHELL_SCRIPTS = (
-    RUN_SH,
-    RUN_SH.parent / "validate-inputs.sh",
-)
+# Every shell script the Action ships, discovered rather than listed: a
+# hand-kept tuple of two let `install-abicheck.sh` arrive with an unisolated
+# probe that no guard read (Copilot review).
+ACTION_SHELL_SCRIPTS = tuple(sorted(RUN_SH.parent.glob("*.sh")))
+#: Scripts known to carry inline Python, so the scan provably reads each.
+SCRIPTS_WITH_INLINE_PYTHON = ("run.sh", "validate-inputs.sh", "install-abicheck.sh")
 
 
 def _inline_python_invocations(text: str) -> list[tuple[int, str]]:
@@ -784,9 +786,13 @@ def test_the_isolation_scan_is_not_vacuous() -> None:
     A per-file assertion, not a total: a scan that silently stopped reading
     one file would still find plenty in the other and look thorough.
     """
-    for script in ACTION_SHELL_SCRIPTS:
-        found = _inline_python_invocations(script.read_text(encoding="utf-8"))
-        assert found, f"no inline Python invocation found in {script.name}"
+    scanned = {script.name for script in ACTION_SHELL_SCRIPTS}
+    for name in SCRIPTS_WITH_INLINE_PYTHON:
+        assert name in scanned, f"{name} is not scanned"
+        found = _inline_python_invocations(
+            (RUN_SH.parent / name).read_text(encoding="utf-8")
+        )
+        assert found, f"no inline Python invocation found in {name}"
 
 
 def test_the_isolation_predicate_rejects_each_half_measure() -> None:

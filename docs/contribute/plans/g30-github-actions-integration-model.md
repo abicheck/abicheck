@@ -581,8 +581,9 @@ expression evaluates correctly with no separate branch needed.
 `baseline-channel: none` runs `mode: scan` (no `--against`) instead of
 `compare`, matching S5's audit path exactly; `tests/test_action_check_target.py::
 TestFinalizeAugmentMode::test_baseline_channel_none_skips_resolve_and_still_augments`
-covers it end-to-end at the shell level, and `test-check-target` in
-`.github/workflows/test-action.yml` exercises the full YAML composition
+covers it end-to-end at the shell level, and the `[check-target]` steps of
+`test-action-scenarios` in `.github/workflows/test-action.yml` (formerly the
+`test-check-target` job) exercise the full YAML composition
 (including this bypass's sibling branches) against a real `abicheck
 compare` run. **Third/fourth required sub-tasks (unconditional depth-suffixed
 `check_id`/`target_id`, dual-write, `gate-mode`-aware neutralization,
@@ -645,8 +646,9 @@ coverage of `check_report.py`) covers the pure logic;
 `tests/test_action_check_target.py` covers `validate-inputs.sh`/`run.sh`'s
 bash orchestration end-to-end, including every `gate-mode` × outcome
 (resolved/operational-error/bootstrap) combination and the
-effective-depth-degradation branch; `test-check-target` in
-`.github/workflows/test-action.yml` is the required end-to-end fixture job,
+effective-depth-degradation branch; the `[check-target]` steps of
+`test-action-scenarios` in `.github/workflows/test-action.yml` (formerly the
+`test-check-target` job) are the required end-to-end fixture,
 exercising the real nested `uses:` composition (`resolve-baseline` → the
 root Action → the finalize step) against real `abicheck compare` output,
 not simulated env vars.
@@ -688,7 +690,8 @@ implementation (PR #625), not anticipated above:**
   that contains the composite Action doing the `uses:`. `check-target`'s
   nested `uses: ./actions/resolve-baseline`/`./actions/collect-facts`/`./`
   (root Action) therefore only ever worked because the added
-  `test-check-target` fixture happens to invoke `check-target` from *within*
+  `test-check-target` fixture (now the `[check-target]` steps of
+  `test-action-scenarios`) happens to invoke `check-target` from *within*
   `abicheck/abicheck`'s own workflow — the one case where the caller's
   checkout and this Action's own repository are the same thing. A real
   external consumer (`uses: abicheck/abicheck/actions/check-target@v1` from

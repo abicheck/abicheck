@@ -720,7 +720,10 @@ STEPS: tuple[Step, ...] = (
     ),
     Step(
         "slow",
-        # -n auto --dist worksteal, matching ci.yml's "Run slow tests" step:
+        # ci.yml's `slow-tests` job runs this step and "slow-perf" below via
+        # `verify.py --profile full --only slow,slow-perf --junit-dir .`, so
+        # this catalog entry is the one definition of the slow lane.
+        # -n auto --dist worksteal:
         # most `slow`-marked tests here are independent (Hypothesis/property-
         # based suites plus the production-scale snapshot-compression round
         # trips), so a serial run was pure wasted wall time on a multi-core
@@ -749,6 +752,9 @@ STEPS: tuple[Step, ...] = (
             "auto",
             "--dist",
             "worksteal",
+            "-q",
+            "-r",
+            "fE",
         ),
         frozenset({FULL}),
         description="Hypothesis / perf-benchmark tests (parallel; excludes wall-clock-timed tests)",
@@ -765,9 +771,9 @@ STEPS: tuple[Step, ...] = (
         # (2s/5s/30s and 60s respectively) or fits a scaling exponent --
         # running them concurrently with other CPU-heavy tests makes
         # scheduler contention part of the measurement, which can fail (or
-        # distort) the gate with no actual product regression. ci.yml's
-        # "Run slow tests" step keeps both files serial, together, for the
-        # identical reason (Codex review, PR #1036); performance.yml's own
+        # distort) the gate with no actual product regression (Codex review,
+        # PR #1036). ci.yml's `slow-tests` job runs this step as-is, after
+        # "slow", never alongside it; performance.yml's own
         # dedicated job only covers the first -- an acknowledged, separate
         # gap in that workflow, not fixed here.
         _py(
@@ -777,6 +783,9 @@ STEPS: tuple[Step, ...] = (
             "-m",
             "slow",
             "--tb=short",
+            "-q",
+            "-r",
+            "fE",
         ),
         frozenset({FULL}),
         description='Wall-clock-timed perf-benchmark tests (serial, unlike "slow")',
@@ -921,7 +930,22 @@ def _git_commit() -> str:
     return proc.stdout.strip() if proc.returncode == 0 else "unknown"
 
 
-def run_step(step: Step) -> dict[str, object]:
+def _is_pytest_step(step: Step) -> bool:
+    return "pytest" in step.cmd
+
+
+def step_command(step: Step, junit_dir: str | None = None) -> tuple[str, ...]:
+    """The command `run_step` executes: `step.cmd`, plus a per-step JUnit XML
+    record for a pytest step when `--junit-dir` was given. Named after the
+    step (`test-results-<step>.xml`), so two steps in one invocation can never
+    overwrite each other's results."""
+    if junit_dir is None or not _is_pytest_step(step):
+        return step.cmd
+    path = Path(junit_dir) / f"test-results-{step.name}.xml"
+    return (*step.cmd, f"--junitxml={path}")
+
+
+def run_step(step: Step, junit_dir: str | None = None) -> dict[str, object]:
     if step.precondition is not None:
         reason = step.precondition()
         if reason is not None:
@@ -933,7 +957,8 @@ def run_step(step: Step) -> dict[str, object]:
                 "duration_s": 0.0,
             }
 
-    print(f"\n=== {step.name} === {' '.join(step.cmd)}", flush=True)
+    cmd = step_command(step, junit_dir)
+    print(f"\n=== {step.name} === {' '.join(cmd)}", flush=True)
     start = time.time()
     env = {**step.env_defaults, **os.environ, **step.env}
     # Diagnostic instrumentation (round 20, Part B) -- capture_output=True
@@ -947,7 +972,7 @@ def run_step(step: Step) -> dict[str, object]:
     # see this module's own top-of-file comment for the full reasoning. This
     # also means a caller with `--json` gets the raw text available even when
     # the terminal itself scrolled it out of view.
-    proc = subprocess.run(step.cmd, cwd=ROOT, env=env, capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
     duration = time.time() - start
     # Echo the child's captured stdout/stderr BEFORE the partial-result
     # early return below (CodeRabbit review, fresh evidence): this used to
@@ -1014,6 +1039,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--junit-dir",
+        metavar="DIR",
+        default=None,
+        help="Write each pytest step's JUnit XML to DIR/test-results-<step>.xml",
+    )
+    parser.add_argument(
         "--json",
         metavar="PATH",
         default=None,
@@ -1037,12 +1068,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.list:
         for s in selected:
-            print(f"{s.name}\t{' '.join(s.cmd)}\t{s.description}")
+            print(
+                f"{s.name}\t{' '.join(step_command(s, args.junit_dir))}\t{s.description}"
+            )
         return 0
 
     results = []
     for step in selected:
-        results.append(run_step(step))
+        results.append(run_step(step, args.junit_dir))
 
     n_passed = sum(1 for r in results if r["status"] == "passed")
     n_failed = sum(1 for r in results if r["status"] == "failed")
