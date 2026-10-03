@@ -90,6 +90,13 @@ __all__ = [
 #: in a file of this name is synthetic, never part of any library's surface.
 PREAMBLE_FILENAME = "__abicheck_castxml_preamble.hpp"
 
+#: Line of the aggregate on which ``headers[0]`` is included: the preamble's
+#: own ``#include`` occupies line 1, and ``headers[i]`` follows on line
+#: ``i + AGGREGATE_FIRST_HEADER_LINE``. Diagnostic attribution
+#: (``unparseable_header_fallback``) maps an aggregate frame's line back to
+#: its input through this, so the writer and the reader share one layout.
+AGGREGATE_FIRST_HEADER_LINE = 2
+
 #: The record the preamble declares, and the spelling every reader reports
 #: in its place -- the one castxml's own builtin already reports on x86-64,
 #: so a library's ``_Float128`` API reads identically on every target.
@@ -127,6 +134,7 @@ def write_castxml_aggregate(headers: Iterable[Path], suffix: str) -> Path:
     preamble = agg_dir / PREAMBLE_FILENAME
     preamble.write_text(CASTXML_HEADER_PREAMBLE)
     lines = [f'#include "{preamble}"\n']
+    assert len(lines) + 1 == AGGREGATE_FIRST_HEADER_LINE
     lines += [f'#include "{h.resolve()}"\n' for h in headers]
     agg_path = agg_dir / f"aggregate{suffix}"
     agg_path.write_text("".join(lines))
