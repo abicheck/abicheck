@@ -345,4 +345,87 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="config.propagation_completeness",
+        invariant=(
+            "An accepted configuration value either reaches every "
+            "relevant consumer with identical semantics, or is rejected "
+            "at the public boundary — no third state."
+        ),
+        fixed_by=(860, 883, 886, 906),
+        seed_tests=(
+            "tests/test_run_plan.py",
+            "tests/test_run_plan_consumer_compile_active.py",
+            "tests/test_project_targets_consumer_compile.py",
+            "tests/test_cli_compare_release_bundle_signature_wiring.py",
+            "tests/test_reusable_workflows_project_evidence.py",
+            "tests/test_action_compile_context_parity.py",
+            "tests/test_gha_expr.py",
+            "tests/test_consumer_compile_full_chain_propagation.py",
+            "tests/test_l4_frontend_propagation.py",
+            # castxml compiler emulation: a -std/--sysroot/-m*/feature -f
+            # flag reached castxml's parser but not the emulated compiler's
+            # macro/include query. Oracle: the real compiler's -dM output.
+            "tests/test_castxml_compiler_emulation.py",
+            # `compare --no-baseline` resolved the project config and read
+            # 6 of its fields. Oracle: the written `.abicheck.yml`.
+            "tests/test_no_baseline_config_settings.py",
+            # `compat check -source`/`-src-report-path` never reached the
+            # HTML report's kind. Oracle: ABICC's own flag table.
+            "tests/test_compat_report_kind.py",
+            # `project history --policy DOC` read the path as a profile name.
+            # Oracle: the deprecation-window rule as the docs state it.
+            "tests/test_cli_project_history_policy.py",
+            # The pimpl inline-accessor detector never received the policy's
+            # internal_namespaces. Oracle: the documented convention, and
+            # agreement with internal_type_leaks_via_public_api.
+            "tests/test_inline_body_internal_namespaces.py",
+            # The S2 pre-scan never received the configured compiler.
+            # Oracle: the option's documented selection rules, and L4's pick.
+            "tests/test_preprocessor_scan_compiler.py",
+            # The coverage and scope notices advised the setting the run
+            # already had. Oracle: the settings' documented meaning.
+            "tests/test_notice_advice_matches_setting.py",
+            # `compare --dry-run` priced a compile DB and a source scope the
+            # run does not use. Oracle: the run's own L3 collector.
+            "tests/test_compare_dry_run_compile_db.py",
+        ),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Still open: (a) this closed chain reaches config -> "
+                    "generate_run_plan() -> the composite-Action/reusable-"
+                    "workflow path only — no seed test drives the same "
+                    "consumer_compile value through the native Python API "
+                    "or a `project`/`aggregate` CLI invocation end to end; "
+                    "(b) Phase 6 names eight other configurable concerns "
+                    "(policy/policy-file, frontend/compiler as a general "
+                    "per-entry-point concern beyond this one profile field, "
+                    "include roots, evidence-pack/target attribution, "
+                    "safety budgets, suppression/filtering, per-library "
+                    "override, output/report options) — of these only the "
+                    "frontend concern has since had any of this treatment, "
+                    "and only for one chain: `--ast-frontend` -> the L4 "
+                    "source-ABI replay backend that `compare`/`dump` select "
+                    "through `effective_frontend` "
+                    "(tests/test_l4_frontend_propagation.py, exhaustive over "
+                    "the frontend x env domain, grounded in "
+                    "_make_source_extractor). `scan` once ignored the value "
+                    "for L4; its separate resolver went with `scan` "
+                    "(ADR-068 Phase 6) and the dead-code plan's Stage D, "
+                    "and the end-to-end half of that coverage "
+                    "(tests/test_dump_scan_l3_comparability.py) went with "
+                    "it. The same concern's *other* consumers (the L2 "
+                    "header parse, the "
+                    "preprocessor/pattern pre-scans) are untouched. "
+                    "consumer_compile was chosen as the first "
+                    "worked example specifically because #860/#883's own "
+                    "history and this class's pre-existing seed tests "
+                    "already pointed at it, not because it's necessarily "
+                    "representative of the others' own chain shapes."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-6",
+            ),
+        ),
+    ),
 )
