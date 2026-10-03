@@ -572,12 +572,12 @@ class TestBtfErrorHandling:
 
 
 # ---------------------------------------------------------------------------
-# TypeMetadataSource protocol
+# Parsed struct/enum tables
 # ---------------------------------------------------------------------------
 
 
-class TestTypeMetadataSourceProtocol:
-    def test_protocol_methods(self) -> None:
+class TestParsedTypeTables:
+    def test_struct_and_enum_tables(self) -> None:
         b = BtfBuilder()
         int_enc = struct.pack("<I", 32)
         b.add_type("int", BTF_KIND_INT, 0, 4, extra=int_enc)
@@ -591,17 +591,11 @@ class TestTypeMetadataSourceProtocol:
 
         meta = parse_btf_from_bytes(b.build())
 
-        assert meta.has_data is True
-        assert meta.get_struct_layout("point") is not None
-        assert meta.get_struct_layout("nonexistent") is None
-        assert meta.get_enum_info("my_enum") is not None
-        assert meta.get_enum_info("nonexistent") is None
-
-    def test_isinstance_check(self) -> None:
-        from abicheck.type_metadata import TypeMetadataSource
-
-        meta = BtfMetadata(has_btf=True)
-        assert isinstance(meta, TypeMetadataSource)
+        assert meta.has_btf is True
+        assert meta.structs.get("point") is not None
+        assert meta.structs.get("nonexistent") is None
+        assert meta.enums.get("my_enum") is not None
+        assert meta.enums.get("nonexistent") is None
 
 
 # ---------------------------------------------------------------------------
@@ -619,8 +613,8 @@ class TestBtfMetadataAccessors:
         b.add_type("myfunc", BTF_KIND_FUNC, 0, 2)
 
         meta = parse_btf_from_bytes(b.build())
-        assert meta.get_function_proto("myfunc") is not None
-        assert meta.get_function_proto("nonexistent") is None
+        assert meta.func_protos.get("myfunc") is not None
+        assert meta.func_protos.get("nonexistent") is None
 
     def test_get_typedef(self) -> None:
         b = BtfBuilder()
@@ -629,16 +623,16 @@ class TestBtfMetadataAccessors:
         b.add_type("myint", BTF_KIND_TYPEDEF, 0, 1)
 
         meta = parse_btf_from_bytes(b.build())
-        assert meta.get_typedef("myint") == "int"
-        assert meta.get_typedef("nonexistent") is None
+        assert meta.typedefs.get("myint") == "int"
+        assert meta.typedefs.get("nonexistent") is None
 
     def test_empty_metadata(self) -> None:
         meta = BtfMetadata()
-        assert meta.has_data is False
-        assert meta.get_struct_layout("x") is None
-        assert meta.get_enum_info("x") is None
-        assert meta.get_function_proto("x") is None
-        assert meta.get_typedef("x") is None
+        assert meta.has_btf is False
+        assert meta.structs.get("x") is None
+        assert meta.enums.get("x") is None
+        assert meta.func_protos.get("x") is None
+        assert meta.typedefs.get("x") is None
 
 
 # ---------------------------------------------------------------------------

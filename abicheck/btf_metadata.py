@@ -26,7 +26,7 @@ Reference: ``include/uapi/linux/btf.h`` in the Linux kernel source.
 Public API
 ----------
 parse_btf_metadata(elf_path)
-    → BtfMetadata (implements TypeMetadataSource protocol)
+    → BtfMetadata (consumed through ``to_dwarf_metadata()``)
 
 has_btf_section(elf_path)
     → bool  (quick check without full parse)
@@ -117,8 +117,8 @@ class BtfType:
 class BtfMetadata:
     """BTF-derived ABI-relevant type information.
 
-    Implements the same interface as DwarfMetadata so the checker's
-    detectors work without modification (TypeMetadataSource protocol).
+    The checker reads it as :class:`DwarfMetadata` through
+    :meth:`to_dwarf_metadata`, so detectors work without modification.
     """
 
     structs: dict[str, StructLayout] = field(default_factory=dict)
@@ -127,23 +127,6 @@ class BtfMetadata:
     typedefs: dict[str, str] = field(default_factory=dict)
     has_btf: bool = False
     type_count: int = 0
-
-    # TypeMetadataSource protocol
-    @property
-    def has_data(self) -> bool:
-        return self.has_btf
-
-    def get_struct_layout(self, name: str) -> StructLayout | None:
-        return self.structs.get(name)
-
-    def get_enum_info(self, name: str) -> EnumInfo | None:
-        return self.enums.get(name)
-
-    def get_function_proto(self, name: str) -> FuncProto | None:
-        return self.func_protos.get(name)
-
-    def get_typedef(self, name: str) -> str | None:
-        return self.typedefs.get(name)
 
     def to_dwarf_metadata(self) -> DwarfMetadata:
         """Convert to DwarfMetadata for checker compatibility.

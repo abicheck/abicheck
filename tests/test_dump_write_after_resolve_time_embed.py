@@ -396,7 +396,6 @@ def test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_emb
     graph is non-empty.
     """
     from abicheck.buildsource import SourceAbiTu, SourceEntity, SourceLocation
-    from abicheck.buildsource.inputs_emit import write_inputs_pack
     from abicheck.cli_buildsource import _write_snapshot_output
     from abicheck.compile_context import CompileContext
     from abicheck.service import DumpRequest, InputSpec
@@ -404,6 +403,7 @@ def test_write_snapshot_output_folds_a_flow2_inputs_pack_onto_a_resolve_time_emb
         execute_dump_request,
         resolve_dump_request,
     )
+    from tests._inputs_pack_writer import write_inputs_pack
 
     so_path, header, compile_db = _build_library_with_flow2_symbol(tmp_path)
 

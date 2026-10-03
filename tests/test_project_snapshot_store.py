@@ -22,7 +22,6 @@ from abicheck.project_snapshot_store import (
     DirectoryObjectStore,
     read_artifact_ref,
     read_manifest_summary,
-    read_project_manifest,
     read_variant_artifact_pair,
     read_variant_ref,
     write_project_manifest,
@@ -38,6 +37,7 @@ from abicheck.storage.dto import (
 from abicheck.storage.import_v1 import import_legacy_snapshot as _import_legacy_snapshot
 from abicheck.storage.package import ArtifactRef, ObjectRef, PackageManifest, VariantRef
 from abicheck.storage.versioning import StorageVersions
+from tests._project_manifest_reader import read_project_manifest
 
 
 def import_legacy_snapshot(*args: Any, **kwargs: Any) -> Any:

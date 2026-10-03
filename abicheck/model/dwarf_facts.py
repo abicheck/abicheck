@@ -67,7 +67,7 @@ class EnumInfo:
 class DwarfMetadata:
     """All DWARF-derived ABI-relevant type information from one .so.
 
-    Implements the TypeMetadataSource protocol (see type_metadata.py).
+    BTF and CTF reduce to this shape through their ``to_dwarf_metadata()``.
     """
 
     # name → StructLayout  (structs, classes, unions)
@@ -94,17 +94,6 @@ class DwarfMetadata:
     # before schema v51 leave it False, so empty conflict maps there mean
     # "not looked for", never "none exist".
     odr_conflicts_observed: bool = False
-
-    # TypeMetadataSource protocol methods
-    @property
-    def has_data(self) -> bool:
-        return self.has_dwarf
-
-    def get_struct_layout(self, name: str) -> StructLayout | None:
-        return self.structs.get(name)
-
-    def get_enum_info(self, name: str) -> EnumInfo | None:
-        return self.enums.get(name)
 
 
 @dataclass

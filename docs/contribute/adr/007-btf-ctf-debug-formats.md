@@ -10,6 +10,13 @@
 > `--btf`/`--ctf`/`--dwarf` are now hidden legacy aliases on `abicheck dump`;
 > the current primary flag is `--debug-format {auto,dwarf,btf,ctf}` (see
 > `abicheck/cli.py`), which supersedes them. `--show-data-sources` is unchanged.
+>
+> **2026-10 amendment:** the `TypeMetadataSource` protocol and its accessor
+> methods are removed. No detector ever consumed the protocol: BTF and CTF
+> reach the checker as `DwarfMetadata` through `to_dwarf_metadata()`, and only
+> tests called the accessors
+> ([dead-code-and-single-owner](../plans/dead-code-and-single-owner.md),
+> library-API pass). The "Unified protocol" section below is historical.
 
 ---
 

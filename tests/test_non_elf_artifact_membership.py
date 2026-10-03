@@ -29,7 +29,6 @@ from abicheck.model.python_facts import PythonApiSurface
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.project_snapshot_store import (
     DirectoryObjectStore,
-    read_project_manifest,
     write_project_manifest,
 )
 from abicheck.serialization import snapshot_to_dict
@@ -45,6 +44,7 @@ from abicheck.workflows.bundle_facts_capture import (
     capture_bundle_facts,
 )
 from abicheck.workflows.bundle_facts_compare import compare_bundle_from_facts
+from tests._project_manifest_reader import read_project_manifest
 
 
 def _non_elf_snapshot(kind: str, name: str) -> AbiSnapshot:

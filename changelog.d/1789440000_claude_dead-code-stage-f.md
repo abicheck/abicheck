@@ -19,3 +19,9 @@
   `_l5_payload_empty`. No behavior change.
 - Removed `semantic_ir_legacy_adapter.legacy_record_ir`, an uncalled wrapper;
   `compare/record_layout.py` reads through `legacy_record_occurrences`.
+- Dead-code plan library-API pass: removed the `TypeMetadataSource` protocol
+  and its accessors (BTF/CTF reach the checker through
+  `to_dwarf_metadata()`), and `EntityResolver.v1_id_for`;
+  `buildsource.inputs_emit.write_inputs_pack` and
+  `project_snapshot_store.read_project_manifest`, which only tests called,
+  moved to `tests/`.

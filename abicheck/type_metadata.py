@@ -12,21 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unified TypeMetadataSource protocol for all debug format readers.
+"""Shared value types for the debug-format readers (ADR-007).
 
-All debug format metadata classes (DwarfMetadata, BtfMetadata, CtfMetadata)
-implement this protocol so the checker's detectors can consume type
-information without knowing the source format.
-
-See ADR-007 for design rationale.
+BTF and CTF reduce to :class:`~abicheck.model.dwarf_facts.DwarfMetadata`
+through their own ``to_dwarf_metadata()``, which is how the checker consumes
+them; the ``TypeMetadataSource`` protocol ADR-007 first described had no
+consumer and was removed (dead-code-and-single-owner, library-API pass).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
-
-from .model.dwarf_facts import EnumInfo, StructLayout
 
 
 @dataclass
@@ -55,25 +51,3 @@ def read_null_terminated_string(data: bytes, offset: int) -> str:
     if end < 0:
         return data[offset:].decode("utf-8", errors="replace")
     return data[offset:end].decode("utf-8", errors="replace")
-
-
-@runtime_checkable
-class TypeMetadataSource(Protocol):
-    """Common interface for all debug format readers.
-
-    Implemented by: DwarfMetadata, BtfMetadata, CtfMetadata.
-    The checker's detectors accept this protocol instead of a concrete class.
-    """
-
-    def get_struct_layout(self, name: str) -> StructLayout | None:
-        """Look up a struct/union layout by name."""
-        ...
-
-    def get_enum_info(self, name: str) -> EnumInfo | None:
-        """Look up an enum type by name."""
-        ...
-
-    @property
-    def has_data(self) -> bool:
-        """Whether this source has any type data available."""
-        ...

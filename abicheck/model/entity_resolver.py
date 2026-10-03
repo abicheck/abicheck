@@ -89,7 +89,7 @@ class EntityResolver:
     construction (one node, one id), but two *different* v1 ids resolving to
     the *same* canonical identity is exactly the identity-fragmentation
     pattern this ADR exists to surface, so the first-seen v1 id becomes that
-    canonical id's representative (:meth:`v1_id_for`) and every subsequent
+    canonical id's representative (the first entry of each later conflict) and every subsequent
     collision is recorded in ``conflicts`` instead of silently overwriting.
     """
 
@@ -186,13 +186,6 @@ class EntityResolver:
             )
             for c in self.conflicts
         ]
-
-    def v1_id_for(self, canonical_id: str) -> str | None:
-        """The representative (first-seen) v1 node id for *canonical_id*, or
-        ``None`` if nothing has resolved to it yet. When more than one v1 id
-        resolves to the same canonical identity, the others are recorded in
-        ``conflicts`` rather than returned here."""
-        return self._canonical_to_v1.get(canonical_id)
 
     def to_dict(self) -> dict[str, object]:
         return {

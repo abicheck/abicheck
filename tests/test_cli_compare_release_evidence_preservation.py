@@ -65,8 +65,8 @@ class TestMaterializationObjectScoping:
     def test_only_this_artifacts_own_objects_are_materialized(
         self, tmp_path: Path
     ) -> None:
-        from abicheck.project_snapshot_store import read_project_manifest
         from abicheck.workflows.release_package import resolve_release_package_map
+        from tests._project_manifest_reader import read_project_manifest
 
         old_libs, _ = _old_new_libraries()
         pkg = tmp_path / "pkg"

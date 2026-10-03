@@ -254,6 +254,7 @@ consumer that does not exist yet.
 | `storage.import_baseline_set.import_baseline_set`/`export_baseline_set`, with `dto.baseline_set_metadata_from_dto`/`_to_dto` | ADR-062 (Proposed); [storage-format-v2](storage-format-v2.md); G40 | A baseline publish/load path in `compare` or `project` that goes through the BundleFacts→ProjectSnapshot adapter (streaming variant is a known gap). |
 | `storage.entity_ids.elf_symbol_occurrence` | ADR-062 Phase 0 (storage-format-v2 A0.2/A0.3) | A storage-v2 ELF symbol-occurrence producer (later ADR-062 phases). |
 | `binary_fingerprint.compute_function_fingerprints` | ADR-003 | `diff_symbols_renames.py`'s ELF-only rename path describes fingerprinting when a binary path is available; the call was never made. |
+| `wheel_tags.parse_manylinux_glibc_floor`/`parse_musllinux_floor`/`parse_macos_deployment_target_floor` | [g27-wheel-deployment-verification](g27-wheel-deployment-verification.md) | Auto-derive `runtime_floors` from a compared wheel's own platform tag; today every floor needs an explicit `--env-matrix`. |
 | `wheel_tags.parse_numpy_requirement_from_metadata`, `parse_wheel_numpy_requirement` | [g26-numpy-capi-envelope](g26-numpy-capi-envelope.md) | G26's "declared" side: `diff_numpy_capi` should read the wheel METADATA requirement through these. |
 | `graph_backends.ingest_codeql_extends_results` | ADR-041 (partially phased), ADR-044 | L5 CodeQL collection calls it beside `ingest_codeql_call_results` when an extends-query result exists. |
 | `acknowledgment_gate.fold_additions_review_exit` (live, but always `0`) | ADR-067 D6 | No front end passes `acknowledgments` to `checker.compare`, so the additions-review axis never fires. Wiring it needs an input (config key or flag), the axis inside `ExitDecision` (an `exit` block field and reason; today the CLI folds it after the decision, so the report's `exit.code` and the typed API would disagree with the process exit once it can fire), and the report schema bump that goes with that. |
@@ -267,22 +268,21 @@ producers stamp (ADR-063), used by the tests that check that tier; whether
 weaker tiers should stop counting as exported is the separate policy
 question ADR-063 leaves open, so it is kept as that question's inert reader.
 
-### Kept as library API (undocumented)
+### Library API group — decided
 
-Intended as Python API, but no `docs/use`/`docs/reference`/`docs/learn` page
-names them, so the tool sees only the ADR. The work is a reference entry (or a
-decision to delete), not wiring.
+The Python API is `abicheck.service.__all__`
+(`docs/reference/python-api-reference.md` is generated from it). None of
+these was in it, so each was decided rather than documented by default:
 
-| Item | Owner |
+| Item | Decision |
 |---|---|
-| `TypeMetadataSource` protocol accessors (`get_enum_info`, `get_struct_layout`, `has_data`, and on BTF/CTF also `get_function_proto`, `get_typedef`) on `BtfMetadata`/`CtfMetadata`/`DwarfMetadata` | ADR-007 (production uses `to_dwarf_metadata()` instead) |
-| `wheel_tags.parse_manylinux_glibc_floor`/`parse_musllinux_floor`/`parse_macos_deployment_target_floor` (re-exported from `package.py`) | [g27-wheel-deployment-verification](g27-wheel-deployment-verification.md) |
-| `buildsource.inputs_emit.write_inputs_pack` | ADR-038 (batch producer for build integrations) |
-| `contract_replay.replay_original_decisions` | ADR-049 D6 / ADR-067 (no replay command is scheduled) |
-| `project_snapshot_store.read_project_manifest` | ADR-062 (eager reader; production uses the lazy one) |
-| `snapshot_io.read_snapshot_storage_info` | ADR-059 |
-| `workflows.input_resolution.load_env_matrix` | ADR-068 (migration path for `env_matrix_path`) |
-| `EntityResolver.v1_id_for` | ADR-046 |
+| `TypeMetadataSource` and its accessors on `BtfMetadata`/`CtfMetadata`/`DwarfMetadata` (`get_struct_layout`, `get_enum_info`, `has_data`, and `get_function_proto`/`get_typedef`) | **Deleted.** Its docstring said detectors accept the protocol; none did, and nothing used it as an annotation. BTF and CTF reach the checker as `DwarfMetadata` through `to_dwarf_metadata()`. `tests/test_type_metadata.py`, which checked only protocol conformance, is deleted; the BTF/CTF parser tests now read the parsed tables directly. ADR-007 carries a dated amendment. |
+| `wheel_tags.parse_manylinux_glibc_floor`/`parse_musllinux_floor`/`parse_macos_deployment_target_floor` | **Rolling out, not API:** G27's still-planned auto-derivation of `runtime_floors` from a compared wheel's own tag (today every floor comes from `--env-matrix`). Listed with `parse_wheel_architecture_claim`, which Stage D kept for the same entry point. |
+| `inputs_emit.write_inputs_pack` | **Moved to `tests/_inputs_pack_writer.py`.** No producer writes a pack in one call; the `abicheck-cc` wrapper and the Clang plugin write incrementally through `init_inputs_pack`/`append_source_facts`, which the helper still uses, so its packs exercise the real format. |
+| `project_snapshot_store.read_project_manifest` | **Moved to `tests/_project_manifest_reader.py`.** Every production reader goes through the lazy primitives (ADR-062 D8); the eager convenience was assembled from them and only tests loaded a whole manifest. |
+| `EntityResolver.v1_id_for` | **Deleted.** The mapping it read is live (`resolve` detects conflicts with it); the tests now state the representative through that behaviour: a third node with the same identity conflicts with the first, not the second. |
+| `snapshot_io.read_snapshot_storage_info` | **Kept, test hook:** the observation point the compression tests read a written envelope through, over the same `_classify_with_skippable_fallback` the read path uses. |
+| `contract_replay.replay_original_decisions`, `workflows.input_resolution.load_env_matrix` | **Kept**, as Stage C already decided (ADR-049 D6's replay procedure; ADR-068's migration path for `env_matrix_path`). |
 
 ### Test hooks and oracles
 
