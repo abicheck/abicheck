@@ -32,7 +32,9 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from xml.etree.ElementTree import Element
+from xml.etree.ElementTree import Element, ParseError
+
+from defusedxml import DefusedXmlException
 
 from ... import deadline
 from ...extract.castxml_compiler_emulation import (
@@ -483,7 +485,15 @@ class CastxmlSourceExtractor:
                     f"scan deadline exceeded before parsing castxml output for "
                     f"{compile_unit.source}"
                 ) from exc
-            root = parse_castxml_xml(out_xml)
+            # Malformed output (e.g. castxml handed a TU it cannot parse) is
+            # this TU's failure, not the whole replay's -- same contract as
+            # the clang extractor's JSON-decode handling.
+            try:
+                root = parse_castxml_xml(out_xml)
+            except (ParseError, DefusedXmlException) as exc:
+                raise SourceExtractionError(
+                    f"castxml produced unparseable XML for {compile_unit.source}: {exc}"
+                ) from exc
         finally:
             out_xml.unlink(missing_ok=True)
 

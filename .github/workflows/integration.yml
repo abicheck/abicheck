@@ -3,7 +3,10 @@ name: Integration
 # Real-toolchain lanes: header/DWARF/PE/Mach-O integration on three OSes, the
 # native PE/Mach-O compare workflows, MSVC+PDB, and libabigail/ABICC parity.
 #
-# One runner per OS, every lane a scripts/verify.py step (AGENTS.md "M0-3").
+# One runner per OS, every lane a scripts/verify.py step (AGENTS.md "M0-3"),
+# each with --require-complete: this job installs every step's tools itself, so
+# a precondition skip means an install broke -- without the flag verify.py's
+# `full` profile reports that skip as exit 0, a green step that ran nothing.
 # These used to be nine runners in ci.yml -- a `heavy-parity-gate` job, three
 # `integration-tests` legs, `cross-platform-e2e` x2, `windows-msvc`,
 # `libabigail-parity`, `abicc-parity` -- each paying its own checkout, Python,
@@ -39,6 +42,8 @@ on:
       - 'action/**'
       - '.github/actions/**'
       - 'scripts/verify.py'
+      # The Linux leg's demo-libz step (formerly ci.yml's `e2e` job).
+      - 'scripts/demo_libz.py'
   workflow_dispatch:
 
 concurrency:
@@ -71,7 +76,7 @@ jobs:
         # the "tolerate a flaky pre-baked third-party apt repo" rule.
         uses: ./.github/actions/install-system-deps
         with:
-          packages: gcc g++ cmake clang abi-compliance-checker curl ca-certificates
+          packages: gcc g++ cmake clang abi-compliance-checker zlib1g-dev curl ca-certificates
       - name: Install abidiff (Linux)
         if: runner.os == 'Linux'
         # Spelled `abigail-tools` on some releases, `libabigail-tools` on
@@ -133,35 +138,41 @@ jobs:
           # floor; the step's own default is the host-agnostic '1'.
           ABICHECK_MIN_EXECUTED: '20'
           PYTEST_ADDOPTS: -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-integration.xml
-        run: python scripts/verify.py --profile full --only integration
+        run: python scripts/verify.py --profile full --only integration --require-complete
       - name: Integration tests (macOS/Windows)
         if: (success() || failure()) && runner.os != 'Linux'
         env:
           # The Mach-O/PE subset counts are not pinned, so the step default
           # "> 0" floor catches a missing toolchain without platform guesswork.
           PYTEST_ADDOPTS: -n auto --dist worksteal
-        run: python scripts/verify.py --profile full --only integration
+        run: python scripts/verify.py --profile full --only integration --require-complete
       - name: Native PE/Mach-O compare workflows
         # Formerly the `cross-platform-e2e` job. Apple clang -> .dylib,
         # MinGW gcc -> .dll, then `abicheck compare` on them.
         if: (success() || failure()) && runner.os != 'Linux'
-        run: python scripts/verify.py --profile full --only native-compare
+        run: python scripts/verify.py --profile full --only native-compare --require-complete
       - name: MSVC + PDB end-to-end
         # Formerly the `windows-msvc` job, and still informational: the
         # pure-Python PDB parser is maturing on real MSVC output, so a failure
         # here is reported without failing the leg.
         if: (success() || failure()) && runner.os == 'Windows'
         continue-on-error: true
-        run: python scripts/verify.py --profile full --only msvc
+        run: python scripts/verify.py --profile full --only msvc --require-complete
       - name: libabigail parity
         # Marker-scoped, and the step sets its own ABICHECK_MIN_EXECUTED.
         if: (success() || failure()) && runner.os == 'Linux'
-        run: python scripts/verify.py --profile full --only libabigail-parity
+        run: python scripts/verify.py --profile full --only libabigail-parity --require-complete
       - name: ABICC parity
         # tests/test_xml_parity.py's schema checks carry no marker, so the
         # unit lane already runs them; nothing extra is needed here.
         if: (success() || failure()) && runner.os == 'Linux'
-        run: python scripts/verify.py --profile full --only abicc-parity
+        run: python scripts/verify.py --profile full --only abicc-parity --require-complete
+      - name: End-to-end demo (libz)
+        # Formerly ci.yml's `e2e` job: the distro libz dumped with its real
+        # zlib.h through CastXML, then mutated and classified. The demo takes
+        # ~3 s; as its own job it paid a full runner's setup on every PR.
+        if: (success() || failure()) && runner.os == 'Linux'
+        run: python scripts/verify.py --profile full --only demo-libz --require-complete
       - name: Upload integration coverage to Codecov
         if: ${{ always() && runner.os == 'Linux' }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7

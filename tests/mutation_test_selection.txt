@@ -325,6 +325,7 @@ tests/test_enumtype_case_b_facts.py
 tests/test_env_matrix_digest_frozen_projection.py
 tests/test_environment_drift.py
 tests/test_error_handling.py
+tests/test_eval_runner.py
 tests/test_evidence_adequacy_e_s1.py
 tests/test_evidence_benchmark.py
 tests/test_evidence_provenance_completeness.py

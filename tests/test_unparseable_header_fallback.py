@@ -441,6 +441,7 @@ def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
     headers = _headers(rng.randint(2, 10))
     target = rng.randrange(len(headers))
     depth = rng.randint(0, 4)
+    # Below the top-level input, any file may include any other.
     inner = [
         (
             str(rng.choice(headers)) if rng.random() < 0.5 else f"/inc/detail/d{j}.h",

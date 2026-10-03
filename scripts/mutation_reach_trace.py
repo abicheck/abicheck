@@ -54,6 +54,7 @@ saw reach mutated code to ``<dir>/<worker>.json``.
 
 from __future__ import annotations
 
+import functools
 import gc
 import importlib
 import json
@@ -166,20 +167,118 @@ class Monitor:
         self.hit = True
         return _MON.DISABLE
 
+    def _live_functions(
+        self, census: bool | None = None
+    ) -> Generator[types.FunctionType]:
+        """Every live function, or -- when another thread exists -- every
+        function reachable from the ``only_mutate`` modules' namespaces.
+
+        A heap census while another thread runs can hand out (and so break)
+        a tuple that thread is still building (bug class
+        ``gc-census-concurrent-thread``), so it is taken only when
+        ``gc_census_is_safe()``; the namespace walk is the fallback.
+
+        The walk follows namespaces, classes, containers, closures, partials,
+        bound methods, defaults and ``__wrapped__`` from every module whose
+        file is an only_mutate file. Its one structural limit: a function of
+        an only_mutate file loaded *without* registering a module in
+        ``sys.modules`` (a bare ``exec_module``) has no root it can start
+        from, so a test reaching only that copy is under-reported. No
+        thread-safe enumeration of the heap exists to close that; the
+        mutation lane's ``selection-check`` job, which compares the
+        selection with mutmut's own association, is the backstop.
+        """
+        if census is None:
+            census = gc_census_is_safe()
+        for obj in function_candidates(self.modules, heap_census=census):
+            if isinstance(obj, types.FunctionType):
+                yield obj
+        if census:
+            return
+        seen: set[int] = set()
+        # By file, not by name: the same only_mutate file can be imported
+        # under a name `module_names` did not predict (another sys.path
+        # entry, a test's own importlib load), and the census found those.
+        stack: list[object] = [
+            vars(m) for m in list(sys.modules.values()) if self._is_only_mutate(m)
+        ]
+        while stack:
+            obj = stack.pop()
+            if id(obj) in seen:
+                continue
+            seen.add(id(obj))
+            if isinstance(obj, dict):
+                stack.extend(obj.values())
+            elif isinstance(obj, (list, tuple, set, frozenset)):
+                # A callback table or registry held only in a container.
+                stack.extend(obj)
+            elif isinstance(obj, functools.partial):
+                stack.extend((obj.func, *obj.args, *obj.keywords.values()))
+            elif isinstance(obj, types.MethodType):
+                stack.append(obj.__func__)
+            elif isinstance(obj, type):
+                # The class's values directly: a temporary copy pushed here
+                # would be freed after its turn, and a later copy reusing
+                # its id() would be skipped as already seen.
+                stack.extend(vars(obj).values())
+            elif isinstance(obj, (staticmethod, classmethod, property)):
+                stack.extend(
+                    f
+                    for f in (
+                        getattr(obj, a, None)
+                        for a in ("__func__", "fget", "fset", "fdel")
+                    )
+                    if f
+                )
+            elif isinstance(obj, types.FunctionType):
+                yield obj
+                if (wrapped := getattr(obj, "__wrapped__", None)) is not None:
+                    stack.append(wrapped)
+                # A decorator's wrapper reaches the decorated function only
+                # through its closure (no functools.wraps, no __wrapped__).
+                for cell in obj.__closure__ or ():
+                    try:
+                        stack.append(cell.cell_contents)
+                    except ValueError:  # an empty cell
+                        pass
+                stack.extend(obj.__defaults__ or ())
+                stack.extend((obj.__kwdefaults__ or {}).values())
+
+    @functools.cached_property
+    def _basenames(self) -> frozenset[str]:
+        return frozenset(os.path.basename(p) for p in self.paths)
+
+    def _is_only_mutate(self, module: object) -> bool:
+        path = getattr(module, "__file__", None)
+        if not isinstance(path, str):
+            return False
+        # Called for every loaded module before every test: rule out the
+        # common case by basename before paying for a filesystem resolve.
+        if os.path.basename(path) not in self._basenames:
+            return False
+        try:
+            return str(Path(path).resolve()) in self.paths
+        except OSError:
+            return False
+
     def arm(self) -> None:
         """Enable PY_START on every only_mutate code object not yet armed,
         rescanning only when an only_mutate module was (re)imported."""
-        ids = tuple(id(sys.modules.get(name)) for name in self.modules)
+        # Every loaded module of an only_mutate file, not only the predicted
+        # names: one imported later under another name (a test's own
+        # importlib load) must trigger a rescan too.
+        ids = tuple(id(sys.modules.get(name)) for name in self.modules) + tuple(
+            sorted(id(m) for m in list(sys.modules.values()) if self._is_only_mutate(m))
+        )
         if ids == self.module_ids:
             return
         census = gc_census_is_safe()
         if census:
-            # Only a full census marks these modules scanned; a namespace
-            # walk (another thread alive) is retried at the next test.
+            # Only a full census marks this module set done: after a partial
+            # namespace walk (another thread alive) the next test retries,
+            # so the census runs once this is the sole thread again.
             self.module_ids = ids
-        for obj in function_candidates(self.modules, heap_census=census):
-            if not isinstance(obj, types.FunctionType):
-                continue
+        for obj in self._live_functions(census):
             code = obj.__code__
             if code.co_filename not in self.paths or code in self.armed:
                 continue
