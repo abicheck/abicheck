@@ -47,3 +47,13 @@
   `numpy_abi_major_incompatible` across the 1.x/2.x boundary) — two kinds that
   had no emitter. `deployment.runtime_floors.NUMPY_REQUIREMENT` declares the
   requirement by hand.
+
+### Fixed
+
+- A directory/package `compare` no longer treats a non-binary file whose
+  name merely contains `.so.` (`libfoo.so.c`, `libfoo.so.bak`) as a library.
+  Such a file used to become a release member that failed to load, which
+  failed the whole comparison and could displace the real `libfoo.so` that
+  shared its match key. `libfoo.so` and `libfoo.so.<digits>` are still
+  accepted by name (linker-script stubs); any other suffix is decided by the
+  file's content.

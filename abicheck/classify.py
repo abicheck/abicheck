@@ -106,16 +106,22 @@ class FileClassifier(ABC):
 class BinaryExtensionClassifier(FileClassifier):
     """Fast accept based on known binary file extensions.
 
-    Uses a regex for ``.so`` to enforce an extension boundary and avoid
-    false positives from substrings like ``some``, ``solution``, ``resolve``.
+    A name is only a hint. ``libfoo.so`` and ``libfoo.so.<digits>`` are
+    accepted on the name alone -- that keeps a text linker-script stub such
+    as ``libc.so`` discoverable, which content sniffing would reject. Any
+    other ``.so.<suffix>`` (``libfoo.so.c``, ``libfoo.so.bak``, but also a
+    real ``libfoo.so.0d``) abstains, so :class:`MagicByteClassifier` decides
+    from the file's content. Accepting every ``.so.`` name let a source or
+    backup file next to a library become a release member that then failed
+    to load, failing the whole directory comparison.
     """
 
-    _SO_RE: re.Pattern[str] = re.compile(r"\.so(?:\.|$)")
+    _SO_NAME_ONLY_RE: re.Pattern[str] = re.compile(r"\.so(?:\.\d+)*$")
     _BINARY_EXTS: frozenset[str] = frozenset({".dll", ".dylib", ".pyd"})
 
     def accepts(self, path: Path) -> bool | None:
         lower = path.name.lower()
-        if self._SO_RE.search(lower):
+        if self._SO_NAME_ONLY_RE.search(lower):
             return True
         if any(lower.endswith(ext) for ext in self._BINARY_EXTS):
             return True

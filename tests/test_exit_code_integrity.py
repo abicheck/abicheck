@@ -32,6 +32,7 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import Verdict
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy.severity import _LEGACY_VERDICT_EXIT_CODE
 from abicheck.severity import legacy_exit_code
 
@@ -94,7 +95,9 @@ def test_compare_flow_matches_canonical() -> None:
     new = AbiSnapshot(library="libfoo.so.1", version="2.0", functions=[_fn("a")])
     result = compare(old, new, scope_to_public_surface=False)
 
-    got = _exit_code_of(_exit_with_severity_or_verdict, result, None, False)
+    got = _exit_code_of(
+        _exit_with_severity_or_verdict, result, EffectiveGate.from_severity(None)
+    )
     assert got == legacy_exit_code(result.verdict)
 
 
