@@ -57,3 +57,8 @@
   shared its match key. `libfoo.so` and `libfoo.so.<digits>` are still
   accepted by name (linker-script stubs); any other suffix is decided by the
   file's content.
+- A directory/package `compare` no longer treats separate debug info as a
+  library: anything inside a macOS `*.dSYM` bundle (whose DWARF companion is
+  a real Mach-O with the library's own name) and any `*.debug` file. On macOS
+  a `gcc -g` build directory used to yield two `libx.so` candidates and fail
+  with an ambiguous match.

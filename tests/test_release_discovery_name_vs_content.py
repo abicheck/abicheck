@@ -70,7 +70,18 @@ def _name_alone_qualifies(name: str) -> bool:
     return parts[0] == "" and all(p.isdigit() for p in parts[1:])
 
 
-def _expected(name: str, content: str) -> bool:
+def _is_debug_companion(path: Path) -> bool:
+    # Separate debug info: a ``*.debug`` file or anything inside a macOS
+    # ``*.dSYM`` bundle. Never a library, even though it is a real binary
+    # carrying the library's own name.
+    if path.name.lower().endswith(".debug"):
+        return True
+    return any(part.lower().endswith(".dsym") for part in path.parent.parts)
+
+
+def _expected(name: str, content: str, parent: Path = Path("lib")) -> bool:
+    if _is_debug_companion(parent / name):
+        return False
     return content == "binary" or _name_alone_qualifies(name)
 
 
@@ -97,6 +108,8 @@ def test_oracle_is_not_constant() -> None:
     assert not _expected("libreal.so.c", "c_source")
     assert not _expected("libreal.so.bak", "empty")
     assert _expected("libreal.so.0d", "binary")
+    assert not _expected("libreal.so.debug", "binary")
+    assert not _expected("libreal.so", "binary", Path("x.so.dSYM/Contents"))
 
 
 def test_a_source_file_beside_a_library_is_not_a_release_member(tmp_path: Path) -> None:
@@ -104,4 +117,25 @@ def test_a_source_file_beside_a_library_is_not_a_release_member(tmp_path: Path) 
     shutil.copyfile(Path(sys.executable).resolve(), lib)
     for stray in ("libreal.so.c", "libreal.so.bak", "libreal.so.txt"):
         (tmp_path / stray).write_bytes(_C_SOURCE)
+    assert collect_release_inputs(tmp_path) == [lib]
+
+
+def test_debug_companions_are_never_members(tmp_path: Path) -> None:
+    """The macOS ``gcc -g`` layout: a dylib, its dSYM DWARF copy (a real
+    Mach-O with the same name) and dsymutil's relocation map. Only the
+    library itself is a member, so the directory has one ``libx.so``, not an
+    ambiguous pair."""
+    binary = _binary_bytes()
+    lib = tmp_path / "libx.so"
+    lib.write_bytes(binary)
+    contents = tmp_path / "libx.so.dSYM" / "Contents"
+    for rel, data in (
+        ("Resources/DWARF/libx.so", binary),
+        ("Resources/Relocations/aarch64/libx.so.yml", b"---\ntriple: arm64\n"),
+        ("Info.plist", b"<plist/>"),
+    ):
+        f = contents / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(data)
+    (tmp_path / "libx.so.debug").write_bytes(binary)
     assert collect_release_inputs(tmp_path) == [lib]

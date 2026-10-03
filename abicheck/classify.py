@@ -103,6 +103,26 @@ class FileClassifier(ABC):
 # ---------------------------------------------------------------------------
 
 
+class DebugCompanionClassifier(FileClassifier):
+    """Reject separate debug-info companions, whatever their content.
+
+    A macOS ``*.dSYM`` bundle holds a Mach-O copy of the library's DWARF
+    (``libx.so.dSYM/Contents/Resources/DWARF/libx.so``) plus dsymutil's
+    relocation maps; a ``*.debug`` file is a separate ELF debuginfo object.
+    Both are real binaries with the library's own name, so a name or magic
+    check accepts them, and a release directory then held two ``libx.so``
+    members (an ambiguous match) or compared the debug copy as if it were the
+    library. They are evidence about a library, never a library.
+    """
+
+    def accepts(self, path: Path) -> bool | None:
+        if path.name.lower().endswith(".debug"):
+            return False
+        if any(part.lower().endswith(".dsym") for part in path.parent.parts):
+            return False
+        return None
+
+
 class BinaryExtensionClassifier(FileClassifier):
     """Fast accept based on known binary file extensions.
 
@@ -330,6 +350,7 @@ class FallbackSniffClassifier(FileClassifier):
 # ---------------------------------------------------------------------------
 
 _PIPELINE: list[FileClassifier] = [
+    DebugCompanionClassifier(),
     BinaryExtensionClassifier(),
     MagicByteClassifier(),
     AbiJsonClassifier(),
