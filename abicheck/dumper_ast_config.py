@@ -33,6 +33,12 @@ from .extract.castxml_compiler_emulation import (
     castxml_parser_arguments,
     emulated_compiler_command,
 )
+from .extract.castxml_header_compat import (
+    CASTXML_HEADER_PREAMBLE,
+    PREAMBLE_FILENAME,
+    castxml_aggregate_text,
+)
+from .extract.header_ast_cache_producers import clang_ast_output_fingerprint
 from .header_utils import drop_include_tokens_duplicating_paths
 
 #: Bumped once (Codex review, fresh evidence, P2): a pre-existing on-disk
@@ -87,6 +93,7 @@ def _cache_key(
     force_cpp: bool | None = None,
     force_cpp20: bool = False,
     frontend_context: str = "host",
+    invocation_tool: tuple[str, ...] = (),
 ) -> str:
     h = hashlib.sha256()
     h.update(f"backend={backend}".encode())
@@ -178,6 +185,102 @@ def _cache_key(
     # cache was manually cleared — the cache key must depend on everything
     # that changes the frontend command, and this heuristic decision does.
     h.update(f"force_cpp20={force_cpp20}".encode())
+    # That rule, by construction rather than per field: the exact aggregate
+    # header and command line this key's run will hand the frontend, and for
+    # clang the code that shapes the stored entry
+    # (`extract.header_ast_cache_producers`). Empty *invocation_tool* (a probe
+    # that never runs the frontend) folds nothing.
+    if invocation_tool:
+        h.update(
+            "invocation={}".format(
+                _invocation_digest(
+                    backend,
+                    invocation_tool,
+                    headers,
+                    extra_includes,
+                    sysroot=sysroot,
+                    nostdinc=nostdinc,
+                    gcc_options=gcc_options,
+                    gcc_option_tokens=gcc_option_tokens,
+                    force_cpp=bool(force_cpp),
+                    force_cpp20=force_cpp20,
+                    system_includes=system_includes,
+                )
+            ).encode()
+        )
+    if backend == "clang":
+        h.update(f"output_code={clang_ast_output_fingerprint()}".encode())
+    return h.hexdigest()
+
+
+def clang_aggregate_text(headers: Sequence[Path]) -> str:
+    """The clang aggregate header's text: one ``#include`` per header.
+
+    Shared by ``dumper._clang_header_dump`` and the cache key, so a change to
+    what clang is fed is a key change.
+    """
+    return "".join(f'#include "{h.resolve()}"\n' for h in headers)
+
+
+def _invocation_digest(
+    backend: str,
+    tool: tuple[str, ...],
+    headers: list[Path],
+    extra_includes: list[Path],
+    *,
+    sysroot: Path | None,
+    nostdinc: bool,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    force_cpp: bool,
+    force_cpp20: bool,
+    system_includes: tuple[str, ...],
+) -> str:
+    """Hash the aggregate header and command line a run would use.
+
+    Built with the same builders the run calls, with fixed placeholders for
+    the per-run temporary paths. *tool* is ``(cc_bin, cc_id, castxml_bin)``
+    for castxml and ``(clang_bin, cc_id, dpcpp_multi, dpcpp_host)`` for clang.
+    """
+    agg = Path("<abicheck-aggregate>" + (".hpp" if force_cpp else ".h"))
+    if backend == "clang":
+        clang_bin, cc_id, multi, host = tool
+        text = clang_aggregate_text(headers)
+        argv = _build_clang_header_command(
+            clang_bin,
+            cc_id,
+            list(extra_includes),
+            agg,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            force_cpp=force_cpp,
+            force_cpp20=force_cpp20,
+            system_includes=system_includes,
+            dpcpp_multi_context=multi == "True",
+            dpcpp_host_context=host == "True",
+        )
+    else:
+        cc_bin, cc_id, castxml_bin = tool
+        preamble = Path("<abicheck-preamble>") / PREAMBLE_FILENAME
+        text = castxml_aggregate_text(headers, preamble) + CASTXML_HEADER_PREAMBLE
+        argv = _build_castxml_command(
+            cc_bin,
+            cc_id,
+            list(extra_includes),
+            Path("<abicheck-out.xml>"),
+            agg,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            force_cpp=force_cpp,
+            force_cpp20=force_cpp20,
+            castxml_bin=castxml_bin,
+        )
+    h = hashlib.sha256(text.encode())
+    h.update("\0".join(argv).encode())
     return h.hexdigest()
 
 

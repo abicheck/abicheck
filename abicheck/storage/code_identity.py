@@ -18,9 +18,11 @@ much as a release upgrade -- is a different identity, so a cache miss is
 guaranteed rather than remembered. It prefers false misses over false hits,
 the same rule ADR-033 D5 states for these caches.
 
-Caches of an *external tool's* output for inputs abicheck generates (the
-castxml/clang header-AST cache) do not use this: their entries do not depend
-on abicheck's code except through the generated input itself.
+Caches of an *external tool's* output (the castxml/clang header-AST cache)
+fold something narrower, so an unrelated edit does not discard them: the exact
+input abicheck generates for the tool, plus :func:`abicheck_modules_fingerprint`
+over the named modules that shape what is stored
+(``extract.header_ast_cache_producers``).
 """
 
 from __future__ import annotations
@@ -34,7 +36,10 @@ __all__ = [
     "PACKAGE_ROOT",
     "SOURCE_SUFFIXES",
     "abicheck_code_fingerprint",
+    "abicheck_modules_fingerprint",
     "compute_code_fingerprint",
+    "compute_modules_fingerprint",
+    "module_source_path",
 ]
 
 #: The installed package directory (``abicheck/``).
@@ -43,6 +48,18 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 #: File kinds that make up the package's code. Bytecode is a derivative of
 #: these and is excluded, as is anything under ``__pycache__``.
 SOURCE_SUFFIXES = frozenset({".py", ".pyi"})
+
+
+def _digest_sources(root: Path, files: list[Path]) -> str:
+    """The shared hash: each file's root-relative path, then its content digest."""
+    h = hashlib.sha256(b"abicheck-code-identity-v1\0")
+    for path in files:
+        h.update(path.relative_to(root).as_posix().encode() + b"\0")
+        try:
+            h.update(hashlib.sha256(path.read_bytes()).digest())
+        except OSError:
+            h.update(b"UNREADABLE")
+    return h.hexdigest()
 
 
 def compute_code_fingerprint(root: Path) -> str:
@@ -61,14 +78,46 @@ def compute_code_fingerprint(root: Path) -> str:
         and "__pycache__" not in p.relative_to(root).parts
         and p.is_file()
     )
-    h = hashlib.sha256(b"abicheck-code-identity-v1\0")
-    for path in files:
-        h.update(path.relative_to(root).as_posix().encode() + b"\0")
-        try:
-            h.update(hashlib.sha256(path.read_bytes()).digest())
-        except OSError:
-            h.update(b"UNREADABLE")
-    return h.hexdigest()
+    return _digest_sources(root, files)
+
+
+def module_source_path(root: Path, module: str) -> Path | None:
+    """The source file of dotted *module* (``abicheck.x.y``) under *root*."""
+    parts = module.split(".")[1:]
+    if not parts:
+        candidates = [root / "__init__.py"]
+    else:
+        base = root.joinpath(*parts)
+        candidates = [base.with_suffix(".py"), base / "__init__.py"]
+    return next((c for c in candidates if c.is_file()), None)
+
+
+def compute_modules_fingerprint(root: Path, modules: tuple[str, ...]) -> str:
+    """Content hash of the named modules' source only.
+
+    For a cache whose entries depend on a *known, small* part of abicheck --
+    where folding the whole package would make every unrelated edit a miss.
+    The caller owns the claim that *modules* is complete; pair it with a test
+    that derives the set from what actually runs. A module that cannot be found
+    hashes as a marker rather than being dropped, so a rename is still a change.
+    """
+    files: list[Path] = []
+    h = hashlib.sha256()
+    for module in sorted(set(modules)):
+        path = module_source_path(root, module)
+        if path is None:
+            h.update(f"MISSING:{module}\0".encode())
+        else:
+            files.append(path)
+    return hashlib.sha256(
+        (_digest_sources(root, files) + h.hexdigest()).encode()
+    ).hexdigest()
+
+
+@memoized
+def abicheck_modules_fingerprint(modules: tuple[str, ...]) -> str:
+    """:func:`compute_modules_fingerprint` over the running package, per process."""
+    return compute_modules_fingerprint(PACKAGE_ROOT, modules)
 
 
 @memoized

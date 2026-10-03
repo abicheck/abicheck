@@ -9,5 +9,11 @@
   abicheck produced. Each key now also folds a content hash of the installed
   `abicheck` package (`storage.code_identity.abicheck_code_fingerprint`), so any
   change to the package, an upgrade or a different development checkout
-  alike, is a cache miss. The castxml/clang header-AST cache, which stores the
-  external tool's own output, is unchanged.
+  alike, is a cache miss. The header-graph projection stored beside a cached
+  clang AST is stamped the same way. The castxml/clang header-AST cache, which
+  stores the external tool's output, keys the exact aggregate header and command
+  line abicheck generates for the tool instead of trusting a hand-bumped schema
+  constant, and a clang entry also keys the source of the modules that shape
+  what is stored (compaction, DPC++ document selection, the failing-header
+  retry), so changing how abicheck builds the frontend's input or processes its
+  output is a miss without discarding the cache on every unrelated change.
