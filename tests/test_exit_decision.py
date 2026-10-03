@@ -168,6 +168,7 @@ class TestResolveExitDecision:
             "incomplete_scope_contribution": 0,
             "no_comparison_completed_contribution": 0,
             "loadability_contribution": 0,
+            "additions_review_contribution": 0,
         }
 
     def test_crosscheck_promotion_has_no_live_producer(self) -> None:
@@ -870,6 +871,7 @@ class TestCompareExitDecisionIntegration:
             "incomplete_scope_contribution": 0,
             "no_comparison_completed_contribution": 0,
             "loadability_contribution": 0,
+            "additions_review_contribution": 0,
         }
 
     def test_breaking_comparison_reports_the_compatibility_gate_reason(

@@ -1074,7 +1074,11 @@ _ARTIFACT_NAMES = frozenset(
 #:        to judge on incomplete/unsupported evidence -- the per-entity
 #:        counterpart of ``not_evaluated``. A detector is now listed when it
 #:        declined anything, even with no findings and no coverage gap.
-REPORT_SCHEMA_VERSION = "5.12"
+#: 5.13 -- additive ``exit.additions_review_contribution`` (ADR-067 D6): the
+#:        additions-review floor is folded inside ``ExitDecision`` rather
+#:        than after it, so ``exit.code`` equals the process exit when the
+#:        axis fires. ``0`` for every run without acknowledgment records.
+REPORT_SCHEMA_VERSION = "5.13"
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

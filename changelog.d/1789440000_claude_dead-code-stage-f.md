@@ -62,3 +62,12 @@
   a real Mach-O with the library's own name) and any `*.debug` file. On macOS
   a `gcc -g` build directory used to yield two `libx.so` candidates and fail
   with an ambiguous match.
+
+### Changed
+
+- ADR-067 D6's additions-review floor is now an `ExitDecision` axis
+  (`exit.additions_review_contribution`, reason `additions_review`, report
+  schema 5.13) instead of a fold applied after the decision, so the report's
+  `exit.code` and the process exit cannot disagree once the axis fires.
+  `acknowledgment_gate.fold_additions_review_exit` is removed. No exit code
+  changes today: no front end supplies acknowledgment records yet.

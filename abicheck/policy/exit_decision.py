@@ -228,6 +228,13 @@ class ExitReason(str, Enum):
     #: all) uses this axis alone, with `compatibility_contribution` fixed at
     #: `0`.
     LOADABILITY = "loadability"
+    #: ADR-067 D6: public additions a run's acknowledgment records do not
+    #: cover, under ``acknowledgment.unacknowledged_additions: block``. A
+    #: ``0``/``1`` fold participant like ``CONTRACT_COVERAGE``: it raises a
+    #: clean exit to ``1`` and never lowers a real ``2``/``4``, and it never
+    #: reclassifies the addition itself (D6, "policy acceptance, never
+    #: reclassification").
+    ADDITIONS_REVIEW = "additions_review"
 
 
 @dataclass(frozen=True)
@@ -373,6 +380,10 @@ class ExitDecision:
     #: documents): a positional caller of this public constructor keeps
     #: binding the older tail.
     loadability_contribution: int = 0
+    #: ADR-067 D6's additions-review floor -- see
+    #: :class:`ExitReason.ADDITIONS_REVIEW`. ``0`` for every run that supplied
+    #: no acknowledgment records, or whose policy is ``allow``/``warn``.
+    additions_review_contribution: int = 0
 
     def exit_without_analysis_assurance(self) -> int:
         """The code this decision would have had with no assurance axis.
@@ -434,6 +445,7 @@ class ExitDecision:
                 self.no_comparison_completed_contribution
             ),
             "loadability_contribution": self.loadability_contribution,
+            "additions_review_contribution": self.additions_review_contribution,
         }
 
     @classmethod
@@ -476,6 +488,7 @@ class ExitDecision:
                 "no_comparison_completed_contribution", 0
             ),
             loadability_contribution=d.get("loadability_contribution", 0),
+            additions_review_contribution=d.get("additions_review_contribution", 0),
         )
 
 
@@ -491,6 +504,7 @@ def resolve_exit_decision(
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
     loadability_contribution: int = 0,
+    additions_review_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the axis contributions below into one explainable decision.
@@ -563,6 +577,7 @@ def resolve_exit_decision(
         ExitReason.INCOMPLETE_SCOPE: incomplete_scope_contribution,
         ExitReason.NO_COMPARISON_COMPLETED: no_comparison_completed_contribution,
         ExitReason.LOADABILITY: loadability_contribution,
+        ExitReason.ADDITIONS_REVIEW: additions_review_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -586,6 +601,7 @@ def resolve_exit_decision(
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
         loadability_contribution=loadability_contribution,
+        additions_review_contribution=additions_review_contribution,
     )
 
 
@@ -646,6 +662,7 @@ def resolve_compare_exit_decision(
     with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from ..analysis_assurance import analysis_assurance_exit_contribution
+    from .acknowledgment_gate import additions_review_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
     from .severity import compute_exit_code, legacy_exit_code
 
@@ -687,6 +704,7 @@ def resolve_compare_exit_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=coverage_contribution,
         analysis_assurance_contribution=assurance_contribution,
+        additions_review_contribution=additions_review_exit_contribution(result),
     )
 
 

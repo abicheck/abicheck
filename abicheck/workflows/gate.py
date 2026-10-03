@@ -71,9 +71,6 @@ from ..analysis_assurance import (
     compute_analysis_assurance,
 )
 from ..confidence import note_if_same_binary_compared
-from ..policy.acknowledgment_gate import (
-    fold_additions_review_exit as fold_additions_review_exit,
-)
 from ..policy.contract_coverage_exit import (
     announce_coverage_floor,
     coverage_exit_floor,

@@ -99,6 +99,9 @@ _NON_OPERATIONAL_CONTRIBUTIONS: frozenset[str] = frozenset(
         # and loadability is `deps`-only (ADR-068 D6).
         "budget_overflow_contribution",
         "loadability_contribution",
+        # ADR-067 D6: a policy-acceptance floor (unacknowledged additions
+        # under `block`), never a broken run.
+        "additions_review_contribution",
     }
 )
 
