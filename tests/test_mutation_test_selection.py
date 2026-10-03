@@ -28,10 +28,11 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -130,6 +131,39 @@ _REACHING = {
 }
 
 
+#: A conftest that keeps a second Python thread alive for the whole session
+#: and makes any heap census taken beside it fail loudly -- the condition
+#: under which ``gc.get_objects()`` corrupts another thread's ``tuple(...)``
+#: (``memory_trace.gc_census_is_safe``).
+_LINGERING_THREAD_CONFTEST = """
+import gc
+import threading
+
+threading.Thread(target=threading.Event().wait, daemon=True).start()
+_census = gc.get_objects
+
+
+def _guarded_census(*args, **kwargs):
+    assert threading.active_count() == 1, "heap census beside a live thread"
+    return _census(*args, **kwargs)
+
+
+gc.get_objects = _guarded_census
+"""
+
+
+@pytest.mark.parametrize("workers", [[], ["-n", "2"]])
+def test_the_trace_never_takes_a_census_beside_another_thread(
+    tmp_path: Path, workers: list[str]
+) -> None:
+    """With a second thread alive throughout, the plugin must not enumerate
+    the heap, and its namespace walk must still find every reaching test --
+    nested functions, methods and lambdas included. Same oracle as below."""
+    project = _project(tmp_path)
+    (project / "tests" / "conftest.py").write_text(_LINGERING_THREAD_CONFTEST)
+    assert _trace(project, workers) == _REACHING
+
+
 @pytest.mark.parametrize("workers", [[], ["-n", "2"], ["-p", "no:randomly", "-n", "0"]])
 def test_the_trace_records_exactly_the_reaching_tests(
     tmp_path: Path, workers: list[str]
@@ -212,7 +246,7 @@ def _exists(paths: set[str]):
         ([], set(), _SEL),
         (["abicheck/diff_types.py", "README.md"], {"abicheck/diff_types.py"}, _SEL),
         (["tests/test_new.py"], {"tests/test_new.py"}, [*_SEL, "tests/test_new.py"]),
-        (["tests/sub/test_deep.py"], {"tests/sub/test_deep.py"}, [*_SEL, "tests/sub/test_deep.py"]),
+        (["tests/sub/test_deep.py"], {"tests/sub/test_deep.py"}, ["tests/sub/test_deep.py", *_SEL]),
         (["tests/test_a.py"], {"tests/test_a.py"}, _SEL),
         (["tests/test_gone.py"], set(), _SEL),
         (["tests/conftest.py"], {"tests/conftest.py"}, ["tests/"]),
@@ -226,6 +260,25 @@ def test_extend_selection(
     assert scope.extend_selection(_SEL, changed, _exists(present)) == expected
 
 
+@pytest.mark.parametrize("seed", range(25))
+def test_the_widened_selection_passes_the_committed_files_own_check(seed: int) -> None:
+    """Whatever a branch changes, the file ``extend-selection`` writes must
+    satisfy the invariant the suite asserts about the committed file
+    (sorted, unique, ``tests/**/test_*.py``) -- the stats pass runs that
+    assertion against the widened file, inside mutmut. Inputs are random
+    names in random order, including ones sorting before every committed
+    entry; the oracle is the well-formedness rule, not extend_selection."""
+    rng = random.Random(seed)
+    pool = [f"tests/{d}test_{rng.choice('abcxyz')}{i}.py"
+            for i, d in enumerate(rng.choices(["", "sub/", "unit/a/"], k=12))]  # fmt: skip
+    committed = sorted(set(rng.sample(pool, 4)))
+    changed = rng.sample(pool, rng.randint(0, len(pool)))
+    out = scope.extend_selection(committed, changed, lambda p: True)
+    assert out == sorted(set(out))
+    assert set(committed) | set(changed) == set(out)
+    assert all(PurePosixPath(p).name.startswith("test_") for p in out)
+
+
 def test_extend_selection_never_narrows() -> None:
     """Exhaustive over every subset of a small path universe: the result
     always contains the committed selection, or is the whole suite."""
@@ -235,6 +288,9 @@ def test_extend_selection_never_narrows() -> None:
         changed = [p for i, p in enumerate(universe) if mask >> i & 1]
         out = scope.extend_selection(_SEL, changed, _exists(set(universe)))
         assert out == ["tests/"] or set(_SEL) <= set(out)
+        # The widened file is checked by the suite it feeds, under the same
+        # rule as the committed one (test_the_committed_selection_is_well_formed).
+        assert out == sorted(set(out))
         for path in changed:
             if path.startswith("tests/test_") and out != ["tests/"]:
                 assert path in out

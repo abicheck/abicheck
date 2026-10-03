@@ -268,8 +268,13 @@ def extend_selection(
     measurement. A changed shared test module (``conftest.py``, a helper)
     can change which files reach mutated code in ways no path rule can see,
     so it widens the run back to the whole suite. Never narrows.
+
+    The result is sorted and unique, like the committed file: the widened
+    file is written over it before mutmut copies ``tests/``, and the stats
+    pass runs the suite's own well-formedness check against it -- an
+    appended entry out of order failed that check and aborted every shard.
     """
-    out = list(selection)
+    out = set(selection)
     for path in changed:
         if (
             not path.startswith("tests/")
@@ -278,11 +283,10 @@ def extend_selection(
         ):
             continue
         if PurePosixPath(path).name.startswith("test_"):
-            if path not in out:
-                out.append(path)
+            out.add(path)
         else:
             return ["tests/"]
-    return out
+    return sorted(out)
 
 
 def pyproject_mutation_config_changed(old_text: str | None, new_text: str) -> bool:

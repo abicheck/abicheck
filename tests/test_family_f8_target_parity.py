@@ -322,3 +322,114 @@ def test_seeded_mutant_flag_only_static_tls_is_reported(
 
     monkeypatch.setattr(em, "has_static_tls_relocation", lambda elf: False)
     assert tls_parity_violations(_static_tls_by_target(tmp_path))
+
+
+# -- A header the frontend rejects, inside a directory dump --------------------
+#
+# extraction.aggregate_layout_inverted_by_line: the castxml aggregate gained a
+# compatibility-preamble include on its first line (the F8 builtin fix), and
+# the unparseable-header fallback still mapped aggregate line N to header N-1,
+# so it dropped the healthy header and the directory dump failed -- on every
+# target, the host included. The oracle is the same owned surface: a
+# directory holding the library header plus one header the frontend rejects
+# must yield exactly what the library header alone yields.
+
+_REJECTED_HEADER = '#pragma once\n#error "Unsupported compiler"\n'
+
+_MUTANTS["aggregate_line_attribution"] = (
+    "import abicheck.extract.unparseable_header_fallback as u\n"
+    "_orig = u._attribute\n"
+    "def _by_line(located, index):\n"
+    "    f, line = located[0]\n"
+    "    if len(located) > 1 and u._norm(f) not in index:\n"
+    "        return line - 1 if 1 <= line <= len(index) else None\n"
+    "    return _orig(located, index)\n"
+    "u._attribute = _by_line\n"
+)
+
+
+def _dump_dir(tmp: Path, target: str | None, mutant: str | None = None):
+    """``abicheck dump -H <dir>`` over the library header plus a rejected one."""
+    hs = HEADER_SETS[0]
+    work = tmp / f"dir-{target or 'host'}-{mutant or 'real'}"
+    include = work / "include"
+    include.mkdir(parents=True)
+    header, src = _write_case(work, hs)
+    shutil.move(str(header), include / header.name)
+    src.write_text(
+        src.read_text().replace('#include "api.hpp"', '#include "include/api.hpp"')
+    )
+    (include / "zz_rejected.hpp").write_text(_REJECTED_HEADER)
+    shim = _shim(tmp, target)
+    lib = work / "libapi.so"
+    subprocess.run(
+        [
+            str(shim / "g++") if shim else "g++",
+            "-shared",
+            "-fPIC",
+            str(src),
+            "-o",
+            str(lib),
+        ],
+        check=True,
+    )
+    env = {**os.environ, "XDG_CACHE_HOME": str(work / "cache")}
+    if shim:
+        env["PATH"] = f"{shim}{os.pathsep}{env['PATH']}"
+    if mutant:
+        site = work / "site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(
+            _MUTANTS[mutant]
+            + f"\nimport pathlib\npathlib.Path({str(work / 'mutant-ran')!r}).touch()\n"
+        )
+        env["PYTHONPATH"] = f"{site}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    out = work / "snap.json"
+    r = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "abicheck",
+            "dump",
+            str(lib),
+            "-H",
+            str(include),
+            "-o",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if mutant:
+        assert (work / "mutant-ran").exists(), (
+            "the seeded mutant never loaded; the check would be vacuous"
+        )
+    return load_snapshot(out) if r.returncode == 0 else None
+
+
+_dir_tools = pytest.mark.skipif(
+    not (_CASTXML and shutil.which("g++")), reason="needs castxml and g++"
+)
+
+
+@pytest.mark.integration
+@_dir_tools
+@pytest.mark.parametrize(
+    "target", [None, *_available_targets()], ids=lambda t: t or "host"
+)
+def test_rejected_header_in_a_directory_keeps_the_owned_surface(
+    target: str | None, tmp_path: Path
+) -> None:
+    alone = _dump(tmp_path, HEADER_SETS[0], target)
+    assert alone is not None and _owned_surface(alone), "vacuity guard"
+    assert not parity_violations(alone, _dump_dir(tmp_path, target))
+
+
+@pytest.mark.integration
+@_dir_tools
+def test_seeded_mutant_aggregate_line_attribution_is_reported(tmp_path: Path) -> None:
+    alone = _dump(tmp_path, HEADER_SETS[0], None)
+    assert parity_violations(
+        alone, _dump_dir(tmp_path, None, mutant="aggregate_line_attribution")
+    )

@@ -157,6 +157,7 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_gc_census_thread_safety.py",
             "tests/test_compare_release_concurrency_integration.py",
+            "tests/test_mutation_test_selection.py",
         ),
         public_surfaces=("cli",),
         axes={
