@@ -101,8 +101,12 @@ Scoping is **on by default**. When no public-header surface
 can be resolved — e.g. comparing two stripped `.so` files with no header or
 DWARF provenance — scoping is automatically a no-op and every finding is
 reported, so the default never hides anything it cannot place. Pass
-`--no-scope-public-headers` to force the unscoped report (every finding,
-regardless of surface).
+`--contract all` to force the unscoped report for one run (every finding,
+regardless of surface; it also turns on per-finding contract evaluation,
+adding the `contract_*` fields to the report), or set `.abicheck.yml`'s
+`scope.public: false` to keep it unscoped without contract evaluation. (The
+former CLI opt-in/opt-out flag pair was removed; scoping was already the
+default.)
 
 The ledger is **always** reported — there is no switch. (`--show-filtered`
 was removed; the scope/reconciliation ledger, the pattern-modulation ledger
@@ -131,7 +135,7 @@ scope:
 ```
 
 ```bash
-abicheck compare old.so new.so --scope-public-headers --config .abicheck.yml
+abicheck compare old.so new.so --config .abicheck.yml
 ```
 
 Entries match **exactly** — the raw symbol, or a qualified name's trailing
@@ -141,8 +145,8 @@ Entries match **exactly** — the raw symbol, or a qualified name's trailing
 
 Matching is on the symbol as recorded on the finding (mangled or demangled),
 plus the trailing `::` segment of a qualified name. Widening only ever *keeps* a
-finding — it can never hide a break — and only takes effect together with
-`--scope-public-headers`. It is the counterpart to suppression, which *narrows*
+finding — it can never hide a break — and only takes effect while
+public-header scoping is on (the default, `scope.public: true`). It is the counterpart to suppression, which *narrows*
 the surface; the two remain separate, auditable inputs.
 
 ### How it appears in each format
@@ -184,7 +188,7 @@ itself, distinct from the overall verdict confidence:
 
 **Text**: an audit block on stderr (the reason is shown in parentheses):
 ```text
-Filtered as non-public ABI surface (1 finding, --scope-public-headers):
+Filtered as non-public ABI surface (1 finding, public-header scoping):
   - type_size_changed: InternalCache (non-public-type)
 ```
 
@@ -783,11 +787,16 @@ Every JSON report carries a top-level `report_schema_version` field
 > `.schema.json` for scan output (unlike `compare`'s
 > `compare_report.schema.json`).
 >
-> `compare` has two report-schema version markers today, one per report
-> shape: `report_schema_version` above for a two-sided `compare` report, and
+> `compare` has three report-schema version markers today, one per report
+> shape: `report_schema_version` above for a two-sided `compare` report,
 > **`audit_report_schema_version`** for `compare --no-baseline -o
 > json=...`'s single-build audit document (`AUDIT_REPORT_SCHEMA_VERSION`,
-> `abicheck/report/no_baseline_document.py`). The audit document
+> `abicheck/report/no_baseline_document.py`), and
+> **`audit_set_report_schema_version`** for `compare --no-baseline DIR`'s
+> N-library `audit_set` envelope ([`audit_set_report.schema.json`](../reference/schemas/v1/audit_set_report.schema.json)),
+> whose `members[].report` each carry the single-build audit document
+> verbatim and whose root `findings` are every member's findings tagged with
+> `member`. The audit document
 > deliberately carries *only* its own marker and never
 > `report_schema_version`: the compare report's schema tells consumers to
 > accept any matching MAJOR, so stamping an audit there would be a
@@ -796,7 +805,7 @@ Every JSON report carries a top-level `report_schema_version` field
 > which is the rule for every report family, not just these two: `aggregate`
 > is its own document with its own `aggregate_schema_version` (see
 > [`aggregate`'s own report shape](#aggregates-own-report-shape) below), so
-> "two markers" is a fact about `compare`, never a discriminator to apply
+> "three markers" is a fact about `compare`, never a discriminator to apply
 > across all of abicheck's output.
 > `compare`'s own top-level
 > `coverage_warnings` field (e.g. a warning that the two compared binaries

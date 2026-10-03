@@ -45,7 +45,7 @@ import click
 def _cli_flag(name: str, value: bool) -> bool | None:
     """Return *value* only when *name* actually came from the command line.
 
-    So a flag default (e.g. ``--scope-public-headers``'s True) doesn't mask config.
+    So a flag default (e.g. ``--policy``'s ``strict_abi``) doesn't mask config.
     """
     src = click.get_current_context().get_parameter_source(name)
     return value if src == click.core.ParameterSource.COMMANDLINE else None
@@ -422,7 +422,7 @@ def _warn_force_public_ignored(
     force_public: object,
     scope_public_headers: bool,
 ) -> None:
-    """Warn a ``scope.public_symbols`` overlay needs ``--scope-public-headers``.
+    """Warn a ``scope.public_symbols`` overlay needs header-origin scoping on.
 
     Names the config key rather than the removed ``--public-symbol``/
     ``--public-symbols-list`` flags it used to: they were hidden duplicates of
@@ -432,7 +432,8 @@ def _warn_force_public_ignored(
     if force_public and not scope_public_headers:
         click.echo(
             "Warning: .abicheck.yml's scope.public_symbols overlay only takes "
-            "effect with --scope-public-headers; ignoring the widening overlay.",
+            "effect with header-origin scoping on (scope.public: true, the "
+            "default); ignoring the widening overlay.",
             err=True,
         )
 

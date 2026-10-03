@@ -34,9 +34,11 @@ from ..model.execution_cache import memoized
 __all__ = [
     "AGGREGATE_REPORT_SCHEMA_PATH",
     "AUDIT_REPORT_SCHEMA_PATH",
+    "AUDIT_SET_REPORT_SCHEMA_PATH",
     "COMPARE_REPORT_SCHEMA_PATH",
     "load_aggregate_report_schema",
     "load_audit_report_schema",
+    "load_audit_set_report_schema",
     "load_compare_report_schema",
 ]
 
@@ -50,6 +52,11 @@ AGGREGATE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "aggregate_report.schema.json"
 #: rejected this pair", which is why that schema requires a ``reason``
 #: beside a null verdict and this one must not.
 AUDIT_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "audit_report.schema.json"
+#: The N-library audit (``compare --no-baseline DIR``, one-comparison-product
+#: F-23): an ``audit_set`` envelope holding one ``audit_report`` per member.
+#: Its own schema because its root is a set -- members, acquisition states, a
+#: folded exit code -- not one candidate's findings.
+AUDIT_SET_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "audit_set_report.schema.json"
 
 
 @memoized
@@ -64,6 +71,14 @@ def load_compare_report_schema() -> dict[str, Any]:
 def load_audit_report_schema() -> dict[str, Any]:
     """Return the parsed single-build-audit JSON Schema as a dict."""
     with AUDIT_REPORT_SCHEMA_PATH.open(encoding="utf-8") as fh:
+        data: dict[str, Any] = json.load(fh)
+    return data
+
+
+@memoized
+def load_audit_set_report_schema() -> dict[str, Any]:
+    """Return the parsed N-library audit (``audit_set``) JSON Schema as a dict."""
+    with AUDIT_SET_REPORT_SCHEMA_PATH.open(encoding="utf-8") as fh:
         data: dict[str, Any] = json.load(fh)
     return data
 

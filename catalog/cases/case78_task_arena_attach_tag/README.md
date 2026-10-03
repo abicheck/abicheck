@@ -44,7 +44,7 @@ Additions:
 - type_added: New type: mylib::task_arena::attach
 ```
 
-Note: the CLI warns `--scope-public-headers could not resolve the public
+Note: the CLI warns `public-header scoping could not resolve the public
 surface` here because no headers were passed (the L1 floor below is
 DWARF-only) — it falls back to the full export table, which is what this
 case needs.

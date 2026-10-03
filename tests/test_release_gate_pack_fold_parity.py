@@ -137,7 +137,6 @@ def test_severity_and_scheme_fold_agree_between_compare_and_release(
     resolved_cfg = resolve_compare_config(
         None,
         cli_severity_preset=preset,
-        cli_scope_public=None,
     )
     single_pair = apply_to_compare_config(resolved_cfg, pack_application)
 
@@ -184,7 +183,6 @@ def test_a_pack_with_no_gate_contribution_is_a_no_op_on_both_sides(
     resolved_cfg = resolve_compare_config(
         None,
         cli_severity_preset=preset,
-        cli_scope_public=None,
     )
     single_pair = apply_to_compare_config(resolved_cfg, inert)
     assert single_pair == resolved_cfg

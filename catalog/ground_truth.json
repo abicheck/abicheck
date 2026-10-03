@@ -662,7 +662,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "risk",
-   "description": "An uninstantiated function template's parameter types change (int -> long). No shipped binary instantiates the template, so nothing that currently links is broken; a consumer only picks up the new signature on its next recompile. The canonical truth is COMPATIBLE_WITH_RISK, not API_BREAK: a source-visible risk for future consumers, not a proven break for any consumer that exists yet. It is missed by default object/DWARF and header/castxml comparison (nothing is emitted to compare), but visible at L4: source-ABI replay parses the real clang AST, hashes each template's parameter list, and reports the mismatch as template_body_changed (RISK) \u2014 demonstrating that this class of C++-only change needs source evidence, not that it is undetectable outright. Seeing it takes explicit L3 compile-unit + public-header evidence (a bare --sources tree with no build metadata is not enough) plus --no-scope-public-headers on compare, since the L2 header backend does not model templates and would otherwise scope the finding out as internal.",
+   "description": "An uninstantiated function template's parameter types change (int -> long). No shipped binary instantiates the template, so nothing that currently links is broken; a consumer only picks up the new signature on its next recompile. The canonical truth is COMPATIBLE_WITH_RISK, not API_BREAK: a source-visible risk for future consumers, not a proven break for any consumer that exists yet. It is missed by default object/DWARF and header/castxml comparison (nothing is emitted to compare), but visible at L4: source-ABI replay parses the real clang AST, hashes each template's parameter list, and reports the mismatch as template_body_changed (RISK) \u2014 demonstrating that this class of C++-only change needs source evidence, not that it is undetectable outright. Seeing it takes explicit L3 compile-unit + public-header evidence (a bare --sources tree with no build metadata is not enough) plus --contract all on compare, since the L2 header backend does not model templates and would otherwise scope the finding out as internal.",
    "expected": "COMPATIBLE_WITH_RISK",
    "expected_absent_kinds": [
     "func_params_changed",
@@ -1915,7 +1915,7 @@
    "api_break": false,
    "bad_practice": true,
    "category": "breaking",
-   "description": "internal_helper() is exported with default visibility but never declared in v1.h (an accidental export, same pattern as case143). v2 removes it entirely. abicheck deliberately keeps this BREAKING even under --scope-public-headers (on by default): scoping filters changes it can prove are unreachable from the public surface (case118/case184), but a bare ELF export with no header declaration at all cannot be proven non-contractual -- it might still be reached via dlsym() or direct linkage. Only the audit/crosscheck layer (case143) flags the still-present symbol as a quality issue; removing it stays a real binary break.",
+   "description": "internal_helper() is exported with default visibility but never declared in v1.h (an accidental export, same pattern as case143). v2 removes it entirely. abicheck deliberately keeps this BREAKING even under public-header scoping (on by default): scoping filters changes it can prove are unreachable from the public surface (case118/case184), but a bare ELF export with no header declaration at all cannot be proven non-contractual -- it might still be reached via dlsym() or direct linkage. Only the audit/crosscheck layer (case143) flags the still-present symbol as a quality issue; removing it stays a real binary break.",
    "expected": "BREAKING",
    "expected_kinds": [
     "func_removed_elf_only"
@@ -3906,7 +3906,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
-   "description": "The positive control paired with case120_internal_struct_reordered_scoped. A public struct's first two fields swap places: nothing is added or removed and sizeof(Record) is unchanged, so a size-only check reports a clean release, but every consumer compiled against v1 reads `id` from an offset that now holds `flags`. case120 applies the identical reorder to a type that is not on the public surface and must stay NO_CHANGE under --scope-public-headers; the pair is a positive/negative control for this one mechanism, not a corpus-wide claim.",
+   "description": "The positive control paired with case120_internal_struct_reordered_scoped. A public struct's first two fields swap places: nothing is added or removed and sizeof(Record) is unchanged, so a size-only check reports a clean release, but every consumer compiled against v1 reads `id` from an offset that now holds `flags`. case120 applies the identical reorder to a type that is not on the public surface and must stay NO_CHANGE under public-header scoping (the default); the pair is a positive/negative control for this one mechanism, not a corpus-wide claim.",
    "expected": "BREAKING",
    "expected_kinds": [
     "type_field_offset_changed"

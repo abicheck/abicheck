@@ -66,14 +66,14 @@ you're looking at determines whether that's true.
 
 First, a terminology note this page relies on throughout: **scoping** and
 **policy** are two separate mechanisms, not two names for the same thing.
-`--scope-public-headers` (on by default) and an explicit surface allowlist
+Public-header scoping (on by default) and an explicit surface allowlist
 control whether a `Change` is *removed from* `DiffResult.changes` at all —
 unlike a `--policy` document's `overrides:` block, which never removes a
 `Change` from `changes` and only reclassifies which `Verdict` a given
 `ChangeKind` maps to. So "a policy profile scoped to the public surface"
 isn't a real, separate filtering mechanism — a private `func_removed` still
 shows up in the report under any `--policy` profile; only
-`--scope-public-headers` (or suppression, a third, separate mechanism —
+public-header scoping (or suppression, a third, separate mechanism —
 see below) decides whether it's there at all.
 
 **`compare_bundle()`/`analyze_bundle()` honor a custom `PolicyFile` for
@@ -117,10 +117,10 @@ SONAME cohorts) — never from a per-library `DiffResult`'s already-scoped
 `libcore.so`'s *public* API for `bundle_intra_dep_removed` to fire: `libalgo.so`
 still imports it via DT_NEEDED, so removing it breaks `libalgo.so`'s runtime
 load regardless of whether any external consumer ever called `core_mul`
-directly, and `--scope-public-headers` never touches this detector's input at
+directly, and public-header scoping never touches this detector's input at
 all.
 
-**Diff-derived detectors no longer inherit `--scope-public-headers` through
+**Diff-derived detectors no longer inherit public-header scoping through
 starvation — G38 Phase 14 closed that gap.** `bundle_intra_dep_signature_
 changed`, `bundle_intra_type_changed`, and `bundle_provider_changed` are
 computed by scanning each library's own per-library `DiffResult` for the
@@ -129,7 +129,7 @@ specific kinds they promote (`func_params_changed`/`func_return_changed`/
 `type_field_removed`/etc. for the type-change detector, `func_removed`+
 `func_added` pairs for the provider-migration detector) — but the source
 they scan is `diff.changes` **plus** `diff.out_of_surface_changes`, not
-`diff.changes` alone. `--scope-public-headers` (on by default) never
+`diff.changes` alone. Public-header scoping (on by default) never
 *drops* a non-public-surface finding — `post_processing.
 FilterNonPublicSurface` moves it to `out_of_surface_changes` instead (a "recorded, never silently dropped" ledger) — so an internal,
 headerless C export with no public header naming either side still reaches
@@ -151,7 +151,7 @@ a bundle sibling).
 Contrast either case with an *ordinary* per-library finding that never gets
 promoted to a bundle finding at all (`func_removed` on something no sibling
 imports): that one **is** filtered from the per-library report by
-`--scope-public-headers`, same as any other per-library finding — but is
+public-header scoping, same as any other per-library finding — but is
 unaffected by which `--policy` profile is selected, since policy never
 removes a finding, only reclassifies its verdict.
 
@@ -163,7 +163,7 @@ rule can target a `bundle_*` kind by name — that part holds for every
 `bundle_*` kind, with no exception, on every entry point. On the
 directory/package `compare` fan-out, `--suppress` is applied to each
 library's `DiffResult.changes` *before* it reaches `compare_bundle()` (the
-same per-library compare pipeline that applies `--scope-public-headers`) —
+same per-library compare pipeline that applies public-header scoping) —
 and `post_processing.py`'s own step ordering runs `FilterNonPublicSurface`
 *before* `ApplySuppression`, so a change already demoted to
 `out_of_surface_changes` never reaches `ApplySuppression` at all and can

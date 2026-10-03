@@ -299,26 +299,6 @@ def reject_unsupported_options(
             "A --build-info build-configuration matrix is not supported together "
             "with a stored-bundle-facts OLD_INPUT."
         )
-    if kwargs.get("post_manifest_path") is not None:
-        # Codex review: --post-manifest's public_surface_allowlist is
-        # applied by passing post_manifest_path through to each
-        # service.compare_snapshots() call -- compare_release_against_
-        # bundle_facts() has no such parameter, so a private POST symbol
-        # the manifest would scope out of the surface stays in the finding
-        # set/verdict regardless.
-        raise click.UsageError(
-            "--post-manifest is not supported together with a stored-bundle-facts OLD_INPUT."
-        )
-    if kwargs.get("scope_public_headers") is False:
-        # Codex review, same root cause: --no-scope-public-headers has no
-        # channel into compare_release_against_bundle_facts() either (the
-        # driver always scopes to the public surface via service.
-        # compare_snapshots's own default) -- rejected rather than silently
-        # ignored.
-        raise click.UsageError(
-            "--no-scope-public-headers is not supported together with "
-            "a stored-bundle-facts OLD_INPUT."
-        )
     if kwargs.get("debug_info2") is not None or kwargs.get("debug_info1") is not None:
         # Codex review, same root cause as the package-extraction fix
         # elsewhere: compare_release_against_bundle_facts() resolves
@@ -494,6 +474,9 @@ def reject_unsupported_options(
             # driver's own JSON rendering never re-merges redundant_changes
             # the way ordinary `compare` does.
             _unsupported_config_blocks.append("scope:")
+        if _bc.contract_post_manifest is not None:
+            # Phase 9c: the POST manifest overlay (the retired --post-manifest).
+            _unsupported_config_blocks.append("contract:")
         if (
             _bc.suppression_strict is not None
             or _bc.suppression_require_justification is not None
@@ -536,8 +519,7 @@ def reject_unsupported_options(
                 "are not supported together with a stored-bundle-facts OLD_INPUT: "
                 "compare_release_against_bundle_facts() has no channel to "
                 "honor them (same reason --severity-preset/--pack/"
-                "--no-scope-public-headers are rejected as explicit "
-                "flags). Use a --config that only sets compile: options."
+                "--contract are rejected as explicit flags). Use a --config that only sets compile: options."
             )
 
     if kwargs.get("old_headers_only") or kwargs.get("old_includes_only"):

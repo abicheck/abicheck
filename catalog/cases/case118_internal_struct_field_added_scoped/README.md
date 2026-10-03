@@ -29,7 +29,7 @@ compile:
   frontend: clang
   compiler: clang
 EOF
-abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --scope-public-headers --config .abicheck.yml
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -39,13 +39,13 @@ Verdict: NO_CHANGE (exit 0)
 
 _No ABI changes detected._
 
-Filtered as non-public ABI surface (1 finding, --scope-public-headers):
+Filtered as non-public ABI surface (1 finding, public-header scoping):
   - type_field_added_compatible: InternalStats (non-public-type)
 ```
 
 The filtered-ledger line above is always shown; without
-it the report shows only the clean `NO_CHANGE` verdict. Dropping
-`--scope-public-headers` entirely reports the `InternalStats` field
+it the report shows only the clean `NO_CHANGE` verdict. Turning
+public-header scoping off (`--contract all`) reports the `InternalStats` field
 addition as an ordinary (compatible) change instead of filtering it — useful
 when auditing the whole exported surface rather than just the public-header
 API.

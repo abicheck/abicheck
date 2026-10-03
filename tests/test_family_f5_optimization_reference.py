@@ -112,6 +112,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.name_classification::memoized::strip_anonymous_type_location": H,
     "abicheck.schemas.documents::memoized::load_aggregate_report_schema": "UNCOVERED: schema loader for `aggregate` only; returns packaged JSON",
     "abicheck.schemas.documents::memoized::load_audit_report_schema": "UNCOVERED: schema loader for audit reports only; returns packaged JSON",
+    "abicheck.schemas.documents::memoized::load_audit_set_report_schema": "UNCOVERED: schema loader for directory audit-set reports only; returns packaged JSON",
     "abicheck.schemas.documents::memoized::load_compare_report_schema": "UNCOVERED: schema loader used by validation tooling, not by compare itself",
     "abicheck.storage.closure_identity::memoized::_anon_type_ordinal_matches_cached": "UNCOVERED: stored-closure identity for anonymous types; needs a ProjectSnapshot fixture",
     # ---- memoized properties ----

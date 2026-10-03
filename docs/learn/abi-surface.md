@@ -125,12 +125,13 @@ and the contract evaluator classifies the finding as out of the exported
 contract rather than scoring it:
 
 ```bash
-abicheck compare old.json new.so -H include/ --contract exports --no-scope-public-headers
+abicheck compare old.json new.so -H include/ --contract exports
 ```
 
-The second flag matters: default public-header scoping removes the
-unreachable change before the evaluator ever sees it, so with `--contract
-exports` alone the report shows nothing at all. Contract domains are owned
+Naming the `exports` domain also turns default public-header scoping off
+for the run: header-origin demotion is the `public` domain's question, so
+under `exports` (or `all`) the unreachable change reaches the evaluator
+instead of being removed before it is classified. Contract domains are owned
 by [Contract-Aware Compatibility](contract-aware-compatibility.md).
 
 The design patterns that keep the surface small — opaque handles, Pimpl,

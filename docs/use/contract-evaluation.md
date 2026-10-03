@@ -36,8 +36,8 @@ the run changes.
 There used to be a separate `--contract-evaluation` switch, with `--contract`
 merely selecting a domain for it. That left two ways to ask for one thing, so
 the switch is gone. Its domain-less form — evaluate, but let the domain be
-chosen by `--scope-public-headers`/`--no-scope-public-headers` or the project's
-`.abicheck.yml` — is now `--contract auto`:
+chosen by the project's `.abicheck.yml` (`scope.public`; `public` when unset)
+— is now `--contract auto`:
 
 ```bash
 abicheck compare old.so new.so -H include/ --contract auto

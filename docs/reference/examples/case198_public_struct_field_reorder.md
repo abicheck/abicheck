@@ -28,7 +28,7 @@ This is the **positive control** for the field-reorder mechanism. Its
 negative control is
 `case120_internal_struct_reordered_scoped`,
 where the identical reorder is applied to a type that is *not* on the public
-surface and must therefore stay `NO_CHANGE` under `--scope-public-headers`.
+surface and must therefore stay `NO_CHANGE` under public-header scoping (the default).
 The pair proves two things about these two fixtures: the public reorder is
 flagged, and the internal one is not.
 

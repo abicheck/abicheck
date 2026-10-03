@@ -17,7 +17,7 @@ scenarios:
       and emit a single glibcxx_dual_abi_flip_detected diagnostic — and it is a
       real break (exit 4) because callers built against the other ABI won't link.
     flow:
-      - abicheck compare old.json new.json --no-scope-public-headers
+      - abicheck compare old.json new.json --contract all
     expected:
       exit_code: 4
       verdict: BREAKING
@@ -36,7 +36,7 @@ scenarios:
       the corroborating integer-typedef width flip and report a binary break
       (exit 4, integer_model_changed).
     flow:
-      - abicheck compare old.json new.json --no-scope-public-headers
+      - abicheck compare old.json new.json --contract all
     expected:
       exit_code: 4
       verdict: BREAKING
@@ -55,7 +55,7 @@ scenarios:
       it as a risk signal rather than a confirmed break, so the default gate does
       not fail (exit 0) on a flag change alone.
     flow:
-      - abicheck compare old.json new.json --no-scope-public-headers
+      - abicheck compare old.json new.json --contract all
     expected:
       exit_code: 0
       verdict: COMPATIBLE

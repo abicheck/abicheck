@@ -70,14 +70,15 @@ not) and *how sure* abicheck is (proven or not).
 ## Three contract modes
 
 `--contract public|exports|all` selects which evidence domain a finding is
-judged against (the legacy `--scope-public-headers`/`--no-scope-public-headers`
-flag maps onto `public`/`all`; an explicit `--contract` always outranks it):
+judged against (`--contract auto` takes its domain from `.abicheck.yml`'s
+legacy `scope.public` key, which maps onto `public`/`all` and is `public`
+when unset; an explicit `--contract` always outranks it):
 
 | Mode | What's in the contract | Evidence it consults |
 |---|---|---|
 | `public` (default alias) | The library's declared public headers — the source-level API surface | Header AST, scoped the same way plain `compare`'s public-surface scoping already works |
 | `exports` | Whatever the binary's own observed export table actually exports (`.dynsym`/PE export directory/Mach-O export trie) | The **export table alone decides which declarations are roots** — no header-origin/publicness filtering. But header (or debug-info) declaration data still matters afterward: the closure walk from those roots over the record/enum/typedef graph needs typed declarations to resolve, so giving it headers can turn an otherwise-`UNKNOWN_UNRESOLVED` type edge into a provable one. |
-| `all` | Everything detected — no exclusion, with two exceptions | Nothing extra; every entity-level finding is trivially `IN_CONTRACT` **unless** it's specifically excluded by a committed `--post-manifest` (see below). A `NOT_APPLICABLE` finding (below) is unaffected by mode entirely — it was never a domain-membership question to begin with. |
+| `all` | Everything detected — no exclusion, with two exceptions | Nothing extra; every entity-level finding is trivially `IN_CONTRACT` **unless** it's specifically excluded by a committed POST manifest overlay (`.abicheck.yml`'s `contract.overlays.post_manifest`; see below). A `NOT_APPLICABLE` finding (below) is unaffected by mode entirely — it was never a domain-membership question to begin with. |
 
 **Decision table:**
 
@@ -94,21 +95,21 @@ actually exported (stripped, versioned out) — that's out of contract under
 implementation-detail symbol exported for a narrow, undocumented reason).
 
 **`all` isn't quite unconditional, in two independent ways.** A
-separately-opted-in `--post-manifest` (a committed, narrower public-symbol
+separately-opted-in POST manifest overlay (a committed, narrower public-symbol
 list) is checked *before* the `all` mode shortcut for `public`/`all` — a
 finding whose symbol the manifest specifically excludes still comes back
 `PROVEN_OUT_OF_CONTRACT`, not `IN_CONTRACT`, under either of those two
 modes. `exports` mode is the one exception: it dispatches to its own
-export-table-rooted decision *before* the manifest check ever runs, so a
-`--post-manifest` is advisory only there — an observed export the manifest
+export-table-rooted decision *before* the manifest check ever runs, so the
+manifest overlay is advisory only there — an observed export the manifest
 omits can still resolve `IN_CONTRACT` under `--contract exports`. This only
-matters if you're also using `--post-manifest`. Separately, and
+matters if you also configure the manifest overlay. Separately, and
 unconditionally, across all three modes: a
 mode-independent check (loader/SONAME/security-hardening/deployment-floor
 kinds — the same curated set behind the `NOT_APPLICABLE` row above) runs
 *before any mode dispatch at all*, so those findings stay `NOT_APPLICABLE`
 under `all` too — not because they're excluded, but because they were never
-a domain-membership question in the first place. Without `--post-manifest`,
+a domain-membership question in the first place. Without a manifest overlay,
 every *entity-level* finding under `all` is `IN_CONTRACT`, which is the
 practical reading most users need.
 
@@ -181,17 +182,18 @@ you turn this on for a real gate:
 ### 1. Private implementation removal
 
 ```bash
-# Plain compare, with default public-surface scoping disabled -- the
-# internal type change is a real, gating BREAKING finding. (Plain compare's
-# OWN default scoping, --scope-public-headers, would filter this exact case
-# too -- disabling it here isolates contract evaluation, not ordinary
-# surface scoping, as what's making the difference between the two runs.)
-abicheck compare old.json new.json --no-scope-public-headers
+# Both runs use an .abicheck.yml with `scope: {public: false}`, which
+# disables plain compare's default public-surface scoping.
+# Plain compare -- the internal type change is a real, gating BREAKING
+# finding. (Plain compare's OWN default public-header scoping would filter
+# this exact case too -- disabling it here isolates contract evaluation, not
+# ordinary surface scoping, as what's making the difference between the two
+# runs.)
+abicheck compare old.json new.json
 # verdict: BREAKING
 
 # Contract-aware, public mode -- visible, but not evaluated
-abicheck compare old.json new.json --no-scope-public-headers \
-  --contract public
+abicheck compare old.json new.json --contract public
 # verdict: NO_CHANGE (nothing EVALUATED changed)
 # the finding is still in `changes`, with:
 #   "contract_relevance": "PROVEN_OUT_OF_CONTRACT",

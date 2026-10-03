@@ -304,8 +304,19 @@ removed). `--build-info` consumes a previously captured one.
 | `--require-justification` | `suppression.require_justification: true` |
 | `--env-matrix` | the `deployment:` block |
 
-`--scope-public-headers` / `--no-scope-public-headers` are **not** demoted:
-they remain the everyday on/off switch for public-surface scoping.
+`--scope-public-headers` / `--no-scope-public-headers` were at first **not**
+demoted, and were later removed outright (one-comparison-product Phase 9b;
+passing either now exits 64, "No such option"). Public-header scoping is
+still on by default for a `compare` run with no `--contract`:
+
+| Removed flag | Replacement |
+|---|---|
+| `--scope-public-headers` | Drop it — it was the default. `--contract public` names the scoped domain explicitly and also turns on per-finding contract evaluation. |
+| `--no-scope-public-headers` | `--contract all` for one run (same exit codes; also adds the `contract_*` report fields), or `scope.public: false` in `.abicheck.yml` to stay unscoped without contract evaluation. |
+| `--post-manifest PATH` | `.abicheck.yml`'s `contract.overlays.post_manifest: PATH` (one-comparison-product Phase 9d; a relative path resolves against the project root). |
+
+`--contract auto` now takes its domain from `scope.public` (`public` when
+unset). The typed API's `CompareRequest.scope_public` is unchanged.
 
 `assurance.require_complete` is an orthogonal exit axis: an
 `analysis_assurance.status` other than `complete` contributes exit `1`,

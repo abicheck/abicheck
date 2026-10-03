@@ -300,10 +300,12 @@ CONTRACT_REASON_CODES: MappingProxyType[str, str] = MappingProxyType(
             "architecture, deployment, or security state)."
         ),
         "legacy_alias_all": (
-            "--no-scope-public-headers selected contract=all as its exact alias."
+            "The legacy scope setting (scope.public: false; formerly "
+            "--no-scope-public-headers) selected contract=all as its exact alias."
         ),
         "legacy_alias_public": (
-            "--scope-public-headers selected contract=public as an "
+            "The legacy scope setting (scope.public: true; formerly "
+            "--scope-public-headers) selected contract=public as an "
             "intentionally stricter migration alias."
         ),
         "explicit_consumer_or_required_symbol_evidence": (

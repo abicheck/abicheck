@@ -24,6 +24,7 @@ produced it, and credit only sources that really contributed.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 
 from _compat_eval_fixtures import (
@@ -435,17 +436,18 @@ class TestReceiptMetadataIsCompared:
         # The genuine cross-front-end case the normalization exists for.
         policy = tmp_path / "policy.yml"
         policy.write_text("base_policy: sdk_vendor\n")
+        # A typed request has no "unset" for scope_public, so the equivalent
+        # CLI-front-end input has to state the legacy alias too. The CLI has
+        # had no spelling for it since one-comparison-product Phase 9b, so it
+        # is stated on the resolver input directly.
         cli = _resolve(
             front_end=FrontEnd.CLI,
-            explicit=compare_cli_inputs(
-                {
-                    "policy_file_path": policy,
-                    "policy": "strict_abi",
-                    # A typed request has no "unset" for scope_public, so the
-                    # equivalent CLI run has to state the flag too.
-                    "scope_public_headers": True,
-                },
-                explicit_parameters={"policy", "scope_public_headers"},
+            explicit=dataclasses.replace(
+                compare_cli_inputs(
+                    {"policy_file_path": policy, "policy": "strict_abi"},
+                    explicit_parameters={"policy"},
+                ),
+                scope_public_headers=True,
             ),
         )
         api = compatibility_config_from_compare_request(
@@ -876,13 +878,13 @@ class TestReceiptNamesTheStatingFrontEnd:
         policy.write_text("base_policy: sdk_vendor\n")
         cfg = _resolve(
             explicit=compare_cli_inputs(
-                {"policy_file_path": policy, "scope_public_headers": False},
-                explicit_parameters={"scope_public_headers"},
+                {"policy_file_path": policy, "policy": "sdk_vendor"},
+                explicit_parameters={"policy"},
             )
         )
-        assert [e.option for e in cfg.provenance[CONTRACT_MODE_FIELD].selected_by] == [
-            "--no-scope-public-headers"
-        ]
+        # --scope-public-headers/--no- are gone (Phase 9b): contract.mode has
+        # no CLI selector to name, so it falls to the built-in default.
+        assert cfg.provenance[CONTRACT_MODE_FIELD].selected_by == ()
         assert [e.option for e in cfg.provenance[POLICY_BASE_FIELD].selected_by] == [
             "--policy"
         ]

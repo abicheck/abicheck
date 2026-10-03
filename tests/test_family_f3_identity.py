@@ -452,9 +452,10 @@ def test_unparseable_header_is_named_by_file_not_aggregate_line(
     import random
 
     from abicheck.extract.castxml_header_compat import write_castxml_aggregate
-    from abicheck.extract.unparseable_header_fallback import (
-        attribute_failing_headers,
-    )
+
+    # The public wrapper was removed as dead code (#1469); the failing set is
+    # the first half of the one scanner the fallback itself calls.
+    from abicheck.extract.unparseable_header_fallback import _scan_diagnostics
 
     names = [tmp_path / f"h{i}.h" for i in range(4)]
     for h in names:
@@ -470,7 +471,7 @@ def test_unparseable_header_is_named_by_file_not_aggregate_line(
             f"In file included from {agg}:{agg_line}:\n"
             f'{target}:2:2: error: "Unsupported compiler"\n'
         )
-        assert attribute_failing_headers(stderr, order) == {order.index(names[bad])}
+        assert _scan_diagnostics(stderr, order)[0] == {order.index(names[bad])}
     finally:
         shutil.rmtree(agg.parent, ignore_errors=True)
 

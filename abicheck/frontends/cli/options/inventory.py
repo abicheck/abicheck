@@ -62,7 +62,9 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     # duplicates of ``.abicheck.yml``'s ``severity:`` block and have been
     # removed from the CLI (see ``cli_options.severity_options``).
     "severity": frozenset({"--severity-preset"}),
-    "scope": frozenset({"--scope-public-headers"}),
+    # The "scope" family (--scope-public-headers/--no-) was deleted in
+    # one-comparison-product Phase 9b; --contract is the one contract
+    # mechanism, so no command is required to compose a scope decorator.
     # Plan slice 7m: one flag, one grammar -- `--format` retired into
     # `-o FORMAT=DESTINATION`, so this family is a single member.
     "output": frozenset({"--output"}),
@@ -97,7 +99,6 @@ FAMILY_DECORATOR: dict[str, str] = {
     "two_sided_input": "two_sided_input_options",
     "policy": "policy_options",
     "severity": "severity_options",
-    "scope": "scope_options",
     "output": "export_options",
     "evidence": "evidence_options",
 }
@@ -112,7 +113,6 @@ REQUIRED_FAMILIES: frozenset[str] = frozenset(
         "two_sided_input",
         "policy",
         "severity",
-        "scope",
         "output",
     }
 )

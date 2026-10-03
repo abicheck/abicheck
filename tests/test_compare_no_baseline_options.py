@@ -37,6 +37,7 @@ from abicheck.cli import main
 from abicheck.frontends.cli.commands.compare_no_baseline import (
     _INERT_DESTS,
     _OLD_ONLY_DESTS,
+    _SET_ONLY_OPTIONS,
     _SIDED_LABEL_DESTS,
     _SIDED_SINGLE_DESTS,
     _UNSUPPORTED_OPTIONS,
@@ -44,15 +45,23 @@ from abicheck.frontends.cli.commands.compare_no_baseline import (
     _was_given,
 )
 
-#: The dispatch *pair*: the module that translates one invocation, and the
-#: sibling that owns which invocations it refuses. Both are scanned, because
-#: the exhaustiveness contract is about the path as a whole -- an option read
-#: in either one is wired, and scanning only the first would have started
-#: reporting false gaps the moment the rulings moved out of it.
+#: The dispatch *family*: the module that dispatches one invocation, the
+#: sibling that owns which invocations it refuses, the shared resolution both
+#: audit shapes read the invocation through, and the N-library audit's own
+#: command module (``--select``/``--select-required``). All are scanned,
+#: because the exhaustiveness contract is about the path as a whole -- an
+#: option read in any one is wired, and scanning only the first would have
+#: started reporting false gaps the moment the rulings moved out of it.
 _MODULES = tuple(
     Path(__file__).resolve().parent.parent / f"abicheck/frontends/cli/commands/{name}"
-    for name in ("compare_no_baseline.py", "no_baseline_rulings.py")
+    for name in (
+        "compare_no_baseline.py",
+        "no_baseline_rulings.py",
+        "no_baseline_invocation.py",
+        "compare_no_baseline_set.py",
+    )
 )
+_RULINGS_MODULE = _MODULES[1]
 
 #: Every destination ``cli_options.normalize_sided_options`` *generates*,
 #: keyed by the raw parameter it replaces. ``compare_cmd`` calls that
@@ -158,6 +167,7 @@ def test_every_compare_option_is_wired_or_declared() -> None:
     accounted = (
         _dests_read_by_module()
         | set(_UNSUPPORTED_OPTIONS)
+        | set(_SET_ONLY_OPTIONS)
         | {dest for dests in _NORMALIZED_DESTS.values() for dest in dests}
         | set(_VIEW_DEFAULTS)
         | set(_OLD_ONLY_DESTS)
@@ -290,7 +300,7 @@ def test_module_documents_why_the_table_exists() -> None:
     realistic way this class reopens, so the reason is pinned as content,
     not left to review.
     """
-    source = _MODULES[0].read_text(encoding="utf-8")
+    source = _RULINGS_MODULE.read_text(encoding="utf-8")
     assert "_UNSUPPORTED_OPTIONS" in source
     assert re.search(r"accepted but never read|silently", source), (
         "the table must explain that it exists to prevent silently-dropped options"

@@ -13,15 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The legacy scope flags and their ``--contract`` replacements, through the CLI.
+"""The legacy scope setting and its ``--contract`` replacements, through the CLI.
 
 One-comparison-product Phase 9 replaces ``--no-scope-public-headers`` with
 ``--contract all`` and ``--scope-public-headers`` with ``--contract public``.
-Before either flag can be deleted, the mapping has to hold on real input, so
-this runs every case of the labelled FP-rate corpus
+The mapping had to hold on real input before either flag could be deleted,
+so this runs every case of the labelled FP-rate corpus
 (``scripts/check_fp_rate.py``) through the public ``compare`` CLI under each
 spelling. The oracle is the corpus's own ground-truth label (internal noise
 vs. real break), not the code under test.
+
+Phase 9b deleted both flags. The two legacy readings they selected are still
+reachable, and still measured here: header-origin scoping on is the run with
+**no flag at all** (the built-in default Phase 9b had to keep, or every
+no-flag run would silently flip), and scoping off is ``.abicheck.yml``'s
+``scope.public: false``. So ``--contract all`` is still checked against the
+exact behavior the opt-out flag had, through the setting that now spells it.
 
 Measuring this found a defect: ``--contract all`` alone left the legacy
 header-origin filter running at its *default* value, ahead of the evaluator,
@@ -56,9 +63,11 @@ CORPUS = fp_gate.CORPUS
 #: explained unresolved loss (docs/contribute/known-gaps.md). Never exit 0.
 PUBLIC_COVERAGE_ONLY = frozenset({"ambiguous_namespaced_leaf_spelling_only"})
 
-_SPELLINGS = {
-    "no_scope": ["--no-scope-public-headers"],
-    "scope": ["--scope-public-headers"],
+#: ``None`` stands for "point --config at a scope.public: false document",
+#: written once per module run (below) -- the opt-out's config spelling.
+_SPELLINGS: dict[str, list[str] | None] = {
+    "no_scope": None,
+    "scope": [],
     "contract_all": ["--contract", "all"],
     "contract_public": ["--contract", "public"],
 }
@@ -67,6 +76,12 @@ _SPELLINGS = {
 @pytest.fixture(scope="module")
 def exits(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, int]]:
     root = tmp_path_factory.mktemp("mapping")
+    no_scope_cfg = root / "no-scope.abicheck.yml"
+    no_scope_cfg.write_text("scope:\n  public: false\n", encoding="utf-8")
+    spellings = {
+        name: ["--config", str(no_scope_cfg)] if args is None else args
+        for name, args in _SPELLINGS.items()
+    }
     runner = CliRunner()
     out: dict[str, dict[str, int]] = {}
     for case in CORPUS:
@@ -86,7 +101,7 @@ def exits(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, int]]
                     f"json={root / 'r.json'}",
                 ],
             ).exit_code
-            for name, args in _SPELLINGS.items()
+            for name, args in spellings.items()
         }
     return out
 
@@ -101,9 +116,7 @@ def test_contract_all_is_the_exact_no_scope_alias(
     exits: dict[str, dict[str, int]],
 ) -> None:
     diffs = {name: e for name, e in exits.items() if e["contract_all"] != e["no_scope"]}
-    assert not diffs, (
-        f"--contract all disagrees with --no-scope-public-headers: {diffs}"
-    )
+    assert not diffs, f"--contract all disagrees with scope.public: false: {diffs}"
 
 
 def test_contract_all_reports_internal_breaks(exits: dict[str, dict[str, int]]) -> None:
@@ -149,3 +162,33 @@ def test_contract_public_fabricates_no_break_on_internal_noise(
 def test_the_coverage_only_set_is_still_real() -> None:
     names = {c.name for c in CORPUS if not c.internal_noise}
     assert PUBLIC_COVERAGE_ONLY <= names
+
+
+@pytest.mark.parametrize(
+    "flag", ["--scope-public-headers", "--no-scope-public-headers"]
+)
+def test_the_retired_spellings_are_usage_errors(tmp_path: Path, flag: str) -> None:
+    """Phase 9b (plan F-27): no hidden alias, no silent ignore -- exit 64
+    naming the option, before any extraction."""
+    case = CORPUS[0]
+    old, new = case.build()
+    old_p, new_p = tmp_path / "old.json", tmp_path / "new.json"
+    old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+    new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+    result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p), flag])
+    assert result.exit_code == 64, result.output
+    assert "No such option" in result.output
+    assert flag in result.output
+
+
+def test_the_no_flag_run_still_scopes(exits: dict[str, dict[str, int]]) -> None:
+    """The invariant Phase 9b had to keep: deleting the flags must not flip
+    the default. Some internal-noise case breaks once scoping is off, and
+    every one of them stays clean with no flag at all."""
+    noisy = [
+        c.name for c in CORPUS if c.internal_noise and exits[c.name]["no_scope"] == 4
+    ]
+    assert noisy, "vacuous: no internal-noise case breaks with scoping off"
+    assert all(exits[name]["scope"] == 0 for name in noisy), {
+        name: exits[name] for name in noisy
+    }

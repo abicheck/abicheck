@@ -53,6 +53,7 @@ from ..model.ownership_rules import OwnershipRules
 from ..policy.support_promise import (
     SUPPORT_PROMISE_POLICIES as _SUPPORT_PROMISE_POLICIES,
 )
+from .build_config_contract import contract_block, parse_contract_post_manifest
 from .build_config_schema import (
     TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
     TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
@@ -205,31 +206,15 @@ class BuildConfig:
     scope_public: bool | None = None
     collapse_versioned_symbols: bool | None = None
     public_symbols: list[str] = field(default_factory=list)
-    #: ``scope.public_header_dirs`` (ADR-068 plan §5 P4): directory paths
-    #: (relative to the project root, or absolute) whose headers are treated
-    #: as this project's public/internal boundary for the four
-    #: boundary-dependent cross-source checks migrated onto ``compare()``'s
-    #: pipeline in ``workflows/cross_source_evolution.py``
-    #: (``exported_not_public``/``public_not_exported``/
-    #: ``rtti_for_internal_type``/``public_to_internal_dependency``). This is
-    #: deliberately a *new* key, not a repurposing of the pre-existing
-    #: ``scope.public`` boolean above (which toggles ``--scope-public-headers``
-    #: FP-filtering behavior and has nothing to do with declaration
-    #: provenance) -- naming collision aside, the two config values answer
-    #: unrelated questions. Folded additively alongside any ``-H``/``--header``
-    #: *directory* argument (never a file -- see ``workflows.scan_config.
-    #: public_provenance_set``'s file-vs-directory asymmetry, preserved
-    #: verbatim here since this field only ever contributes directories) via
-    #: ``cli_compare_helpers.run_compare`` -> ``cli_resolve.
-    #: _resolve_compare_snapshots``'s ``config_public_header_dirs`` parameter,
-    #: which feeds the same ``InputSpec.public_header_dirs`` /
-    #: ``provenance.apply_provenance`` machinery a ``-H`` directory already
-    #: does -- one shared boundary primitive, two input sources. Empty by
-    #: default: a project with no such config, and no ``-H`` directory
-    #: either, tags every declaration ``ScopeOrigin.UNKNOWN`` exactly as
-    #: before, which is what makes the four checks above evidence-gate to
-    #: ``NOT_EVALUATED`` (never a fabricated finding) when neither source is
-    #: present.
+    #: ``scope.public_header_dirs`` (ADR-068 plan §5 P4): directories
+    #: (project-root-relative or absolute) whose headers are this project's
+    #: public/internal boundary for the boundary-dependent cross-source checks
+    #: (``workflows/cross_source_evolution.py``). Unrelated to the
+    #: ``scope.public`` boolean above (header-origin scoping, the config home
+    #: of the retired ``--scope-public-headers``). Folded in beside any ``-H``
+    #: *directory* through ``InputSpec.public_header_dirs``; empty by default,
+    #: which evidence-gates those checks to ``NOT_EVALUATED``. Full rationale:
+    #: ``docs/reference/config-file.md``'s ``scope:`` section.
     public_header_dirs: list[str] = field(default_factory=list)
     #: ``scope.exclude_headers``: the config spelling of ``--exclude-header``
     #: -- fnmatch patterns dropping headers from the *parsed* surface.
@@ -242,6 +227,8 @@ class BuildConfig:
     #: ``scope.dependencies``/``private_headers``/``private_namespaces``
     #: (``extract.ownership``); see ``build_config_scope.py``.
     ownership: OwnershipRules = field(default_factory=OwnershipRules)
+    #: ``contract.overlays.post_manifest`` (Phase 9c); see ``build_config_contract.py``.
+    contract_post_manifest: str | None = None
     #: ``scope.show_redundant`` — a reporting/FP-tuning toggle demoted off the CLI
     #: (ADR-040 Lever 2). ``None`` = unset. The ``--show-filtered`` debugging view
     #: stays a visible CLI flag.
@@ -417,6 +404,7 @@ class BuildConfig:
             "policy",
             "deployment",
             "bundle_variants",
+            "contract",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
@@ -625,6 +613,7 @@ class BuildConfig:
             public_header_dirs=_strs(scope, "public_header_dirs"),
             exclude_headers=_strs(scope, "exclude_headers"),
             ownership=parse_ownership_rules(scope),
+            contract_post_manifest=parse_contract_post_manifest(top),
             scope_on_incomplete=_one_of(
                 _opt_str(scope, "on_incomplete"),
                 ("warn", "block"),
@@ -868,6 +857,7 @@ class BuildConfig:
             ("sources", self._sources_block()),
             ("severity", self._severity_block()),
             ("scope", _scope_block(self)),
+            ("contract", contract_block(self)),
             ("suppression", self._suppression_block()),
             ("source", self._source_block()),
             ("compile", self._compile_block()),

@@ -208,8 +208,8 @@ def _old_sided_message(spelling: str) -> str:
 #:
 #: * *no baseline to speak of* -- the option describes a comparison
 #:   (consumer scoping, variant selection, a stored bundle-facts pair).
-#: * *not a single artifact* -- the option is for the directory/package
-#:   release fan-out, which ``--no-baseline`` does not accept anyway.
+#: * *two-sided release only* -- the option shapes the two-sided
+#:   directory/package fan-out's output, which an audit does not produce.
 #: * *not implemented yet* -- genuinely applicable to a one-sided audit and
 #:   simply not wired. These are the ones worth closing next; they are
 #:   listed rather than silently accepted so that is a visible decision.
@@ -235,10 +235,6 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "use-case attribution maps a comparison's findings to declared use "
         "cases; an audit's findings are not changes",
     ),
-    "post_manifest_path": (
-        "--post-manifest",
-        "a post-manifest overlays contract scope across two sides",
-    ),
     "diagnostic_comparison": (
         "--diagnostic-comparison",
         "this escape hatch downgrades an incomparable-pair failure; with "
@@ -263,16 +259,12 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "changed-path localization narrows a comparison to what a revision "
         "range touched",
     ),
-    # -- for the directory/package release fan-out ------------------------
-    "select": ("--select", "member selection applies to a directory/package operand"),
-    "select_required": (
-        "--select-required",
-        "member selection applies to a directory/package operand",
-    ),
+    # -- for the two-sided release fan-out --------------------------------
     "output_dir": (
         "--output <format>=<directory>/",
-        "a per-component export applies to the release fan-out; name a file "
-        "(or '-') for a single artifact",
+        "a per-component export directory belongs to the two-sided release "
+        "fan-out; name a file (or '-') -- a directory audit's JSON already "
+        "carries every member's own report",
     ),
     # -- applicable, simply not wired yet ---------------------------------
     "abi3": (
@@ -344,6 +336,24 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
     ),
 }
 
+#: Options only a *set* operand -- a directory of libraries, a package
+#: archive, a multi-artifact stored package (``compare --no-baseline DIR``,
+#: one-comparison-product F-23) -- honours. Rejected for a scalar operand
+#: exactly like :data:`_UNSUPPORTED_OPTIONS`, since one artifact has no
+#: members to select among; read by ``compare_no_baseline_set.py`` otherwise.
+_SET_ONLY_OPTIONS: dict[str, tuple[str, str]] = {
+    "select": (
+        "--select",
+        "member selection applies to a directory/package operand, and a "
+        "single artifact has no members to select among",
+    ),
+    "select_required": (
+        "--select-required",
+        "member selection applies to a directory/package operand, and a "
+        "single artifact has no members to select among",
+    ),
+}
+
 #: Dests whose "nothing was passed" value is not ``None``/falsey, so a
 #: presence test needs the sentinel rather than truthiness.
 _UNSET_SENTINELS: tuple[object, ...] = (None, (), "", False)
@@ -365,9 +375,17 @@ def _was_given(value: object) -> bool:
     return value not in _UNSET_SENTINELS
 
 
-def _reject_unsupported_options(kwargs: dict[str, Any]) -> None:
-    """Reject any option :data:`_UNSUPPORTED_OPTIONS` names, if it was given."""
-    for dest, (spelling, reason) in _UNSUPPORTED_OPTIONS.items():
+def _reject_unsupported_options(
+    kwargs: dict[str, Any], *, operand_is_set: bool = False
+) -> None:
+    """Reject any option :data:`_UNSUPPORTED_OPTIONS` names, if it was given
+    -- and, for a scalar operand, any :data:`_SET_ONLY_OPTIONS` one too."""
+    table = (
+        _UNSUPPORTED_OPTIONS
+        if operand_is_set
+        else {**_UNSUPPORTED_OPTIONS, **_SET_ONLY_OPTIONS}
+    )
+    for dest, (spelling, reason) in table.items():
         if _was_given(kwargs.get(dest)):
             raise click.UsageError(
                 f"{spelling} is not available with --no-baseline: {reason}"
@@ -387,29 +405,40 @@ def _reject_context_stashed_options(ctx: click.Context) -> None:
     silently dropped: ``compare --no-baseline snap.abi.json --variant v1``
     ran a normal audit and exited 0.
 
-    It is rejected rather than wired because this path implements no variant
-    *selection*. ``--variant`` chooses among the ``VariantRef``s a stored
-    ``ProjectSnapshot`` package declares; the audit resolves a package
-    operand through ``resolve_no_baseline_candidate``, which takes the
-    package's own single artifact and never consults a variant selector at
-    all. So the flag would name a selection nothing performs.
-
-    (This reason was originally "the dispatch refuses a package operand
-    outright", which stopped being true when a one-artifact
-    ``ProjectSnapshot`` package directory was accepted -- CodeRabbit review.
-    The rejection survives that narrowing; only its justification changed.)
-    Wiring it becomes real work when ``--no-baseline`` grows multi-variant
-    package support (plan row F-23), and the usage error is what makes that
-    a visible gap rather than a silent one.
+    Rejected for a *scalar* operand because one artifact offers no variant
+    to select: a single-artifact stored ``ProjectSnapshot`` package (one
+    artifact under one variant) is audited through that artifact. A package
+    declaring several variants is a *set* operand, and there ``--variant``
+    is wired -- see :func:`_set_variant_from_context`.
     """
     from ..options.release import variant_kwargs_from_context
 
     if any(variant_kwargs_from_context(ctx).values()):
         raise click.UsageError(
-            "--variant is not available with --no-baseline: it selects among "
-            "the variants a stored ProjectSnapshot package declares, and this "
-            "path performs no variant selection -- a package operand is "
-            "audited through its single artifact. It is rejected "
+            "--variant is not available with --no-baseline for a single "
+            "artifact: it selects among the variants a stored ProjectSnapshot "
+            "package declares, and this operand has only one. It is rejected "
             "rather than silently ignored so a CI job never believes it took "
             "effect."
         )
+
+
+def _set_variant_from_context(ctx: click.Context) -> str | None:
+    """The ``--variant`` an N-library audit of a stored package selects.
+
+    A stored ``ProjectSnapshot`` package declaring several variants is a set
+    operand (``workflows.release_package.is_multi_artifact_package``), and
+    choosing among its variants is exactly what ``--variant`` does for a
+    two-sided release's NEW side -- so here it is wired, not rejected: a
+    bare ``--variant ID`` or ``--variant new=ID`` selects the candidate's
+    variant. An explicitly OLD-scoped value (``--variant old=ID`` without
+    the same value for NEW) names a side this run declared absent, and is a
+    usage error for the same reason every other ``old=`` input is.
+    """
+    from ..options.release import variant_kwargs_from_context
+
+    variants = variant_kwargs_from_context(ctx)
+    old, new = variants.get("old_variant"), variants.get("new_variant")
+    if old is not None and old != new:
+        raise click.UsageError(_old_sided_message("--variant old="))
+    return new

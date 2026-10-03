@@ -42,8 +42,8 @@ from click.testing import CliRunner
 
 from abicheck.cli import main as abicheck_main
 from abicheck.cli_helpers_compare import ResolvedCompareConfig
-from abicheck.frontends.cli.commands import compare_no_baseline as cnb
 from abicheck.model.evidence_depth_levels import SourceMethod, method_to_collect_mode
+from abicheck.workflows import no_baseline_compare as nbc
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "scripts") not in sys.path:
@@ -52,6 +52,9 @@ import example_catalog  # noqa: E402
 
 _AUDIT_MODULES = (
     ROOT / "abicheck/frontends/cli/commands/compare_no_baseline.py",
+    # One-comparison-product F-23: the resolution both the scalar and the
+    # directory audit share (`resolve_no_baseline_invocation`).
+    ROOT / "abicheck/frontends/cli/commands/no_baseline_invocation.py",
     ROOT / "abicheck/frontends/cli/commands/no_baseline_rulings.py",
 )
 _SETTINGS_MODULE = ROOT / "abicheck/frontends/cli/compare_config_settings.py"
@@ -61,8 +64,8 @@ _GATE = (
     "kind membership, not severity categories (ADR-068 2026-09-10 amendment)"
 )
 _RELEASE = (
-    "directory/package release fan-out only; --no-baseline refuses a "
-    "directory of libraries (plan row F-23)"
+    "directory/package release fan-out only: a two-sided release setting "
+    "with no meaning for a candidate audited alone"
 )
 NOT_APPLICABLE: dict[str, str] = {
     "severity": _GATE,
@@ -75,11 +78,8 @@ NOT_APPLICABLE: dict[str, str] = {
     "exit_code_scheme": _GATE,
     "bundle_system_providers": _RELEASE,
     "bundle_cohorts": _RELEASE,
-    "release_dso_only": _RELEASE,
-    "release_include_private_dso": _RELEASE,
     "release_support_promise": _RELEASE,
     "fail_on_removed_library": _RELEASE,
-    "on_incomplete_scope": _RELEASE,
     "resource_limits_max_bundle_facts_decode_nodes": (
         "bounds decoding a bundle-facts document, which --no-baseline does not "
         "accept as its operand"
@@ -223,13 +223,15 @@ def test_the_audit_applies_the_config_it_resolved(
 
         return wrapper
 
+    # Both are called from the one candidate-audit sequence the scalar and
+    # the directory audit share (`audit_no_baseline_candidate`).
     monkeypatch.setattr(
-        cnb,
+        nbc,
         "resolve_no_baseline_candidate",
-        spy("resolve", cnb.resolve_no_baseline_candidate),
+        spy("resolve", nbc.resolve_no_baseline_candidate),
     )
     monkeypatch.setattr(
-        cnb, "run_no_baseline_compare", spy("run", cnb.run_no_baseline_compare)
+        nbc, "run_no_baseline_compare", spy("run", nbc.run_no_baseline_compare)
     )
     result = CliRunner().invoke(
         abicheck_main, ["compare", "--no-baseline", str(candidate), "-o", "json=-"]

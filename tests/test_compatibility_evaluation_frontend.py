@@ -25,7 +25,7 @@ fields, and Phase 1's own gate: a CLI run and the equivalent typed
 from __future__ import annotations
 
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -789,16 +789,30 @@ class TestSameTierConflicts:
 
 class TestCliAdapter:
     def test_defaulted_options_are_read_only_when_actually_typed(self):
-        kwargs = {"policy": "strict_abi", "scope_public_headers": True}
+        kwargs = {"policy": "strict_abi"}
         untyped = compare_cli_inputs(kwargs)
         assert untyped.policy_base is None
-        assert untyped.scope_public_headers is None
 
-        typed = compare_cli_inputs(
-            kwargs, explicit_parameters={"policy", "scope_public_headers"}
-        )
+        typed = compare_cli_inputs(kwargs, explicit_parameters={"policy"})
         assert typed.policy_base == "strict_abi"
-        assert typed.scope_public_headers is True
+
+    @pytest.mark.parametrize("value", [True, False])
+    @pytest.mark.parametrize(
+        "typed", [frozenset(), frozenset({"scope_public_headers"})]
+    )
+    def test_the_cli_never_states_the_legacy_scope_alias(self, value, typed):
+        """One-comparison-product Phase 9b deleted --scope-public-headers/--no-:
+        whatever a stale caller passes under that destination, typed or not,
+        the CLI adapter states nothing, so contract.mode falls to the project
+        tier (scope.public) or the built-in default."""
+        inputs = compare_cli_inputs(
+            {"policy": "strict_abi", "scope_public_headers": value},
+            explicit_parameters=typed,
+        )
+        assert inputs.scope_public_headers is None
+        assert _resolve(explicit=inputs).provenance["contract.mode"].layer is (
+            SelectorLayer.BUILT_IN_DEFAULT
+        )
 
     def test_none_valued_options_are_read_directly(self):
         inputs = compare_cli_inputs(
@@ -816,11 +830,7 @@ class TestCliAdapter:
         # A `compare` run where the user typed none of these must not look
         # different from one with no inputs -- that is what makes the
         # explicitness set load-bearing rather than cosmetic.
-        cfg = _resolve(
-            explicit=compare_cli_inputs(
-                {"policy": "strict_abi", "scope_public_headers": True}
-            )
-        )
+        cfg = _resolve(explicit=compare_cli_inputs({"policy": "strict_abi"}))
         assert cfg == _resolve()
 
 
@@ -877,14 +887,21 @@ class TestPhase1Gate:
     CompatibilityEvaluationConfig and provenance receipt." """
 
     def _sides(self, tmp_path: Path, *, cli_kwargs, request_kwargs, **shared):
-        cli = _resolve(
-            front_end=FrontEnd.CLI,
-            explicit=compare_cli_inputs(
-                cli_kwargs,
-                explicit_parameters=set(cli_kwargs),
-                **shared,
-            ),
+        # The legacy scope alias has no CLI spelling since one-comparison-
+        # product Phase 9b (the API's `scope_public` is a separate, deferred
+        # decision), so it is stated on the CLI-front-end inputs directly:
+        # what this gate checks is that the *resolver* treats the field the
+        # same way whichever front end states it.
+        cli_kwargs = dict(cli_kwargs)
+        scope = cli_kwargs.pop("scope_public_headers", None)
+        explicit = compare_cli_inputs(
+            cli_kwargs,
+            explicit_parameters=set(cli_kwargs),
+            **shared,
         )
+        if scope is not None:
+            explicit = replace(explicit, scope_public_headers=scope)
+        cli = _resolve(front_end=FrontEnd.CLI, explicit=explicit)
         old = InputSpec(path=tmp_path / "old.so")
         new = InputSpec(path=tmp_path / "new.so")
         api = compatibility_config_from_compare_request(

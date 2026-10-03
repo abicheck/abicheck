@@ -568,7 +568,7 @@ workflow-run artifact so nothing is lost.
 
 **Informational findings**/**Public API additions** mirror whatever the
 checker already classified as compatible — so public-header surface scoping
-(`--scope-public-headers`) and policy profiles (e.g. `sdk_vendor` demoting a
+(on by default) and policy profiles (e.g. `sdk_vendor` demoting a
 removal) flow through automatically; the comment never re-classifies
 anything.
 

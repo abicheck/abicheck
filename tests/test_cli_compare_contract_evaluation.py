@@ -35,6 +35,7 @@ from pathlib import Path
 
 import click
 import pytest
+from _legacy_scope import no_scope_config_args
 from click.testing import CliRunner
 
 from abicheck.checker import DiffResult, Verdict
@@ -421,9 +422,10 @@ class TestEndToEndJsonReport:
     def test_an_untyped_contract_flag_keeps_the_legacy_alias_source(self, tmp_path):
         """The refresh is opt-in per run, not a blanket overwrite.
 
-        ``--scope-public-headers`` selects the domain through D7's
-        ``LEGACY_ALIAS`` layer, which ``resolve_legacy_contract_mode``
-        already recorded correctly -- claiming ``EXPLICIT_CLI`` for it would
+        Under ``--contract auto`` the legacy scope alias selects the domain.
+        Since one-comparison-product Phase 9b its only CLI-reachable spelling
+        is ``.abicheck.yml``'s ``scope.public``, recorded at D7's
+        ``PROJECT_CONFIG`` layer -- claiming ``EXPLICIT_CLI`` for it would
         name an option the user never typed.
         """
         old_p, new_p = _write_pair(tmp_path)
@@ -435,13 +437,16 @@ class TestEndToEndJsonReport:
                 str(new_p),
                 "--contract",
                 "auto",
-                "--scope-public-headers",
+                *no_scope_config_args(tmp_path),
                 "-o",
                 "json=-",
             ],
         )
         ctx = json.loads(legacy.output)["contract_context"]["evaluation_context"]
-        assert ctx["field_provenance"]["contract.mode"]["layer"] != "explicit_cli"
+        provenance = ctx["field_provenance"]["contract.mode"]
+        assert provenance["layer"] == "project_config"
+        assert provenance["selected_by"][0]["option"] == "scope.public"
+        assert ctx["resolved_config"]["contract"]["mode"] == "all"
 
     def test_help_all_mentions_flag(self):
         result = CliRunner().invoke(main, ["compare", "--help-all"])
@@ -491,7 +496,6 @@ class TestShowFilteredAuditLedger:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--scope-public-headers",
                 "--contract",
                 "public",
                 "-o",
@@ -534,7 +538,6 @@ class TestShowFilteredAuditLedger:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--scope-public-headers",
                 "-o",
                 "json=-",
             ],

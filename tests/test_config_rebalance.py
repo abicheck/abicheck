@@ -108,7 +108,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.severity.abi_breaking == SeverityLevel.ERROR  # preset default
         assert r.scope_public is True
@@ -128,7 +127,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.severity.abi_breaking == SeverityLevel.WARNING
         assert r.scope_public is False
@@ -144,18 +142,17 @@ class TestConfigPrecedence:
         # command line. --severity-abi-breaking and --strict-suppressions were
         # hidden duplicates of a config key and are gone, so the config value
         # is now the whole answer for those two -- an override the resolver
-        # cannot express is the point, not an omission.
+        # cannot express is the point, not an omission. scope.public joined
+        # them in one-comparison-product Phase 9b (--scope-public-headers/
+        # --no- are gone; --contract all replaces the opt-out).
         cfg = BuildConfig(
             severity_abi_breaking="warning",
             scope_public=False,
             suppression_strict=True,
         )
-        r = resolve_compare_config(
-            cfg,
-            cli_severity_preset=None,
-            cli_scope_public=True,  # CLI override
-        )
-        assert r.scope_public is True
+        r = resolve_compare_config(cfg, cli_severity_preset="strict")
+        assert r.merged_severity_preset == "strict"
+        assert r.scope_public is False
         assert r.severity.abi_breaking == SeverityLevel.WARNING
         assert r.strict_suppressions is True
 
@@ -167,7 +164,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert set(r.public_symbols) == {"_Z3foov"}
 
@@ -183,7 +179,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset="strict",
-            cli_scope_public=None,
         )
         assert r.exit_code_scheme == "severity"
 
@@ -191,7 +186,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.debug_format is None
         assert r.dwarf_only is False
@@ -211,7 +205,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.debug_format == "dwarf"
         assert r.dwarf_only is True
@@ -255,7 +248,7 @@ class TestConfigPrecedence:
             debug_dwarf_only=True,
             scope_show_redundant=True,
         )
-        r = resolve_compare_config(cfg, cli_severity_preset=None, cli_scope_public=None)
+        r = resolve_compare_config(cfg, cli_severity_preset=None)
         assert r.debug_format == "dwarf"
         assert r.dwarf_only is True
         assert r.show_redundant is True
@@ -267,7 +260,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.on_incomplete_scope == "warn"
         assert r.fail_on_removed_library is False
@@ -288,7 +280,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.on_incomplete_scope == "block"
         assert r.fail_on_removed_library is True
@@ -320,7 +311,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.require_complete_analysis is False
 
@@ -332,7 +322,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.require_complete_analysis is True
 
@@ -352,7 +341,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.resource_limits_max_bundle_facts_decode_nodes is None
 
@@ -364,7 +352,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.resource_limits_max_bundle_facts_decode_nodes == 5_000_000
 
@@ -385,7 +372,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.deployment is None
 
@@ -398,7 +384,6 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert r.deployment is matrix
         assert r.deployment is not None
@@ -969,7 +954,6 @@ class TestRemovedConfigDuplicates:
             "--severity-preset",
             "--view",
             "--depth",
-            "--scope-public-headers",
             # ADR-040 Lever 2 carve-out: the coarse debug-artifact
             # override stays visible (`--debug-root` merged into it, 7n).
             "--debug-info",

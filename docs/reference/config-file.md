@@ -136,7 +136,7 @@ an unknown-key error.
 `compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
 `assurance:`, `deployment:`, `resource_limits:`, `performance:`, `policy:`, `version:`,
 `risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`,
-`baseline:`, and `bundle_variants:` are the recognized top-level keys.
+`baseline:`, `bundle_variants:`, and `contract:` are the recognized top-level keys.
 See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
 generated key/type list (`BuildConfig`'s own schema); the sections below
@@ -180,7 +180,9 @@ See [Severity](../use/severity.md) and [Exit codes](exit-codes.md).
 ### `scope:`
 
 Public-surface scoping — the main false-positive control. `public:` (default
-effectively `true`) restricts analysis to the public exported surface;
+effectively `true`) restricts analysis to the public exported surface. It has
+no CLI flag; for one run, `compare --contract all` turns it off and
+`--contract public` names it;
 `collapse_versioned_symbols:` (default `false`) collapses symbol-versioned
 duplicates before diffing; `show_redundant:` (default `false`) disables
 redundancy filtering. `public_symbols:` is an explicit public-symbol overlay,
@@ -223,6 +225,17 @@ would make the run narrower than the command line says it is. A rule that
 matches no header warns once for the whole run — including a
 directory/package comparison, where the rules are release-wide and are
 stated once rather than repeated per library.
+
+`public_header_dirs:` (default `[]`) names directories (project-root-relative
+or absolute) whose headers are this project's public/internal boundary for
+the boundary-dependent cross-source checks (`exported_not_public`,
+`public_not_exported`, `rtti_for_internal_type`,
+`public_to_internal_dependency`). It is unrelated to `public:` above despite
+the name: `public:` decides whether findings are scoped to the public
+surface, `public_header_dirs:` says which headers draw that surface's
+boundary. Entries are folded in beside any `-H` *directory* (never a `-H`
+file). With neither, every declaration's header origin is unknown and those
+four checks report `NOT_EVALUATED` rather than a finding.
 
 **Ownership keys** (`dependencies:`, `private_headers:`,
 `private_namespaces:`, `dependency_evidence:`) say who owns each
@@ -297,6 +310,37 @@ at all contributes `1` under either setting. See
 [Multi-binary § Comparison scope and completeness](../use/multi-binary.md#comparison-scope-and-completeness).
 
 ---
+
+### `contract:`
+
+Contract overlays: concrete documents that decide part of the `public`
+contract domain beside the headers. `overlays:` maps an overlay kind to a
+document path; `post_manifest` is the only kind today — a POST Python export
+manifest whose committed `pp_*`/ufunc-loop surface scopes the comparison
+(private `__pp_*` kernel churn is demoted to the filtered ledger, which every
+run discloses). See [POST Python extensions](../use/post-python.md).
+
+```yaml
+contract:
+  overlays:
+    post_manifest: python/abi/post_manifest.json
+```
+
+A relative path resolves against the project root, like
+`compile.include_dirs`. This key is the overlay's only spelling (the former
+per-run flag was removed).
+
+**It applies only from a config named with `--config`.** The overlay narrows
+what gates, and an auto-discovered `.abicheck.yml` is one a pull request can
+edit in the very checkout it is judged on, so a discovered value is noted on
+stderr and not applied. This is the same trust boundary `build.query` and
+`compile.compiler` sit behind. The composite Action likewise drops it from a
+discovered config; set its `build-config` input to a reviewed config to opt
+in. The overlay applies to a single-pair `compare`
+only. A directory/package comparison and a `--no-baseline` audit do not
+apply it and say so on stderr (an unapplied narrowing overlay can only add
+findings, never hide one). A stored-bundle-facts baseline rejects the
+`contract:` block like the other blocks it cannot honour.
 
 ### `suppression:`
 

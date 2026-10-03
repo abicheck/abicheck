@@ -267,9 +267,11 @@ earlier and has no CLI spelling left either.
 
 **Not demoted (still visible flags):** `--debug-info` (the coarse per-run
 debug-artifact override, side-aware, and since Phase 7n the whole
-separate-debug-info role — see the table above); and
-`--scope-public-headers` / `--no-scope-public-headers` (the everyday on/off
-switch for public-surface scoping).
+separate-debug-info role — see the table above).
+`--scope-public-headers` / `--no-scope-public-headers` were listed here too
+until one-comparison-product Phase 9b deleted them: public-header scoping
+stays on by default, `--contract all` turns it off for one run, and
+`.abicheck.yml`'s `scope.public: false` turns it off project-wide.
 
 ### Run profiles: added, then removed
 

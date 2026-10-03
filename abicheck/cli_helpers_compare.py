@@ -368,7 +368,6 @@ def resolve_compare_config(
     cfg: BuildConfig | None,
     *,
     cli_severity_preset: str | None,
-    cli_scope_public: bool | None,
 ) -> ResolvedCompareConfig:
     """Merge CLI flags over ``.abicheck.yml`` config with built-in defaults.
 
@@ -383,6 +382,9 @@ def resolve_compare_config(
     CLI duplicates of a config key and have been removed from the CLI
     entirely (no surviving override, ADR-068 D5 guard #2), so
     ``.abicheck.yml`` is now their only source, read straight off *cfg*.
+    ``scope.public`` joined them in one-comparison-product Phase 9b: the
+    ``--scope-public-headers``/``--no-`` pair is gone (``--contract all``
+    replaces the opt-out), so the key and its built-in ``True`` decide.
     """
     from .workflows.gate import resolve_severity_config
 
@@ -414,9 +416,7 @@ def resolve_compare_config(
         addition=eff_add,
     )
 
-    scope_public = bool(
-        _pick(cli_scope_public, cfg.scope_public if cfg else None, True)
-    )
+    scope_public = bool(_pick(None, cfg.scope_public if cfg else None, True))
     collapse = bool(cfg.collapse_versioned_symbols) if cfg else False
     merged_public: list[str] = list(cfg.public_symbols) if cfg else []
 

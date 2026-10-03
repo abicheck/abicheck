@@ -122,11 +122,10 @@ def contract_options(f: F) -> F:
         "Mach-O export trie) plus the raw type closure reachable from it "
         "-- a private-header type reached from a real export is inside "
         "this contract, an unexported public-header declaration is not. "
-        "'all': every entity, no root or closure evidence required. "
-        "'auto': evaluate, but let the domain be chosen by the D7 "
-        "precedence chain below an explicit CLI value -- the "
-        "--scope-public-headers/--no-scope-public-headers legacy alias, "
-        "then .abicheck.yml. "
+        "'all': every entity, no root or closure evidence required "
+        "(replaces the removed --no-scope-public-headers). "
+        "'auto': evaluate, but let .abicheck.yml's scope.public choose "
+        "the domain (public when unset). "
         "Each finding is stamped with a contract_relevance (IN_CONTRACT/"
         "PROVEN_OUT_OF_CONTRACT/UNKNOWN_UNPROVEN/UNKNOWN_UNRESOLVED/"
         "NOT_APPLICABLE), a contract_reason_code and -- when resolved -- "
@@ -197,9 +196,9 @@ def resolve_contract_evaluation(contract_mode: str | None) -> bool:
     ``--contract``, whose domain fell through to the D7 chain below an
     explicit CLI value) is spelled ``--contract auto``:
     :func:`resolve_contract_domain` maps it back to ``None``, which is exactly
-    the state that lets `compatibility_evaluation_wiring.
-    resolve_legacy_contract_mode`'s ``--scope-public-headers`` reading, and
-    then `.abicheck.yml`, decide the domain.
+    the state that lets `.abicheck.yml`'s ``scope.public`` (the legacy
+    alias's only CLI-reachable spelling since one-comparison-product Phase
+    9b), and then the built-in default, decide the domain.
     """
     return contract_mode is not None
 

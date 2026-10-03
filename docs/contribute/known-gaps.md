@@ -7888,11 +7888,21 @@ ADR amendment for the full reasoning each):
   deferred `dump`'s own removal) — `.abicheck.yml`'s `build.targets` is now
   the *only* front-end-reachable source for either command, with no CLI
   override left to take precedence over it.
-- `--artifact-set`/`new-library-set` — ADR-065 S3's package component
-  inventories (plan Prerequisite P5) are explicitly "Not started"; routing
-  this onto `compare --no-baseline DIR` today would silently narrow its
-  member-selection/coverage guarantees rather than reproduce them, which is
-  exactly the false-negative risk the (c) admission bar exists to catch.
+- `--artifact-set`/`new-library-set` — **resolved on the CLI (2026-10-03,
+  one-comparison-product acceptance F-23).** This entry recorded that ADR-065
+  S3's package component inventories (plan Prerequisite P5) were not started,
+  so routing the mode onto `compare --no-baseline DIR` would have narrowed
+  its member-selection/coverage guarantees. P5 landed, and `compare
+  --no-baseline DIR` now exists: members come from the one-sided release
+  resolver (`workflows.release_inputs.resolve_release_side`, which the
+  two-sided fan-out now also calls), the acquisition record is ADR-065's
+  (`workflows/no_baseline_set.py` -- `--select`/`--select-required`,
+  `scope.on_incomplete`, a directory `unproven`, a fully extracted archive or
+  an asserting stored package `proven`), each member is audited by the same
+  sequence a scalar audit runs, and the result is one `audit_set` document
+  (`report/no_baseline_set.py`, `audit_set_report.schema.json`). Still open:
+  the Action's `new-library-set` input keeps its usage error -- wiring it to
+  this command is an Action-side slice, not done here.
 
 Ruled (a), already covered by `compare` today, no Action-level gap left once
 routed unconditionally: the additive-vs-overriding `--header`/`--include`
@@ -11059,6 +11069,27 @@ function reads as not exported on both architectures. A token substitution is
 not a fix (Itanium substitution numbering differs between a class name and a
 builtin type), so it was not attempted. glibc's own `*f128` declarations are
 system headers and unaffected.
+
+## `compare --no-baseline` has no typed Python request, scalar or directory (2026-10-03)
+
+Neither shape of the single-build audit -- `compare --no-baseline FILE` nor
+the N-library `compare --no-baseline DIR` (one-comparison-product F-23) --
+has a typed request in `abicheck.service` the way two-sided `compare` has
+`CompareRequest`/`run_compare_request`. Both are reachable from Python only
+through the framework-free workflow functions the CLI itself calls:
+`workflows.no_baseline_compare.audit_no_baseline_candidate` (one candidate,
+given a `NoBaselineAuditInputs`), and `workflows.no_baseline_set.
+resolve_no_baseline_set_plan` + `run_no_baseline_set` (a set), rendered by
+`report.no_baseline.render_no_baseline` / `report.no_baseline_set.
+render_no_baseline_set`. What is missing is the front-end half: resolving
+`.abicheck.yml` (`scope.public`, `scope.on_incomplete`, `release.*`,
+`deployment:`, `assurance.require_complete`, the suppression acceptance
+checks) and the policy documents into those inputs, which today only
+`frontends/cli/commands/no_baseline_invocation.py` does -- so a Python
+caller has to restate it, and could resolve a config differently from the
+CLI. Deferred deliberately when F-23 landed: the request type should be one
+decision covering both cardinalities (ADR-061's "one model, any
+cardinality"), not a directory-only addition.
 
 ## The comparability contract never records the target platform (2026-10-03)
 

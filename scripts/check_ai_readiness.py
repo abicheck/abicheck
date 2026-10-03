@@ -3197,7 +3197,6 @@ _REQUIRED_FAMILY_DECORATORS: frozenset[str] = frozenset(
         "two_sided_input_options",
         "policy_options",
         "severity_options",
-        "scope_options",
         "export_options",
     }
 )

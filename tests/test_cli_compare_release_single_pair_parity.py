@@ -56,6 +56,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from _legacy_scope import no_scope_config_args
 from click.testing import CliRunner
 
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -133,7 +134,9 @@ def _axis_severity_preset_strict(tmp_path: Path) -> list[str]:
 
 
 def _axis_no_scope_public_headers(tmp_path: Path) -> list[str]:
-    return ["--no-scope-public-headers"]
+    # The flag was retired in one-comparison-product Phase 9b; scope.public:
+    # false is the setting it overrode, and the axis it still has to hold on.
+    return no_scope_config_args(tmp_path)
 
 
 _AXES: list[tuple[str, Callable[[Path], list[str]]]] = [

@@ -149,9 +149,7 @@ class TestPreRefactorFoldBehaviorPreserved:
         self, preset: str | None, data: st.DataObject
     ) -> None:
         levels = data.draw(_severity_levels())
-        resolved_cfg = resolve_compare_config(
-            None, cli_severity_preset=preset, cli_scope_public=None
-        )
+        resolved_cfg = resolve_compare_config(None, cli_severity_preset=preset)
         pack_application = PackApplication(policy_overrides={}, severity_levels=levels)
         got = apply_to_compare_config(resolved_cfg, pack_application)
 
@@ -244,9 +242,7 @@ class TestEffectiveGateParity:
         levels = data.draw(_severity_levels())
         pack_application = PackApplication(policy_overrides={}, severity_levels=levels)
 
-        resolved_cfg = resolve_compare_config(
-            None, cli_severity_preset=preset, cli_scope_public=None
-        )
+        resolved_cfg = resolve_compare_config(None, cli_severity_preset=preset)
         single_pair = apply_to_compare_config(resolved_cfg, pack_application)
 
         release = resolve_release_gate_options(
@@ -284,15 +280,11 @@ class TestEffectiveGateParity:
         assert gate2.effective_gate == EffectiveGate.from_severity(cfg)
 
     def test_resolved_compare_config_effective_gate_helper(self) -> None:
-        cfg = resolve_compare_config(
-            None, cli_severity_preset=None, cli_scope_public=None
-        )
+        cfg = resolve_compare_config(None, cli_severity_preset=None)
         assert effective_gate_for_resolved_compare_config(
             cfg
         ) == EffectiveGate.from_severity(None)
-        cfg2 = resolve_compare_config(
-            None, cli_severity_preset="strict", cli_scope_public=None
-        )
+        cfg2 = resolve_compare_config(None, cli_severity_preset="strict")
         assert effective_gate_for_resolved_compare_config(
             cfg2
         ) == EffectiveGate.from_severity(cfg2.severity)
@@ -347,9 +339,7 @@ class TestEffectiveGateForResolvedCompareConfigCarriesRealAxes:
     differentiate the returned object, not silently default away."""
 
     def test_require_complete_analysis_differentiates(self) -> None:
-        cfg = resolve_compare_config(
-            None, cli_severity_preset=None, cli_scope_public=None
-        )
+        cfg = resolve_compare_config(None, cli_severity_preset=None)
         off = effective_gate_for_resolved_compare_config(
             cfg, require_complete_analysis=False
         )
@@ -361,9 +351,7 @@ class TestEffectiveGateForResolvedCompareConfigCarriesRealAxes:
         assert on.require_complete_analysis is True
 
     def test_used_by_scope_differentiates(self) -> None:
-        cfg = resolve_compare_config(
-            None, cli_severity_preset=None, cli_scope_public=None
-        )
+        cfg = resolve_compare_config(None, cli_severity_preset=None)
         no_scope = effective_gate_for_resolved_compare_config(cfg)
         scoped = effective_gate_for_resolved_compare_config(
             cfg, result=_FakeResult(gate_scope="used_by", used_by=({"app": "x"},))
@@ -375,9 +363,7 @@ class TestEffectiveGateForResolvedCompareConfigCarriesRealAxes:
     def test_two_different_required_symbol_selections_differentiate(self) -> None:
         """The literal finding example: two runs differing only in which
         symbol is required must not collapse to one EffectiveGate."""
-        cfg = resolve_compare_config(
-            None, cli_severity_preset=None, cli_scope_public=None
-        )
+        cfg = resolve_compare_config(None, cli_severity_preset=None)
         a = effective_gate_for_resolved_compare_config(
             cfg,
             result=_FakeResult(
@@ -398,9 +384,7 @@ class TestEffectiveGateForResolvedCompareConfigCarriesRealAxes:
         """Characterization: a caller passing neither (this function's
         original, pre-fix call shape) still gets the same all-defaults
         EffectiveGate as before this fix."""
-        cfg = resolve_compare_config(
-            None, cli_severity_preset="strict", cli_scope_public=None
-        )
+        cfg = resolve_compare_config(None, cli_severity_preset="strict")
         gate = effective_gate_for_resolved_compare_config(cfg)
         assert gate == EffectiveGate.from_severity(cfg.severity)
         assert gate.require_complete_analysis is False
@@ -414,9 +398,7 @@ class TestEffectiveGateForResolvedCompareConfigCarriesRealAxes:
         release fan-out this run might dispatch to, so this function must
         not read them onto its own returned ``EffectiveGate`` (see this
         function's own docstring)."""
-        cfg = resolve_compare_config(
-            None, cli_severity_preset=None, cli_scope_public=None
-        )
+        cfg = resolve_compare_config(None, cli_severity_preset=None)
         assert cfg.on_incomplete_scope == "warn"  # cfg itself does carry it
         gate = effective_gate_for_resolved_compare_config(cfg)
         assert gate.on_incomplete_scope is None
