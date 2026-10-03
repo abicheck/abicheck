@@ -505,8 +505,10 @@ digest lost its `exit_code_scheme` override. `tests/
 test_effective_gate_single_input.py` states the class: no function under
 `abicheck/` takes a scheme beside a severity map (one named exception, the
 persisted `with_resolved_gate` receipt), and the process exit, report `exit`
-block and digest agree over every finding subset and severity setting. Still
-open: the release fan-out's exit resolver.
+block and digest agree over every finding subset and severity setting. The
+release fan-out's exit resolver was checked and needs no cutover: its scheme
+is `severity_exit_code is None`, whose single producer derives it from
+`GateOptions.severity`.
 
 **Target:** one runtime object,
 
