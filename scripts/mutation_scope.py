@@ -258,6 +258,11 @@ def _section(doc: Mapping[str, object], keys: tuple[str, ...]) -> object:
     return node
 
 
+#: ``gen_mutation_test_selection.FULL_SELECTION``, restated: that module is a
+#: sibling script, imported lazily where the CLI needs its validator.
+_FULL_SELECTION = ("tests/",)
+
+
 def extend_selection(
     selection: list[str], changed: list[str], exists: Callable[[str], bool]
 ) -> list[str]:
@@ -285,7 +290,7 @@ def extend_selection(
         if PurePosixPath(path).name.startswith("test_"):
             out.add(path)
         else:
-            return ["tests/"]
+            return list(_FULL_SELECTION)
     return sorted(out)
 
 
@@ -379,6 +384,15 @@ def main(argv: list[str] | None = None) -> int:
         new_sel = extend_selection(
             old_sel, changed, lambda p: (REPO_ROOT / p).is_file()
         )
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from gen_mutation_test_selection import selection_problems  # noqa: PLC0415
+
+        problems = selection_problems(new_sel, lambda p: (REPO_ROOT / p).is_file())
+        if problems:
+            # Fail here, at the step that produced it, not 20 minutes later
+            # inside mutmut's stats pass where the suite checks the same rule.
+            print(f"ERROR: widened selection is malformed: {problems}")
+            return 1
         path.write_text("\n".join(new_sel) + "\n", encoding="utf-8")
         added = [p for p in new_sel if p not in old_sel]
         print(

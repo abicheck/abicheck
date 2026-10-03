@@ -217,16 +217,32 @@ def test_the_mutmut_lane_reads_the_committed_selection() -> None:
 
 
 def test_the_committed_selection_is_well_formed() -> None:
-    """Sorted, unique, and every entry an existing test file -- a cheap
-    always-on check; completeness itself is the weekly --check."""
-    lines = gen.read_selection()
-    assert lines, "an empty selection would make the stats pass run nothing"
-    assert lines == sorted(set(lines))
-    missing = [p for p in lines if not (REPO / p).is_file()]
-    assert not missing, f"selection names files that do not exist: {missing}"
-    assert all(
-        Path(p).name.startswith("test_") and p.startswith("tests/") for p in lines
+    """Sorted, unique, and every entry an existing test file -- or the
+    whole-suite sentinel a PR touching a shared test module widens it to
+    (this check runs inside mutmut's stats pass, against the widened file).
+    A cheap always-on check; completeness itself is the weekly --check."""
+    assert not gen.selection_problems(
+        gen.read_selection(), lambda p: (REPO / p).is_file()
     )
+
+
+def test_extend_selection_widens_to_the_generators_own_sentinel() -> None:
+    """mutation_scope restates FULL_SELECTION rather than importing its
+    sibling at module load; the two spellings must stay one value."""
+    assert list(scope._FULL_SELECTION) == gen.FULL_SELECTION
+
+
+def test_selection_rule_accepts_both_legitimate_shapes_and_nothing_else() -> None:
+    every = lambda p: True  # noqa: E731
+    assert gen.FULL_SELECTION == ["tests/"]
+    assert not gen.selection_problems(list(gen.FULL_SELECTION), every)
+    assert not gen.selection_problems(["tests/a/test_x.py", "tests/test_y.py"], every)
+    assert gen.selection_problems([], every)
+    assert gen.selection_problems(["tests/test_b.py", "tests/test_a.py"], every)
+    assert gen.selection_problems(["tests/test_a.py", "tests/test_a.py"], every)
+    assert gen.selection_problems(["tests/conftest.py"], every)
+    assert gen.selection_problems(["tests/", "tests/test_a.py"], every)
+    assert gen.selection_problems(["tests/test_a.py"], lambda p: False)
 
 
 # --------------------------------------------------------------------------
@@ -274,6 +290,7 @@ def test_the_widened_selection_passes_the_committed_files_own_check(seed: int) -
     committed = sorted(set(rng.sample(pool, 4)))
     changed = rng.sample(pool, rng.randint(0, len(pool)))
     out = scope.extend_selection(committed, changed, lambda p: True)
+    assert not gen.selection_problems(out, lambda p: True)
     assert out == sorted(set(out))
     assert set(committed) | set(changed) == set(out)
     assert all(PurePosixPath(p).name.startswith("test_") for p in out)
@@ -290,7 +307,7 @@ def test_extend_selection_never_narrows() -> None:
         assert out == ["tests/"] or set(_SEL) <= set(out)
         # The widened file is checked by the suite it feeds, under the same
         # rule as the committed one (test_the_committed_selection_is_well_formed).
-        assert out == sorted(set(out))
+        assert not gen.selection_problems(out, lambda p: True), out
         for path in changed:
             if path.startswith("tests/test_") and out != ["tests/"]:
                 assert path in out
