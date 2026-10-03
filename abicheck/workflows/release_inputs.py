@@ -53,6 +53,8 @@ claim.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from ..errors import ReleaseOperandContentError, ReleaseOperandUsageError
@@ -60,12 +62,12 @@ from ..model.sided_inputs import compose_sided_paths
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from ..model.package_inventory import PackageInventory
     from .extraction import PackageExtractor
 
 __all__ = [
+    "ReleaseSide",
     "collect_release_inputs",
     "debian_symbols_warning",
     "discover_files",
@@ -75,6 +77,7 @@ __all__ = [
     "prepare_release_inputs",
     "resolve_release_headers",
     "resolve_release_package_side",
+    "resolve_release_side",
 ]
 
 
@@ -376,6 +379,165 @@ def discover_files(
     return files
 
 
+@dataclass(frozen=True)
+class ReleaseSide:
+    """One release operand, resolved on its own (ADR-065 S3, one-comparison-
+    product F-23).
+
+    Everything :func:`prepare_release_inputs` used to compute for OLD and
+    NEW by hand, inline and twice: the stored-package map or the live
+    extraction/discovery, ``--dso-only`` classification, the side's headers
+    and include roots, and its declared component inventory. A two-sided
+    release resolves two of these and *pairs* them; ``compare --no-baseline
+    DIR`` resolves one and audits each member -- one acquisition model, any
+    cardinality, so the two paths cannot discover a different member set
+    from the same operand.
+
+    ``stored`` is ``True`` for a stored ``ProjectSnapshot`` package operand
+    (whose own ``inventory_complete`` assertion governs completeness, which
+    is why ``inventory`` is then ``None``). ``match_warnings`` are
+    ``build_match_map``'s own, unprefixed; ``symbols_conflicts`` are this
+    side's Debian ``.symbols``-vs-binary lines, already prefixed with
+    *side*, so a two-sided caller composes them in its established order.
+    """
+
+    side: str
+    stored: bool
+    members: dict[str, Path]
+    files: list[Path]
+    lib_dir: Path
+    debug_dir: Path | None
+    header_dir: Path | None
+    symbols_file: Path | None
+    headers: list[Path]
+    includes: list[Path]
+    unclassified: dict[str, str] = field(default_factory=dict)
+    inventory: PackageInventory | None = None
+    match_warnings: list[str] = field(default_factory=list)
+    symbols_conflicts: list[str] = field(default_factory=list)
+
+
+def resolve_release_side(
+    side_dir: Path,
+    *,
+    side: str,
+    debug_pkg: Path | None,
+    devel_pkg: Path | None,
+    include_private_dso: bool,
+    dso_only: bool,
+    headers: tuple[Path, ...],
+    side_headers_only: tuple[Path, ...],
+    includes: tuple[Path, ...],
+    side_includes_only: tuple[Path, ...],
+    config_includes: tuple[Path, ...],
+    extract_if_package: Callable[
+        [Path, Path | None, Path | None],
+        tuple[Path, Path | None, Path | None, Path | None, bool],
+    ],
+    discover_shared_libraries: Callable[..., list[Path]],
+    is_package: Callable[[Path], bool],
+    is_elf_shared_object: Callable[[Path], bool],
+    variant: str | None = None,
+    make_temp_dir: Callable[[str], Path] | None = None,
+) -> ReleaseSide:
+    """Resolve one release operand into a :class:`ReleaseSide`.
+
+    *side* is ``"old"`` or ``"new"``: it names the ``--variant`` prefix an
+    ambiguous stored package's error should suggest, and prefixes this
+    side's Debian symbols-contract lines. The rules are exactly the ones
+    :func:`prepare_release_inputs` applied per side before it called this
+    twice -- see that function for the two-sided composition (pairing, the
+    OLD-vs-NEW Debian diff, warning order).
+    """
+    from ..package import package_component_inventory
+    from .contract_conflicts import debian_symbols_binary_conflict_lines
+    from .extraction import build_match_map
+
+    pkg_map = (
+        resolve_release_package_side(side_dir, variant, make_temp_dir, side=side)
+        if make_temp_dir is not None
+        else None
+    )
+    # ADR-065 D1/D2: a stored member --dso-only could not classify is an
+    # acquisition failure the caller records, not a silent narrowing.
+    unclassified: dict[str, str] = {}
+    if dso_only and pkg_map is not None:
+        # --dso-only's stored-side counterpart to is_elf_shared_object
+        # filtering a live directory's files below (Codex review: previously
+        # only applied there, so a stored non-ELF/executable artifact stayed
+        # in scope).
+        from .release_package import classify_dso_only_package_map
+
+        classified = classify_dso_only_package_map(pkg_map)
+        pkg_map, unclassified = classified.members, classified.unclassified
+
+    lib_dir, debug_dir, header_dir, symbols_file, whole = extract_if_package(
+        side_dir, debug_pkg, devel_pkg
+    )
+    files: list[Path] = []
+    if pkg_map is not None:
+        members, warns = dict(pkg_map), cast("list[str]", [])
+    else:
+        files = discover_files(
+            side_dir,
+            lib_dir,
+            include_private_dso,
+            discover_shared_libraries,
+            is_package,
+        )
+        if dso_only:
+            files = [f for f in files if is_elf_shared_object(f)]
+        members, warns = build_match_map(files)
+    # E-S3 case 3: this side's own declared symbols contract vs. its own
+    # contained binary.
+    conflicts = [
+        f"[{side}] {line}"
+        for line in debian_symbols_binary_conflict_lines(symbols_file, lib_dir)
+    ]
+    side_headers = compose_sided_paths(headers, side_headers_only)
+    if header_dir:
+        # An extracted devel-package header directory replaces the uniform
+        # value on this side -- see `resolve_release_headers`.
+        side_headers = compose_sided_paths([header_dir], side_headers_only)
+    # `--include old=` adds to the both-sides `--include` rather than
+    # replacing it (`model.sided_inputs`), so config_includes -- the project
+    # .abicheck.yml compile.include_dirs suffix, already folded into
+    # `includes` by the caller -- survives a per-side value through
+    # `includes` itself. It is still composed in explicitly because a caller
+    # may pass it without having folded it in.
+    side_includes = compose_sided_paths(
+        list(includes) + list(config_includes), side_includes_only
+    )
+    side_includes.extend(discover_include_roots(header_dir))
+    # ADR-065 S3: the declared component inventory, built from the members
+    # this run selected out of a container it unpacked *in full*. Only a
+    # live package operand has one -- a stored `ProjectSnapshot` side
+    # already carries its own `inventory_complete` assertion, which
+    # `release_inventory_evidence` reads instead, and a directory operand
+    # proves nothing about what the release ships.
+    inventory = (
+        package_component_inventory(lib_dir, files, container_complete=True)
+        if pkg_map is None and whole
+        else None
+    )
+    return ReleaseSide(
+        side=side,
+        stored=pkg_map is not None,
+        members=members,
+        files=files,
+        lib_dir=lib_dir,
+        debug_dir=debug_dir,
+        header_dir=header_dir,
+        symbols_file=symbols_file,
+        headers=side_headers,
+        includes=side_includes,
+        unclassified=unclassified,
+        inventory=inventory,
+        match_warnings=list(warns),
+        symbols_conflicts=conflicts,
+    )
+
+
 def prepare_release_inputs(
     old_dir: Path,
     new_dir: Path,
@@ -421,6 +583,11 @@ def prepare_release_inputs(
 ]:
     """Resolve both release operands into per-library maps and matched keys.
 
+    Each operand is resolved by :func:`resolve_release_side` -- the one-sided
+    resolver ``compare --no-baseline DIR`` shares -- and this function adds
+    only what needs two sides: key pairing, the OLD-vs-NEW Debian symbols
+    diff, and the warning order.
+
     ADR-065 S4 removed the old-minus-new / new-minus-old key lists from this
     return: pairing answers *which* members have a counterpart and nothing
     else -- what an unpaired member means is decided once, by
@@ -434,151 +601,83 @@ def prepare_release_inputs(
     *old_variant*/*new_variant* and *make_temp_dir* (ADR-062 A1.7) are the
     stored-side plumbing for a `ProjectSnapshot` package operand -- ``None``
     (the default) leaves every pre-existing loose-directory/archive caller
-    unaffected. When a side *is* a package directory, its variant is
-    unpacked into per-library sub-package directories
-    (`_resolve_release_package_side`) instead of running the live
-    extraction/discovery path for that side; the two sides are resolved
-    fully independently, so a `stored/live` or `live/stored` release is the
-    same code path as `stored/stored`/`live/live`, just with one side's
-    branch taken instead of the other's.
+    unaffected. The two sides are resolved fully independently, so a
+    `stored/live` or `live/stored` release is the same code path as
+    `stored/stored`/`live/live`, just with one side's branch taken instead
+    of the other's.
     """
-    from ..package import package_component_inventory
-    from .contract_conflicts import debian_symbols_release_conflict_lines
-    from .extraction import build_match_map
-
-    old_pkg_map = (
-        resolve_release_package_side(old_dir, old_variant, make_temp_dir, side="old")
-        if make_temp_dir is not None
-        else None
-    )
-    new_pkg_map = (
-        resolve_release_package_side(new_dir, new_variant, make_temp_dir, side="new")
-        if make_temp_dir is not None
-        else None
-    )
-    # ADR-065 D1/D2: a stored member --dso-only could not classify is an
-    # acquisition failure the caller records, not a silent narrowing.
-    old_unclassified: dict[str, str] = {}
-    new_unclassified: dict[str, str] = {}
-    if dso_only:
-        # --dso-only's stored-side counterpart to is_elf_shared_object
-        # filtering a live directory's files below (Codex review: previously
-        # only applied there, so a stored non-ELF/executable artifact stayed
-        # in scope). No-op on either map that's already None.
-        from .release_package import dso_only_filter_pair
-
-        old_cls, new_cls = dso_only_filter_pair(old_pkg_map, new_pkg_map)
-        if old_cls is not None:
-            old_pkg_map, old_unclassified = old_cls.members, old_cls.unclassified
-        if new_cls is not None:
-            new_pkg_map, new_unclassified = new_cls.members, new_cls.unclassified
-
-    (old_lib_dir, old_debug_dir, old_header_dir, old_symbols_file, old_whole) = (
-        extract_if_package(old_dir, debug_info1, devel_pkg1)
-    )
-    (new_lib_dir, new_debug_dir, new_header_dir, new_symbols_file, new_whole) = (
-        extract_if_package(new_dir, debug_info2, devel_pkg2)
-    )
-    old_files: list[Path] = []
-    new_files: list[Path] = []
-    if old_pkg_map is not None:
-        old_map, old_warns = dict(old_pkg_map), cast("list[str]", [])
-    else:
-        old_files = discover_files(
+    sides: list[ReleaseSide] = []
+    for side, side_dir, debug_pkg, devel_pkg, h_only, i_only, variant in (
+        (
+            "old",
             old_dir,
-            old_lib_dir,
-            include_private_dso,
-            discover_shared_libraries,
-            is_package,
-        )
-        if dso_only:
-            old_files = [f for f in old_files if is_elf_shared_object(f)]
-        old_map, old_warns = build_match_map(old_files)
-    if new_pkg_map is not None:
-        new_map, new_warns = dict(new_pkg_map), cast("list[str]", [])
-    else:
-        new_files = discover_files(
+            debug_info1,
+            devel_pkg1,
+            old_headers_only,
+            old_includes_only,
+            old_variant,
+        ),
+        (
+            "new",
             new_dir,
-            new_lib_dir,
-            include_private_dso,
-            discover_shared_libraries,
-            is_package,
+            debug_info2,
+            devel_pkg2,
+            new_headers_only,
+            new_includes_only,
+            new_variant,
+        ),
+    ):
+        sides.append(
+            resolve_release_side(
+                side_dir,
+                side=side,
+                debug_pkg=debug_pkg,
+                devel_pkg=devel_pkg,
+                include_private_dso=include_private_dso,
+                dso_only=dso_only,
+                headers=headers,
+                side_headers_only=h_only,
+                includes=includes,
+                side_includes_only=i_only,
+                config_includes=config_includes,
+                extract_if_package=extract_if_package,
+                discover_shared_libraries=discover_shared_libraries,
+                is_package=is_package,
+                is_elf_shared_object=is_elf_shared_object,
+                variant=variant,
+                make_temp_dir=make_temp_dir,
+            )
         )
-        if dso_only:
-            new_files = [f for f in new_files if is_elf_shared_object(f)]
-        new_map, new_warns = build_match_map(new_files)
+    old, new = sides
     warning_msgs: list[str] = [
-        f"Warning: {warning}" for warning in (old_warns + new_warns)
+        f"Warning: {warning}" for warning in (old.match_warnings + new.match_warnings)
     ]
-    debian_symbols_note = debian_symbols_warning(old_symbols_file, new_symbols_file)
+    debian_symbols_note = debian_symbols_warning(old.symbols_file, new.symbols_file)
     if debian_symbols_note is not None:
         warning_msgs.append(debian_symbols_note)
-    # E-S3 case 3: each side's own declared symbols contract vs. its own
-    # contained binary (distinct from the old-vs-new diff just above).
-    warning_msgs.extend(
-        debian_symbols_release_conflict_lines(
-            old_symbols_file, old_lib_dir, new_symbols_file, new_lib_dir
-        )
-    )
-    old_h, new_h = resolve_release_headers(
-        headers,
-        old_headers_only,
-        new_headers_only,
-        old_header_dir,
-        new_header_dir,
-    )
-    # `--include old=` adds to the both-sides `--include` rather than
-    # replacing it (`model.sided_inputs`), so config_includes -- the project
-    # .abicheck.yml compile.include_dirs suffix, already folded into
-    # `includes` by the caller -- now survives a per-side value through
-    # `includes` itself. It is still composed in explicitly because a caller
-    # may pass it without having folded it in.
-    old_inc = compose_sided_paths(
-        list(includes) + list(config_includes), old_includes_only
-    )
-    new_inc = compose_sided_paths(
-        list(includes) + list(config_includes), new_includes_only
-    )
-    old_inc.extend(discover_include_roots(old_header_dir))
-    new_inc.extend(discover_include_roots(new_header_dir))
+    warning_msgs.extend(old.symbols_conflicts + new.symbols_conflicts)
     matched_keys, old_map, new_map = match_release_keys(
         old_dir,
         new_dir,
-        old_map,
-        new_map,
-        old_files,
-        new_files,
+        old.members,
+        new.members,
+        old.files,
+        new.files,
         is_package,
     )
-    # ADR-065 S3: the declared component inventory, built from the members
-    # this run selected out of a container it unpacked *in full*. Only a
-    # live package operand has one -- a stored `ProjectSnapshot` side
-    # (`*_pkg_map is not None`) already carries its own `inventory_complete`
-    # assertion, which `release_inventory_evidence` reads instead, and a
-    # directory operand proves nothing about what the release ships.
-    old_inventory = (
-        package_component_inventory(old_lib_dir, old_files, container_complete=True)
-        if old_pkg_map is None and old_whole
-        else None
-    )
-    new_inventory = (
-        package_component_inventory(new_lib_dir, new_files, container_complete=True)
-        if new_pkg_map is None and new_whole
-        else None
-    )
     return (
-        old_debug_dir,
-        new_debug_dir,
-        old_h,
-        new_h,
-        old_inc,
-        new_inc,
+        old.debug_dir,
+        new.debug_dir,
+        old.headers,
+        new.headers,
+        old.includes,
+        new.includes,
         old_map,
         new_map,
         warning_msgs,
         matched_keys,
-        old_unclassified,
-        new_unclassified,
-        old_inventory,
-        new_inventory,
+        old.unclassified,
+        new.unclassified,
+        old.inventory,
+        new.inventory,
     )

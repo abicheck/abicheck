@@ -530,7 +530,9 @@ def _embed_inline_source_side(
     default=False,
     help="Declare that no prior surface exists for this candidate -- an "
     "audit, not a comparison. Takes exactly one operand (the "
-    "candidate build) instead of OLD NEW; the OLD side is recorded with "
+    "candidate build) instead of OLD NEW; a directory/package of libraries "
+    "is audited per member (--select/--select-required apply) into one "
+    "report. The OLD side is recorded with "
     "the 'declared_absent' acquisition state. Replaces `scan`'s "
     "audit-only mode (no --against): reports candidate-side facts only -- "
     "never an addition, a removal, or a compatibility verdict. "

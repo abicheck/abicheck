@@ -787,11 +787,16 @@ Every JSON report carries a top-level `report_schema_version` field
 > `.schema.json` for scan output (unlike `compare`'s
 > `compare_report.schema.json`).
 >
-> `compare` has two report-schema version markers today, one per report
-> shape: `report_schema_version` above for a two-sided `compare` report, and
+> `compare` has three report-schema version markers today, one per report
+> shape: `report_schema_version` above for a two-sided `compare` report,
 > **`audit_report_schema_version`** for `compare --no-baseline -o
 > json=...`'s single-build audit document (`AUDIT_REPORT_SCHEMA_VERSION`,
-> `abicheck/report/no_baseline_document.py`). The audit document
+> `abicheck/report/no_baseline_document.py`), and
+> **`audit_set_report_schema_version`** for `compare --no-baseline DIR`'s
+> N-library `audit_set` envelope ([`audit_set_report.schema.json`](../reference/schemas/v1/audit_set_report.schema.json)),
+> whose `members[].report` each carry the single-build audit document
+> verbatim and whose root `findings` are every member's findings tagged with
+> `member`. The audit document
 > deliberately carries *only* its own marker and never
 > `report_schema_version`: the compare report's schema tells consumers to
 > accept any matching MAJOR, so stamping an audit there would be a
@@ -800,7 +805,7 @@ Every JSON report carries a top-level `report_schema_version` field
 > which is the rule for every report family, not just these two: `aggregate`
 > is its own document with its own `aggregate_schema_version` (see
 > [`aggregate`'s own report shape](#aggregates-own-report-shape) below), so
-> "two markers" is a fact about `compare`, never a discriminator to apply
+> "three markers" is a fact about `compare`, never a discriminator to apply
 > across all of abicheck's output.
 > `compare`'s own top-level
 > `coverage_warnings` field (e.g. a warning that the two compared binaries

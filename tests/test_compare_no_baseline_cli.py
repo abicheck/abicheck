@@ -789,19 +789,30 @@ def test_the_audit_accepts_a_project_snapshot_package_directory(
     assert kinds_of(from_package.output) == kinds_of(from_file.output)
 
 
-def test_a_release_directory_is_still_a_usage_error(tmp_path: Path) -> None:
-    """The narrowing must not become 'accept any directory'.
+def test_a_release_directory_is_audited_per_member_not_refused(tmp_path: Path) -> None:
+    """One-comparison-product F-23: a directory of libraries is the
+    N-library audit (``compare --no-baseline DIR``), not a usage error.
 
-    A directory of several libraries needs the per-library fan-out this path
-    does not have yet, so it stays a usage error naming that reason.
+    The narrowing this used to pin ("must not become 'accept any
+    directory'") still holds in the sense that matters: the directory is not
+    read as one artifact -- it is audited per member, and an unreadable
+    member is listed with its own state rather than aborting the run or
+    vanishing (``tests/test_compare_no_baseline_set*.py`` own the rest).
+    A header-only ELF stub with no dynamic section is still a readable
+    (empty, symbols-only) artifact, so here the one member is audited.
     """
     plain = tmp_path / "release"
     plain.mkdir()
     (plain / "libfoo.so").write_bytes(b"\x7fELF\x02\x01\x01\x00" + bytes(56))
 
-    result = invoke_cli("compare", "--no-baseline", str(plain))
-    assert result.exit_code == 64, result.output
-    assert "directory of libraries" in result.output
+    result = invoke_cli("compare", "--no-baseline", str(plain), "-o", "json=-")
+    assert result.exit_code != 64, result.output
+    doc = json.loads(result.stdout)
+    assert doc["audit_set"] is True
+    assert [m["display_name"] for m in doc["members"]] == ["libfoo.so"]
+    assert doc["members"][0]["acquisition_state"] == "declared_absent"
+    assert doc["members"][0]["report"]["audit_report_schema_version"]
+    assert doc["exit_code"] == result.exit_code
 
 
 def _in_dir(tmp_path: Path, config_text: str | None):
@@ -858,7 +869,7 @@ def test_a_discovered_configs_scope_reaches_the_audit_runner(
     scope-sensitive would let a silently-dropped setting pass. Both values
     are exercised, since honoring only the default would satisfy one row.
     """
-    import abicheck.frontends.cli.commands.compare_no_baseline as cmd
+    import abicheck.workflows.no_baseline_compare as cmd
 
     work, snapshot = _in_dir(tmp_path, f"scope:\n  public: {str(public).lower()}\n")
     monkeypatch.chdir(work)
@@ -889,7 +900,7 @@ def test_a_discovered_configs_deployment_reaches_the_audit_runner(
     `run_no_baseline_compare` -- previously that function had no
     `env_matrix` parameter at all, so a declared `deployment.runtime_floors`
     was silently invisible to this audit mode."""
-    import abicheck.frontends.cli.commands.compare_no_baseline as cmd
+    import abicheck.workflows.no_baseline_compare as cmd
     from abicheck.environment_matrix import EnvironmentMatrix
 
     work, snapshot = _in_dir(

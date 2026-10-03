@@ -21,6 +21,8 @@ import pytest
 from abicheck import schemas
 from abicheck.buildsource.build_output import BUILD_OUTPUT_SCHEMA
 from abicheck.buildsource.run_plan import RUN_PLAN_SCHEMA_SKIPPED
+from abicheck.report.no_baseline_document import AUDIT_REPORT_SCHEMA_VERSION
+from abicheck.report.no_baseline_set import AUDIT_SET_REPORT_SCHEMA_VERSION
 from abicheck.serialization import SCHEMA_VERSION
 from abicheck.workflows.aggregate import AGGREGATE_SCHEMA_VERSION
 
@@ -44,6 +46,11 @@ class TestSchemasCurrent:
             # branch for why.
             ("run-plan", RUN_PLAN_SCHEMA_SKIPPED),
             ("release", schemas.RELEASE_SCHEMA_VERSION),
+            # `compare --no-baseline` (one candidate) and `compare
+            # --no-baseline DIR` (one-comparison-product F-23) -- two
+            # documents, two independently versioned namespaces.
+            ("audit", AUDIT_REPORT_SCHEMA_VERSION),
+            ("audit-set", AUDIT_SET_REPORT_SCHEMA_VERSION),
         ],
     )
     def test_current_matches_the_owning_constant(self, name, expected):

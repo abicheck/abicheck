@@ -221,6 +221,16 @@ replacement for legacy `mode: scan` with no baseline (see
           # did by default -- see the warning above.
 ```
 
+On the command line, the same audit runs over a whole release:
+`abicheck compare --no-baseline build/lib/` (or a `.deb`/`.rpm`/`.whl`/
+`.tar.*` package, or a stored `ProjectSnapshot` package) audits every
+library it ships, each exactly as `compare --no-baseline <library>` would,
+and writes one `audit_set` report. `--select-required libfoo.so` declares a
+member that must be present (`scope.on_incomplete: block` makes its absence
+fail the run); a run that audits no member at all exits `1`. See
+[Exit codes § `compare --no-baseline DIR`](../reference/exit-codes.md#compare-no-baseline-dir-n-library-audit).
+The Action's own `new-library-set` input does not route here yet.
+
 ### Estimate cost before committing to a depth
 
 `dry-run: 'true'` prints the resolved depth/scope — without comparing

@@ -24,7 +24,8 @@ the lane-coverage bound was accepted (2026-10-02), and slices 9a (the
 deleted, 2026-10-03) are done: `--contract` is `compare`'s one contract
 mechanism and Phase 9 has no executable slice left. A 2026-10-03 re-triage
 of Phase 7's open list found one executable item the stale "P5 open" note had
-hidden: `compare --no-baseline DIR` (acceptance F-23). Retiring
+hidden: `compare --no-baseline DIR` (acceptance F-23), since done (2026-10-03).
+Retiring
 `CompareRequest.scope_public` is a separate, deferred Python-API decision.
 **Effort:** XL · **Risk:** high — this deleted a public command and moved
 capabilities between analysis paths. Phase ordering was the safety mechanism.
@@ -206,8 +207,8 @@ The "Current owner" column is the owner **at the 2026-09-06 audit**; every
 | 13 | Risk-driven evidence selection (`--depth auto`) | `risk.py`, `model/evidence_depth_levels.py` | — | **DELETE** | **Done** (2026-09-09, ruled (b) by ADR-068's second amendment). Unpinned `--depth` resolves to `headers` (`evidence_depth_levels.resolve_unpinned_level`). Documented breaking change: a job relying on escalation must pin its rung |
 | 14 | Risk rule overrides (`--risk-rules`) | `cli_scan_baseline._load_risk_rules` | — | **DELETE** | **Done** (ruled (b)): nothing left to tune once #13 selects nothing; no `risk:` config key |
 | 15 | CPython/`abi3` audit (`--abi3`) | `scan_abi3_resolve.py`, `scan_engine._run_abi3_audit` | `compare` candidate-side enrichment stage | COMPARE-STAGE; floor value is CONFIG (`python.abi3_floor`) | **Done** (Phase 2d). Precondition failure uses the exit-`7` axis. A declared `python.abi3_floor` arms it with no flag (re-verified 2026-10-03) |
-| 16 | Artifact-set / multi-library audit (`--artifact-set`) | `service_scan.run_scan_set`, `bundle.py` | `compare --no-baseline DIR` over ADR-065 members | DELETE (mode); capability preserved | Mode **deleted**. `compare --no-baseline DIR` is not implemented yet (exit 64); its prerequisite, ADR-065 S3 (P5), has landed, so it is the next executable slice |
-| 17 | Set member-identity/provider manifest (`scan --manifest`) | `cli_scan_helpers.load_artifact_set_manifest`; ADR-056; cli-cleanup PR H | `.abicheck.yml` bundle/provider contract, read by the same path | CONFIG | `scan` side deleted; PR H cancelled. Provider resolution is G42's |
+| 16 | Artifact-set / multi-library audit (`--artifact-set`) | `service_scan.run_scan_set`, `bundle.py` | `compare --no-baseline DIR` over ADR-065 members | DELETE (mode); capability preserved | **Done** (2026-10-03, acceptance F-23). Mode deleted; `compare --no-baseline DIR` audits each member of a directory, package archive, or multi-artifact stored package through the same per-candidate sequence as a scalar audit (`workflows/no_baseline_set.py`), with members resolved by the one-sided release resolver both shapes now share (`release_inputs.resolve_release_side`) and ADR-065's acquisition record (`--select`/`--select-required`, `scope.on_incomplete`, D2 inventory proof). One `audit_set` document (`report/no_baseline_set.py`, `audit_set_report.schema.json`). No typed request yet (`known-gaps.md`) |
+| 17 | Set member-identity/provider manifest (`scan --manifest`) | `cli_scan_helpers.load_artifact_set_manifest`; ADR-056; cli-cleanup PR H | `.abicheck.yml` bundle/provider contract, read by the same path | CONFIG | `scan` side deleted; PR H cancelled. Provider resolution is G42's. Member *selection* over a set audit is `--select`/`--select-required` on `compare --no-baseline DIR` (row 16) |
 | 18 | Analysis completeness/assurance | `analysis_assurance`, `--require-complete-analysis` (both commands) | `compare` (already present) | MERGE | **Done.** Flag demoted to `assurance.require_complete` after Phase 6 |
 | 19 | Budget guard (`--budget`) | `scan_engine._check_scan_budget`, `_BudgetOverflow`, exit `5` | `compare --budget`, `ExitDecision` operational axis | ADVANCED KEEP; default in CONFIG | **Done** (Phase 4 commit 2). `deadline.deadline_scope` across resolve + classify; `DiffResult.budget_overflow`; typed API `CompareRequest.budget_s` |
 | 20 | Finding cap (`--max-findings`) | `cli_scan_baseline` summary truncation | — | DELETE | **Done.** Complete machine data is never truncated (7m) |
@@ -938,7 +939,7 @@ open list:
 | `--dump-manifest`, `--include-system-declarations` → capture contract; one capture specification for `dump`/`abicheck-cc`/the Clang plugin | **Unowned.** G34's phases (0, A–D) contain no capture-specification phase, so the pointer named nothing. Needs a plan slice written before it can move; both flags stay `keep` until then |
 | `--severity-preset` merged into policy selection | declined for now — needs gate-activation convergence first. `EffectiveGate` covers single-pair `compare` and the release fan-out, but the `--no-baseline` audit still switches its gate on from the preset's *name* (`policy/audit_gate_exit.py`); no plan slice owns that convergence yet |
 | `--select-required` merged into an expected inventory | P5 has **landed** (ADR-065 S3, 2026-09-06). What is missing is a decision: whether a declared expected-inventory config key should exist at all, since `rulings.py` keeps `--select`/`--select-required` as distinct concepts |
-| `compare --no-baseline DIR` (§3 #16, acceptance F-23) | **Executable** — its prerequisite P5 landed; tracked as the next slice |
+| ~~`compare --no-baseline DIR` (§3 #16, acceptance F-23)~~ | **Done** (2026-10-03) — see §3 row 16 |
 | `dump --compression`, `--dry-run`→`--plan`, `--used-by-manifest`→`--used-by @FILE` | declined with a measurement (7k/7l) |
 
 ### Phase 8 — `deps` convergence (ADR-068 D6) — done
@@ -1120,7 +1121,7 @@ under Phase 0's parity harness while both commands exist.
 | F-20 | `--explain-patterns` does not change the verdict | Verdict/exit identical with and without it, on a fixture where the old implication changed both |
 | F-21 | Live vs. snapshot parity | `compare A.so B.so` ≡ `dump A.so && compare A.json B.so` for the same evidence |
 | F-22 | `--no-baseline` audit | Candidate-side findings present; every one carries an evolution state drawn from `{persistent, not_evaluated}` — ADR-068 D3 permits both against a `declared_absent` OLD and forbids only `introduced`/`resolved`; **no** additions, removals, or compatibility verdict |
-| F-23 | `--no-baseline` over a directory | Replaces `scan --artifact-set`: per-member audit findings, one result document |
+| F-23 | `--no-baseline` over a directory | Replaces `scan --artifact-set`: per-member audit findings, one result document. **Met** (2026-10-03): each member's embedded report equals a scalar `compare --no-baseline <member>` run, an archive equals scalar runs over its extracted files, and every set-shaped operand (directory, tar/tar.gz/tar.xz/tar.bz2, wheel, multi-artifact and degraded stored packages) routes to it (`tests/test_compare_no_baseline_set.py`, `tests/test_no_baseline_set_record.py`) |
 | F-24 | Budget overflow / evidence-contract abort | Exits `5`/`7` from `compare` with the same precedence `scan` had (ADR-064) |
 | F-25 | Not-comparable operands | Exit `6`, no fabricated findings |
 | F-26 | Usage errors | `compare NEW` (one operand, no flag) and `compare --no-baseline OLD NEW` both exit `64` — arity is declared, never inferred |

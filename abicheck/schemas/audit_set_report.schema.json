@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.github.io/abicheck/reference/schemas/v1/audit_set_report.schema.json",
+  "title": "abicheck N-library audit report (audit_set)",
+  "description": "Schema for the JSON document produced by `abicheck compare --no-baseline DIR -o json=...` when the operand is a set of libraries -- a directory, a package archive, or a multi-artifact/degraded stored ProjectSnapshot package (one-comparison-product F-23, ADR-068 D2). One envelope holding, per member, the member's acquisition state and -- when it was audited -- its own single-build audit document verbatim (audit_report.schema.json). OLD is declared absent for every member: `verdict` is always null, `changes` always empty, and no member is ever reported added or removed. Versioned independently via audit_set_report_schema_version; additive changes bump the MINOR component, removals, changed meanings, and fields moved into `required` bump the MAJOR component.",
+  "type": "object",
+  "required": [
+    "audit_set_report_schema_version",
+    "audit_set",
+    "no_baseline",
+    "library",
+    "operand_kind",
+    "verdict",
+    "old_acquisition_state",
+    "changes",
+    "members",
+    "findings",
+    "suppressed_findings",
+    "suppressed_count",
+    "comparison_scope",
+    "exit_axes",
+    "exit_code",
+    "run_outcome"
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "member": {
+      "type": "object",
+      "description": "One member of the set: its acquisition state for this run and, when audited, its own audit document.",
+      "required": [
+        "member",
+        "display_name",
+        "acquisition_state",
+        "required",
+        "reason",
+        "report"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "member": {
+          "type": "string",
+          "description": "The canonical release match key -- the same key a two-sided directory/package compare pairs this library by."
+        },
+        "display_name": {
+          "type": "string",
+          "description": "The on-disk filename when known, else the member key."
+        },
+        "acquisition_state": {
+          "type": "string",
+          "description": "ADR-065 D1's per-member state. `declared_absent` means the member was audited (OLD is declared absent, so the audit is the completed outcome); never `not_supplied`, `available` or `ambiguous` -- an audit pairs nothing.",
+          "enum": [
+            "declared_absent",
+            "expected_not_produced",
+            "failed",
+            "unsupported",
+            "out_of_scope"
+          ]
+        },
+        "required": {
+          "type": "boolean",
+          "description": "False only for a member an explicit --select declared optional."
+        },
+        "reason": {
+          "type": "string"
+        },
+        "error_type": {
+          "type": "string",
+          "description": "The exception class behind a `failed`/`unsupported` audit, when one was raised."
+        },
+        "report": {
+          "description": "The member's own audit document, exactly as `compare --no-baseline <member> -o json=...` emits it (audit_report.schema.json); null when the member was not audited.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "audit_report_schema_version",
+                "no_baseline",
+                "findings",
+                "exit_code"
+              ],
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "taggedFinding": {
+      "type": "object",
+      "description": "One member's finding row (audit_report.schema.json's `finding`), tagged with the member it came from.",
+      "required": [
+        "member",
+        "kind",
+        "verdict",
+        "category"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "member": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "evolution": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Never `introduced` or `resolved`: no member has a baseline to evolve from.",
+          "enum": [
+            "persistent",
+            "not_evaluated",
+            null
+          ]
+        }
+      }
+    }
+  },
+  "properties": {
+    "audit_set_report_schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "This envelope's own MAJOR.MINOR version, currently \"1.0\". Each member report carries its own audit_report_schema_version."
+    },
+    "audit_set": {
+      "const": true
+    },
+    "no_baseline": {
+      "const": true,
+      "description": "The marker every no-baseline consumer recognizes an audit by."
+    },
+    "library": {
+      "type": "string",
+      "description": "The operand's name (the directory or archive basename)."
+    },
+    "operand_kind": {
+      "type": "string",
+      "enum": [
+        "directory",
+        "package"
+      ]
+    },
+    "new_version": {
+      "type": "string",
+      "description": "The candidate version when every audited member agrees on one, else empty."
+    },
+    "verdict": {
+      "type": "null",
+      "description": "Always null: an audit reports no compatibility verdict."
+    },
+    "old_acquisition_state": {
+      "const": "declared_absent"
+    },
+    "changes": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/member"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/taggedFinding"
+      }
+    },
+    "suppressed_findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/taggedFinding"
+      }
+    },
+    "suppressed_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "comparison_scope": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "ADR-065's completeness section over the set's own acquisition record (report/comparison_scope.py) -- the same shape a directory/package compare carries. `proven_removed`/`proven_added` are always empty."
+    },
+    "contract_coverage_exit_contribution": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The max of every audited member's own contribution."
+    },
+    "contract_coverage_failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "member"
+        ],
+        "additionalProperties": true
+      },
+      "description": "Every audited member's coverage failures, tagged by member; present only under --contract."
+    },
+    "exit_axes": {
+      "type": "object",
+      "description": "Each axis's contribution; `exit_code` is their max. audit_gate/contract_coverage/analysis_assurance/evidence_contract are the max over every audited member's own axis; operational_error is 4 when a member's audit failed (the same contribution a directory/package compare folds for a failed member); incomplete_scope/no_comparison_completed are ADR-065 D6/D7 over the set's record -- so zero audited members exits 1.",
+      "required": [
+        "audit_gate",
+        "contract_coverage",
+        "analysis_assurance",
+        "evidence_contract",
+        "operational_error",
+        "incomplete_scope",
+        "no_comparison_completed"
+      ],
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "exit_code": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "run_outcome": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "compatibility": {
+          "type": "null"
+        },
+        "assurance": {
+          "type": "null",
+          "description": "Per-member assurance lives in each member report's own run_outcome."
+        },
+        "operational": {
+          "type": "string",
+          "enum": [
+            "none",
+            "evidence_contract_error",
+            "extraction_error",
+            "no_comparison_completed"
+          ]
+        }
+      }
+    },
+    "policy": {
+      "type": "string"
+    },
+    "disposition_audit": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Every audited member's ADR-067 disposition audit, folded (report.disposition_audit.fold_disposition_audits)."
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
