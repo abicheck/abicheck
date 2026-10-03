@@ -477,6 +477,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # The S2 pre-scan never received the configured compiler.
             # Oracle: the option's documented selection rules, and L4's pick.
             "tests/test_preprocessor_scan_compiler.py",
+            # The coverage and scope notices advised the setting the run
+            # already had. Oracle: the settings' documented meaning.
+            "tests/test_notice_advice_matches_setting.py",
         ),
         known_gaps=(
             KnownGap(

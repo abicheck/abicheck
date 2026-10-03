@@ -65,6 +65,13 @@ CLI_MITIGATION = (
     "or set contract.unresolved=warn to accept incomplete coverage."
 )
 
+#: :data:`CLI_MITIGATION` for a run whose ``contract.unresolved=warn``
+#: already accepted the failures: advising it again would send the reader
+#: looking for a change that changes nothing.
+_MITIGATION_WHEN_ACCEPTED = (
+    "Use -o json=... for the full contract_coverage_failures ledger."
+)
+
 
 def coverage_exit_for_context(ctx: Any) -> int:
     """The exit floor a persisted contract context imposes (``0``/``1``).
@@ -143,7 +150,8 @@ def _coverage_message(where: list[str], floor: int, base_exit: int) -> str:
     """The one wording, so the two entry points cannot describe it differently.
 
     What fell short, what that did to the exit code, and then
-    :data:`CLI_MITIGATION` -- how to see the rest and how to accept it.
+    :data:`CLI_MITIGATION` -- how to see the rest and how to accept it, the
+    second half only while the run has not already accepted it.
     """
     if floor == 0:
         # `contract.unresolved=warn` accepted these. Staying silent here
@@ -170,7 +178,7 @@ def _coverage_message(where: list[str], floor: int, base_exit: int) -> str:
         "Contract coverage incomplete for the selected --contract domain: "
         + ", ".join(where)
         + f". {effect}. "
-        + CLI_MITIGATION
+        + (_MITIGATION_WHEN_ACCEPTED if floor == 0 else CLI_MITIGATION)
     )
 
 

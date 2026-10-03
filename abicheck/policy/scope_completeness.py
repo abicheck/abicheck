@@ -68,12 +68,20 @@ __all__ = [
 INCOMPLETE_SCOPE_POLICIES: tuple[str, ...] = ("warn", "block")
 DEFAULT_INCOMPLETE_SCOPE_POLICY = "warn"
 
-#: How a CLI user turns the warning into a gate, or closes the gap.
+#: How a CLI user closes the gap, or turns the warning into a gate.
 CLI_MITIGATION = (
     "Supply the missing members (or compare one artifact against its own "
     "counterpart), or set scope.on_incomplete: block in .abicheck.yml to "
     "fail the run on an incompletely checked scope. -o json=... carries "
     "the full comparison_scope record."
+)
+
+#: :data:`CLI_MITIGATION` for a run already under ``block``: advising the
+#: setting the run already has would send the reader looking for a change
+#: that changes nothing.
+_MITIGATION_UNDER_BLOCK = (
+    "Supply the missing members (or compare one artifact against its own "
+    "counterpart). -o json=... carries the full comparison_scope record."
 )
 
 
@@ -227,7 +235,8 @@ def incomplete_scope_diagnostic(
             f"Contributes {floor}, below the compatibility axis's own exit "
             f"{base_exit}, which stands"
         )
-    return f"{what} {effect}. {CLI_MITIGATION}"
+    mitigation = _MITIGATION_UNDER_BLOCK if effective == "block" else CLI_MITIGATION
+    return f"{what} {effect}. {mitigation}"
 
 
 #: How many member names one state's group spells out before "+N more".
