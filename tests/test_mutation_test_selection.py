@@ -202,9 +202,17 @@ def test_the_mutmut_lane_reads_the_committed_selection() -> None:
 
 def test_the_committed_selection_is_well_formed() -> None:
     """Sorted, unique, and every entry an existing test file -- a cheap
-    always-on check; completeness itself is the weekly --check."""
+    always-on check; completeness itself is the weekly --check.
+
+    The one other legal content is ``gen.FULL_SELECTION``: the mutation lane
+    rewrites this file in place with ``mutation_scope extend-selection``
+    before mutmut's stats pass, which runs this test, and a PR that changes a
+    shared test module (``conftest.py``, a helper) widens it to the whole
+    suite. Rejecting that would fail every such PR's mutation lane."""
     lines = gen.read_selection()
     assert lines, "an empty selection would make the stats pass run nothing"
+    if lines == gen.FULL_SELECTION:
+        return
     assert lines == sorted(set(lines))
     missing = [p for p in lines if not (REPO / p).is_file()]
     assert not missing, f"selection names files that do not exist: {missing}"
@@ -242,6 +250,18 @@ def test_extend_selection(
     changed: list[str], present: set[str], expected: list[str]
 ) -> None:
     assert scope.extend_selection(_SEL, changed, _exists(present)) == expected
+
+
+def test_a_widened_selection_is_well_formed(tmp_path: Path, monkeypatch) -> None:
+    """What ``extend-selection`` writes for a changed shared test module must
+    pass the well-formedness check the stats pass then runs over it."""
+    sel = tmp_path / "selection.txt"
+    widened = scope.extend_selection(_SEL, ["tests/conftest.py"], lambda p: True)
+    assert widened == gen.FULL_SELECTION
+    sel.write_text("\n".join(widened) + "\n", encoding="utf-8")
+    read = gen.read_selection
+    monkeypatch.setattr(gen, "read_selection", lambda: read(sel))
+    test_the_committed_selection_is_well_formed()
 
 
 def test_extend_selection_never_narrows() -> None:
