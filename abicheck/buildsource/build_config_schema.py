@@ -48,6 +48,7 @@ from collections.abc import Callable
 
 from ..environment_matrix import EnvironmentMatrix
 from ..model.bundle_variants import BUNDLE_VARIANTS_KEY, bundle_variants_findings
+from .build_config_contract import CONTRACT_KEY, contract_findings
 from .build_config_scope import (
     OWNERSHIP_LIST_KEYS,
     dependencies_findings,
@@ -272,6 +273,7 @@ def _bundle_variants_block_findings(value: object) -> list[str]:
 
 WHOLE_BLOCK_VALIDATORS: dict[str, Callable[[object], list[str]]] = {
     "deployment": deployment_findings,
+    CONTRACT_KEY: contract_findings,
     BUNDLE_VARIANTS_KEY: _bundle_variants_block_findings,
 }
 

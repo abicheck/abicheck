@@ -458,8 +458,9 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "retired --scope-public-headers into --contract. Same rule: never "
         "trade a possible false negative for a shorter CLI.",
         blocker=(
-            "one-comparison-product Phase 9c: a `contract.overlays` config "
-            "home feeding the existing post_manifest provider"
+            "one-comparison-product Phase 9d: delete the option now that "
+            "Phase 9c gave it a config home (.abicheck.yml's "
+            "contract.overlays.post_manifest)"
         ),
     ),
     "--instantiation-manifest": _deferred(

@@ -93,6 +93,10 @@ from .frontends.cli.compare_report import (
     _render_compare_report as _render_compare_report,
 )
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
+from .frontends.cli.contract_overlays import (
+    post_manifest_allowlist_for,
+    reject_or_note_unapplied_post_manifest,
+)
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.ownership_config import project_ownership_request
 from .frontends.cli.runtime import (
@@ -116,7 +120,6 @@ from .workflows.public_header_boundary import (
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
-    from .model import AbiSnapshot
     from .model.consumer_spec import ConsumerAppInput
     from .workflows.extraction import DumpManifest
     from .workflows.policy_file import PolicyFile
@@ -270,30 +273,6 @@ def _needs_inline_embed(
         _raw_evidence(p)
         for p in (old_sources, new_sources, old_build_info, new_build_info)
     )
-
-
-def _resolve_post_manifest_allowlist(
-    post_manifest_path: Path | None,
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-) -> set[str] | None:
-    """Resolve the --post-manifest committed public surface, or ``None``.
-
-    The manifest *is* the authoritative public surface, so this drives
-    FilterNonPublicSurface directly (no header provenance needed) — private
-    ``__pp_*`` kernel churn is demoted. Union with the binaries' committed
-    (``pp_*``) exports so a *removed* wrapper — absent from a new manifest — stays
-    in-surface instead of being silently demoted.
-    """
-    if post_manifest_path is None:
-        return None
-    from .post_manifest import contract_scope_allowlist, load_manifest
-
-    try:
-        manifest = load_manifest(post_manifest_path)
-    except (ValueError, OSError) as exc:
-        raise click.UsageError(f"--post-manifest {post_manifest_path}: {exc}") from exc
-    return contract_scope_allowlist(manifest, old, new)
 
 
 def _classify_and_reject_operands(
@@ -1403,6 +1382,12 @@ def run_compare(
             budget=budget,
             pdb_path=pdb_path,
         )
+        reject_or_note_unapplied_post_manifest(
+            post_manifest_path,
+            project_cfg,
+            route="a directory/package comparison",
+            reason="the per-library fan-out has no contract-overlay channel",
+        )
         # Codex review, fresh evidence ("Validate release-only view
         # restrictions before dry-run exit"): --view leaf/root-cause is
         # rejected for a directory/package operand inside
@@ -2070,8 +2055,8 @@ def run_compare(
 
     # --post-manifest: scope the comparison to the POST manifest's committed
     # `pp_*`/ufunc-loop surface (private __pp_* kernel churn is demoted).
-    post_manifest_allowlist = _resolve_post_manifest_allowlist(
-        post_manifest_path, old, new
+    post_manifest_allowlist = post_manifest_allowlist_for(
+        post_manifest_path, project_cfg, cfg_path, old, new
     )
 
     # ADR-068 D4 (the correctness fix this phase exists for): pattern-verdict

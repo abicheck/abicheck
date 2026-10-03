@@ -377,6 +377,15 @@ def _resolve_no_baseline_invocation(
         config=kwargs.get("config"),
         severity_preset=None,
     )
+    from ..contract_overlays import reject_or_note_unapplied_post_manifest
+
+    # The flag itself is already rejected by the audit's own rulings table.
+    reject_or_note_unapplied_post_manifest(
+        None,
+        _project_cfg,
+        route="a --no-baseline audit",
+        reason="an overlay scopes a contract across two sides",
+    )
     scope = _ScopeChoices(
         scope_to_public_surface=bool(resolved_cfg.scope_public),
         collapse_versioned_symbols=bool(

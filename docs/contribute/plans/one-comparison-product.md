@@ -19,8 +19,9 @@ relevance-defect blockers in
 **closed** (2026-10-01; see [Phase 9](#phase-9-contract-mechanism-consolidation-gated-may-not-start-early)),
 the lane-coverage bound was accepted (2026-10-02), and slices 9a (the
 `--contract all` scope fix) and 9b (`--scope-public-headers`/`--no-` deleted,
-2026-10-03) are done. What remains is 9c/9d, `--post-manifest` as a contract
-overlay.
+2026-10-03) and 9c (`--post-manifest`'s config home,
+`contract.overlays.post_manifest`, 2026-10-03) are done. What remains is 9d,
+deleting `--post-manifest`.
 **Effort:** XL · **Risk:** high — this deleted a public command and moved
 capabilities between analysis paths. Phase ordering was the safety mechanism.
 
@@ -924,7 +925,7 @@ authoritative open list:
 
 | Item | Where it is |
 |---|---|
-| `--post-manifest` → a contract overlay (`--scope-public-headers` was retired in 9b) | Phase 9c/9d — unblocked, next |
+| `--post-manifest` deleted (config home landed in 9c; `--scope-public-headers` was retired in 9b) | Phase 9d — unblocked, next |
 | `--instantiation-manifest`, `--use-cases`, `--bundle-facts-library-manifest`, `--bundle-facts-out` | `deferred`/keep rulings with named blockers in `rulings.py` |
 | `--follow-deps`/`--search-path`/`--ld-library-path` → one `--environment` operand | G42 |
 | `--abi3` armed from a declared floor | G26 |
@@ -1020,9 +1021,30 @@ F2 route-parity harness's axis moved from a Click parameter to a config key
 (`Axis.config_keys`), keeping the typed-API default guard through
 `CONFIG_DEFAULT_MAP`.
 
-**Remaining slices.** 9c gives `--post-manifest` a `contract.overlays`
-config home on the existing `post_manifest` provider; 9d deletes the option.
-Retiring `scope.public`/`CompareRequest.scope_public` is a separate
+**9c — `--post-manifest`'s config home. Done** (2026-10-03).
+`.abicheck.yml`'s `contract:` block, `overlays: {post_manifest: PATH}`, feeds
+the same allowlist and the same `post_manifest` evidence provider the flag
+does; a relative path resolves against the project root
+(`project_root_for_config`), and the Action's config relocation rewrites it
+like `compile.include_dirs`. Flag > config for one run. Schema and parsing
+live in `buildsource/build_config_contract.py` (strict loading: unknown
+overlay kinds and empty paths fail), route decisions in
+`frontends/cli/contract_overlays.py`. Found while wiring it: the release
+fan-out never received `--post-manifest`, so a directory/package comparison
+accepted and silently ignored it. The flag is now exit 64 there, and the
+config key is a stderr note (a project property, not this invocation's;
+an unapplied narrowing overlay can only add findings). Same split on the
+`--no-baseline` audit; a stored-bundle-facts baseline rejects the `contract:`
+block with the other blocks it cannot honour. `tests/test_post_manifest_config_overlay.py`
+uses the flag as the oracle across three sibling pair shapes. The resolved
+`ContractConfig.overlays` field is still not populated from either spelling,
+and a pack assigning it stays rejected (`UNAPPLIED_PACK_FIELDS`); the
+persisted `post_manifest` provider record (under `--contract`) carries the applied allowlist and its digest, identically for either spelling — it does not record which spelling or path selected it.
+
+**Remaining slices.** 9d deletes `--post-manifest` (exit 64), leaving
+`contract.overlays.post_manifest` as its only spelling. Extending overlays
+to the release fan-out would need a per-library manifest shape, which no
+project has asked for. Retiring `scope.public`/`CompareRequest.scope_public` is a separate
 Python-API decision. One asymmetry that decision should settle: the typed
 API always states `scope_public` (default `True`) at the `legacy_alias`
 layer, while a no-flag CLI run now resolves `contract.mode` from the

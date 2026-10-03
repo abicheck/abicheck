@@ -484,6 +484,9 @@ def reject_unsupported_options(
             # driver's own JSON rendering never re-merges redundant_changes
             # the way ordinary `compare` does.
             _unsupported_config_blocks.append("scope:")
+        if _bc.contract_post_manifest is not None:
+            # Phase 9c: the config spelling of --post-manifest, rejected above.
+            _unsupported_config_blocks.append("contract:")
         if (
             _bc.suppression_strict is not None
             or _bc.suppression_require_justification is not None

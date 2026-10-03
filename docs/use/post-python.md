@@ -87,6 +87,21 @@ The manifest surface is authoritative, so this works independently of
 public-header scoping; the filtered ledger is always reported so a clean
 verdict never hides that filtering happened.
 
+**Make it a project setting.** The manifest is a stable property of the
+project, so state it once in `.abicheck.yml` instead of on every run:
+
+```yaml
+contract:
+  overlays:
+    post_manifest: python/abi/manifest.json   # relative to the project root
+```
+
+`--post-manifest` still overrides the key for one run. The overlay applies to
+a single-pair `compare`. A directory/package comparison and a
+`compare --no-baseline` audit note on stderr that they do not apply it;
+passing `--post-manifest` to either is a usage error (exit `64`). See
+[`contract:`](../reference/config-file.md#contract).
+
 !!! note "Removed symbols and the `pp_*` namespace"
     When you point `--post-manifest` at the **new** manifest, a committed
     wrapper that was *removed* in the release is no longer listed there. Binary

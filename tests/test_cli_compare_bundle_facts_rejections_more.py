@@ -615,3 +615,32 @@ class TestStoredPairExplicitCompileConfig:
         )
         assert code == 64
         assert "No such option" in out
+
+
+def test_config_contract_overlay_is_rejected(tmp_path: Path) -> None:
+    """One-comparison-product Phase 9c: contract.overlays.post_manifest is
+    --post-manifest's config spelling, and the stored-bundle-facts driver has
+    no channel for either -- rejected with the other config blocks it cannot
+    honour. (The retired --no-scope-public-headers' config spelling,
+    scope.public: false, is rejected the same way as a scope: block.)"""
+    facts_path = tmp_path / "old.bundlefacts.json"
+    facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    config_path = tmp_path / ".abicheck.yml"
+    config_path.write_text("contract:\n  overlays:\n    post_manifest: m.json\n")
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(config_path),
+            "-o",
+            "json=-",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "contract:" in result.output
+    assert "No such option" not in result.output

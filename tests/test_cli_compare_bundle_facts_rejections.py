@@ -446,27 +446,6 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--pack" in out
 
-    def test_no_scope_public_headers_is_rejected(self, tmp_path: Path) -> None:
-        # Codex review: --no-scope-public-headers has no channel into
-        # compare_release_against_bundle_facts() -- the driver always scopes
-        # to the public surface via service.compare_snapshots's own default.
-        facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
-        new_dir = tmp_path / "new"
-        new_dir.mkdir()
-
-        code, out = _invoke(
-            "compare",
-            str(facts_path),
-            str(new_dir),
-            "--no-scope-public-headers",
-            "-o",
-            "json=-",
-        )
-
-        assert code == 64
-        assert "--no-scope-public-headers" in out
-
     def test_debug_info_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: this driver resolves NEW-side ELF/DWARF facts
         # directly from the binary itself and has no debug-dir parameter to
