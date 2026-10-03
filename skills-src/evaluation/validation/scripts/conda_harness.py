@@ -288,6 +288,8 @@ def run_abicheck(
     old_ver: str,
     new_ver: str,
     extra_args: Sequence[str] = (),
+    *,
+    timeout: float | None = None,
 ) -> dict | None:
     """Run ``abicheck compare`` on two .so files and return the parsed JSON.
 
@@ -308,7 +310,9 @@ def run_abicheck(
         f"json={out_path}",
         *extra_args,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # TimeoutExpired propagates: a caller budgeting a run decides what a
+    # timeout means (run_compat_corpus records it as "not evaluated").
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     try:
         data = json.loads(Path(out_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

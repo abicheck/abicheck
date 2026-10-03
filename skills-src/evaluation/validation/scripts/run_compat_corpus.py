@@ -45,8 +45,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -360,8 +362,21 @@ def evidence_args(entry: dict, work: Path) -> list[str]:
     return args
 
 
-def run_pair(entry: dict, work: Path, subdir: str = "linux-64") -> dict:
-    """Fetch, extract and compare every shared object common to both builds."""
+def run_pair(
+    entry: dict,
+    work: Path,
+    subdir: str = "linux-64",
+    *,
+    compare_timeout: float | None = None,
+) -> dict:
+    """Fetch, extract and compare every shared object common to both builds.
+
+    *compare_timeout* bounds each ``abicheck compare`` (seconds). A compare
+    that exceeds it is recorded as that library's error -- so the pair reads
+    "not evaluated" and the gate fails on it -- rather than consuming the
+    whole job: the first header-aware run spent 93 minutes on one protobuf
+    pair and was cancelled before six other pairs started.
+    """
     sys.path.insert(0, str(SCRIPTS_DIR))
     import conda_harness as ch
 
@@ -386,18 +401,30 @@ def run_pair(entry: dict, work: Path, subdir: str = "linux-64") -> dict:
     extra = evidence_args(entry, work)
     result["evidence"] = list(extra)
     for name in sorted(set(sides["old"]) & set(sides["new"])):
-        report = ch.run_abicheck(
-            sides["old"][name],
-            sides["new"][name],
-            entry["old_ver"],
-            entry["new_ver"],
-            extra,
-        )
-        result["libraries"][name] = (
+        started = time.monotonic()
+        try:
+            report = ch.run_abicheck(
+                sides["old"][name],
+                sides["new"][name],
+                entry["old_ver"],
+                entry["new_ver"],
+                extra,
+                timeout=compare_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            result["libraries"][name] = {
+                "verdict": None,
+                "counts_by_kind": {},
+                "error": f"compare timed out after {compare_timeout:.0f}s",
+            }
+            continue
+        lib = (
             summarize_report(report)
             if report is not None
             else {"verdict": None, "counts_by_kind": {}, "error": "no report"}
         )
+        lib["compare_s"] = round(time.monotonic() - started, 1)
+        result["libraries"][name] = lib
     if any(lib.get("error") for lib in result["libraries"].values()):
         result["error"] = "abicheck produced no report for at least one library"
     return result
@@ -410,6 +437,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument(
         "--only", action="append", default=[], help="run only this pair id (repeatable)"
+    )
+    ap.add_argument(
+        "--library",
+        action="append",
+        default=[],
+        help="run only the pairs of this corpus `library` (repeatable); the "
+        "workflow's per-library matrix uses this",
+    )
+    ap.add_argument(
+        "--compare-timeout",
+        type=float,
+        default=None,
+        help="seconds allowed per `abicheck compare`; a compare that exceeds "
+        "it is recorded as that pair's error (not evaluated)",
     )
     ap.add_argument(
         "--results-dir",
@@ -427,6 +468,11 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             ap.error(f"unknown pair(s): {sorted(unknown)}")
         corpus = [e for e in corpus if e["pair"] in args.only]
+    if args.library:
+        unknown = set(args.library) - {e["library"] for e in corpus}
+        if unknown:
+            ap.error(f"unknown library(ies): {sorted(unknown)}")
+        corpus = [e for e in corpus if e["library"] in args.library]
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, dict] = {}
@@ -442,7 +488,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"== {pid}", file=sys.stderr)
             with tempfile.TemporaryDirectory() as tmp:
-                results[pid] = run_pair(entry, Path(tmp))
+                results[pid] = run_pair(
+                    entry, Path(tmp), compare_timeout=args.compare_timeout
+                )
         results[pid]["totals"] = pair_totals(results[pid])
         (args.out_dir / f"{pid}.json").write_text(
             json.dumps(results[pid], indent=2) + "\n", encoding="utf-8"
