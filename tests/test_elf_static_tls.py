@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -177,6 +178,10 @@ def _has_any_tls_dynamic_evidence(so: Path) -> bool:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="builds and reads ELF shared objects; the host toolchain emits PE/Mach-O elsewhere",
+)
 @pytest.mark.skipif(
     not shutil.which("readelf"), reason="readelf required as the oracle"
 )

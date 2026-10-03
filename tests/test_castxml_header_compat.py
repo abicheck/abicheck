@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -254,6 +255,10 @@ def test_aarch64_target_parses_libstdcxx_float_headers(
 
 @pytest.mark.integration
 @pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="builds and reads ELF shared objects; the host toolchain emits PE/Mach-O elsewhere",
+)
+@pytest.mark.skipif(
     not (_CASTXML and shutil.which("g++")), reason="needs castxml and g++"
 )
 def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> None:
@@ -280,7 +285,7 @@ def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> No
     # Differential test: prove the second configuration really ran without the
     # preamble (separate caches are given by the per-run XDG_CACHE_HOME).
     assert marker.exists(), "sitecustomize did not run; the comparison would be vacuous"
-    if os.uname().machine in ("x86_64", "i686"):
+    if platform.machine() in ("x86_64", "i686"):
         assert (
             with_preamble.declarations.functions,
             with_preamble.declarations.types,

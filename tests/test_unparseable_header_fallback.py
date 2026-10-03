@@ -16,6 +16,10 @@ from pathlib import Path
 import pytest
 
 from abicheck.errors import HeaderToolchainError, SnapshotError
+from abicheck.extract.castxml_header_compat import (
+    AGGREGATE_HEADER_LINE_OFFSET,
+    write_castxml_aggregate,
+)
 from abicheck.extract.unparseable_header_fallback import (
     attribute_failing_headers,
     cross_header_conflicts,
@@ -30,6 +34,31 @@ from abicheck.model.header_exclusion_record import (
 AGG = "/tmp/abicheck-agg-1234.hpp"
 
 
+def _agg_line(i: int) -> int:
+    """The aggregate line that ``#include``s header *i*."""
+    return i + 1 + AGGREGATE_HEADER_LINE_OFFSET
+
+
+@pytest.mark.parametrize("n", [1, 2, 5])
+def test_aggregate_writer_puts_each_header_on_the_line_attribution_assumes(tmp_path, n):
+    """Oracle is the writer's real output, not the offset constant: header
+    ``i``'s include must sit on the line the attribution maps back to ``i``."""
+    headers = [tmp_path / f"h{i}.h" for i in range(n)]
+    for h in headers:
+        h.write_text("")
+    agg = write_castxml_aggregate(headers, ".hpp")
+    try:
+        lines = agg.read_text().splitlines()
+        for i, h in enumerate(headers):
+            assert lines[_agg_line(i) - 1] == f'#include "{h.resolve()}"'
+            stderr = (
+                f"In file included from {agg}:{_agg_line(i)}:\n{h}:1:1: error: boom"
+            )
+            assert attribute_failing_headers(stderr, headers) == {i}
+    finally:
+        shutil.rmtree(agg.parent)
+
+
 def _headers(n: int) -> list[Path]:
     return [Path(f"/inc/h{i}.h") for i in range(n)]
 
@@ -42,13 +71,13 @@ def _stderr_for(active: list[Path], bad: set[Path], style: int) -> str:
             continue
         if style == 0:  # #error directly in the header, reached from the aggregate
             out += [
-                f"In file included from {AGG}:{i + 1}:",
+                f"In file included from {AGG}:{_agg_line(i)}:",
                 f"{h}:3:2: error: Unsupported compiler",
                 '    3 | #error "Unsupported compiler"',
             ]
         elif style == 1:  # error in a private transitive include
             out += [
-                f"In file included from {AGG}:{i + 1}:",
+                f"In file included from {AGG}:{_agg_line(i)}:",
                 f"In file included from {h}:7:",
                 "/inc/detail/x.h:9:1: error: unknown type name 'foo'",
             ]
@@ -115,7 +144,7 @@ def test_transitive_listed_include_drops_only_the_aggregate_input(seed):
                 "stderr",
                 "\n".join(
                     [
-                        f"In file included from {AGG}:{i + 1}:",
+                        f"In file included from {AGG}:{_agg_line(i)}:",
                         f"In file included from {a}:5:",
                         f"{b}:3:2: error: MODE_FROM_A requires C++",
                     ]
@@ -257,7 +286,7 @@ def test_toolchain_failure_is_not_header_specific():
 
 def test_attribution_ignores_warnings():
     headers = _headers(2)
-    stderr = f"In file included from {AGG}:2:\n{headers[1]}:1:1: warning: deprecated"
+    stderr = f"In file included from {AGG}:{_agg_line(1)}:\n{headers[1]}:1:1: warning: deprecated"
     assert attribute_failing_headers(stderr, headers) == set()
 
 
@@ -315,7 +344,7 @@ def _conflict_stderr(active: list[Path], pairs: list[tuple[Path, Path]]) -> str:
         if a not in active or b not in active:
             continue
         out += [
-            f"In file included from {AGG}:{active.index(b) + 1}:",
+            f"In file included from {AGG}:{_agg_line(active.index(b))}:",
             f"{b}:1:16: error: typedef redefinition with different types",
             "    1 | typedef double clashing_t;",
             f"{a}:1:13: note: previous definition is here",
@@ -368,7 +397,7 @@ def test_note_in_same_or_unlisted_header_stays_self_contained(seed):
     note_file = h if seed % 2 else Path("/usr/include/c++/foo.h")
     stderr = "\n".join(
         [
-            f"In file included from {AGG}:{i + 1}:",
+            f"In file included from {AGG}:{_agg_line(i)}:",
             f"{h}:4:1: error: no matching function",
             f"{note_file}:2:1: note: candidate function not viable",
         ]
@@ -383,14 +412,16 @@ def test_real_castxml_redefinition_is_a_conflict(tmp_path):
     b = tmp_path / "b.h"
     a.write_text("typedef int clashing_t;\n")
     b.write_text("typedef double clashing_t;\n")
-    agg = tmp_path / "agg.cpp"
-    agg.write_text(f'#include "{a}"\n#include "{b}"\n')
-    proc = subprocess.run(
-        ["castxml", "--castxml-output=1", "-o", str(tmp_path / "o.xml"), str(agg)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    agg = write_castxml_aggregate([a, b], ".cpp")
+    try:
+        proc = subprocess.run(
+            ["castxml", "--castxml-output=1", "-o", str(tmp_path / "o.xml"), str(agg)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        shutil.rmtree(agg.parent)
     assert proc.returncode != 0
     assert cross_header_conflicts(proc.stderr, [a, b]) == {1}
 
@@ -426,7 +457,7 @@ def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
         )
         for j in range(depth)
     ]
-    frames = [(AGG, target + 1), *inner]
+    frames = [(AGG, _agg_line(target)), *inner]
     err_file = f"/inc/detail/leaf{seed}.h" if depth else str(headers[target])
     stderr = "\n".join(
         [
@@ -444,7 +475,7 @@ def test_gcc_group_does_not_leak_into_the_next_diagnostic():
     headers = _headers(3)
     stderr = "\n".join(
         [
-            *_chain_lines([(AGG, 1), ("/inc/detail/a.h", 2)], "gcc"),
+            *_chain_lines([(AGG, _agg_line(0)), ("/inc/detail/a.h", 2)], "gcc"),
             "/inc/detail/b.h:1:1: error: first",
             "    1 | x",
             f"{headers[2]}:1:1: error: second",

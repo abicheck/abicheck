@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from ..errors import SnapshotError
 from ..model.header_exclusion_record import EXCLUDED_HEADERS_TOOLCHAIN_KEY
+from .castxml_header_compat import AGGREGATE_HEADER_LINE_OFFSET
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -91,7 +92,8 @@ def attribute_failing_headers(stderr: str, headers: Sequence[Path]) -> set[int]:
 
     Each error is attributed through its include chain: an outermost frame
     in the aggregate (a file that is none of *headers*) at line ``N`` names
-    ``headers[N-1]`` (the aggregate includes header ``i`` on line ``i+1``);
+    ``headers[N-1-AGGREGATE_HEADER_LINE_OFFSET]`` (the preamble precedes the
+    headers in the aggregate);
     only without such a frame does the innermost listed file in the chain
     name it. An error nothing in the chain attributes is skipped, never
     guessed at.
@@ -161,12 +163,13 @@ def _attribute(
     located: list[tuple[str, int]], index: dict[str, int], n_headers: int
 ) -> int | None:
     # The aggregate TU's own frame names the top-level input directly: the
-    # aggregate includes header ``i`` on line ``i+1``. Prefer it over any
+    # aggregate includes header ``i`` after the preamble. Prefer it over any
     # inner listed header -- when listed A includes listed B and B fails only
     # under a macro A set, the input to drop is A, not B.
     outer_file, outer_line = located[0]
     if len(located) > 1 and _norm(outer_file) not in index:
-        return outer_line - 1 if 1 <= outer_line <= n_headers else None
+        pos = outer_line - 1 - AGGREGATE_HEADER_LINE_OFFSET
+        return pos if 0 <= pos < n_headers else None
     # No aggregate frame: the innermost listed header in the chain.
     for file, _line in reversed(located):
         idx = index.get(_norm(file))

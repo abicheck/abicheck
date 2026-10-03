@@ -109,6 +109,10 @@ _PROFILES = {
 
 @pytest.mark.integration
 @pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="builds and reads ELF shared objects; the host toolchain emits PE/Mach-O elsewhere",
+)
+@pytest.mark.skipif(
     not (shutil.which("castxml") and shutil.which("c++")),
     reason="needs castxml and c++",
 )

@@ -116,6 +116,13 @@ typedef __attribute__((__neon_vector_type__(2))) double __Float64x2_t;
 """
 
 
+#: Aggregate lines that precede the first header ``#include`` (the preamble).
+#: Header ``i`` is on aggregate line ``i + 1 + AGGREGATE_HEADER_LINE_OFFSET``;
+#: :mod:`abicheck.extract.unparseable_header_fallback` maps diagnostics back
+#: through this, so the writer and the attribution cannot drift apart.
+AGGREGATE_HEADER_LINE_OFFSET = 1
+
+
 def write_castxml_aggregate(headers: Iterable[Path], suffix: str) -> Path:
     """Write the header castxml parses: the preamble, then every *headers* entry.
 
