@@ -105,7 +105,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "AArch64, so every C++ header reaching `<cwchar>` and every header "
             "reaching `<math.h>` failed to parse there."
         ),
-        fixed_by=(1467,),
+        fixed_by=(1470,),
         seed_tests=(
             "tests/test_castxml_header_compat.py",
             "tests/test_family_f8_target_parity.py",
@@ -147,7 +147,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "writes `DF_STATIC_TLS` for initial-exec TLS on x86-64 but not on "
             "AArch64, so `static_tls_introduced` never fired there."
         ),
-        fixed_by=(1467,),
+        fixed_by=(1470,),
         seed_tests=(
             "tests/test_elf_static_tls.py",
             "tests/test_family_f8_target_parity.py",
@@ -184,7 +184,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "recognized, so a cross-target dump kept every libc/libstdc++ "
             "declaration (7,707 functions instead of 7)."
         ),
-        fixed_by=(1467,),
+        fixed_by=(1470,),
         seed_tests=(
             "tests/test_cross_sysroot_system_headers.py",
             "tests/test_family_f8_target_parity.py",

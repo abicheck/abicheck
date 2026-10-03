@@ -1020,7 +1020,7 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "vanished for release builds, stripped libraries and every macOS "
             "dylib, while the headers stated the namespace all along."
         ),
-        fixed_by=(1467,),
+        fixed_by=(1470,),
         seed_tests=(
             "tests/test_record_qualified_name.py",
             "tests/test_family_f1_evidence_ablation.py",
