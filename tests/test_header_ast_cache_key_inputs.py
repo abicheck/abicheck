@@ -154,6 +154,33 @@ class TestInvocationIsInTheKey:
         monkeypatch.setattr(tempfile, "tempdir", str(other))
         assert _key(tmp_path, backend) == first == _key(tmp_path, backend)
 
+    @pytest.mark.parametrize("backend", ["castxml", "clang"])
+    def test_header_order_is_keyed(self, tmp_path, backend) -> None:
+        # Order is part of the parse (an earlier header's macros and
+        # declarations change how later ones parse); the key used to sort the
+        # header paths and served one order's AST for the other.
+        a, b = tmp_path / "a.h", tmp_path / "b.h"
+        a.write_text("#define FROM_A 1\n")
+        b.write_text("int f(void);\n")
+        tool = (
+            ("cc", "gnu", "castxml")
+            if backend == "castxml"
+            else ("clang", "gnu", "False", "False")
+        )
+
+        def key(headers):
+            return cfg._cache_key(
+                headers,
+                [],
+                "cc",
+                backend=backend,
+                invocation_tool=tool,
+                force_cpp=False,
+            )
+
+        assert key([a, b]) != key([b, a])
+        assert key([a, b]) == key([a, b])
+
     def test_probe_key_without_a_tool_is_unchanged_by_generation(
         self, tmp_path, monkeypatch
     ) -> None:

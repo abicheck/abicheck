@@ -60,6 +60,7 @@ NON_SHAPING_MODULES: dict[str, str] = {
     "abicheck.extract.headers.clang.locations": "materializes locations after the cache write",
     "abicheck.storage.acyclic_json": "pauses the garbage collector",
     "abicheck.storage.ast_size_observer": "size telemetry",
+    "abicheck.workflows.memory_trace": "memory telemetry, called through the size observer's hook when installed",
     "abicheck.storage.cache_integrity": "digests the written entry for read-time verification",
     "abicheck.storage.derived_ast": "offers the on-disk document to a derived consumer",
     # The failing-header retry calls back into the run to rebuild clang's
