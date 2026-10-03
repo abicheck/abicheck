@@ -276,3 +276,67 @@ def test_the_action_relocation_keeps_the_overlay_path_pointing_home(
         found_path=root / ".abicheck.yml",
     )
     assert absolute["contract"]["overlays"]["post_manifest"] == "/x/m.json"
+
+
+@pytest.mark.parametrize(
+    "exports",
+    [
+        [],
+        [
+            {
+                "name": "other",
+                "c_symbol": "pp_other",
+                "params": [],
+                "return_dtype": "Float64",
+            }
+        ],
+    ],
+    ids=["empty-manifest", "unrelated-manifest"],
+)
+def test_a_discovered_config_cannot_narrow_the_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exports: list
+) -> None:
+    """Codex security review (P1): a pull request can add or edit the
+    auto-discovered ``.abicheck.yml`` in the very checkout being judged, and a
+    manifest that omits a real export would move its removal out of the gate.
+    Only an explicitly named ``--config`` is trusted to apply the overlay --
+    the trust the retired ``--post-manifest`` flag had by construction. The
+    oracle is the run with no overlay at all: a discovered one must not change
+    its exit code, while the same document named explicitly does."""
+    old_p, new_p = tmp_path / "old.json", tmp_path / "new.json"
+    old_p.write_text(
+        snapshot_to_json(_snap([_fn("public_api"), _fn("pp_x")])), encoding="utf-8"
+    )
+    new_p.write_text(snapshot_to_json(_snap([_fn("pp_x")])), encoding="utf-8")
+    (tmp_path / "m.json").write_text(
+        json.dumps({"post_abi": 1, "exports": exports}), encoding="utf-8"
+    )
+    cfg = _config(tmp_path, _KEY)
+    plain = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
+    assert plain.exit_code == 4, plain.output
+    monkeypatch.chdir(tmp_path)  # cfg is now the auto-discovered config
+    discovered = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
+    assert discovered.exit_code == plain.exit_code, discovered.output
+    assert "contract.overlays.post_manifest is not applied" in discovered.stderr
+    explicit = CliRunner().invoke(
+        main, ["compare", str(old_p), str(new_p), "--config", str(cfg)]
+    )
+    assert explicit.exit_code != plain.exit_code, explicit.output  # the overlay is real
+
+
+def test_the_action_strips_the_overlay_from_a_discovered_config(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from abicheck.action_config_overlay import strip_untrusted_execution_keys
+
+    base = {
+        "contract": {"overlays": {"post_manifest": "m.json"}},
+        "scope": {"public": True},
+    }
+    stripped = strip_untrusted_execution_keys(base)
+    assert stripped["contract"]["overlays"] == {}
+    assert stripped["scope"] == {"public": True}
+    assert base["contract"]["overlays"] == {"post_manifest": "m.json"}  # not mutated
+    assert "contract.overlays.post_manifest was dropped" in capsys.readouterr().err
+    untouched = {"scope": {"public": False}}
+    assert strip_untrusted_execution_keys(untouched) == untouched

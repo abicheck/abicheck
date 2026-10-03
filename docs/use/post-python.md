@@ -69,8 +69,13 @@ contract:
 ```
 
 ```bash
-abicheck compare libmylib.v1.so libmylib.v2.so
+abicheck compare libmylib.v1.so libmylib.v2.so --config .abicheck.yml
 ```
+
+Name the config with `--config`: the overlay narrows what gates, so an
+auto-discovered `.abicheck.yml` (one a pull request could edit) is not
+trusted to apply it, and the run says so on stderr. In the GitHub Action,
+point the `build-config` input at the reviewed config.
 
 - A change to a **committed** symbol (`pp_gammaln` signature change, removal, a
   dropped/renamed ufunc loop) drives the verdict as usual.
@@ -112,7 +117,7 @@ is set) — so it drops straight into a CI gate:
 ```bash
 # Fail the build only on a change to the committed POST surface
 # (with contract.overlays.post_manifest set in .abicheck.yml).
-abicheck compare libmylib.v1.so libmylib.v2.so
+abicheck compare libmylib.v1.so libmylib.v2.so --config .abicheck.yml
 ```
 
 ---

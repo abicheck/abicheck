@@ -328,7 +328,15 @@ contract:
 
 A relative path resolves against the project root, like
 `compile.include_dirs`. This key is the overlay's only spelling (the former
-per-run flag was removed). The overlay applies to a single-pair `compare`
+per-run flag was removed).
+
+**It applies only from a config named with `--config`.** The overlay narrows
+what gates, and an auto-discovered `.abicheck.yml` is one a pull request can
+edit in the very checkout it is judged on, so a discovered value is noted on
+stderr and not applied. This is the same trust boundary `build.query` and
+`compile.compiler` sit behind. The composite Action likewise drops it from a
+discovered config; set its `build-config` input to a reviewed config to opt
+in. The overlay applies to a single-pair `compare`
 only. A directory/package comparison and a `--no-baseline` audit do not
 apply it and say so on stderr (an unapplied narrowing overlay can only add
 findings, never hide one). A stored-bundle-facts baseline rejects the

@@ -2051,10 +2051,11 @@ def run_compare(
         extra_changes, new, _enrich.abi3_floor, new_input.name
     )
 
-    # --post-manifest: scope the comparison to the POST manifest's committed
-    # `pp_*`/ufunc-loop surface (private __pp_* kernel churn is demoted).
+    # contract.overlays.post_manifest: scope the comparison to the POST
+    # manifest's committed `pp_*`/ufunc-loop surface. Narrowing, so only an
+    # explicitly named --config is trusted to apply it.
     post_manifest_allowlist = post_manifest_allowlist_for(
-        project_cfg, cfg_path, old, new
+        project_cfg, cfg_path, old, new, config_explicit=config is not None
     )
 
     # ADR-068 D4 (the correctness fix this phase exists for): pattern-verdict

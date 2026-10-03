@@ -21,7 +21,16 @@ spelling: Phase 9d deleted ``--post-manifest``, which exits 64. This module
 is the one place a ``compare`` route decides what to do with it:
 
 - a single-pair ``compare`` applies it, a relative path resolved against the
-  project root (``config_paths.project_root_for_config``);
+  project root (``config_paths.project_root_for_config``) -- **only from an
+  explicitly named** ``--config``. The overlay narrows what gates (an
+  uncommitted export's change leaves the verdict), so an auto-discovered
+  ``.abicheck.yml`` -- which a pull request can add or edit in the very
+  checkout it is being judged on -- is not trusted to set it: the same trust
+  boundary ``build.query``/``compile.compiler`` already sit behind, and the
+  one the retired ``--post-manifest`` flag had by construction (only the
+  operator typed it). A discovered value is noted on stderr, not applied;
+  the composite Action strips it from a discovered config for the same
+  reason (``action_config_overlay.strip_untrusted_execution_keys``);
 - a route that cannot apply an overlay (the directory/package release
   fan-out, the ``--no-baseline`` audit) states on stderr that it was not
   applied. It is a property of the project, not of this invocation, so it is
@@ -84,6 +93,8 @@ def post_manifest_allowlist_for(
     cfg_path: Path | None,
     old: AbiSnapshot,
     new: AbiSnapshot,
+    *,
+    config_explicit: bool,
 ) -> set[str] | None:
     """The committed public surface of the configured overlay, or ``None``.
 
@@ -93,9 +104,21 @@ def post_manifest_allowlist_for(
     (``pp_*``) exports so a *removed* wrapper -- absent from a new manifest --
     stays in-surface instead of being silently demoted. A document that does
     not load is exit 64 naming the config key.
+
+    *config_explicit* is whether the operator named the config with
+    ``--config``; a discovered config's overlay is noted and not applied
+    (see the module docstring).
     """
     path = resolve_post_manifest_path(project_cfg, cfg_path)
     if path is None:
+        return None
+    if not config_explicit:
+        click.echo(
+            f"Note: the auto-discovered {cfg_path}'s {CONFIG_KEY} is not "
+            "applied: a discovered config is not trusted to narrow the "
+            "compared contract. Name the config with --config to apply it.",
+            err=True,
+        )
         return None
     from ...post_manifest import contract_scope_allowlist, load_manifest
 

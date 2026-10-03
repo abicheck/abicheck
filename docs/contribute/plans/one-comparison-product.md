@@ -1054,6 +1054,17 @@ and the F2 route-parity row. The tests' oracle moved from the flag to
 directly; `tests/_legacy_scope.post_manifest_config_args` is the one test
 spelling.
 
+**Trust boundary (Codex security review on #1477).** Moving the overlay
+from an operator-typed flag into project config also moved it across a
+trust boundary: an auto-discovered `.abicheck.yml` is editable by the pull
+request being judged, and an empty or partial manifest would move a real
+export removal out of the gate. The overlay therefore applies only from an
+explicitly named `--config` (the `build.query`/`compile.compiler`
+precedent); a discovered value is a stderr note, and
+`action_config_overlay.strip_untrusted_execution_keys` drops it from a
+discovered config. `test_a_discovered_config_cannot_narrow_the_gate` uses
+the no-overlay run as its oracle.
+
 **Remaining (not slices of this plan).** Extending overlays to the release
 fan-out would need a per-library manifest shape, which no project has asked
 for. Retiring `scope.public`/`CompareRequest.scope_public` is a separate

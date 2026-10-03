@@ -226,7 +226,10 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
     code/an executable to run -- ``cli_options.py``'s ``compile.compiler``
     gate and ADR-032 D5's ``build.query`` gate exist specifically to
     withhold that from anything but an operator's own explicit
-    ``--config``), and caps (never strips -- a lower value is never a
+    ``--config``), strips ``contract.overlays.post_manifest`` (it narrows
+    what gates; ``frontends/cli/contract_overlays.py`` applies it only from
+    an explicit ``--config``, and this overlay is always explicit), and
+    caps (never strips -- a lower value is never a
     decode-bomb risk) ``resource_limits.max_bundle_facts_decode_nodes`` via
     the identical
     :func:`~abicheck.frontends.cli.commands.compare_bundle_facts_rejections.
@@ -269,6 +272,22 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
             "reviewed) to opt in.",
             file=sys.stderr,
         )
+
+    contract = base.get("contract")
+    overlays = contract.get("overlays") if isinstance(contract, dict) else None
+    if isinstance(contract, dict) and isinstance(overlays, dict):
+        if "post_manifest" in overlays:
+            overlays = {k: v for k, v in overlays.items() if k != "post_manifest"}
+            base["contract"] = {**contract, "overlays": overlays}
+            print(
+                "::warning::the discovered .abicheck.yml's "
+                "contract.overlays.post_manifest was dropped from this "
+                "synthesized --config overlay -- an auto-discovered config is "
+                "never trusted to narrow the compared contract (a pull request "
+                "can edit it); set build-config explicitly (naming a config "
+                "you reviewed) to opt in.",
+                file=sys.stderr,
+            )
 
     resource_limits = base.get("resource_limits")
     if isinstance(resource_limits, dict):
