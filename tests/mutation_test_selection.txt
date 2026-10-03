@@ -682,6 +682,7 @@ tests/unit/report/test_result_counts.py
 tests/unit/report/test_review_groups.py
 tests/unit/report/test_review_sections_html.py
 tests/unit/storage/test_decode_fast_path.py
+tests/unit/storage/test_entity_id_domain_bridge.py
 tests/unit/storage/test_import_baseline_set.py
 tests/unit/storage/test_import_bundle_facts.py
 tests/unit/storage/test_import_v1.py
