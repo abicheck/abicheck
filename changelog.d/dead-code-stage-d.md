@@ -34,3 +34,10 @@
   The release preview repeated input discovery and answered an empty plan
   for a directory with no supported input; it now uses the same discovery as
   the comparison and reports the same error.
+- **A release-level suppression now relabels every copy of a finding.** The
+  lockstep-SONAME suppression a directory/package `compare` applies after
+  each member's disposition ledger closed matched findings by object, so a
+  finding the ledger had recorded through a second producer (an alias of the
+  same observation) kept its earlier disposition in the audit while the
+  report hid it. `DispositionLedger.with_suppressed` now resolves aliases the
+  way every other ledger lookup does.

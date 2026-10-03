@@ -502,7 +502,6 @@
   "tests/test_disposition_audit_coverage.py": 0.16,
   "tests/test_disposition_audit_release_fanout.py": 0.06,
   "tests/test_disposition_audit_states.py": 0.24,
-  "tests/test_disposition_ledger_override.py": 0.02,
   "tests/test_disposition_reclassification.py": 0.05,
   "tests/test_disposition_rule_identity.py": 0.01,
   "tests/test_disposition_scope_matrix.py": 14.25,
