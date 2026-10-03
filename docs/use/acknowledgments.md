@@ -12,18 +12,34 @@ generated: false
 
 # Change acknowledgment
 
-`checker.compare(acknowledgments=...)` (the typed Python API) accepts a
-loaded set of **acknowledgment records** — an explicit, reviewable statement
-that a specific, already-detected change was seen and intentionally
-accepted, as opposed to a [suppression](suppressions.md), which claims the
-finding is a false positive or out of scope.
+`compare` reads **acknowledgment records** — explicit, reviewable statements
+that a specific, already-detected change was seen and intentionally accepted —
+from the file `.abicheck.yml`'s `acknowledgment:` block names. That is unlike
+a [suppression](suppressions.md), which claims the finding is a false positive
+or out of scope.
 
-**Engine-level only today: no native CLI flag yet.** Records are loaded with
-`AcknowledgmentList.load(path)` and passed to `checker.compare(acknowledgments=...)`
-through the typed Python API. `abicheck compare` does not yet have
-a `--acknowledgments PATH` flag to load a document from a run's CLI invocation —
-until that front-end wiring lands, this mechanism is reachable only from code
-calling the Python API directly.
+```yaml
+# .abicheck.yml
+acknowledgment:
+  file: abi/acknowledgments.yml      # the records (format below)
+  unacknowledged_additions: block    # allow (default) | warn | block
+```
+
+A relative `file` resolves against the project root.
+
+**The records load only from a config named with `--config`.** A record
+accepts a finding, which can turn a `block` exit back into `0`. An
+auto-discovered `.abicheck.yml` is one the pull request under review can
+edit, so its `file` is noted on stderr and not loaded, the same trust
+boundary [`contract.overlays`](../reference/config-file.md#contract) has.
+`unacknowledged_additions` applies from any config, because `warn`/`block`
+can only add to what a run reports.
+
+Today this applies to a single-pair `compare`. A directory/package comparison
+notes on stderr that the block was not applied. The typed Python API passes
+records directly (`checker.compare(acknowledgments=AcknowledgmentList.load(path))`)
+and takes the gate from a `--policy` document's own `acknowledgment:` block;
+`CompareRequest` has no field for the records yet.
 
 > Acknowledgment is **not** suppression. A suppressed finding disappears
 > from the report and the gate before the verdict is computed. An
@@ -87,13 +103,12 @@ suppression-only broad-selector key (`symbol_pattern`, `type_pattern`,
 
 ## The additions review gate
 
-A project may configure whether an **unacknowledged public addition**
-should be flagged, via the `--policy` document's `acknowledgment:` block:
-
-```yaml
-acknowledgment:
-  unacknowledged_additions: allow   # allow (default) | warn | block
-```
+A project configures whether an **unacknowledged public addition** is
+flagged with `acknowledgment.unacknowledged_additions` in `.abicheck.yml`
+(above). A `--policy` document may state the same setting in its own
+`acknowledgment:` block; when it does, it wins over `.abicheck.yml`. With a
+gate set and no `file`, nothing is acknowledged, so every public addition
+counts.
 
 - `allow` (the default): no existing run changes.
 - `warn`: every unacknowledged public addition is listed in the
@@ -102,7 +117,10 @@ acknowledgment:
 - `block`: the same list contributes an orthogonal `1` to the exit code —
   raising a clean `0` to `1`, never lowering a real ABI/API-break exit `2`/
   `4` — the same fold [contract coverage](contract-evaluation.md) and
-  [analysis assurance](../reference/exit-codes.md) already use. This never
+  [analysis assurance](../reference/exit-codes.md) already use. The report's
+  `exit` block names it as `additions_review_contribution` (reason
+  `additions_review`), and the GitHub Action publishes the verdict
+  `ADDITIONS_UNACKNOWLEDGED` when it is the only thing that gated the run. This never
   reclassifies the addition itself: its `ChangeKind` and verdict class are
   untouched either way.
 

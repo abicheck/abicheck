@@ -1127,6 +1127,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             "parse_user_depth",
             "fold_coverage_exit",
             "fold_analysis_assurance_exit",
+            "fold_additions_review_exit",
             "compute_section_summary",
             "both_castxml_backed_fact",
             "is_castxml_backed_fact",

@@ -342,6 +342,23 @@ apply it and say so on stderr (an unapplied narrowing overlay can only add
 findings, never hide one). A stored-bundle-facts baseline rejects the
 `contract:` block like the other blocks it cannot honour.
 
+### `acknowledgment:`
+
+ADR-067's acknowledgment records and additions-review gate. `file:` names the
+records document (a relative path resolves against the project root) and
+`unacknowledged_additions:` is `allow` (default), `warn` or `block`.
+
+```yaml
+acknowledgment:
+  file: abi/acknowledgments.yml
+  unacknowledged_additions: block
+```
+
+`file` applies only from a config named with `--config`; a discovered value
+is noted and not loaded. `unacknowledged_additions` applies from any config.
+A `--policy` document stating its own `acknowledgment:` block wins over this
+one. See [Change acknowledgment](../use/acknowledgments.md).
+
 ### `suppression:`
 
 Suppression **hygiene policy** (a project rule, distinct from the suppression

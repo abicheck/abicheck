@@ -4600,6 +4600,18 @@ _scope_gated() {
   [[ "$_contribution" == "1" ]]
 }
 
+# ADR-067 D6's additions-review axis (`.abicheck.yml`'s
+# `acknowledgment.unacknowledged_additions: block`, report schema 5.13): did
+# public additions not covered by an acknowledgment record gate this run?
+# Read from the structured report only; a report without the key cannot say,
+# which is "not gated", the same rule as the sibling axes.
+_additions_gated() {
+  local _src _contribution
+  _src=$(_json_report_src)
+  _contribution=$(_report_query "$_src" additions_review_contribution)
+  [[ "$_contribution" == "1" ]]
+}
+
 # Informational sibling (Codex review): the report recorded an incomplete
 # scope, gating or accepted under `--on-incomplete-scope warn`. Read from the
 # structured report only, like `_scope_gated`, and never a failure signal --
@@ -5299,7 +5311,7 @@ else
       if [[ "$_exit1_validity" != "ok" ]]; then
         VERDICT="ERROR"
         _error_annotation "abicheck exited 1 without a readable JSON result (report: ${_exit1_validity:-none located}), so no severity, coverage, assurance or scope gate can be attributed -- the invocation failed before producing one. See the command's own error output above."
-      elif _coverage_gated || _assurance_gated || _scope_gated; then
+      elif _coverage_gated || _assurance_gated || _scope_gated || _additions_gated; then
         # `compare` shares exit 1 between up to four independent axes
         # (severity policy, ADR-049 contract coverage, P0.4 analysis
         # assurance), so the report's pre-fold `severity.exit_code` is
@@ -5328,12 +5340,22 @@ else
             if _assurance_gated; then
               echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
             fi
-          else
+          elif _assurance_gated; then
             # P0.4's orthogonal analysis-assurance axis alone (no
             # contract-coverage gap this run) -- same "not a break, not a
             # severity-policy failure" shape as the coverage branch above.
             VERDICT="ANALYSIS_INCOMPLETE"
             echo "::warning::abicheck's own evidence was not fully complete under assurance.require_complete (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
+            if _additions_gated; then
+              echo "::warning::abicheck also reports public additions not covered by an acknowledgment record; see disposition_audit.unacknowledged_additions_review in the JSON report."
+            fi
+          else
+            # ADR-067 D6's additions-review axis alone: public additions no
+            # acknowledgment record covers, under
+            # acknowledgment.unacknowledged_additions: block. Policy
+            # acceptance, not a break -- the additions keep their verdict.
+            VERDICT="ADDITIONS_UNACKNOWLEDGED"
+            echo "::warning::abicheck found public additions that no acknowledgment record covers, under acknowledgment.unacknowledged_additions: block (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see disposition_audit.unacknowledged_additions_review in the JSON report."
           fi
         else
           # Either severity gated too, or there is no readable JSON report
@@ -5348,6 +5370,9 @@ else
           fi
           if _scope_gated; then
             echo "::warning::abicheck also reports an incompletely checked comparison scope; see comparison_scope in the JSON report."
+          fi
+          if _additions_gated; then
+            echo "::warning::abicheck also reports public additions not covered by an acknowledgment record; see disposition_audit.unacknowledged_additions_review in the JSON report."
           fi
         fi
       elif [[ "${_NO_BASELINE:-false}" == "true" ]]; then
@@ -5697,6 +5722,10 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         else
           echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
         fi
+        ;;
+      ADDITIONS_UNACKNOWLEDGED)
+        # ADR-067 D6's additions-review axis (exit code 1).
+        echo "> **Verdict: ADDITIONS_UNACKNOWLEDGED** ⚠️ — Public additions are not covered by an acknowledgment record, and \`acknowledgment.unacknowledged_additions\` is \`block\`. This is **not** an ABI/API break and **not** a severity-policy failure — the additions keep their verdict. Acknowledge them in the records file \`acknowledgment.file\` names, or relax the setting to \`warn\`; see \`disposition_audit.unacknowledged_additions_review\` in the JSON report."
         ;;
       PASS)
         echo "> **Verdict: PASS** — Binary loads and no harmful ABI changes detected."
@@ -6322,6 +6351,14 @@ else
   # pass under any setting (D7).
   if _scope_gated; then
     echo "::error::abicheck's comparison scope was not fully checked (an unchecked selected member under scope.on_incomplete: block, or no comparison completed at all); see comparison_scope in the JSON report."
+    FINAL_EXIT=1
+  fi
+
+  # ADR-067 D6's additions-review axis, unconditional for the same reason:
+  # `acknowledgment.unacknowledged_additions: block` is the project's own
+  # choice and no fail-on-* input governs it.
+  if _additions_gated; then
+    echo "::error::abicheck found public additions that no acknowledgment record covers, under acknowledgment.unacknowledged_additions: block; see disposition_audit.unacknowledged_additions_review in the JSON report."
     FINAL_EXIT=1
   fi
 fi

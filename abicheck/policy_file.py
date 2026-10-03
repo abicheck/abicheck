@@ -74,12 +74,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .errors import PolicyError
-from .model.change_catalog.kinds import ChangeKind
-from .model.change_catalog.registry import VALID_BASE_POLICIES
-from .policy.acknowledgment_policy import (
+from .model.acknowledgment_policy import (
     AcknowledgmentPolicy,
     built_in_default_acknowledgment_policy,
 )
+from .model.change_catalog.kinds import ChangeKind
+from .model.change_catalog.registry import VALID_BASE_POLICIES
 from .policy.classification import Verdict, compute_verdict, policy_kind_sets
 from .policy.policy_file_namespaces import (
     parse_experimental_namespaces,

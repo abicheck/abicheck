@@ -48,6 +48,17 @@
   had no emitter. `deployment.runtime_floors.NUMPY_REQUIREMENT` declares the
   requirement by hand.
 
+- `compare` loads ADR-067 acknowledgment records and the additions-review
+  gate from `.abicheck.yml`'s new `acknowledgment:` block (`file`,
+  `unacknowledged_additions: allow|warn|block`). The records load only from a
+  config named with `--config`; a discovered config's `file` is noted and not
+  loaded. A `--policy` document's own `acknowledgment:` block outranks the
+  config's, and is now honored by the CLI too. Under `block`, unacknowledged
+  public additions raise a clean exit to `1` (reason `additions_review`), and
+  the GitHub Action publishes the verdict `ADDITIONS_UNACKNOWLEDGED`.
+  Single-pair `compare` only; a directory/package comparison notes the block
+  as unapplied.
+
 ### Fixed
 
 - A directory/package `compare` no longer treats a non-binary file whose

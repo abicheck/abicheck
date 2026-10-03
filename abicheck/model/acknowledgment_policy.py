@@ -15,7 +15,8 @@
 
 """ADR-067 D6: the additions review gate's typed policy value.
 
-A leaf model type, mirroring :mod:`abicheck.policy.versioning_policy`'s own
+A leaf model type (it lives in ``model`` so both ``policy`` and the
+``.abicheck.yml`` parser read one vocabulary), mirroring :mod:`abicheck.policy.versioning_policy`'s own
 shape (a small frozen dataclass plus a ``built_in_default_*`` factory) — see
 that module's sibling parser (:mod:`abicheck.policy_file_versioning`) for the
 pattern this module's own parser (:mod:`abicheck.policy_file_acknowledgment`)

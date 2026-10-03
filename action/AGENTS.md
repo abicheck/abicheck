@@ -564,3 +564,17 @@ the compare exit-1 dispatch (verdict `SCOPE_INCOMPLETE`),
 the job-summary case (`scope_where` names the unchecked members), the
 "also contributed" note, and an unconditional `FINAL_EXIT=1`, since no
 `fail-on-*` input governs the axis. Tests: `tests/test_action_scope_verdict.py`.
+
+## ADR-067 D6 additions-review axis (`ADDITIONS_UNACKNOWLEDGED`)
+
+`_additions_gated()` mirrors `_scope_gated()`: it reads `_report_query ...
+additions_review_contribution`, the root `exit` block's
+`additions_review_contribution` (report schema 5.13), and a report without
+the key answers "cannot tell" (empty), which is "not gated". It joins the
+compare exit-1 dispatch after coverage/scope/assurance (verdict
+`ADDITIONS_UNACKNOWLEDGED` when it is the only axis that fired with no
+severity gate), adds an "also reports" warning beside the others, has its
+own job-summary case, and sets an unconditional `FINAL_EXIT=1`, since no
+`fail-on-*` input governs it. Tests: `tests/test_action_additions_verdict.py`,
+which replays reports produced by the real `compare` CLI rather than
+hand-written ones.

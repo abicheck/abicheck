@@ -76,6 +76,10 @@ from .cli_resolve import (
 from .contract_scoped_promotion import stamp_scoped_result_findings
 from .errors import PolicyError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli import compare_enrichment as _enrichment
+from .frontends.cli.acknowledgment_config import (
+    compare_acknowledgments_for,
+    note_unapplied_acknowledgments,
+)
 from .frontends.cli.compare_report import (
     # A cohesive slice of ``run_compare``'s post-comparison phase (scoped
     # gating, report rendering, suppression-audit attachment, set-input flag
@@ -1383,6 +1387,9 @@ def run_compare(
             route="a directory/package comparison",
             reason="the per-library fan-out has no contract-overlay channel",
         )
+        note_unapplied_acknowledgments(
+            project_cfg, route="a directory/package comparison"
+        )
         # Codex review, fresh evidence ("Validate release-only view
         # restrictions before dry-run exit"): --view leaf/root-cause is
         # rejected for a directory/package operand inside
@@ -2054,6 +2061,11 @@ def run_compare(
     post_manifest_allowlist = post_manifest_allowlist_for(
         project_cfg, cfg_path, old, new, config_explicit=config is not None
     )
+    # ADR-067 D5/D6: `.abicheck.yml`'s `acknowledgment:` block (records only
+    # from an explicit --config; see acknowledgment_config.py).
+    acks = compare_acknowledgments_for(
+        project_cfg, cfg_path, pf, config_explicit=config is not None
+    )
 
     # ADR-068 D4 (the correctness fix this phase exists for): pattern-verdict
     # modulation is unconditional now, not a flag (removed; see
@@ -2108,6 +2120,8 @@ def run_compare(
             diagnostic_comparison=diagnostic_comparison,
             contract_evaluation=contract_evaluation,
             contract_mode=resolved_contract_mode,
+            acknowledgments=acks.records,
+            acknowledgment_policy=acks.policy,
         )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         report_not_comparable_and_exit(

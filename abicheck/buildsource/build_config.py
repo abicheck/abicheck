@@ -53,6 +53,11 @@ from ..model.ownership_rules import OwnershipRules
 from ..policy.support_promise import (
     SUPPORT_PROMISE_POLICIES as _SUPPORT_PROMISE_POLICIES,
 )
+from .build_config_acknowledgment import (
+    AcknowledgmentConfig,
+    acknowledgment_block,
+    parse_acknowledgment_config,
+)
 from .build_config_contract import contract_block, parse_contract_post_manifest
 from .build_config_schema import (
     TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
@@ -229,6 +234,8 @@ class BuildConfig:
     ownership: OwnershipRules = field(default_factory=OwnershipRules)
     #: ``contract.overlays.post_manifest`` (Phase 9c); see ``build_config_contract.py``.
     contract_post_manifest: str | None = None
+    #: ``acknowledgment:`` (ADR-067 D5/D6); see ``build_config_acknowledgment.py``.
+    acknowledgment: AcknowledgmentConfig | None = None
     #: ``scope.show_redundant`` — a reporting/FP-tuning toggle demoted off the CLI
     #: (ADR-040 Lever 2). ``None`` = unset. The ``--show-filtered`` debugging view
     #: stays a visible CLI flag.
@@ -405,6 +412,7 @@ class BuildConfig:
             "deployment",
             "bundle_variants",
             "contract",
+            "acknowledgment",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
@@ -614,6 +622,7 @@ class BuildConfig:
             exclude_headers=_strs(scope, "exclude_headers"),
             ownership=parse_ownership_rules(scope),
             contract_post_manifest=parse_contract_post_manifest(top),
+            acknowledgment=parse_acknowledgment_config(top),
             scope_on_incomplete=_one_of(
                 _opt_str(scope, "on_incomplete"),
                 ("warn", "block"),
@@ -858,6 +867,7 @@ class BuildConfig:
             ("severity", self._severity_block()),
             ("scope", _scope_block(self)),
             ("contract", contract_block(self)),
+            ("acknowledgment", acknowledgment_block(self)),
             ("suppression", self._suppression_block()),
             ("source", self._source_block()),
             ("compile", self._compile_block()),

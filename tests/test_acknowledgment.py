@@ -33,6 +33,7 @@ from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.errors import PolicyError
 from abicheck.model import AbiSnapshot
+from abicheck.model.acknowledgment_policy import AcknowledgmentPolicy
 from abicheck.model.declarations import Function
 from abicheck.policy.acknowledgment import (
     AcknowledgmentList,
@@ -41,7 +42,6 @@ from abicheck.policy.acknowledgment import (
 from abicheck.policy.acknowledgment_gate import (
     evaluate_unacknowledged_additions,
 )
-from abicheck.policy.acknowledgment_policy import AcknowledgmentPolicy
 from abicheck.policy.disposition_close import (
     acknowledged_total,
     acknowledgments as ledger_acknowledgments,

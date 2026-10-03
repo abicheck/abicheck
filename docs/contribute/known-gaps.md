@@ -6945,6 +6945,27 @@ value is stopping a re-attempt.
   L4/L5 coverage rows to `NOT_COLLECTED` in the same place the payload
   fields themselves are cleared.
 
+### ADR-067 acknowledgments reach only a single-pair `compare`
+
+`.abicheck.yml`'s `acknowledgment:` block (records `file` and
+`unacknowledged_additions`) is applied by a single-pair `compare`. Two routes
+do not apply it yet:
+
+- **The directory/package release fan-out** notes on stderr that the block
+  was not applied. Its per-member comparisons go through
+  `cli_compare_release*.py`, which would need the records threaded into each
+  member's `compare_snapshots` call and the per-member
+  `additions_review_contribution` folded with `max` into the release exit,
+  the way contract coverage is.
+- **The typed API's `CompareRequest`** has no field naming a records file.
+  A Python caller passes `acknowledgments=` to `checker.compare` directly, and
+  a `policy_file_path` document's `acknowledgment:` block sets the gate.
+  `service_compare_pipeline.py` sits at its no-growth baseline, so the field
+  needs responsibility moved out of that file first.
+
+Neither can hide a finding: an unapplied gate only means additions are not
+reviewed, and the additions keep their verdict either way.
+
 ### `--exclude-header` cannot narrow a `--dump-manifest` dump
 
 `dump`/`compare --exclude-header PATTERN` filters the resolved `-H` header

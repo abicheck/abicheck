@@ -500,7 +500,7 @@ topics:
     canonical_page: use/acknowledgments.md
     fact_sources:
       - abicheck/policy/acknowledgment.py
-      - abicheck/policy/acknowledgment_policy.py
+      - abicheck/model/acknowledgment_policy.py
       - abicheck/policy/acknowledgment_gate.py
       - abicheck/policy_file_acknowledgment.py
     allowed_summaries:

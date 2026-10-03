@@ -155,6 +155,7 @@ if TYPE_CHECKING:
 
     from .buildsource.source_inputs import SourceReadLicence
     from .environment_matrix import EnvironmentMatrix
+    from .model.acknowledgment_policy import AcknowledgmentPolicy
     from .model.identity import EntityId  # noqa: F401
     from .policy.acknowledgment import AcknowledgmentList
     from .post_processing import PipelineContext
@@ -920,6 +921,7 @@ def compare(
     old_source_licence: SourceReadLicence | None = None,
     new_source_licence: SourceReadLicence | None = None,
     acknowledgments: AcknowledgmentList | None = None,
+    acknowledgment_policy: AcknowledgmentPolicy | None = None,
 ) -> DiffResult:
     """Compare a candidate snapshot against a baseline and return a DiffResult.
 
@@ -1048,6 +1050,7 @@ def compare(
             evidence contributes nothing); never a verdict on its own, so
             it never changes ``changes``, the verdict, or the exit code.
         acknowledgments: ADR-067 D5/C-S3 optional :class:`~abicheck.policy.acknowledgment.AcknowledgmentList`; ``None`` is a no-op.
+        acknowledgment_policy: ADR-067 D6 gate policy; outranks *policy_file*'s own (D7 resolves it before this call).
 
     Raises:
         ProfileMismatchError: *old* and *new* were extracted under
@@ -1508,7 +1511,8 @@ def compare(
         result.unacknowledged_additions_review = _eval_uar(
             result,
             acknowledgments,
-            getattr(policy_file, "acknowledgment_policy", None),
+            acknowledgment_policy
+            or getattr(policy_file, "acknowledgment_policy", None),
             component=(old.library if old is not None else new.library),
             baseline=(old.version if old is not None else None),
             release_label=new.version,

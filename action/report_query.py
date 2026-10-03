@@ -715,6 +715,15 @@ def answer(report: dict[str, Any], query: str, arg: str = "") -> str | None:
                 }
             )
         )
+    if query == "additions_review_contribution":
+        # ADR-067 D6: the additions-review floor, carried on the root `exit`
+        # block from report schema 5.13. A report without the key has no
+        # such axis to answer from, so this is CannotTell (""), never a `0`
+        # that would read as "did not fire".
+        block = _either("exit", {})
+        if not isinstance(block, dict) or "additions_review_contribution" not in block:
+            return ""
+        return str(block.get("additions_review_contribution"))
     if query == "scope_contribution":
         # ADR-065 S2 (D6/D7): the completeness axis's two 0/1 fold
         # participants, carried on a directory/package release report's
