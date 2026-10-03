@@ -466,6 +466,13 @@ def policy_options(func: F) -> F:
         default=None,
         help="Suppression file (YAML) to filter known/intentional changes.",
     )(func)
+    return policy_option(func)
+
+
+def policy_option(func: F) -> F:
+    """``--policy NAME|PATH`` alone, for a command that classifies verdicts
+    but takes no suppression file (``project history``). The command also
+    receives ``policy_file_path`` (see :func:`_resolve_policy_operand`)."""
     func = click.option(
         "--policy",
         "policy",

@@ -467,6 +467,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # `compat check -source`/`-src-report-path` never reached the
             # HTML report's kind. Oracle: ABICC's own flag table.
             "tests/test_compat_report_kind.py",
+            # `project history --policy DOC` read the path as a profile name.
+            # Oracle: the deprecation-window rule as the docs state it.
+            "tests/test_cli_project_history_policy.py",
         ),
         known_gaps=(
             KnownGap(

@@ -70,6 +70,7 @@ __all__ = [
     "built_in_default_versioning_policy",
     "evaluate_release_acceptance",
     "integrate_policy_acceptance",
+    "stated_versioning_policy_of",
 ]
 
 
@@ -267,6 +268,21 @@ def built_in_default_versioning_policy() -> VersioningPolicy:
     behavior... so no existing run changes."
     """
     return VersioningPolicy()
+
+
+def stated_versioning_policy_of(policy_file: object) -> VersioningPolicy | None:
+    """The versioning policy *policy_file* states, or ``None``.
+
+    Only a document with a ``versioning:`` block states one: a built-in
+    default is not a statement, so a run without one leaves every
+    versioning-policy fact unevaluated rather than reporting a default it
+    never chose. The one rule both a pairwise report
+    (``semver.stated_versioning_policy``) and ``project history`` apply.
+    """
+    if policy_file is None or not getattr(policy_file, "versioning_stated", False):
+        return None
+    policy = getattr(policy_file, "versioning", None)
+    return policy if isinstance(policy, VersioningPolicy) else None
 
 
 # ---------------------------------------------------------------------------

@@ -97,6 +97,7 @@ from ..model.snapshot import AbiSnapshot
 from ..policy.evidence_status import Confidence, FindingEvolution
 from ..policy.finding_evolution import apply_finding_evolution
 from ..policy.versioning_policy import VersioningPolicy
+from ..policy_file import PolicyFile
 from ..serialization import load_snapshot
 from .snapshot_factory import absent_baseline
 
@@ -544,6 +545,7 @@ def build_longitudinal_history(
     entries: list[HistoryEntry],
     *,
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
     versioning_policy: VersioningPolicy | None = None,
 ) -> LongitudinalHistoryResult:
     """Compose ``checker.compare()`` pairwise across an already-ordered,
@@ -552,6 +554,9 @@ def build_longitudinal_history(
     ``entries`` must already be in the caller's intended release order (D1:
     S1 never infers or reorders — see :func:`run_history_request` for the
     common "load N snapshot files" entry point built on this).
+
+    ``policy``/``policy_file`` are the profile and policy document every
+    pairwise ``compare()`` runs under, as ``compare --policy`` resolves them.
 
     ``versioning_policy`` (ADR-066 S2) is optional and orthogonal: when
     given, ``deprecation_compliance`` is populated by evaluating the
@@ -579,7 +584,11 @@ def build_longitudinal_history(
     # confidence is not consulted for `evidence_uncertain`: nothing was removed.
     empty = absent_baseline(library)
     initial_result = compare(
-        empty, entries[0].snapshot, policy=policy, scope_to_public_surface=True
+        empty,
+        entries[0].snapshot,
+        policy=policy,
+        policy_file=policy_file,
+        scope_to_public_surface=True,
     )
     events.extend(
         _events_from_pair(
@@ -604,7 +613,11 @@ def build_longitudinal_history(
     previous_result: DiffResult | None = None
     for prev, curr in zip(entries, entries[1:]):
         result = compare(
-            prev.snapshot, curr.snapshot, policy=policy, scope_to_public_surface=True
+            prev.snapshot,
+            curr.snapshot,
+            policy=policy,
+            policy_file=policy_file,
+            scope_to_public_surface=True,
         )
         apply_finding_evolution(result, previous_result)
         pairwise.append(
@@ -659,6 +672,7 @@ def run_history_request(
     *,
     versions: list[str] | None = None,
     policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
     versioning_policy: VersioningPolicy | None = None,
 ) -> LongitudinalHistoryResult:
     """The typed entry point: N stored-snapshot paths in, one
@@ -693,7 +707,10 @@ def run_history_request(
         )
 
     return build_longitudinal_history(
-        entries, policy=policy, versioning_policy=versioning_policy
+        entries,
+        policy=policy,
+        policy_file=policy_file,
+        versioning_policy=versioning_policy,
     )
 
 

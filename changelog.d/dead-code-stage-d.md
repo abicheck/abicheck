@@ -49,6 +49,13 @@
 
 ### Fixed
 
+- **`project history --policy` takes a policy document, as `compare --policy`
+  does.** A document path was passed on as a profile name and read as
+  `strict_abi`, so its `overrides:` never reached the pairwise comparisons
+  and its `versioning:` block never reached the deprecation-window check:
+  `deprecation_compliance` was always empty from the CLI. The document now
+  drives both; a profile name works as before.
+
 - **`compat check` labels source-only HTML reports as source reports.** With
   `-old-style`, the report written for `-source` and the one written to
   `-src-report-path` were titled "Binary compatibility report" and carried
