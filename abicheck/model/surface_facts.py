@@ -93,7 +93,6 @@ __all__ = [
     "is_header_declared",
     "is_legacy_derived",
     "is_public_export",
-    "is_unknown",
     "public_header_contract_fact",
     "surface_fact_summary",
     "visibility_label",
@@ -144,11 +143,6 @@ def is_confirmed_false(fact: Fact[bool]) -> bool:
     return fact.status in (FactStatus.PRESENT, FactStatus.PARTIAL) and (
         fact.value is False
     )
-
-
-def is_unknown(fact: Fact[bool]) -> bool:
-    """Neither of the above: no usable evidence either way."""
-    return not is_confirmed_true(fact) and not is_confirmed_false(fact)
 
 
 # ---------------------------------------------------------------------------

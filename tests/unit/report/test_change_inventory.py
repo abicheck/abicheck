@@ -62,7 +62,7 @@ def test_a_stamped_finding_is_never_a_compatibility_change(
     stamped = state is not None
     assert split.compatibility_changes == (0 if stamped else 1)
     assert split.hygiene_total == (1 if stamped else 0)
-    assert split.has_hygiene is stamped
+    assert (split.hygiene_total > 0) is stamped
     scored = (
         split.compatibility_breaking
         + split.compatibility_source_breaks

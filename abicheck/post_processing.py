@@ -1780,10 +1780,6 @@ class PostProcessingPipeline:
             ctx.kept = changes
         return ctx
 
-    @property
-    def step_names(self) -> list[str]:
-        return [s.name for s in self.steps]
-
 
 # Default pipeline matching the current compare() post-processing order.
 DEFAULT_PIPELINE = PostProcessingPipeline(

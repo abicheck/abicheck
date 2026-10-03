@@ -58,18 +58,6 @@ class DebugArtifact:
         return self.dwarf_path is not None
 
     @property
-    def has_pdb(self) -> bool:
-        return self.pdb_path is not None
-
-    @property
-    def has_dsym(self) -> bool:
-        return self.dsym_path is not None
-
-    @property
-    def has_split_dwarf(self) -> bool:
-        return self.dwp_path is not None or self.dwo_dir is not None
-
-    @property
     def description(self) -> str:
         """Human-readable summary of what was found."""
         parts: list[str] = []

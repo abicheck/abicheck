@@ -238,12 +238,6 @@ def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
     return out
 
 
-def _candidate_type_names(typename: str) -> list[str]:
-    """Names only (drops the per-hop pointer flag); back-compat for callers that
-    just need reachability, not indirection."""
-    return [name for name, _ in _candidate_type_names_indirect(typename)]
-
-
 def _split_top_level_commas(s: str) -> list[str]:
     """Split *s* on commas that are not nested inside ``<...>``."""
     parts: list[str] = []
@@ -486,7 +480,7 @@ def _seed_queue_from_functions(
         # (the opaque-handle pattern ``void use(ns::detail::Impl*)``) does not
         # embed its layout — record the indirection so a layout-only change is
         # demoted, mirroring the pointer-field case (Codex review). The seed path
-        # otherwise drops the ``*`` (``_candidate_type_names`` strips decorators).
+        # otherwise drops the ``*`` (``_candidate_type_names_indirect`` strips decorators).
         seeds = [(func.return_type, (func.return_pointer_depth or 0) > 0)]
         seeds += [(p.type, (p.pointer_depth or 0) > 0) for p in func.params]
         for t, top_ptr in seeds:

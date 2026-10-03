@@ -23,7 +23,7 @@ from abicheck.checker_types import Change
 from abicheck.compare.internal_namespaces import name_segments as _name_segments
 from abicheck.internal_leak import (
     _build_suffix_index,
-    _candidate_type_names,
+    _candidate_type_names_indirect,
     _resolve_type_name,
     _split_top_level_commas,
     _strip_template_args,
@@ -137,16 +137,23 @@ class TestIsInternalType:
 
 class TestCandidateTypeNames:
     def test_plain_type(self) -> None:
-        cands = _candidate_type_names("int")
+        cands = [n for n, _ in _candidate_type_names_indirect("int")]
         assert "int" in cands
 
     def test_pointer_decorator_stripped(self) -> None:
-        cands = _candidate_type_names("const ns::detail::Impl*")
+        cands = [
+            n for n, _ in _candidate_type_names_indirect("const ns::detail::Impl*")
+        ]
         # const + * stripped — strip leaves "ns::detail::Impl"
         assert any("ns::detail::Impl" in c for c in cands)
 
     def test_template_inner_extracted(self) -> None:
-        cands = _candidate_type_names("std::unique_ptr<ns::detail::Impl>")
+        cands = [
+            n
+            for n, _ in _candidate_type_names_indirect(
+                "std::unique_ptr<ns::detail::Impl>"
+            )
+        ]
         # Outer template AND the inner type both surface
         joined = ",".join(cands)
         assert "std::unique_ptr" in joined

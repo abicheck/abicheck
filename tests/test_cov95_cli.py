@@ -44,7 +44,6 @@ from abicheck.cli_compare_release import (
     _resolve_release_severity_config,
 )
 from abicheck.cli_helpers_compare import (
-    _collect_additions,
     _collect_release_inputs,
     _warn_ignored_flags,
 )
@@ -516,19 +515,6 @@ class TestSmallHelpers:
         # full/symbols/graph are rejected outright -- no alias, no --max shorthand.
         rejected = runner.invoke(main, ["dump", "--depth", "full"])
         assert rejected.exit_code != 0
-
-    def test_collect_additions(self) -> None:
-        result = DiffResult(
-            old_version="1",
-            new_version="2",
-            library="x",
-            changes=[
-                Change(kind=ChangeKind.FUNC_ADDED, symbol="a", description="added"),
-                Change(kind=ChangeKind.FUNC_REMOVED, symbol="b", description="removed"),
-            ],
-        )
-        adds = _collect_additions(result)
-        assert len(adds) == 1
 
 
 # ── _warn_ignored_flags (cli.py:949-971) ──────────────────────────────────────

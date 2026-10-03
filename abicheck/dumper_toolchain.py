@@ -77,10 +77,6 @@ def _safe_size(path: Path) -> int | None:
         return None
 
 
-def _castxml_available() -> bool:
-    return shutil.which("castxml") is not None
-
-
 @memoized(maxsize=64)
 def _executable_sha256(
     real_path: str,

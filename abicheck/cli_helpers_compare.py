@@ -220,14 +220,6 @@ def resolve_force_public_scope(
     return forced, listed
 
 
-def _collect_additions(result: DiffResult) -> list[object]:
-    """Collect additive changes in a policy-independent way."""
-    from .checker_policy import COMPATIBLE_KINDS
-
-    addition_kinds = {k for k in COMPATIBLE_KINDS if k.value.endswith("_added")}
-    return [c for c in result.changes if c.kind in addition_kinds]
-
-
 #: Owned by ``binary_utils.py`` (a true leaf) to break the ADR-056 cycle
 #: `bundle -> cli_helpers_compare -> service -> dry_run_estimate -> bundle`; reached
 #: via ``workflows.extraction`` since ADR-061 P4. Re-exported for every caller.

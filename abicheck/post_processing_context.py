@@ -141,22 +141,6 @@ class PipelineContext:
     absent_baseline: AbiSnapshot | None = None
 
     @property
-    def baseline_present(self) -> bool:
-        """Whether this run has a baseline to evaluate evolution against.
-
-        ``False`` for a ``compare --no-baseline`` audit. Every step in this
-        pipeline that *derives a finding from the OLD->NEW delta* -- the
-        late detectors, the pattern/namespace/template passes, the
-        versioned-scheme overlay -- returns early instead of asking that
-        question against a copy of the candidate and receiving a
-        manufactured "nothing changed". (Those steps test ``ctx.old is
-        None`` directly, which also narrows the type for the body below;
-        this property is the readable spelling for a caller that only needs
-        the fact.)
-        """
-        return self.old is not None
-
-    @property
     def baseline_or_empty(self) -> AbiSnapshot:
         """The OLD side for a step that unions or looks up across both.
 

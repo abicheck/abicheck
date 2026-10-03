@@ -44,9 +44,9 @@ class TestDebugArtifact:
     def test_empty_artifact(self) -> None:
         empty = DebugArtifact()
         assert not empty.has_dwarf
-        assert not empty.has_pdb
-        assert not empty.has_dsym
-        assert not empty.has_split_dwarf
+        assert empty.pdb_path is None
+        assert empty.dsym_path is None
+        assert empty.dwp_path is None and empty.dwo_dir is None
         assert "no debug info found" in empty.description
 
     def test_dwarf_artifact(self) -> None:
@@ -56,22 +56,22 @@ class TestDebugArtifact:
 
     def test_pdb_artifact(self) -> None:
         a = DebugArtifact(pdb_path=Path("/foo/bar.pdb"), source="test")
-        assert a.has_pdb
+        assert a.pdb_path is not None
         assert "PDB" in a.description
 
     def test_dsym_artifact(self) -> None:
         a = DebugArtifact(dsym_path=Path("/foo/bar.dSYM"), source="test")
-        assert a.has_dsym
+        assert a.dsym_path is not None
         assert "dSYM" in a.description
 
     def test_split_dwarf_dwp(self) -> None:
         a = DebugArtifact(dwp_path=Path("/foo/bar.dwp"), source="test")
-        assert a.has_split_dwarf
+        assert a.dwp_path is not None
         assert "DWP" in a.description
 
     def test_split_dwarf_dwo(self) -> None:
         a = DebugArtifact(dwo_dir=Path("/foo/dwo"), source="test")
-        assert a.has_split_dwarf
+        assert a.dwo_dir is not None
         assert "DWO" in a.description
 
     def test_multi_source_description(self) -> None:
@@ -649,7 +649,7 @@ class TestResolveDebugInfo:
 
         result = resolve_debug_info(binary)
         assert result is not None
-        assert result.has_dsym
+        assert result.dsym_path is not None
 
     def test_with_debuginfod_disabled(self, tmp_path: Path) -> None:
         result = resolve_debug_info(

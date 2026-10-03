@@ -595,7 +595,9 @@ class TestManifestAndIdentity:
             ]
         }
         (tmp_path / "m.json").write_text(json.dumps(data))
-        exp = ExpectedTargets.from_manifest_file(tmp_path / "m.json")
+        exp = ExpectedTargets.from_manifest_data(
+            json.loads((tmp_path / "m.json").read_text())
+        )
         assert exp.targets == {LINUX: True, MACOS: False}
 
     @pytest.mark.parametrize(
@@ -636,11 +638,6 @@ class TestManifestAndIdentity:
             {"aggregate_manifest_version": "1.0", "targets": [{"id": LINUX}]}
         )
         assert exp.targets == {LINUX: True}
-
-    def test_manifest_file_unreadable_is_error(self, tmp_path: Path):
-        (tmp_path / "m.json").write_text("{ not json")
-        with pytest.raises(AggregateError):
-            ExpectedTargets.from_manifest_file(tmp_path / "m.json")
 
     def test_from_lists_empty_is_error(self):
         with pytest.raises(AggregateError):

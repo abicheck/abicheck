@@ -1342,13 +1342,6 @@ class _ClangAstParser:
         """
         return self._record_vtable_index.record_index()
 
-    def _specialization_record_index(self) -> dict[str, dict[str, Any]]:
-        """See ``extract.headers.clang.context.RecordVtableIndex.
-        specialization_record_index`` (the canonical implementation this
-        delegates to) for the full contract.
-        """
-        return self._record_vtable_index.specialization_record_index()
-
     def _base_lookup_index(self) -> dict[str, dict[str, Any]]:
         """See ``extract.headers.clang.context.RecordVtableIndex.
         base_lookup_index`` (the canonical implementation this delegates to)

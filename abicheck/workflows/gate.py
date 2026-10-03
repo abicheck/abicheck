@@ -77,7 +77,6 @@ from ..policy.acknowledgment_gate import (
 )
 from ..policy.contract_coverage_exit import (
     announce_coverage_floor,
-    coverage_diagnostic_from_summary,
     coverage_exit_floor,
     coverage_exit_for_context,
     fold_coverage_exit,
@@ -183,7 +182,6 @@ __all__ = [
     "same_persisted_content",
     "compute_exit_code",
     "compute_gate_decision",
-    "coverage_diagnostic_from_summary",
     "coverage_exit_floor",
     "coverage_exit_for_context",
     "coverage_failure_count",

@@ -828,7 +828,7 @@ class TestPipelineFallbackKept:
         pipeline = PostProcessingPipeline([EnrichSourceLocations()])
         ctx = pipeline.run(list(changes), old, new)
         assert [c.symbol for c in ctx.kept] == ["bar"]
-        assert pipeline.step_names == ["enrich_source_locations"]
+        assert [s.name for s in pipeline.steps] == ["enrich_source_locations"]
 
 
 # ===========================================================================

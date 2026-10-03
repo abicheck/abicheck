@@ -69,7 +69,9 @@ def test_valid_block_parses_to_declared_maps() -> None:
         "target_triple": "aarch64-linux-gnu",
         "compiler_family": "clang",
     }
-    assert config.required_names == frozenset({"x86"})
+    assert frozenset(v.name for v in config.variants if v.required) == frozenset(
+        {"x86"}
+    )
 
 
 # Every value that is *not* acceptable for each key, by an independent table.

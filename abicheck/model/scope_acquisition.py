@@ -354,10 +354,6 @@ class ScopeAcquisitionRecord:
             m for m in self.members if m.state is AcquisitionState.OUT_OF_SCOPE
         )
 
-    def members_in(self, state: AcquisitionState) -> tuple[MemberAcquisition, ...]:
-        """Every member currently in *state*, in record order."""
-        return tuple(m for m in self.members if m.state is state)
-
     def counts(self) -> dict[str, int]:
         """``{state value: count}`` over every state, zeros included, so a
         reader can check the partition sums to the expected set."""

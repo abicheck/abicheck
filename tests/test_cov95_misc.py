@@ -104,7 +104,6 @@ from abicheck.checker_policy import (  # noqa: E402
     impact_for,
     policy_for,
     policy_kind_sets,
-    policy_registry_markdown,
 )
 from abicheck.checker_types import Change  # noqa: E402
 
@@ -144,15 +143,6 @@ class TestPolicyLookups:
         """impact_for returns a (possibly empty) string for every kind (line 700)."""
         for kind in ChangeKind:
             assert isinstance(impact_for(kind), str)
-
-    def test_policy_registry_markdown(self) -> None:
-        """policy_registry_markdown emits a row per ChangeKind (lines 705-715)."""
-        md = policy_registry_markdown()
-        assert "| ChangeKind | Default verdict | Severity | Doc slug |" in md
-        # Header (2 lines) + one row per kind.
-        assert md.count("\n") + 1 == len(ChangeKind) + 2
-        sample = next(iter(ChangeKind))
-        assert f"`{sample.value}`" in md
 
 
 class TestPolicyKindSets:

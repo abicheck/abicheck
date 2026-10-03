@@ -128,7 +128,7 @@ def test_resolve_expands_directory_header_input_before_matching(
     ev = BuildEvidence(compile_units=[cu])
     result = resolve_header_compile_context(ev, [header_dir])
     assert result.matched is True
-    assert result.matched_unit_count == 1
+    assert len(result.matched_units) == 1
     assert result.context is not None
     assert "-std=c++20" in result.context.gcc_option_tokens
 
@@ -162,7 +162,7 @@ def test_resolve_derives_context_from_single_matching_unit(tmp_path: Path) -> No
     ev = BuildEvidence(compile_units=[cu])
     result = resolve_header_compile_context(ev, [header])
     assert result.matched is True
-    assert result.matched_unit_count == 1
+    assert len(result.matched_units) == 1
     assert result.context is not None
     tokens = result.context.gcc_option_tokens
     assert "-std=c++20" in tokens
@@ -385,7 +385,7 @@ def test_resolve_forced_language_resolves_language_ambiguity_before_grouping(
         ev, [header], lang="c++", lang_explicit=True
     )
     assert result.matched is True
-    assert result.matched_unit_count == 1
+    assert len(result.matched_units) == 1
     assert result.context is not None
     assert "-DSHARED=1" in result.context.gcc_option_tokens
 
@@ -433,7 +433,7 @@ def test_resolve_forced_language_falls_back_to_unfiltered_set_when_no_unit_match
         ev, [header], lang="c++", lang_explicit=True
     )
     assert result.matched is True
-    assert result.matched_unit_count == 1
+    assert len(result.matched_units) == 1
     assert result.context is not None
     # The lone C unit's own -std=c17 conflicts with the forced C++ language
     # (via _standard_conflicts_with_forced_language), so it's still omitted
@@ -628,7 +628,7 @@ def test_resolve_agreeing_units_apply_one_context(tmp_path: Path) -> None:
     ev = BuildEvidence(compile_units=units)
     result = resolve_header_compile_context(ev, [header])
     assert result.matched is True
-    assert result.matched_unit_count == 2
+    assert len(result.matched_units) == 2
     assert result.context is not None
 
 
@@ -686,7 +686,7 @@ def test_resolve_explicit_std_resolves_std_only_disagreement(tmp_path: Path) -> 
     # No error: the std-only disagreement is excused by the explicit pin.
     result = resolve_header_compile_context(ev, [header], explicit=explicit)
     assert result.matched is True
-    assert result.matched_unit_count == 2
+    assert len(result.matched_units) == 2
 
 
 def test_resolve_genuine_disagreement_with_no_explicit_override_still_fails(
@@ -844,7 +844,7 @@ def test_resolve_agreeing_structured_fields_with_different_raw_flag_spellings_no
     ev = BuildEvidence(compile_units=[unit_a, unit_b])
     result = resolve_header_compile_context(ev, [header])
     assert result.matched is True
-    assert result.matched_unit_count == 2
+    assert len(result.matched_units) == 2
     assert result.context is not None
 
 
@@ -904,7 +904,7 @@ def test_resolve_exact_target_and_sysroot_spellings_still_masked(
     ev = BuildEvidence(compile_units=[unit_a, unit_b])
     result = resolve_header_compile_context(ev, [header])
     assert result.matched is True
-    assert result.matched_unit_count == 2
+    assert len(result.matched_units) == 2
 
 
 def test_resolve_msvc_std_colon_disagreement_with_unpopulated_standard_field_still_raises(
@@ -973,7 +973,7 @@ def test_resolve_msvc_std_colon_stays_masked_when_standard_field_populated_and_a
     ev = BuildEvidence(compile_units=[unit_a, unit_b])
     result = resolve_header_compile_context(ev, [header])
     assert result.matched is True
-    assert result.matched_unit_count == 2
+    assert len(result.matched_units) == 2
     assert result.context is not None
 
 
@@ -1115,7 +1115,7 @@ def test_resolve_msvc_std_colon_agreement_across_units_stays_unambiguous_and_ret
     ev = BuildEvidence(compile_units=[unit_a, unit_b])
     result = resolve_header_compile_context(ev, [header])
     assert result.matched is True
-    assert result.matched_unit_count == 2
+    assert len(result.matched_units) == 2
     assert result.context is not None
     assert "/std:c++20" in list(result.context.gcc_option_tokens)
 
@@ -1133,7 +1133,7 @@ def test_resolve_multiple_headers_union_of_matches(tmp_path: Path) -> None:
     unit2 = _cu(source=str(src2), directory=str(tmp_path), standard="c++20")
     ev = BuildEvidence(compile_units=[unit1, unit2])
     result = resolve_header_compile_context(ev, [h1, h2])
-    assert result.matched_unit_count == 2
+    assert len(result.matched_units) == 2
 
 
 def test_resolve_expands_redacted_home_relative_source(

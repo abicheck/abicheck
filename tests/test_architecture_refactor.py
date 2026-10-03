@@ -1092,7 +1092,7 @@ class TestPostProcessingPipeline:
             "detect_versioned_symbol_scheme",
             "escalate_frozen_namespace_violations",
         ]
-        assert DEFAULT_PIPELINE.step_names == expected_names
+        assert [s.name for s in DEFAULT_PIPELINE.steps] == expected_names
 
     def test_pipeline_runs_on_empty_changes(self):
         """Pipeline produces valid context with empty change list."""
@@ -1213,7 +1213,7 @@ class TestPostProcessingPipeline:
                 DeduplicateAstDwarf(),
             ]
         )
-        assert pipeline.step_names == [
+        assert [s.name for s in pipeline.steps] == [
             "filter_reserved_field_renames",
             "deduplicate_ast_dwarf",
         ]

@@ -83,7 +83,7 @@ class TestMergeSnapshotsBasics:
         )
         merged = merge_snapshots(castxml, clang)
         assert merged is castxml
-        assert merged.func_by_mangled("_Z3barv") is None
+        assert merged.function_map.get("_Z3barv") is None
         assert merged.ast_producer == "castxml"
 
     def test_from_headers_inferred_preserved_when_true(self):
@@ -111,7 +111,7 @@ class TestMergeSnapshotsBasics:
         merged = merge_snapshots(castxml, clang)
         # A fresh lookup must reflect the merged functions list, not a stale
         # cached index carried over from the castxml snapshot via replace().
-        assert merged.func_by_mangled("_Z3foov") is not None
+        assert merged.function_map.get("_Z3foov") is not None
 
     def test_clang_backfills_ms_abi_when_castxml_drops_it(self):
         castxml_fn = Function(
@@ -225,7 +225,7 @@ class TestMergeSnapshotsBasics:
         castxml = _snap(ast_producer="castxml")
         clang = _snap(functions=[clang_only], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        assert merged.func_by_mangled("_Z3barv") is not None
+        assert merged.function_map.get("_Z3barv") is not None
         # No castxml confirmation exists for a clang-only entity.
         key = func_fact_key("_Z3barv", "deprecated")
         assert not is_castxml_backed_fact(merged, key)
@@ -303,7 +303,7 @@ class TestFunctionFactBackfill:
         castxml = _snap(functions=[old_f], ast_producer="castxml")
         clang = _snap(ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        f = merged.func_by_mangled("_Z3foov")
+        f = merged.function_map.get("_Z3foov")
         assert f.deprecated == "msg"
         assert is_castxml_backed_fact(merged, func_fact_key("_Z3foov", "deprecated"))
 
@@ -320,7 +320,7 @@ class TestFunctionFactBackfill:
         castxml = _snap(functions=[old_f], ast_producer="castxml")
         clang = _snap(functions=[clang_f], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        f = merged.func_by_mangled("_Z3foov")
+        f = merged.function_map.get("_Z3foov")
         assert f.deprecated == "msg"
         key = func_fact_key("_Z3foov", "deprecated")
         assert merged.fact_provenance[key] == "clang"
@@ -341,7 +341,7 @@ class TestFunctionFactBackfill:
         castxml = _snap(functions=[old_f], ast_producer="castxml")
         clang = _snap(ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        f = merged.func_by_mangled("_Z3foov")
+        f = merged.function_map.get("_Z3foov")
         assert f.is_override is True
         assert is_castxml_backed_fact(merged, func_fact_key("_Z3foov", "is_override"))
 
@@ -377,8 +377,8 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_ctor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(synthetic) is None
-        assert merged.func_by_mangled(real_mangled) is not None
+        assert merged.function_map.get(synthetic) is None
+        assert merged.function_map.get(real_mangled) is not None
 
     def test_template_class_base_name_containing_uppercase_i_still_normalized(self):
         # Codex review: a base name that itself contains an uppercase "I"
@@ -409,8 +409,8 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_ctor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(synthetic) is None
-        assert merged.func_by_mangled(real_mangled) is not None
+        assert merged.function_map.get(synthetic) is None
+        assert merged.function_map.get(real_mangled) is not None
 
     def test_template_class_destructor_scope_normalized_across_producers(self):
         synthetic = "~ns::Widget<int>"
@@ -433,8 +433,8 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_dtor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(synthetic) is None
-        assert merged.func_by_mangled(real_mangled) is not None
+        assert merged.function_map.get(synthetic) is None
+        assert merged.function_map.get(real_mangled) is not None
 
     def test_different_template_instantiations_disambiguated_by_param_type(self):
         # Two distinct instantiations (Widget<int>, Widget<double>) share the
@@ -477,10 +477,10 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[int_clang, double_clang], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(int_real) is not None
-        assert merged.func_by_mangled(double_real) is not None
-        assert merged.func_by_mangled(int_synthetic) is None
-        assert merged.func_by_mangled(double_synthetic) is None
+        assert merged.function_map.get(int_real) is not None
+        assert merged.function_map.get(double_real) is not None
+        assert merged.function_map.get(int_synthetic) is None
+        assert merged.function_map.get(double_synthetic) is None
 
     def test_multiple_instantiations_default_ctor_stays_safely_unreconciled(self):
         # Known residual limitation (Codex review): once the scope key is
@@ -524,10 +524,10 @@ class TestCtorDtorReconciliation:
 
         # Neither synthetic key got (wrongly) rewritten to either real
         # mangled name -- both sets of functions coexist unreconciled.
-        assert merged.func_by_mangled(int_synthetic) is not None
-        assert merged.func_by_mangled(double_synthetic) is not None
-        assert merged.func_by_mangled(int_real) is not None
-        assert merged.func_by_mangled(double_real) is not None
+        assert merged.function_map.get(int_synthetic) is not None
+        assert merged.function_map.get(double_synthetic) is not None
+        assert merged.function_map.get(int_real) is not None
+        assert merged.function_map.get(double_real) is not None
 
     def test_constructor_synthetic_key_reconciled_to_real_mangled_name(self):
         synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
@@ -550,8 +550,8 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_ctor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(synthetic) is None
-        reconciled = merged.func_by_mangled(real_mangled)
+        assert merged.function_map.get(synthetic) is None
+        reconciled = merged.function_map.get(real_mangled)
         assert reconciled is not None
         assert reconciled.name == "Widget"
 
@@ -589,7 +589,7 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_ctor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        reconciled = merged.func_by_mangled(real_mangled)
+        reconciled = merged.function_map.get(real_mangled)
         assert reconciled is not None
         assert reconciled.elf_binding == SymbolBinding.WEAK
         assert reconciled.elf_visibility == ElfVisibility.DEFAULT
@@ -613,7 +613,7 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_fn], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        reconciled = merged.func_by_mangled("_Z1fv")
+        reconciled = merged.function_map.get("_Z1fv")
         assert reconciled is not None
         assert reconciled.elf_binding == SymbolBinding.GLOBAL
 
@@ -644,8 +644,8 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_ctor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(synthetic) is None
-        assert merged.func_by_mangled(real_mangled) is not None
+        assert merged.function_map.get(synthetic) is None
+        assert merged.function_map.get(real_mangled) is not None
 
     def test_constructor_with_two_comma_bearing_params_still_matches(self):
         # Two distinct parameters, each itself comma-bearing -- makes sure
@@ -676,8 +676,8 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_ctor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(synthetic) is None
-        assert merged.func_by_mangled(real_mangled) is not None
+        assert merged.function_map.get(synthetic) is None
+        assert merged.function_map.get(real_mangled) is not None
 
     def test_destructor_synthetic_key_reconciled_to_real_mangled_name(self):
         synthetic = "~ns::Base1"
@@ -700,8 +700,8 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_dtor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(synthetic) is None
-        assert merged.func_by_mangled(real_mangled) is not None
+        assert merged.function_map.get(synthetic) is None
+        assert merged.function_map.get(real_mangled) is not None
 
     def test_constructor_no_match_when_signature_differs(self):
         # Same class, but the clang candidate takes a different parameter —
@@ -724,8 +724,8 @@ class TestCtorDtorReconciliation:
         merged = merge_snapshots(castxml, clang)
 
         # Falls back to today's (buggy-but-safe) behavior: synthetic key kept.
-        assert merged.func_by_mangled(synthetic) is not None
-        assert merged.func_by_mangled("_ZN2ns6WidgetC1Ed") is not None
+        assert merged.function_map.get(synthetic) is not None
+        assert merged.function_map.get("_ZN2ns6WidgetC1Ed") is not None
 
     def test_constructor_no_match_when_scope_differs(self):
         synthetic = f"{SYNTHETIC_CTOR_KEY_PREFIX}ns::Widget(int)"
@@ -736,7 +736,7 @@ class TestCtorDtorReconciliation:
         castxml = _snap(functions=[castxml_ctor], ast_producer="castxml")
         clang = _snap(functions=[unrelated_class_ctor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        assert merged.func_by_mangled(synthetic) is not None
+        assert merged.function_map.get(synthetic) is not None
 
     def test_destructor_ambiguous_when_two_candidates(self):
         # Two dtor-shaped candidates under the identical (marker, scope) key
@@ -749,14 +749,14 @@ class TestCtorDtorReconciliation:
         castxml = _snap(functions=[castxml_dtor], ast_producer="castxml")
         clang = _snap(functions=[cand1, cand2], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        assert merged.func_by_mangled(synthetic) is not None
+        assert merged.function_map.get(synthetic) is not None
 
     def test_ordinary_mangled_function_is_untouched(self):
         f = Function(name="foo", mangled="_Z3foov", return_type="void")
         castxml = _snap(functions=[f], ast_producer="castxml")
         clang = _snap(ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
-        assert merged.func_by_mangled("_Z3foov") is not None
+        assert merged.function_map.get("_Z3foov") is not None
 
     def test_nested_class_inside_template_scope_normalized(self):
         # Codex review: a last-component-only normalization leaves an
@@ -783,8 +783,8 @@ class TestCtorDtorReconciliation:
         clang = _snap(functions=[clang_ctor], ast_producer="clang")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(synthetic) is None
-        assert merged.func_by_mangled(real_mangled) is not None
+        assert merged.function_map.get(synthetic) is None
+        assert merged.function_map.get(real_mangled) is not None
 
 
 class TestVariableFactBackfill:
@@ -825,8 +825,8 @@ class TestMachoMangledNormalization:
         merged = merge_snapshots(castxml, clang)
 
         assert len(merged.declarations.functions) == 1
-        assert merged.func_by_mangled("_ZN2ns3fooEv") is not None
-        assert merged.func_by_mangled("__ZN2ns3fooEv") is None
+        assert merged.function_map.get("_ZN2ns3fooEv") is not None
+        assert merged.function_map.get("__ZN2ns3fooEv") is None
 
     def test_plain_c_function_not_duplicated_when_mangled_differs_by_underscore(self):
         castxml_f = Function(name="foo", mangled="foo", return_type="void")
@@ -836,7 +836,7 @@ class TestMachoMangledNormalization:
         merged = merge_snapshots(castxml, clang)
 
         assert len(merged.declarations.functions) == 1
-        assert merged.func_by_mangled("foo") is not None
+        assert merged.function_map.get("foo") is not None
 
     def test_variable_not_duplicated_when_mangled_differs_by_darwin_underscore(self):
         castxml_v = Variable(name="g", mangled="_ZN2ns1gE", type="int")
@@ -872,8 +872,8 @@ class TestMachoMangledNormalization:
         clang = _snap(functions=[clang_ctor], ast_producer="clang", platform="macho")
         merged = merge_snapshots(castxml, clang)
 
-        assert merged.func_by_mangled(synthetic) is None
-        assert merged.func_by_mangled("_ZN2ns6WidgetC1Ei") is not None
+        assert merged.function_map.get(synthetic) is None
+        assert merged.function_map.get("_ZN2ns6WidgetC1Ei") is not None
 
     def test_elf_functions_untouched_by_macho_normalization(self):
         # Sanity: the normalization must be platform-gated -- an ELF/PE
@@ -886,7 +886,7 @@ class TestMachoMangledNormalization:
         merged = merge_snapshots(castxml, clang)
 
         assert len(merged.declarations.functions) == 1
-        assert merged.func_by_mangled("_Z3foov") is not None
+        assert merged.function_map.get("_Z3foov") is not None
 
 
 class TestParamDefaultsProvenance:

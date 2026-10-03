@@ -370,10 +370,6 @@ class BundleSnapshot:
             return name in self.filesystem_backed_names
         return self.filesystem_backed
 
-    @property
-    def library_names(self) -> list[str]:
-        return sorted(self.libraries.keys())
-
     def is_intra_bundle_provider(self, soname: str) -> bool:
         """Return True if ``soname`` matches a library inside this bundle.
 

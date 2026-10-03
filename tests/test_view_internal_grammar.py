@@ -244,9 +244,6 @@ class TestDisplayDimensionsComeFromTheCatalog:
             registry.operation_for("hypothetical_future_fact")
             is ChangeOperation.REMOVED
         )
-        assert registry.kinds_for_entity(ChangeEntity.BUILD) == frozenset(
-            {"hypothetical_future_fact"}
-        )
 
     def test_machine_output_carries_the_entity_beside_the_operation(self, tmp_path):
         old, new = _build_pair(tmp_path, None, ".so")

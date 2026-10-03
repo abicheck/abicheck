@@ -407,9 +407,9 @@ class TestExcludesDependencies:
             from_headers=True,
             functions=[_fn("run"), sys_fn],
         )
-        assert snap.func_by_mangled(sys_fn.mangled) is sys_fn
+        assert snap.function_map.get(sys_fn.mangled) is sys_fn
         scoped = scope_snapshot_excluding_dependencies(snap)
-        assert scoped.func_by_mangled(sys_fn.mangled) is None
+        assert scoped.function_map.get(sys_fn.mangled) is None
 
 
 class TestDependencyScopeTagging:

@@ -2846,7 +2846,7 @@ class TestIsIntraBundleProvider:
                 "liba.so": _meta(soname="liba.so.1"),
             }
         )
-        assert snap.library_names == ["liba.so", "libb.so"]
+        assert sorted(snap.libraries) == ["liba.so", "libb.so"]
 
 
 # ---------------------------------------------------------------------------

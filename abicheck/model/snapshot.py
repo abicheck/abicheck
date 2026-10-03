@@ -613,9 +613,6 @@ class AbiSnapshot:
         assert self._var_by_mangled is not None
         return self._var_by_mangled
 
-    def func_by_mangled(self, mangled: str) -> Function | None:
-        return self.function_map.get(mangled)
-
     def var_by_mangled(self, mangled: str) -> Variable | None:
         return self.variable_map.get(mangled)
 

@@ -294,21 +294,6 @@ def impact_caveat_for(evidence_status: EvidenceStatus | None) -> str:
     )
 
 
-def policy_registry_markdown() -> str:
-    """Build a markdown snippet for docs from the policy registry."""
-    lines = [
-        "| ChangeKind | Default verdict | Severity | Doc slug |",
-        "|---|---|---|---|",
-    ]
-    for kind in sorted(ChangeKind, key=lambda k: k.value):
-        entry = policy_for(kind)
-        lines.append(
-            f"| `{kind.value}` | `{entry.default_verdict.value}` | "
-            f"`{entry.severity}` | `{entry.doc_slug}` |"
-        )
-    return "\n".join(lines)
-
-
 def policy_kind_sets(
     policy: str,
 ) -> tuple[

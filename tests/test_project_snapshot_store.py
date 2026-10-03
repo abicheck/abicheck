@@ -25,7 +25,6 @@ from abicheck.project_snapshot_store import (
     read_project_manifest,
     read_variant_artifact_pair,
     read_variant_ref,
-    variant_and_artifact_ids,
     write_project_manifest,
 )
 from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
@@ -250,7 +249,8 @@ class TestManifestRoundTrip:
         loaded = read_project_manifest(tmp_path)
         assert loaded == manifest
 
-        variant_ids, artifact_ids = variant_and_artifact_ids(tmp_path)
+        summary = read_manifest_summary(tmp_path)
+        variant_ids, artifact_ids = summary.variant_ids, summary.artifact_ids
         assert variant_ids == ("default",)
         assert artifact_ids == ("libfoo",)
 
@@ -581,7 +581,7 @@ class TestReadManifestSummaryValidation:
     def test_a_duplicate_variant_id_is_refused(self, tmp_path: Path) -> None:
         """`PackageManifest.__post_init__` already refuses a duplicate id,
         but only on the eager `read_project_manifest` path -- the lazy
-        `read_manifest_summary`/`variant_and_artifact_ids` primitives never
+        `read_manifest_summary` primitive never
         construct a `PackageManifest` and so let a manifest naming the same
         variant twice through unchecked (Codex review)."""
         self._write_manifest_json(

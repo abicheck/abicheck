@@ -25,11 +25,9 @@ here so no other module's import path changes.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 #: SemVer-style (MAJOR.MINOR) version of the expected-target *manifest* input
@@ -230,14 +228,6 @@ class ExpectedTargets:
     #: that resolves this against a default should get to say so).
     gate_missing_required: OnMissingRequired | None = None
     gate_unexpected_target: OnUnexpectedTarget | None = None
-
-    @classmethod
-    def from_manifest_file(cls, path: Path) -> ExpectedTargets:
-        try:
-            data = json.loads(path.read_text())
-        except (OSError, ValueError) as exc:
-            raise AggregateError(f"cannot read manifest {path}: {exc}") from exc
-        return cls.from_manifest_data(data)
 
     @classmethod
     def from_manifest_data(cls, data: Any) -> ExpectedTargets:

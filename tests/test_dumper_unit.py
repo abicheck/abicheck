@@ -1,6 +1,6 @@
 """Unit tests for dumper.py internals — mock external tools.
 
-Covers _CastxmlParser methods, _castxml_available, _cache_key,
+Covers _CastxmlParser methods, _cache_key,
 _parse_vtable_index, _vt_sort_key, _pyelftools_exported_symbols,
 and _castxml_dump error paths.
 """
@@ -16,7 +16,6 @@ import pytest
 from abicheck.dumper import (
     _cache_key,
     _cache_path,
-    _castxml_available,
     _castxml_dump,
     _CastxmlParser,
     _is_kernel_binary,
@@ -30,19 +29,6 @@ from abicheck.dumper import (
 from abicheck.extract.headers.castxml.records import collect_virtual_methods
 from abicheck.model import Visibility
 from abicheck.name_classification import canonicalize_type_name
-
-# ── _castxml_available ──────────────────────────────────────────────────
-
-
-class TestCastxmlAvailable:
-    def test_returns_true_when_castxml_on_path(self, monkeypatch):
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
-        assert _castxml_available() is True
-
-    def test_returns_false_when_castxml_missing(self, monkeypatch):
-        monkeypatch.setattr(shutil, "which", lambda _: None)
-        assert _castxml_available() is False
-
 
 # ── _safe_mtime ──────────────────────────────────────────────────────────
 

@@ -353,7 +353,7 @@ def test_resolve_agreeing_target_abi_values_stay_unambiguous(tmp_path: Path) -> 
     ev = BuildEvidence(compile_units=[unit_a, unit_b])
     result = resolve_header_compile_context(ev, [header])
     assert result.matched is True
-    assert result.matched_unit_count == 2
+    assert len(result.matched_units) == 2
 
 
 def test_resolve_bare_and_xclang_wrapped_captures_of_same_value_stay_unambiguous(
@@ -394,7 +394,7 @@ def test_resolve_bare_and_xclang_wrapped_captures_of_same_value_stay_unambiguous
     ev = BuildEvidence(compile_units=[unit_a, unit_b])
     result = resolve_header_compile_context(ev, [header])
     assert result.matched is True
-    assert result.matched_unit_count == 2
+    assert len(result.matched_units) == 2
 
 
 def test_resolve_bare_and_xclang_wrapped_captures_of_different_values_still_ambiguous(

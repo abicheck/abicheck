@@ -102,7 +102,6 @@ __all__ = [
     "read_project_manifest",
     "read_variant_artifact_pair",
     "read_variant_ref",
-    "variant_and_artifact_ids",
     "write_project_manifest",
 ]
 
@@ -521,11 +520,11 @@ def _required_string_id_list(
     Also refuses a duplicate id. `PackageManifest.__post_init__` already
     catches this, but only on the *eager* `read_project_manifest` path,
     after both this function and every named `refs/*.json` document have
-    already been loaded -- `read_manifest_summary`/`variant_and_artifact_ids`
-    (the lazy primitives D8 exists for, and the ones a real section-aware
-    reader is meant to use directly) never construct a `PackageManifest` at
-    all, so a manifest listing the same variant or artifact id twice passed
-    silently through them and could be processed more than once by a caller
+    already been loaded -- `read_manifest_summary` (the lazy primitive D8
+    exists for, and the one a real section-aware reader is meant to use
+    directly) never constructs a `PackageManifest` at all, so a manifest
+    listing the same variant or artifact id twice passed silently through it
+    and could be processed more than once by a caller
     that trusts `variant_ids`/`artifact_ids` to name a package's membership
     (Codex review). Checked here, the one place both read paths already
     share, rather than duplicating the check in each caller.
@@ -549,7 +548,7 @@ def _required_string_id_list(
     `artifact_ref_relpath`) already enforce on construction. Without this,
     an id like `"../x"` passed every check above (a real string, not a
     duplicate, no filesystem collision with another entry) and was handed
-    back from `read_manifest_summary`/`variant_and_artifact_ids` as valid
+    back from `read_manifest_summary` as valid
     package membership, even though building a `VariantRef`/`ArtifactRef`
     from it -- the eager `read_project_manifest` path -- already refuses
     it; the lazy path exposed an id no ref could ever actually be loaded
@@ -796,16 +795,6 @@ def read_variant_artifact_pair(
     # decision with an actual caller to design against, rather than a
     # guess.
     return variant, artifact
-
-
-def variant_and_artifact_ids(
-    root: str | Path,
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """`(variant_ids, artifact_ids)` from `manifest.json` alone — the
-    membership a caller needs before deciding which `refs/*.json` documents
-    to load next."""
-    summary = read_manifest_summary(root)
-    return summary.variant_ids, summary.artifact_ids
 
 
 def read_project_manifest(root: str | Path) -> PackageManifest:

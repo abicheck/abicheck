@@ -456,7 +456,7 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_action_compile_context_parity.py",
             "tests/test_gha_expr.py",
             "tests/test_consumer_compile_full_chain_propagation.py",
-            "tests/test_explicit_source_extractor_propagation.py",
+            "tests/test_l4_frontend_propagation.py",
             # castxml compiler emulation: a -std/--sysroot/-m*/feature -f
             # flag reached castxml's parser but not the emulated compiler's
             # macro/include query. Oracle: the real compiler's -dM output.
@@ -478,25 +478,17 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "override, output/report options) — of these only the "
                     "frontend concern has since had any of this treatment, "
                     "and only for one chain: `--ast-frontend` -> the L4 "
-                    "source-ABI replay backend, where `scan` used to "
-                    "accept the value and then ignore it "
-                    "(tests/test_explicit_source_extractor_propagation.py, "
-                    "exhaustive over the frontend x env domain, grounded in "
-                    "_make_source_extractor). ADR-068 Phase 6 deleted `scan` "
-                    "and its own end-to-end half of that coverage "
-                    "(tests/test_dump_scan_l3_comparability.py) along with "
-                    "the production call site the primitive fed "
-                    "(scan_engine._build_new_snapshot) -- no `compare`-side "
-                    "caller passes an explicit `--ast-frontend` through to "
-                    "L4 source-ABI replay selection today, so this whole "
-                    "chain is currently unreachable from any production "
-                    "code path (a real, acknowledged capability gap, not "
-                    "silently dropped -- see that module's own module "
-                    "docstring). The primitive's request-domain contract "
-                    "stays covered regardless; only the end-to-end and "
-                    "call-site halves are gone, with no replacement caller "
-                    "to re-derive them against. The same "
-                    "concern's *other* consumers (the L2 header parse, the "
+                    "source-ABI replay backend that `compare`/`dump` select "
+                    "through `effective_frontend` "
+                    "(tests/test_l4_frontend_propagation.py, exhaustive over "
+                    "the frontend x env domain, grounded in "
+                    "_make_source_extractor). `scan` once ignored the value "
+                    "for L4; its separate resolver went with `scan` "
+                    "(ADR-068 Phase 6) and the dead-code plan's Stage D, "
+                    "and the end-to-end half of that coverage "
+                    "(tests/test_dump_scan_l3_comparability.py) went with "
+                    "it. The same concern's *other* consumers (the L2 "
+                    "header parse, the "
                     "preprocessor/pattern pre-scans) are untouched. "
                     "consumer_compile was chosen as the first "
                     "worked example specifically because #860/#883's own "

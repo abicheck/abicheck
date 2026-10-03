@@ -83,16 +83,6 @@ class ChangeInventorySplit:
             + self.hygiene_not_evaluated
         )
 
-    @property
-    def has_hygiene(self) -> bool:
-        """Whether this run carries standing inventory at all.
-
-        What a renderer tests before stating the split: a comparison with
-        no hygiene finding must read exactly as it did before this block
-        existed.
-        """
-        return self.hygiene_total > 0
-
 
 _STATE_FIELD = {
     CrossSourceEvolution.INTRODUCED: "introduced",

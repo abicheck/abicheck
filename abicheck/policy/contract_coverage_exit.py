@@ -143,27 +143,6 @@ def coverage_failure_diagnostic(
     )
 
 
-def coverage_diagnostic_from_summary(summary: Any, *, base_exit: int = 0) -> str | None:
-    """The same notice, built from a rendered ``scan`` summary dict.
-
-    ``scan``'s CLI never holds the ``DiffResult`` -- ``_run_baseline_compare``
-    is shared with ``dry_run_estimate.run_scan()`` and returns a summary, which is
-    exactly why the announcement cannot live there. But that summary already
-    carries the ledger, so the command can explain its own exit without any
-    of the result plumbing (Codex review).
-    """
-    if not isinstance(summary, dict):
-        return None
-    failures = summary.get("contract_coverage_failures") or []
-    if not failures:
-        return None
-    floor = summary.get("contract_coverage_exit_contribution") or 0
-    where = sorted(
-        f"{f.get('side')}/{f.get('provider')}" for f in failures if isinstance(f, dict)
-    )
-    return _coverage_message(where, floor, base_exit)
-
-
 def _coverage_message(
     where: list[str], floor: int, base_exit: int, mitigation: str = CLI_MITIGATION
 ) -> str:

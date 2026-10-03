@@ -38,7 +38,6 @@ from abicheck.model.contract_conflicts import (
     CONFLICT_PACKAGE_BINARY_MISMATCH,
     ConflictSourceClaim,
     ContractSourceConflict,
-    conflicts_to_dicts,
 )
 from abicheck.policy.contract_conflicts import (
     detect_exported_but_undeclared,
@@ -105,7 +104,7 @@ class TestContractSourceConflictShape:
         )
         restored = ContractSourceConflict.from_dict(c.to_dict())
         assert restored == c
-        assert conflicts_to_dicts([c])[0]["entity"] == "foo"
+        assert [x.to_dict() for x in [c]][0]["entity"] == "foo"
 
     def test_all_conflict_kinds_are_distinct(self) -> None:
         assert len(ALL_CONFLICT_KINDS) == 3
