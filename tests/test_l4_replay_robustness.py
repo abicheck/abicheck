@@ -147,7 +147,7 @@ def test_malformed_castxml_output_is_a_per_unit_failure(
     with pytest.raises(SourceExtractionError):
         extractor.extract(cu, public_header_roots=["x.h"])
     # ...and the replay worker turns it into a diagnostic rather than raising.
-    tu, diag = _extract_one(extractor, ["x.h"], "", cu)
+    tu, diag = _extract_one(extractor, ["x.h"], cu)
     assert tu is None and diag and "src/x.c" in diag
     runner.assert_exhausted()
 
@@ -174,9 +174,7 @@ def _build() -> BuildEvidence:
 def test_no_scope_selects_an_assembler_unit(scope: str) -> None:
     build = _build()
     changed = [cu.source for cu in build.compile_units]
-    picked = select_compile_units(
-        build, scope=scope, changed_paths=changed, target_id="target://lib"
-    )
+    picked = select_compile_units(build, scope=scope, changed_paths=changed)
     assert not [cu.source for cu in picked if cu.source.endswith(_ASM)], scope
     assert build.compile_units[0].source.endswith(_ASM), (
         "assembler units must sort first"

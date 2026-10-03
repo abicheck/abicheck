@@ -446,6 +446,10 @@ def test_arm_rescans_when_a_matching_module_appears_under_another_name(
     monkeypatch.setattr(
         mon, "_live_functions", lambda census=None: scans.append(1) or iter(())
     )
+    # A partial (threaded) walk deliberately rescans on the next test; this
+    # test is about the module set, so it must not depend on whether an
+    # earlier test in this worker left a thread alive.
+    monkeypatch.setattr(trace, "gc_census_is_safe", lambda: True)
 
     mon.arm()
     mon.arm()
