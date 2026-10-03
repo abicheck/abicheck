@@ -395,7 +395,6 @@ def _scoped_only_extra_causes(
 
 def _to_json_root_cause(
     result: DiffResult,
-    indent: int = 2,
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
@@ -542,7 +541,7 @@ def _to_json_root_cause(
     return _reporter_contract_blocks.render_json_with_side_facts(
         d,
         result,
-        indent=indent,
+        indent=2,
         helpers=_SCOPED_GATE_HELPERS,
         severity_config=severity_config,
         gate=gate,
@@ -1044,7 +1043,6 @@ def _add_trailing_fields(
 
 def to_json(
     result: DiffResult,
-    indent: int = 2,
     *,
     show_only: str | None = None,
     report_mode: str = "full",
@@ -1068,7 +1066,6 @@ def to_json(
     if report_mode == "root-cause":
         return _to_json_root_cause(
             result,
-            indent=indent,
             show_only=show_only,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
@@ -1091,7 +1088,7 @@ def to_json(
         include_exit_decision=include_exit_decision,
         contract_evaluation=contract_evaluation,
     )
-    return render_json(doc, indent=indent)
+    return render_json(doc)
 
 
 _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {

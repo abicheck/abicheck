@@ -36,8 +36,24 @@
   `service_input_resolution.BaselineReuseContext`/
   `resolve_baseline_compile_context` go with them. `compare` and `dump`
   behave as before; see the plan's Stage E.
+- **Renderer parameters no caller passed.** `to_markdown`,
+  `to_review_digest`, `to_sarif`/`to_sarif_str`, `to_junit_xml` and
+  `generate_html_report` lose `report_document`, the pre-envelope form of
+  sharing one report document: pass `envelope=` (a
+  `report.build.build_report_envelope` result), as every `compare` render
+  does. `reporter.to_json`, `sarif.to_sarif_str` and
+  `stack_report.stack_to_json` lose `indent` (always 2);
+  `junit_report.to_junit_xml_multi` loses `report_mode` (the release
+  fan-out it serves rejects `--view root-cause` first);
+  `html_report.write_html_report` loses `demangle`.
 
 ### Fixed
+
+- **`compat check` labels source-only HTML reports as source reports.** With
+  `-old-style`, the report written for `-source` and the one written to
+  `-src-report-path` were titled "Binary compatibility report" and carried
+  `kind:binary` in the metadata comment ABICC tooling reads. They now say
+  `Source` and `kind:source`, as abi-compliance-checker's do.
 
 - **`compare --no-baseline` now applies the `.abicheck.yml` settings
   two-sided `compare` applies.** `compile.lang`, the `debug:` block

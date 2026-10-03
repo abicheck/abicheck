@@ -146,7 +146,7 @@ class TestBuildCalledExactlyOnce:
 
 class TestSarifReusesSharedDocument:
     """SARIF's own ADR-061 Phase 2 gap C slice: ``to_sarif``'s
-    ``report_document`` parameter reuses the shared build's
+    ``envelope`` parameter reuses the shared build's
     ``disposition_audit`` field instead of an independent
     ``compute_disposition_audit`` call, and ``render_output`` builds the
     shared document exactly once for the ``sarif`` format.
@@ -157,8 +157,8 @@ class TestSarifReusesSharedDocument:
         self, changes: list[Change]
     ) -> None:
         result = _result(changes)
-        doc = build_report_document(result)
-        with_doc = to_sarif(result, report_document=doc)
+        envelope = build_report_envelope(result, _snapshot("1.0"), _snapshot("2.0"))
+        with_doc = to_sarif(result, envelope=envelope)
         without_doc = to_sarif(result)
         expected = compute_disposition_audit(result, None).to_dict()
 
@@ -169,15 +169,15 @@ class TestSarifReusesSharedDocument:
         )
 
     @pytest.mark.parametrize("changes", _CHANGE_COMBINATIONS)
-    def test_to_sarif_str_is_unaffected_by_report_document_reuse(
+    def test_to_sarif_str_is_unaffected_by_envelope_document_reuse(
         self, changes: list[Change]
     ) -> None:
         """Passing the shared document must not change any other field --
         only the source of the ``dispositionAudit`` value changes, and that
         value itself is proven equal above."""
         result = _result(changes)
-        doc = build_report_document(result)
-        with_doc = json.loads(to_sarif_str(result, report_document=doc))
+        envelope = build_report_envelope(result, _snapshot("1.0"), _snapshot("2.0"))
+        with_doc = json.loads(to_sarif_str(result, envelope=envelope))
         without_doc = json.loads(to_sarif_str(result))
         assert with_doc == without_doc
 
@@ -214,7 +214,7 @@ class TestSarifReusesSharedDocument:
 
 class TestJunitReusesSharedDocument:
     """JUnit's own ADR-061 Phase 2 gap C slice: ``to_junit_xml``'s
-    ``report_document`` parameter reuses the shared build's
+    ``envelope`` parameter reuses the shared build's
     ``disposition_audit`` field instead of an independent
     ``compute_disposition_audit`` call, and ``render_output`` builds the
     shared document exactly once for the ``junit`` format.
@@ -248,8 +248,8 @@ class TestJunitReusesSharedDocument:
         self, changes: list[Change]
     ) -> None:
         result = _result(changes)
-        doc = build_report_document(result)
-        with_doc = self._audit_properties(to_junit_xml(result, report_document=doc))
+        envelope = build_report_envelope(result, _snapshot("1.0"), _snapshot("2.0"))
+        with_doc = self._audit_properties(to_junit_xml(result, envelope=envelope))
         without_doc = self._audit_properties(to_junit_xml(result))
         expected = compute_disposition_audit(result, None).to_dict()
 
@@ -257,15 +257,15 @@ class TestJunitReusesSharedDocument:
         assert with_doc == without_doc
 
     @pytest.mark.parametrize("changes", _CHANGE_COMBINATIONS)
-    def test_to_junit_xml_is_unaffected_by_report_document_reuse(
+    def test_to_junit_xml_is_unaffected_by_envelope_document_reuse(
         self, changes: list[Change]
     ) -> None:
         """Passing the shared document must not change any other field --
         only the source of the disposition-audit properties changes, and
         that value itself is proven equal above."""
         result = _result(changes)
-        doc = build_report_document(result)
-        with_doc = to_junit_xml(result, report_document=doc)
+        envelope = build_report_envelope(result, _snapshot("1.0"), _snapshot("2.0"))
+        with_doc = to_junit_xml(result, envelope=envelope)
         without_doc = to_junit_xml(result)
         assert with_doc == without_doc
 
@@ -1551,8 +1551,8 @@ class TestSarifAndJunitDecisionBoundary:
     proves nothing about SARIF's or JUnit's *own* boundary.
 
     The real, honest boundary available today is narrower, and this is that
-    boundary made executable: once a caller supplies a shared
-    ``report_document``, the one piece of SARIF's/JUnit's own decision-making
+    boundary made executable: once a caller supplies an envelope
+    (whose shared ``document`` it carries), the one piece of SARIF's/JUnit's own decision-making
     this slice actually converged -- the disposition-audit block -- must be
     read from it rather than re-decided via a second
     ``compute_disposition_audit`` call. This is the real, current contract;
@@ -1563,12 +1563,12 @@ class TestSarifAndJunitDecisionBoundary:
         self,
     ) -> None:
         result = _result([_BREAKING, _ADDITION])
-        doc = build_report_document(result)
+        envelope = build_report_envelope(result, _snapshot("1.0"), _snapshot("2.0"))
 
         with mock.patch(
             "abicheck.report.disposition_audit.compute_disposition_audit"
         ) as spy:
-            to_sarif(result, report_document=doc)
+            to_sarif(result, envelope=envelope)
 
         spy.assert_not_called()
 
@@ -1576,12 +1576,12 @@ class TestSarifAndJunitDecisionBoundary:
         self,
     ) -> None:
         result = _result([_BREAKING, _ADDITION])
-        doc = build_report_document(result)
+        envelope = build_report_envelope(result, _snapshot("1.0"), _snapshot("2.0"))
 
         with mock.patch(
             "abicheck.report.disposition_audit.compute_disposition_audit"
         ) as spy:
-            to_junit_xml(result, report_document=doc)
+            to_junit_xml(result, envelope=envelope)
 
         spy.assert_not_called()
 

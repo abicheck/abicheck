@@ -461,6 +461,12 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # flag reached castxml's parser but not the emulated compiler's
             # macro/include query. Oracle: the real compiler's -dM output.
             "tests/test_castxml_compiler_emulation.py",
+            # `compare --no-baseline` resolved the project config and read
+            # 6 of its fields. Oracle: the written `.abicheck.yml`.
+            "tests/test_no_baseline_config_settings.py",
+            # `compat check -source`/`-src-report-path` never reached the
+            # HTML report's kind. Oracle: ABICC's own flag table.
+            "tests/test_compat_report_kind.py",
         ),
         known_gaps=(
             KnownGap(

@@ -571,7 +571,6 @@ def _build_testsuite(
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
     report_mode: str = "full",
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> ET.Element:
     """Build a ``<testsuite>`` element from a single DiffResult.
@@ -581,8 +580,7 @@ def _build_testsuite(
     emitted as passing test cases so that the pass-rate is meaningful.
     When *show_only* is active, only the filtered changes are emitted
     (no unchanged snapshot symbols) so the test count matches the filter.
-    *report_document* is forwarded to :func:`_add_disposition_audit_properties` (see its docstring).
-    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` this render projects: it supplies both that document and every per-finding verdict/category below, so JUnit resolves neither for itself.
+    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` this render projects: it supplies the shared document :func:`_add_disposition_audit_properties` reads and every per-finding verdict/category below, so JUnit resolves neither for itself.
     """
     kind_sets = result._effective_kind_sets()
     resolved_today = None if envelope is None else envelope.resolved_today
@@ -693,11 +691,11 @@ def _build_testsuite(
         props,
         result,
         severity_config,
-        report_document=_resolved_document(envelope, report_document),
+        report_document=_resolved_document(envelope),
     )
     add_scoped_properties(props, result)
     _add_env_matrix_property(
-        props, result, report_document=_resolved_document(envelope, report_document)
+        props, result, report_document=_resolved_document(envelope)
     )
 
     # G29 Phase 3 (ADR-052 follow-up): --report-mode root-cause adds
@@ -960,7 +958,6 @@ def to_junit_xml(
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
     report_mode: str = "full",
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> str:
     """Convert a single DiffResult to a JUnit XML string.
@@ -989,8 +986,6 @@ def to_junit_xml(
         (``"impact"``) renders identically to ``"full"``, same as before
         this parameter existed; a retired mode (``"leaf"``) or an unknown
         one raises ``ValidationError``.
-    report_document:
-        ADR-061 gap C shared build; forwarded to :func:`_build_testsuite`.
     envelope:
         ADR-061 gap C completed ``ReportEnvelope``; forwarded to
         :func:`_build_testsuite`, which reads its shared document and its
@@ -1019,7 +1014,6 @@ def to_junit_xml(
         show_only=show_only,
         severity_config=severity_config,
         report_mode=report_mode,
-        report_document=report_document,
         envelope=envelope,
     )
     root.append(ts)
@@ -1089,7 +1083,6 @@ def to_junit_xml_multi(
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
     error_libraries: list[dict[str, object]] | None = None,
-    report_mode: str = "full",
     comparison_scope: Mapping[str, object] | None = None,
     env_matrix_source_sha256: str | None = None,
 ) -> str:
@@ -1102,18 +1095,16 @@ def to_junit_xml_multi(
     ``<testsuite>`` with a single ``<error>`` testcase so CI dashboards
     reflect the failure.
 
-    *report_mode*: see :func:`to_junit_xml`. *comparison_scope*: ADR-065's section (``report.junit_scope``). *env_matrix_source_sha256*: the release-wide deployment-floor digest -- see :func:`abicheck.report.junit_scope.append_env_matrix_suite`.
+    Always the ``full`` mode: the directory/package release fan-out, its one
+    caller, rejects ``--view leaf``/``root-cause`` before rendering
+    (``reject_release_incompatible_view_mode``). *comparison_scope*: ADR-065's section (``report.junit_scope``). *env_matrix_source_sha256*: the release-wide deployment-floor digest -- see :func:`abicheck.report.junit_scope.append_env_matrix_suite`.
     """
     # A public entry point reaching ``_build_testsuite`` directly, so it
-    # validates and prewarms for itself rather than inheriting either from
-    # its single-result sibling (Codex review, PR #1284): delegating the mode
-    # contract in the docstring left a retired mode rendering a full
-    # document, and an unwarmed demangle cache forks one ``c++filt`` per
-    # distinct symbol on a host without in-process ``cxxfilt``.
-    from .report.report_modes import reject_unsupported_report_mode
+    # prewarms for itself rather than inheriting that from its single-result
+    # sibling (Codex review, PR #1284): an unwarmed demangle cache forks one
+    # ``c++filt`` per distinct symbol on a host without in-process ``cxxfilt``.
     from .reporter import prewarm_change_demangling
 
-    reject_unsupported_report_mode(report_mode)
     for _result, _old_snap in results:
         prewarm_change_demangling(_result)
 
@@ -1130,7 +1121,6 @@ def to_junit_xml_multi(
             old_snap,
             show_only=show_only,
             severity_config=severity_config,
-            report_mode=report_mode,
         )
         root.append(ts)
         total_tests += int(ts.get("tests", "0"))

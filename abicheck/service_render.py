@@ -411,7 +411,6 @@ def _project_terminal(envelope: ReportEnvelope) -> str:
     document = build_review_digest_document(
         envelope.result,
         severity_config=envelope.severity_config,
-        report_document=envelope.document,
         envelope=envelope,
     )
     text = render_terminal_digest_document(document)

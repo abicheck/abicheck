@@ -73,20 +73,18 @@ def element_from_mapping(node: object) -> ET.Element:
     return element
 
 
-def render_xml_document(
-    document: ReportDocument, *, indent: bool = True, encoding: str = "UTF-8"
-) -> str:
-    """Serialize *document* as XML without deriving or changing report facts."""
+def render_xml_document(document: ReportDocument, *, indent: bool = True) -> str:
+    """Serialize *document* as UTF-8 XML without deriving or changing report facts."""
 
     root = element_from_mapping(document.to_mapping())
     if indent:
         ET.indent(root)
     buf = io.BytesIO()
-    ET.ElementTree(root).write(buf, encoding=encoding, xml_declaration=True)
-    return buf.getvalue().decode(encoding)
+    ET.ElementTree(root).write(buf, encoding="UTF-8", xml_declaration=True)
+    return buf.getvalue().decode("UTF-8")
 
 
-def render_element_as_xml(root: ET.Element, *, indent: bool = True) -> str:
+def render_element_as_xml(root: ET.Element) -> str:
     """Freeze a completed element tree as a report document and render it.
 
     The XML counterpart of
@@ -95,6 +93,4 @@ def render_element_as_xml(root: ET.Element, *, indent: bool = True) -> str:
     freeze one step rather than three, so a caller cannot skip it by reaching
     straight for ``ElementTree.write``.
     """
-    return render_xml_document(
-        ReportDocument.from_mapping(element_to_mapping(root)), indent=indent
-    )
+    return render_xml_document(ReportDocument.from_mapping(element_to_mapping(root)))

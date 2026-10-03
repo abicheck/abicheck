@@ -720,8 +720,6 @@ def effective_config_fields_from_raw(
     severity_config: SeverityConfig | None,
     exit_code_scheme: str | None,
     require_complete_analysis: bool = False,
-    on_incomplete_scope: str | None = None,
-    fail_on_removed_library: bool | None = None,
 ) -> dict[str, str]:
     """:func:`effective_config_fields` for a run's raw gate inputs -- the one
     place those become an ``EffectiveGate`` for a single comparison's digest
@@ -735,7 +733,10 @@ def effective_config_fields_from_raw(
     or ``""`` keeps the derived one, so the gate cannot carry an empty scheme.
     The release summary, which has no single *result*, builds its own gate
     (``cli_compare_receipt._release_summary_effective_config_block``) and
-    calls :func:`effective_config_fields` directly.
+    calls :func:`effective_config_fields` directly; it is also the only
+    gate carrying the release-only axes (``scope.on_incomplete``,
+    ``gate.fail_on_removed_library``), which no single comparison's exit
+    reads, so a member report's digest leaves them at their defaults.
     """
     import dataclasses
 
@@ -745,8 +746,6 @@ def effective_config_fields_from_raw(
         severity_config,
         require_complete_analysis=require_complete_analysis,
         scope=scoped_gate_selection_from_result(result),
-        on_incomplete_scope=on_incomplete_scope,
-        fail_on_removed_library=fail_on_removed_library,
     )
     scheme = exit_code_scheme or gate.exit_code_scheme
     if scheme != gate.exit_code_scheme:

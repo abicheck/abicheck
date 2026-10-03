@@ -256,16 +256,16 @@ def resolved_gate(
     return gate_decision_for_result(result, severity_config)
 
 
-def resolved_document(
-    envelope: ReportEnvelope | None,
-    report_document: ReportDocument | None,
-) -> ReportDocument | None:
-    """The envelope's shared document, else the caller's own ``report_document``.
+def resolved_document(envelope: ReportEnvelope | None) -> ReportDocument | None:
+    """The envelope's shared document, or ``None`` for a direct caller with
+    no envelope (which then builds what it needs itself).
 
-    The envelope wins: when both are supplied, the caller is inside an
-    envelope-driven render and the envelope's document *is* the shared one.
+    The envelope is the one way a render receives the shared document: every
+    production render goes through ``service_render`` with one. Each
+    renderer used to take a ``report_document`` too, the pre-envelope form of
+    the same reuse; no production call passed it, so it is gone.
     """
-    return envelope.document if envelope is not None else report_document
+    return envelope.document if envelope is not None else None
 
 
 def env_matrix_digest_reusing_document(
@@ -285,8 +285,7 @@ def env_matrix_digest_reusing_document(
     must never leak into a still-later render of that same document (Codex
     review, fresh evidence -- SARIF's and JUnit's own projections were still
     reading ``result`` directly after every other format was fixed for this
-    exact class). A direct caller with no document at all (no envelope, no
-    ``report_document``) keeps the prior, independent behaviour of reading
+    exact class). A direct caller with no document at all (no envelope) keeps the prior, independent behaviour of reading
     *result* straight.
     """
     if document is None:
