@@ -11048,3 +11048,55 @@ function reads as not exported on both architectures. A token substitution is
 not a fix (Itanium substitution numbering differs between a class name and a
 builtin type), so it was not attempted. glibc's own `*f128` declarations are
 system headers and unaffected.
+
+## The comparability contract never records the target platform (2026-10-03)
+
+Found by the dead-code plan's Stage E parameter pass: no production call
+passes `comparability.compute_extraction_contract`'s `target_triple`,
+`pointer_width` or `endianness`. `dumper_contract._attach_extraction_contract`,
+the one real-extraction caller, omits all three, so every fresh contract's
+`profile_fields` hold `""` for them, and `-m32`/`--target=` reach the
+fingerprint no other way (`macro_ops` covers only `-D`/`-U`,
+`pass_through_flags` only `-include`). The gate rule
+`check_contracts_comparable` documents ("a cross-compiler flag set for only one
+side ... still raises") therefore cannot fire: OLD dumped with
+`--gcc-options=-m32` and NEW without, against the same x86-64 binary, are
+judged comparable, and declarations that differ only because of the target
+(`sizeof`, `#ifdef __LP64__`) are reported as ABI findings rather than
+`ProfileMismatchError`. The platform-identity carve-out that compares these
+fields with the binary's own architecture is likewise dead in production.
+
+Not wired in the parameter pass because it is a gate change, not a missing
+argument:
+
+- castxml's recorded `compiler_target_triple` is the emulated compiler's
+  `-dumpmachine`, which ignores `-m32`; only the clang frontend resolves the
+  effective triple (`dumper_toolchain._configured_target_triple`, which honours
+  `--target=`/`-m32`) and it hands it to the parser alone. A sound
+  `pointer_width`/`endianness` needs the macro query castxml's compiler
+  emulation already runs (`__SIZEOF_POINTER__`, `__BYTE_ORDER__`).
+- Every stored baseline carries `""` for all three. Recording real values
+  changes every fresh `profile_fingerprint`, so the gate needs a
+  legacy-unrecorded carve-out (an empty side is unknown, never a mismatch),
+  as `language_standard` has, or every existing baseline comparison would
+  start failing as not comparable.
+
+Proposed: record the effective triple on `ast_toolchain` for both frontends,
+derive width/endianness from the emulated compiler's macros, pass all three,
+and add the unrecorded-side carve-out with tests over {recorded, unrecorded} x
+{same, different} x {binary differs, binary same}. Owner: ADR-050.
+
+## The L2 header parse never captures a dependency file (2026-10-03)
+
+Also from Stage E: `compute_extraction_contract`'s `depfile_resolved_paths`
+and `generated_driver_path` are never passed, because no castxml/clang L2
+invocation requests `-MD -MF`. ADR-050 D1 describes `include_sequence` as
+hashing the content of every file the parse actually read under each external
+`-I` root, plus a system/toolchain bucket; with no depfile both are always
+empty. Two dumps that read different dependency headers (a newer
+`/opt/dep/include`, a libstdc++ update changing an ABI-relevant macro) get
+identical `profile_fingerprint`s, the under-counting this digest exists to
+prevent. `buildsource/include_graph.parse_depfile` already parses the format.
+Building the capture changes fresh fingerprints the same way the target
+platform entry above does, so it needs the same unrecorded-side carve-out.
+Owner: ADR-050; until then ADR-050 D1 overstates what is fingerprinted.
