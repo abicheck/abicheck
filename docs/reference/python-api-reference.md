@@ -306,20 +306,15 @@ Detect binary format from magic bytes.
 
 ## `estimate_scan`
 
-Dry-run: projected per-layer cost of one comparison operand for this project. Probes the project (TU count, header fan-out, collect mode) and returns one :class:`CostEstimate` per L-layer the level would touch -- **without running any compiler or parsing any binary**. Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a precise wall-clock prediction.
+Dry-run: projected per-layer cost of one comparison operand for this project. Probes the project (TU count, header fan-out) and returns one :class:`CostEstimate` per L-layer the level would touch -- **without running any compiler or parsing any binary**. Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a precise wall-clock prediction.
 
 | Parameter | Type | Default |
 |---|---|---|
 | `side` | `InputSpec` | *(required)* |
 | *(keyword-only below)* | | |
-| `mode` | `str` | `'pr'` |
-| `source_method` | `str \| None` | `None` |
-| `depth` | `str \| None` | `None` |
+| `resolved_level` | `tuple[SourceMethod, EvidenceDepth]` | *(required)* |
+| `collect_mode` | `str` | *(required)* |
 | `changed_paths` | `Sequence[str]` | `()` |
-| `seeded` | `bool` | `False` |
-| `max_tus` | `int \| None` | `None` |
-| `compile_db` | `Path \| None` | `None` |
-| `resolved_level` | `tuple[SourceMethod, EvidenceDepth] \| None` | `None` |
 
 **Returns:** `list[CostEstimate]`
 

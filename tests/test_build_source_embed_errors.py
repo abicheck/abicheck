@@ -146,7 +146,6 @@ def test_bad_config_is_a_usage_error_at_the_function_boundary(
             None,
             bad_config.parent,
             build_config=bad_config,
-            quiet=True,
         )
 
     assert excinfo.value.exit_code == 2
