@@ -142,7 +142,7 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             "file of the package -- with or without a hand-bumped version "
             "constant -- makes every such key miss, and changing it back "
             "makes them hit again. Every `DiskCache` in the package is either "
-            "keyed by `storage.code_identity.abicheck_code_identity()` or "
+            "keyed by `storage.code_identity.abicheck_code_fingerprint()` or "
             "classified as storing an external tool's own output."
         ),
         fixed_by=(1466,),

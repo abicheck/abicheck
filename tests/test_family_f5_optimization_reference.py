@@ -86,7 +86,7 @@ R, B, H = "release.memo", "binary.memo", "headers.memo"
 _NEEDS_L5 = "UNCOVERED: L3-L5 build-source graph extraction (needs a compile database + clang); no in-process fixture reaches it"
 COVERAGE: dict[str, str] = {
     # ---- memoized functions ----
-    "abicheck.storage.code_identity::memoized::abicheck_code_identity": B,
+    "abicheck.storage.code_identity::memoized::abicheck_code_fingerprint": B,
     "abicheck.buildsource.header_compile_context::memoized::_include_pattern": _NEEDS_L5,
     "abicheck.buildsource.source_extractors.castxml::memoized::_castxml_tool_version": "UNCOVERED: L4 castxml source extractor tool probe; build-source path only",
     "abicheck.buildsource.source_extractors.clang::memoized::_clang_compiler_family": "UNCOVERED: L4 clang source extractor tool probe; build-source path only",

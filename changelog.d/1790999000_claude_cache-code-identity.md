@@ -7,7 +7,7 @@
   matching bump kept serving the previous code's result for byte-identical
   inputs -- a reproducible debug build, for example, got the snapshot an older
   abicheck produced. Each key now also folds a content hash of the installed
-  `abicheck` package (`storage.code_identity.abicheck_code_identity`), so any
+  `abicheck` package (`storage.code_identity.abicheck_code_fingerprint`), so any
   change to the package, an upgrade or a different development checkout
   alike, is a cache miss. The castxml/clang header-AST cache, which stores the
   external tool's own output, is unchanged.

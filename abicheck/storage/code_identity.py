@@ -11,7 +11,7 @@ example catalog: its debug builds are byte-reproducible (same source, flags
 and working directory), so a restored cache answered a pull request with the
 snapshot its base branch's extractor produced.
 
-:func:`abicheck_code_identity` closes that class: a content hash of every
+:func:`abicheck_code_fingerprint` closes that class: a content hash of every
 source file in the installed ``abicheck`` package, folded into each of those
 keys. Any edit to the package -- a development checkout between commits as
 much as a release upgrade -- is a different identity, so a cache miss is
@@ -33,8 +33,8 @@ from ..model.execution_cache import memoized
 __all__ = [
     "PACKAGE_ROOT",
     "SOURCE_SUFFIXES",
-    "abicheck_code_identity",
-    "compute_code_identity",
+    "abicheck_code_fingerprint",
+    "compute_code_fingerprint",
 ]
 
 #: The installed package directory (``abicheck/``).
@@ -45,7 +45,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_SUFFIXES = frozenset({".py", ".pyi"})
 
 
-def compute_code_identity(root: Path) -> str:
+def compute_code_fingerprint(root: Path) -> str:
     """Content hash of every source file under *root*.
 
     Order-independent of directory listing (paths are sorted), independent of
@@ -72,7 +72,7 @@ def compute_code_identity(root: Path) -> str:
 
 
 @memoized
-def abicheck_code_identity() -> str:
+def abicheck_code_fingerprint() -> str:
     """The identity of the abicheck code running in this process.
 
     Computed once per process (~50 ms over ~1000 files) and deliberately
@@ -80,4 +80,4 @@ def abicheck_code_identity() -> str:
     loaded, and an edit made on disk after start-up does not change what the
     running interpreter executes.
     """
-    return compute_code_identity(PACKAGE_ROOT)
+    return compute_code_fingerprint(PACKAGE_ROOT)

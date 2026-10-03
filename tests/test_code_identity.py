@@ -26,7 +26,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from abicheck.storage import code_identity
-from abicheck.storage.code_identity import compute_code_identity
+from abicheck.storage.code_identity import compute_code_fingerprint
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -60,7 +60,7 @@ class TestComputeCodeIdentity:
     def test_identity_equal_iff_sources_equal(self, tmp_path_factory, a, b) -> None:
         ra = _write(tmp_path_factory.mktemp("a") / "pkg", a)
         rb = _write(tmp_path_factory.mktemp("b") / "pkg", b)
-        same = compute_code_identity(ra) == compute_code_identity(rb)
+        same = compute_code_fingerprint(ra) == compute_code_fingerprint(rb)
         assert same == (_sources_of(a) == _sources_of(b))
 
     @settings(
@@ -74,7 +74,7 @@ class TestComputeCodeIdentity:
     ) -> None:
         names = list(tree)
         root = _write(tmp_path_factory.mktemp("t") / "pkg", tree)
-        before = compute_code_identity(root)
+        before = compute_code_fingerprint(root)
         victim = data.draw(st.sampled_from(sorted(names)))
         kind = data.draw(st.sampled_from(["content", "rename", "delete"]))
         path = root / victim
@@ -84,7 +84,7 @@ class TestComputeCodeIdentity:
             path.rename(path.with_name("zz_" + path.name))
         else:
             path.unlink()
-        assert compute_code_identity(root) != before
+        assert compute_code_fingerprint(root) != before
 
     def test_ignores_listing_order_mtime_bytecode_and_non_sources(
         self, tmp_path: Path
@@ -97,12 +97,12 @@ class TestComputeCodeIdentity:
         (r2 / "__pycache__" / "a.cpython-313.pyc").write_bytes(b"\0bytecode")
         (r2 / "sub" / "notes.txt").write_text("not code")
         (r2 / "sub" / "data.json").write_text("{}")
-        assert compute_code_identity(r1) == compute_code_identity(r2)
+        assert compute_code_fingerprint(r1) == compute_code_fingerprint(r2)
 
     def test_real_package_identity_is_stable_and_memoized(self) -> None:
-        first = code_identity.abicheck_code_identity()
-        assert first == code_identity.abicheck_code_identity()
-        assert first == compute_code_identity(code_identity.PACKAGE_ROOT)
+        first = code_identity.abicheck_code_fingerprint()
+        assert first == code_identity.abicheck_code_fingerprint()
+        assert first == compute_code_fingerprint(code_identity.PACKAGE_ROOT)
         assert len(first) == 64
 
 
@@ -118,7 +118,7 @@ def identity(monkeypatch: pytest.MonkeyPatch):
 
     def set_to(value: str) -> None:
         for mod in (snapshot_cache, build_cache, source_replay):
-            monkeypatch.setattr(mod, "abicheck_code_identity", lambda v=value: v)
+            monkeypatch.setattr(mod, "abicheck_code_fingerprint", lambda v=value: v)
 
     return set_to
 
@@ -207,7 +207,7 @@ class TestCachesMissAcrossCodeIdentity:
 
 #: Every ``DiskCache`` in the package, by registered name. ``"code-identity"``
 #: means its entries are abicheck-computed output and its key folds
-#: :func:`abicheck_code_identity` (proved per cache above); anything else names
+#: :func:`abicheck_code_fingerprint` (proved per cache above); anything else names
 #: why the identity does not apply.
 DISK_CACHE_CLASSIFICATION = {
     "abicheck.snapshot_cache.disk": "code-identity",
@@ -247,7 +247,7 @@ def test_every_disk_cache_is_classified() -> None:
     assert found, "scanner found no DiskCache at all -- the scan itself is broken"
     assert found == set(DISK_CACHE_CLASSIFICATION), (
         "classify every DiskCache in DISK_CACHE_CLASSIFICATION: a cache of "
-        "abicheck-computed output must fold abicheck_code_identity() into its key"
+        "abicheck-computed output must fold abicheck_code_fingerprint() into its key"
     )
     keyed = {n for n, c in DISK_CACHE_CLASSIFICATION.items() if c == "code-identity"}
     assert keyed == set(_PROVED)
