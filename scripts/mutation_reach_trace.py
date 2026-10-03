@@ -212,7 +212,13 @@ class Monitor:
         )
         if ids == self.module_ids:
             return
-        self.module_ids = ids
+        from abicheck.workflows.memory_trace import gc_census_is_safe
+
+        if gc_census_is_safe():
+            # Only a full census marks this module set done: after a partial
+            # namespace walk (another thread alive) the next test retries,
+            # so the census runs once this is the sole thread again.
+            self.module_ids = ids
         for obj in self._live_functions():
             code = obj.__code__
             if code.co_filename not in self.paths or code in self.armed:

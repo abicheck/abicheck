@@ -89,12 +89,15 @@ def _norm(path: str | Path) -> str:
 def attribute_failing_headers(stderr: str, headers: Sequence[Path]) -> set[int]:
     """0-based indices into *headers* whose ``#include`` chain raised an error.
 
-    Each error is attributed through its include chain: an outermost frame
-    in the aggregate (a file that is none of *headers*) names the listed
-    header it included there -- the chain's next location, matched by file;
-    only without such a frame does the innermost listed file in the chain
-    name it. An error nothing in the chain attributes is skipped, never
-    guessed at.
+    Each error is attributed through its include chain: when the outermost
+    frame is the aggregate (a file that is none of *headers*), the input is
+    the file that frame includes -- the chain's next entry -- looked up in
+    *headers* by path; only without such a frame does the innermost listed
+    file in the chain name it. The aggregate's line numbers are never read:
+    its layout belongs to whoever writes it (a preamble include precedes the
+    headers), so a line-to-index rule would silently blame a neighbour the
+    moment that layout changed. An error nothing in the chain attributes is
+    skipped, never guessed at.
     """
     return _scan_diagnostics(stderr, headers)[0]
 
@@ -143,32 +146,28 @@ def _scan_diagnostics(
         err = _ERROR_RE.match(line)
         if err:
             located = [*chain, (err.group("file"), int(err.group("line")))]
-            current = _attribute(located, index, len(headers))
+            current = _attribute(located, index)
             if current is not None:
                 failing.add(current)
         else:
             note = _NOTE_RE.match(line)
             if note and current is not None:
                 located = [*chain, (note.group("file"), int(note.group("line")))]
-                other = _attribute(located, index, len(headers))
+                other = _attribute(located, index)
                 if other is not None and other != current:
                     conflicting.add(current)
         chain = []
     return failing, conflicting
 
 
-def _attribute(
-    located: list[tuple[str, int]], index: dict[str, int], n_headers: int
-) -> int | None:
+def _attribute(located: list[tuple[str, int]], index: dict[str, int]) -> int | None:
     # The aggregate TU's own frame names the top-level input: the file it
-    # included at that line is the chain's *next* location. Prefer it over
-    # any inner listed header -- when listed A includes listed B and B fails
-    # only under a macro A set, the input to drop is A, not B. Resolved by
-    # file, never by line arithmetic: the aggregate's layout is not fixed
-    # (castxml's prepends a compatibility preamble include), so "header i is
-    # on line i+1" silently named the wrong header once that line existed.
-    # A next file that is no listed header (the preamble itself) is
-    # unattributed, never guessed at.
+    # includes, i.e. the chain's next entry. Prefer it over any inner listed
+    # header -- when listed A includes listed B and B fails only under a
+    # macro A set, the input to drop is A, not B. Resolved by path, never by
+    # the frame's line number: the aggregate's layout is its writer's
+    # (``write_castxml_aggregate`` puts a preamble first), and an unlisted
+    # next entry (that preamble, a toolchain file) attributes to nothing.
     outer_file, _outer_line = located[0]
     if len(located) > 1 and _norm(outer_file) not in index:
         return index.get(_norm(located[1][0]))

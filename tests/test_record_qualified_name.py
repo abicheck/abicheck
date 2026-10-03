@@ -136,8 +136,8 @@ def test_case89_finding_is_independent_of_debug_evidence(tmp_path: Path) -> None
                 check=True,
             )
             if strip:
-                # -S strips debug info under both GNU strip (= --strip-debug)
-                # and Apple's cctools strip, which has no -g.
+                # -S is --strip-debug in GNU strip and the only spelling
+                # Apple's strip accepts; -g exists only in GNU strip.
                 subprocess.run(["strip", "-S", str(lib)], check=True)
             subprocess.run(
                 [

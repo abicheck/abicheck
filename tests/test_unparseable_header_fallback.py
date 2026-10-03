@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.errors import HeaderToolchainError, SnapshotError
+from abicheck.extract.castxml_header_compat import write_castxml_aggregate
 from abicheck.extract.unparseable_header_fallback import (
     attribute_failing_headers,
     cross_header_conflicts,
@@ -34,21 +35,40 @@ def _headers(n: int) -> list[Path]:
     return [Path(f"/inc/h{i}.h") for i in range(n)]
 
 
+def _agg_line(active: list[Path], h: Path) -> int:
+    """Line on which the real castxml aggregate writer includes *h*.
+
+    Read from a file ``write_castxml_aggregate`` actually wrote, never from a
+    formula: the fixtures must reproduce the layout castxml really sees (a
+    preamble include precedes the headers), or they would only prove the
+    attribution agrees with a re-statement of itself.
+    """
+    agg = write_castxml_aggregate(active, ".hpp")
+    try:
+        target = f'#include "{h.resolve()}"'
+        for n, line in enumerate(agg.read_text().splitlines(), start=1):
+            if line == target:
+                return n
+        raise AssertionError(f"{h} is not included by the aggregate")
+    finally:
+        shutil.rmtree(agg.parent)
+
+
 def _stderr_for(active: list[Path], bad: set[Path], style: int) -> str:
     """castxml/clang-shaped diagnostics for each *bad* header still active."""
     out: list[str] = []
-    for i, h in enumerate(active):
+    for h in active:
         if h not in bad:
             continue
         if style == 0:  # #error directly in the header, reached from the aggregate
             out += [
-                f"In file included from {AGG}:{i + 1}:",
+                f"In file included from {AGG}:{_agg_line(active, h)}:",
                 f"{h}:3:2: error: Unsupported compiler",
                 '    3 | #error "Unsupported compiler"',
             ]
         elif style == 1:  # error in a private transitive include
             out += [
-                f"In file included from {AGG}:{i + 1}:",
+                f"In file included from {AGG}:{_agg_line(active, h)}:",
                 f"In file included from {h}:7:",
                 "/inc/detail/x.h:9:1: error: unknown type name 'foo'",
             ]
@@ -108,14 +128,13 @@ def test_transitive_listed_include_drops_only_the_aggregate_input(seed):
     def attempt(active: list[Path]) -> str:
         calls.append(list(active))
         if a in active:
-            i = active.index(a)
             exc = SnapshotError("castxml failed")
             setattr(
                 exc,
                 "stderr",
                 "\n".join(
                     [
-                        f"In file included from {AGG}:{i + 1}:",
+                        f"In file included from {AGG}:{_agg_line(active, a)}:",
                         f"In file included from {a}:5:",
                         f"{b}:3:2: error: MODE_FROM_A requires C++",
                     ]
@@ -315,7 +334,7 @@ def _conflict_stderr(active: list[Path], pairs: list[tuple[Path, Path]]) -> str:
         if a not in active or b not in active:
             continue
         out += [
-            f"In file included from {AGG}:{active.index(b) + 1}:",
+            f"In file included from {AGG}:{_agg_line(active, b)}:",
             f"{b}:1:16: error: typedef redefinition with different types",
             "    1 | typedef double clashing_t;",
             f"{a}:1:13: note: previous definition is here",
@@ -365,10 +384,11 @@ def test_note_in_same_or_unlisted_header_stays_self_contained(seed):
     headers = _headers(rng.randint(2, 8))
     h = rng.choice(headers)
     i = headers.index(h)
+    line = _agg_line(headers, h)
     note_file = h if seed % 2 else Path("/usr/include/c++/foo.h")
     stderr = "\n".join(
         [
-            f"In file included from {AGG}:{i + 1}:",
+            f"In file included from {AGG}:{line}:",
             f"{h}:4:1: error: no matching function",
             f"{note_file}:2:1: note: candidate function not viable",
         ]
@@ -411,19 +431,12 @@ def _chain_lines(frames: list[tuple[str, int]], style: str) -> list[str]:
 
 @pytest.mark.parametrize("style", ["clang", "gcc"])
 @pytest.mark.parametrize("seed", range(30))
-@pytest.mark.parametrize("preamble_lines", [0, 1, 3])
-def test_multi_level_chains_attribute_to_the_aggregate_input(
-    seed, style, preamble_lines
-):
-    """Oracle: the input the aggregate frame included names the header,
-    regardless of how deep the chain is, whether intermediate files are
-    listed, which compiler's frame layout is used, or how many lines precede
-    the header includes in the aggregate (castxml's prepends a compatibility
-    preamble; "header i is on line i+1" named the wrong header once it did).
-
-    The chain is modelled on real compiler output: the frame after
-    ``aggregate:N`` is always the file the aggregate included on line N.
-    """
+def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
+    """Oracle: the input the aggregate frame includes -- the chain's next
+    entry -- is the one dropped, regardless of how deep the chain is,
+    whether intermediate files are listed, or which compiler's frame layout
+    is used. Chains are shaped as a compiler prints them: the aggregate's
+    line includes the target, the target includes the rest."""
     rng = random.Random(seed)
     headers = _headers(rng.randint(2, 10))
     target = rng.randrange(len(headers))
@@ -436,13 +449,9 @@ def test_multi_level_chains_attribute_to_the_aggregate_input(
         )
         for j in range(depth)
     ]
-    agg_line = preamble_lines + target + 1
-    if depth:
-        frames = [(AGG, agg_line), (str(headers[target]), 2), *inner]
-        err_file = f"/inc/detail/leaf{seed}.h"
-    else:
-        frames = [(AGG, agg_line)]
-        err_file = str(headers[target])
+    agg_frame = (AGG, _agg_line(headers, headers[target]))
+    frames = [agg_frame, (str(headers[target]), 2), *inner] if depth else [agg_frame]
+    err_file = f"/inc/detail/leaf{seed}.h" if depth else str(headers[target])
     stderr = "\n".join(
         [
             "some preamble",
@@ -455,15 +464,52 @@ def test_multi_level_chains_attribute_to_the_aggregate_input(
     assert attribute_failing_headers(stderr, headers) == {target}
 
 
-def test_an_error_in_the_aggregate_preamble_is_unattributed():
-    """An error reached through the aggregate's own preamble include names no
-    listed header, so no header is dropped for it."""
+@pytest.mark.parametrize("style", ["clang", "gcc"])
+@pytest.mark.parametrize("seed", range(40))
+def test_attribution_is_independent_of_the_aggregate_layout(seed, style):
+    """The aggregate's line numbers carry no meaning to the attribution.
+
+    Whoever writes the aggregate owns its layout (a preamble include, blank
+    lines, any header order); a rule that inverted it arithmetically blamed
+    the healthy neighbour of the failing header as soon as a preamble line
+    was added. Here every bad header sits on an arbitrary line of an
+    arbitrary layout -- including lines no header occupies and line numbers
+    past the header count -- and the oracle is the generator's own choice of
+    bad headers, not any line formula.
+    """
+    rng = random.Random(7000 + seed)
+    headers = _headers(rng.randint(1, 9))
+    bad = set(rng.sample(headers, rng.randint(1, len(headers))))
+    order = rng.sample(headers, len(headers))
+    lines = rng.sample(range(1, 4 * len(headers) + 6), len(headers))
+    line_of = dict(zip(order, sorted(lines)))
+    out: list[str] = []
+    for h in headers:
+        if h not in bad:
+            continue
+        frames = [(AGG, line_of[h])]
+        if rng.random() < 0.5:  # the error sits deeper, in a private include
+            frames.append((str(h), rng.randint(1, 30)))
+            leaf = f"/inc/detail/{h.stem}_impl.h"
+        else:
+            leaf = str(h)
+        out += [*_chain_lines(frames, style), f"{leaf}:2:1: error: boom"]
+    expected = {headers.index(h) for h in bad}
+    assert attribute_failing_headers("\n".join(out), headers) == expected
+
+
+def test_an_error_in_the_aggregate_preamble_is_attributed_to_no_header():
+    """An error whose chain runs through the writer's own preamble names no
+    input: the preamble is not one of the headers, so nothing is dropped and
+    the caller re-raises the original failure instead of blaming a header."""
     headers = _headers(3)
+    agg = write_castxml_aggregate(headers, ".hpp")
+    try:
+        preamble = agg.read_text().splitlines()[0].split('"')[1]
+    finally:
+        shutil.rmtree(agg.parent)
     stderr = "\n".join(
-        [
-            *_chain_lines([(AGG, 1)], "clang"),
-            "/tmp/abicheck_castxml_x/preamble.h:4:2: error: boom",
-        ]
+        [f"In file included from {AGG}:1:", f"{preamble}:3:1: error: boom"]
     )
     assert attribute_failing_headers(stderr, headers) == set()
 
@@ -473,7 +519,7 @@ def test_gcc_group_does_not_leak_into_the_next_diagnostic():
     stderr = "\n".join(
         [
             *_chain_lines(
-                [(AGG, 1), (str(headers[0]), 4), ("/inc/detail/a.h", 2)], "gcc"
+                [(AGG, _agg_line(headers, headers[0])), (str(headers[0]), 2)], "gcc"
             ),
             "/inc/detail/b.h:1:1: error: first",
             "    1 | x",

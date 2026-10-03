@@ -710,6 +710,42 @@ def present_fact_count(snap: AbiSnapshot, site: tuple[type, str]) -> int:
     return count
 
 
+def present_fact_sites(snap: AbiSnapshot) -> frozenset[tuple[type, str]]:
+    """Every ``(class, field)`` with at least one present ``Fact`` in
+    ``snap`` -- one walk answering :func:`present_fact_count` ``> 0`` for
+    every site at once (same traversal, same object-identity dedup). The
+    per-site form re-walks the whole snapshot per site, which made the F1
+    module's import-time site census the costliest part of collecting the
+    suite."""
+    hit: set[tuple[type, str]] = set()
+    seen: set[int] = set()
+
+    def walk(obj: Any) -> None:
+        if isinstance(obj, list | tuple):
+            for x in obj:
+                walk(x)
+            return
+        if isinstance(obj, Mapping):
+            for x in obj.values():
+                walk(x)
+            return
+        if isinstance(obj, Fact) or not (
+            dataclasses.is_dataclass(obj) and not isinstance(obj, type)
+        ):
+            return
+        if id(obj) in seen:
+            return
+        seen.add(id(obj))
+        for f in dataclasses.fields(obj):
+            value = getattr(obj, f.name)
+            if isinstance(value, Fact) and value.is_present:
+                hit.add((type(obj), f.name))
+            walk(value)
+
+    walk(snap)
+    return frozenset(hit)
+
+
 def _drop(field: str) -> Callable[[AbiSnapshot], AbiSnapshot | None]:
     def op(s: AbiSnapshot) -> AbiSnapshot | None:
         return (
