@@ -45,13 +45,58 @@ def mutated():
     return paths, list(sys.modules.values())
 
 
-def test_the_namespace_walk_reaches_what_the_heap_walk_reaches(mutated) -> None:
-    paths, modules = mutated
-    assert mrt._census_is_safe(), "run without other threads, so gc is the oracle"
-    by_heap = _armable(mrt.live_functions(modules), paths)
-    by_namespace = _armable(mrt.namespace_functions(modules), paths)
-    assert by_heap, "the oracle found nothing to arm"
-    assert by_namespace == by_heap
+_COMPARE_IN_A_FRESH_INTERPRETER = """
+import gc, importlib, json, sys
+sys.path.insert(0, sys.argv[2])
+import mutation_reach_trace as mrt
+from pathlib import Path
+repo = Path(sys.argv[1])
+paths = mrt.only_mutate_paths(repo)
+for name in mrt.module_names(repo, paths):
+    importlib.import_module(name)
+gc.collect()
+modules = list(sys.modules.values())
+assert mrt._census_is_safe()
+def armable(functions):
+    return {
+        f"{c.co_filename}:{c.co_firstlineno}:{c.co_qualname}"
+        for f in functions
+        if f.__code__.co_filename in paths
+        for c in mrt.code_objects(f.__code__)
+        if c.co_name != "<module>"
+    }
+print(json.dumps({
+    "heap": sorted(armable(mrt.live_functions(modules))),
+    "namespace": sorted(armable(mrt.namespace_functions(modules))),
+}))
+"""
+
+
+def test_the_namespace_walk_reaches_what_the_heap_walk_reaches() -> None:
+    """In a fresh interpreter, as the tracer meets them: a test process's heap
+    also holds functions other tests left behind (uncollected garbage, a
+    reloaded module's previous functions), which no walk from a module can
+    reach and which the tracer never needs to arm."""
+    import json
+    import subprocess
+
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _COMPARE_IN_A_FRESH_INTERPRETER,
+            str(REPO),
+            str(REPO / "scripts"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=REPO,
+    )
+    found = json.loads(out.stdout)
+    assert found["heap"], "the oracle found nothing to arm"
+    assert sorted(set(found["heap"]) - set(found["namespace"])) == []
+    assert found["namespace"] == found["heap"]
 
 
 def test_with_another_thread_alive_no_heap_census_runs(
