@@ -57,7 +57,7 @@ rather than under `abicheck/compare/`, deliberately: it imports from
 first, out of scope for a pure rename (see `architecture/modules.yaml`'s own
 entry for the full reasoning). `scan_levels.py` moved to
 `abicheck/model/evidence_depth_levels.py` (it defines value types —
-`EvidenceDepth`/`SourceMethod`/`ScanMode`/`SourceScope` — consumed at least as
+`EvidenceDepth`/`SourceMethod`/`SourceScope` — consumed at least as
 widely by `compare`'s own evidence-depth resolution as by `scan`, and has no
 buildsource-specific dependency at all). Both moves are pure rename/re-home
 with no behavior change; see those packages' own module maps. `poi.py` and

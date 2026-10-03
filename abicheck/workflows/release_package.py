@@ -500,16 +500,3 @@ def classify_dso_only_package_map(pkg_map: dict[str, Path]) -> DsoOnlyClassifica
             continue
         members[key] = sub_dir
     return DsoOnlyClassification(members, unclassified)
-
-
-def dso_only_filter_pair(
-    old_pkg_map: dict[str, Path] | None, new_pkg_map: dict[str, Path] | None
-) -> tuple[DsoOnlyClassification | None, DsoOnlyClassification | None]:
-    """`classify_dso_only_package_map` applied to whichever of
-    *old_pkg_map*/*new_pkg_map* is not `None` -- the pair shape
-    `cli_compare_release_matrix._prepare_compare_release_inputs` needs for
-    its own two stored-side maps in one call."""
-    return (
-        classify_dso_only_package_map(old_pkg_map) if old_pkg_map is not None else None,
-        classify_dso_only_package_map(new_pkg_map) if new_pkg_map is not None else None,
-    )

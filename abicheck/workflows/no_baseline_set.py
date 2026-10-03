@@ -147,7 +147,6 @@ def resolve_no_baseline_set_plan(
     dso_only: bool = False,
     selection: ReleaseSelection | None = None,
     variant: str | None = None,
-    make_temp_dir: Callable[[str], Path] | None = None,
 ) -> NoBaselineSetPlan:
     """Resolve *operand* (a directory, package archive, or multi-artifact
     stored package) into a :class:`NoBaselineSetPlan`.
@@ -173,13 +172,10 @@ def resolve_no_baseline_set_plan(
         stored_side_inventory_complete,
     )
 
-    base_make_temp_dir = make_temp_dir or (
-        lambda prefix: Path(tempfile.mkdtemp(prefix=prefix))
-    )
     allocated: list[Path] = []
 
     def _make_temp_dir(prefix: str) -> Path:
-        path = base_make_temp_dir(prefix)
+        path = Path(tempfile.mkdtemp(prefix=prefix))
         allocated.append(path)
         return path
 
