@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -162,7 +163,28 @@ _NEEDS_STATIC = {
     "initial-exec": True,
     "local-exec": True,
 }
-_COMPILERS = [cc for cc in ("gcc", "aarch64-linux-gnu-gcc") if shutil.which(cc)]
+
+
+def _targets_elf(cc: str) -> bool:
+    """Whether *cc* links ELF shared objects (the only format this test reads).
+
+    MinGW's ``gcc`` on Windows links a PE DLL whatever the ``.so`` suffix says,
+    and Apple's ``gcc`` a Mach-O dylib; parsing either as ELF finds nothing. A
+    compiler that targets another format lacks the named capability, so it is
+    left out rather than failing a test of ELF TLS classification.
+    """
+    r = subprocess.run([cc, "-dumpmachine"], capture_output=True, text=True)
+    triple = r.stdout.strip().lower()
+    return r.returncode == 0 and not any(
+        t in triple for t in ("mingw", "cygwin", "windows", "msvc", "darwin", "apple")
+    )
+
+
+_COMPILERS = [
+    cc
+    for cc in ("gcc", "aarch64-linux-gnu-gcc")
+    if shutil.which(cc) and _targets_elf(cc)
+]
 
 
 def _has_any_tls_dynamic_evidence(so: Path) -> bool:
@@ -178,9 +200,13 @@ def _has_any_tls_dynamic_evidence(so: Path) -> bool:
 
 @pytest.mark.integration
 @pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="builds and reads ELF shared objects; the host toolchain emits PE/Mach-O elsewhere",
+)
+@pytest.mark.skipif(
     not shutil.which("readelf"), reason="readelf required as the oracle"
 )
-@pytest.mark.skipif(not _COMPILERS, reason="no C compiler")
+@pytest.mark.skipif(not _COMPILERS, reason="no ELF-targeting C compiler")
 @pytest.mark.parametrize("cc", _COMPILERS)
 def test_every_tls_model_is_classified_by_its_semantics(
     cc: str, tmp_path: Path

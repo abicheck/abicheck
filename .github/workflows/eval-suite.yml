@@ -32,8 +32,18 @@ on:
   # that changes checker code under abicheck/** but not skills-src/evaluation/field/**. Instead, every
   # PR event reaches the workflow and the per-job `if` below runs the suite only
   # when the PR carries the `eval` label (jobs skip cheaply otherwise).
+  # A skipped run allocates no runner (an `if`-skipped job never gets one), so
+  # this trigger costs check-list noise, not queue time. It stays
+  # `synchronize` + the current label set rather than `labeled` only, so a
+  # later push to a labelled PR re-runs the suite against the new head.
   pull_request:
     types: [opened, reopened, synchronize, labeled]
+
+concurrency:
+  # A PR groups by PR number so a new push supersedes the stale run; a
+  # schedule/dispatch run groups by ref, never by the per-run run_id.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -128,11 +138,15 @@ jobs:
           cache: "pip"
 
       - name: Install source-tier system toolchain
-        # git+cmake produce the compile DB; clang makes L4 decls/types
-        # non-partial. zstd extracts .conda archives; binutils gives readelf.
+        # git+cmake configure and build each library target (the runner dumps
+        # the .so it produced); clang makes L4 decls/types non-partial.
         uses: ./.github/actions/install-system-deps
         with:
-          packages: zstd binutils git cmake clang
+          packages: git cmake clang
+
+      # The dump passes the library's public headers (-H), which runs the L2
+      # header parse -- CastXML, the default header backend.
+      - uses: ./.github/actions/setup-castxml
 
       - name: Install abicheck + source-tier toolchain
         run: |

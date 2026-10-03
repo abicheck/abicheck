@@ -694,7 +694,9 @@ class TestNoWorkflowGatesInstallOnUpdate:
             for path in WORKFLOWS_DIR.glob("*.yml")
             if "install-system-deps" in path.read_text(encoding="utf-8")
         }
-        for expected in ("ci.yml", "examples-validation.yml"):
+        # The ci.yml lanes that broke (integration-tests, e2e) now live in
+        # integration.yml, so that is where the guard has to look.
+        for expected in ("integration.yml", "examples-validation.yml"):
             assert expected in users, f"{expected} no longer uses the shared action"
 
     def test_install_sh_exists(self) -> None:

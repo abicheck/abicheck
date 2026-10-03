@@ -108,8 +108,12 @@ def _trace(
     project: Path, extra: list[str], inherited: dict[str, str] | None = None
 ) -> set[str]:
     out = project / "reach"
+    # The nested run is its own session: an outer xdist worker's identity
+    # (PYTEST_XDIST_WORKER=gwN) would otherwise be inherited by the nested
+    # *controller*, whose output file then collides with -- and overwrites --
+    # the nested worker of the same name, dropping that worker's hits.
     env = {
-        **{k: v for k, v in os.environ.items() if not k.startswith("PYTEST_XDIST")},
+        **{k: v for k, v in os.environ.items() if not k.startswith("PYTEST_XDIST_")},
         **(inherited or {}),
         "MUTATION_REACH_OUT": str(out),
         "PYTHONPATH": os.pathsep.join([str(REPO / "scripts"), str(project)]),
@@ -325,3 +329,142 @@ def test_extend_selection_never_narrows() -> None:
         for path in changed:
             if path.startswith("tests/test_") and out != ["tests/"]:
                 assert path in out
+
+
+# --------------------------------------------------------------------------
+# The census-free fallback finds what the census finds
+# --------------------------------------------------------------------------
+
+
+def test_namespace_walk_reaches_every_code_object_of_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With another thread alive the plugin may not take a heap census
+    (bug class gc-census-concurrent-thread) and walks the only_mutate
+    modules instead; it must still arm every code object the file defines.
+
+    Oracle: the file's own compiled code tree (``compile`` + nested
+    ``co_consts``), matched by qualified name -- independent of both the walk
+    and the census, and taking no census itself.
+    """
+    import importlib.util
+
+    import mutation_reach_trace as trace
+
+    src = tmp_path / "walked.py"
+    text = (
+        _MUTATED
+        + "import functools\n"
+        + "def _deco(f):\n    @functools.wraps(f)\n    def w(*a):\n        return f(*a)\n    return w\n"
+        + "@_deco\ndef wrapped(x):\n    return x\n"
+        + "class Props:\n"
+        + "    @staticmethod\n    def s():\n        return 1\n"
+        + "    @classmethod\n    def c(cls):\n        return 2\n"
+        + "    @property\n    def p(self):\n        return 3\n"
+        + "    class Nested:\n        def deep(self):\n            return 4\n"
+        # Reachable only through a container, a closure without
+        # functools.wraps, a partial, a bound method or a default.
+        + "def _in_list():\n    return 5\n"
+        + "CALLBACKS = [(_in_list,)]\n"
+        + "def _plain(f):\n    def g():\n        return f()\n    return g\n"
+        + "def _hidden():\n    return 6\n"
+        + "exposed = _plain(_hidden)\n"
+        + "def _partial_target(a, b):\n    return a + b\n"
+        + "PARTIAL = functools.partial(_partial_target, 1)\n"
+        + "def _bound_target(self):\n    return 7\n"
+        + "BOUND = _bound_target.__get__(object())\n"
+        + "def _default_target():\n    return 8\n"
+        + "def uses_default(cb=_default_target):\n    return cb()\n"
+        + "del _in_list, _hidden, _partial_target, _bound_target, _default_target\n"
+    )
+    src.write_text(text)
+    # Imported under a name module_names() would not predict, the way a
+    # test's own importlib load can.
+    spec = importlib.util.spec_from_file_location("unpredicted_name", src)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "unpredicted_name", module)
+    spec.loader.exec_module(module)
+
+    def is_function_code(code: object) -> bool:
+        # Class bodies are code objects too, but no function object owns
+        # one; arm() only needs the code that functions run.
+        return code.co_name != "<module>" and bool(code.co_flags & 0x2)  # CO_NEWLOCALS
+
+    expected = {
+        c.co_qualname
+        for c in trace.code_objects(compile(text, str(src), "exec"))
+        if is_function_code(c)
+    }
+    assert {
+        "helper",
+        "helper.<locals>.inner",
+        "Thing.method",
+        "Props.Nested.deep",
+        "_in_list",
+        "_hidden",
+        "_partial_target",
+        "_bound_target",
+        "_default_target",
+    } <= expected
+
+    mon = object.__new__(trace.Monitor)
+    mon.paths = frozenset({str(src.resolve())})
+    mon.modules = ["pkg.never_imported"]
+    monkeypatch.setattr(trace, "gc_census_is_safe", lambda: False)
+    reached = {
+        c.co_qualname
+        for f in mon._live_functions()
+        if f.__code__.co_filename == str(src.resolve())
+        for c in trace.code_objects(f.__code__)
+    }
+    assert reached == expected
+
+
+def test_arm_rescans_when_a_matching_module_appears_under_another_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``arm()`` runs before every test and skips the walk while nothing it
+    tracks changed. A module of an only_mutate file imported *later* under a
+    name ``module_names`` did not predict must count as a change -- else its
+    functions are never armed and the tests reaching them go unrecorded."""
+    import importlib.util
+
+    import mutation_reach_trace as trace
+
+    src = tmp_path / "late.py"
+    src.write_text("def f():\n    return 1\n")
+    mon = object.__new__(trace.Monitor)
+    mon.paths = frozenset({str(src.resolve())})
+    mon.modules = ["pkg.never_imported"]
+    mon.module_ids = ()
+    mon.armed = set()
+    scans: list[int] = []
+    monkeypatch.setattr(
+        mon, "_live_functions", lambda census=None: scans.append(1) or iter(())
+    )
+
+    mon.arm()
+    mon.arm()
+    assert len(scans) == 1, "an unchanged module set must not rescan"
+
+    spec = importlib.util.spec_from_file_location("loaded_late_under_new_name", src)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "loaded_late_under_new_name", module)
+    spec.loader.exec_module(module)
+    mon.arm()
+    assert len(scans) == 2, "a newly loaded only_mutate module must trigger a rescan"
+    mon.arm()
+    assert len(scans) == 2
+
+
+def test_the_widened_selection_is_the_value_the_well_formed_check_accepts() -> None:
+    """``extend-selection`` writes its own spelling of "the whole suite";
+    ``test_the_committed_selection_is_well_formed`` runs inside that widened
+    stats pass and must accept exactly that value. Pinned together so a
+    change to either spelling cannot reopen the abort."""
+    widened = scope.extend_selection(
+        ["tests/test_a.py"], ["tests/_some_helper.py"], lambda p: True
+    )
+    assert widened == gen.FULL_SELECTION

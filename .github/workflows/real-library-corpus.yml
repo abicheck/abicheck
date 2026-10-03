@@ -27,12 +27,23 @@ permissions:
 
 jobs:
   corpus:
-    name: Real-library corpus gate
+    name: Real-library corpus gate (${{ matrix.library }})
     # The PR's *current* label set, not github.event.label.name (populated
     # only on the one `labeled` event), so later pushes to a labelled PR run.
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'real-corpus')
+    # One job per corpus library, not one serial job over every pair: the
+    # first header-aware run spent 93 minutes on a single protobuf pair and
+    # hit the job timeout before six other pairs had started, so one slow
+    # library starved the rest of the gate. A weekly/dispatch lane, so the
+    # extra runners add no per-PR queue pressure.
+    # tests/test_real_library_corpus_matrix.py pins this list to the set of
+    # `library` values in skills-src/evaluation/validation/data/compat_corpus.json.
+    strategy:
+      fail-fast: false
+      matrix:
+        library: [icu, libpng, libxml2, oneTBB, openssl, protobuf, zstd]
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
@@ -48,6 +59,11 @@ jobs:
         with:
           packages: binutils zstd
 
+      # Every pair whose packages ship an include/ tree is compared with
+      # --header old=/new= and --contract public (run_compat_corpus.py's
+      # evidence_args), which runs the CastXML header parse.
+      - uses: ./.github/actions/setup-castxml
+
       - name: Install abicheck
         run: |
           python -m pip install --upgrade pip
@@ -56,15 +72,20 @@ jobs:
       - name: Run corpus gate
         env:
           ABICHECK_MEMORY_TRACE: ${{ github.workspace }}/reports/corpus/memory-trace.jsonl
+          CORPUS_LIBRARY: ${{ matrix.library }}
         run: |
           mkdir -p reports/corpus
+          # --compare-timeout bounds one `abicheck compare` (45 min): a
+          # pathological library is recorded as "not evaluated" -- which
+          # fails the gate -- instead of eating the job's whole budget.
           python skills-src/evaluation/validation/scripts/run_compat_corpus.py \
+            --library "$CORPUS_LIBRARY" --compare-timeout 2700 \
             --out-dir reports/corpus
 
       - name: Upload corpus results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: real-library-corpus
+          name: real-library-corpus-${{ matrix.library }}
           path: reports/corpus/
           if-no-files-found: warn
