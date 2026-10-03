@@ -486,7 +486,9 @@ class TestDryRunReceiptsWithoutAToolchain:
     ) -> None:
         """The `--no-baseline` wiring, without a compiler: stop at the
         candidate resolution and inspect the context it was handed."""
-        from abicheck.frontends.cli.commands import compare_no_baseline as nb
+        # The CLI and the directory audit share one candidate audit
+        # (`audit_no_baseline_candidate`), which resolves through this.
+        from abicheck.workflows import no_baseline_compare as nb
 
         seen: dict[str, object] = {}
 

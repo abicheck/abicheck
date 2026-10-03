@@ -1108,7 +1108,7 @@ def current(name: str) -> str | int:
 
         return AUDIT_REPORT_SCHEMA_VERSION
     if name == "audit-set":
-        from ..report.no_baseline_set import AUDIT_SET_REPORT_SCHEMA_VERSION
+        from ..report.no_baseline_document import AUDIT_SET_REPORT_SCHEMA_VERSION
 
         return AUDIT_SET_REPORT_SCHEMA_VERSION
     if name == "snapshot":

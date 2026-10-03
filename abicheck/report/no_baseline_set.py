@@ -55,6 +55,7 @@ from .no_baseline import (
     render_no_baseline_markdown,
 )
 from .no_baseline_document import (
+    AUDIT_SET_REPORT_SCHEMA_VERSION,
     NO_BASELINE_EXIT_AXIS_LABELS,
     NO_BASELINE_EXIT_AXIS_NOTICES,
     NoBaselineDocument,
@@ -79,13 +80,6 @@ __all__ = [
     "render_no_baseline_set_oneline",
 ]
 
-#: The ``audit_set`` envelope's own schema version
-#: (``abicheck/schemas/audit_set_report.schema.json``), in its own namespace
-#: -- deliberately neither ``audit_report_schema_version`` (that names the
-#: *member* documents, each of which still carries it verbatim) nor
-#: ``report_schema_version``. Bump MINOR for an additive field, MAJOR for a
-#: removal, a changed meaning, or a field moved into ``required``.
-AUDIT_SET_REPORT_SCHEMA_VERSION = "1.0"
 
 #: The formats an N-library audit renders.
 NO_BASELINE_SET_SUPPORTED_FORMATS = frozenset({"json", "markdown", "oneline"})
