@@ -241,23 +241,6 @@ from .workflows.extraction import (  # noqa: E402,I001
 )
 
 
-def _collect_release_inputs(path: Path) -> list[Path]:
-    """Collect compare-able inputs from a file or directory.
-
-    The Click-translating wrapper over :func:`abicheck.workflows.
-    release_inputs.collect_release_inputs` (the engine-side primitive --
-    ADR-061 gap D: it lives there so the release request/plan is resolvable
-    with no Click context at all). The message and exit code are unchanged.
-    """
-    from .errors import ReleaseOperandContentError
-    from .workflows.release_inputs import collect_release_inputs
-
-    try:
-        return collect_release_inputs(path)
-    except ReleaseOperandContentError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-
 def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:
     """Build key->path map with version-aware duplicate resolution.
 

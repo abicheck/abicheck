@@ -103,20 +103,50 @@ with the ADR or page that names it:
 The removed Python names are registered in `scripts/retired_surfaces.py`, so
 a page that still presents one as live is flagged.
 
-## Stage D — the recomputed list (open)
+## Stage D — the recomputed list (in progress)
 
 `python scripts/usecase_paths.py record --source scenarios --source flows
---build-catalog DIR` followed by `usecase_paths.py dead` lists, at the time
-of writing, **128** dead functions (no production reference, undocumented),
-25 named only in user docs and 75 named only by an ADR or plan. The largest
-groups: orphaned `_CastxmlParser` methods in `dumper_castxml.py` (11),
-`reporter_markdown.py` section builders kept only by a re-export from
-`reporter.py` (9), `dwarf_advanced.py`'s CFI helpers (7),
-`buildsource/compiler_record.py` (6) and `pdb_parser.py` accessors (6) --
-the last waits for a Windows recording before it counts. Most of the rest
-are single accessors and cache-reset hooks.
+--build-catalog DIR` followed by `usecase_paths.py dead` listed **127** dead
+functions (no production reference, undocumented), 26 named only in user
+docs and 76 named only by an ADR or plan. Worked module by module, the same
+way as Stage C.
 
-Work it the same way as Stage C, module by module: wire, delete, move to
-`tests/`, or keep with the page that names it. A cache-reset or
+A function with no production reference is dead whatever the platform: a
+missing Windows or macOS recording only explains why a function is
+*unreached*, never why nothing calls it. So the `pdb_parser.py` accessors
+were decided here like everything else rather than waiting for a Windows
+recording.
+
+### Deleted, wired or moved
+
+| Item | Decision |
+|---|---|
+| `_CastxmlParser` delegation shims (`dumper_castxml.py`, 20 incl. the ones the name matcher kept alive through a same-named method elsewhere, and the unread `_FUNCTION_TAGS`) | **Deleted.** Each forwarded to an `extract/headers/castxml/*` owner; the tests that reached through one now call the owner with `parser._ctx`. |
+| `reporter_markdown.py`'s `_append_*`/`_build_*` section wrappers (12) and their `reporter.py` re-exports | **Deleted.** The renderer goes through `compute_*` + `report/render_markdown.render_*`; the tests now call that pair. |
+| The CFI pass in `dwarf_advanced.py` (frame registers, callee-saved fallback), `parse_advanced_dwarf` (both copies), `ChangeKind.FRAME_REGISTER_CHANGED`, `AdvancedDwarfMetadata.frame_registers`/`callee_saved_regs` | **Deleted** (409 → 408 kinds). The unified DWARF parse never called the pass, and it asked pyelftools for `get_EH_CFI_entries`/`get_CFI_entries`, which do not exist, so it returned nothing even when called; its tests used mocks with those names. Measured before deciding: a corrected pass wired into production changed one of the 169 built catalog cases, a false `frame_register_changed` turning `case15_noexcept_change` from `COMPATIBLE_WITH_RISK` into `BREAKING`, and still missed case64's GCC `ms_abi` change (the callee-saved set at that optimisation level carries no `rdi`/`rsi` spill, and the heuristic counted the return-address column as a saved register). `test_dwarf_unified.py`'s advanced-half "unified equals separate" tests compared `parse_dwarf` with a shim of itself; they now compare against `tests/_dwarf_advanced_oracle.py`, a separate ELF open. |
+| `service_compare_evidence.explicit_source_extractor` and `L4_SOURCE_EXTRACTORS` | **Deleted** (scan's resolver). Its test module claimed `compare`/`dump` never pass an explicit `--ast-frontend` to L4 replay; they do, through `effective_frontend` in `workflows/artifact/embed_side.py`. The exhaustive frontend x env oracle now checks that live resolver (`tests/test_l4_frontend_propagation.py`), and the `config.propagation_completeness` manifest entry says so. |
+| About thirty single accessors and wrappers: `BinarySummary.has_text`/`text_size`, `HeaderCompileContextResolution.matched_unit_count`, `BundleSnapshot.library_names`, `_collect_additions`, `_ClangAstParser._specialization_record_index`, `_castxml_available`, `DebugArtifact.has_dsym`/`has_pdb`/`has_split_dwarf`, `_candidate_type_names`, `BundleVariantsConfig.required_names`, `ChangeKindRegistry.kinds_for_entity`/`templated_kinds`, `conflicts_to_dicts`, `is_unresolved_node_id`, `ScopeAcquisitionRecord.members_in`, `AbiSnapshot.func_by_mangled`, `surface_facts.is_unknown`, `is_local_name_symbol`, `policy_registry_markdown`, `coverage_diagnostic_from_summary`, `PostProcessingPipeline.step_names`, `PipelineContext.baseline_present`, `package_declares_full_dependency_scope`, `variant_and_artifact_ids`, `ChangeInventorySplit.has_hygiene`, `_charge_document_bytes`, `ExpectedTargets.from_manifest_file`, `ResolvedArtifactPlan.add_cleanup`, `BundleCompareRequest.any_stored`, `SnapshotRetention.any_full`, `ordinal_only_pe_exports`, `execution_cache.caching_enabled`/`cache_kinds` | **Deleted.** Tests that used one now state the same expectation on the data it read. |
+
+### Kept
+
+| Item | Why |
+|---|---|
+| `buildsource/compiler_record.extract_compiler_record` and its helpers | Documented Python API: `docs/use/build-evidence-setup.md` names it as the replacement for the removed `--read-compiler-record` flag (the page now names the function, not only the module, so the tool can see it). |
+| `header_include_memo.clear_include_memo`, `spelling_match_cache.clear_caches`, `cache_header_scan.reset_header_scan_statistics`, `path_aliases.clear_path_alias_caches`, `execution_cache.clear_memoized`/`reset_cache_stats`, `type_spelling.strip_ptr_cache_clear` | Test hooks: cache resets for test isolation and cold-cache benchmarks. |
+| `type_spelling.strip_ptr_cache_entries`/`strip_ptr_cache_stats`, `_PatternRegistry.is_held`/`pattern_for`/`reference_counts`, `_ProbeGate.in_flight`, `MemoryAdmission.estimate_gib`, `lazy_graph.is_graph_decoded`, `SurfaceAcquisitionLedger.acquisitions_by_key`/`total_acquisitions`/`total_reuses` | Test hooks: the observation points the retention, single-flight, admission, lazy-decode and acquire-once tests assert through. |
+
+### Still open
+
+- **Parameters scan's deletion left behind.** The tool works on functions,
+  not parameters. `workflows/artifact/execute._resolve_side_snapshot_impl`
+  still takes `source_extractor`, `expand_public_header_roots`,
+  `l4_public_headers`/`l4_public_header_dirs`, `baseline_reuse_hint`,
+  `seed_lang_explicit` and `defer_cleanup` (and threads several into
+  `embed_side_build_source`), which neither remaining caller passes. The
+  general fix is a parameter pass in `scripts/production_references.py`
+  (a keyword parameter no production call site supplies), not a hand edit
+  of this one function.
+
+Recompute the list rather than editing a copy of it. A cache-reset or
 `reset_for_testing` hook that exists for test isolation is a test hook and
-is kept. Recompute the list rather than editing a copy of it.
+is kept.

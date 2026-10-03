@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.model import execution_cache as ec
 from abicheck.model.execution_cache import (
     REFERENCE_MODE_ENV_VAR,
     MemoryCache,
@@ -87,7 +86,6 @@ def test_reference_mode_parses_the_environment(
 ) -> None:
     monkeypatch.setenv(REFERENCE_MODE_ENV_VAR, raw)
     assert reference_mode() is on
-    assert ec.caching_enabled() is (not on)
 
 
 def test_reference_mode_is_read_on_every_call(monkeypatch: pytest.MonkeyPatch) -> None:

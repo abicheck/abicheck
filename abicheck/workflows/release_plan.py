@@ -26,19 +26,15 @@ guidance the root ``CLAUDE.md`` gives for legacy oversized files, applied
 here to a fresh one before it becomes one.
 
 :func:`build_release_plan_from_directories` discovers a plain directory's
-comparable inputs the same way the real release fan-out's own
-``cli_helpers_compare._collect_release_inputs``/``_build_match_map`` do --
-``classify.is_supported_compare_input`` (extract-classified: any file
-format `compare` accepts, not only a real ELF shared object) plus
+comparable inputs through the real release fan-out's own owner,
+``workflows.release_inputs.collect_release_inputs`` (any file format
+`compare` accepts, not only a real ELF shared object), plus
 ``binary_utils.build_match_map`` (the same version-aware canonical-key
 dedup) -- rather than :func:`abicheck.package.discover_shared_libraries`,
 which only recognizes ELF shared objects and would silently show an empty
 or wrong plan for a directory of ``.json`` snapshots or another supported
 non-ELF input (an earlier version of this preview made exactly that
-mistake). ``cli_helpers_compare.py`` itself is ``frontends``-classified and
-Click-coupled (it turns an ambiguous match into ``click.ClickException``),
-so this module calls the two leaf, ``extract``-classified primitives
-underneath it directly instead.
+mistake).
 """
 
 from __future__ import annotations
@@ -335,19 +331,20 @@ def build_release_plan_from_directories(
     selection: ReleaseSelection | None = None,
 ) -> ReleasePlan:
     """:func:`build_release_plan` for two plain, on-disk directories -- the
-    ``compare --dry-run`` preview's own entry point. Discovers each side the
-    same way the real live-directory fan-out does (see module docstring):
-    every file under *old_dir*/*new_dir* that ``is_supported_compare_input``
-    accepts, canonically keyed by ``build_match_map`` -- so the preview can
-    never claim a plan the real run would not also produce. Never extracts a
-    package: a caller with a package operand should not call this at all
-    (see the CLI renderer's own package-operand branch).
+    ``compare --dry-run`` preview's own entry point. Discovers each side
+    through the real live-directory fan-out's own owner,
+    :func:`~abicheck.workflows.release_inputs.collect_release_inputs`, and
+    keys it with ``build_match_map`` -- so the preview can never claim a plan
+    the real run would not also produce, and fails (``ReleaseOperandContentError``)
+    exactly where the real run would: a side with no supported input. Never
+    extracts a package: a caller with a package operand should not call this
+    at all (see the CLI renderer's own package-operand branch).
     """
     from ..binary_utils import build_match_map
-    from ..classify import is_supported_compare_input
+    from .release_inputs import collect_release_inputs
 
-    old_files = [p for p in sorted(old_dir.rglob("*")) if is_supported_compare_input(p)]
-    new_files = [p for p in sorted(new_dir.rglob("*")) if is_supported_compare_input(p)]
+    old_files = collect_release_inputs(old_dir)
+    new_files = collect_release_inputs(new_dir)
     old_map, _old_warnings = build_match_map(old_files)
     new_map, _new_warnings = build_match_map(new_files)
     return build_release_plan(old_map, new_map, selection=selection)

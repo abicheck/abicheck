@@ -68,7 +68,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
 # re-exports them *from here* and direct tests import them by those names --
 # deleting them would be an import break for no gain, so the blocks are
 # marked rather than trimmed.
-from .cli_helpers_compare import _build_match_map, _collect_release_inputs  # noqa: F401
+from .cli_helpers_compare import _build_match_map  # noqa: F401
 from .frontends.cli.options.params import (
     DEFAULT_POLICY_PROFILE,
     _load_suppression_and_policy,
