@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Which code each use case runs, and what changed about it.
 
-Three subcommands share one recorded artifact:
+Four subcommands share one recorded artifact:
 
 ``record``
     Runs the use-case sources under coverage, each run tagged with its id,
@@ -38,6 +38,13 @@ Three subcommands share one recorded artifact:
       none reaches on head. Not a deletion list: a signal to look at why
       the code stopped being used (dead now, or a use case lost a path).
     * newly reached functions, and runs present on one side only.
+
+``dead``
+    Unreached functions classified by production reference
+    (``production_references.py``): dead (every reference lies inside other
+    dead code, to a fixpoint), documented API, ADR/plan-named, still
+    referenced, or not checkable by name. A review list for
+    ``docs/contribute/plans/dead-code-and-single-owner.md``.
 
 Being unreached is never a verdict that code is dead: platform readers for
 PE/Mach-O are unreached on Linux because no such toolchain runs there, and
@@ -829,6 +836,44 @@ def cmd_diff(args: argparse.Namespace) -> int:
     return 1 if fail else 0
 
 
+# ── dead ────────────────────────────────────────────────────────────────────
+
+
+def unreached_functions(doc: dict) -> set[str]:
+    reached = set(reach(doc))
+    return {fn for fn in all_functions(doc) if fn not in reached}
+
+
+def cmd_dead(args: argparse.Namespace) -> int:
+    from production_references import dead_report, render_markdown
+
+    doc = load_recording(args.recording)
+    report = dead_report(Path(args.root).resolve(), unreached_functions(doc))
+    if args.json:
+        Path(args.json).write_text(
+            json.dumps(
+                {
+                    "revision": doc.get("revision"),
+                    "sources": doc.get("sources"),
+                    "dead": report.dead,
+                    "documented": report.documented,
+                    "decided": report.decided,
+                    "tests": report.tests,
+                    "live": {
+                        fid: f"{s.path}:{s.line}"
+                        for fid, s in sorted(report.live.items())
+                    },
+                    "unverifiable": dict(sorted(report.unverifiable.items())),
+                },
+                indent=1,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    print(render_markdown(report, limit=args.top))
+    return 0
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
@@ -883,6 +928,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     df.add_argument("--shared-at", type=int, default=3)
     df.set_defaults(func=cmd_diff)
+
+    dd = sub.add_parser(
+        "dead",
+        help="unreached functions with no production reference (a review list)",
+    )
+    dd.add_argument("recording", type=Path)
+    dd.add_argument(
+        "--root",
+        default=str(ROOT),
+        help="checkout the recording was made from (default: this one)",
+    )
+    dd.add_argument("--json", help="write the full classification here")
+    dd.add_argument("--top", type=int, default=None,
+                    help="list at most this many per section (default: all)")  # fmt: skip
+    dd.set_defaults(func=cmd_dead)
 
     args = parser.parse_args(argv)
     if args.cmd == "record" and not args.source:

@@ -219,10 +219,11 @@ edges — recorded as a diagnostic, not inferred around.
 Like the consumer join, **`OBJECT_DEFINES_SYMBOL` only ever joins onto a
 `binary_symbol` node the graph already carries** — an archive's internal-only
 indexed symbols (never exported by any side) mint no node, keeping the graph
-compact. `archive_graph.defining_members(graph, symbol)` is the
-localization read view: every `(archive label, member name)` pair the graph
-records as defining a symbol, for a "`cache_dispatch.o` in
-`libinternal_dispatch.a`" finding detail.
+compact. `localize_symbol(graph, symbol)` (`graph explain`) reports them as
+`defined_in_archive_members`: every `{archive, member}` pair the graph
+records as defining the symbol — "`cache_dispatch.o` in
+`libinternal_dispatch.a`" — read through `model.source_graph_query.defining_members`.
+An empty list is an absence of evidence, not "defined nowhere".
 
 Coverage is tracked at `extractor_passes["archive_graph"]` (every
 `static_library` node the graph named was found, read, and index-backed) /

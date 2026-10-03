@@ -2319,7 +2319,7 @@ corroborating evidence, distinct from the existing runtime `app.c`/`app.cpp`
 fixtures in `examples/`, from `probe_harness.py`'s header-only-library
 snapshot-extraction probe, from `contrib/abicheck-clang-plugin`'s
 compile-time facts extraction, and — closest of the four —
-`abicheck/source_smoke.py`'s hand-authored two-sided consumer compile/link
+`source_smoke.py`'s (now `tests/source_smoke.py`) hand-authored two-sided consumer compile/link
 oracle) turned out to be out of scope for this initiative as a *general*
 mechanism. A driving case already exists —
 `case111_enumerable_thread_specific_lambda_ambiguity`'s `source_smoke` spec

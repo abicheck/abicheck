@@ -99,15 +99,11 @@ def project_group() -> None:
     Most libraries never need this group — it exists for projects that check
     several targets/build profiles/baseline channels together, wired through
     the reusable ``check-project.yml`` GitHub Actions workflow. A single
-    library checking one artifact just uses ``dump``/``compare``/``scan``.
+    library checking one artifact just uses ``dump``/``compare``.
 
-    A whole-*product* baseline archive (multiple interdependent libraries
-    packed into one deterministic ``.tar.zst``, so a bundle-aware
-    ``compare`` sees every cross-library edge in one invocation instead of
-    one per-library ``scan``) is a library-only surface, not a CLI command
-    here — see :mod:`abicheck.product_baseline`'s
-    :func:`~abicheck.product_baseline.pack_product_baseline`/
-    :func:`~abicheck.product_baseline.unpack_product_baseline`.
+    A whole product (several interdependent libraries) is compared with
+    directory or package ``compare``, which sees every cross-library edge in
+    one invocation.
     """
 
 

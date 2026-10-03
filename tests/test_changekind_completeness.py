@@ -416,9 +416,6 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # ADR-056 audit-mode bundle finding (scan --artifact-set, no old side).
     # Exercised in tests/test_bundle.py.
     ChangeKind.BUNDLE_UNRESOLVED_INTRA_DEPENDENCY,
-    # G38 Phase 3 multibuild variant pairing.
-    # Exercised in tests/test_bundle_multibuild.py.
-    ChangeKind.BUNDLE_VARIANT_COVERAGE_REGRESSED,
     # G38 Phase 4 C-boundary signature-evidence gate.
     # Exercised in tests/test_bundle_signature_evidence.py.
     ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED,

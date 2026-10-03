@@ -53,7 +53,9 @@ change the framing below:
    (an alternative L2 fact source), not a diagnostic-corroboration mechanism
    — it augments what abicheck knows about a declaration, it doesn't compile
    a consumer against it.
-4. **`abicheck/source_smoke.py`'s two-sided consumer compile/link check.**
+4. **`source_smoke.py`'s two-sided consumer compile/link check** (moved
+   from `abicheck/` to `tests/source_smoke.py` in 2026-10, its only runtime
+   caller being the examples harness).
    This is the closest existing relative — `run_source_smoke()` genuinely
    does compile the same consumer TU against a v1 and a v2 header/lib pair
    and reads the compiler's real success/failure as the check's own oracle.

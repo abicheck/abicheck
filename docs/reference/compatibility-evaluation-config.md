@@ -294,13 +294,11 @@ that moves a `ChangeKind` between buckets changes the identity too.
 ## Front-end equality
 
 Phase 1's own gate is that equivalent semantic input resolves identically
-whichever front end asked. It is checked, not asserted:
-
-```python
-from abicheck.compatibility_evaluation_frontend import cross_front_end_differences
-
-cross_front_end_differences(cli_config, api_config)   # [] when equivalent
-```
+whichever front end asked. It is checked, not asserted: the test suite
+resolves the CLI's `compare` kwargs and the equivalent `CompareRequest` and
+compares the two configs (`cross_front_end_differences` in
+`tests/_cross_front_end.py`, an empty list when they are equivalent). A run
+only ever resolves one config, so the check is a test, not package API.
 
 The only permitted difference is *which* front end stated a value
 (`explicit_cli` vs. `api_request`, and the option spelling recorded with it) —
@@ -339,24 +337,18 @@ choice and is recorded as one.)
 
 The complement of that rule — a receipt must not name an input its front end
 *cannot* have — needs its own check, because the equality gate above
-deliberately normalizes option spellings away and so is blind to it:
-
-```python
-from abicheck.compatibility_evaluation_frontend import unstatable_selectors
-
-unstatable_selectors(api_config)                               # no CLI flag at an API tier
-unstatable_selectors(api_config, request_type=CompareRequest)  # ...and every name is a real field
-```
-
-Without `request_type` it reports any `api_request` hop labelled with a CLI
-flag — a candidate built with a hard-coded `"--flag"` instead of going
-through the resolver's front-end-aware spelling. That check alone is not
-enough, because "not a flag" passes for any plausible-looking identifier:
-**"the API" need not be one namespace.** A front end resolving at
-`FrontEnd.API` can record fields its own request type does not have, so
-`request_type=` has the check verify each name is real, and `api_spellings=`
-remaps the default (`CompareRequest`'s) spellings for a front end whose
-request type names the same input differently.
+deliberately normalizes option spellings away and so is blind to it
+(`unstatable_selectors` in the same test module). It reports any
+`api_request` hop labelled with a CLI flag — a candidate built with a
+hard-coded `"--flag"` instead of going through the resolver's
+front-end-aware spelling. That check alone is not enough, because "not a
+flag" passes for any plausible-looking identifier: **"the API" need not be
+one namespace.** A front end resolving at `FrontEnd.API` can record fields
+its own request type does not have, so given a `request_type` the check also
+verifies each name is a real field of it. (A front end whose request type
+names the same input differently passes `api_spellings=` to
+`resolve_compatibility_evaluation_config`, which remaps the default
+`CompareRequest` spellings.)
 
 Today there is only one such type. `ScanRequest` used to name three of these
 inputs differently (`scope_to_public_surface`, `policy_file`, `suppression`)

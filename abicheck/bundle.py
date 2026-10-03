@@ -40,15 +40,9 @@ Public surface:
                                     the shape :func:`build_bundle_snapshot`
                                     and :func:`compare_bundle` both need.
 
-For a caller with two plain *directories* on disk (e.g. two
-:mod:`abicheck.product_baseline` archives already unpacked) who doesn't want
-to build snapshots or run the per-library compares themselves, see
-:func:`abicheck.product_baseline.compare_product_directories` — it discovers,
-matches, and diffs for you, then calls :func:`compare_bundle`. Kept in
-``product_baseline`` rather than here: it needs the per-pair compare engine
-(``service_compare_pipeline.run_compare``), and that module's own import
-graph already reaches back into this one, so importing it from this module
-would create an import cycle.
+For two plain *directories* on disk, directory ``compare`` (the release
+fan-out) discovers, matches and diffs the libraries, then calls
+:func:`compare_bundle`.
 
 Bundle findings use the ``ChangeKind.BUNDLE_*`` values registered in
 :mod:`abicheck.change_registry`. They participate in policy classification,
@@ -873,7 +867,7 @@ def build_bundle_snapshot_from_metadata(
     version-table analysis included — directly from that stored metadata,
     with no binaries required at compare time at all. This is the primitive
     a snapshot-first product baseline would build on; it does not itself
-    change how ``dump``/``pack_product_baseline`` work today.
+    change how ``dump`` works today.
 
     Args:
         metadata: A ``{library_name: ElfMetadata}`` map — the same keying

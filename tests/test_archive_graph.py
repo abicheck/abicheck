@@ -41,7 +41,6 @@ from abicheck.buildsource.archive_graph import (
     _long_name_at,
     archive_member_node_id,
     augment_graph_with_archives,
-    defining_members,
     parse_ar_archive,
     read_archive,
 )
@@ -51,6 +50,7 @@ from abicheck.buildsource.source_graph import (
     SourceGraphSummary,
     build_source_graph,
 )
+from abicheck.model.source_graph_query import defining_members
 
 
 def _header(name: str, size: int) -> bytes:

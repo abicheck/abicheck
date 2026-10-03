@@ -72,7 +72,10 @@ convergence stays with `plans/cli-cleanup-phase-two.md`'s open PR I rather
 than being done twice — see that plan's own row. The silent canonical
 fallback in `compare_product_directories` (D3's `ambiguous` diagnostic)
 is also left for a later slice, since turning it into a refusal-to-compare
-is a behaviour change with its own migration note.
+is a behaviour change with its own migration note. *(Closed by deletion:
+`abicheck/product_baseline.py` had no command, Action or workflow caller
+and was removed — `plans/dead-code-and-single-owner.md` Stage C — so no
+pairing site keeps a silent fallback.)*
 
 S0 (executable scenario table) remains open. Design record for
 the vision's "partial matrices" and "scope-sensitive analysis" decisions
@@ -115,11 +118,13 @@ The current code answers these unevenly (file references are from the
   pairing (exact path, then an ambiguity-guarded SONAME/case-folded
   fallback), but an *ambiguous* group is silently left unpaired and then
   surfaces as `BUNDLE_LIBRARY_REMOVED` plus `BUNDLE_LIBRARY_ADDED` — an
-  ambiguity reported as a removal.
+  ambiguity reported as a removal. *(Closed by deleting the module, which no
+  command reached.)*
 - A release run with zero matched pairs appends a warning and keeps
   `worst_verdict = "NO_CHANGE"`, exit `0` (`cli_compare_release_pairwise.py`).
 - Multibuild variant pairing is exact-fingerprint-only and deliberately
-  never a union (`abicheck/bundle_multibuild.py`, G38 Phase 3), with
+  never a union (`abicheck/bundle_multibuild.py`, G38 Phase 3 — since
+  deleted as unreachable, superseded by `compare/variant_pairing.py`), with
   same-side collisions detected — but every capture path stamps the default
   fingerprint, `bundle_variants:` (`abicheck/bundle_variants_config.py`)
   has no production caller, and a declared-but-never-captured `required`
@@ -399,9 +404,10 @@ S3 (landed): package component inventories and support-promise findings under
 contract policy. S4 (landed): Action/project/aggregate parity and deletion of
 the replaced set-difference path; scalar-versus-bundle operand convergence
 stays a slice of `plans/cli-cleanup-phase-two.md`'s PR I, and
-`compare_product_directories`' canonical fallback (D3) is not yet an
-`ambiguous` diagnostic — both are recorded as open in the plan rather than
-claimed here.
+`compare_product_directories`' canonical fallback (D3) was never made an
+`ambiguous` diagnostic — the module was deleted instead, having no command
+caller (`plans/dead-code-and-single-owner.md` Stage C); the operand
+convergence stays recorded as open in the plan rather than claimed here.
 
 ## Acceptance tests (contract)
 

@@ -1047,6 +1047,24 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "Python API no command, Action or workflow reached, removed by"
+        " plans/dead-code-and-single-owner.md Stage C: abicheck.product_baseline"
+        " (directory/package `compare` plus --bundle-facts-out cover a whole"
+        " product), bundle_side_input's live/stored resolution layer,"
+        " bundle_multibuild, and impact.use_cases' graph build/join",
+        (
+            "pack_product_baseline",
+            "unpack_product_baseline",
+            "compare_product_directories",
+            "compare_bundle_sides",
+            "resolve_bundle_side",
+            "bundle_multibuild",
+            "build_use_case_graph",
+            "join_use_case_graph",
+        ),
+        frozenset(),
+    ),
 )
 
 
