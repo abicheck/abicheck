@@ -212,7 +212,7 @@ def _exists(paths: set[str]):
         ([], set(), _SEL),
         (["abicheck/diff_types.py", "README.md"], {"abicheck/diff_types.py"}, _SEL),
         (["tests/test_new.py"], {"tests/test_new.py"}, [*_SEL, "tests/test_new.py"]),
-        (["tests/sub/test_deep.py"], {"tests/sub/test_deep.py"}, [*_SEL, "tests/sub/test_deep.py"]),
+        (["tests/sub/test_deep.py"], {"tests/sub/test_deep.py"}, ["tests/sub/test_deep.py", *_SEL]),
         (["tests/test_a.py"], {"tests/test_a.py"}, _SEL),
         (["tests/test_gone.py"], set(), _SEL),
         (["tests/conftest.py"], {"tests/conftest.py"}, ["tests/"]),
@@ -224,6 +224,21 @@ def test_extend_selection(
     changed: list[str], present: set[str], expected: list[str]
 ) -> None:
     assert scope.extend_selection(_SEL, changed, _exists(present)) == expected
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_extend_selection_keeps_the_selection_invariant(seed: int) -> None:
+    """Oracle: the committed-file invariant (sorted, unique, superset) holds
+    for any sorted selection and any set of changed test files, in any order."""
+    import random
+
+    rng = random.Random(seed)
+    pool = [f"tests/test_{c}{i}.py" for c in "abcxyz" for i in range(4)]
+    selection = sorted(rng.sample(pool, rng.randint(1, 10)))
+    changed = rng.sample(pool, rng.randint(0, 8))
+    out = scope.extend_selection(selection, changed, lambda _p: True)
+    assert out == sorted(set(out))
+    assert set(out) == set(selection) | set(changed)
 
 
 def test_extend_selection_never_narrows() -> None:

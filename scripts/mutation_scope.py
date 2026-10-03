@@ -267,7 +267,10 @@ def extend_selection(
     committed selection, so a PR's own new tests are never left out of its
     measurement. A changed shared test module (``conftest.py``, a helper)
     can change which files reach mutated code in ways no path rule can see,
-    so it widens the run back to the whole suite. Never narrows.
+    so it widens the run back to the whole suite. Never narrows. The result
+    keeps the committed file's own invariant (sorted, unique): it overwrites
+    that file in place, and the selection's own well-formedness test runs in
+    the stats pass whenever a PR touches it.
     """
     out = list(selection)
     for path in changed:
@@ -282,7 +285,7 @@ def extend_selection(
                 out.append(path)
         else:
             return ["tests/"]
-    return out
+    return sorted(set(out))
 
 
 def pyproject_mutation_config_changed(old_text: str | None, new_text: str) -> bool:
