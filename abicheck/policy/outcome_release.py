@@ -48,7 +48,6 @@ from .outcome import (
 
 __all__ = [
     "run_outcome_dict_for_release",
-    "unclassified_release_contribution_fields",
 ]
 
 
@@ -75,8 +74,8 @@ _OPERATIONAL_CONTRIBUTIONS: tuple[tuple[str, OperationalStatus], ...] = (
 #: that deliberately decode onto *no* operational status, each because
 #: another ``run_outcome`` axis already carries it or because the release
 #: fan-out cannot produce it at all. Stating the complement rather than
-#: letting an unlisted field fall through is what makes
-#: :func:`unclassified_release_contribution_fields` able to answer at all --
+#: letting an unlisted field fall through is what lets a test check that
+#: the two tables cover every field (``tests/test_release_evidence_contract_axis.py``) --
 #: ``evidence_contract_error_contribution`` reached this decoder as a silent
 #: ``operational: "none"`` beside its own ``exit.code: 7`` precisely because
 #: an ``if`` chain has no complement to be short of (Codex review, P1, the
@@ -102,36 +101,6 @@ _NON_OPERATIONAL_CONTRIBUTIONS: frozenset[str] = frozenset(
         "loadability_contribution",
     }
 )
-
-
-def unclassified_release_contribution_fields() -> frozenset[str]:
-    """Contribution fields this decoder classifies neither way -- always empty.
-
-    The executable half of the two tables above. A contribution field added
-    to :class:`~abicheck.policy.exit_decision.ExitDecision` without being
-    either decoded onto an operational status or listed as deliberately
-    non-operational would otherwise reach a release report as
-    ``operational: "none"`` beside a nonzero ``exit.code`` -- and
-    ``workflows.aggregate.gate.GateInfo.from_report_data`` treats that block
-    as authoritative, so a consumer of the saved report reads the run as
-    nonblocking while the process said it failed. That is not a hypothetical:
-    it is what the ADR-064 evidence-contract axis did here (Codex review,
-    P1), and an ``if`` chain could not have caught it. Asserted by
-    ``tests/test_outcome_release.py``.
-    """
-    from dataclasses import fields
-
-    from .exit_decision import ExitDecision
-
-    published = {
-        field.name
-        for field in fields(ExitDecision)
-        if field.name.endswith("_contribution")
-    }
-    classified = {key for key, _ in _OPERATIONAL_CONTRIBUTIONS} | (
-        _NON_OPERATIONAL_CONTRIBUTIONS
-    )
-    return frozenset(published - classified)
 
 
 def run_outcome_dict_for_release(
@@ -181,7 +150,7 @@ def run_outcome_dict_for_release(
     The full decode is ``_OPERATIONAL_CONTRIBUTIONS`` and its stated
     complement ``_NON_OPERATIONAL_CONTRIBUTIONS``, which together must
     cover every contribution field ``ExitDecision`` publishes
-    (:func:`unclassified_release_contribution_fields`) -- the remaining
+    (``tests/test_release_evidence_contract_axis.py`` checks it) -- the remaining
     contributions are *not* all ``0`` for a release decision, which is
     what an earlier revision of this docstring claimed and what let
     ADR-064's exit-7 axis land here unread.

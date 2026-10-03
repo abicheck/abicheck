@@ -146,6 +146,16 @@ _UNAPPLIED_FIELD_VALUES: dict[str, str] = {
 }
 
 
+def applied_pack_fields(kind) -> frozenset[str]:
+    """The fields a *kind* pack may assign and this build really applies:
+    every routable field the unapplied registry does not name."""
+    from abicheck.compatibility_evaluation_wiring import PACK_FIELD_ROUTES_BY_KIND
+    from abicheck.pack_application import UNAPPLIED_PACK_FIELDS
+
+    routes = PACK_FIELD_ROUTES_BY_KIND.get(kind, {})
+    return frozenset(routes) - frozenset(UNAPPLIED_PACK_FIELDS)
+
+
 class TestAPackActuallyConfiguresTheRun:
     """The reason the first `--pack` was reverted: it configured nothing."""
 
@@ -234,7 +244,6 @@ class TestAPackActuallyConfiguresTheRun:
         )
         from abicheck.compatibility_evaluation_packs import PackKind
         from abicheck.pack_application import (
-            applied_pack_fields,
             check_resolved_config_applies_packs,
             pack_application,
             policy_file_with_packs,
@@ -567,10 +576,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         a newly-routable field is applied or listed -- never neither, which is
         how a decorative assignment would slip back in."""
         from abicheck.compatibility_evaluation_wiring import PACK_FIELD_ROUTES_BY_KIND
-        from abicheck.pack_application import (
-            UNAPPLIED_PACK_FIELDS,
-            applied_pack_fields,
-        )
+        from abicheck.pack_application import UNAPPLIED_PACK_FIELDS
 
         routable: set[str] = set()
         for kind, routes in PACK_FIELD_ROUTES_BY_KIND.items():
@@ -594,10 +600,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         """
         from abicheck.cli import main
         from abicheck.compatibility_evaluation_packs import PackKind
-        from abicheck.pack_application import (
-            UNAPPLIED_PACK_FIELDS,
-            applied_pack_fields,
-        )
+        from abicheck.pack_application import UNAPPLIED_PACK_FIELDS
 
         option = next(
             p for p in main.commands["compare"].params if p.name == "pack_paths"

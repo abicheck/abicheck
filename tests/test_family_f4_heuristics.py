@@ -99,7 +99,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # 41: minus three sites the Phase 3 decoration codecs deleted
     # (export_join._macho_shifted, the rename parser's ctor/dtor scan).
     "grammar": 41,
-    "own_format": 44,
+    # 43: minus outcome_release.unclassified_release_contribution_fields,
+    # moved into its test (dead-code plan, Stage D).
+    "own_format": 43,
     "platform": 21,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.

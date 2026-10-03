@@ -70,7 +70,6 @@ from .change_registry_types import Verdict
 from .compatibility_evaluation_frontend import (
     SEVERITY_CATEGORY_FIELDS,
 )
-from .compatibility_evaluation_packs import PackKind
 from .compatibility_evaluation_wiring import (
     INTERNAL_NAMESPACES_FIELD,
     load_selected_packs,
@@ -95,8 +94,8 @@ PACK_SOURCE_KIND = "pack_manifest"
 #: Every entry is a field ``compatibility_evaluation_wiring``'s
 #: ``CONTRACT_PACK_FIELD_ROUTES``/``GATE_PACK_FIELD_ROUTES`` accepts, so the
 #: two together partition the routable vocabulary into "applied" and "not
-#: yet" -- :func:`applied_pack_fields` derives the first half from the second
-#: rather than keeping a second hand-maintained list.
+#: yet" -- the applied half is the routable set minus this one, never a
+#: second hand-maintained list (``tests/test_pack_application.py`` checks it).
 #:
 #: ``contract.unresolved`` left this mapping in Phase 7, when the coverage
 #: exit it configures became real (``contract_coverage_exit.py``). It is
@@ -210,14 +209,6 @@ def _inert_value_error(source: str, field_name: str, reason: str) -> PackManifes
         f"act on ({reason}). Rejected rather than recorded as active "
         "configuration."
     )
-
-
-def applied_pack_fields(kind: PackKind) -> frozenset[str]:
-    """The fields a *kind* pack may assign and this build really applies."""
-    from .compatibility_evaluation_wiring import PACK_FIELD_ROUTES_BY_KIND
-
-    routes = PACK_FIELD_ROUTES_BY_KIND.get(kind, {})
-    return frozenset(routes) - frozenset(UNAPPLIED_PACK_FIELDS)
 
 
 @dataclass(frozen=True)

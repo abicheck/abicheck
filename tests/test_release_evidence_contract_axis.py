@@ -154,20 +154,29 @@ class TestEveryExitAxisIsDecodedOntoRunOutcome:
     `exit.code: 7`, so a report-driven consumer read a failed run as
     nonblocking (Codex review, P1).
 
-    `unclassified_release_contribution_fields()` is the general fix -- the
-    decoder now states both the axes it maps and the exact complement it
-    deliberately does not, over the field list `ExitDecision` itself
-    publishes. The test below is what makes that mechanical: it does not
+    The general fix: the decoder states both the axes it maps
+    (`_OPERATIONAL_CONTRIBUTIONS`) and the exact complement it deliberately
+    does not (`_NON_OPERATIONAL_CONTRIBUTIONS`), and the test below checks
+    the two cover the field list `ExitDecision` itself publishes. The test below is what makes that mechanical: it does not
     name the evidence axis at all, so it fails for the *next* axis too,
     which is the property the three prior narrow fixes each lacked.
     """
 
     def test_no_contribution_field_is_left_unclassified(self) -> None:
+        from dataclasses import fields
+
+        from abicheck.policy.exit_decision import ExitDecision
         from abicheck.policy.outcome_release import (
-            unclassified_release_contribution_fields,
+            _NON_OPERATIONAL_CONTRIBUTIONS,
+            _OPERATIONAL_CONTRIBUTIONS,
         )
 
-        assert unclassified_release_contribution_fields() == frozenset()
+        published = {
+            f.name for f in fields(ExitDecision) if f.name.endswith("_contribution")
+        }
+        assert published, "ExitDecision publishes no contribution field"
+        classified = {key for key, _ in _OPERATIONAL_CONTRIBUTIONS}
+        assert published - classified - _NON_OPERATIONAL_CONTRIBUTIONS == set()
 
     @pytest.mark.parametrize(
         ("kwargs", "expected_operational"),
