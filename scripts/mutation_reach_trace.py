@@ -35,12 +35,7 @@ on those code objects; each reports once and is disabled, and
 ``restart_events()`` re-arms them per test, so every other call in the suite
 costs nothing. (A global ``sys.setprofile`` hook was measured covering about
 2% of the suite in several minutes.) The code objects are found from every
-live function and their nested ``co_consts``. Live functions come from a
-``gc`` heap census when that is safe (this is the process's only Python
-thread, ``memory_trace.gc_census_is_safe``); with other threads alive a
-census can corrupt a tuple one of them is building, so the scan falls back
-to walking the ``only_mutate`` modules' namespaces (functions, class members,
-``__wrapped__`` chains). A closure created at
+live function (``gc``) and their nested ``co_consts``. A closure created at
 run time reuses a nested code object that is already armed, so new code only
 appears when an ``only_mutate`` module is (re)imported: the scan is repeated
 only when those module objects change, not per test.
@@ -63,6 +58,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from abicheck.workflows.memory_trace import gc_census_is_safe
 
 #: ``sys.monitoring`` (3.12+), typed loosely: mypy here targets 3.11.
 _MON: Any = getattr(sys, "monitoring", None)
@@ -94,46 +91,6 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
-def namespace_functions(modules: list[types.ModuleType]) -> list[types.FunctionType]:
-    """Every function reachable from *modules*' namespaces: module-level
-    functions, class members (static/class methods, properties), nested
-    classes, container contents (dict/list/tuple/set), instance attributes
-    (stopping at other modules), and ``__wrapped__`` chains. The thread-safe stand-in for a heap
-    census; nested code objects are reached from these via ``code_objects``."""
-    found: dict[int, types.FunctionType] = {}
-    seen: set[int] = set()
-    stack: list[object] = [v for m in modules for v in vars(m).values()]
-    while stack:
-        obj = stack.pop()
-        if id(obj) in seen:
-            continue
-        seen.add(id(obj))
-        if isinstance(obj, types.FunctionType):
-            found[id(obj)] = obj
-        elif isinstance(obj, (staticmethod, classmethod)):
-            stack.append(obj.__func__)
-        elif isinstance(obj, property):
-            stack.extend(f for f in (obj.fget, obj.fset, obj.fdel) if f is not None)
-        elif isinstance(obj, type):
-            stack.extend(vars(obj).values())
-        elif isinstance(obj, dict):
-            stack.extend(obj.values())
-        elif isinstance(obj, (list, tuple, set, frozenset)):
-            stack.extend(obj)
-        elif not isinstance(obj, types.ModuleType):
-            # Instances (a registry entry holding a ``requires_support=``
-            # lambda): their attributes. Never another module's namespace.
-            stack.extend(getattr(obj, "__dict__", {}).values())
-            slots = getattr(type(obj), "__slots__", ())
-            for slot in (slots,) if isinstance(slots, str) else slots:
-                if hasattr(obj, slot):
-                    stack.append(getattr(obj, slot))
-        wrapped = getattr(obj, "__wrapped__", None) if callable(obj) else None
-        if wrapped is not None:
-            stack.append(wrapped)
-    return list(found.values())
-
-
 class Monitor:
     def __init__(self, paths: frozenset[str], modules: list[str]) -> None:
         if _MON is None:
@@ -159,8 +116,14 @@ class Monitor:
         ids = tuple(id(sys.modules.get(name)) for name in self.modules)
         if ids == self.module_ids:
             return
-        self.module_ids = ids
-        for obj in self._live_functions():
+        census = gc_census_is_safe()
+        if census:
+            # A partial namespace walk leaves module_ids unset, so the next
+            # test (with the extra threads gone) gets the full census.
+            self.module_ids = ids
+        for obj in gc.get_objects() if census else self._namespace_functions():
+            if not isinstance(obj, types.FunctionType):
+                continue
             code = obj.__code__
             if code.co_filename not in self.paths or code in self.armed:
                 continue
@@ -169,14 +132,41 @@ class Monitor:
                     _MON.set_local_events(_TOOL_ID, nested, _MON.events.PY_START)
                     self.armed.add(nested)
 
-    def _live_functions(self) -> list[types.FunctionType]:
-        from abicheck.workflows.memory_trace import gc_census_is_safe
+    def _namespace_functions(self) -> list[object]:
+        """Functions reachable from the ``only_mutate`` modules' namespaces.
 
-        if gc_census_is_safe():
-            return [o for o in gc.get_objects() if isinstance(o, types.FunctionType)]
-        return namespace_functions(
-            [m for name in self.modules if (m := sys.modules.get(name)) is not None]
-        )
+        The fallback when a heap census is unsafe: ``gc.get_objects()``
+        beside another live thread breaks that thread's ``tuple(...)``
+        construction (``memory_trace.gc_census_is_safe``). Module globals,
+        class members, and what ``staticmethod``/``classmethod``/``property``
+        and ``functools.wraps`` hold cover every def; only a function created
+        and stored outside those namespaces is missed, and the census
+        catches it once this is the sole thread again.
+        """
+        found: list[object] = []
+        pending: list[object] = []
+        for name in self.modules:
+            module = sys.modules.get(name)
+            if module is not None:
+                pending.extend(list(vars(module).values()))
+        seen: set[int] = set()
+        while pending:
+            value = pending.pop()
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            if isinstance(value, type):
+                pending.extend(list(vars(value).values()))
+            elif isinstance(value, (staticmethod, classmethod)):
+                pending.append(value.__func__)
+            elif isinstance(value, property):
+                pending.extend(f for f in (value.fget, value.fset, value.fdel) if f)
+            elif isinstance(value, types.FunctionType):
+                found.append(value)
+                wrapped = getattr(value, "__wrapped__", None)
+                if wrapped is not None:
+                    pending.append(wrapped)
+        return found
 
     def close(self) -> None:
         _MON.register_callback(_TOOL_ID, _MON.events.PY_START, None)

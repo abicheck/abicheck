@@ -16,10 +16,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.errors import HeaderToolchainError, SnapshotError
-from abicheck.extract.castxml_header_compat import (
-    AGGREGATE_FIRST_HEADER_LINE,
-    write_castxml_aggregate,
-)
+from abicheck.extract.castxml_header_compat import write_castxml_aggregate
 from abicheck.extract.unparseable_header_fallback import (
     attribute_failing_headers,
     cross_header_conflicts,
@@ -32,28 +29,46 @@ from abicheck.model.header_exclusion_record import (
 )
 
 AGG = "/tmp/abicheck-agg-1234.hpp"
-FIRST = AGGREGATE_FIRST_HEADER_LINE
 
 
 def _headers(n: int) -> list[Path]:
     return [Path(f"/inc/h{i}.h") for i in range(n)]
 
 
+def _agg_line(active: list[Path], h: Path) -> int:
+    """Line on which the real castxml aggregate writer includes *h*.
+
+    Read from a file ``write_castxml_aggregate`` actually wrote, never from a
+    formula: the fixtures must reproduce the layout castxml really sees (a
+    preamble include precedes the headers), or they would only prove the
+    attribution agrees with a re-statement of itself.
+    """
+    agg = write_castxml_aggregate(active, ".hpp")
+    try:
+        target = f'#include "{h.resolve()}"'
+        for n, line in enumerate(agg.read_text().splitlines(), start=1):
+            if line == target:
+                return n
+        raise AssertionError(f"{h} is not included by the aggregate")
+    finally:
+        shutil.rmtree(agg.parent)
+
+
 def _stderr_for(active: list[Path], bad: set[Path], style: int) -> str:
     """castxml/clang-shaped diagnostics for each *bad* header still active."""
     out: list[str] = []
-    for i, h in enumerate(active):
+    for h in active:
         if h not in bad:
             continue
         if style == 0:  # #error directly in the header, reached from the aggregate
             out += [
-                f"In file included from {AGG}:{i + FIRST}:",
+                f"In file included from {AGG}:{_agg_line(active, h)}:",
                 f"{h}:3:2: error: Unsupported compiler",
                 '    3 | #error "Unsupported compiler"',
             ]
         elif style == 1:  # error in a private transitive include
             out += [
-                f"In file included from {AGG}:{i + FIRST}:",
+                f"In file included from {AGG}:{_agg_line(active, h)}:",
                 f"In file included from {h}:7:",
                 "/inc/detail/x.h:9:1: error: unknown type name 'foo'",
             ]
@@ -113,14 +128,13 @@ def test_transitive_listed_include_drops_only_the_aggregate_input(seed):
     def attempt(active: list[Path]) -> str:
         calls.append(list(active))
         if a in active:
-            i = active.index(a)
             exc = SnapshotError("castxml failed")
             setattr(
                 exc,
                 "stderr",
                 "\n".join(
                     [
-                        f"In file included from {AGG}:{i + FIRST}:",
+                        f"In file included from {AGG}:{_agg_line(active, a)}:",
                         f"In file included from {a}:5:",
                         f"{b}:3:2: error: MODE_FROM_A requires C++",
                     ]
@@ -262,7 +276,7 @@ def test_toolchain_failure_is_not_header_specific():
 
 def test_attribution_ignores_warnings():
     headers = _headers(2)
-    stderr = f"In file included from {AGG}:{FIRST + 1}:\n{headers[1]}:1:1: warning: deprecated"
+    stderr = f"In file included from {AGG}:2:\n{headers[1]}:1:1: warning: deprecated"
     assert attribute_failing_headers(stderr, headers) == set()
 
 
@@ -320,7 +334,7 @@ def _conflict_stderr(active: list[Path], pairs: list[tuple[Path, Path]]) -> str:
         if a not in active or b not in active:
             continue
         out += [
-            f"In file included from {AGG}:{active.index(b) + FIRST}:",
+            f"In file included from {AGG}:{_agg_line(active, b)}:",
             f"{b}:1:16: error: typedef redefinition with different types",
             "    1 | typedef double clashing_t;",
             f"{a}:1:13: note: previous definition is here",
@@ -370,10 +384,11 @@ def test_note_in_same_or_unlisted_header_stays_self_contained(seed):
     headers = _headers(rng.randint(2, 8))
     h = rng.choice(headers)
     i = headers.index(h)
+    line = _agg_line(headers, h)
     note_file = h if seed % 2 else Path("/usr/include/c++/foo.h")
     stderr = "\n".join(
         [
-            f"In file included from {AGG}:{i + FIRST}:",
+            f"In file included from {AGG}:{line}:",
             f"{h}:4:1: error: no matching function",
             f"{note_file}:2:1: note: candidate function not viable",
         ]
@@ -388,7 +403,8 @@ def test_real_castxml_redefinition_is_a_conflict(tmp_path):
     b = tmp_path / "b.h"
     a.write_text("typedef int clashing_t;\n")
     b.write_text("typedef double clashing_t;\n")
-    agg = write_castxml_aggregate([a, b], ".hpp")
+    agg = tmp_path / "agg.cpp"
+    agg.write_text(f'#include "{a}"\n#include "{b}"\n')
     proc = subprocess.run(
         ["castxml", "--castxml-output=1", "-o", str(tmp_path / "o.xml"), str(agg)],
         capture_output=True,
@@ -397,20 +413,6 @@ def test_real_castxml_redefinition_is_a_conflict(tmp_path):
     )
     assert proc.returncode != 0
     assert cross_header_conflicts(proc.stderr, [a, b]) == {1}
-
-
-def test_aggregate_layout_matches_attribution_offset(tmp_path):
-    """Oracle: read the aggregate castxml really parses and locate each
-    header's ``#include`` line; it must be where attribution looks for it."""
-    headers = [tmp_path / f"h{i}.h" for i in range(5)]
-    for h in headers:
-        h.write_text("")
-    agg = write_castxml_aggregate(headers, ".hpp")
-    lines = agg.read_text().splitlines()
-    for i, h in enumerate(headers):
-        lineno = lines.index(f'#include "{h.resolve()}"') + 1
-        stderr = f"In file included from {agg}:{lineno}:\n{h}:1:2: error: boom"
-        assert attribute_failing_headers(stderr, headers) == {i}
 
 
 def _chain_lines(frames: list[tuple[str, int]], style: str) -> list[str]:
@@ -430,9 +432,11 @@ def _chain_lines(frames: list[tuple[str, int]], style: str) -> list[str]:
 @pytest.mark.parametrize("style", ["clang", "gcc"])
 @pytest.mark.parametrize("seed", range(30))
 def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
-    """Oracle: the aggregate frame's line names the input, regardless of how
-    deep the chain is, whether intermediate files are listed, or which
-    compiler's frame layout is used."""
+    """Oracle: the input the aggregate frame includes -- the chain's next
+    entry -- is the one dropped, regardless of how deep the chain is,
+    whether intermediate files are listed, or which compiler's frame layout
+    is used. Chains are shaped as a compiler prints them: the aggregate's
+    line includes the target, the target includes the rest."""
     rng = random.Random(seed)
     headers = _headers(rng.randint(2, 10))
     target = rng.randrange(len(headers))
@@ -444,7 +448,8 @@ def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
         )
         for j in range(depth)
     ]
-    frames = [(AGG, target + FIRST), *inner]
+    agg_frame = (AGG, _agg_line(headers, headers[target]))
+    frames = [agg_frame, (str(headers[target]), 2), *inner] if depth else [agg_frame]
     err_file = f"/inc/detail/leaf{seed}.h" if depth else str(headers[target])
     stderr = "\n".join(
         [
@@ -458,11 +463,63 @@ def test_multi_level_chains_attribute_to_the_aggregate_input(seed, style):
     assert attribute_failing_headers(stderr, headers) == {target}
 
 
+@pytest.mark.parametrize("style", ["clang", "gcc"])
+@pytest.mark.parametrize("seed", range(40))
+def test_attribution_is_independent_of_the_aggregate_layout(seed, style):
+    """The aggregate's line numbers carry no meaning to the attribution.
+
+    Whoever writes the aggregate owns its layout (a preamble include, blank
+    lines, any header order); a rule that inverted it arithmetically blamed
+    the healthy neighbour of the failing header as soon as a preamble line
+    was added. Here every bad header sits on an arbitrary line of an
+    arbitrary layout -- including lines no header occupies and line numbers
+    past the header count -- and the oracle is the generator's own choice of
+    bad headers, not any line formula.
+    """
+    rng = random.Random(7000 + seed)
+    headers = _headers(rng.randint(1, 9))
+    bad = set(rng.sample(headers, rng.randint(1, len(headers))))
+    order = rng.sample(headers, len(headers))
+    lines = rng.sample(range(1, 4 * len(headers) + 6), len(headers))
+    line_of = dict(zip(order, sorted(lines)))
+    out: list[str] = []
+    for h in headers:
+        if h not in bad:
+            continue
+        frames = [(AGG, line_of[h])]
+        if rng.random() < 0.5:  # the error sits deeper, in a private include
+            frames.append((str(h), rng.randint(1, 30)))
+            leaf = f"/inc/detail/{h.stem}_impl.h"
+        else:
+            leaf = str(h)
+        out += [*_chain_lines(frames, style), f"{leaf}:2:1: error: boom"]
+    expected = {headers.index(h) for h in bad}
+    assert attribute_failing_headers("\n".join(out), headers) == expected
+
+
+def test_an_error_in_the_aggregate_preamble_is_attributed_to_no_header():
+    """An error whose chain runs through the writer's own preamble names no
+    input: the preamble is not one of the headers, so nothing is dropped and
+    the caller re-raises the original failure instead of blaming a header."""
+    headers = _headers(3)
+    agg = write_castxml_aggregate(headers, ".hpp")
+    try:
+        preamble = agg.read_text().splitlines()[0].split('"')[1]
+    finally:
+        shutil.rmtree(agg.parent)
+    stderr = "\n".join(
+        [f"In file included from {AGG}:1:", f"{preamble}:3:1: error: boom"]
+    )
+    assert attribute_failing_headers(stderr, headers) == set()
+
+
 def test_gcc_group_does_not_leak_into_the_next_diagnostic():
     headers = _headers(3)
     stderr = "\n".join(
         [
-            *_chain_lines([(AGG, FIRST), ("/inc/detail/a.h", 2)], "gcc"),
+            *_chain_lines(
+                [(AGG, _agg_line(headers, headers[0])), (str(headers[0]), 2)], "gcc"
+            ),
             "/inc/detail/b.h:1:1: error: first",
             "    1 | x",
             f"{headers[2]}:1:1: error: second",
