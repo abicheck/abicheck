@@ -30,6 +30,13 @@ from pathlib import Path
 
 from ..model.execution_cache import memoized
 
+__all__ = [
+    "PACKAGE_ROOT",
+    "SOURCE_SUFFIXES",
+    "abicheck_code_identity",
+    "compute_code_identity",
+]
+
 #: The installed package directory (``abicheck/``).
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 

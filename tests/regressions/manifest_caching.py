@@ -146,7 +146,10 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             "classified as storing an external tool's own output."
         ),
         fixed_by=(1466,),
-        seed_tests=("tests/test_code_identity.py",),
+        seed_tests=(
+            "tests/test_code_identity.py",
+            "tests/test_family_f5_optimization_reference.py",
+        ),
         known_gaps=(
             KnownGap(
                 description=(
