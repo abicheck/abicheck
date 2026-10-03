@@ -120,7 +120,7 @@ if TYPE_CHECKING:
 
     from ..checker_types import DiffResult
     from ..model.change_catalog.registry import Verdict
-    from .severity import SeverityConfig
+    from .effective_gate import EffectiveGate
 
 
 class ExitReason(str, Enum):
@@ -591,10 +591,8 @@ def resolve_exit_decision(
 
 def resolve_compare_exit_decision(
     result: DiffResult,
-    sev_config: SeverityConfig | None,
-    scheme: str,
+    gate: EffectiveGate,
     *,
-    require_complete_analysis: bool = False,
     today: date | None = None,
 ) -> ExitDecision:
     """:func:`resolve_exit_decision`, deriving every contribution from
@@ -653,14 +651,17 @@ def resolve_compare_exit_decision(
 
     coverage_contribution = coverage_exit_floor(result)
     assurance_contribution = analysis_assurance_exit_contribution(
-        result, require_complete=require_complete_analysis
+        result, require_complete=gate.require_complete_analysis
     )
 
-    if scheme == "severity":
-        assert sev_config is not None
+    # *gate* is the one resolved gate object (duplication-and-convergence
+    # P0): its severity is `None` exactly when the legacy scheme is in
+    # effect, so the scheme and the severity map can no longer be passed
+    # in disagreement.
+    if gate.severity is not None:
         compatibility_contribution = compute_exit_code(
             result.changes,
-            sev_config,
+            gate.severity,
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,

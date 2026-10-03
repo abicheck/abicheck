@@ -78,14 +78,14 @@ def _apply_scoped_gating(
     required_symbols: tuple[str, ...],
     used_by_old_input: Path,
     used_by_new_input: Path,
-    exit_code_scheme: str,
-    sev_config: Any,
+    severity: Any,
     suppression: Any,
 ) -> int | None:
     """Apply whichever ADR-043 scoped gate this run selected, if any.
 
     ``--used-by`` and ``--required-symbol`` are mutually exclusive (rejected
-    earlier), so at most one applies. Returns the scoped exit code, or ``None``
+    earlier), so at most one applies. *severity* is the run's
+    ``EffectiveGate.severity`` (``None`` under the legacy scheme). Returns the scoped exit code, or ``None``
     when the run is unscoped and the full-library verdict gates instead.
     """
     if used_by_apps:
@@ -98,8 +98,7 @@ def _apply_scoped_gating(
             new,
             policy,
             pf,
-            exit_code_scheme=exit_code_scheme,
-            sev_config=sev_config,
+            severity=severity,
             suppression=suppression,
         )
     if required_symbols:
@@ -110,8 +109,7 @@ def _apply_scoped_gating(
             new,
             policy,
             pf,
-            exit_code_scheme=exit_code_scheme,
-            sev_config=sev_config,
+            severity=severity,
             suppression=suppression,
         )
     return None

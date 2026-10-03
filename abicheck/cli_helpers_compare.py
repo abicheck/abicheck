@@ -712,8 +712,7 @@ def _scoped_exit_code(
     scoped: Any,
     relevant_changes: list[Any],
     result: Any,
-    exit_code_scheme: str,
-    sev_config: Any,
+    severity: Any,
     policy: str,
     policy_file: PolicyFile | None,
     *,
@@ -734,19 +733,22 @@ def _scoped_exit_code(
     *relevant_changes*: a missing contract symbol is BREAKING but is not a
     diff ``Change``, so ``compute_exit_code`` never sees it and would
     otherwise return 0 (Codex review).
+
+    *severity* is the run's ``EffectiveGate.severity``: ``None`` exactly when
+    the legacy scheme is in effect, so the scheme is never passed beside it.
     """
-    if exit_code_scheme == "severity":
+    if severity is not None:
         from .workflows.gate import compute_exit_code, missing_contract_exit_code
 
         code = compute_exit_code(
             relevant_changes,
-            sev_config,
+            severity,
             policy=policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=policy_file,
         )
         if has_missing_contract:
-            code = max(code, missing_contract_exit_code(sev_config))
+            code = max(code, missing_contract_exit_code(severity))
         return code
     from .workflows.gate import legacy_exit_code
 
@@ -853,8 +855,7 @@ def _apply_used_by_scoping(
     new_snapshot: Any,
     policy: str,
     policy_file: PolicyFile | None,
-    exit_code_scheme: str = "legacy",
-    sev_config: Any = None,
+    severity: Any = None,
     suppression: Any = None,
 ) -> int:
     """Scope *result* to each ``--used-by`` app; worst-wins (ADR-043).
@@ -867,8 +868,8 @@ def _apply_used_by_scoping(
     version list/PE ordinal table :func:`~abicheck.appcompat.scope_diff_to_app`
     needs. Attaches a JSON-safe summary to ``result.used_by`` for the
     renderer and returns the worst app's exit code, computed under
-    *exit_code_scheme* (legacy verdict floor, or severity-aware over each
-    app's relevant changes when the caller passed a severity setting).
+    the run's scheme (legacy verdict floor when *severity* is ``None``, or
+    severity-aware over each app's relevant changes otherwise).
 
     *suppression* (ADR-044 P2, Codex review) is forwarded to
     :func:`~abicheck.appcompat.scope_diff_to_app`: its findings are
@@ -954,8 +955,7 @@ def _apply_used_by_scoping(
             scoped,
             scoped.breaking_for_app,
             result,
-            exit_code_scheme,
-            sev_config,
+            severity,
             policy,
             policy_file,
             has_missing_contract=bool(
@@ -968,7 +968,7 @@ def _apply_used_by_scoping(
         # info-only`), so picking the reported scoped_verdict by exit code
         # could let a later, less-severe app overwrite an earlier BREAKING
         # one merely because their exit codes tied at 0 (Codex review).
-        if exit_code_scheme == "severity":
+        if severity is not None:
             if exit_code > worst_exit:
                 worst_changes = {_finding_id(c): c for c in scoped.breaking_for_app}
                 worst_missing = set(scoped.missing_symbols) | set(
@@ -994,7 +994,9 @@ def _apply_used_by_scoping(
     result.consumer_impact_summary = _consumer_impact_summary(summaries)  # type: ignore[attr-defined]
     result.scoped_verdict = worst_verdict  # type: ignore[attr-defined]
     result.scoped_exit_code = worst_exit  # type: ignore[attr-defined]
-    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
+    from .workflows.gate import gate_exit_code_scheme
+
+    result.scoped_exit_code_scheme = gate_exit_code_scheme(severity is not None)  # type: ignore[attr-defined]
     result.gate_scope = "used_by"  # type: ignore[attr-defined]
     result.scoped_relevant_finding_ids = frozenset(relevant_finding_ids)  # type: ignore[attr-defined]
     result.scoped_missing_labels = tuple(sorted(missing_labels))  # type: ignore[attr-defined]
@@ -1017,12 +1019,12 @@ def _apply_used_by_scoping(
         also_detected=result.scoped_only_changes,
     )
 
-    if exit_code_scheme == "severity":
+    if severity is not None:
         categories, counts = _scoped_severity_summary(
             list(worst_changes.values()),
             worst_missing,
             result,
-            sev_config,
+            severity,
             policy,
             policy_file,
         )
@@ -1038,8 +1040,7 @@ def _apply_required_symbol_scoping(
     new: Any,
     policy: str,
     policy_file: PolicyFile | None,
-    exit_code_scheme: str = "legacy",
-    sev_config: Any = None,
+    severity: Any = None,
     suppression: Any = None,
 ) -> int:
     """Scope *result* to an explicit ``--required-symbol(s)`` contract (ADR-043).
@@ -1100,20 +1101,21 @@ def _apply_required_symbol_scoping(
         scoped,
         scoped.breaking_for_host,
         result,
-        exit_code_scheme,
-        sev_config,
+        severity,
         policy,
         policy_file,
         has_missing_contract=bool(scoped.missing_entrypoints),
     )
     result.scoped_exit_code = exit_code  # type: ignore[attr-defined]
-    result.scoped_exit_code_scheme = exit_code_scheme  # type: ignore[attr-defined]
-    if exit_code_scheme == "severity":
+    from .workflows.gate import gate_exit_code_scheme
+
+    result.scoped_exit_code_scheme = gate_exit_code_scheme(severity is not None)  # type: ignore[attr-defined]
+    if severity is not None:
         categories, counts = _scoped_severity_summary(
             scoped.breaking_for_host,
             scoped.missing_entrypoints,
             result,
-            sev_config,
+            severity,
             policy,
             policy_file,
         )

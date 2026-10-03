@@ -74,7 +74,7 @@ from .options.params import (
 if TYPE_CHECKING:
     from ...checker_types import Change
     from ...workflows.extraction import DebugArtifact
-    from ...workflows.gate import SeverityConfig
+    from ...workflows.gate import EffectiveGate, SeverityConfig
 
 from ...model import AbiSnapshot
 
@@ -529,12 +529,9 @@ def _announce_exit_scheme(
 
 def _exit_with_severity_or_verdict(
     result: DiffResult,
-    sev_config: SeverityConfig | None,
-    scheme: str,
+    gate: EffectiveGate,
     fmt: str | None = None,
     secondary_fmts: Sequence[str] = (),
-    *,
-    require_complete_analysis: bool = False,
 ) -> None:
     """Exit with the appropriate code for the resolved exit-code scheme.
 
@@ -564,12 +561,7 @@ def _exit_with_severity_or_verdict(
         resolve_compare_exit_decision_with_abort_axes,
     )
 
-    decision = resolve_compare_exit_decision_with_abort_axes(
-        result,
-        sev_config,
-        scheme,
-        require_complete_analysis=require_complete_analysis,
-    )
+    decision = resolve_compare_exit_decision_with_abort_axes(result, gate)
     announce_coverage_floor(
         result,
         base_exit=decision.compatibility_contribution,
@@ -586,7 +578,9 @@ def _exit_with_severity_or_verdict(
         decision.contract_coverage_contribution,
     )
     diagnostic = assurance_floor_diagnostic(
-        result, require_complete=require_complete_analysis, base_exit=pre_assurance_exit
+        result,
+        require_complete=gate.require_complete_analysis,
+        base_exit=pre_assurance_exit,
     )
     if diagnostic is not None:
         click.echo(diagnostic, err=True)

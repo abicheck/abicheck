@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from ..checker_types import DiffResult
-    from .severity import SeverityConfig
+    from .effective_gate import EffectiveGate
 
 #: Which of :class:`ExitDecision`'s four ADR-064 fields corresponds to each
 #: dominant :class:`ExitReason`. `_dominant_decision` uses this so exactly
@@ -324,10 +324,8 @@ def resolve_scan_exit_decision(
 
 def resolve_compare_exit_decision_with_abort_axes(
     result: DiffResult,
-    sev_config: SeverityConfig | None,
-    scheme: str,
+    gate: EffectiveGate,
     *,
-    require_complete_analysis: bool = False,
     today: date | None = None,
 ) -> ExitDecision:
     """`one-comparison-product.md` P3: `resolve_compare_exit_decision`,
@@ -365,13 +363,7 @@ def resolve_compare_exit_decision_with_abort_axes(
     """
     from .exit_decision import resolve_compare_exit_decision
 
-    ordinary = resolve_compare_exit_decision(
-        result,
-        sev_config,
-        scheme,
-        require_complete_analysis=require_complete_analysis,
-        today=today,
-    )
+    ordinary = resolve_compare_exit_decision(result, gate, today=today)
     evidence_contract_error = getattr(result, "evidence_contract_error", False)
     budget_overflow = getattr(result, "budget_overflow", False)
     if not (evidence_contract_error or budget_overflow):

@@ -730,7 +730,7 @@ def classify_compare_pair(
     )
     # Abort-axes-aware (plan P3): a typed caller's own `exit_decision` reports an `--abi3` evidence-contract abort too.
     exit_decision = gate_workflow.resolve_compare_exit_decision_with_abort_axes(
-        result, gate.severity, gate.exit_code_scheme
+        result, gate.effective_gate
     )
 
     # Installs the same gate onto result.contract_context; see

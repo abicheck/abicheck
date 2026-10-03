@@ -119,13 +119,10 @@ def add_contract_context(
     # `cli._exit_with_severity_or_verdict` resolves for the real process
     # exit, persisted here so a report reader doesn't have to re-derive it
     # from `severity.exit_code`/`contract_coverage_exit_contribution`/
-    # `analysis_assurance_exit_contribution` separately. `severity_config
-    # is not None` is the same signal every other block in this module and
-    # in `reporter.py` already uses to mean "the severity-aware scheme is in
-    # effect" (`cli_compare_helpers.report_severity` is `None` whenever
-    # `resolved_cfg.exit_code_scheme != "severity"`), so this reproduces
-    # `_exit_with_severity_or_verdict`'s own scheme selection rather than
-    # guessing at a new one. Unconditional for a native `compare` call --
+    # `analysis_assurance_exit_contribution` separately. *severity_config*
+    # is the run's `EffectiveGate.severity` (`None` exactly under the legacy
+    # scheme), so the gate built from it is the one the process exit used.
+    # Unconditional for a native `compare` call --
     # unlike `contract_context` below, every comparison has a compatibility
     # contribution, so there is always a decision to report, not just under
     # `--contract`. `include_exit_decision=False` (only `compat/cli.py`
@@ -133,22 +130,20 @@ def add_contract_context(
     # follows an unrelated 0/1/2 ABICC-style scheme, so this block's
     # native-scheme `code` would disagree with the real compat exit for the
     # same run (Codex review).
-    from .policy.gate_pack_fold import gate_exit_code_scheme
-
-    scheme = gate_exit_code_scheme(severity_config is not None)
     if include_exit_decision:
         # one-comparison-product.md P3: the abort-axes-aware wrapper, not the
         # bare ordinary fold -- see its own docstring in
         # policy/exit_decision_precedence.py for why it lives there.
+        from .policy.effective_gate import EffectiveGate
         from .policy.exit_decision_precedence import (
             resolve_compare_exit_decision_with_abort_axes,
         )
 
         d["exit"] = resolve_compare_exit_decision_with_abort_axes(
             result,
-            severity_config,
-            scheme,
-            require_complete_analysis=require_complete_analysis,
+            EffectiveGate.from_severity(
+                severity_config, require_complete_analysis=require_complete_analysis
+            ),
             today=today,
         ).to_dict()
     add_annotations(d, result, severity_config=severity_config, today=today)
@@ -170,7 +165,6 @@ def add_contract_context(
             d,
             result,
             severity_config=severity_config,
-            exit_code_scheme=scheme,
             require_complete_analysis=require_complete_analysis,
         )
 
@@ -227,7 +221,6 @@ def add_effective_config_digest(
     result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
-    exit_code_scheme: str | None = None,
     require_complete_analysis: bool = False,
 ) -> None:
     """CLI cleanup phase two, PR B: the effective-configuration digest --
@@ -252,14 +245,9 @@ def add_effective_config_digest(
     Both fields are schema-optional for exactly this reason, mirroring
     ``exit``'s own optional status.
 
-    *exit_code_scheme*, when given, is the caller's own already-resolved
-    scheme (e.g. `scan --against`'s ``exit_scheme``, which additionally
-    depends on its own ``exit_code_scheme`` parameter, not just whether
-    *severity_config* is set) -- reused rather than re-derived, so the
-    digest can never disagree with the ``exit`` block it sits beside. The
-    default (``None``) reproduces the same ``"severity" if severity_config
-    is not None else "legacy"`` derivation :func:`add_contract_context`
-    already uses for that block.
+    The scheme is not a parameter: it is derived from *severity_config*
+    through the same ``EffectiveGate`` the ``exit`` block beside it is
+    resolved from, so the two cannot disagree.
 
     *require_complete_analysis* mirrors the identically-named CLI/API flag
     (P0.4's analysis-completeness gate, `--require-complete-analysis`) --
@@ -277,14 +265,12 @@ def add_effective_config_digest(
 
     # The one per-run `EffectiveGate` this comparison resolved: *severity_config*,
     # *require_complete_analysis* and *result*'s own recorded scoped-gate
-    # selection (`--used-by`/`--required-symbol`), with *exit_code_scheme*
-    # overriding the derived scheme when given. Built in one place
+    # selection (`--used-by`/`--required-symbol`). Built in one place
     # (`effective_config_fields_from_raw`) so the digest cannot be computed
     # from a second projection of the same raw inputs.
     ec_fields = effective_config_fields_from_raw(
         result,
         severity_config=severity_config,
-        exit_code_scheme=exit_code_scheme,
         require_complete_analysis=require_complete_analysis,
     )
     d["effective_config_digest"] = effective_config_digest(ec_fields)

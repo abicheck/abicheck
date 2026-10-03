@@ -1,5 +1,12 @@
 ### Removed
 
+- `compare`'s exit decision, report `exit` block, typed-API `exit_decision`,
+  scoped `--used-by`/`--required-symbol` gate and effective-config digest now
+  resolve from one `EffectiveGate`. The internal resolvers no longer take an
+  exit-code scheme beside a severity map, so the two can no longer be passed
+  in disagreement; `add_effective_config_digest`/
+  `effective_config_fields_from_raw` lost their `exit_code_scheme` override.
+  No behavior change.
 - Dead-code plan Stage F: the retired `scan` `--mode` preset resolver
   (`ScanMode`, `resolve_level`, `resolve_source_method`, `mode_preset`) and
   five helpers whose last caller went with #1477 or Stage E. "Explicit

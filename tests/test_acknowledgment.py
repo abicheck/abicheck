@@ -48,6 +48,7 @@ from abicheck.policy.disposition_close import (
     acknowledgments as ledger_acknowledgments,
     ledger_for,
 )
+from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy_file import PolicyFile
 from abicheck.report.disposition_audit import compute_disposition_audit
 
@@ -711,7 +712,7 @@ def test_compare_blocks_on_a_real_unacknowledged_addition(tmp_path: Path) -> Non
     )
     assert result.verdict == Verdict.COMPATIBLE
     with pytest.raises(SystemExit) as exc_info:
-        _exit_with_severity_or_verdict(result, None, "legacy")
+        _exit_with_severity_or_verdict(result, EffectiveGate.from_severity(None))
     assert exc_info.value.code == 1
 
 

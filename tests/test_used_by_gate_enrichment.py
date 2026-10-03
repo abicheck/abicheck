@@ -49,6 +49,7 @@ from abicheck.checker import DiffResult
 from abicheck.checker_policy import Verdict
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.effective_gate import EffectiveGate
 from abicheck.policy.exit_decision import resolve_compare_exit_decision
 
 # ---------------------------------------------------------------------------
@@ -107,12 +108,16 @@ class TestExitDecisionInvariantToConsumerScope:
     def test_compatibility_contribution_ignores_consumer_scope_stamp(
         self, verdict: Verdict, stamp: dict[str, object]
     ) -> None:
-        baseline = resolve_compare_exit_decision(_diff_result(verdict), None, "legacy")
+        baseline = resolve_compare_exit_decision(
+            _diff_result(verdict), EffectiveGate.from_severity(None)
+        )
 
         stamped = _diff_result(verdict)
         for key, value in stamp.items():
             setattr(stamped, key, value)
-        decision = resolve_compare_exit_decision(stamped, None, "legacy")
+        decision = resolve_compare_exit_decision(
+            stamped, EffectiveGate.from_severity(None)
+        )
 
         assert decision.compatibility_contribution == (
             baseline.compatibility_contribution
@@ -131,7 +136,9 @@ class TestExitDecisionInvariantToConsumerScope:
             result.scoped_exit_code = 4
             result.scoped_compatibility_contribution = 4
             result.gate_scope = "used_by"
-            decision = resolve_compare_exit_decision(result, None, "legacy")
+            decision = resolve_compare_exit_decision(
+                result, EffectiveGate.from_severity(None)
+            )
             assert ExitReason.SCOPED_GATE not in decision.reasons
 
 

@@ -718,7 +718,6 @@ def effective_config_fields_from_raw(
     result: Any,
     *,
     severity_config: SeverityConfig | None,
-    exit_code_scheme: str | None,
     require_complete_analysis: bool = False,
 ) -> dict[str, str]:
     """:func:`effective_config_fields` for a run's raw gate inputs -- the one
@@ -728,9 +727,10 @@ def effective_config_fields_from_raw(
     Builds the gate with
     :meth:`~abicheck.policy.effective_gate.EffectiveGate.from_severity` and
     :func:`~abicheck.policy.effective_gate.scoped_gate_selection_from_result`
-    (*result*'s own recorded scoped-gate selection). *exit_code_scheme*
-    overrides the derived scheme when a caller already resolved one; ``None``
-    or ``""`` keeps the derived one, so the gate cannot carry an empty scheme.
+    (*result*'s own recorded scoped-gate selection). The scheme is always the
+    one ``EffectiveGate`` derives from *severity_config*: there is no
+    parameter to state it beside the severity map, so the digest cannot
+    record a scheme the exit decision did not use.
     The release summary, which has no single *result*, builds its own gate
     (``cli_compare_receipt._release_summary_effective_config_block``) and
     calls :func:`effective_config_fields` directly; it is also the only
@@ -738,8 +738,6 @@ def effective_config_fields_from_raw(
     ``gate.fail_on_removed_library``), which no single comparison's exit
     reads, so a member report's digest leaves them at their defaults.
     """
-    import dataclasses
-
     from .policy.effective_gate import EffectiveGate, scoped_gate_selection_from_result
 
     gate = EffectiveGate.from_severity(
@@ -747,7 +745,4 @@ def effective_config_fields_from_raw(
         require_complete_analysis=require_complete_analysis,
         scope=scoped_gate_selection_from_result(result),
     )
-    scheme = exit_code_scheme or gate.exit_code_scheme
-    if scheme != gate.exit_code_scheme:
-        gate = dataclasses.replace(gate, exit_code_scheme=scheme)
     return effective_config_fields(result, gate=gate)
