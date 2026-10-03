@@ -630,7 +630,7 @@ def test_scan_files_finds_constructs_in_extensionless_header(tmp_path: Path) -> 
     inc = tmp_path / "include"
     inc.mkdir()
     (inc / "Core").write_text("#pragma pack(1)\nstruct S { int x; };")
-    res = find_pattern_facts([inc], changed_paths=["include/Core"])
+    res = find_pattern_facts([inc])
     assert res.files_scanned == 1
     assert PatternKind.PRAGMA_PACK in {f.kind for f in res.facts}
 

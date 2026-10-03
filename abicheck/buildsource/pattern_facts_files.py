@@ -9,7 +9,7 @@ module owns the question that comes first: given a caller's roots, which files
 is the scan expected to read, and what became of each one. That is the half the
 expected-input-set model (``source_inputs.py``) applies to, so it is also the
 half that holds this scanner's walk policy (the suffix allowlist, the
-extensionless-header heuristic, the pruned directories, the changed-path join)
+extensionless-header heuristic, the pruned directories)
 and the licence its direct-root entry points run under.
 
 ``pattern_facts.py`` re-exports ``SOURCE_SUFFIXES`` and ``iter_source_files`` (removed),
@@ -129,7 +129,6 @@ def classify_walked_file(path: Path) -> SourceInputDisposition | None:
 
 def resolve_expected_source_inputs(
     roots: Iterable[str | Path],
-    changed_paths: Iterable[str] | None = None,
     *,
     licence: SourceReadLicence = _DIRECT_ROOT_LICENCE,
 ) -> SourceInputSet:
@@ -141,27 +140,7 @@ def resolve_expected_source_inputs(
     """
     return resolve_source_inputs(
         roots,
-        changed_paths,
         licence=licence,
         classify_candidate=classify_walked_file,
-        path_changed=_path_changed,
         pruned_dirs=_PRUNED_DIR_SEGMENTS,
     )
-
-
-def _path_changed(candidate: Path, changed: set[str]) -> bool:
-    """True if ``candidate`` tail-matches any of the changed-path strings.
-
-    The changed list usually holds repo-relative paths (``include/foo.h``)
-    while ``candidate`` may be absolute or rooted elsewhere, so a suffix match
-    in either direction is the robust join; a bare filename in the changed list
-    matches by basename.
-    """
-    norm = str(candidate).replace("\\", "/")
-    for ch in changed:
-        c = ch.replace("\\", "/")
-        if norm == c or norm.endswith("/" + c) or c.endswith("/" + norm):
-            return True
-        if "/" not in c and candidate.name == c:
-            return True
-    return False

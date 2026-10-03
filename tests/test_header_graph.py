@@ -30,6 +30,7 @@ from abicheck.buildsource.header_graph import (
 from abicheck.buildsource.header_graph_ast_projection import (
     HEADER_CALL_GRAPH_PASS,
     HEADER_TYPE_GRAPH_PASS,
+    project_header_graph_ast,
 )
 from abicheck.buildsource.include_graph import augment_graph_with_includes
 from abicheck.buildsource.source_graph import (
@@ -103,7 +104,7 @@ def _tu(*decls: dict) -> dict:
     return {"kind": "TranslationUnitDecl", "inner": list(decls)}
 
 
-# ── decl-node seeding (no ast_root needed) ──────────────────────────────────
+# ── decl-node seeding (no AST needed) ───────────────────────────────────────
 
 
 def test_seeds_public_and_private_function_decls_with_visibility() -> None:
@@ -247,7 +248,7 @@ def test_fact_provenance_with_no_mangled_name_leaves_attr_absent() -> None:
     assert "visibility_provenance" not in node.attrs
 
 
-# ── type-node + edge folding (ast_root supplied) ────────────────────────────
+# ── type-node + edge folding (AST supplied) ─────────────────────────────────
 
 
 def _headline_ast() -> dict:
@@ -271,7 +272,7 @@ def test_public_struct_with_private_field_type_classifies_correctly() -> None:
     ast = _headline_ast()
     graph = build_header_only_graph(
         _snapshot(),
-        ast,
+        ast_projection=project_header_graph_ast(ast),
         public_header_paths=[PUBLIC_HEADER],
     )
 
@@ -295,7 +296,9 @@ def test_public_struct_with_private_field_type_classifies_correctly() -> None:
 
 def test_extractor_passes_stamped_when_ast_supplied() -> None:
     ast = _headline_ast()
-    graph = build_header_only_graph(_snapshot(), ast)
+    graph = build_header_only_graph(
+        _snapshot(), ast_projection=project_header_graph_ast(ast)
+    )
     assert graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] is True
     assert graph.extractor_passes[HEADER_CALL_GRAPH_PASS] is True
     # finalize()'s coverage recognizes the header-only type-graph pass for
@@ -312,7 +315,9 @@ def test_coverage_never_credits_body_dependent_kinds_from_header_pass_alone() ->
     # pass name alone.
     ast = _tu(_record("Widget", file=PUBLIC_HEADER))
     graph = build_header_only_graph(
-        _snapshot(), ast, public_header_paths=[PUBLIC_HEADER]
+        _snapshot(),
+        ast_projection=project_header_graph_ast(ast),
+        public_header_paths=[PUBLIC_HEADER],
     )
     assert graph.extractor_passes[HEADER_CALL_GRAPH_PASS] is True
     assert graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] is True
@@ -327,7 +332,7 @@ def test_base_class_edge_from_headers_alone() -> None:
     )
     graph = build_header_only_graph(
         _snapshot(),
-        ast,
+        ast_projection=project_header_graph_ast(ast),
         public_header_paths=[PUBLIC_HEADER],
     )
     node_by_id = {n.id: n for n in graph.nodes}
@@ -844,7 +849,9 @@ def test_ast_only_reference_target_gets_visibility_even_when_unseeded() -> None:
         },
     )
     graph = build_header_only_graph(
-        _snapshot(), ast, public_header_paths=[PUBLIC_HEADER]
+        _snapshot(),
+        ast_projection=project_header_graph_ast(ast),
+        public_header_paths=[PUBLIC_HEADER],
     )
     node_by_id = {n.id: n for n in graph.nodes}
     target_id = "decl://_ZN5Color3REDE"
@@ -910,7 +917,9 @@ def test_ast_only_reference_source_gets_visibility_even_when_unseeded() -> None:
         },
     )
     graph = build_header_only_graph(
-        _snapshot(), ast, public_header_paths=[PUBLIC_HEADER]
+        _snapshot(),
+        ast_projection=project_header_graph_ast(ast),
+        public_header_paths=[PUBLIC_HEADER],
     )
     node_by_id = {n.id: n for n in graph.nodes}
     src_id = "decl://Widget::x"

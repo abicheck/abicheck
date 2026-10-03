@@ -60,7 +60,9 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=("tests/test_header_graph_ast_projection.py",),
         public_surfaces=("cli", "python-api"),
         axes={
-            "entry_point": ("ast_root", "ast_projection", "neither"),
+            # `ast_root` left with the builder's raw-tree parameter (Stage E):
+            # every caller now projects first.
+            "entry_point": ("ast_projection", "neither"),
             "evidence": ("type-edges", "call-edges", "reference-edges", "none"),
         },
         known_gaps=(

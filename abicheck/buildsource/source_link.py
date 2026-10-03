@@ -1231,7 +1231,6 @@ def link_source_abi(
     exported_symbols: Iterable[str] = (),
     library: str = "",
     target_id: str = "",
-    forced_public: Iterable[str] = (),
 ) -> SourceAbiSurface:
     """Link per-TU dumps into one library source ABI surface (ADR-030 D5).
 
@@ -1239,15 +1238,11 @@ def link_source_abi(
     source declaration that maps to one of them is shipped; one that does not is
     recorded under ``unmatched.decls_without_symbol`` and mapped to ``""`` so the
     diff can later flag a lost mapping (``source_decl_binary_symbol_mismatch``).
-    ``forced_public`` names declarations the policy forces onto the surface even
-    without a public-header origin.
     """
     tus = list(tus)
     exported = set(exported_symbols)
-    forced = set(forced_public)
     surface = SourceAbiSurface(library=library, target_id=target_id)
     surface.roots["exported_symbols"] = sorted(exported)
-    surface.roots["forced_public"] = sorted(forced)
 
     state = _LinkState(
         export_index=_build_export_index(exported),
@@ -1261,7 +1256,7 @@ def link_source_abi(
                 tu.target_id or target_id
             )
         for entity in tu.all_entities():
-            if not (_is_public(entity) or entity.qualified_name in forced):
+            if not _is_public(entity):
                 continue
             if _is_duplicate_entity(entity, state):
                 continue

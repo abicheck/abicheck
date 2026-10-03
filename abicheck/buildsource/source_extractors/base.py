@@ -350,7 +350,6 @@ def assemble_source_tu(
     generated_constants: set[str] | None = None,
     typedef_headers: dict[str, str] | None = None,
     generated_typedefs: set[str] | None = None,
-    diagnostics: list[str] | None = None,
 ) -> SourceAbiTu:
     """Assemble parsed model objects into a normalized :class:`SourceAbiTu` (D4).
 
@@ -395,5 +394,4 @@ def assemble_source_tu(
             )
             for name, value in sorted(constants.items())
         ],
-        diagnostics=list(diagnostics or []),
     )

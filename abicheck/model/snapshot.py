@@ -315,11 +315,13 @@ class AbiSnapshot:
     created_at: str | None = None  # ISO 8601 timestamp, auto-set at dump time
     build_id: str | None = None  # opaque CI identifier (run ID, build number, etc.)
     # Build-mode capture (schema v5) — normalized compiler / stdlib / std
-    # mode derived from DWARF DW_AT_producer, ELF .comment, and mangled
-    # symbol heuristics. Used to attribute layout/mangling differences
-    # to build configuration rather than real ABI breaks. See
+    # mode. Used to attribute layout/mangling differences to build
+    # configuration rather than real ABI breaks. No dump path populates it:
+    # it is read back from a stored document that carries it, and the
+    # stdlib-ABI detectors otherwise derive the stdlib dimensions from
+    # mangled symbols at compare time (``build_mode_from_signals``). See
     # ``abicheck/build_mode.py`` for the dataclass and detector logic.
-    # None when capture is unavailable or the dumper predates v5.
+    # None when nothing recorded it.
     build_mode: BuildMode | None = None
     # Optional on-disk artifact path that produced this snapshot.
     # Keyword-only (placed after all other fields) to prevent accidental positional binding.

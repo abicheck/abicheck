@@ -386,13 +386,13 @@ class TestParseSyclMetadata:
         assert parse_sycl_metadata(tmp_path) is None
 
     def test_full_metadata(self, tmp_path: Path, monkeypatch) -> None:
-        monkeypatch.delenv("SYCL_PI_PLUGINS_DIR", raising=False)
-        monkeypatch.delenv("SYCL_UR_ADAPTERS_DIR", raising=False)
         (tmp_path / "libsycl.so").write_bytes(b"x")
         sycl_sub = tmp_path / "sycl"
         sycl_sub.mkdir()
         extra = tmp_path / "extra"
         extra.mkdir()
+        monkeypatch.setenv("SYCL_PI_PLUGINS_DIR", str(extra))
+        monkeypatch.delenv("SYCL_UR_ADAPTERS_DIR", raising=False)
 
         plugins = [
             SyclPluginInfo(name="cuda", library="libpi_cuda.so", pi_version="1.2"),
@@ -401,7 +401,7 @@ class TestParseSyclMetadata:
         with patch(
             "abicheck.sycl_metadata.discover_sycl_plugins", return_value=plugins
         ):
-            meta = parse_sycl_metadata(tmp_path, extra_plugin_paths=[extra])
+            meta = parse_sycl_metadata(tmp_path)
         assert meta is not None
         assert meta.implementation == "dpcpp"
         # Tuple-based max: "1.10" > "1.2".

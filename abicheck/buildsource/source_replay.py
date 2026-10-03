@@ -156,10 +156,6 @@ def _target_owns_changed_header(target: Target, changed: frozenset[str]) -> bool
     )
 
 
-def _units_for_target(build: BuildEvidence, target_id: str) -> list[CompileUnit]:
-    return [cu for cu in build.compile_units if cu.target_id == target_id]
-
-
 def _norm_include_map(
     include_map: Mapping[str, Iterable[str]] | None,
 ) -> dict[str, list[str]]:
@@ -182,13 +178,12 @@ def select_compile_units(
     *,
     scope: str,
     changed_paths: Iterable[str] = (),
-    target_id: str = "",
     include_map: Mapping[str, Iterable[str]] | None = None,
     public_header_roots: Sequence[str] | None = None,
 ) -> list[CompileUnit]:
     """Select which compile units to replay for an ADR-030 D7 ``scope``.
 
-    Pure: a function of the build evidence plus the changed-path set / target id,
+    Pure: a function of the build evidence plus the changed-path set,
     and — when supplied — a per-TU **include graph** ``{compile_unit_id:
     [included_path, ...]}`` (ADR-031 D3, from compiler depfiles via
     :func:`include_graph.parse_depfile` / :class:`include_graph.ClangIncludeExtractor`).
@@ -210,8 +205,8 @@ def select_compile_units(
       of any target that owns a changed header, falling back to a full fan-out
       when a header maps to no TU (the cache then skips the unaffected units).
       PR mode (ADR-025 changed-path signal).
-    - ``target`` — units of ``target_id`` (release-baseline mode). When no target
-      is given, every unit attached to some target, falling back to all units.
+    - ``target`` — every unit attached to some build target (release-baseline
+      mode), falling back to all units.
     - ``full`` — every compile unit (nightly/deep mode).
     """
     if scope not in REPLAY_SCOPES:
@@ -227,7 +222,7 @@ def select_compile_units(
     if scope == "headers-only":
         return _select_headers_only(build, inc, public_header_roots)
     if scope == "target":
-        return _select_target(build, target_id)
+        return _select_target(build)
     return _select_changed(build, frozenset(changed_paths), inc)
 
 
@@ -462,9 +457,7 @@ def _included(
     )
 
 
-def _select_target(build: BuildEvidence, target_id: str) -> list[CompileUnit]:
-    if target_id:
-        return _units_for_target(build, target_id)
+def _select_target(build: BuildEvidence) -> list[CompileUnit]:
     target_ids = {t.id for t in build.targets}
     attached = [cu for cu in build.compile_units if cu.target_id in target_ids]
     return attached or list(build.compile_units)
@@ -535,16 +528,13 @@ def _select_changed(
     return []
 
 
-def public_header_roots_for(build: BuildEvidence, target_id: str = "") -> list[str]:
-    """Collect the public-header set from the build targets (D5 linker input).
+def public_header_roots_for(build: BuildEvidence) -> list[str]:
+    """Collect the public-header set across all build targets (D5 linker input).
 
-    Restricted to ``target_id`` when given, else the union across all targets.
     De-duplicated and sorted for determinism.
     """
     roots: set[str] = set()
     for target in build.targets:
-        if target_id and target.id != target_id:
-            continue
         roots.update(target.public_headers)
     return sorted(roots)
 
@@ -606,7 +596,6 @@ def compute_tu_cache_key(
     extractor_version: str,
     compile_unit: CompileUnit,
     public_header_roots: Sequence[str],
-    schema_version: int = SOURCE_ABI_VERSION,
     compiler_override: str | None = None,
 ) -> str | None:
     """Compute the D8 per-TU cache key, or ``None`` if the TU is uncacheable.
@@ -629,7 +618,7 @@ def compute_tu_cache_key(
         return None
     parts = [
         "abicheck-source-abi-cache",
-        str(schema_version),
+        str(SOURCE_ABI_VERSION),
         extractor_name,
         extractor_version,
         # Source *location* (not just content): two distinct TUs with identical
@@ -828,11 +817,8 @@ def run_source_replay(
     *,
     scope: str = "target",
     changed_paths: Iterable[str] = (),
-    target_id: str = "",
-    library: str = "",
     exported_symbols: Iterable[str] = (),
     public_header_roots: Sequence[str] | None = None,
-    forced_public: Iterable[str] = (),
     cache: SourceAbiCache | None = None,
     include_map: Mapping[str, Iterable[str]] | None = None,
 ) -> tuple[SourceAbiSurface, list[str]]:
@@ -850,14 +836,13 @@ def run_source_replay(
     roots = (
         list(public_header_roots)
         if public_header_roots is not None
-        else public_header_roots_for(build, target_id)
+        else public_header_roots_for(build)
     )
     total_started = time.monotonic()
     units = select_compile_units(
         build,
         scope=scope,
         changed_paths=changed_paths,
-        target_id=target_id,
         include_map=include_map,
         public_header_roots=roots,
     )
@@ -879,7 +864,7 @@ def run_source_replay(
 
     jobs = _l4_jobs(len(misses))
     miss_units = [units[i] for i in misses]
-    worker = partial(_extract_one, extractor, list(roots or []), target_id)
+    worker = partial(_extract_one, extractor, list(roots or []))
     extract_started = time.monotonic()
     extracted = _extract_cache_misses(
         worker, miss_units, jobs, use_process_pool=_l4_use_process_pool()
@@ -891,13 +876,7 @@ def run_source_replay(
     )
 
     link_started = time.monotonic()
-    surface = link_source_abi(
-        tus,
-        exported_symbols=exported_symbols,
-        library=library,
-        target_id=target_id,
-        forced_public=forced_public,
-    )
+    surface = link_source_abi(tus, exported_symbols=exported_symbols)
     link_elapsed = time.monotonic() - link_started
     _record_replay_coverage(
         surface,
@@ -1184,7 +1163,6 @@ def _l4_use_process_pool() -> bool:
 def _extract_one(
     extractor: SourceAbiExtractor,
     roots: list[str],
-    target_id: str,
     cu: CompileUnit,
 ) -> tuple[SourceAbiTu | None, str | None]:
     """Extract one compile unit; returns ``(tu, None)`` or ``(None, diagnostic)``.
@@ -1193,10 +1171,7 @@ def _extract_one(
     per-TU work is stateless, so it is safe to run in any worker/process.
     """
     try:
-        return (
-            extractor.extract(cu, public_header_roots=roots, target_id=target_id),
-            None,
-        )
+        return extractor.extract(cu, public_header_roots=roots), None
     except SourceExtractionError as exc:
         return None, f"{cu.source or cu.id}: {exc}"
 

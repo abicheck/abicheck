@@ -204,7 +204,7 @@ def _collect_source_abi(
             f"no-op: scope {scope!r} selects no translation units",
         )
 
-    roots = [str(h) for h in headers] or public_header_roots_for(merged, target_id)
+    roots = [str(h) for h in headers] or public_header_roots_for(merged)
 
     if extractor == "android":
         return _collect_source_abi_android(
@@ -278,8 +278,6 @@ def _collect_source_abi(
         impl,
         scope=scope,
         changed_paths=changed_paths,
-        target_id=target_id,
-        library=library,
         exported_symbols=exported,
         public_header_roots=roots,
         cache=cache,

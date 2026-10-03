@@ -3147,26 +3147,15 @@ class TestCompareRequestAdr055Evidence:
         with pytest.raises(SnapshotError, match="Invalid evidence pack"):
             run_compare_request(request)
 
-    def test_embedded_evidence_diffing_is_quiet(self, tmp_path, monkeypatch, capsys):
+    def test_embedded_evidence_diffing_is_quiet(self, tmp_path, capsys):
         """Codex review: prepare_embedded_build_source's coverage-table echoes
         and attach_evidence_metrics' timing-summary echo previously printed
         CLI tables to stderr unconditionally -- polluting a non-CLI caller's
-        stream with output it has no way to suppress. run_compare_request must
-        pass quiet=True through both."""
-        from abicheck import cli_buildsource_helpers
-
+        stream with output it has no way to suppress. run_compare_request calls
+        the engine (buildsource.evidence_report) directly and hands it no
+        output sink, so nothing reaches either stream."""
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
-
-        def fake_diff_embedded_build_source(*args, **kwargs):
-            assert kwargs.get("quiet") is True
-            return [], [], {"extractor.duration_seconds": 0.01}
-
-        monkeypatch.setattr(
-            cli_buildsource_helpers,
-            "diff_embedded_build_source",
-            fake_diff_embedded_build_source,
-        )
 
         request = CompareRequest(
             old=InputSpec.of(old_p, build_info=tmp_path), new=InputSpec.of(new_p)
