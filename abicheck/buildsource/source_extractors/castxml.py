@@ -34,6 +34,8 @@ import tempfile
 from pathlib import Path
 from xml.etree.ElementTree import Element, ParseError
 
+from defusedxml import DefusedXmlException
+
 from ... import deadline
 from ...extract.castxml_compiler_emulation import (
     castxml_parser_arguments,
@@ -488,7 +490,7 @@ class CastxmlSourceExtractor:
             # the clang extractor's JSON-decode handling.
             try:
                 root = parse_castxml_xml(out_xml)
-            except ParseError as exc:
+            except (ParseError, DefusedXmlException) as exc:
                 raise SourceExtractionError(
                     f"castxml produced unparseable XML for {compile_unit.source}: {exc}"
                 ) from exc

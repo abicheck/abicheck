@@ -310,14 +310,23 @@ def run_abicheck(
         f"json={out_path}",
         *extra_args,
     ]
-    # TimeoutExpired propagates: a caller budgeting a run decides what a
-    # timeout means (run_compat_corpus records it as "not evaluated").
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    proc: subprocess.CompletedProcess[str] | None = None
     try:
+        # TimeoutExpired propagates: a caller budgeting a run decides what a
+        # timeout means (run_compat_corpus records it as "not evaluated").
+        # Inside the try so the finally below removes the report file on a
+        # timeout or a failed process start too.
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         data = json.loads(Path(out_path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         # Without this a missing tool (e.g. CastXML for --header) reads only
         # as "no report", with the cause thrown away.
+        if proc is None:  # the process never started (e.g. abicheck not on PATH)
+            print(
+                f"abicheck compare could not start for {Path(old).name}",
+                file=sys.stderr,
+            )
+            return None
         err = (proc.stderr or "").strip()
         print(
             f"abicheck compare exited {proc.returncode} with no report for "

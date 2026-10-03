@@ -40,6 +40,7 @@ are cached.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import logging
@@ -220,16 +221,21 @@ def select_compile_units(
         )
     if scope == "off":
         return []
+    # Drop assembler units *before* any scope chooses representatives: the
+    # headers-only heuristic picks one unit per target and set cover picks one
+    # per header, so filtering afterwards would lose that target's or header's
+    # coverage whenever the chosen representative happened to be assembly.
+    eligible = [cu for cu in build.compile_units if not is_assembly_unit(cu)]
+    if len(eligible) != len(build.compile_units):
+        build = dataclasses.replace(build, compile_units=eligible)
     if scope == "full":
-        return [cu for cu in build.compile_units if not is_assembly_unit(cu)]
+        return list(build.compile_units)
     inc = _norm_include_map(include_map)
     if scope == "headers-only":
-        picked = _select_headers_only(build, inc, public_header_roots)
-    elif scope == "target":
-        picked = _select_target(build, target_id)
-    else:
-        picked = _select_changed(build, frozenset(changed_paths), inc)
-    return [cu for cu in picked if not is_assembly_unit(cu)]
+        return _select_headers_only(build, inc, public_header_roots)
+    if scope == "target":
+        return _select_target(build, target_id)
+    return _select_changed(build, frozenset(changed_paths), inc)
 
 
 #: Source suffixes of assembler translation units. They declare no C/C++ ABI,

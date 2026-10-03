@@ -34,6 +34,7 @@ import os
 from pathlib import Path
 
 import pytest
+from _strict_process import StrictProcessRunner, proc
 
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
 from abicheck.buildsource.source_extractors import CastxmlSourceExtractor
@@ -115,6 +116,9 @@ def test_the_matrix_is_not_vacuous() -> None:
         "<GCC_XML><File id='f1'",  # truncated
         "\t.text\n\t.globl HUF_decompress4X1_usingDTable_internal_fast_asm_loop\n",
         "not xml at all <<<",
+        # defusedxml refuses entity declarations with EntitiesForbidden, which
+        # is not a ParseError subclass.
+        '<!DOCTYPE x [<!ENTITY a "b">]><GCC_XML>&a;</GCC_XML>',
     ],
 )
 def test_malformed_castxml_output_is_a_per_unit_failure(
@@ -125,17 +129,18 @@ def test_malformed_castxml_output_is_a_per_unit_failure(
     extractor = CastxmlSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
 
-    class _Result:
-        returncode = 0
-        stdout = ""
-        stderr = ""
+    def _castxml_writes_payload(argv: tuple[str, ...]) -> bool:
+        # The one castxml call writes its XML to the -o path; the payload is
+        # what this unit's real castxml run would have left there.
+        if argv[0] != extractor.castxml_bin or "-o" not in argv:
+            return False
+        Path(argv[argv.index("-o") + 1]).write_text(payload)
+        return True
 
-    def _fake_run(cmd: list[str], **kw: object) -> _Result:
-        if "-o" in cmd:
-            Path(cmd[cmd.index("-o") + 1]).write_text(payload)
-        return _Result()
-
-    monkeypatch.setattr(castxml_mod.deadline, "run_bounded", _fake_run)
+    runner = StrictProcessRunner()
+    for _ in range(2):  # extractor.extract, then the replay worker's call
+        runner.expect(argv_matches=_castxml_writes_payload, returns=proc())
+    runner.install(monkeypatch, castxml_mod.deadline, "run_bounded")
     cu = CompileUnit(
         id="cu://x", source="src/x.c", directory=str(tmp_path), language="C"
     )
@@ -144,6 +149,7 @@ def test_malformed_castxml_output_is_a_per_unit_failure(
     # ...and the replay worker turns it into a diagnostic rather than raising.
     tu, diag = _extract_one(extractor, ["x.h"], "", cu)
     assert tu is None and diag and "src/x.c" in diag
+    runner.assert_exhausted()
 
 
 # ── replay selection never includes an assembler unit ────────────────────────
@@ -179,3 +185,27 @@ def test_no_scope_selects_an_assembler_unit(scope: str) -> None:
         assert {
             cu.source for cu in build.compile_units if cu.source.endswith(_C_FAMILY)
         } <= kept
+
+
+@pytest.mark.parametrize("with_include_map", [False, True])
+def test_headers_only_keeps_a_c_family_representative(with_include_map: bool) -> None:
+    """Assembler units are dropped *before* a representative is chosen.
+
+    ``_build()`` orders the assembler units first by id, so a heuristic that
+    picks a target's first unit (or a set cover that picks an assembler unit to
+    cover a header) and filters afterwards would leave the target with no unit
+    at all. Oracle: the scope must still select at least one C-family unit,
+    and every header a C-family unit includes stays covered.
+    """
+    build = _build()
+    include_map = None
+    if with_include_map:
+        include_map = {cu.id: ["include/lib.h"] for cu in build.compile_units}
+    picked = select_compile_units(
+        build,
+        scope="headers-only",
+        include_map=include_map,
+        public_header_roots=["include"],
+    )
+    assert picked, "headers-only lost the target's only C-family representatives"
+    assert all(cu.source.endswith(_C_FAMILY) for cu in picked)

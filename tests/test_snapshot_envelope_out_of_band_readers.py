@@ -395,8 +395,10 @@ def _one_hop_offenders(tree: ast.Module, rel: str) -> list[str]:
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
     indexed_params: dict[str, dict[int, set[str]]] = {}
+    param_names: dict[str, list[str]] = {}
     for func in funcs:
         params = [a.arg for a in func.args.posonlyargs + func.args.args]
+        param_names[func.name] = params
         unwrapped = _unwrapped_names(func)
         hits: dict[int, set[str]] = {}
         for recv, key in _moved_key_receivers(func):
@@ -416,10 +418,15 @@ def _one_hop_offenders(tree: ast.Module, rel: str) -> list[str]:
         for call in ast.walk(caller):
             if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)):
                 continue
+            names = param_names.get(call.func.id, [])
+            by_keyword = {kw.arg: kw.value for kw in call.keywords if kw.arg}
             for index, keys in indexed_params.get(call.func.id, {}).items():
-                if index >= len(call.args):
+                if index < len(call.args):
+                    arg = call.args[index]
+                elif names[index] in by_keyword:
+                    arg = by_keyword[names[index]]
+                else:
                     continue
-                arg = call.args[index]
                 if _is_raw_document_call(arg) or (
                     isinstance(arg, ast.Name) and arg.id in raw_names
                 ):
@@ -514,6 +521,19 @@ def scan(path):
     return coverage(doc)
 """
 
+_RAW_BY_KEYWORD = _RAW_HANDOFF.replace(
+    "coverage(json.loads", "coverage(snap=json.loads"
+)
+_RAW_NAME_BY_KEYWORD = _RAW_VIA_NAME.replace("coverage(doc)", "coverage(snap=doc)")
+_UNWRAPPED_BY_KEYWORD = """
+import json
+def coverage(snap):
+    return snap.get("build_source") or {}
+def scan(path):
+    doc = from_sectioned_document(json.loads(path.read_text()))
+    return coverage(snap=doc)
+"""
+
 _UNWRAPPED_HANDOFF = """
 import json
 def coverage(snap):
@@ -538,8 +558,19 @@ def scan(pack):
         (_RAW_VIA_NAME, True),
         (_UNWRAPPED_HANDOFF, False),
         (_PACK_HANDOFF, False),
+        (_RAW_BY_KEYWORD, True),
+        (_RAW_NAME_BY_KEYWORD, True),
+        (_UNWRAPPED_BY_KEYWORD, False),
     ],
-    ids=["direct", "via-local-name", "unwrapped-first", "not-a-document"],
+    ids=[
+        "direct",
+        "via-local-name",
+        "unwrapped-first",
+        "not-a-document",
+        "direct-keyword",
+        "via-local-name-keyword",
+        "unwrapped-keyword",
+    ],
 )
 def test_one_hop_scan_flags_exactly_a_raw_document_handoff(
     source: str, flagged: bool
