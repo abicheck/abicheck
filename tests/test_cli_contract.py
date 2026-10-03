@@ -806,13 +806,14 @@ def test_gate_flags_missing_decorator(
     findings = gate.Findings()
     gate.check_cli_contract(findings)
     msgs = [m for c, m in findings.errors if c == "cli-contract"]
-    # severity/scope/output are missing → three coverage errors naming `compare`.
+    # severity/output are missing → two coverage errors naming `compare`.
+    # (The scope family was retired in one-comparison-product Phase 9b.)
     missing = {
         fam
         for fam in ("severity_options", "scope_options", "export_options")
         if any(fam in m and "compare" in m for m in msgs)
     }
-    assert missing == {"severity_options", "scope_options", "export_options"}, msgs
+    assert missing == {"severity_options", "export_options"}, msgs
 
 
 def test_gate_flags_missing_command(
@@ -851,7 +852,6 @@ def test_intentional_subset_decorator_is_not_flagged(
         '@main.command("synth")\n'
         "@two_sided_input_options\n"
         "@policy_options\n"
-        "@scope_options\n"
         "@export_options(['json'])\n"
         "def synth_cmd():\n"
         "    pass\n"

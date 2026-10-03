@@ -27,6 +27,8 @@ documentation at stable, versioned URLs:
 - [Build evidence](schemas/v1/build_evidence.schema.json)
 - [BuildSourcePack manifest](schemas/v1/build_source_pack.schema.json)
 - [Compare JSON report](schemas/v1/compare_report.schema.json)
+- [Single-build audit report](schemas/v1/audit_report.schema.json) (`compare --no-baseline FILE`)
+- [N-library audit report](schemas/v1/audit_set_report.schema.json) (`compare --no-baseline DIR`)
 
 Every file declares its own canonical HTTPS `$id` at the linked URL. Versioned
 paths are immutable contracts: a breaking schema revision receives a new major

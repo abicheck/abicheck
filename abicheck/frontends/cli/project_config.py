@@ -46,7 +46,6 @@ def resolve_project_compare_config(
     *,
     config: Path | None,
     severity_preset: str | None,
-    scope_public_headers: bool,
 ) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
@@ -67,8 +66,13 @@ def resolve_project_compare_config(
     ``cli_dwarf_only``/``cli_debuginfod``/``cli_debuginfod_url`` override --
     its defaults (``None``/``None``/``None``/``None``) mean the config value
     (or the built-in default) always wins.
+
+    One-comparison-product Phase 9b did the same to
+    ``--scope-public-headers``/``--no-scope-public-headers``: no
+    ``cli_scope_public`` override is passed, so ``scope.public`` (or its
+    built-in ``True``) decides header-origin scoping for a run with no
+    ``--contract``. ``--contract all`` replaces the opt-out flag.
     """
-    from ...cli_compare_options import _cli_flag
     from ...cli_helpers_compare import resolve_compare_config
     from ...config_paths import resolve_project_config
     from ...workflows.extraction import load_build_config_with_digest
@@ -85,7 +89,6 @@ def resolve_project_compare_config(
     resolved_cfg = resolve_compare_config(
         project_cfg,
         cli_severity_preset=severity_preset,
-        cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
     )
     return cfg_path, project_cfg, resolved_cfg, cfg_sha
 

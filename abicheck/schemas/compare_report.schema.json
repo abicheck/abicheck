@@ -1755,7 +1755,7 @@
     },
     "scope": {
       "type": "object",
-      "description": "Public-header scoping outcome (ADR-024, issue #235). Only present when --scope-public-headers was requested. When 'resolved' is false the public surface could not be determined and analysis fell back to the full export table, so 'manual_review_required' is true and compatibility is UNCONFIRMED.",
+      "description": "Public-header scoping outcome (ADR-024, issue #235). Only present when public-header scoping was in effect (the default; .abicheck.yml scope.public: false turns it off). When 'resolved' is false the public surface could not be determined and analysis fell back to the full export table, so 'manual_review_required' is true and compatibility is UNCONFIRMED.",
       "required": [
         "public_headers_applied",
         "resolved",

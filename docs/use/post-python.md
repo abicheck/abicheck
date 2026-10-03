@@ -11,7 +11,7 @@ private implementation detail that is free to churn.
 
 | You want to… | Use |
 |--------------|-----|
-| Compare two builds but only flag changes to the **committed** surface | `abicheck compare … --post-manifest manifest.json` |
+| Compare two builds but only flag changes to the **committed** surface | `abicheck compare …` with `contract.overlays.post_manifest` in `.abicheck.yml` |
 | Check the manifest itself — is it consistent with the binary? did it break vs the previous version? | the `abicheck.post_manifest` Python API (below) |
 
 ---
@@ -55,15 +55,27 @@ change.
 
 ---
 
-## `compare --post-manifest` — scope a diff to the committed surface
+## `contract.overlays.post_manifest` — scope a diff to the committed surface
 
 When you compare two POST builds, most of the diff is private-kernel churn you
-do **not** care about. Pass the manifest and `abicheck` scopes the verdict to
-the committed `pp_*`/ufunc-loop symbols only:
+do **not** care about. Name the manifest in the project's `.abicheck.yml` and
+`abicheck compare` scopes the verdict to the committed `pp_*`/ufunc-loop
+symbols only:
+
+```yaml
+contract:
+  overlays:
+    post_manifest: python/abi/manifest.json   # relative to the project root
+```
 
 ```bash
-abicheck compare libmylib.v1.so libmylib.v2.so --post-manifest manifest.json
+abicheck compare libmylib.v1.so libmylib.v2.so --config .abicheck.yml
 ```
+
+Name the config with `--config`: the overlay narrows what gates, so an
+auto-discovered `.abicheck.yml` (one a pull request could edit) is not
+trusted to apply it, and the run says so on stderr. In the GitHub Action,
+point the `build-config` input at the reviewed config.
 
 - A change to a **committed** symbol (`pp_gammaln` signature change, removal, a
   dropped/renamed ufunc loop) drives the verdict as usual.
@@ -75,35 +87,37 @@ abicheck compare libmylib.v1.so libmylib.v2.so --post-manifest manifest.json
   are always kept — a struct passed to a committed export or a changed SONAME
   breaks clients regardless of the export set.
 
-See exactly what was demoted in the always-disclosed filtered ledger (text) or under the
-`surface_scope` key (`-o json=...`):
+See exactly what was demoted in the always-disclosed filtered ledger (text) or
+under the `surface_scope` key (`-o json=...`). The manifest surface is
+authoritative, so this works independently of public-header scoping; the
+filtered ledger is always reported so a clean verdict never hides that
+filtering happened.
 
-```bash
-abicheck compare libmylib.v1.so libmylib.v2.so \
-    --post-manifest manifest.json
-```
-
-The manifest surface is authoritative, so this works independently of
-`--scope-public-headers`; the filtered ledger is always reported so a clean
-verdict never hides that filtering happened.
+The manifest is a project setting, so there is no per-run flag for it (the
+former `compare` flag was removed; see
+[`contract:`](../reference/config-file.md#contract)). Point `--config` at a
+different `.abicheck.yml` to compare under a different manifest. The overlay
+applies to a single-pair `compare`. A directory/package comparison and a
+`compare --no-baseline` audit note on stderr that they do not apply it.
 
 !!! note "Removed symbols and the `pp_*` namespace"
-    When you point `--post-manifest` at the **new** manifest, a committed
-    wrapper that was *removed* in the release is no longer listed there. Binary
-    scoping recovers such removals by the `pp_*` committed namespace so the
-    removal still breaks — but a committed ufunc `loop_symbol` that is *not*
+    When the configured manifest is the **new** one, a committed wrapper that
+    was *removed* in the release is no longer listed there. Binary scoping
+    recovers such removals by the `pp_*` committed namespace so the removal
+    still breaks — but a committed ufunc `loop_symbol` that is *not*
     `pp_`-prefixed may fall outside this recovery. The manifest-to-manifest
     checks below (**diff** / **gate**) see both versions and are the
-    authoritative gate for loop-symbol renames/removals; treat
-    `compare --post-manifest` as the best-effort binary-level surface filter.
+    authoritative gate for loop-symbol renames/removals; treat the
+    `compare` overlay as the best-effort binary-level surface filter.
 
 **Exit codes** are the standard `compare` codes — `0` compatible, `2` source
 break, `4` ABI break (or the severity-aware scheme when any `--severity-*` flag
 is set) — so it drops straight into a CI gate:
 
 ```bash
-# Fail the build only on a change to the committed POST surface.
-abicheck compare libmylib.v1.so libmylib.v2.so --post-manifest manifest.json
+# Fail the build only on a change to the committed POST surface
+# (with contract.overlays.post_manifest set in .abicheck.yml).
+abicheck compare libmylib.v1.so libmylib.v2.so --config .abicheck.yml
 ```
 
 ---
@@ -168,10 +182,12 @@ if gate.violated:              # breaking change without a post_abi bump
    everything the manifest promises?
 3. **On a release PR:** `check_version_gate(old_manifest, new_manifest)` — was a
    breaking change matched by a `post_abi` bump? *(fails the PR if not)*
-4. **Optional, binary-level:** `abicheck compare old.so new.so
-   --post-manifest manifest.json` — diff the actual binaries, scoped to the
-   committed surface, so private-kernel churn stays out of the verdict.
+4. **Optional, binary-level:** `abicheck compare old.so new.so` with
+   `contract.overlays.post_manifest` configured — diff the actual binaries,
+   scoped to the committed surface, so private-kernel churn stays out of the
+   verdict.
 
 !!! note
     Steps 1–3 are a Python library today (no dedicated CLI subcommand yet);
-    step 4 — `compare --post-manifest` — is the CLI entry point.
+    step 4 — `compare` with the manifest overlay configured — is the CLI
+    entry point.

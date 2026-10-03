@@ -113,7 +113,7 @@ Rules that fall out of it:
   resolve without complaint, and the receipt reports the winning chain.
 - **An untouched option contributes nothing.** A flag left at its click
   default is not a stated value, so the next layer down wins. This matters for
-  `--policy` and `--scope-public-headers`, whose defaults are not `None`.
+  `--policy`, whose default is not `None`.
 - **A selected pack never silently overrides a stated value.** Packs sit
   directly above the built-in default: a pack fills a field only when neither
   the user nor the project stated it ("explicit override >
@@ -142,13 +142,13 @@ the shadowed input is retained in the receipt
 | Pair | Winner | Why |
 |---|---|---|
 | `--policy` + `--policy` | the file's `base_policy` | D7, verbatim: `--policy` "keeps winning as documented and tested today". `--policy`'s own help text already says it is ignored then. |
-| `--contract` + `--scope-public-headers`/`--no-` | the explicit `--contract` | The Phase 6 flag documents that "an explicit value outranks those"; the live CLI accepts the pair today. |
+| `contract_mode` + `scope_public` (typed API) | the explicit `contract_mode` | The Phase 6 flag documents that "an explicit value outranks those". The CLI half of this pair (the public-header scoping flags) was deleted in one-comparison-product Phase 9b; a CLI run states the legacy alias only through `.abicheck.yml`'s `scope.public`, which `--contract` outranks by ordinary tier order. |
 
 ## Where each field comes from
 
 | Field | CLI | API (`CompareRequest`) | `.abicheck.yml` | Pack |
 |---|---|---|---|---|
-| `contract.mode` | `--contract`; legacy `--scope-public-headers/--no-` | `contract_mode`; `scope_public` | `scope.public` | — |
+| `contract.mode` | `--contract` | `contract_mode`; `scope_public` | `scope.public` | — |
 | `contract.unresolved` | — | — | — | `contract` |
 | `contract.overlays` | — | — | — | `contract` |
 | `contract.packs` | *(pack paths)* | — | — | — |

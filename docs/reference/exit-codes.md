@@ -159,8 +159,9 @@ first replacement for `scan`'s audit-only mode (no `--against`) and
 integration scenario S5. `--no-baseline` is an explicit declaration, never inferred
 from argument count: `compare NEW` (one operand, no flag) and
 `compare --no-baseline OLD NEW` (the flag plus two operands) are both usage
-errors, exit `64`. Only a single artifact is supported today; a
-directory/package operand is also a usage error until package component inventories land.
+errors, exit `64`. A directory of libraries, a package archive, or a
+multi-artifact stored package is audited per member instead — see
+[`compare --no-baseline DIR`](#compare-no-baseline-dir-n-library-audit) below.
 
 The OLD side is recorded with the `declared_absent`
 `MemberAcquisition` state — distinct from `not_supplied` (an *unproven*
@@ -240,6 +241,38 @@ never a clean preview of a run that would exit `7`. Two-sided
 exits `0` on the same pinned-but-unsatisfiable depth (recorded in
 [`known-gaps.md`](../contribute/known-gaps.md); giving it the same preview
 is the natural follow-up, and would make it exit nonzero there too).
+
+## `compare --no-baseline DIR` (N-library audit)
+
+When the operand is a set of libraries — a directory, a package archive
+(`.deb`/`.rpm`/`.whl`/`.tar.*`/...), or a multi-artifact or degraded stored
+`ProjectSnapshot` package, classified exactly as two-sided `compare`
+classifies it — each selected member is audited exactly as
+`compare --no-baseline <member>` would audit it, and one `audit_set` JSON
+document holds every member's own audit report. Members are selected with
+`--select`/`--select-required` (a usage error, exit `64`, for a single
+artifact), and `.abicheck.yml`'s `scope.on_incomplete`, `release.dso_only`
+and `release.include_private_dso` apply as they do to a two-sided
+directory/package `compare`.
+
+The exit code is the `max` over:
+
+| Axis | Contributes | When |
+|---|---|---|
+| Audit gate, contract coverage, analysis assurance, evidence contract | `3`/`1`/`1`/`7` | The max of every audited member's own contribution (table above) |
+| Operational error | `4` | A selected member's audit failed (an unreadable or unparseable artifact) — the same contribution a directory/package `compare` folds for a failed member. The member is listed with its reason, never dropped |
+| Incomplete scope | `1` | A selected member was not audited (`expected_not_produced`, `failed`, `unsupported`) **and** `scope.on_incomplete: block`; `0` under the default `warn` |
+| No audit completed | `1` | No selected member reached a completed audit — an empty selection, or every member failing. Never a clean pass, under either `scope.on_incomplete` setting |
+
+An artifact this build cannot analyze (a snapshot newer than the reader) is
+`unsupported` — the scope axis, not the operational one; a misconfiguration
+that would be a usage error for one artifact aborts the whole run with exit
+`64`. OLD is declared absent for every member, so no member is ever reported
+added or removed — whatever the candidate's inventory proves — and the
+compatibility family never contributes. A directory operand with no
+readable member exits `1` with the same error a two-sided `compare` gives.
+Formats: `json`, `markdown` (the default) and `oneline`; the others are
+usage errors.
 
 ## Analysis-assurance contribution (P0.4)
 

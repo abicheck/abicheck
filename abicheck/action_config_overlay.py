@@ -226,7 +226,10 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
     code/an executable to run -- ``cli_options.py``'s ``compile.compiler``
     gate and ADR-032 D5's ``build.query`` gate exist specifically to
     withhold that from anything but an operator's own explicit
-    ``--config``), and caps (never strips -- a lower value is never a
+    ``--config``), strips ``contract.overlays.post_manifest`` (it narrows
+    what gates; ``frontends/cli/contract_overlays.py`` applies it only from
+    an explicit ``--config``, and this overlay is always explicit), and
+    caps (never strips -- a lower value is never a
     decode-bomb risk) ``resource_limits.max_bundle_facts_decode_nodes`` via
     the identical
     :func:`~abicheck.frontends.cli.commands.compare_bundle_facts_rejections.
@@ -269,6 +272,22 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
             "reviewed) to opt in.",
             file=sys.stderr,
         )
+
+    contract = base.get("contract")
+    overlays = contract.get("overlays") if isinstance(contract, dict) else None
+    if isinstance(contract, dict) and isinstance(overlays, dict):
+        if "post_manifest" in overlays:
+            overlays = {k: v for k, v in overlays.items() if k != "post_manifest"}
+            base["contract"] = {**contract, "overlays": overlays}
+            print(
+                "::warning::the discovered .abicheck.yml's "
+                "contract.overlays.post_manifest was dropped from this "
+                "synthesized --config overlay -- an auto-discovered config is "
+                "never trusted to narrow the compared contract (a pull request "
+                "can edit it); set build-config explicitly (naming a config "
+                "you reviewed) to opt in.",
+                file=sys.stderr,
+            )
 
     resource_limits = base.get("resource_limits")
     if isinstance(resource_limits, dict):
@@ -322,29 +341,23 @@ def rebase_relative_config_paths(
     fresh overlay path elsewhere on disk (typically under
     ``$RUNNER_TEMP``).
 
-    ``compile.include_dirs`` is the only such field today (confirmed by
-    grepping every ``buildsource/build_config.py`` field for a
+    Two such fields today: ``compile.include_dirs`` and
+    ``contract.overlays.post_manifest`` (one-comparison-product Phase 9c),
+    found by grepping every ``buildsource/build_config.py`` field for a
     ``project_root_for_config`` consumer -- ``build.compile_db`` is a glob
     resolved against the ``--sources`` root instead, never the config
     file's own location, so it is unaffected by relocation and is handled
     by :func:`strip_untrusted_execution_keys` for an unrelated,
-    trust-driven reason).
+    trust-driven reason.
 
     Applies regardless of whether *base* is trusted (an operator's own
     explicit ``--config``) or not -- this is a pure correctness concern,
     orthogonal to :func:`strip_untrusted_execution_keys`'s trust-driven
-    stripping: an explicit ``--config`` with a relative
-    ``compile.include_dirs`` breaks exactly the same way a discovered one
-    does the moment its document moves.
+    stripping: an explicit ``--config`` with a relative path field breaks
+    exactly the same way a discovered one does the moment its document
+    moves.
     """
     base = dict(base)
-    compile_blk = base.get("compile")
-    if not isinstance(compile_blk, dict):
-        return base
-    include_dirs = compile_blk.get("include_dirs")
-    if include_dirs is None:
-        return base
-
     root = project_root_for_config(found_path)
 
     def _abs(p: object) -> object:
@@ -353,13 +366,25 @@ def rebase_relative_config_paths(
         pp = Path(p)
         return str(pp) if pp.is_absolute() else str((root / pp).resolve())
 
-    compile_blk = dict(compile_blk)
-    compile_blk["include_dirs"] = (
-        [_abs(p) for p in include_dirs]
-        if isinstance(include_dirs, list)
-        else _abs(include_dirs)
+    compile_blk = base.get("compile")
+    include_dirs = (
+        compile_blk.get("include_dirs") if isinstance(compile_blk, dict) else None
     )
-    base["compile"] = compile_blk
+    if isinstance(compile_blk, dict) and include_dirs is not None:
+        compile_blk = dict(compile_blk)
+        compile_blk["include_dirs"] = (
+            [_abs(p) for p in include_dirs]
+            if isinstance(include_dirs, list)
+            else _abs(include_dirs)
+        )
+        base["compile"] = compile_blk
+
+    contract = base.get("contract")
+    overlays = contract.get("overlays") if isinstance(contract, dict) else None
+    if isinstance(contract, dict) and isinstance(overlays, dict):
+        if "post_manifest" in overlays:
+            overlays = {**overlays, "post_manifest": _abs(overlays["post_manifest"])}
+            base["contract"] = {**contract, "overlays": overlays}
     return base
 
 

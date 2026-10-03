@@ -415,7 +415,6 @@ class TestGateParityWithTheLiveRun:
                 {"severity_addition": "error"},
             ),
             ({"policy": "sdk_vendor"}, {"policy"}, {}),
-            ({"scope_public_headers": False}, {"scope_public_headers"}, {}),
         ],
     )
     def test_resolver_gate_matches_resolve_compare_config(
@@ -427,7 +426,6 @@ class TestGateParityWithTheLiveRun:
 
         full = {
             "contract_mode": None,
-            "scope_public_headers": True,
             "policy": "strict_abi",
             "policy_file_path": None,
             "suppress": None,
@@ -441,11 +439,6 @@ class TestGateParityWithTheLiveRun:
         live = resolve_compare_config(
             project_cfg,
             cli_severity_preset=full["severity_preset"],
-            cli_scope_public=(
-                full["scope_public_headers"]
-                if "scope_public_headers" in typed
-                else None
-            ),
         )
         resolved = resolve_cli_config(
             full, typed=typed, project_cfg=project_cfg, project_path=None

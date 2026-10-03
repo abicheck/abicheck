@@ -7,6 +7,8 @@ guarantees for backward-compatible changes to non-public API/ABI.
 
 from __future__ import annotations
 
+from _legacy_scope import no_scope_config_args
+
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change
@@ -972,7 +974,6 @@ class TestScopeCli:
                 "compare",
                 str(op),
                 str(np_),
-                "--scope-public-headers",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -989,10 +990,11 @@ class TestScopeCli:
 
         op, np_ = self._make_pair(tmp_path)
         runner = CliRunner()
-        # Scoping is on by default now, so --no-scope-public-headers is needed
+        # Scoping is on by default, so scope.public: false (the config spelling
+        # of the retired --no-scope-public-headers) is needed
         # to surface the internal-struct change.
         result = runner.invoke(
-            main, ["compare", str(op), str(np_), "--no-scope-public-headers"]
+            main, ["compare", str(op), str(np_), *no_scope_config_args(tmp_path)]
         )
         # The internal struct's size change is breaking, so compare exits
         # non-zero (2/4) — assert that so a crash (exit 1, no real output)
@@ -1959,9 +1961,7 @@ class TestWideningCLI:
         op, np_ = self._pair(tmp_path)
         runner = CliRunner()
         # Scoped without widening: the internal change is filtered out of stdout.
-        scoped = runner.invoke(
-            main, ["compare", str(op), str(np_), "--scope-public-headers"]
-        )
+        scoped = runner.invoke(main, ["compare", str(op), str(np_)])
         assert "InternalCache" not in scoped.stdout
         # Scoped + widened: the change is back in the report.
         cfg = tmp_path / ".abicheck.yml"
@@ -1972,7 +1972,6 @@ class TestWideningCLI:
                 "compare",
                 str(op),
                 str(np_),
-                "--scope-public-headers",
                 "--config",
                 str(cfg),
             ],

@@ -174,6 +174,8 @@ def _build() -> BuildEvidence:
 def test_no_scope_selects_an_assembler_unit(scope: str) -> None:
     build = _build()
     changed = [cu.source for cu in build.compile_units]
+    # One target, so the `target` scope's "every unit attached to a target"
+    # (#1469 dropped the per-target selector) is that target's units.
     picked = select_compile_units(build, scope=scope, changed_paths=changed)
     assert not [cu.source for cu in picked if cu.source.endswith(_ASM)], scope
     assert build.compile_units[0].source.endswith(_ASM), (

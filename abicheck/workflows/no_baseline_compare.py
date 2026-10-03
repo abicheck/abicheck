@@ -100,7 +100,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "NO_BASELINE_SELECTION",
+    "NoBaselineAuditInputs",
     "NoBaselineCompareResult",
+    "audit_no_baseline_candidate",
     "candidate_is_live_artifact",
     "candidate_is_stored_snapshot",
     "declared_absent_acquisition_record",
@@ -531,4 +533,122 @@ def run_no_baseline_compare(
         acquisition=declared_absent_acquisition_record(new),
         findings=partition.one_sided,
         suppressed_findings=suppressed.one_sided,
+    )
+
+
+@dataclass(frozen=True)
+class NoBaselineAuditInputs:
+    """Everything one candidate's audit needs besides the candidate itself.
+
+    The scalar ``compare --no-baseline FILE`` and the N-library ``compare
+    --no-baseline DIR`` both build one of these and hand it, per candidate, to
+    :func:`audit_no_baseline_candidate` -- so "audit one artifact" has exactly
+    one sequence, and a directory member cannot be audited any differently
+    from the same file named on its own (one-comparison-product F-23). Values
+    only, already resolved by the front end: the policy documents are loaded
+    *before* any candidate is resolved, which is what lets a set audit refuse
+    a malformed ``--suppress`` once rather than report it as N member
+    failures.
+    """
+
+    headers: tuple[Path, ...] = ()
+    exclude_headers: tuple[str, ...] = ()
+    includes: tuple[Path, ...] = ()
+    lang: str = "c++"
+    lang_explicit: bool = False
+    public_headers: tuple[Path, ...] = ()
+    public_header_dirs: tuple[Path, ...] = ()
+    sources: Path | None = None
+    build_info: Path | None = None
+    build_config: Path | None = None
+    depth: str | None = None
+    version: str = ""
+    debug_roots: tuple[Path, ...] = ()
+    #: The collect mode the front end resolved (``--depth`` > ``source.
+    #: method`` > inferred), and the ``debug:`` block -- both applied to the
+    #: candidate exactly as two-sided ``compare`` applies them to a side.
+    collect_mode: str | None = None
+    pdb: Path | None = None
+    enable_debuginfod: bool = False
+    debuginfod_url: str | None = None
+    dwarf_only: bool = False
+    debug_format: str | None = None
+    include_labels: dict[Path, str] | None = None
+    include_dependencies: bool = False
+    compile: CompileContext | None = None
+    #: Where resolution progress goes; the front end's own channel.
+    notify: Callable[[str], None] | None = None
+    suppression: SuppressionList | None = None
+    policy: str = "strict_abi"
+    policy_file: PolicyFile | None = None
+    scope_to_public_surface: bool = True
+    #: ``scope.public_symbols``: declarations forced public, the overlay
+    #: two-sided ``compare`` applies (``resolve_force_public_scope``).
+    force_public_symbols: frozenset[str] = frozenset()
+    collapse_versioned_symbols: bool = False
+    contract_evaluation: bool = False
+    contract_mode: str | None = None
+    env_matrix: EnvironmentMatrix | None = None
+
+
+def audit_no_baseline_candidate(
+    candidate: Path, inputs: NoBaselineAuditInputs
+) -> NoBaselineCompareResult:
+    """Resolve *candidate* and audit it -- the one resolve-and-run sequence.
+
+    Exactly :func:`resolve_no_baseline_candidate` followed by
+    :func:`run_no_baseline_compare`, with the live/stored carve-out
+    (:func:`candidate_is_live_artifact`) computed from the same candidate.
+    Raises whatever those raise; classifying a failure (usage error for a
+    scalar audit, a member's own acquisition state for a set) is the
+    caller's job, since the two answer it differently.
+    """
+    snapshot = resolve_no_baseline_candidate(
+        candidate,
+        headers=list(inputs.headers),
+        exclude_headers=inputs.exclude_headers,
+        includes=list(inputs.includes),
+        lang=inputs.lang,
+        lang_explicit=inputs.lang_explicit,
+        public_headers=list(inputs.public_headers),
+        public_header_dirs=list(inputs.public_header_dirs),
+        sources=inputs.sources,
+        build_info=inputs.build_info,
+        build_config=inputs.build_config,
+        depth=inputs.depth,
+        version=inputs.version,
+        debug_roots=list(inputs.debug_roots),
+        pdb=inputs.pdb,
+        enable_debuginfod=inputs.enable_debuginfod,
+        debuginfod_url=inputs.debuginfod_url,
+        dwarf_only=inputs.dwarf_only,
+        debug_format=inputs.debug_format,
+        collect_mode=inputs.collect_mode,
+        include_labels=inputs.include_labels,
+        include_dependencies=inputs.include_dependencies,
+        compile=inputs.compile,
+        notify=inputs.notify,
+    )
+    return run_no_baseline_compare(
+        snapshot,
+        suppression=inputs.suppression,
+        policy=inputs.policy,
+        policy_file=inputs.policy_file,
+        scope_to_public_surface=inputs.scope_to_public_surface,
+        force_public_symbols=set(inputs.force_public_symbols) or None,
+        # ADR-068 D4/Phase 5: pattern-verdict modulation is unconditional on
+        # every `compare` path now (no `--pattern-verdicts` flag exists any
+        # more) -- this audit-only path gets the identical treatment.
+        pattern_verdicts=True,
+        collapse_versioned_symbols=inputs.collapse_versioned_symbols,
+        contract_evaluation=inputs.contract_evaluation,
+        contract_mode=inputs.contract_mode,
+        # ADR-064's exit-7 axis: a pinned --depth build/source that this
+        # run's evidence did not reach -- recorded by `run_no_baseline_
+        # compare` after classification, so no front end can forget it.
+        depth=inputs.depth,
+        candidate_is_live=candidate_is_live_artifact(
+            candidate, sources=inputs.sources, build_info=inputs.build_info
+        ),
+        env_matrix=inputs.env_matrix,
     )

@@ -1066,6 +1066,41 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         frozenset(),
     ),
     (
+        # one-comparison-product.md Phase 9b: the second contract mechanism
+        # beside --contract. Header-origin scoping stays on for a run with no
+        # --contract (`.abicheck.yml`'s `scope.public` is its config
+        # spelling); `--contract all` is the measured replacement for the
+        # opt-out (Phase 9a, tests/test_contract_legacy_scope_mapping.py).
+        "compare --scope-public-headers/--no-scope-public-headers "
+        "(--contract all|public, or scope.public in .abicheck.yml)",
+        ("--scope-public-headers", "--no-scope-public-headers"),
+        frozenset(
+            {
+                "contribute/known-gaps.md",
+                "contribute/config-key-review.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/public-contract-default.md",
+                "start/upgrading-to-0.6.md",
+            }
+        ),
+    ),
+    (
+        # one-comparison-product.md Phase 9d: a POST manifest is a stable
+        # project property; .abicheck.yml's contract.overlays.post_manifest
+        # (Phase 9c) is its only spelling.
+        "compare --post-manifest (contract.overlays.post_manifest in .abicheck.yml)",
+        ("--post-manifest",),
+        frozenset(
+            {
+                "contribute/known-gaps.md",
+                "contribute/config-key-review.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/public-contract-default.md",
+                "start/upgrading-to-0.6.md",
+            }
+        ),
+    ),
+    (
         "Removed by plans/dead-code-and-single-owner.md Stage D: the CFI pass"
         " behind frame_register_changed never ran on a real comparison, and"
         " dwarf_advanced.parse_advanced_dwarf duplicated"

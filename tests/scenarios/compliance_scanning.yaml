@@ -12,13 +12,13 @@ scenarios:
     narrative: >
       A maintainer ships a stable public API and changes only a private/internal
       type that is not reachable from any public declaration. Run as a
-      compliance scanner with public headers and --scope-public-headers, abicheck
+      compliance scanner with public headers and public-header scoping (the default), abicheck
       must NOT raise compliance errors for the private break (matching the
       default behaviour of libabigail and abicc). The private change is recorded
       as filtered -- disclosed on every run since plan slice 7o, with no token
       to type -- never as a verdict-affecting finding.
     flow:
-      - abicheck compare old.json new.json --scope-public-headers
+      - abicheck compare old.json new.json
     expected:
       exit_code: 0
       verdict: NO_CHANGE   # the only change was to a private type → filtered
@@ -41,7 +41,7 @@ scenarios:
       as confident compatibility). This is the "don't overclaim" companion to
       SC-PUBLIC-SURFACE-SCOPE.
     flow:
-      - abicheck compare old.json new.json --scope-public-headers -o json=-
+      - abicheck compare old.json new.json -o json=-
     expected:
       exit_code: 4   # fallback keeps the break, so the gate still fires
       scope_resolved: false

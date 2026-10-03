@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AUDIT_REPORT_SCHEMA_VERSION",
+    "AUDIT_SET_REPORT_SCHEMA_VERSION",
     "NO_BASELINE_EXIT_AXIS_LABELS",
     "NO_BASELINE_EXIT_AXIS_NOTICES",
     "NO_BASELINE_REPORT_SCHEMA_VERSION",
@@ -160,6 +161,16 @@ __all__ = [
 #:   ``schema_staleness_status`` every audit has always emitted, since an
 #:   audit has no OLD side -- compare report ``5.7``). No emitted value changes.
 AUDIT_REPORT_SCHEMA_VERSION = "1.6"
+
+#: The ``audit_set`` envelope's own schema version (``compare --no-baseline
+#: DIR``, ``abicheck/schemas/audit_set_report.schema.json``), in its own
+#: namespace -- neither ``audit_report_schema_version`` (that names the
+#: *member* documents, each of which still carries it verbatim) nor
+#: ``report_schema_version``. Bump MINOR for an additive field, MAJOR for a
+#: removal, a changed meaning, or a field moved into ``required``. Kept here
+#: beside its scalar sibling, not in ``no_baseline_set``, so
+#: ``schemas.current("audit-set")`` reads it without importing the renderer.
+AUDIT_SET_REPORT_SCHEMA_VERSION = "1.0"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.

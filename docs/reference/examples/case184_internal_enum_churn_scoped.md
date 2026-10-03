@@ -53,7 +53,7 @@ abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h -
 ```text
 Verdict: NO_CHANGE (exit 0)
 
-Filtered as non-public ABI surface (1 finding, --scope-public-headers):
+Filtered as non-public ABI surface (1 finding, public-header scoping):
   - enum_member_value_changed: InternalMode::MODE_B (private-header)
 ```
 
@@ -80,7 +80,7 @@ classifier tags `InternalMode` as `PRIVATE_HEADER` rather than
 `PUBLIC_HEADER`, letting ordinary reachability filtering apply after all —
 and since nothing public reaches it, the value change is filtered.
 
-Without `--scope-public-headers`, or if `InternalMode` were declared
+With scoping off (`--contract all`), or if `InternalMode` were declared
 directly in the public header itself (no separate private header — a
 confident `PUBLIC_HEADER` origin), the same value change is reported as
 `BREAKING` (`enum_member_value_changed`) instead — the public-header override

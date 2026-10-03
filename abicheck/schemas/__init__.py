@@ -34,9 +34,11 @@ from __future__ import annotations
 from .documents import (  # noqa: F401 -- re-exported: `abicheck.schemas` is the import site every caller uses
     AGGREGATE_REPORT_SCHEMA_PATH as AGGREGATE_REPORT_SCHEMA_PATH,
     AUDIT_REPORT_SCHEMA_PATH as AUDIT_REPORT_SCHEMA_PATH,
+    AUDIT_SET_REPORT_SCHEMA_PATH as AUDIT_SET_REPORT_SCHEMA_PATH,
     COMPARE_REPORT_SCHEMA_PATH as COMPARE_REPORT_SCHEMA_PATH,
     load_aggregate_report_schema as load_aggregate_report_schema,
     load_audit_report_schema as load_audit_report_schema,
+    load_audit_set_report_schema as load_audit_set_report_schema,
     load_compare_report_schema as load_compare_report_schema,
 )
 from .release_schema import RELEASE_SCHEMA_VERSION
@@ -53,6 +55,7 @@ _ARTIFACT_NAMES = frozenset(
         "snapshot",
         "compare",
         "audit",
+        "audit-set",
         "aggregate",
         "build-output",
         "run-plan",
@@ -1085,7 +1088,8 @@ def current(name: str) -> str | int:
     One read-only lookup facade over the version constants each artifact's
     own module already owns (ADR-055 D3) -- current-version discovery only.
     *name* is one of ``"snapshot"``, ``"compare"``, ``"audit"``
-    (``compare --no-baseline``), ``"release"``, ``"aggregate"``,
+    (``compare --no-baseline``), ``"audit-set"`` (``compare --no-baseline
+    DIR``), ``"release"``, ``"aggregate"``,
     ``"build-output"``, or ``"run-plan"``. ``"scan"`` was retired with the
     ``scan`` command itself (ADR-068 Phase 6).
 
@@ -1103,6 +1107,10 @@ def current(name: str) -> str | int:
         from ..report.no_baseline_document import AUDIT_REPORT_SCHEMA_VERSION
 
         return AUDIT_REPORT_SCHEMA_VERSION
+    if name == "audit-set":
+        from ..report.no_baseline_document import AUDIT_SET_REPORT_SCHEMA_VERSION
+
+        return AUDIT_SET_REPORT_SCHEMA_VERSION
     if name == "snapshot":
         from ..serialization import SCHEMA_VERSION
 

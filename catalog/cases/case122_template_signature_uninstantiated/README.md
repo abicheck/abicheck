@@ -76,7 +76,7 @@ EOF
 abicheck dump libtpl_v1.so -H v1.h -p v1.compile_commands.json --build-info v1.evidence -o v1.abi.json --config .abicheck.yml
 abicheck dump libtpl_v2.so -H v2.h -p v2.compile_commands.json --build-info v2.evidence -o v2.abi.json --config .abicheck.yml
 
-abicheck compare v1.abi.json v2.abi.json --no-scope-public-headers
+abicheck compare v1.abi.json v2.abi.json --contract all
 ```
 
 (`compile.frontend`/`compile.compiler` in `.abicheck.yml`) select the
@@ -110,7 +110,7 @@ templates at all — confirmed above, the default header lane returns
 template's parameter list, catching the mismatch as `template_body_changed`.
 Reaching that evidence needs an explicit L3 compile-unit pack (public
 headers alone, with no build metadata, aren't enough to scope `clamp` as
-reachable) plus `--no-scope-public-headers` on `compare`.
+reachable) plus `--contract all` on `compare`.
 
 ## Why abicheck catches it
 

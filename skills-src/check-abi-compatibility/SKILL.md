@@ -181,8 +181,9 @@ and whether it is the library's own change or toolchain/dependency churn.
 This is the same workflow, entered from a different question. Work the
 causes in this order, and stop at the first that explains the volume:
 
-1. **Scoping.** Was `--scope-public-headers` used? Is `scope.resolved`
-   true? An unscoped run reports internal and standard-library churn as
+1. **Scoping.** Was public-header scoping on (the default; a
+   `.abicheck.yml` `scope.public: false` or `--contract all` turns it
+   off)? Is `scope.resolved` true? An unscoped run reports internal and standard-library churn as
    findings.
 2. **Toolchain drift.** Did the two sides use different compilers, standard
    libraries, or `-std=` values? A libstdc++ or dual-ABI change regenerates

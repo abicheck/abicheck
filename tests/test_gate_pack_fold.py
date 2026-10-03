@@ -235,8 +235,6 @@ class TestExitCodeSchemeIsDerivedNotSettable:
         )
         assert gate.exit_code_scheme == gate_exit_code_scheme(gate.severity is not None)
 
-        cfg = resolve_compare_config(
-            None, cli_severity_preset=preset, cli_scope_public=None
-        )
+        cfg = resolve_compare_config(None, cli_severity_preset=preset)
         assert cfg.exit_code_scheme == gate_exit_code_scheme(cfg.severity_active)
         assert cfg.exit_code_scheme == gate.exit_code_scheme

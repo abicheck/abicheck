@@ -350,8 +350,8 @@ safe:
 - **Headers win** — if you *do* supply public C headers (a hybrid module with a
   real C API), the header-scoped surface is authoritative and this oracle defers
   to it; and with no recovered surface the check degrades honestly (nothing is
-  demoted). It rides the same `--scope-public-headers` switch as the rest of
-  surface scoping (on by default).
+  demoted). It rides the same switch as the rest of public-header surface
+  scoping (on by default; `.abicheck.yml`'s `scope.public`).
 
 This is measured as a first-class evidence layer: the FP-rate gate carries a
 `python-api` axis (internal native churn must scope away; a Python-API break

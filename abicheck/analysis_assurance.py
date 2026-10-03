@@ -1428,7 +1428,7 @@ def compute_analysis_assurance(
         )
     if not result.scope_resolved:
         notes.append(
-            "scope_resolved is False: --scope-public-headers was requested "
+            "scope_resolved is False: public-header scoping was requested "
             "but the public surface could not be resolved, so scoping fell "
             "back to the full export table"
         )

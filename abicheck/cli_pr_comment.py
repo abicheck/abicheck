@@ -129,9 +129,10 @@ def pr_comment_cmd(
     REPORT is a JSON file from 'abicheck compare -o json=...' (directory/
     package fan-out and --used-by/--required-symbol(s) scoped reports all
     produce a compatible shape) or 'abicheck compare --no-baseline ...
-    -o json=...' (recognised by its own 'audit_report_schema_version' key
-    -- the Action's own audit-only mode: scan translation, ADR-068,
-    produces this shape). A *stored* report from the retired `scan` command
+    -o json=...' (recognised by its own 'audit_report_schema_version' key,
+    or 'audit_set_report_schema_version' for a directory/package of
+    libraries -- the Action's own audit-only mode: scan translation,
+    ADR-068, produces this shape). A *stored* report from the retired `scan` command
     (recognised by its own 'scan_schema_version' key) is no longer a
     supported input -- `scan` was deleted outright (ADR-068 Phase 6, no
     deprecation window) along with this tool's own scan-shaped adapter, and

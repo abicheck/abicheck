@@ -672,7 +672,6 @@ def test_cli_compare_reconciles_without_any_flag():
             "compare",
             str(case / "v1.abi.json"),
             str(case / "v2.abi.json"),
-            "--scope-public-headers",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -721,9 +720,7 @@ def test_directory_inputs_now_reconcile_instead_of_rejecting(tmp_path):
     (new_dir / "libfoo.abi.json").write_text(
         (case / "v2.abi.json").read_text(encoding="utf-8"), encoding="utf-8"
     )
-    result = CliRunner().invoke(
-        main, ["compare", str(old_dir), str(new_dir), "--scope-public-headers"]
-    )
+    result = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
     combined = result.output + (result.stderr if result.stderr_bytes else "")
     assert "not supported" not in combined, combined
     assert result.exit_code == 0, combined

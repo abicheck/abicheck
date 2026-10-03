@@ -136,7 +136,7 @@ class OverlaySelection:
 def overlay_selection(evidence: ContractEvidenceBlock) -> OverlaySelection:
     """Recover the run's explicit overlays from its own evidence ledger.
 
-    ``--post-manifest``'s committed-export allowlist and
+    The POST manifest overlay's committed-export allowlist and
     ``--public-symbol``'s forced-public set both genuinely decide contract
     membership, so a persisted ``evaluation_context`` that left
     ``contract.overlays``/``surface.explicit_scope`` empty described a run
@@ -289,9 +289,10 @@ def _merged_overlay_provenance(
 
     *stated* is the front end's entry (which option, which file, which
     digest); *observed* is the ledger's (that an overlay really applied).
-    Neither subsumes the other, and a run can have only one of them -- a
-    ``--post-manifest`` scope the front end cannot model, or a resolved value
-    on a run whose ledger recorded no overlay -- so the merge keeps the
+    Neither subsumes the other, and a run can have only one of them -- an
+    overlay no front-end input states (a typed-API ``public_surface_
+    allowlist``), or a resolved value on a run whose ledger recorded no
+    overlay -- so the merge keeps the
     richer entry and appends the other's hops rather than choosing between
     them. Duplicate hops are dropped, since a merged receipt naming the same
     selector twice would misreport one selection as two.
@@ -326,8 +327,8 @@ def with_resolved_config(
     ``contract.overlays`` and ``surface.explicit_scope`` are not resolved
     from stated inputs at all: :func:`overlay_selection` recovers them from
     the run's *own evidence ledger*, so they name the overlays that actually
-    applied -- including ``--post-manifest``, which no front-end input model
-    describes. An observation of what ran outranks a resolution of what was
+    applied -- including a typed-API ``public_surface_allowlist``, which no
+    front-end input model describes. An observation of what ran outranks a resolution of what was
     asked for, so when the ledger recorded any overlay, both values survive.
 
     Their *provenance* follows a different rule, because value and receipt
@@ -338,9 +339,9 @@ def with_resolved_config(
     Taking the core's wholesale therefore dropped exactly the identification
     a replay needs (Codex review, fresh evidence). So when the front end
     really resolved a value of its own, its entry is kept and the observed
-    hop is appended to it, leaving both recorded; when it did not (a
-    ``--post-manifest``-only run, which it cannot model), the core's stands
-    alone.
+    hop is appended to it, leaving both recorded (``.abicheck.yml``'s
+    ``contract.overlays.post_manifest`` under an explicit ``--config``); when
+    it did not (an overlay it cannot model), the core's stands alone.
 
     ``contract.overlays`` is the one field where both sides can also state a
     *value*: a ``kind: contract`` pack assigns overlay selectors, and the

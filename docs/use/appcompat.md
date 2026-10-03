@@ -145,7 +145,7 @@ problem in CI.
 | `--lang` | Language mode: `c++` (default) or `c` |
 | `-o FORMAT=DESTINATION` | Export the report: `markdown` (default), `json`, `sarif`, `html`, `junit`, `review`; `-` is stdout, repeatable |
 | `-o` / `--output` | Write report to file |
-| `--scope-public-headers` / `--no-scope-public-headers` | Restrict findings to the public-header ABI surface (on by default) |
+| `.abicheck.yml`'s `scope.public` | Restrict findings to the public-header ABI surface (on by default; `false` turns it off — config-only, the CLI flag pair was removed; `--contract all` turns it off for one run) |
 | `--severity-preset` | `default`, `strict`, or `info-only` (switches to the severity-aware exit scheme) |
 | `.abicheck.yml`'s `severity:` block | Per-category overrides (`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`, each `error`/`warning`/`info`) — config-only; `--severity-preset` is the per-run CLI knob |
 | `--suppress` | Suppression file (YAML) |

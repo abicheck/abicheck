@@ -64,29 +64,25 @@ def test_compare_no_baseline_rejects_two_operands(tmp_path: Path) -> None:
     assert result.exit_code == 64, result.output
 
 
-# F-23's "no command offers a directory audit" claim used to be pinned by a
-# dedicated test probing `scan --help-all`/`scan --artifact-set` directly
-# (first restated when `scan --artifact-set` itself was retired, ADR-068's
-# second 2026-09-09 amendment ruling (b), pending ADR-065 S3's package
-# component inventories). `scan` was then deleted outright (ADR-068
-# Phase 6) -- there is no CLI left to probe for the retired flag, so the
-# claim is now vacuously true rather than testable, and the sole remaining,
-# still-open half is `test_compare_directory_no_baseline_is_unreachable`
-# below: `compare --no-baseline DIR` is a declared usage error, not a
-# directory audit.
+# F-23, closed: `compare --no-baseline DIR` audits each member of a
+# directory on its own (the directory counterpart of F-22 above). `scan`'s
+# retired `--artifact-set` had no CLI left to probe once `scan` itself was
+# deleted (ADR-068 Phase 6); the directory form is what replaced it.
 
 
-def test_compare_directory_no_baseline_is_unreachable(tmp_path: Path) -> None:
-    """F-23: the directory form of --no-baseline (plan §3 #16's "compare
-    --no-baseline DIR" replacement for --artifact-set) stays an explicit,
-    declared gap -- ADR-065 S3's package component inventories (plan §5 P5)
-    haven't landed, so `--no-baseline` itself now exists (Phase 2e) but
-    refuses a directory operand with a real usage error rather than
-    silently mis-auditing it."""
+def test_compare_directory_no_baseline_audits_each_member(tmp_path: Path) -> None:
+    """F-23: the directory form of --no-baseline (plan §3 #16's replacement
+    for --artifact-set) audits every member with OLD declared absent --
+    candidate-side facts only, no compatibility verdict, the same contract
+    F-22 states for one artifact."""
     lib_dir = tmp_path / "release"
     lib_dir.mkdir()
     write_snapshot(_empty_snapshot(), lib_dir / "libfoo.so.abi.json")
 
-    result = invoke_cli("compare", "--no-baseline", str(lib_dir))
-    assert result.exit_code == 64, result.output
-    assert "directory" in result.output
+    result = invoke_cli("compare", "--no-baseline", str(lib_dir), "-o", "json=-")
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.stdout)
+    (member,) = report["members"]
+    assert member["acquisition_state"] == "declared_absent"
+    assert member["report"]["verdict"] is None
+    assert member["report"]["changes"] == []

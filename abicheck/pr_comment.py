@@ -832,6 +832,12 @@ def _from_no_baseline(
         # detail sections disagreeing, which is the one thing this rollup
         # may not do (CodeRabbit review).
         change_summary=summarize_changes(changes_shaped),
+        # An N-library audit (`audit_set`) carries a real member scope; a
+        # scalar audit's one-member scope is always complete, so this is
+        # `None` for it and its comment is unchanged.
+        scope_notice=comparison_scope_notice(scope)
+        if isinstance(scope := report.get("comparison_scope"), dict)
+        else None,
     )
 
 
@@ -1449,7 +1455,11 @@ def build_model(
             "`compare` (with a stored baseline) or `compare --no-baseline` "
             "and feed this tool the resulting report instead."
         )
-    if "audit_report_schema_version" in report:
+    # `compare --no-baseline DIR`'s `audit_set` envelope shares the scalar
+    # audit's root shape (member-tagged `findings`, `exit_axes`, `exit_code`).
+    if "audit_report_schema_version" in report or (
+        "audit_set_report_schema_version" in report
+    ):
         return _from_no_baseline(report, gate_api_break, gate_breaking, path_prefix)
     return _from_compare(report, gate_api_break, gate_breaking, path_prefix)
 

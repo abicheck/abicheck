@@ -34,7 +34,7 @@ scenarios:
       export table alone cannot see. The scanner must flag it (exit 4,
       type_vtable_changed).
     flow:
-      - abicheck compare old.json new.json --no-scope-public-headers
+      - abicheck compare old.json new.json --contract all
     expected:
       exit_code: 4
       verdict: BREAKING
@@ -52,7 +52,7 @@ scenarios:
       load. The scanner must treat the data surface like the function surface and
       report a binary break (exit 4, var_removed).
     flow:
-      - abicheck compare old.json new.json --no-scope-public-headers
+      - abicheck compare old.json new.json --contract all
     expected:
       exit_code: 4
       verdict: BREAKING

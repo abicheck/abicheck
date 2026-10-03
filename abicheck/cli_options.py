@@ -677,27 +677,6 @@ def define_option(func: F) -> F:
     return func
 
 
-def scope_options(func: F) -> F:
-    """Public-surface scoping (`--scope-public-headers/--no-`).
-
-    The universally-shared toggle. ``--show-filtered`` (a ``compare``-only audit
-    view) stays inline on ``compare`` rather than being forced onto commands that
-    have no filtered-findings report to dump.
-    """
-    func = click.option(
-        "--scope-public-headers/--no-scope-public-headers",
-        "scope_public_headers",
-        default=True,
-        show_default=True,
-        help="Restrict findings to the public-header ABI surface: "
-        "changes to symbols/types not reachable from public-header-declared "
-        "exported API are recorded as filtered, not reported. Internal-type "
-        "leaks are never hidden. On by default; use --no-scope-public-headers "
-        "to report every finding regardless of surface.",
-    )(func)
-    return func
-
-
 #: Canonical ``--lang`` choice set + default. Declared once so the choice
 #: *order* (shown in ``--help`` and error text) and case-insensitivity cannot
 #: drift between commands — historically ``scan`` listed ``["c", "c++"]`` and

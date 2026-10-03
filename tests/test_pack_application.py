@@ -1030,7 +1030,6 @@ class TestOnlyAppliedFieldsAreAccepted:
 
         params = {
             "contract_mode": None,
-            "scope_public_headers": True,
             "policy": "strict_abi",
             "policy_file_path": None,
             "suppress": None,
@@ -1048,7 +1047,6 @@ class TestOnlyAppliedFieldsAreAccepted:
         from_ctx = resolve_release_pack_application_from_ctx(
             ctx=click.Context(click.Command("noop")),
             contract_mode=None,
-            scope_public_headers=True,
             policy="strict_abi",
             policy_file_path=None,
             suppress=None,
@@ -1238,7 +1236,6 @@ class TestNoPackChangesNothing:
         resolved = resolve_compare_config(
             None,
             cli_severity_preset=None,
-            cli_scope_public=None,
         )
         assert resolved.exit_code_scheme == "legacy"
         application = PackApplication(

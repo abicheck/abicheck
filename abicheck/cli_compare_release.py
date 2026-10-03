@@ -87,7 +87,6 @@ from .cli_options import (
     lang_option,
     policy_options,
     release_input_options,
-    scope_options,
     severity_options,
     verbose_option,
 )
@@ -288,7 +287,6 @@ _ENGINE_FORMATS = ["json", "markdown", "junit", "oneline", "html"]
     "invocation already performs -- it does not change any finding or "
     "exit code.",
 )
-@scope_options  # --scope-public-headers/--no- (ADR-037 D3)
 @include_dependencies_option
 @click.option(
     "--probe-matrix-old",
@@ -360,11 +358,17 @@ def compare_release_cmd(
     bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...],
     bundle_facts_out: Path | None,
-    scope_public_headers: bool,
     include_dependencies: bool,
     probe_matrix_old: Path | None,
     probe_matrix_new: Path | None,
     severity_preset: str | None,
+    # One-comparison-product Phase 9b: --scope-public-headers/--no- are no
+    # longer CLI spellings, so this is a plain keyword parameter like
+    # `on_incomplete_scope` below. `compare`'s fan-out passes the resolved
+    # value (.abicheck.yml's scope.public over the built-in default); an
+    # explicit `--contract all`/`exports` domain turns header-origin demotion
+    # off inside checker.compare itself (Phase 9a), not through this value.
+    scope_public_headers: bool = True,
     on_incomplete_scope: str = "warn",
     # ADR-071: `assurance.require_complete`, project-wide (never per-library,
     # D4) -- a plain keyword parameter for the same reason

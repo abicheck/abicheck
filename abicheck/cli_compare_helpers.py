@@ -92,6 +92,10 @@ from .frontends.cli.compare_report import (
     _render_compare_report as _render_compare_report,
 )
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
+from .frontends.cli.contract_overlays import (
+    note_unapplied_post_manifest,
+    post_manifest_allowlist_for,
+)
 from .frontends.cli.options.params import _load_suppression_and_policy
 from .frontends.cli.ownership_config import project_ownership_request
 from .frontends.cli.runtime import (
@@ -115,7 +119,6 @@ from .workflows.public_header_boundary import (
 
 if TYPE_CHECKING:
     from .cli_helpers_compare import ResolvedCompareConfig
-    from .model import AbiSnapshot
     from .model.consumer_spec import ConsumerAppInput
     from .workflows.extraction import DumpManifest
     from .workflows.policy_file import PolicyFile
@@ -125,7 +128,6 @@ def _resolve_compare_config(
     *,
     config: Path | None,
     severity_preset: str | None,
-    scope_public_headers: bool,
 ) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """This module's long-standing name for `frontends.cli.project_config.
     resolve_project_compare_config`.
@@ -139,7 +141,6 @@ def _resolve_compare_config(
     return resolve_project_compare_config(
         config=config,
         severity_preset=severity_preset,
-        scope_public_headers=scope_public_headers,
     )
 
 
@@ -271,30 +272,6 @@ def _needs_inline_embed(
         _raw_evidence(p)
         for p in (old_sources, new_sources, old_build_info, new_build_info)
     )
-
-
-def _resolve_post_manifest_allowlist(
-    post_manifest_path: Path | None,
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-) -> set[str] | None:
-    """Resolve the --post-manifest committed public surface, or ``None``.
-
-    The manifest *is* the authoritative public surface, so this drives
-    FilterNonPublicSurface directly (no header provenance needed) — private
-    ``__pp_*`` kernel churn is demoted. Union with the binaries' committed
-    (``pp_*``) exports so a *removed* wrapper — absent from a new manifest — stays
-    in-surface instead of being silently demoted.
-    """
-    if post_manifest_path is None:
-        return None
-    from .post_manifest import contract_scope_allowlist, load_manifest
-
-    try:
-        manifest = load_manifest(post_manifest_path)
-    except (ValueError, OSError) as exc:
-        raise click.UsageError(f"--post-manifest {post_manifest_path}: {exc}") from exc
-    return contract_scope_allowlist(manifest, old, new)
 
 
 def _classify_and_reject_operands(
@@ -698,6 +675,7 @@ def _resolve_evaluation_config(
     project_cfg: Any,
     cfg_path: Path | None,
     cfg_sha: str | None,
+    config_explicit: bool,
     policy: str,
     policy_file_path: Path | None,
     policy_file: PolicyFile | None,
@@ -706,7 +684,6 @@ def _resolve_evaluation_config(
     symbols_list: Any,
     contract_mode: str | None,
     contract_evaluation: bool,
-    scope_public_headers: bool,
     require_justification: bool,
     severity_preset: str | None,
     pack_paths: tuple[Path, ...],
@@ -738,7 +715,6 @@ def _resolve_evaluation_config(
         evaluation_config, pf, resolved_cfg = resolve_and_apply(
             {
                 "contract_mode": contract_mode,
-                "scope_public_headers": scope_public_headers,
                 "policy": policy,
                 "policy_file_path": policy_file_path,
                 "suppress": suppress,
@@ -757,6 +733,8 @@ def _resolve_evaluation_config(
             typed={n for n in typed_parameter_names() if _param_from_cli(n)},
             project_cfg=project_cfg,
             project_path=cfg_path,
+            # The overlay applies only from an explicitly named --config.
+            project_overlays_applied=config_explicit,
             # Both already loaded for the comparison itself; re-reading them
             # here could pair one content's digest with another's rules.
             policy_file=pf,
@@ -1183,8 +1161,6 @@ def run_compare(
     ld_library_path: str,
     include_dependencies: bool,
     show_only: str | None,
-    scope_public_headers: bool,
-    post_manifest_path: Path | None,
     report_mode: str,
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],
@@ -1299,7 +1275,6 @@ def run_compare(
     cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
         config=config,
         severity_preset=severity_preset,
-        scope_public_headers=scope_public_headers,
     )
     sev_config = resolved_cfg.severity
     # `scope.exclude_headers` -- the config equivalent of `--exclude-header`
@@ -1314,6 +1289,8 @@ def run_compare(
     # value.
     if not exclude_headers:
         exclude_headers = tuple(getattr(project_cfg, "exclude_headers", ()) or ())
+    # One-comparison-product Phase 9b: no CLI flag any more -- scope.public
+    # (or its built-in True) is the whole answer for a run with no --contract.
     scope_public_headers = resolved_cfg.scope_public
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
@@ -1400,6 +1377,11 @@ def run_compare(
             budget=budget,
             pdb_path=pdb_path,
         )
+        note_unapplied_post_manifest(
+            project_cfg,
+            route="a directory/package comparison",
+            reason="the per-library fan-out has no contract-overlay channel",
+        )
         # Codex review, fresh evidence ("Validate release-only view
         # restrictions before dry-run exit"): --view leaf/root-cause is
         # rejected for a directory/package operand inside
@@ -1424,7 +1406,6 @@ def run_compare(
         release_pack_application = resolve_release_pack_application_from_ctx(
             ctx,
             contract_mode=contract_mode,
-            scope_public_headers=scope_public_headers,
             policy=policy,
             policy_file_path=policy_file_path,
             suppress=suppress,
@@ -1982,6 +1963,7 @@ def run_compare(
         project_cfg=project_cfg,
         cfg_path=cfg_path,
         cfg_sha=cfg_sha,
+        config_explicit=config is not None,
         policy=policy,
         policy_file_path=policy_file_path,
         policy_file=pf,
@@ -1990,7 +1972,6 @@ def run_compare(
         symbols_list=symbols_list,
         contract_mode=contract_mode,
         contract_evaluation=contract_evaluation,
-        scope_public_headers=scope_public_headers,
         require_justification=require_justification,
         severity_preset=severity_preset,
         pack_paths=pack_paths,
@@ -2070,10 +2051,11 @@ def run_compare(
         extra_changes, new, _enrich.abi3_floor, new_input.name
     )
 
-    # --post-manifest: scope the comparison to the POST manifest's committed
-    # `pp_*`/ufunc-loop surface (private __pp_* kernel churn is demoted).
-    post_manifest_allowlist = _resolve_post_manifest_allowlist(
-        post_manifest_path, old, new
+    # contract.overlays.post_manifest: scope the comparison to the POST
+    # manifest's committed `pp_*`/ufunc-loop surface. Narrowing, so only an
+    # explicitly named --config is trusted to apply it.
+    post_manifest_allowlist = post_manifest_allowlist_for(
+        project_cfg, cfg_path, old, new, config_explicit=config is not None
     )
 
     # ADR-068 D4 (the correctness fix this phase exists for): pattern-verdict

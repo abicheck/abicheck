@@ -41,7 +41,7 @@ compile:
   frontend: clang
   compiler: clang
 EOF
-abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --scope-public-headers --config .abicheck.yml
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -51,11 +51,11 @@ Verdict: NO_CHANGE (exit 0)
 
 _No ABI changes detected._
 
-Filtered as non-public ABI surface (1 finding, --scope-public-headers):
+Filtered as non-public ABI surface (1 finding, public-header scoping):
   - type_field_removed: InternalStats (non-public-type)
 ```
 
-Dropping `--scope-public-headers` reports the `InternalStats` field removal
+Turning public-header scoping off (`--contract all`) reports the `InternalStats` field removal
 as an ordinary breaking change instead of filtering it — the right mode when
 auditing the full exported surface rather than just the public-header API.
 

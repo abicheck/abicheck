@@ -16,6 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from _legacy_scope import NO_SCOPE_CONFIG  # noqa: E402
 from source_smoke import SourceSmokeResult  # noqa: E402
 
 import tests.validate_examples as ve  # noqa: E402
@@ -861,8 +862,10 @@ class TestBuildCompareDirectCmd:
         assert "-H" in cmd
         h_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-H"]
         assert h_values == [f"old={v1_hdr}", f"new={v2_hdr}"]
-        assert "--scope-public-headers" in cmd
-        assert "--no-scope-public-headers" not in cmd
+        # Scoped is the default: no flag (the toggle was retired in Phase 9b)
+        # and no unscoped config.
+        assert "--config" not in cmd
+        assert not any("scope-public-headers" in a for a in cmd)
         assert "--pattern-verdicts" not in cmd
 
     def test_missing_header_omits_its_flag(self, tmp_path: Path) -> None:
@@ -877,7 +880,9 @@ class TestBuildCompareDirectCmd:
 
         h_values = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-H"]
         assert h_values == [f"old={v1_hdr}"]
-        assert "--no-scope-public-headers" in cmd
+        assert cmd[cmd.index("--config") + 1] == str(NO_SCOPE_CONFIG)
+        assert NO_SCOPE_CONFIG.is_file()
+        assert not any("scope-public-headers" in a for a in cmd)
 
     def test_pattern_verdicts_no_longer_appends_a_flag(self, tmp_path: Path) -> None:
         # ADR-068 D4/Phase 5: --pattern-verdicts was removed from `compare`

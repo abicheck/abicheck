@@ -101,7 +101,7 @@ def render_review_digest(digest: ReviewDigest) -> str:
 
     if digest.manual_review_banner:
         lines += [
-            "> ⚠️ **Manual review required.** `--scope-public-headers` could not "
+            "> ⚠️ **Manual review required.** Public-header scoping could not "
             "resolve the public surface, so analysis fell back to the full export "
             "table. Treat this result as *unconfirmed*, not a clean public surface.",
             "",

@@ -42,9 +42,12 @@ from pathlib import Path
 from typing import NamedTuple
 
 REPO_DIR = Path(__file__).parent.parent
+
+
 sys.path.insert(0, str(REPO_DIR / "scripts"))
 sys.path.insert(0, str(Path(__file__).parent))  # source_smoke lives beside this
 import example_catalog  # noqa: E402
+from _legacy_scope import scope_args  # noqa: E402
 from example_case_runner import (  # noqa: E402
     print_console_summary,
     print_progress,
@@ -723,12 +726,8 @@ def _build_compare_cmd(
             "new=" + str(new_build_source),
         ]
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
-    # are authored unscoped unless the case opts in, so be explicit either way.
-    cmd.append(
-        "--scope-public-headers"
-        if scope_public_headers
-        else "--no-scope-public-headers"
-    )
+    # are authored unscoped unless the case opts in.
+    cmd += scope_args(scope_public_headers)
     # ADR-068 D4/Phase 5: pattern verdicts are unconditional now, not a CLI
     # flag; *pattern_verdicts* is kept only for call-site documentation of
     # which ground_truth.json cases need the idiom evidence -- inert here.
@@ -788,12 +787,8 @@ def _build_compare_direct_cmd(
     if v2_hdr and v2_hdr.exists():
         cmd += ["-H", "new=" + str(v2_hdr)]
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
-    # are authored unscoped unless the case opts in, so be explicit either way.
-    cmd.append(
-        "--scope-public-headers"
-        if scope_public_headers
-        else "--no-scope-public-headers"
-    )
+    # are authored unscoped unless the case opts in.
+    cmd += scope_args(scope_public_headers)
     # ADR-068 D4/Phase 5: see _build_compare_cmd's identical note.
     del pattern_verdicts
     return cmd

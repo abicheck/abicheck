@@ -56,7 +56,6 @@ from ....cli_options import (
     policy_options,
     reject_bundle_facts_manifest_without_old_bundle_facts,
     release_options,
-    scope_options,
     set_input_options,
     severity_options,
     two_sided_input_options,
@@ -529,7 +528,9 @@ def _embed_inline_source_side(
     default=False,
     help="Declare that no prior surface exists for this candidate -- an "
     "audit, not a comparison. Takes exactly one operand (the "
-    "candidate build) instead of OLD NEW; the OLD side is recorded with "
+    "candidate build) instead of OLD NEW; a directory/package of libraries "
+    "is audited per member (--select/--select-required apply) into one "
+    "report. The OLD side is recorded with "
     "the 'declared_absent' acquisition state. Replaces `scan`'s "
     "audit-only mode (no --against): reports candidate-side facts only -- "
     "never an addition, a removal, or a compatibility verdict. "
@@ -652,19 +653,16 @@ def _embed_inline_source_side(
     default="",
     help="Simulated LD_LIBRARY_PATH (with --follow-deps).",
 )
-@scope_options  # --scope-public-headers/--no- (ADR-037 D3)
+# One-comparison-product Phase 9b: --scope-public-headers/--no- are gone.
+# Header-origin scoping stays on for a run with no --contract (built-in
+# default, or .abicheck.yml's scope.public); `--contract all` is the
+# measured replacement for --no-scope-public-headers (Phase 9a).
 # ADR-068 D4 / Phase 5: --show-filtered is gone; the ledger it echoed has
 # been unconditional since ADR-067 S1, so `--view filtered` is its spelling.
-@click.option(
-    "--post-manifest",
-    "post_manifest_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default=None,
-    help="Scope the comparison to a POST Python export manifest's committed ABI "
-    "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
-    "private __pp_* kernel churn and other non-committed exports are demoted "
-    "to the filtered ledger, which every run discloses.",
-)
+# One-comparison-product Phase 9d: --post-manifest is gone. A POST manifest
+# is a stable project property: .abicheck.yml's contract.overlays.
+# post_manifest (Phase 9c, frontends/cli/contract_overlays.py) is its only
+# spelling.
 # one-comparison-product.md Phase 7n: --probe-matrix is gone. A probe-matrix
 # snapshot is build evidence, so it is one of --build-info's operands now,
 # recognised from the document's own schema/required-key contract rather

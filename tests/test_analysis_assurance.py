@@ -109,19 +109,27 @@ def _breaking_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
 _REQUIRE_COMPLETE_ANALYSIS_FLAG = "--require-complete-analysis"
 
 
-def _assurance_config_args(tmp_path: Path) -> list[str]:
-    cfg_path = tmp_path / ".abicheck-assurance.yml"
+def _assurance_config_args(tmp_path: Path, *, scoped: bool = True) -> list[str]:
+    """``--config`` for ``assurance.require_complete: true``; *scoped=False*
+    adds ``scope.public: false``, the config spelling of the retired
+    ``--no-scope-public-headers`` (one-comparison-product Phase 9b) -- one
+    document, since ``--config`` names exactly one."""
+    name = ".abicheck-assurance.yml" if scoped else ".abicheck-assurance-noscope.yml"
+    cfg_path = tmp_path / name
     if not cfg_path.exists():
-        cfg_path.write_text("assurance:\n  require_complete: true\n", encoding="utf-8")
+        text = "assurance:\n  require_complete: true\n"
+        if not scoped:
+            text += "scope:\n  public: false\n"
+        cfg_path.write_text(text, encoding="utf-8")
     return ["--config", str(cfg_path)]
 
 
-def _compare(tmp_path: Path, pair, *extra: str):
+def _compare(tmp_path: Path, pair, *extra: str, scoped: bool = True):
     old_p, new_p = _write(tmp_path, *pair)
     extra_list = list(extra)
     if _REQUIRE_COMPLETE_ANALYSIS_FLAG in extra_list:
         extra_list.remove(_REQUIRE_COMPLETE_ANALYSIS_FLAG)
-        extra_list.extend(_assurance_config_args(tmp_path))
+        extra_list.extend(_assurance_config_args(tmp_path, scoped=scoped))
     return CliRunner().invoke(main, ["compare", str(old_p), str(new_p), *extra_list])
 
 
@@ -585,8 +593,8 @@ class TestHeaderContextAsymmetry:
         res = _compare(
             tmp_path,
             (old, new),
-            "--no-scope-public-headers",
             "--require-complete-analysis",
+            scoped=False,
         )
         assert res.exit_code != 0, res.output
 
@@ -658,8 +666,8 @@ class TestDwarfContextAsymmetry:
         res = _compare(
             tmp_path,
             (old, new),
-            "--no-scope-public-headers",
             "--require-complete-analysis",
+            scoped=False,
         )
         assert res.exit_code != 0, res.output
 
@@ -735,8 +743,8 @@ class TestL0ContextAsymmetry:
         res = _compare(
             tmp_path,
             (old, new),
-            "--no-scope-public-headers",
             "--require-complete-analysis",
+            scoped=False,
         )
         assert res.exit_code != 0, res.output
 
@@ -1928,7 +1936,6 @@ class TestDwarfChannelAsymmetry:
         res = _compare(
             tmp_path,
             (old, new),
-            "--no-scope-public-headers",
-            *_assurance_config_args(tmp_path),
+            *_assurance_config_args(tmp_path, scoped=False),
         )
         assert res.exit_code != 0, res.output
