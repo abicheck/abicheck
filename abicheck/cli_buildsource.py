@@ -70,7 +70,6 @@ def embed_build_source(
     public_headers: tuple[str, ...] = (),
     public_header_dirs: tuple[str, ...] = (),
     defer_cleanup: list[Callable[[], None]] | None = None,
-    quiet: bool = False,
 ) -> None:
     """CLI adapter over :func:`abicheck.buildsource.embed.embed_build_source`.
 
@@ -82,8 +81,7 @@ def embed_build_source(
       ``SnapshotError`` (an invalid pack) is operational -> a plain
       ``ClickException``, exit 1. Collapsing the two would tell a CI consumer
       the invocation was wrong when the data was.
-    * **The stream.** ``quiet`` is preserved as this layer's spelling; it
-      simply decides whether a stderr writer is handed to the engine.
+    * **The stream.** The engine's advisory messages go to stderr.
     """
     from .workflows.extraction import embed_build_source as _embed
 
@@ -101,9 +99,7 @@ def embed_build_source(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             defer_cleanup=defer_cleanup,
-            on_warning=None
-            if quiet
-            else (lambda message: click.echo(message, err=True)),
+            on_warning=lambda message: click.echo(message, err=True),
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc

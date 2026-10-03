@@ -64,10 +64,24 @@
   `project_header_graph_ast` first); `sycl_metadata.parse_sycl_metadata`
   loses `extra_plugin_paths` (use `SYCL_PI_PLUGINS_DIR`); the pattern
   pre-scan's input resolvers lose their `changed_paths` narrowing, whose
-  only caller was `scan`. The rest are internal; the plan's Stage E
+  only caller was `scan`; `dry_run_estimate.estimate_scan` (also exported
+  from `abicheck.service`) takes the run's resolved `resolved_level`,
+  `collect_mode` and `changed_paths` and loses `mode`, `source_method`,
+  `depth`, `seeded`, `max_tus` and `compile_db`, `scan`'s ways of stating
+  them. The rest are internal; the plan's Stage E
   (`docs/contribute/plans/dead-code-and-single-owner.md`) lists them.
 
 ### Fixed
+
+- **`compare --dry-run` prices the build evidence the run collects.** Its
+  cost preview chose a compile DB by its own rules: it ignored
+  `.abicheck.yml`'s `build.compile_db` (in the source tree or named by
+  `--config`), so it counted every source file where the run reads a
+  narrower compile DB, and given a `--build-info` directory without a
+  `compile_commands.json` it fell back to the source tree, where the run
+  collects nothing. It also ignored `--since`/`--changed-path`: it reported
+  "target" scope and priced the whole target for a run that replays only the
+  changed translation units. Both now come from the run's own resolution.
 
 - **Coverage and scope notices no longer advise the setting a run already
   has.** The contract-coverage notice ended "or set contract.unresolved=warn

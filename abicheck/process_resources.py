@@ -290,7 +290,7 @@ def gil_enabled() -> bool:
     return True if probe is None else bool(probe())
 
 
-def python_parallelism(*, diagnostics: list[str] | None = None) -> int:
+def python_parallelism() -> int:
     """How many Python-heavy units may run at once (>= 1).
 
     ``ABICHECK_MEMBER_JOBS`` when set to a positive integer (clamped to
@@ -298,7 +298,8 @@ def python_parallelism(*, diagnostics: list[str] | None = None) -> int:
     :data:`GIL_MEMBER_PARALLELISM` under the GIL and the CPU count on a
     free-threaded interpreter. Memory is *not* considered here -- the caller's
     memory admission is what bounds a level-1 pool by RAM; this bounds it by
-    what can actually execute.
+    what can actually execute. An unparsable override falls back to that
+    default silently, as every other sizing variable here does.
     """
     raw = os.environ.get(MEMBER_JOBS_ENV_VAR, "").strip()
     if raw:
@@ -306,11 +307,6 @@ def python_parallelism(*, diagnostics: list[str] | None = None) -> int:
             requested = int(raw)
         except ValueError:
             requested = 0
-            if diagnostics is not None:
-                diagnostics.append(
-                    f"ignoring unparsable {MEMBER_JOBS_ENV_VAR}={raw!r}; "
-                    "using the interpreter-derived default"
-                )
         if requested > 0:
             return max(1, min(requested, jobs_ceiling()))
     if gil_enabled():
