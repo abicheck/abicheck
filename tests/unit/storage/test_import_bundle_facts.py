@@ -661,7 +661,7 @@ class TestImportBundleFacts:
         `str(...)`, so a stored non-string value would otherwise silently
         become a different string, possibly colliding with a genuinely
         distinct, already-string fingerprint elsewhere and letting
-        `pair_variants()` compare the wrong variants (Codex review)."""
+        variant pairing compare the wrong variants (Codex review)."""
         doctored, store = self._doctored_composition_manifest(
             {"variant_fingerprint": 1, "manifest": None}
         )

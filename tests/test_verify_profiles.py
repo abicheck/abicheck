@@ -155,6 +155,8 @@ def test_python_tool_steps_use_isolated_module_lookup() -> None:
         "unit-pr",
         "docs-build",
         "integration",
+        "native-compare",
+        "msvc",
         "libabigail-parity",
         "abicc-parity",
         "slow",
@@ -298,7 +300,7 @@ def test_require_complete_turns_a_full_profile_skip_into_a_failure(
     """`full` keeps "skipped where the environment lacks the tool" for local
     runs, but a CI job that installs a step's tools itself passes
     --require-complete: there a skip means the install broke, and exit 0
-    would read as a pass that ran nothing (ci.yml's e2e job)."""
+    would read as a pass that ran nothing (integration.yml's steps)."""
     import dataclasses
 
     synthetic = dataclasses.replace(
@@ -316,16 +318,22 @@ def test_require_complete_turns_a_full_profile_skip_into_a_failure(
     assert ("INCOMPLETE" in capsys.readouterr().out) is require_complete
 
 
-def test_ci_e2e_job_runs_the_demo_step_and_fails_on_a_skip() -> None:
-    workflow = _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))
-    runs = [st.get("run", "") for st in workflow["jobs"]["e2e"]["steps"]]
-    assert any(
-        "verify.py --profile full --only demo-libz" in r and "--require-complete" in r
-        for r in runs
-    ), runs
-    assert not any("python scripts/demo_libz.py" in r for r in runs), (
-        "inline copy of the step"
+def test_integration_workflow_steps_fail_on_a_skip() -> None:
+    """integration.yml installs every step's tools itself, so each verify.py
+    step there passes --require-complete; demo-libz (formerly ci.yml's e2e
+    job) runs on the Linux leg and has no inline copy left anywhere."""
+    workflow = _yaml_fast.safe_load(_read(".github/workflows/integration.yml"))
+    runs = [st.get("run", "") for st in workflow["jobs"]["integration"]["steps"]]
+    verify_runs = [r for r in runs if "scripts/verify.py" in r]
+    assert any("--only demo-libz" in r for r in verify_runs), verify_runs
+    assert verify_runs and all("--require-complete" in r for r in verify_runs), (
+        verify_runs
     )
+    for wf in (ROOT / ".github" / "workflows").glob("*.yml"):
+        assert "python scripts/demo_libz.py" not in wf.read_text(encoding="utf-8"), (
+            wf.name
+        )
+    assert "e2e" not in _yaml_fast.safe_load(_read(".github/workflows/ci.yml"))["jobs"]
 
 
 def test_pr_profile_includes_golden_tests() -> None:
@@ -1066,3 +1074,76 @@ class TestTheSlowLaneHasExactlyOneOwner:
         commands = self._job_invocations("unit-tests")
         offenders = [c for c in commands if "not slow" not in c]
         assert not offenders, f"unit-tests must exclude the slow marker: {offenders}"
+
+
+# --- .github/workflows/integration.yml -------------------------------------
+
+#: The lanes integration.yml owns. Each one is a verify.py step, so CI and a
+#: local `--profile full --only <step>` run one definition rather than two.
+_INTEGRATION_WORKFLOW_STEPS = {
+    "integration",
+    "native-compare",
+    "msvc",
+    "libabigail-parity",
+    "abicc-parity",
+    "demo-libz",
+}
+
+
+def test_integration_workflow_routes_every_lane_through_verify_py() -> None:
+    """The integration lanes used to be inline pytest lines in ci.yml that
+    had drifted from verify.py's own `integration` step (CI ignored
+    tests/test_abi_examples.py, the step ran it). No inline copy is left to
+    drift: every pytest the workflow runs goes through a step."""
+    workflow = _yaml_fast.safe_load(_read(".github/workflows/integration.yml"))
+    runs = [
+        step["run"]
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if isinstance(step.get("run"), str)
+    ]
+    assert not [r for r in runs if re.search(r"\bpytest\b", r)], runs
+    wired = {
+        name
+        for r in runs
+        for lst in re.findall(r"verify\.py --profile full --only ([\w,-]+)", r)
+        for name in lst.split(",")
+    }
+    assert wired == _INTEGRATION_WORKFLOW_STEPS
+    for name in _INTEGRATION_WORKFLOW_STEPS:
+        assert verify.FULL in _step(name).profiles, name
+
+
+def test_integration_step_excludes_the_files_other_lanes_own() -> None:
+    cmd = _step("integration").cmd
+    assert "--ignore=tests/test_abi_examples.py" in cmd
+    assert "--ignore=tests/test_cross_platform_integration.py" in cmd
+    assert "tests/test_cross_platform_integration.py" in _step("native-compare").cmd
+
+
+def test_env_defaults_yield_to_the_caller_but_env_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Linux leg raises the integration floor to 20 through its own
+    environment; a step's fixed `env` must still win over the caller."""
+    seen: dict[str, str] = {}
+
+    def fake_run(cmd, cwd, env, capture_output, text):  # noqa: ANN001
+        seen.update(env)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(verify.subprocess, "run", fake_run)
+    step = verify.Step(
+        "probe",
+        ("true",),
+        frozenset({verify.FULL}),
+        env={"FIXED": "step"},
+        env_defaults={"FLOOR": "1", "OTHER": "d"},
+    )
+    monkeypatch.setenv("FLOOR", "20")
+    monkeypatch.setenv("FIXED", "caller")
+    monkeypatch.delenv("OTHER", raising=False)
+    verify.run_step(step)
+    assert (seen["FLOOR"], seen["FIXED"], seen["OTHER"]) == ("20", "step", "d")
+    assert _step("integration").env_defaults == {"ABICHECK_MIN_EXECUTED": "1"}
+    assert "ABICHECK_MIN_EXECUTED" not in _step("integration").env

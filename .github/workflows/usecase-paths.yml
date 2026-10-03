@@ -10,7 +10,8 @@ name: Use-case paths
 #               functions no use case reaches any more.
 #   full     -- weekly and on demand: adds the real-binary flows
 #               (scripts/usecase_flows.yaml, real compiled catalog cases and
-#               castxml) and publishes the importance ranking.
+#               castxml) and publishes the importance ranking and the
+#               dead-code candidate list.
 
 on:
   pull_request:
@@ -21,6 +22,7 @@ on:
       - 'tests/test_scenarios.py'
       - 'scripts/usecase_paths.py'
       - 'scripts/usecase_flows.yaml'
+      - 'scripts/production_references.py'
       - '.github/workflows/usecase-paths.yml'
       - '.github/actions/setup-castxml/action.yml'
       - '.github/actions/install-system-deps/**'
@@ -113,9 +115,18 @@ jobs:
           python scripts/usecase_paths.py rank usecase-paths.json --json usecase-rank.json \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Unreached functions no production code references (to a fixpoint),
+      # split from documented and ADR/plan-named API -- the review list
+      # docs/contribute/plans/dead-code-and-single-owner.md works from.
+      - name: Dead-code candidates
+        run: |
+          python scripts/usecase_paths.py dead usecase-paths.json --json usecase-dead.json \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: usecase-paths
           path: |
             usecase-paths.json
             usecase-rank.json
+            usecase-dead.json

@@ -1,0 +1,183 @@
+name: Integration
+
+# Real-toolchain lanes: header/DWARF/PE/Mach-O integration on three OSes, the
+# native PE/Mach-O compare workflows, MSVC+PDB, and libabigail/ABICC parity.
+#
+# One runner per OS, every lane a scripts/verify.py step (AGENTS.md "M0-3"),
+# each with --require-complete: this job installs every step's tools itself, so
+# a precondition skip means an install broke -- without the flag verify.py's
+# `full` profile reports that skip as exit 0, a green step that ran nothing.
+# These used to be nine runners in ci.yml -- a `heavy-parity-gate` job, three
+# `integration-tests` legs, `cross-platform-e2e` x2, `windows-msvc`,
+# `libabigail-parity`, `abicc-parity` -- each paying its own checkout, Python,
+# pip install and toolchain setup for one to three minutes of tests, and all
+# but the gate waiting on the gate's own runner first (12-30 minutes of queue
+# measured on 2026-10-02, before any of them could even be queued). The legs
+# now share their OS's setup, and the path filter the gate implemented with a
+# runner is a trigger-level `paths:` filter, which costs none. The gate
+# existed so a skipped job still reported a stable required check; no check
+# has been merge-blocking since 2026-09, so that reason is gone.
+#
+# `push` to main deliberately carries no `paths:` filter: the gate ran every
+# heavy job on every non-PR event, and a runner-image or toolchain update can
+# change these lanes' outcome on a commit that touched none of their inputs.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    # Exactly the gate's former filter set. The last four are the lanes' own
+    # *infrastructure*, not just their inputs: every leg pip-installs the
+    # package, sets CastXML up through the composite action, and runs
+    # scripts/verify.py steps, so a PR touching only those (e.g. re-pinning
+    # CastXML in action/install-castxml.sh) must still run them.
+    # tests/test_workflow_path_filter_closure.py enforces that closure.
+    paths:
+      - 'abicheck/**'
+      - 'tests/**'
+      - 'examples/**'
+      - 'catalog/**'
+      - '.github/workflows/**'
+      - 'pyproject.toml'
+      - 'action/**'
+      - '.github/actions/**'
+      - 'scripts/verify.py'
+      # The Linux leg's demo-libz step (formerly ci.yml's `e2e` job).
+      - 'scripts/demo_libz.py'
+  workflow_dispatch:
+
+concurrency:
+  # Same grouping as ci.yml (see its comment): PRs by number, main pushes by
+  # ref, manual runs isolated by run_id.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    name: integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write  # Codecov OIDC upload (Linux)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        # Compilers for the integration lane plus abi-compliance-checker for
+        # the ABICC parity step. Routed through the shared action, which owns
+        # the "tolerate a flaky pre-baked third-party apt repo" rule.
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ cmake clang abi-compliance-checker zlib1g-dev curl ca-certificates
+      - name: Install abidiff (Linux)
+        if: runner.os == 'Linux'
+        # Spelled `abigail-tools` on some releases, `libabigail-tools` on
+        # others -- its own either/or step because the package list above
+        # cannot express an alternative. If neither lands, the
+        # libabigail-parity step's ABICHECK_MIN_EXECUTED floor fails loudly.
+        run: sudo apt-get install -y abigail-tools || sudo apt-get install -y libabigail-tools
+      - name: Set up pinned CastXML (Linux)
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-castxml
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install castxml cmake
+      - name: Install system deps (Windows)
+        if: runner.os == 'Windows'
+        # The PyPI `castxml` wheel is a stale 0.4.5 legacy build that the
+        # castxml_policy version gate correctly rejects (see
+        # action/install-castxml.sh: "Use Homebrew/conda-forge on this
+        # platform"). The runner's preinstalled Miniconda pulls the maintained
+        # conda-forge build instead, and conda verifies its own packages.
+        #
+        # No `choco install mingw`: the dedicated native-compare job used to
+        # run one (~45 s) but it only edits the *machine* PATH, which later
+        # steps never see -- the gcc those tests used was the runner image's
+        # own MinGW all along. The native-compare step's floor of 5 fails the
+        # leg if that ever stops being true.
+        run: |
+          choco install cmake --no-progress --yes
+          & "$env:CONDA\condabin\conda.bat" install --yes -c conda-forge castxml
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:CONDA\Library\bin"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:CONDA\Scripts"
+      - name: Set up MSVC developer environment (cl.exe on PATH)
+        # Example cases that build through CMake run CMake's compiler sanity
+        # check against cl.exe, which needs vcvarsall's environment; the msvc
+        # step below needs the same.
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756  # v1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      # Every step below runs whatever an earlier *test* step concluded
+      # (`success() || failure()` is "not cancelled"): they are independent
+      # lanes that used to be independent jobs, and one red lane must not hide
+      # the next one's result.
+      #
+      # xdist on every OS. Windows already ran this suite under `-n auto`;
+      # Linux ran it serially *with coverage* (12.7-15.3 min, the longest
+      # step in this area). pytest-cov combines worker data itself, and the
+      # Codecov `integration` flag (codecov.yml's own status) is the report's
+      # consumer, so coverage stays -- only its serial cost goes.
+      - name: Integration tests (Linux, with coverage)
+        if: (success() || failure()) && runner.os == 'Linux'
+        env:
+          # Linux's ELF integration count is known (~900), so it gets a real
+          # floor; the step's own default is the host-agnostic '1'.
+          ABICHECK_MIN_EXECUTED: '20'
+          PYTEST_ADDOPTS: -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-integration.xml
+        run: python scripts/verify.py --profile full --only integration --require-complete
+      - name: Integration tests (macOS/Windows)
+        if: (success() || failure()) && runner.os != 'Linux'
+        env:
+          # The Mach-O/PE subset counts are not pinned, so the step default
+          # "> 0" floor catches a missing toolchain without platform guesswork.
+          PYTEST_ADDOPTS: -n auto --dist worksteal
+        run: python scripts/verify.py --profile full --only integration --require-complete
+      - name: Native PE/Mach-O compare workflows
+        # Formerly the `cross-platform-e2e` job. Apple clang -> .dylib,
+        # MinGW gcc -> .dll, then `abicheck compare` on them.
+        if: (success() || failure()) && runner.os != 'Linux'
+        run: python scripts/verify.py --profile full --only native-compare --require-complete
+      - name: MSVC + PDB end-to-end
+        # Formerly the `windows-msvc` job, and still informational: the
+        # pure-Python PDB parser is maturing on real MSVC output, so a failure
+        # here is reported without failing the leg.
+        if: (success() || failure()) && runner.os == 'Windows'
+        continue-on-error: true
+        run: python scripts/verify.py --profile full --only msvc --require-complete
+      - name: libabigail parity
+        # Marker-scoped, and the step sets its own ABICHECK_MIN_EXECUTED.
+        if: (success() || failure()) && runner.os == 'Linux'
+        run: python scripts/verify.py --profile full --only libabigail-parity --require-complete
+      - name: ABICC parity
+        # tests/test_xml_parity.py's schema checks carry no marker, so the
+        # unit lane already runs them; nothing extra is needed here.
+        if: (success() || failure()) && runner.os == 'Linux'
+        run: python scripts/verify.py --profile full --only abicc-parity --require-complete
+      - name: End-to-end demo (libz)
+        # Formerly ci.yml's `e2e` job: the distro libz dumped with its real
+        # zlib.h through CastXML, then mutated and classified. The demo takes
+        # ~3 s; as its own job it paid a full runner's setup on every PR.
+        if: (success() || failure()) && runner.os == 'Linux'
+        run: python scripts/verify.py --profile full --only demo-libz --require-complete
+      - name: Upload integration coverage to Codecov
+        if: ${{ always() && runner.os == 'Linux' }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7
+        with:
+          use_oidc: true
+          files: coverage-integration.xml
+          flags: integration
+          fail_ci_if_error: false

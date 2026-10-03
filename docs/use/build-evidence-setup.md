@@ -289,8 +289,9 @@ from abicheck.buildsource.source_graph import diff_source_graph, localize_symbol
 # Structural delta between two source-graph summaries (nodes/edges added/removed)
 delta = diff_source_graph(old_graph, new_graph)
 
-# What produced and reaches a symbol: exporting target, source declaration(s),
-# declaring public header(s), ABI-relevant build option(s), static callees.
+# What produced and reaches a symbol: exporting target, defining static-archive
+# member(s), source declaration(s), declaring public header(s), ABI-relevant
+# build option(s), static callees.
 explanation = localize_symbol(graph, "_ZN3foo3barEv")
 ```
 

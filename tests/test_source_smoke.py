@@ -5,9 +5,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
-from abicheck import source_smoke as source_smoke_module
-from abicheck.source_smoke import (
+import source_smoke as source_smoke_module
+from source_smoke import (
     SourceSmokeResult,
     SourceSmokeSide,
     SourceSmokeSpec,

@@ -16,7 +16,7 @@
 """Unit tests for :mod:`abicheck.bundle_side_input` (G38 Phase 13).
 
 Mirrors ``tests/test_bundle_facts.py``'s in-memory ``ElfMetadata`` fixture
-style for the pure-Python resolution/parity tests; one class at the bottom
+style for the pure-Python unit tests; one class at the bottom
 (``@pytest.mark.integration``) compiles two real tiny ``.so`` files to prove
 :func:`abicheck.bundle_side_input.compare_release_against_bundle_facts`
 resolves a stored OLD side against a genuinely live NEW-side directory end
@@ -32,22 +32,13 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.bundle import _compute_resolution_graph
-from abicheck.bundle_models import BundleSnapshot
-from abicheck.bundle_side_input import (
-    LiveBundleInput,
-    StoredBundleFactsInput,
-    compare_bundle_sides,
-    compare_release_against_bundle_facts,
-    resolve_bundle_side,
-)
+from abicheck.bundle_side_input import compare_release_against_bundle_facts
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
 from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import save_bundle_facts
 from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
-from abicheck.workflows.bundle_facts_compare import compare_bundle_from_facts
 
 # ---------------------------------------------------------------------------
 # Fixtures (mirrors tests/test_bundle_facts.py's own helpers)
@@ -68,14 +59,6 @@ def _meta(
     )
 
 
-def _snapshot(libraries: dict[str, ElfMetadata]) -> BundleSnapshot:
-    libs = {name: Path(f"/fake/{name}") for name in libraries}
-    graph = _compute_resolution_graph(libs, libraries)
-    return BundleSnapshot(
-        root=Path("/fake"), libraries=libs, metadata=libraries, resolution=graph
-    )
-
-
 def _diff(
     library: str, *changes: Change, verdict: Verdict = Verdict.BREAKING
 ) -> DiffResult:
@@ -88,218 +71,11 @@ def _diff(
     )
 
 
-def _metadata() -> dict[str, ElfMetadata]:
-    return {
-        "libcore.so": _meta(soname="libcore.so", exports=["core_mul", "core_add"]),
-        "libalgo.so": _meta(
-            soname="libalgo.so", needed=["libcore.so"], imports=["core_mul"]
-        ),
-    }
-
-
 def _per_library_snapshots(metadata: dict[str, ElfMetadata]) -> dict[str, AbiSnapshot]:
     return {
         name: AbiSnapshot(library=name, version="old", elf=meta)
         for name, meta in metadata.items()
     }
-
-
-def _elf_only_fn(symbol: str) -> Function:
-    return Function(
-        name=symbol, mangled=symbol, return_type="?", visibility=Visibility.ELF_ONLY
-    )
-
-
-# ---------------------------------------------------------------------------
-# resolve_bundle_side
-# ---------------------------------------------------------------------------
-
-
-class TestResolveBundleSide:
-    def test_live_input_resolves_from_paths(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        metadata = _metadata()
-        libraries = {name: tmp_path / name for name in metadata}
-        for name, path in libraries.items():
-            path.write_bytes(b"")  # existence only -- parsing is monkeypatched below
-        import abicheck.bundle as bundle_mod
-
-        monkeypatch.setattr(bundle_mod, "_path_looks_like_elf", lambda p: True)
-        monkeypatch.setattr(
-            bundle_mod, "parse_elf_metadata", lambda p: metadata[p.name]
-        )
-
-        resolved = resolve_bundle_side(LiveBundleInput(libraries=libraries))
-
-        assert set(resolved.snapshot.metadata) == set(metadata)
-        assert resolved.signature_evidence == {}
-        assert resolved.manifest is None
-
-    def test_stored_input_resolves_with_no_binaries_read(self, tmp_path: Path) -> None:
-        metadata = _metadata()
-        facts = capture_bundle_facts(_per_library_snapshots(metadata))
-        out = tmp_path / "old.bundlefacts.json"
-        save_bundle_facts(facts, out)
-
-        resolved = resolve_bundle_side(StoredBundleFactsInput(path=out))
-
-        assert set(resolved.snapshot.metadata) == set(metadata)
-        assert set(resolved.signature_evidence) == set(metadata)
-        assert all(
-            isinstance(v, AbiSnapshot) for v in resolved.signature_evidence.values()
-        )
-
-
-# ---------------------------------------------------------------------------
-# compare_bundle_sides -- parity across every live/stored pairing
-# ---------------------------------------------------------------------------
-
-
-class TestCompareBundleSidesParity:
-    def test_stored_old_live_new_matches_compare_bundle_from_facts(
-        self, tmp_path: Path
-    ) -> None:
-        """The same acceptance shape tests/test_bundle_facts.py's
-        TestCompareBundleFromFactsParity pins for compare_bundle_from_facts()
-        itself, restated for the unified compare_bundle_sides() entry point:
-        a stored OLD side and a live NEW side must agree with the direct
-        compare_bundle_from_facts() call, since resolve_bundle_side() is
-        exactly what that function's own reconstruction does."""
-        old_metadata = _metadata()
-        # libcore.so removes core_mul, which libalgo.so imports -- a real
-        # cross-DSO break (BUNDLE_INTRA_DEP_REMOVED), keyed off libcore.so's
-        # own per-library diff carrying a matching FUNC_REMOVED change.
-        new_metadata = {
-            "libcore.so": _meta(soname="libcore.so", exports=["core_add"]),
-            "libalgo.so": _meta(
-                soname="libalgo.so", needed=["libcore.so"], imports=["core_mul"]
-            ),
-        }
-        old_facts = capture_bundle_facts(_per_library_snapshots(old_metadata))
-        facts_path = tmp_path / "old.bundlefacts.json"
-        save_bundle_facts(old_facts, facts_path)
-        new_snapshot = _snapshot(new_metadata)
-        core_removed = Change(
-            kind=ChangeKind.FUNC_REMOVED, symbol="core_mul", description="removed"
-        )
-        per_lib_results = [
-            _diff("libcore.so", core_removed, verdict=Verdict.BREAKING),
-            _diff("libalgo.so", verdict=Verdict.NO_CHANGE),
-        ]
-
-        direct = compare_bundle_from_facts(old_facts, new_snapshot, per_lib_results)
-        via_sides = compare_bundle_sides(
-            StoredBundleFactsInput(path=facts_path),
-            LiveBundleInput(libraries=dict.fromkeys(new_metadata, Path("/fake"))),
-            per_lib_results,
-        )
-        # via_sides' "live" new side never parses real ElfMetadata for
-        # /fake paths in this test (build_bundle_snapshot() skips a file it
-        # can't parse, with a warning) -- so instead compare the two
-        # against a stored/stored pairing, which needs no filesystem I/O on
-        # either side and is the real apples-to-apples check.
-        new_facts = capture_bundle_facts(_per_library_snapshots(new_metadata))
-        new_facts_path = tmp_path / "new.bundlefacts.json"
-        save_bundle_facts(new_facts, new_facts_path)
-        stored_stored = compare_bundle_sides(
-            StoredBundleFactsInput(path=facts_path),
-            StoredBundleFactsInput(path=new_facts_path),
-            per_lib_results,
-        )
-        assert direct.bundle_findings == stored_stored.bundle_findings
-        assert any(
-            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
-            for f in direct.bundle_findings
-        )
-        # via_sides itself must still resolve cleanly (no exception) even
-        # though its "live" side is unparseable -- confirming the mixed
-        # live/stored pairing degrades the same way a live compare_bundle()
-        # call already does for an unparseable file, not by crashing.
-        assert via_sides is not None
-
-    def test_signature_evidence_gate_runs_for_stored_stored_pairing(
-        self, tmp_path: Path
-    ) -> None:
-        """G38 Phase 12's C-boundary signature-evidence gate must run for a
-        stored/stored pairing too, not only stored/live -- compare_bundle_
-        sides() is the first entry point in this codebase that can express
-        that pairing at all."""
-        bundle_metadata = {
-            "libcore.so": _meta(soname="libcore.so", exports=["core_fn"]),
-            "libconsumer.so": _meta(
-                soname="libconsumer.so", needed=["libcore.so"], imports=["core_fn"]
-            ),
-        }
-        per_lib_results = [
-            _diff("libcore.so", verdict=Verdict.NO_CHANGE),
-            _diff("libconsumer.so", verdict=Verdict.NO_CHANGE),
-        ]
-
-        def _facts_snapshots(version: str) -> dict[str, AbiSnapshot]:
-            return {
-                "libcore.so": AbiSnapshot(
-                    library="libcore.so",
-                    version=version,
-                    elf=bundle_metadata["libcore.so"],
-                    functions=[_elf_only_fn("core_fn")],
-                    elf_only_mode=True,
-                ),
-                "libconsumer.so": AbiSnapshot(
-                    library="libconsumer.so",
-                    version=version,
-                    elf=bundle_metadata["libconsumer.so"],
-                ),
-            }
-
-        old_path = tmp_path / "old.bundlefacts.json"
-        new_path = tmp_path / "new.bundlefacts.json"
-        save_bundle_facts(capture_bundle_facts(_facts_snapshots("old")), old_path)
-        save_bundle_facts(capture_bundle_facts(_facts_snapshots("new")), new_path)
-
-        result = compare_bundle_sides(
-            StoredBundleFactsInput(path=old_path),
-            StoredBundleFactsInput(path=new_path),
-            per_lib_results,
-        )
-
-        assert any(
-            f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_UNVERIFIED
-            for f in result.bundle_findings
-        )
-
-
-class TestCompareBundleSidesManifestPrecedence:
-    def test_explicit_manifest_overrides_either_side(self, tmp_path: Path) -> None:
-        from abicheck.bundle_manifest import InstantiationManifest, ManifestEntry
-
-        metadata = _metadata()
-        # facts carry no manifest of their own -- an explicitly-passed
-        # override promising a symbol neither library actually exports
-        # must still be enforced, proving the override reaches
-        # compare_bundle() rather than being silently dropped in favour of
-        # whichever side's own (here: absent) manifest resolve_bundle_side
-        # would otherwise use.
-        facts = capture_bundle_facts(_per_library_snapshots(metadata))
-        facts_path = tmp_path / "old.bundlefacts.json"
-        save_bundle_facts(facts, facts_path)
-        override = InstantiationManifest(
-            entries=(ManifestEntry(symbol="promised_but_missing"),)
-        )
-
-        result = compare_bundle_sides(
-            StoredBundleFactsInput(path=facts_path),
-            StoredBundleFactsInput(path=facts_path),
-            [
-                _diff("libcore.so", verdict=Verdict.NO_CHANGE),
-                _diff("libalgo.so", verdict=Verdict.NO_CHANGE),
-            ],
-            manifest=override,
-        )
-        assert any(
-            f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
-            for f in result.bundle_findings
-        )
 
 
 # compare_stored_bundle_facts_pair (the stored/stored driver, CLI cleanup

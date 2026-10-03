@@ -409,7 +409,8 @@ bare `'abicheck/**/*.py'` alone matches none of them and returns zero
 results, confirmed by running it; adding `'abicheck/*.py'` finds all 16),
 excluding `bundle_models.py`'s own dataclass definition. The real
 construction sites are `bundle.py`, `bundle_signature_evidence.py`,
-`bundle_multibuild.py`, and `product_baseline.py`. This is not merely a naming gap in the
+`bundle_multibuild.py`, and `product_baseline.py` (the last two since deleted
+as unreachable, `dead-code-and-single-owner.md` Stage C). This is not merely a naming gap in the
 inventory: several `BundleFinding` instances combine evidence
 `to_change()` cannot see by the time it runs. `bundle.py`'s
 `BUNDLE_INTRA_TYPE_CHANGED` finding, for example, is built from a

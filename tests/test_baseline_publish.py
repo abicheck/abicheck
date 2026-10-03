@@ -29,6 +29,7 @@ from abicheck.buildsource.baseline_publish import (
     accepted_main_cache_key,
     accepted_main_cache_restore_prefix,
     derive_baseline_libraries,
+    parse_baseline_generation,
 )
 from abicheck.buildsource.build_output import BuildOutput, BuildOutputTarget
 
@@ -286,3 +287,32 @@ class TestAcceptedMainCacheKeys:
             accepted_main_cache_key("p", "prof", "sha1", generation=-1)
         with pytest.raises(ValueError, match="non-negative int"):
             accepted_main_cache_restore_prefix("p", "prof", generation=-1)
+
+
+class TestParseBaselineGeneration:
+    """The workflow input parsed the way ``actions/baseline/run.sh`` accepts
+    it. Oracle: run.sh's own rule (non-empty, every character in
+    ``0123456789``) and ``build_manifest.py``'s ``int()`` of what it
+    accepts -- not ``str.isdigit``, which the implementation uses."""
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_accepts_exactly_what_actions_baseline_accepts(self, seed: int) -> None:
+        import random
+
+        rng = random.Random(seed)
+        alphabet = "0123456789" * 3 + " +-_.xa\u0663\u00b2\n"
+        for _ in range(200):
+            text = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 5)))
+            accepted = text != "" and all(c in "0123456789" for c in text)
+            if text == "":
+                assert parse_baseline_generation(text) is None
+            elif accepted:
+                assert parse_baseline_generation(text) == int(text)
+            else:
+                with pytest.raises(ValueError):
+                    parse_baseline_generation(text)
+
+    def test_leading_zeros_fold_as_the_manifest_records_them(self) -> None:
+        assert accepted_main_cache_key(
+            "p", "prof", "sha", generation=parse_baseline_generation("03")
+        ) == accepted_main_cache_key("p", "prof", "sha", generation=3)

@@ -150,7 +150,6 @@ UNVERIFIED = frozenset(
         "bundle_intra_dep_signature_unverified",
         "bundle_soname_skew",
         "bundle_unresolved_intra_dependency",
-        "bundle_variant_coverage_regressed",
         "call_graph_public_entry_reachability_changed",
         "calling_convention_changed",
         "cet_protection_improved",
