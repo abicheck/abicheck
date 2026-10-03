@@ -139,6 +139,75 @@ def test_the_trace_records_exactly_the_reaching_tests(
     assert _trace(_project(tmp_path), workers) == _REACHING
 
 
+_IDLE_THREAD_CONFTEST = """
+import threading
+
+_stop = threading.Event()
+_idle = threading.Thread(target=_stop.wait, daemon=True)
+_idle.start()
+
+
+def pytest_sessionfinish(session):
+    # The trace plugin armed while this thread was alive, so it never took a
+    # heap census (bug class gc-census-concurrent-thread).
+    assert threading.active_count() > 1
+    _stop.set()
+"""
+
+
+@pytest.mark.parametrize("workers", [[], ["-n", "2"]])
+def test_a_live_thread_gets_the_same_trace_without_a_heap_census(
+    tmp_path: Path, workers: list[str]
+) -> None:
+    """With another thread alive the plugin must not enumerate the GC heap,
+    and its namespace walk must still credit every reaching test: the same
+    oracle as the census path."""
+    project = _project(tmp_path)
+    (project / "tests" / "conftest.py").write_text(_IDLE_THREAD_CONFTEST)
+    assert _trace(project, workers) == _REACHING
+
+
+def test_the_namespace_walk_finds_methods_wrappers_and_accessors() -> None:
+    import types as _types
+
+    import mutation_reach_trace as trace
+
+    mod = _types.ModuleType("_reach_probe")
+    exec(  # noqa: S102 - fixed source
+        "import functools\n"
+        "def plain(): pass\n"
+        "def _deco(f):\n"
+        "    @functools.wraps(f)\n"
+        "    def w(*a): return f(*a)\n"
+        "    return w\n"
+        "@_deco\n"
+        "def wrapped(): pass\n"
+        "class C:\n"
+        "    def m(self): pass\n"
+        "    @staticmethod\n"
+        "    def s(): pass\n"
+        "    @classmethod\n"
+        "    def c(cls): pass\n"
+        "    @property\n"
+        "    def p(self): return 1\n"
+        "    @p.setter\n"
+        "    def p(self, v): pass\n",
+        mod.__dict__,
+    )
+    sys.modules["_reach_probe"] = mod
+    try:
+        names = {
+            f.__code__.co_name
+            for f in trace.namespace_functions(["_reach_probe", "_absent_module"])
+            if isinstance(f, _types.FunctionType)
+        }
+    finally:
+        del sys.modules["_reach_probe"]
+    # ``wrapped`` appears twice under one name: the wrapper ``w`` and the
+    # original via ``__wrapped__``.
+    assert {"plain", "w", "wrapped", "m", "s", "c", "p", "_deco"} <= names
+
+
 def test_the_trace_is_independent_of_test_order(tmp_path: Path) -> None:
     """A test that is first to import a mutated module must not be the only
     one credited (the plugin imports them before any test)."""

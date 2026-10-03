@@ -166,6 +166,9 @@ _CENSUS_ALLOWLIST: dict[str, str] = {
     "scripts/perf_cache_reset.py": (
         "clears lru_caches before a traced run; heap census only when gc_census_is_safe(), else a namespace walk"
     ),
+    "scripts/mutation_reach_trace.py": (
+        "pytest plugin loaded before the package under test; heap census only when census_is_safe(), else a namespace walk"
+    ),
     "tests/test_gc_census_thread_safety.py": "the negative control above",
 }
 _CENSUS_CALLS = {"get_objects", "get_referrers"}
@@ -212,6 +215,10 @@ class TestNoUnguardedCensus:
     def test_allowlisted_benchmark_still_checks_the_guard(self) -> None:
         text = (_REPO / "scripts/perf_cache_reset.py").read_text(encoding="utf-8")
         assert "gc_census_is_safe()" in text
+
+    def test_allowlisted_reach_trace_still_checks_the_guard(self) -> None:
+        text = (_REPO / "scripts/mutation_reach_trace.py").read_text(encoding="utf-8")
+        assert "if census_is_safe():" in text
 
 
 def test_benchmark_cache_reset_still_clears_with_another_thread_alive() -> None:

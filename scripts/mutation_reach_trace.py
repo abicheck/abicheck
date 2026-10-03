@@ -35,7 +35,10 @@ on those code objects; each reports once and is disabled, and
 ``restart_events()`` re-arms them per test, so every other call in the suite
 costs nothing. (A global ``sys.setprofile`` hook was measured covering about
 2% of the suite in several minutes.) The code objects are found from every
-live function (``gc``) and their nested ``co_consts``. A closure created at
+live function and their nested ``co_consts``: a ``gc`` heap census when no
+other thread is alive, else the ``only_mutate`` modules' own namespaces (a
+census beside a live thread can break that thread's ``tuple(...)`` -- bug
+class ``gc-census-concurrent-thread``). A closure created at
 run time reuses a nested code object that is already armed, so new code only
 appears when an ``only_mutate`` module is (re)imported: the scan is repeated
 only when those module objects change, not per test.
@@ -51,6 +54,7 @@ import importlib
 import json
 import os
 import sys
+import threading
 import tomllib
 import types
 from collections.abc import Generator
@@ -89,6 +93,52 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
+def census_is_safe() -> bool:
+    """``abicheck.workflows.memory_trace.gc_census_is_safe``, restated.
+
+    Not imported: this plugin loads before (and independently of) the
+    package under test, which may not be importable at that point.
+    """
+    return threading.active_count() == 1
+
+
+def namespace_functions(modules: list[str]) -> list[object]:
+    """Every function reachable from *modules*' globals, without a heap census.
+
+    Module-level functions, and methods (plain, ``staticmethod``,
+    ``classmethod``, ``property`` accessors) of classes defined there, each
+    unwrapped through ``__wrapped__``. Nested closures, lambdas and
+    comprehensions are not listed: ``code_objects`` reaches them from the
+    enclosing function's ``co_consts``.
+    """
+    found: list[object] = []
+
+    def add(value: object) -> None:
+        if isinstance(value, (staticmethod, classmethod)):
+            value = value.__func__
+        if isinstance(value, property):
+            for accessor in (value.fget, value.fset, value.fdel):
+                if accessor is not None:
+                    add(accessor)
+            return
+        seen: set[int] = set()
+        while value is not None and id(value) not in seen:
+            seen.add(id(value))
+            found.append(value)
+            value = getattr(value, "__wrapped__", None)
+
+    for name in modules:
+        module = sys.modules.get(name)
+        if module is None:
+            continue
+        for value in list(vars(module).values()):
+            add(value)
+            if isinstance(value, type):
+                for member in list(vars(value).values()):
+                    add(member)
+    return found
+
+
 class Monitor:
     def __init__(self, paths: frozenset[str], modules: list[str]) -> None:
         if _MON is None:
@@ -114,8 +164,14 @@ class Monitor:
         ids = tuple(id(sys.modules.get(name)) for name in self.modules)
         if ids == self.module_ids:
             return
-        self.module_ids = ids
-        for obj in gc.get_objects():
+        if census_is_safe():
+            candidates: list[object] = gc.get_objects()
+            # Only a full census may mark this module set done; a namespace
+            # walk is retried until one runs.
+            self.module_ids = ids
+        else:
+            candidates = namespace_functions(self.modules)
+        for obj in candidates:
             if not isinstance(obj, types.FunctionType):
                 continue
             code = obj.__code__
