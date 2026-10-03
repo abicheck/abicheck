@@ -64,7 +64,6 @@ from .cli_helpers_compare import (
     resolve_force_public_scope,
 )
 from .cli_options import (
-    LANG_DEFAULT,
     resolve_compile_context,
     resolve_contract_domain,
     resolve_contract_evaluation,
@@ -1328,36 +1327,30 @@ def run_compare(
     require_complete_analysis_stated = (
         getattr(project_cfg, "assurance_require_complete", None) is not None
     )
-    # ADR-068 D5 / Phase 7a: --dwarf-only/--debuginfod/--debuginfod-url/
-    # --debug-format are gone as CLI flags (hidden, already config-backed
-    # duplicates) -- config-only now, read straight off the resolved config
-    # with no raw CLI local to overwrite, same as collapse/strict/
-    # justification/show_redundant above.
-    debug_format_opt = resolved_cfg.debug_format
-    dwarf_only = resolved_cfg.dwarf_only
-    debuginfod = resolved_cfg.debuginfod
-    debuginfod_url = resolved_cfg.debuginfod_url
+    # ADR-068 D5 / Phase 7: `--lang` and the debug flags are config-only;
+    # `config_run_settings` is the one reading of them, shared with
+    # `--no-baseline` so the two `compare` shapes cannot differ. `lang` is
+    # always None here (compare_cmd's kwargs carry no "lang" key; the
+    # stored-bundle-facts path resolves its own upstream).
+    from .frontends.cli.compare_config_settings import config_run_settings
+
+    run_settings = config_run_settings(resolved_cfg)
+    debug_format_opt = run_settings.debug_format
+    dwarf_only = run_settings.dwarf_only
+    debuginfod = run_settings.debuginfod
+    debuginfod_url = run_settings.debuginfod_url
     # Phase 7 (§4.1 CONFIG row): --pdb-path is config-only; see compare_pdb_config's docstring.
     from .frontends.cli.compare_pdb_config import resolve_and_reject_shared_pdb_path
 
     pdb_path = resolve_and_reject_shared_pdb_path(
-        resolved_cfg.pdb_path, old_input=old_input, new_input=new_input
+        run_settings.pdb_path, old_input=old_input, new_input=new_input
     )
     old_pdb_path: Path | None = None
     new_pdb_path: Path | None = None
     show_redundant = resolved_cfg.show_redundant
-    # Phase 7 (one-comparison-product.md §4.1): `--lang` has no CLI flag
-    # left either; `compile.lang` is its only source, defaulting to the
-    # same `LANG_DEFAULT` ("c++") the removed flag carried so an
-    # unconfigured project's behavior is unchanged. `lang` is always None
-    # here (compare_cmd's own kwargs never carry a "lang" key any more --
-    # the stored-bundle-facts dispatch path resolves its own `lang`/
-    # `lang_explicit` upstream in compare.py and never reaches run_compare
-    # at all), so `resolved_cfg.compile_lang` is the sole source of both
-    # the resolved value and its explicitness.
     if lang is None:
-        lang = resolved_cfg.compile_lang or LANG_DEFAULT
-    lang_explicit = resolved_cfg.compile_lang is not None
+        lang = run_settings.lang
+    lang_explicit = run_settings.lang_explicit
     # Phase 7: `--allow-ast-frontend-fallback`/`--allow-unsupported-castxml`
     # are gone from compare's CLI too; a `.abicheck.yml` `compile:` block
     # setting either to `true` has the identical effect the removed flag

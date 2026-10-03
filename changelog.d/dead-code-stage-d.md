@@ -32,12 +32,22 @@
   `workflows.artifact.execute._resolve_side_snapshot_impl`,
   `resolve_side_snapshot` and `embed_side_build_source` lose the keyword
   parameters only `scan` passed (`build_config_locally_trusted`,
-  `baseline_reuse_hint`, `l4_public_headers`, ...; 21 in all), and
+  `baseline_reuse_hint`, `l4_public_headers`, ...; 17 in all), and
   `service_input_resolution.BaselineReuseContext`/
   `resolve_baseline_compile_context` go with them. `compare` and `dump`
   behave as before; see the plan's Stage E.
 
 ### Fixed
+
+- **`compare --no-baseline` now applies the `.abicheck.yml` settings
+  two-sided `compare` applies.** `compile.lang`, the `debug:` block
+  (`format`, `dwarf_only`, `debuginfod`, `debuginfod_url`, `pdb_path`),
+  `source.method` and `scope.public_symbols` have no CLI flag any more, and
+  the audit resolved the config but never read them: a `compile.lang: c`
+  project's headers were audited as C++, detached debug info configured
+  under `debug:` was never looked up, and `scope.public_symbols` forced
+  nothing public. Both `compare` shapes now read these through one function.
+  Still not applied on the audit: `scope.show_redundant`.
 
 - **PDB forward references resolve to the same definition the layout comes
   from.** When a PDB carried two definitions of one struct name (an ODR

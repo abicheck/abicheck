@@ -123,6 +123,10 @@ def resolve_side_snapshot(
     fmt: str | None,
     public_headers: list[Path],
     public_header_dirs: list[Path],
+    enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
+    dwarf_only: bool = False,
+    debug_format: str | None = None,
     include_labels: dict[Path, str] | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
@@ -152,6 +156,10 @@ def resolve_side_snapshot(
         fmt=fmt,
         public_headers=public_headers,
         public_header_dirs=public_header_dirs,
+        enable_debuginfod=enable_debuginfod,
+        debuginfod_url=debuginfod_url,
+        dwarf_only=dwarf_only,
+        debug_format=debug_format,
         include_labels=include_labels,
         notify=notify,
     ).snapshot
