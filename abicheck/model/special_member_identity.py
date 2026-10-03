@@ -65,8 +65,9 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import abicheck.name_classification as _name_classification
+
 from ..demangle import demangle_batch
-from ..name_classification import canonicalize_type_name
 from .mangled_name import itanium_scope_components
 from .name_decoration import itanium_structors
 from .synthetic_key import (
@@ -183,7 +184,9 @@ def _normalize_integers(spelling: str) -> str:
 def _param_signature(params: Sequence[str]) -> tuple[str, ...]:
     """The comparison form of a parameter list: canonical, unqualified."""
     return tuple(
-        canonicalize_type_name(_normalize_integers(_QUALIFIER.sub("", p.strip())))
+        _name_classification.canonicalize_type_name(
+            _normalize_integers(_QUALIFIER.sub("", p.strip()))
+        )
         for p in params
     )
 

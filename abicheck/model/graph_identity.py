@@ -30,11 +30,8 @@ import re
 from collections.abc import Iterator
 from typing import Any
 
-from ..name_classification import (
-    _declaring_header_discriminator,
-    _quoted_spans,
-    strip_anonymous_type_location,
-)
+import abicheck.name_classification as _name_classification
+
 from .execution_cache import request_key
 from .execution_cache_scoped import SharedScopedCache
 
@@ -167,7 +164,7 @@ def _strip_bare_anonymous_type_location(name: str) -> str:
     # and still paid `_quoted_spans` plus the nested-lookahead scan.
     if "lambda" not in name and "unnamed" not in name and "anonymous" not in name:
         return name
-    quoted_spans = _quoted_spans(name)
+    quoted_spans = _name_classification._quoted_spans(name)
 
     def _inside_quotes(pos: int) -> bool:
         return any(start <= pos < end for start, end in quoted_spans)
@@ -176,7 +173,7 @@ def _strip_bare_anonymous_type_location(name: str) -> str:
         if _inside_quotes(match.start()):
             return match.group(0)
         marker, path, line, col = match.groups()
-        return f"{marker}:{_declaring_header_discriminator(path)}:{line}:{col}"
+        return f"{marker}:{_name_classification._declaring_header_discriminator(path)}:{line}:{col}"
 
     return _BARE_ANON_TYPE_LOCATION_RE.sub(_replace, name)
 
@@ -251,7 +248,7 @@ def _normalize_graph_identity(identity: str) -> str:
     return _NORMALIZE_MEMO.get_or_compute(
         request_key(identity=identity),
         lambda: _strip_bare_anonymous_type_location(
-            strip_anonymous_type_location(identity)
+            _name_classification.strip_anonymous_type_location(identity)
         ),
     )
 
@@ -472,7 +469,7 @@ def closure_location_free_identity(identity: str) -> str:
     normalized = _normalize_graph_identity(identity)
     if ":" not in normalized:
         return normalized
-    quoted_spans = _quoted_spans(normalized)
+    quoted_spans = _name_classification._quoted_spans(normalized)
 
     def _replace(match: re.Match[str]) -> str:
         if any(start <= match.start() < end for start, end in quoted_spans):
@@ -554,7 +551,7 @@ def closure_marker_locations(
     # the combined outcome for a location change that never happened. The
     # two functions are complements over the same markers, so they must
     # agree on which text IS a marker.
-    quoted_spans = _quoted_spans(normalized)
+    quoted_spans = _name_classification._quoted_spans(normalized)
     return tuple(
         (
             " ".join(match.group(1).split()),

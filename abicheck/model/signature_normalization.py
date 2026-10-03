@@ -41,7 +41,8 @@ from __future__ import annotations
 
 import re
 
-from ..name_classification import canonicalize_type_name
+import abicheck.name_classification as _name_classification
+
 from .declarator_qualifiers import (
     _canonicalize_member_qualifiers,
     _find_member_pointer_qualifier,
@@ -592,8 +593,8 @@ def _canonicalize_param_type_uncached(name: str, _depth: int) -> str:
     """The uncached body of :func:`canonicalize_function_signature_param_type`."""
     if _depth > _MAX_PARAM_TYPE_NESTING_DEPTH:
         return name
-    canonical = canonicalize_type_name(
-        _decay_top_level_array(canonicalize_type_name(name))
+    canonical = _name_classification.canonicalize_type_name(
+        _decay_top_level_array(_name_classification.canonicalize_type_name(name))
     )
     depth = 0
     # True for a paren currently open on `transparent_parens` that groups a
@@ -676,9 +677,7 @@ def _canonicalize_param_type_uncached(name: str, _depth: int) -> str:
             combined_base = f"{base} {tail_cv}".strip() if tail_cv else base
             qualifier_text = prefix[qualifier_start:qualifier_end]
             sigil_char = prefix[-1]
-            prefix = (
-                f"{canonicalize_type_name(combined_base)} {qualifier_text} {sigil_char}"
-            )
+            prefix = f"{_name_classification.canonicalize_type_name(combined_base)} {qualifier_text} {sigil_char}"
     raw_suffix = canonical[last_top_level_sigil + 1 :]
     split = _split_at_trailing_param_list(raw_suffix)
     if split is None:

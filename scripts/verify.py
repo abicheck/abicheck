@@ -726,6 +726,12 @@ STEPS: tuple[Step, ...] = (
             "slow",
             "--ignore=tests/test_performance.py",
             "--ignore=tests/test_header_scan_deadline_integration.py",
+            # Skip collecting the ~64k-test tree's modules that never mention
+            # `slow` (tests/pytest_marker_prefilter.py): `-m slow` keeps a few
+            # hundred tests, but collection imported every module in every
+            # xdist worker first. tests/test_marker_prefilter.py proves the
+            # prefiltered selection equals the full one.
+            "--collect-mentioning=slow",
             "--tb=short",
             "-n",
             "auto",
