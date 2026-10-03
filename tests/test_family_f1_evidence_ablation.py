@@ -113,6 +113,7 @@ from _family_f1_harness import (
     oracle_violations,
     outcome,
     present_fact_count,
+    present_fact_sites,
 )
 
 import abicheck.model.declarations as declarations_mod
@@ -152,15 +153,30 @@ _STATUSES = tuple(UNKNOWN_FACTS)
 
 
 def _exercised_fact_sites() -> set[str]:
-    hit = set()
+    present: set[tuple[type, str]] = set()
     for old, new in CORPUS.values():
-        for name, site in _FACT_SITES.items():
-            if present_fact_count(old, site) or present_fact_count(new, site):
-                hit.add(name)
-    return hit
+        present |= present_fact_sites(old) | present_fact_sites(new)
+    return {name for name, site in _FACT_SITES.items() if site in present}
 
 
 _EXERCISED_FACTS = _exercised_fact_sites()
+
+
+def test_one_walk_site_census_matches_the_per_site_count() -> None:
+    """``present_fact_sites`` (one walk per snapshot) decides collection-time
+    parametrization, so it must answer exactly what the per-site walk
+    ``present_fact_count`` answers, for every corpus snapshot and site."""
+    checked = 0
+    for old, new in CORPUS.values():
+        for snap in (old, new):
+            present = present_fact_sites(snap)
+            for site in _FACT_SITES.values():
+                assert (site in present) == bool(present_fact_count(snap, site)), site
+                checked += 1
+    assert checked == 2 * len(CORPUS) * len(_FACT_SITES)
+    assert _EXERCISED_FACTS, "census found no exercised site; the oracle is vacuous"
+
+
 _EXERCISED_CONTAINERS = set(CONTAINER_ABLATIONS)
 _FULL: dict[tuple[str, str], Outcome] = {}
 

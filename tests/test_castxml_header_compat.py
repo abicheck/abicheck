@@ -255,19 +255,22 @@ def test_aarch64_target_parses_libstdcxx_float_headers(
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="builds and reads ELF shared objects; the host toolchain emits PE/Mach-O elsewhere",
-)
-@pytest.mark.skipif(
     not (_CASTXML and shutil.which("g++")), reason="needs castxml and g++"
 )
 def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> None:
     """With and without the preamble, a host dump is byte-identical."""
     header, src = _write_case(tmp_path)
     lib = tmp_path / "libapi.so"
-    subprocess.run(
-        ["g++", "-shared", "-fPIC", "-g", str(src), "-o", str(lib)], check=True
+    build = subprocess.run(
+        ["g++", "-shared", "-fPIC", "-g", str(src), "-o", str(lib)],
+        capture_output=True,
+        text=True,
     )
+    if build.returncode != 0 and "_Float128" in build.stderr:
+        # The case declares a _Float128 API; a host compiler without the type
+        # (Apple clang) cannot build it, so there is no host dump to compare.
+        pytest.skip("host C++ compiler has no _Float128")
+    assert build.returncode == 0, build.stderr
     with_preamble = _dump(tmp_path / "a", None, header, lib, monkeypatch)
     # The same dump with the preamble emptied, in a fresh process and cache.
     (tmp_path / "b").mkdir()
@@ -285,7 +288,7 @@ def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> No
     # Differential test: prove the second configuration really ran without the
     # preamble (separate caches are given by the per-run XDG_CACHE_HOME).
     assert marker.exists(), "sitecustomize did not run; the comparison would be vacuous"
-    if platform.machine() in ("x86_64", "i686"):
+    if platform.machine().lower() in {"x86_64", "amd64", "i686", "i386"}:
         assert (
             with_preamble.declarations.functions,
             with_preamble.declarations.types,

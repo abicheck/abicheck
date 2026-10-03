@@ -53,7 +53,7 @@ import os
 import sys
 import tomllib
 import types
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -91,34 +91,6 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
-def namespace_functions(modules: Iterable[types.ModuleType]) -> list[object]:
-    """Functions reachable from *modules*' namespaces without a heap census:
-    module-level functions, class members (also static/class methods and
-    properties, nested classes) and anything behind ``__wrapped__``."""
-    found: list[object] = []
-    seen: set[int] = set()
-    stack: list[object] = [v for m in modules for v in vars(m).values()]
-    while stack:
-        obj = stack.pop()
-        if id(obj) in seen:
-            continue
-        seen.add(id(obj))
-        if isinstance(obj, types.FunctionType):
-            found.append(obj)
-        elif isinstance(obj, (staticmethod, classmethod)):
-            stack.append(obj.__func__)
-        elif isinstance(obj, property):
-            stack.extend(f for f in (obj.fget, obj.fset, obj.fdel) if f is not None)
-        elif isinstance(obj, type):
-            stack.extend(vars(obj).values())
-        wrapped = (
-            getattr(obj, "__wrapped__", None) if not isinstance(obj, type) else None
-        )
-        if wrapped is not None:
-            stack.append(wrapped)
-    return found
-
-
 class Monitor:
     def __init__(self, paths: frozenset[str], modules: list[str]) -> None:
         if _MON is None:
@@ -138,32 +110,18 @@ class Monitor:
         self.hit = True
         return _MON.DISABLE
 
-    def arm(self) -> bool:
+    def arm(self) -> None:
         """Enable PY_START on every only_mutate code object not yet armed,
-        rescanning only when an only_mutate module was (re)imported.
-
-        The complete source is a GC heap census, which also finds functions
-        built at runtime outside any module namespace. A census beside another
-        live Python thread can corrupt a tuple that thread is building
-        (``memory_trace.gc_census_is_safe``), and a test can leave a thread
-        behind, so then only the modules' namespaces are walked and the scan
-        is not marked done: the next safe arm completes it. Returns whether
-        every only_mutate function is known to be armed; the caller credits a
-        test run after an incomplete arm conservatively, since the walk cannot
-        see a function held only in a registry or closure.
-        """
+        rescanning only when an only_mutate module was (re)imported."""
         ids = tuple(id(sys.modules.get(name)) for name in self.modules)
         if ids == self.module_ids:
-            return True
-        complete = gc_census_is_safe()
-        if complete:
-            functions: Iterable[object] = gc.get_objects()
+            return
+        census = gc_census_is_safe()
+        if census:
+            # A partial namespace walk leaves module_ids unset, so the next
+            # test (with the extra threads gone) gets the full census.
             self.module_ids = ids
-        else:
-            functions = namespace_functions(
-                sys.modules[name] for name in self.modules if name in sys.modules
-            )
-        for obj in functions:
+        for obj in gc.get_objects() if census else self._namespace_functions():
             if not isinstance(obj, types.FunctionType):
                 continue
             code = obj.__code__
@@ -173,7 +131,42 @@ class Monitor:
                 if nested.co_name != "<module>" and nested not in self.armed:
                     _MON.set_local_events(_TOOL_ID, nested, _MON.events.PY_START)
                     self.armed.add(nested)
-        return complete
+
+    def _namespace_functions(self) -> list[object]:
+        """Functions reachable from the ``only_mutate`` modules' namespaces.
+
+        The fallback when a heap census is unsafe: ``gc.get_objects()``
+        beside another live thread breaks that thread's ``tuple(...)``
+        construction (``memory_trace.gc_census_is_safe``). Module globals,
+        class members, and what ``staticmethod``/``classmethod``/``property``
+        and ``functools.wraps`` hold cover every def; only a function created
+        and stored outside those namespaces is missed, and the census
+        catches it once this is the sole thread again.
+        """
+        found: list[object] = []
+        pending: list[object] = []
+        for name in self.modules:
+            module = sys.modules.get(name)
+            if module is not None:
+                pending.extend(list(vars(module).values()))
+        seen: set[int] = set()
+        while pending:
+            value = pending.pop()
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            if isinstance(value, type):
+                pending.extend(list(vars(value).values()))
+            elif isinstance(value, (staticmethod, classmethod)):
+                pending.append(value.__func__)
+            elif isinstance(value, property):
+                pending.extend(f for f in (value.fget, value.fset, value.fdel) if f)
+            elif isinstance(value, types.FunctionType):
+                found.append(value)
+                wrapped = getattr(value, "__wrapped__", None)
+                if wrapped is not None:
+                    pending.append(wrapped)
+        return found
 
     def close(self) -> None:
         _MON.register_callback(_TOOL_ID, _MON.events.PY_START, None)
@@ -201,15 +194,13 @@ def pytest_runtest_protocol(item: pytest.Item, nextitem: object) -> Generator[No
     if mon is None:
         yield
         return
-    complete = mon.arm()
+    mon.arm()
     mon.hit = False
     _MON.restart_events()
     try:
         yield
     finally:
-        # A superset is safe (it only widens mutmut's selection); a missed
-        # reach would silently drop a test that kills mutants.
-        if mon.hit or not complete:
+        if mon.hit:
             mon.hits.add(item.nodeid)
 
 
