@@ -171,8 +171,9 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
 
 - Triggers: weekly schedule, manual `workflow_dispatch` (with size / budget
   inputs), and every PR (`opened`/`reopened`/`synchronize`/`labeled`) — but
-  the four expensive jobs (`scaling`, `regression`, `header-graph-perf`,
-  `header-graph-regression`) only actually run when a `classify` job decides
+  the expensive jobs (`scaling`, `regression`, `header-graph-perf` —
+  schedule/dispatch only, see below — and `l2-cli-perf`, which also runs the header-graph PR-vs-base gate)
+  only actually run when a `classify` job decides
   the PR touches performance-sensitive code, the **classifier-job pattern**
   (`scripts/classify_perf_paths.py`, `tests/test_classify_perf_paths.py`).
   This replaced an earlier `pull_request.paths:` trigger-level filter, for a
@@ -240,6 +241,21 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
   inherently super-linear embedding chain, so it carries `gate_exponent=False`
   and is exempted (its tail slope is still printed for visibility, just not
   gated). Every other scenario is gated.
+- **The exponent gate has a noise floor, checked on the slope's lower
+  endpoint.** A tail slope is only as precise as the smaller of its two
+  points, so the gate applies only when *both* tail points take at least
+  `EXPONENT_FLOOR_SECONDS` (0.2 s, `scripts/perf_measurement.py`). Until
+  2026-10 the floor was checked against the scenario's *peak*. A cheap
+  scenario whose 4000 point had just crossed 0.2 s was then gated on a slope
+  whose 2000 point sat at ~0.1 s in runner jitter, and `report_sarif` read
+  1.48 against the 1.4 budget on unchanged code (locally the same code read
+  1.18–1.35). The cheap gated scenarios (`pe_churn`, `macho_churn`,
+  `var_churn`, the three `report_*`, `fuzzy_rename_churn`,
+  `onedal_mass_removal`) now sweep one size step higher
+  (`TAIL_ABOVE_FLOOR_SIZES`), so both tail points clear the floor and they
+  stay gated. A scenario whose lower tail point later drifts under the floor
+  prints `exponent gate inactive` with its tail value, never silently;
+  raise that scenario's sizes to re-arm it.
 - Publishes the scaling table to the job summary and uploads the JSON.
 
 `slow` regression guards also live in
@@ -254,10 +270,14 @@ The same workflow also carries a second, independent pair of jobs for the
 G31 Phase D header-graph attach-cost gate
 ([`scripts/check_header_graph_perf.py`](https://github.com/abicheck/abicheck/blob/main/scripts/check_header_graph_perf.py),
 see [the G31 Phase D follow-up plan](plans/g31-header-graph-default-on-followup.md)):
-`header-graph-perf` is report-only trend data (no stable committed baseline
+`header-graph-perf` is report-only trend data on schedule/dispatch (on a
+pull request the trend point is the header-graph gate's own head
+measurement, uploaded under the same `performance-header-graph` artifact
+name, so a PR does not spend a second runner re-measuring the same head;
+no stable committed baseline
 number would survive a runner/toolchain change, the same reasoning
 `check_mutation_score.py`'s `SURVIVOR_BASELINE` bootstrap avoids);
-`header-graph-regression` follows this page's own `--baseline`/`--regress-tolerance`
+The header-graph PR-vs-base gate (steps of the `l2-cli-perf` job since 2026-10, formerly its own `header-graph-regression` job on a separate runner) follows this page's own `--baseline`/`--regress-tolerance`
 same-runner base-vs-head pattern (see [Baseline regression](#baseline-regression)
 below) and gates from day one, since that pattern never needs a stale
 committed number to begin with.
@@ -722,7 +742,7 @@ convention — root `AGENTS.md`):
   it for real needs its own dedicated pass, reviewed on its own terms rather
   than folded into an unrelated CI-tooling PR.
 - **Per-job shard classification.** The `classify` job (see "CI integration"
-  above) reports one shared `run` output gating all four downstream jobs
+  above) reports one shared `run` output gating every downstream PR job
   uniformly — the exact same set of jobs a changed path used to trigger
   together under the old `paths:` filter, just moved into tested code.
   Splitting `PERF_SENSITIVE_PATTERNS` into separate shards (e.g. one gating
@@ -758,7 +778,7 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
 | **Fuzzy rename matching (accept path)** | ✅ covered | `fuzzy_rename_churn` — every symbol genuinely renamed → one `func_likely_renamed` per pair, the cost driver P11-refined identified (ICU 2134 renames = 94.5 s; rename detection, *not* symbol count, dominates). The pre-existing `rename_churn` only exercised the *reject* path (disjoint names, zero matches). Linear at ICU scale (≤8 k). |
 | **Version-node migration fan-out (LLVM bump)** | ✅ covered | `version_node_churn` — every export moves `LIB_1.0 → LIB_2.0`, reproducing the LLVM 17→18 36,991-`symbol_moved_version_node` shape and the post-processing fan-out over it. Linear to 50 k. |
 | Peak memory (all scenarios) | ✅ covered | `tracemalloc` `peak_mb` column + `--max-memory-mb` gate (cold-cache pass), **plus** process `rss_mb` (`resource.getrusage`) + `--max-rss-mb` gate — RSS catches native (pyelftools / `c++filt`) allocations `tracemalloc` cannot see (the ~330 MiB LLVM-scale figure). |
-| **Historical / PR-vs-base memory regression** | ✅ covered (gating) | `--regress-memory-tolerance`/`--regress-min-delta-mb` + the `memory-regression` workflow job compare peak tracked heap against the base branch under `max(20%, 4 MiB)`. Before it, memory was gated only against an absolute ceiling, which a doubling well under that ceiling passed silently. See [Memory regression](#memory-regression). |
+| **Historical / PR-vs-base memory regression** | ✅ covered (gating) | `--regress-memory-tolerance`/`--regress-min-delta-mb` + the memory half of the `regression` workflow job compare peak tracked heap against the base branch under `max(20%, 4 MiB)`. Before it, memory was gated only against an absolute ceiling, which a doubling well under that ceiling passed silently. See [Memory regression](#memory-regression). |
 | **Historical / PR-vs-base regression** | ✅ covered (now gating) | `--baseline`/`--regress-tolerance` + the `regression` workflow job measure the base branch and PR head on the same runner and flag scenarios that got slower by more than the tolerance — catching *gradual* drift the per-run exponent misses. `continue-on-error` is dropped, so it now blocks. See [Baseline regression](#baseline-regression). |
 | **Dump / snapshot creation (DWARF/PE/PDB)** | ⚠️ partial | The synthetic harness can't run the real parsers. The ELF **symbol-table** parse **and** the **DWARF** debug-info parse (`-g` build) are now guarded by `tests/test_perf_dump_scaling.py` (`integration`, gcc-only) — DWARF being the dominant real-library dump cost (ICU 18.6 MB snapshot, openblas 23 MB / 9.5 s). The `serialize` scenario proxies the rest of the pipeline. **PE/COFF + PDB parsing remains unbenchmarked** — those need a committed binary or a synthetic byte-stream generator (no Linux-only toolchain produces them). |
 | Appcompat HTML / stack analysis / appcompat filtering | ⚠️ not benchmarked | `stack_checker` runs one `compare()` per dependency (inherent). Appcompat filtering uses set-membership lookups (`appcompat.py` — O(1) per change, **likely already fine**) and `appcompat_html.py` is linear by inspection; neither is timed. |
@@ -808,7 +828,8 @@ python scripts/benchmark_scaling.py --repeat 5 \
 ### Memory regression
 
 The rule above gates *time*. Peak memory has had the same treatment since the
-`memory-regression` workflow job was added:
+memory gate was added (originally its own `memory-regression` workflow job,
+now the second half of the `regression` job):
 
 ```bash
 # Same two-step shape, with memory tracking left ON (no --no-memory), and
@@ -843,14 +864,19 @@ nothing", which would otherwise flag every point in every run. The timing gate
 still fails closed on an empty baseline, so a wholly missing or malformed
 baseline is still caught.
 
-**Why this is a separate CI job** (`memory-regression`, not another flag on
-`regression`): tracing the heap is not timing-neutral. `measure()`'s memory
+**Why this is a separate measurement run** (the memory half of the
+`regression` job, not another flag on its timing run): tracing the heap is not timing-neutral. `measure()`'s memory
 pass clears every live `lru_cache` between sizes and runs an extra untimed
 cold call, which is precisely the bias the timing job's own `--no-memory`
 comment documents. Timing and memory therefore cannot be gated from one run.
-In the memory job memory is on for *both* sides, so that bias applies equally
+In the memory run memory is on for *both* sides, so that bias applies equally
 and cancels; the timing tolerance there is explicitly neutralised
-(`--regress-tolerance 100`) so a distorted timing can never fail a memory job.
+(`--regress-tolerance 100`) so a distorted timing can never fail the memory
+gate. The two runs need two *runs*, not two *runners*: they share one job,
+one checkout pair and one pair of venvs, and the memory steps start only after
+the timing steps have finished, so tracing never overlaps a timed
+measurement. (Until 2026-10 they were two jobs, which checked out and
+installed both sides twice on two runners for no measurement benefit.)
 
 **What it closes.** `peak_mb` was recorded long before it was gated, and was
 checked only against the absolute ceilings `--max-memory-mb`/`--max-rss-mb`.

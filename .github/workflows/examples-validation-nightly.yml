@@ -7,9 +7,9 @@ name: Examples Validation (nightly cross-platform)
 #
 # Windows/MinGW PE is intentionally NOT here: the example autodiscovery harness
 # requires castxml (not reliably installable on the Windows runner), so it could
-# only skip-all. Native PE-on-Windows coverage already lives in ci.yml's BLOCKING
-# `cross-platform-e2e` lane (MinGW gcc + ABICHECK_MIN_EXECUTED=5, castxml-free),
-# which runs on every PR — a nightly duplicate would add no real coverage.
+# only skip-all. Native PE-on-Windows coverage already lives in integration.yml's
+# `native-compare` step (MinGW gcc + ABICHECK_MIN_EXECUTED=5, castxml-free),
+# which runs on every engine PR — a nightly duplicate would add no real coverage.
 on:
   schedule:
     - cron: "23 4 * * *"

@@ -264,11 +264,11 @@ use_cases:
     status: complete
     note: >
       G1 (Windows half) closed. The `compare` workflow is validated end-to-end
-      on native PE binaries in CI: the `cross-platform-e2e` lane builds DLLs
+      on native PE binaries in CI: the `native-compare` CI step builds DLLs
       with MinGW gcc and drives `abicheck compare` directly (binary↔binary),
       asserting BREAKING on a removed export and COMPATIBLE on identical builds
       (tests/test_cross_platform_integration.py). The MSVC+PDB lane
-      (windows-msvc) now asserts both struct-growth (PDB layout) and
+      (`msvc` step) now asserts both struct-growth (PDB layout) and
       exported-function removal (PE export table) verdicts. PDB struct-layout
       extraction depth on some MSVC versions remains best-effort (tests skip
       rather than fail when a layout can't be parsed), and the example-catalog
@@ -284,7 +284,7 @@ use_cases:
     name: macOS Mach-O (x86-64 / ARM64)
     status: complete
     note: >
-      G1 (macOS half) closed. The `cross-platform-e2e` CI lane (macos-latest)
+      G1 (macOS half) closed. The `native-compare` CI step (macos-latest)
       builds .dylib files with Apple clang and drives `abicheck compare`
       directly on native Mach-O binaries, asserting BREAKING on a removed
       export and COMPATIBLE on identical builds

@@ -43,9 +43,9 @@ runs:
     # not just runner.os/runner.arch, because the installer picks a different
     # asset per Ubuntu release as well as per architecture.
     # SHA-pinned, unlike the sibling cache-ast-dumps action which may stay on
-    # a mutable tag: this composite is invoked from ci.yml's integration-tests,
-    # which grants `id-token: write`, and AGENTS.md requires a full commit SHA
-    # for actions running in ci.yml's OIDC-enabled jobs — a re-pointed tag
+    # a mutable tag: this composite is invoked from integration.yml's integration
+    # job, which grants `id-token: write`, and AGENTS.md requires a full commit
+    # SHA for actions running in OIDC-enabled jobs — a re-pointed tag
     # there would execute with access to that job's OIDC credential.
     # (Codex review on PR #685.)
     - name: Cache pinned CastXML

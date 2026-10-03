@@ -248,18 +248,124 @@ def test_exponent_gate_exempts_inherently_superlinear() -> None:
 
 
 def test_check_exponent_gate_flags_quadratic() -> None:
-    # Over budget with a meaningful (above-floor) timing → flagged.
-    assert bench._check_exponent_gate("s", 2.0, 1.4, peak_seconds=1.0)
-    assert bench._check_exponent_gate("s", 1.1, 1.4, peak_seconds=1.0) == []  # linear
-    assert bench._check_exponent_gate("s", None, 1.4, peak_seconds=1.0) == []  # no data
+    # Over budget with both tail points above the floor -> flagged.
+    assert bench._check_exponent_gate("s", 2.0, 1.4, tail_low_seconds=1.0)
+    assert bench._check_exponent_gate("s", 1.1, 1.4, tail_low_seconds=1.0) == []
+    assert bench._check_exponent_gate("s", None, 1.4, tail_low_seconds=1.0) == []
 
 
 def test_check_exponent_gate_skips_sub_floor_noise() -> None:
-    """A sub-50 ms scenario's exponent is noise — never gated, even if huge."""
-    assert bench._check_exponent_gate("s", 5.0, 1.4, peak_seconds=0.001) == []
-    # Default peak_seconds is inf, so omitting it keeps the old (always-gate)
+    """A slope whose lower endpoint is noise is never gated, even if huge."""
+    assert bench._check_exponent_gate("s", 5.0, 1.4, tail_low_seconds=0.001) == []
+    # Default tail_low_seconds is inf, so omitting it keeps the always-gate
     # behaviour for callers that don't pass timings.
     assert bench._check_exponent_gate("s", 5.0, 1.4)
+
+
+# ── The floor binds the slope's NOISIER endpoint, not its peak ───────────────
+#
+# Bug class: the noise floor was checked against the scenario's peak time, so
+# a scenario whose largest point had just crossed it was gated on a slope
+# whose other endpoint sat deep in jitter. report_sarif (0.10 s / 0.25 s)
+# then read 1.48 against a 1.4 budget on unchanged code. The invariant, for
+# ANY two tail points: the gate may fire only when BOTH are at or above the
+# floor. Enumerated exhaustively over a small domain spanning both sides of the
+# floor, every input order, and an extra smaller point that must never matter.
+
+_FLOOR = bench.EXPONENT_FLOOR_SECONDS
+_TIMES = (0.001, 0.05, 0.1, _FLOOR - 1e-9, _FLOOR, 0.25, 0.5, 2.0)
+
+
+def _oracle_low(points: list[tuple[int, float]]) -> float:
+    """Independent derivation: the lower time of the two largest sizes."""
+    by_size = {}
+    for size, seconds in points:
+        if seconds > 0:
+            by_size[size] = seconds
+    sizes = sorted(by_size)
+    if len(sizes) < 2:
+        return 0.0
+    return min(by_size[sizes[-1]], by_size[sizes[-2]])
+
+
+@pytest.mark.parametrize("t_small", (0.001, 0.3))
+@pytest.mark.parametrize("t_a", _TIMES)
+@pytest.mark.parametrize("t_b", _TIMES)
+@pytest.mark.parametrize("reverse", (False, True))
+def test_tail_low_seconds_is_the_lower_of_the_two_largest_points(
+    t_small: float, t_a: float, t_b: float, reverse: bool
+) -> None:
+    raw = [(500, t_small), (2000, t_a), (4000, t_b)]
+    pts = [bench.Point(s, sec, s) for s, sec in (reversed(raw) if reverse else raw)]
+    assert bench.tail_low_seconds(pts) == _oracle_low(raw)
+
+
+@pytest.mark.parametrize("t_a", _TIMES)
+@pytest.mark.parametrize("t_b", _TIMES)
+def test_exponent_gate_fires_only_when_both_tail_points_clear_the_floor(
+    t_a: float, t_b: float
+) -> None:
+    # A wildly super-linear slope, so only the floor can keep it from firing.
+    pts = [bench.Point(2000, t_a, 2000), bench.Point(4000, t_b, 4000)]
+    fired = bool(
+        bench._check_exponent_gate(
+            "s", 3.0, 1.4, tail_low_seconds=bench.tail_low_seconds(pts)
+        )
+    )
+    assert fired == (t_a >= _FLOOR and t_b >= _FLOOR), (t_a, t_b)
+
+
+def test_floor_oracle_is_not_vacuous() -> None:
+    """Both outcomes must occur in the domain, or the sweep above proves nothing."""
+    outcomes = {(a >= _FLOOR and b >= _FLOOR) for a in _TIMES for b in _TIMES}
+    assert outcomes == {True, False}
+
+
+def test_tail_low_seconds_with_no_tail_pair_is_below_any_floor() -> None:
+    assert bench.tail_low_seconds([]) == 0.0
+    assert bench.tail_low_seconds([bench.Point(1000, 5.0, 1000)]) == 0.0
+    assert bench.tail_low_seconds([bench.Point(1000, 0.0, 1000)] * 2) == 0.0
+
+
+def test_every_gated_scenario_has_a_tail_pair() -> None:
+    """A gated scenario whose default sweep has <2 sizes can never be gated."""
+    for name, spec in bench.SCENARIOS.items():
+        if spec.gate_exponent:
+            sizes = [s for s in spec.sizes if s <= spec.max_size]
+            assert len(set(sizes)) >= 2, name
+
+
+def test_cheap_gated_scenarios_sweep_one_step_up() -> None:
+    """The scenarios that straddled the floor on DEFAULT_SIZES measure higher.
+
+    Measured 2026-10-03 (repeat 5): each had its 2000-point under 0.15 s, so
+    its tail slope rested on jitter. Moving the sweep keeps them gated; this
+    pins it so a later edit cannot quietly put them back on the noisy ladder.
+    """
+    shifted = (
+        "pe_churn",
+        "macho_churn",
+        "var_churn",
+        "report_html",
+        "report_sarif",
+        "report_junit",
+    )
+    for name in shifted:
+        assert bench.SCENARIOS[name].sizes == bench.TAIL_ABOVE_FLOOR_SIZES, name
+        assert bench.SCENARIOS[name].gate_exponent is True, name
+    assert bench.SCENARIOS["fuzzy_rename_churn"].sizes[-2:] == (4000, 8000)
+    assert bench.SCENARIOS["onedal_mass_removal"].sizes[-2:] == (2000, 4000)
+    # Its 1000 point read 0.17 s on CI and 0.20 s locally: on the floor, so it
+    # would flip between gated and inactive run to run (Copilot review).
+    assert bench.SCENARIOS["versioned_rename_churn"].sizes[-2:] == (2000, 4000)
+    for name in (
+        *shifted,
+        "fuzzy_rename_churn",
+        "onedal_mass_removal",
+        "versioned_rename_churn",
+    ):
+        spec = bench.SCENARIOS[name]
+        assert max(spec.sizes) <= spec.max_size, name
 
 
 def test_check_rss_gate_flags_over_budget() -> None:
@@ -705,53 +811,104 @@ def _step_run_text(job: dict) -> str:
     return "\n".join(out)
 
 
-def test_memory_regression_job_exists_and_gates_on_a_baseline() -> None:
-    jobs = _performance_workflow()["jobs"]
-    assert "memory-regression" in jobs, (
-        "the memory gate has no CI job, so nothing runs it on a PR"
+def _run_text(steps: list[dict]) -> str:
+    return _step_run_text({"steps": steps})
+
+
+def _regression_steps(*, memory: bool) -> list[dict]:
+    """The `regression` job's benchmark-invoking steps, split by half.
+
+    Time and memory are measured by two separate runs inside the one
+    `regression` job (they share a runner and the two venvs, never a run).
+    A step belongs to the memory half iff it gates or records peak memory
+    against the base; everything else that runs the benchmark is the timing
+    half. Classified by what each step *runs*, not by its name.
+    """
+    job = _performance_workflow()["jobs"]["regression"]
+    out = []
+    for step in job.get("steps", []):
+        body = _run_text([step])
+        if "benchmark_scaling.py" not in body:
+            continue
+        is_memory = "base-memory.json" in body
+        if is_memory == memory:
+            out.append(step)
+    return out
+
+
+def test_memory_regression_gate_exists_and_gates_on_a_baseline() -> None:
+    steps = _regression_steps(memory=True)
+    assert steps, "the memory gate has no CI step, so nothing runs it on a PR"
+    runs = _run_text(steps)
+    assert "--baseline base-memory.json" in runs, (
+        "memory half never compares against a base measurement"
     )
-    runs = _step_run_text(jobs["memory-regression"])
-    assert "--baseline" in runs, "memory job never compares against a base measurement"
     assert "--regress-memory-tolerance" in runs
     assert "--regress-min-delta-mb" in runs
 
 
-def test_memory_regression_job_actually_measures_memory() -> None:
-    """--no-memory would make the whole job vacuous: every peak would be None,
-    the gate would compare nothing, and the job would pass unconditionally."""
-    runs = _step_run_text(_performance_workflow()["jobs"]["memory-regression"])
-    assert "--no-memory" not in runs
+def test_memory_regression_steps_actually_measure_memory() -> None:
+    """--no-memory would make the whole gate vacuous: every peak would be None,
+    the gate would compare nothing, and the step would pass unconditionally."""
+    assert "--no-memory" not in _run_text(_regression_steps(memory=True))
 
 
-def test_memory_regression_job_does_not_also_gate_timing() -> None:
+def test_memory_regression_steps_do_not_also_gate_timing() -> None:
     """Timings taken under tracemalloc are distorted by construction.
 
     Gating them here would fail PRs for an artifact of the instrument, so the
     timing tolerance is explicitly neutralised rather than left at its
     default.
     """
-    runs = _step_run_text(_performance_workflow()["jobs"]["memory-regression"])
-    assert "--regress-tolerance 100" in runs
+    assert "--regress-tolerance 100" in _run_text(_regression_steps(memory=True))
 
 
-def test_memory_regression_job_is_not_advisory() -> None:
-    """`continue-on-error` would make this report-only, not a gate."""
-    job = _performance_workflow()["jobs"]["memory-regression"]
+def test_regression_job_is_not_advisory() -> None:
+    """`continue-on-error` would make either half report-only, not a gate."""
+    job = _performance_workflow()["jobs"]["regression"]
     assert job.get("continue-on-error") in (None, False)
     for step in job.get("steps", []):
         assert step.get("continue-on-error") in (None, False)
 
 
-def test_timing_regression_job_still_excludes_memory() -> None:
-    """The two jobs must stay split.
+def test_timing_regression_still_excludes_memory() -> None:
+    """The two *runs* must stay split, even though they share a job.
 
-    If someone 'simplifies' by dropping --no-memory from the timing job, its
+    If someone 'simplifies' by dropping --no-memory from the timing run, its
     measurements silently acquire the lru_cache-clearing bias that flag exists
     to remove -- which would corrupt the timing gate rather than improve the
-    memory one.
+    memory one. Every timing-half invocation is checked, base and head.
     """
-    runs = _step_run_text(_performance_workflow()["jobs"]["regression"])
-    assert "--no-memory" in runs
+    steps = _regression_steps(memory=False)
+    assert len(steps) == 2, [s.get("name") for s in steps]
+    for step in steps:
+        assert "--no-memory" in _run_text([step]), step.get("name")
+
+
+def test_memory_half_runs_strictly_after_the_timing_half() -> None:
+    """Sharing a runner is safe only if tracing never overlaps a timed run.
+
+    Steps in one job run sequentially, so the guarantee is that every memory
+    step comes after every timing step. Also, the memory half must still run
+    when the timing gate failed (or a timing regression would hide the memory
+    verdict), which is what its `success() || failure()` condition states.
+    """
+    job = _performance_workflow()["jobs"]["regression"]
+    steps = job["steps"]
+    timing = [steps.index(s) for s in _regression_steps(memory=False)]
+    memory = [steps.index(s) for s in _regression_steps(memory=True)]
+    assert timing and memory
+    assert max(timing) < min(memory)
+    for i in memory:
+        cond = str(steps[i].get("if", ""))
+        assert "failure()" in cond and "success()" in cond, cond
+
+
+def test_memory_regression_job_was_folded_not_dropped() -> None:
+    """The standalone job is gone; its gate must live on in `regression`."""
+    jobs = _performance_workflow()["jobs"]
+    assert "memory-regression" not in jobs
+    assert _regression_steps(memory=True)
 
 
 # ── Non-finite baseline values, and a memory gate that compared nothing ──────
