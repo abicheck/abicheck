@@ -51,8 +51,8 @@ import json
 import subprocess
 import sys
 import tomllib
-from collections.abc import Iterable, Mapping
-from pathlib import Path
+from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path, PurePosixPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -258,6 +258,33 @@ def _section(doc: Mapping[str, object], keys: tuple[str, ...]) -> object:
     return node
 
 
+def extend_selection(
+    selection: list[str], changed: list[str], exists: Callable[[str], bool]
+) -> list[str]:
+    """The stats-pass selection for a run whose diff changed *changed* paths.
+
+    Each added or changed ``tests/**/test_*.py`` that still exists joins the
+    committed selection, so a PR's own new tests are never left out of its
+    measurement. A changed shared test module (``conftest.py``, a helper)
+    can change which files reach mutated code in ways no path rule can see,
+    so it widens the run back to the whole suite. Never narrows.
+    """
+    out = list(selection)
+    for path in changed:
+        if (
+            not path.startswith("tests/")
+            or not path.endswith(".py")
+            or not exists(path)
+        ):
+            continue
+        if PurePosixPath(path).name.startswith("test_"):
+            if path not in out:
+                out.append(path)
+        else:
+            return ["tests/"]
+    return out
+
+
 def pyproject_mutation_config_changed(old_text: str | None, new_text: str) -> bool:
     """Did any `MUTATION_RELEVANT_PYPROJECT_KEYS` section change?
 
@@ -275,6 +302,18 @@ def pyproject_mutation_config_changed(old_text: str | None, new_text: str) -> bo
         _section(old, keys) != _section(new, keys)
         for keys in MUTATION_RELEVANT_PYPROJECT_KEYS
     )
+
+
+def _git_changed_paths(base: str) -> list[str]:
+    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+        ["git", "diff", "--name-only", "--diff-filter=AMR", base, "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    return [line for line in proc.stdout.splitlines() if line]
 
 
 def _git_show(ref: str, path: str) -> str | None:
@@ -307,6 +346,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Print true/false: did the mutation-relevant pyproject config change?",
     )
     cfg.add_argument("--base-ref", required=True)
+    ext = sub.add_parser(
+        "extend-selection",
+        help="Add this branch's changed test files to the stats-pass selection file.",
+    )
+    ext.add_argument("--base-ref", required=True)
+    ext.add_argument("--selection", required=True)
     merge = sub.add_parser("merge-baselines", help="Merge per-shard baseline parts.")
     merge.add_argument("parts", nargs="+")
     merge.add_argument("--out", required=True)
@@ -317,6 +362,24 @@ def main(argv: list[str] | None = None) -> int:
         old = _git_show(base, "pyproject.toml") if base else None
         new = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         print("true" if pyproject_mutation_config_changed(old, new) else "false")
+        return 0
+
+    if args.cmd == "extend-selection":
+        base = _merge_base(args.base_ref)
+        if base is None:
+            print(f"ERROR: no merge base with {args.base_ref}")
+            return 1
+        changed = _git_changed_paths(base)
+        path = Path(args.selection)
+        old_sel = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln]
+        new_sel = extend_selection(
+            old_sel, changed, lambda p: (REPO_ROOT / p).is_file()
+        )
+        path.write_text("\n".join(new_sel) + "\n", encoding="utf-8")
+        added = [p for p in new_sel if p not in old_sel]
+        print(
+            f"mutation-scope: stats selection {len(old_sel)} -> {len(new_sel)} entries: {added}"
+        )
         return 0
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))

@@ -80,6 +80,7 @@ jobs:
       run: ${{ steps.decide.outputs.run }}
       require_baseline: ${{ steps.decide.outputs.require_baseline }}
       shards: ${{ steps.plan.outputs.shards }}
+      check_selection: ${{ github.event_name != 'pull_request' || steps.changed.outputs.selection == 'true' || steps.pyproject.outputs.relevant == 'true' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -126,7 +127,17 @@ jobs:
               - 'tests/test_mutation_scope.py'
               - 'scripts/mutmut_stable_param_ids.py'
               - 'tests/test_mutmut_stable_param_ids.py'
+              - 'scripts/mutation_reach_trace.py'
+              - 'scripts/gen_mutation_test_selection.py'
+              - 'tests/mutation_test_selection.txt'
+              - 'tests/test_mutation_test_selection.py'
               - '.github/workflows/mutation.yml'
+            # The narrowed stats selection's own machinery: a change to any
+            # of these re-runs the completeness check (selection-check below).
+            selection:
+              - 'scripts/mutation_reach_trace.py'
+              - 'scripts/gen_mutation_test_selection.py'
+              - 'tests/mutation_test_selection.txt'
             # pyproject.toml is a candidate only: most edits (a dependency
             # pin, another tool's config) change nothing this lane measures.
             # The `pyproject` step below starts the lane only when
@@ -341,6 +352,13 @@ jobs:
           # zizmor template-injection).
           BASE_REF: ${{ github.base_ref }}
         run: |
+          # The stats pass runs tests/mutation_test_selection.txt; this PR's
+          # own added/changed test files join it for this run (a changed
+          # conftest/helper widens it to the whole suite), so a new test is
+          # never left out of its own PR's measurement. Before mutmut runs,
+          # because mutmut copies tests/ into mutants/ at start.
+          python3 scripts/mutation_scope.py extend-selection \
+            --base-ref "origin/$BASE_REF" --selection tests/mutation_test_selection.txt
           require=""
           if [ "$REQUIRE_BASELINE" = "true" ]; then
             require="--require-baseline"
@@ -421,12 +439,37 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+  selection-check:
+    # tests/mutation_test_selection.txt narrows mutmut's stats pass to the
+    # test files that can reach only_mutate code. A file that starts reaching
+    # it but is not listed has its kills silently uncounted (mutants read as
+    # survivors), so completeness is checked on every full run and whenever
+    # the selection machinery changes. Runs in parallel with the shards, so
+    # it adds a runner but no wall time.
+    name: mutmut stats selection is complete
+    needs: resolve
+    if: needs.resolve.outputs.run == 'true' && needs.resolve.outputs.check_selection == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Every test file that reaches mutated code is selected
+        run: python scripts/gen_mutation_test_selection.py --check
+
   gate:
     # The single status the shards roll up into, under the check name this
     # lane has always reported. Skipped (like the shards) when resolve decided
     # not to run; otherwise green only when every shard succeeded.
     name: mutmut (detector core)
-    needs: [resolve, mutmut]
+    needs: [resolve, mutmut, selection-check]
     if: always() && needs.resolve.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -434,9 +477,12 @@ jobs:
       - name: Every shard must have passed
         env:
           SHARDS: ${{ needs.mutmut.result }}
+          SELECTION: ${{ needs.selection-check.result }}
         run: |
-          echo "shards: $SHARDS"
+          echo "shards: $SHARDS; selection check: $SELECTION"
           [ "$SHARDS" = "success" ]
+          # Skipped only when this run had nothing that could stale it.
+          [ "$SELECTION" = "success" ] || [ "$SELECTION" = "skipped" ]
       - uses: actions/checkout@v6
         if: github.event_name == 'workflow_dispatch' && inputs.write_baseline
       - uses: actions/download-artifact@v8

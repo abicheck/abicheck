@@ -100,6 +100,11 @@ _INFRASTRUCTURE_PATHS = {
     # the clean run before any mutant is tested.
     "scripts/mutmut_stable_param_ids.py",
     "tests/test_mutmut_stable_param_ids.py",
+    # The narrowed stats selection: its data, generator, trace and tests.
+    "scripts/mutation_reach_trace.py",
+    "scripts/gen_mutation_test_selection.py",
+    "tests/mutation_test_selection.txt",
+    "tests/test_mutation_test_selection.py",
     ".github/workflows/mutation.yml",
 }
 
@@ -201,6 +206,36 @@ def test_the_shard_plan_asks_the_question_each_run_step_answers() -> None:
                      "--scope-run-to-functions", "--require-baseline"):  # fmt: skip
             assert (flag in step["run"]) == (flag in branch), (event, flag)
     assert "--write-baseline" in plan.split("workflow_dispatch)", 1)[1]
+
+
+def test_the_selection_check_covers_every_run_that_could_stale_it() -> None:
+    """Completeness is checked on every full run and on any PR touching the
+    selection machinery, and the roll-up only tolerates it being skipped."""
+    wf = _workflow()["jobs"]
+    selection = set(_filters()["selection"])
+    assert selection == {
+        "scripts/mutation_reach_trace.py",
+        "scripts/gen_mutation_test_selection.py",
+        "tests/mutation_test_selection.txt",
+    }
+    assert selection <= set(_filters()["mutated"])
+    cond = wf["resolve"]["outputs"]["check_selection"]
+    assert "github.event_name != 'pull_request'" in cond
+    assert "steps.changed.outputs.selection == 'true'" in cond
+    job = wf["selection-check"]
+    assert "gen_mutation_test_selection.py --check" in job["steps"][-1]["run"]
+    assert "selection-check" in wf["gate"]["needs"]
+    gate_run = wf["gate"]["steps"][0]["run"]
+    assert '[ "$SELECTION" = "success" ] || [ "$SELECTION" = "skipped" ]' in gate_run
+
+
+def test_a_pr_run_widens_the_selection_before_mutmut_copies_the_tree() -> None:
+    steps = _workflow()["jobs"]["mutmut"]["steps"]
+    run = next(
+        s for s in steps if s.get("name") == "Run mutation testing (diff-scoped)"
+    )["run"]
+    assert run.index("extend-selection") < run.index("check_mutation_score.py --run")
+    assert "--selection tests/mutation_test_selection.txt" in run
 
 
 def test_no_step_expands_a_github_expression_inside_its_script() -> None:
