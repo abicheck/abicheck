@@ -558,6 +558,7 @@ def _build_corpus() -> dict[str, tuple[AbiSnapshot, AbiSnapshot]]:
         }
     )
     corpus = {k: (_snapshot("1.0", b), _snapshot("2.0", v)) for k, v in cases.items()}
+    corpus.update(_dedicated_pairs(b))
     for platform in ("pe", "macho"):
         for case in PLATFORM_CASES:
             old, new = corpus[case]
@@ -566,6 +567,46 @@ def _build_corpus() -> dict[str, tuple[AbiSnapshot, AbiSnapshot]]:
                 on_platform(new, platform),
             )
     return corpus
+
+
+def _pimpl_side(b: Side, member: str) -> Side:
+    """The case89 shape: a public class holding a pimpl to a ``detail::``
+    record, with public inline accessors whose bodies name *member*."""
+    impl = dataclasses.replace(
+        _rec("descriptor_impl", ((member, "int"), ("max_iter_", "int"))),
+        qualified_name="mylib::detail::descriptor_impl",
+        qualified_name_fact=Fact.present("mylib::detail::descriptor_impl"),
+    )
+    holder = _rec(
+        "descriptor", (("impl_", "shared_ptr<mylib::detail::descriptor_impl>"),)
+    )
+    accessor = dataclasses.replace(
+        _fn("get_class_count", "int", ()),
+        mangled="_ZNK5mylib10descriptor15get_class_countEv",
+        is_inline=True,
+        access=AccessLevel.PUBLIC,
+    )
+    return dataclasses.replace(
+        b,
+        types=(*b.types, impl, holder),
+        functions=(*b.functions, accessor),
+    )
+
+
+def _dedicated_pairs(b: Side) -> dict[str, tuple[AbiSnapshot, AbiSnapshot]]:
+    """Pairs whose OLD side is not the shared base.
+
+    * ``pimpl_inline_body_renamed`` (bug class
+      ``evidence.optional_layer_prerequisite_for_a_stated_fact``): the
+      ``detail::`` namespace is stated by the headers' ``qualified_name``, so
+      the BREAKING finding must survive every ablation -- DWARF included.
+    """
+    return {
+        "pimpl_inline_body_renamed": (
+            _snapshot("1.0", _pimpl_side(b, "class_count_")),
+            _snapshot("2.0", _pimpl_side(b, "iteration_cap_")),
+        ),
+    }
 
 
 CORPUS: dict[str, tuple[AbiSnapshot, AbiSnapshot]] = _build_corpus()

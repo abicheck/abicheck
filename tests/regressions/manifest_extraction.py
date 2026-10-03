@@ -92,4 +92,111 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.emulated_compiler_builtin_absent_from_frontend",
+        invariant=(
+            "A header-AST frontend that *emulates* another compiler makes the "
+            "system headers take that compiler's branches, so every type those "
+            "branches name as a builtin must exist in the frontend on every "
+            "target it parses for -- or be supplied, inert wherever the frontend "
+            "already provides it, and never attributed to the library's own "
+            "surface. castxml emulating g++ >= 13 left glibc's `_Float128` "
+            "(C++) and AArch64 `__Float32x4_t`/`__Float64x2_t` undefined on "
+            "AArch64, so every C++ header reaching `<cwchar>` and every header "
+            "reaching `<math.h>` failed to parse there."
+        ),
+        fixed_by=(1470,),
+        seed_tests=(
+            "tests/test_castxml_header_compat.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "frontend": ("castxml",),
+            "target": ("x86_64", "aarch64"),
+            "language": ("c", "c++"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the builtins glibc's GCC branches name on the "
+                    "targets this repo can reproduce (x86-64, AArch64 via a "
+                    "cross toolchain) are covered; s390x, RISC-V and "
+                    "LoongArch take the same `_Float128` block by the same "
+                    "guard but are not exercised by a real castxml run."
+                ),
+                reference="abicheck/extract/castxml_header_compat.py",
+            ),
+            KnownGap(
+                description=(
+                    "castxml's `mangled` attribute for a function taking "
+                    "`_Float128` is not the compiler's Itanium name on any "
+                    "target, so such a function reads as not exported."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="extraction.linker_summary_flag_read_as_the_fact",
+        invariant=(
+            "An artifact fact the binary records structurally (a relocation, a "
+            "section, a segment) is read from that structure, not only from a "
+            "summary flag some linker writes about it: a fact read from the "
+            "flag alone is false wherever that linker omits the flag. GNU ld "
+            "writes `DF_STATIC_TLS` for initial-exec TLS on x86-64 but not on "
+            "AArch64, so `static_tls_introduced` never fired there."
+        ),
+        fixed_by=(1470,),
+        seed_tests=(
+            "tests/test_elf_static_tls.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
+        axes={
+            "machine": ("x86_64", "aarch64"),
+            "tls_model": (
+                "global-dynamic",
+                "local-dynamic",
+                "initial-exec",
+                "local-exec",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Local-exec TLS linked into an AArch64 shared object "
+                    "leaves neither a relocation nor the flag, so nothing in "
+                    "the binary records it."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="scoping.system_header_layout_unrecognized",
+        invariant=(
+            "Every layout a toolchain uses for the target's own system headers "
+            "is recognized as a system root -- at any depth below it and "
+            "through the `..` spelling the compiler reports -- while a project "
+            "directory in the same position never is, so a dump keeps the "
+            "same declarations whichever toolchain layout produced them. A "
+            "Debian/Ubuntu cross toolchain's `/usr/<triple>/include` was not "
+            "recognized, so a cross-target dump kept every libc/libstdc++ "
+            "declaration (7,707 functions instead of 7)."
+        ),
+        fixed_by=(1470,),
+        seed_tests=(
+            "tests/test_cross_sysroot_system_headers.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "frontend": ("castxml",),
+            "layout": (
+                "usr/include",
+                "usr/<triple>/include",
+                "lib/gcc-cross/<triple>/<ver>/../../../../<triple>/include",
+            ),
+        },
+    ),
 )

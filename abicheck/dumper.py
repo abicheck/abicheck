@@ -167,6 +167,7 @@ from .errors import (
     UnsupportedCastxmlVersionError,
     ValidationError,
 )
+from .extract.castxml_header_compat import write_castxml_aggregate
 from .extract.export_symbol_identity import (
     itanium_export_function as _itanium_export_function,
     itanium_export_variable as _itanium_export_variable,
@@ -1073,10 +1074,7 @@ def _run_castxml_attempt(
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
     agg_ext = ".hpp" if force_cpp else ".h"
 
-    with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
-        for h in headers:
-            agg.write(f'#include "{h.resolve()}"\n')
-        agg_path = Path(agg.name)
+    agg_path = write_castxml_aggregate(headers, agg_ext)  # rmtree'd in `finally`
 
     cmd = _build_castxml_command(
         cc_bin,
@@ -1118,7 +1116,7 @@ def _run_castxml_attempt(
             result, out_xml, headers, force_cpp, castxml_bin=castxml_bin
         )
     finally:
-        agg_path.unlink(missing_ok=True)
+        shutil.rmtree(agg_path.parent, ignore_errors=True)
 
 
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)

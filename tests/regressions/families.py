@@ -123,6 +123,18 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F8",
+            title="Target and toolchain parity",
+            invariant=(
+                "The same sources and headers built or dumped for another target, "
+                "or through another toolchain's install layout, parse and yield "
+                "the same declaration surface and the same artifact facts; "
+                "target-specific evidence may add facts, never remove or "
+                "relocate the library's own."
+            ),
+            harness_tests=("tests/test_family_f8_target_parity.py",),
+        ),
+        Family(
             key="OTHER",
             title="CI, tooling, storage and trust-boundary surfaces",
             invariant=(
@@ -158,6 +170,7 @@ _F1 = (
     "coverage.discovery_derived_completeness",
     "guard.absent_capability_vs_real_failure",
     "registry.kind_completeness",
+    "evidence.optional_layer_prerequisite_for_a_stated_fact",
 )
 _F2 = (
     "serialization.persisted_field_not_decoded",
@@ -245,6 +258,11 @@ _F5 = tuple(
         "serialization.whole_document_materialised_to_write_it",
     ]
 )
+_F8 = (
+    "extraction.emulated_compiler_builtin_absent_from_frontend",
+    "extraction.linker_summary_flag_read_as_the_fact",
+    "scoping.system_header_layout_unrecognized",
+)
 _F7 = (
     "guard.differential_test_shares_state_with_itself",
     "invariant.blanket_assertion_over_widened_population",
@@ -294,6 +312,7 @@ for _key, _ids in (
     ("F4", _F4),
     ("F5", _F5),
     ("F7", _F7),
+    ("F8", _F8),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:
