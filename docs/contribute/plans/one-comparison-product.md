@@ -22,7 +22,9 @@ the lane-coverage bound was accepted (2026-10-02), and slices 9a (the
 2026-10-03) and 9c (`--post-manifest`'s config home,
 `contract.overlays.post_manifest`, 2026-10-03) and 9d (`--post-manifest`
 deleted, 2026-10-03) are done: `--contract` is `compare`'s one contract
-mechanism and Phase 9 has no executable slice left. Retiring
+mechanism and Phase 9 has no executable slice left. A 2026-10-03 re-triage
+of Phase 7's open list found one executable item the stale "P5 open" note had
+hidden: `compare --no-baseline DIR` (acceptance F-23). Retiring
 `CompareRequest.scope_public` is a separate, deferred Python-API decision.
 **Effort:** XL · **Risk:** high — this deleted a public command and moved
 capabilities between analysis paths. Phase ordering was the safety mechanism.
@@ -203,8 +205,8 @@ The "Current owner" column is the owner **at the 2026-09-06 audit**; every
 | 12 | Changed-path localization (`--since`, `--changed-path`) | `cli_scan.py`, `buildsource/poi.py` | `compare --since` / `--changed-path` | COMPARE-STAGE (per-run input, ADVANCED KEEP) | **Done** (Phase 2c). One owner, `workflows/changed_paths.py` |
 | 13 | Risk-driven evidence selection (`--depth auto`) | `risk.py`, `model/evidence_depth_levels.py` | — | **DELETE** | **Done** (2026-09-09, ruled (b) by ADR-068's second amendment). Unpinned `--depth` resolves to `headers` (`evidence_depth_levels.resolve_unpinned_level`). Documented breaking change: a job relying on escalation must pin its rung |
 | 14 | Risk rule overrides (`--risk-rules`) | `cli_scan_baseline._load_risk_rules` | — | **DELETE** | **Done** (ruled (b)): nothing left to tune once #13 selects nothing; no `risk:` config key |
-| 15 | CPython/`abi3` audit (`--abi3`) | `scan_abi3_resolve.py`, `scan_engine._run_abi3_audit` | `compare` candidate-side enrichment stage | COMPARE-STAGE; floor value is CONFIG (`python.abi3_floor`) | **Done** (Phase 2d). Precondition failure uses the exit-`7` axis. Arming from a declared floor alone is G26's (§6 Phase 7 table) |
-| 16 | Artifact-set / multi-library audit (`--artifact-set`) | `service_scan.run_scan_set`, `bundle.py` | `compare --no-baseline DIR` over ADR-065 members | DELETE (mode); capability preserved | Mode **deleted**. `compare --no-baseline DIR` still waits on ADR-065 S3 component inventories (P5) |
+| 15 | CPython/`abi3` audit (`--abi3`) | `scan_abi3_resolve.py`, `scan_engine._run_abi3_audit` | `compare` candidate-side enrichment stage | COMPARE-STAGE; floor value is CONFIG (`python.abi3_floor`) | **Done** (Phase 2d). Precondition failure uses the exit-`7` axis. A declared `python.abi3_floor` arms it with no flag (re-verified 2026-10-03) |
+| 16 | Artifact-set / multi-library audit (`--artifact-set`) | `service_scan.run_scan_set`, `bundle.py` | `compare --no-baseline DIR` over ADR-065 members | DELETE (mode); capability preserved | Mode **deleted**. `compare --no-baseline DIR` is not implemented yet (exit 64); its prerequisite, ADR-065 S3 (P5), has landed, so it is the next executable slice |
 | 17 | Set member-identity/provider manifest (`scan --manifest`) | `cli_scan_helpers.load_artifact_set_manifest`; ADR-056; cli-cleanup PR H | `.abicheck.yml` bundle/provider contract, read by the same path | CONFIG | `scan` side deleted; PR H cancelled. Provider resolution is G42's |
 | 18 | Analysis completeness/assurance | `analysis_assurance`, `--require-complete-analysis` (both commands) | `compare` (already present) | MERGE | **Done.** Flag demoted to `assurance.require_complete` after Phase 6 |
 | 19 | Budget guard (`--budget`) | `scan_engine._check_scan_budget`, `_BudgetOverflow`, exit `5` | `compare --budget`, `ExitDecision` operational axis | ADVANCED KEEP; default in CONFIG | **Done** (Phase 4 commit 2). `deadline.deadline_scope` across resolve + classify; `DiffResult.budget_overflow`; typed API `CompareRequest.budget_s` |
@@ -459,7 +461,7 @@ Six cross-cutting blockers. Each gated a whole phase, not one row.
 | P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Landed** as a deliberately distinct enum from Phase 1's cross-comparison `FindingEvolution`: `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution`, produced by `workflows.cross_source_evolution.compute_cross_source_evolution`, projected by `report.cross_source_evolution`. Per-finding identity is a per-check function (a bare `symbol` key collapsed distinct findings for several checks). The correctness crux — a pre-existing problem never reads as newly introduced when one side's evidence is insufficient — is a property test for all eleven checks |
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion | **Landed** (Phase 4 commit 2); §3 #19/#28 |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public_header_dirs` | §3 #4, #5, #22 | **Solved** for both sources, threaded into `InputSpec.public_header_dirs`/`provenance.apply_provenance`. No new CLI flag. The file-vs-directory asymmetry is preserved verbatim (see `workflows/cross_source_evolution.py`'s module docstring) |
-| P5 | ADR-065 S3's package component inventories | `compare --no-baseline DIR` (§3 #16, #17); `--select-required` merge | **Open** — workstream A's, not this plan's |
+| P5 | ADR-065 S3's package component inventories | `compare --no-baseline DIR` (§3 #16, #17); `--select-required` merge | **Landed** (ADR-065 S3, 2026-09-06): `model/package_inventory.py`, `package.package_component_inventory`. This row read "Open" until 2026-10-03 |
 | P6 | `EntityId`-based public closure (ADR-063 Phase 2) and `public-contract-default.md` Phase 6's two relevance defects plus two uncovered measurement lanes | Phase 9 only | **Defects closed (2026-10-01).** The seed mismatch was closed earlier; the identity gap is closed by schema v54 slot identities captured at extraction, not by a string heuristic. The `package`/`real_binaries` coverage bound was **accepted** (2026-10-02, integration-tested rather than in the always-on measurement) |
 
 P1 and P5 are ADR-065 work this plan consumes rather than owns; starting them
@@ -881,8 +883,8 @@ old=|new=` operand is **future direction owned by G42**, not a reduction; its
 acceptance bar keeps same-run enrichment and forbids defaulting to the
 current host.
 
-**Smaller audit items.** `--abi3` armed from a declared floor — adopted in
-part, owned by G26, never inferred from sniffing the binary.
+**Smaller audit items.** `--abi3` armed from a declared floor — **done**
+(`python.abi3_floor` arms it; never inferred from sniffing the binary).
 `--dump-manifest`/`--include-system-declarations` as capture contract — a
 live disagreement pending G34's capture specification (one spec for `dump`,
 `abicheck-cc` and the Clang plugin). `deps`' defaulted `/` root — **done**:
@@ -921,19 +923,22 @@ document's demangle pass so rule labels stay verbatim.
 `tests/test_release_suppression_audit.py` uses the single-pair report as the
 oracle across four rule sets.
 
-**What remains in Phase 7.** Nothing executable. Every remaining item is
-gated on a named prerequisite or owned elsewhere — this table is the
-authoritative open list:
+**What remains in Phase 7.** Re-triaged against the tree on 2026-10-03
+(several owner pointers had gone stale). This table is the authoritative
+open list:
 
 | Item | Where it is |
 |---|---|
 | ~~`--scope-public-headers`, `--post-manifest`~~ | **Done** — Phase 9b/9c/9d (2026-10-03); `--contract` is the one contract mechanism |
-| `--instantiation-manifest`, `--use-cases`, `--bundle-facts-library-manifest`, `--bundle-facts-out` | `deferred`/keep rulings with named blockers in `rulings.py` |
+| `--instantiation-manifest` | `deferred` in `rulings.py`. Its blocker, a coordinated `contract.*` config home, is half-built: Phase 9c added `.abicheck.yml`'s `contract:` block, but `ContractConfig.overlays` is not yet populated through the ADR-049 D7 resolver (no receipt provenance for it). Routing `contract.overlays` through D7 is the prerequisite slice; the manifest can then join `OVERLAY_KINDS` |
+| `--use-cases`, `--bundle-facts-library-manifest` | `deferred` in `rulings.py`, blocked on G29/ADR-057's `use_cases:` block and G42 respectively (neither landed) |
+| `--bundle-facts-out` | a permanent keep in `rulings.py` (revisit only if `dump` gains a release fan-out) — not open |
 | `--follow-deps`/`--search-path`/`--ld-library-path` → one `--environment` operand | G42 |
-| `--abi3` armed from a declared floor | G26 |
-| `--dump-manifest`, `--include-system-declarations` → capture contract; one capture specification for `dump`/`abicheck-cc`/the Clang plugin | G34 |
-| `--severity-preset` merged into policy selection | declined for now — needs gate-activation convergence first |
-| `--select-required` merged into an expected inventory | ADR-065 P5 (package component inventories) |
+| ~~`--abi3` armed from a declared floor~~ | **Done** — `compare_enrichment.py` arms the audit from `python.abi3_floor` when the flag is absent (`test_config_supplies_the_floor`). The old G26 pointer was wrong: G26 is the NumPy C-API envelope plan and never owned this |
+| `--dump-manifest`, `--include-system-declarations` → capture contract; one capture specification for `dump`/`abicheck-cc`/the Clang plugin | **Unowned.** G34's phases (0, A–D) contain no capture-specification phase, so the pointer named nothing. Needs a plan slice written before it can move; both flags stay `keep` until then |
+| `--severity-preset` merged into policy selection | declined for now — needs gate-activation convergence first. `EffectiveGate` covers single-pair `compare` and the release fan-out, but the `--no-baseline` audit still switches its gate on from the preset's *name* (`policy/audit_gate_exit.py`); no plan slice owns that convergence yet |
+| `--select-required` merged into an expected inventory | P5 has **landed** (ADR-065 S3, 2026-09-06). What is missing is a decision: whether a declared expected-inventory config key should exist at all, since `rulings.py` keeps `--select`/`--select-required` as distinct concepts |
+| `compare --no-baseline DIR` (§3 #16, acceptance F-23) | **Executable** — its prerequisite P5 landed; tracked as the next slice |
 | `dump --compression`, `--dry-run`→`--plan`, `--used-by-manifest`→`--used-by @FILE` | declined with a measurement (7k/7l) |
 
 ### Phase 8 — `deps` convergence (ADR-068 D6) — done
