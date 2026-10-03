@@ -203,6 +203,15 @@ def _need_linux_and_all_bins(*names: str) -> Callable[[], str | None]:
     return check
 
 
+def _need_castxml_and_system_zlib() -> str | None:
+    """castxml plus the distro zlib that scripts/demo_libz.py dumps."""
+    if shutil.which("castxml") is None:
+        return "castxml not found on PATH"
+    if not Path("/usr/include/zlib.h").is_file():
+        return "/usr/include/zlib.h not found (install zlib1g-dev)"
+    return None
+
+
 def _need_platform_and_bins(
     per_platform: dict[str, tuple[str, ...]],
 ) -> Callable[[], str | None]:
@@ -698,6 +707,18 @@ STEPS: tuple[Step, ...] = (
         description="ABICC parity lane (marker-scoped)",
     ),
     Step(
+        # The one end-to-end run over a real *system* library (ci.yml's `e2e`
+        # job): dump the distro's libz with its real zlib.h through CastXML,
+        # mutate the snapshot, and assert the verdict and the three kinds
+        # (scripts/demo_libz.py). Routed through here so ci.yml calls this
+        # step instead of keeping its own copy of the command.
+        "demo-libz",
+        _pyscript("scripts/demo_libz.py"),
+        frozenset({FULL}),
+        precondition=_need_castxml_and_system_zlib,
+        description="End-to-end dump/compare of the system libz with its real headers",
+    ),
+    Step(
         "slow",
         # ci.yml's `slow-tests` job runs this step and "slow-perf" below via
         # `verify.py --profile full --only slow,slow-perf --junit-dir .`, so
@@ -726,6 +747,12 @@ STEPS: tuple[Step, ...] = (
             "slow",
             "--ignore=tests/test_performance.py",
             "--ignore=tests/test_header_scan_deadline_integration.py",
+            # Skip collecting the ~64k-test tree's modules that never mention
+            # `slow` (tests/pytest_marker_prefilter.py): `-m slow` keeps a few
+            # hundred tests, but collection imported every module in every
+            # xdist worker first. tests/test_marker_prefilter.py proves the
+            # prefiltered selection equals the full one.
+            "--collect-mentioning=slow",
             "--tb=short",
             "-n",
             "auto",
@@ -1009,6 +1036,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--list", action="store_true", help="List the steps for --profile and exit"
     )
     parser.add_argument(
+        "--require-complete",
+        action="store_true",
+        help=(
+            "Treat a skipped step as a failure for any profile (the `pr` "
+            "profile always does). For a CI job that installs a step's tools "
+            "itself: a missing tool there is a broken job, not a skip."
+        ),
+    )
+    parser.add_argument(
         "--junit-dir",
         metavar="DIR",
         default=None,
@@ -1059,7 +1095,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # makes a `pr`-profile run genuinely incomplete, not just imperfect — so
     # it fails, the same as `n_failed`, rather than merely warning. A partial
     # result must never exit 0 and be mistaken for a complete one.
-    incomplete = args.profile == PR and n_skipped > 0
+    incomplete = (args.profile == PR or args.require_complete) and n_skipped > 0
     overall = "failed" if n_failed else "incomplete" if incomplete else "passed"
 
     print(
@@ -1067,7 +1103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if incomplete:
         print(
-            f"WARNING: this `pr`-profile run is INCOMPLETE — skipped "
+            f"WARNING: this `{args.profile}`-profile run is INCOMPLETE — skipped "
             f"{', '.join(skipped_names)}. It is not a full substitute for CI "
             f"until the missing tool(s)/module(s) are installed. Treating this "
             f"as a failure (exit 1), not a pass."

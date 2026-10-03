@@ -146,7 +146,8 @@ def scan_one(entry: dict) -> dict:
 
 # ── source tier (L3/L4/L5) ───────────────────────────────────────────────────
 # For manifest entries carrying a `source:` block we clone the repo at each tag,
-# configure it (cmake → compile_commands.json), dump the source ABI surface, and
+# configure it (cmake → compile_commands.json), build the library target, dump
+# the built .so with its public headers and the target's own TUs, and
 # record L3 build / L4 source-ABI / L5 graph coverage. Gated on git+cmake (and
 # clang for a non-partial L4); a missing tool or build failure is recorded as a
 # skipped/errored row, never a crash — the binary tier stays the always-on lane.
@@ -164,14 +165,33 @@ def _list_len(obj: object) -> int:
     return len(obj) if isinstance(obj, list) else 0
 
 
-def _source_coverage(snap: dict) -> dict:
-    """Count the embedded L3/L4/L5 facts in a ``dump --sources`` snapshot (pure).
+def _load_build_source(snapshot_path: Path) -> dict:
+    """The embedded L3/L4/L5 pack of a written snapshot, as a plain dict.
 
-    Reads the inline ``build_source`` payload (``BuildSourcePack.to_embedded_dict``)
-    and returns per-layer counts plus the manifest coverage-status map, defending
-    against a missing/partial payload so a configure-only tree still yields a row.
+    Decoded through abicheck's own public codec (``serialization.load_snapshot``)
+    and ``BuildSourcePack.to_embedded_dict`` rather than by indexing the raw
+    JSON: the on-disk layout is a storage detail that moved (the pack now sits
+    under ``sections.build.payload``), and a raw-key reader written against the
+    old top-level ``build_source`` key read ``{}`` from every snapshot -- so
+    every source-tier row reported 0 compile units / 0 declarations while the
+    snapshots themselves were full, and the lane failed for a reason that had
+    nothing to do with collection.
     """
-    bs = snap.get("build_source") or {}
+    from abicheck.serialization import load_snapshot
+
+    pack = load_snapshot(snapshot_path).build_source
+    return pack.to_embedded_dict() if pack is not None else {}
+
+
+def _source_coverage(bs: dict) -> dict:
+    """Count the L3/L4/L5 facts in an embedded build/source pack (pure).
+
+    *bs* is ``BuildSourcePack.to_embedded_dict()`` output (see
+    :func:`_load_build_source`). Returns per-layer counts plus the manifest
+    coverage-status map, defending against a missing/partial payload so a
+    configure-only tree still yields a row.
+    """
+    bs = bs or {}
     be = bs.get("build_evidence") or {}
     surf = (bs.get("source_abi") or {}).get("reachable_source_surface") or {}
     sg = bs.get("source_graph") or {}
@@ -232,7 +252,23 @@ def _cmake_configure(src_dir: Path, build_dir: Path, extra_args: list[str]) -> N
     )
 
 
-def _dump_sources(tree: Path, build_dir: Path, out: Path) -> tuple[float, subprocess.CompletedProcess]:
+def _cmake_build_target(build_dir: Path, target: str) -> None:
+    """Build just the library *target* (not tests/examples/programs)."""
+    subprocess.run(
+        ["cmake", "--build", str(build_dir), "--target", target,
+         "--parallel", str(os.cpu_count() or 2)],
+        check=True, capture_output=True, text=True, timeout=1200,
+    )
+
+
+def _dump_sources(
+    tree: Path,
+    build_info: Path,
+    out: Path,
+    *,
+    binary: Path | None = None,
+    headers: list[Path] | None = None,
+) -> tuple[float, subprocess.CompletedProcess]:
     # "full" was retired from the public --depth ladder (ADR-043 D2): it
     # collapsed into "source" — replay *scope*, not a deeper depth, used to
     # distinguish them (abicheck/model/evidence_depth_levels.py's own
@@ -242,16 +278,70 @@ def _dump_sources(tree: Path, build_dir: Path, out: Path) -> tuple[float, subpro
     # source-tier job tolerates per-library failures, so a 0/N scanned run
     # still "succeeded") -- see main()'s --fail-on-empty-source gate below,
     # which is the guard against that specific failure mode recurring.
-    return _run([
-        "abicheck", "dump", "--sources", str(tree),
-        "--build-info", str(build_dir),
+    #
+    # The binary and the public headers are what L4 is anchored to: with no
+    # public-header roots the clang extractor classifies every declaration as
+    # non-public and emits none, and with no export table there is nothing
+    # for a declaration to link to ("0/0 symbols matched"). Both were missing
+    # here for months, so L4 was empty on every row while L3/L5 looked fine.
+    cmd = ["abicheck", "dump"]
+    if binary is not None:
+        cmd.append(str(binary))
+    for header in headers or []:
+        cmd += ["-H", str(header)]
+    cmd += [
+        "--sources", str(tree),
+        "--build-info", str(build_info),
         "--depth", "source",
         "-o", str(out),
-    ])
+    ]
+    return _run(cmd)
+
+
+def _target_compile_db(build_dir: Path, target: str, out_dir: Path) -> Path:
+    """Write the library target's own slice of ``compile_commands.json``.
+
+    A configured tree's compile database also holds the static-library twin,
+    tests and example programs, each compiling the public headers under a
+    different ABI-relevant context (``-fPIC`` or not). abicheck refuses to pick
+    one of them when a header parse is requested, so the database handed to
+    ``--build-info`` is narrowed to the TUs CMake compiles for *target*
+    (``CMakeFiles/<target>.dir/``) -- the TUs that produced the binary dumped
+    next to it. Raises when nothing matched: an empty slice would quietly
+    turn L3 into "0 compile units" instead of naming the wrong target.
+    """
+    marker = f"CMakeFiles/{target}.dir/"
+    entries = json.loads((build_dir / "compile_commands.json").read_text(encoding="utf-8"))
+    kept = [
+        e for e in entries
+        if marker in (e.get("output", "") + " " + e.get("command", "") + " " + " ".join(e.get("arguments", [])))
+    ]
+    if not kept:
+        raise RuntimeError(f"no compile_commands.json entry for target {target!r} in {build_dir}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / "compile_commands.json"
+    out.write_text(json.dumps(kept, indent=1) + "\n", encoding="utf-8")
+    return out
+
+
+def _built_shared_library(build_dir: Path, so_stem: str) -> Path:
+    """The real (non-symlink) ``<so_stem>.so*`` the target build produced."""
+    found = sorted(
+        p for p in build_dir.rglob(f"{so_stem}.so*")
+        if p.is_file() and not p.is_symlink()
+    )
+    if not found:
+        raise RuntimeError(f"build produced no {so_stem}.so* under {build_dir}")
+    return found[0]
 
 
 def _scan_source_side(entry: dict, which: str, tag: str) -> tuple[Path, dict, float]:
-    """Clone+configure+dump one side; return (snapshot path, coverage, seconds)."""
+    """Clone+configure+build+dump one side; return (snapshot path, coverage, seconds).
+
+    Builds only the manifest's library ``target`` so the dumped binary is the
+    one these exact sources produce (a conda binary of a nearby version would
+    not link source declarations to its exports reliably).
+    """
     src = entry["source"]
     lib = entry["lib"]
     t0 = time.time()
@@ -263,12 +353,18 @@ def _scan_source_side(entry: dict, which: str, tag: str) -> tuple[Path, dict, fl
     cmake_src = tree / src["cmake_subdir"] if src.get("cmake_subdir") else tree
     build = BUILD_DIR / f"{lib}_{which}_{key}"
     _cmake_configure(cmake_src, build, list(src.get("cmake_args", [])))
+    _cmake_build_target(build, src["target"])
+    binary = _built_shared_library(build, entry.get("so_stem") or f"lib{lib}")
+    compile_db = _target_compile_db(build, src["target"], build / "abicheck-target-db")
+    headers = [tree / h for h in src["public_headers"]]
     SNAP_DIR.mkdir(parents=True, exist_ok=True)
     snap = SNAP_DIR / f"{lib}_src_{which}.json"
-    secs, p = _dump_sources(tree, build, snap)
+    secs, p = _dump_sources(tree, compile_db, snap, binary=binary, headers=headers)
     if p.returncode or not snap.exists():
-        raise RuntimeError(f"dump --sources failed ({which}): {(p.stderr or '')[-200:]}")
-    cov = _source_coverage(json.loads(snap.read_text(encoding="utf-8")))
+        # The head of stderr names the cause; the tail is often a remedy hint.
+        err = (p.stderr or "").strip()
+        raise RuntimeError(f"dump --sources failed ({which}): {err[:300]} ... {err[-300:]}")
+    cov = _source_coverage(_load_build_source(snap))
     return snap, cov, round(time.time() - t0 + secs, 2)
 
 
@@ -369,6 +465,31 @@ def drift_rows(payload: dict) -> list[dict]:
         r for r in payload.get("results", [])
         if "error" in r or not r.get("verdict_matches_expected", True)
     ]
+
+
+def drift_details(drift: list[dict]) -> list[str]:
+    """One line per drifting row naming what the scan actually reported.
+
+    The verdict alone does not say *why* it moved (a new advisory RISK kind,
+    a finding that disappeared, an errored fetch), and the artifact holding
+    the full row is not always reachable from where the log is read -- so
+    the gate's own output carries the finding kinds and summary counts that
+    decide whether the manifest `expect` or the product is what changed.
+    """
+    lines = []
+    for r in drift:
+        if "error" in r:
+            lines.append(f"{r['lib']}: error: {r['error']}")
+            continue
+        counts = ", ".join(
+            f"{k}={r[k]}" for k in ("breaking", "source_breaks", "risk_changes", "compatible_additions", "total_changes")
+            if r.get(k) is not None
+        )
+        lines.append(
+            f"{r['lib']}: {r.get('expect')} -> {r.get('verdict')} ({counts}); "
+            f"top kinds: {r.get('top_kinds') or {}}"
+        )
+    return lines
 
 
 #: The evidence layers `source_scan_summary` requires -- (label, the
@@ -564,8 +685,8 @@ def _render_source_section(rows: list[dict]) -> list[str]:
             f"| {r.get('build_s','?')} | {r.get('compare_s','?')} |")
     L.append("")
     L.append("> Coverage = embedded `build_source` fact counts on the new side. "
-             "L4 needs clang (decls/types); a configure-only tree may show partial "
-             "L4 if generated headers are absent. Reproduce: `python skills-src/evaluation/field/runner.py --tier source`.")
+             "L4 needs clang (decls/types) and is anchored to the built library's "
+             "exports and the manifest's `public_headers`. Reproduce: `python skills-src/evaluation/field/runner.py --tier source`.")
     L.append("")
     return L
 
@@ -626,6 +747,8 @@ def main() -> None:
                 f"{r['lib']}({r.get('verdict') or r.get('error', '?')[:30]})" for r in drift
             )
             print(f"FAIL: binary-tier drift/errors on {len(drift)} lib(s): {libs}", file=sys.stderr)
+            for line in drift_details(drift):
+                print(f"  {line}", file=sys.stderr)
             failed = True
         else:
             print("OK: all binary-tier verdicts match expected", file=sys.stderr)

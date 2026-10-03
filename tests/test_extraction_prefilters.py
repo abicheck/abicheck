@@ -16,6 +16,7 @@ import subprocess
 import pytest
 from hypothesis import given, settings, strategies as st
 
+from abicheck import name_classification
 from abicheck.extract.headers.clang.template_param_indexes import (
     build_template_param_indexes,
 )
@@ -48,13 +49,13 @@ _pieces = st.sampled_from(
 
 def _unfiltered(name: str) -> str:
     """The function body without the prefilter (the pre-change behaviour)."""
-    spans = graph_identity._quoted_spans(name)
+    spans = name_classification._quoted_spans(name)
 
     def _replace(match):  # type: ignore[no-untyped-def]
         if any(start <= match.start() < end for start, end in spans):
             return match.group(0)
         marker, path, line, col = match.groups()
-        disc = graph_identity._declaring_header_discriminator(path)
+        disc = name_classification._declaring_header_discriminator(path)
         return f"{marker}:{disc}:{line}:{col}"
 
     return graph_identity._BARE_ANON_TYPE_LOCATION_RE.sub(_replace, name)

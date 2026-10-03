@@ -289,8 +289,13 @@ _CASTXML_FALLBACK = Path(
     "/root/.cache/abicheck-castxml-conda/castxml=0.7.0=hde8d07d_0-pinset1/bin"
 )
 
+# Includes what it uses, like a real header: the reversed-order test parses
+# ``[extra, api]`` for real. It used to depend on ``lib::`` from whatever came
+# first in the aggregate, and passed only because the header-AST cache key was
+# blind to header order and served the ``[api, extra]`` parse instead.
 _EXTRA_HEADER = """
 #pragma once
+#include "api.h"
 namespace other {
 struct Point { int v; };
 int add(int a, int b) noexcept;
@@ -423,6 +428,81 @@ def test_castxml_reversed_header_order_keeps_identity_and_refuses_explicitly(
     assert all(n == 1 for n in ids_b.values())
     with pytest.raises(ProfileMismatchError, match="header_sequence"):
         compare(base, reordered, cross_source_checks=False)
+
+
+# ---------------------------------------------------------------------------
+# Unparseable-header attribution is independent of the aggregate's layout
+# (bug class extract.aggregate_layout_header_attribution)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", range(4))
+@pytest.mark.parametrize("order_seed", range(3))
+def test_unparseable_header_is_named_by_file_not_aggregate_line(
+    tmp_path: Path, bad: int, order_seed: int
+) -> None:
+    """Which header failed is a fact about the header, not about where the
+    aggregate happened to place it: built with the real castxml aggregate
+    writer (whose leading preamble include is what broke line arithmetic),
+    the failing header is named under every header order.
+
+    Oracle: the header the stderr's chain passes through, read from the
+    aggregate's own text -- not the attribution's index arithmetic.
+    """
+    import random
+
+    from abicheck.extract.castxml_header_compat import write_castxml_aggregate
+    from abicheck.extract.unparseable_header_fallback import (
+        attribute_failing_headers,
+    )
+
+    names = [tmp_path / f"h{i}.h" for i in range(4)]
+    for h in names:
+        h.write_text("#pragma once\n")
+    order = list(names)
+    random.Random(order_seed).shuffle(order)
+    agg = write_castxml_aggregate(order, ".h")
+    try:
+        lines = agg.read_text().splitlines()
+        target = names[bad].resolve()
+        agg_line = next(n for n, text in enumerate(lines, 1) if f'"{target}"' in text)
+        stderr = (
+            f"In file included from {agg}:{agg_line}:\n"
+            f'{target}:2:2: error: "Unsupported compiler"\n'
+        )
+        assert attribute_failing_headers(stderr, order) == {order.index(names[bad])}
+    finally:
+        shutil.rmtree(agg.parent, ignore_errors=True)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(shutil.which("castxml") is None, reason="needs castxml")
+@pytest.mark.parametrize("bad_first", [True, False])
+def test_castxml_unparseable_header_fallback_names_the_bad_header(
+    tmp_path: Path, bad_first: bool
+) -> None:
+    """A real castxml dump drops exactly the unparseable header, wherever it
+    sits in the header list."""
+    from abicheck.dumper import dump
+    from abicheck.model.header_exclusion_record import (
+        excluded_headers_from_toolchain,
+    )
+
+    inc = tmp_path / "include"
+    inc.mkdir()
+    good = inc / "good.h"
+    bad = inc / "bad.h"
+    good.write_text("#pragma once\nint good_fn(int);\n")
+    bad.write_text('#pragma once\n#error "Unsupported compiler"\nint bad_fn(void);\n')
+    src = tmp_path / "lib.c"
+    src.write_text("int good_fn(int x){return x;}\nint bad_fn(void){return 0;}\n")
+    lib = tmp_path / "libx.so"
+    subprocess.run(["gcc", "-shared", "-fPIC", "-o", str(lib), str(src)], check=True)
+    headers = [bad, good] if bad_first else [good, bad]
+    snap = dump(lib, headers, [inc], lang="c", header_backend="castxml")
+    assert "good_fn" in {f.name for f in snap.declarations.functions}
+    excluded = excluded_headers_from_toolchain(snap.ast_toolchain)
+    assert [Path(p).name for p in excluded] == ["bad.h"]
 
 
 # ---------------------------------------------------------------------------

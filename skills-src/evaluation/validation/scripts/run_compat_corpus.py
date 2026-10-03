@@ -20,7 +20,12 @@ Runs ``abicheck compare`` over every pair in ``data/compat_corpus.json`` (real
 conda-forge release pairs with cited ground truth), writes one JSON result per
 pair, and gates the run:
 
-* a known-**compatible** pair fails on any BREAKING or API_BREAK finding;
+* a known-**compatible** pair fails on any BREAKING or API_BREAK finding
+  that compatibility policy actually scored. A finding the report marks
+  ``compatibility_evaluation_status: NOT_EVALUATED`` (contract relevance
+  unproven, ``gate_contribution`` 0) is still counted, under
+  ``<kind> (not evaluated)``, but as a non-breaking count: re-deriving a
+  break from the kind alone overrules the product's own decision;
 * a known-**incompatible** pair fails unless a BREAKING finding is reported
   (and every documented ``expected_break_kinds`` entry appears);
 * a pair that could not be evaluated fails -- a run that compared nothing is
@@ -45,8 +50,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,6 +68,10 @@ CORPUS_SCHEMA = "compat_corpus.v1"
 BASELINE_SCHEMA = "compat_corpus_baseline.v1"
 RESULT_SCHEMA = "compat_corpus_result.v1"
 EXPECTATIONS = ("COMPATIBLE", "BREAKING")
+
+#: A finding policy did not score (ADR-049 D9): recorded, never a break.
+NOT_EVALUATED = "NOT_EVALUATED"
+NOT_EVALUATED_SUFFIX = " (not evaluated)"
 REQUIRED_PAIR_FIELDS = (
     "pair",
     "library",
@@ -176,9 +187,27 @@ def summarize_report(report: dict) -> dict:
     counts: dict[str, int] = {}
     for c in changes:
         if isinstance(c, dict) and isinstance(c.get("kind"), str):
-            counts[c["kind"]] = counts.get(c["kind"], 0) + 1
+            key = c["kind"]
+            if c.get("compatibility_evaluation_status") == NOT_EVALUATED:
+                key += NOT_EVALUATED_SUFFIX
+            counts[key] = counts.get(key, 0) + 1
     verdict = report.get("verdict") or (report.get("summary") or {}).get("verdict")
-    return {"verdict": verdict, "counts_by_kind": dict(sorted(counts.items()))}
+    out: dict[str, Any] = {
+        "verdict": verdict,
+        "counts_by_kind": dict(sorted(counts.items())),
+    }
+    if not verdict:
+        # abicheck reached no verdict: a refused comparison (``not_comparable``
+        # -- e.g. a scope_fingerprint mismatch) writes a report with no
+        # changes at all. Read as a result, that is "compared, found
+        # nothing" -- a clean pass for a known-compatible pair, on a run
+        # that compared nothing. It is that library's error instead, so the
+        # pair reads "not evaluated" with abicheck's own reason.
+        reason = report.get("reason") or {}
+        outcome = (report.get("run_outcome") or {}).get("operational")
+        kind = reason.get("kind") or outcome or "no verdict"
+        out["error"] = f"abicheck reached no verdict ({kind})"
+    return out
 
 
 def pair_totals(result: dict) -> dict:
@@ -360,8 +389,21 @@ def evidence_args(entry: dict, work: Path) -> list[str]:
     return args
 
 
-def run_pair(entry: dict, work: Path, subdir: str = "linux-64") -> dict:
-    """Fetch, extract and compare every shared object common to both builds."""
+def run_pair(
+    entry: dict,
+    work: Path,
+    subdir: str = "linux-64",
+    *,
+    compare_timeout: float | None = None,
+) -> dict:
+    """Fetch, extract and compare every shared object common to both builds.
+
+    *compare_timeout* bounds each ``abicheck compare`` (seconds). A compare
+    that exceeds it is recorded as that library's error -- so the pair reads
+    "not evaluated" and the gate fails on it -- rather than consuming the
+    whole job: the first header-aware run spent 93 minutes on one protobuf
+    pair and was cancelled before six other pairs started.
+    """
     sys.path.insert(0, str(SCRIPTS_DIR))
     import conda_harness as ch
 
@@ -386,20 +428,35 @@ def run_pair(entry: dict, work: Path, subdir: str = "linux-64") -> dict:
     extra = evidence_args(entry, work)
     result["evidence"] = list(extra)
     for name in sorted(set(sides["old"]) & set(sides["new"])):
-        report = ch.run_abicheck(
-            sides["old"][name],
-            sides["new"][name],
-            entry["old_ver"],
-            entry["new_ver"],
-            extra,
-        )
-        result["libraries"][name] = (
+        started = time.monotonic()
+        try:
+            report = ch.run_abicheck(
+                sides["old"][name],
+                sides["new"][name],
+                entry["old_ver"],
+                entry["new_ver"],
+                extra,
+                timeout=compare_timeout,
+            )
+        except subprocess.TimeoutExpired:
+            result["libraries"][name] = {
+                "verdict": None,
+                "counts_by_kind": {},
+                "error": f"compare timed out after {compare_timeout:.0f}s",
+            }
+            continue
+        lib = (
             summarize_report(report)
             if report is not None
             else {"verdict": None, "counts_by_kind": {}, "error": "no report"}
         )
-    if any(lib.get("error") for lib in result["libraries"].values()):
-        result["error"] = "abicheck produced no report for at least one library"
+        lib["compare_s"] = round(time.monotonic() - started, 1)
+        result["libraries"][name] = lib
+    errors = sorted(
+        {lib["error"] for lib in result["libraries"].values() if lib.get("error")}
+    )
+    if errors:
+        result["error"] = "; ".join(errors)
     return result
 
 
@@ -410,6 +467,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument(
         "--only", action="append", default=[], help="run only this pair id (repeatable)"
+    )
+    ap.add_argument(
+        "--library",
+        action="append",
+        default=[],
+        help="run only the pairs of this corpus `library` (repeatable); the "
+        "workflow's per-library matrix uses this",
+    )
+    ap.add_argument(
+        "--compare-timeout",
+        type=float,
+        default=None,
+        help="seconds allowed per `abicheck compare`; a compare that exceeds "
+        "it is recorded as that pair's error (not evaluated)",
     )
     ap.add_argument(
         "--results-dir",
@@ -427,6 +498,11 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             ap.error(f"unknown pair(s): {sorted(unknown)}")
         corpus = [e for e in corpus if e["pair"] in args.only]
+    if args.library:
+        unknown = set(args.library) - {e["library"] for e in corpus}
+        if unknown:
+            ap.error(f"unknown library(ies): {sorted(unknown)}")
+        corpus = [e for e in corpus if e["library"] in args.library]
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     results: dict[str, dict] = {}
@@ -442,7 +518,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"== {pid}", file=sys.stderr)
             with tempfile.TemporaryDirectory() as tmp:
-                results[pid] = run_pair(entry, Path(tmp))
+                results[pid] = run_pair(
+                    entry, Path(tmp), compare_timeout=args.compare_timeout
+                )
         results[pid]["totals"] = pair_totals(results[pid])
         (args.out_dir / f"{pid}.json").write_text(
             json.dumps(results[pid], indent=2) + "\n", encoding="utf-8"

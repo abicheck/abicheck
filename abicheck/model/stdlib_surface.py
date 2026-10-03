@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..name_classification import is_cxx_runtime_library
+import abicheck.name_classification as _name_classification
 
 if TYPE_CHECKING:
     from .snapshot import AbiSnapshot
@@ -53,8 +53,8 @@ def stdlib_namespaces_excluded(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     old_elf = getattr(old, "elf", None)
     new_elf = getattr(new, "elf", None)
     return not (
-        is_cxx_runtime_library(old.library)
-        or is_cxx_runtime_library(new.library)
-        or is_cxx_runtime_library(getattr(old_elf, "soname", ""))
-        or is_cxx_runtime_library(getattr(new_elf, "soname", ""))
+        _name_classification.is_cxx_runtime_library(old.library)
+        or _name_classification.is_cxx_runtime_library(new.library)
+        or _name_classification.is_cxx_runtime_library(getattr(old_elf, "soname", ""))
+        or _name_classification.is_cxx_runtime_library(getattr(new_elf, "soname", ""))
     )

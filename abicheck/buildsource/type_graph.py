@@ -60,10 +60,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from ..model.execution_cache import memoized
+from ..model.execution_cache import memoized, request_key
+from ..model.execution_cache_scoped import ScopedCache
 from ..model.graph_facts import (
     CONF_HIGH,
     CONF_REDUCED,
@@ -1667,10 +1669,10 @@ def index_declared_type_files(ast: dict[str, Any]) -> dict[str, str]:
     runs over the AST (:func:`_index_declared_entities`), exposed standalone
     for a caller that only needs the declaring-file index (e.g. a header-only
     graph builder resolving a type's public/private origin) and not the
-    type/reference edges themselves. Duplicates the one AST walk rather than
-    threading an output parameter through the hardened, heavily-reviewed
-    ``_index_declared_entities``/``_walk_types`` pair — an acceptable, cheap
-    cost for a header-only pass (ADR-041 header-only-graph addendum).
+    type/reference edges themselves (ADR-041 header-only-graph addendum).
+    Inside :func:`ast_derived_scope` it shares that one index walk with
+    :func:`parse_clang_ast_types` and :func:`index_declared_entity_files`
+    over the same tree; outside one it walks the AST itself.
 
     ``_index_declared_entities``'s ``decl_file`` output is a dict shared
     between two unrelated uses: type declarations (records/enums/typedefs,
@@ -1682,8 +1684,7 @@ def index_declared_type_files(ast: dict[str, Any]) -> dict[str, str]:
     declaration. Filtered here to exactly the qualified names
     ``name_index`` actually collected — the type-only subset.
     """
-    idx = _new_ast_indexes()
-    _index_declared_entities(ast, [], "", idx)
+    idx = _ast_indexes(ast)
     type_qnames = {qname for qnames in idx.name_index.values() for qname in qnames}
     # decl_file's document order: a set's order follows per-process string hashing.
     return {q: f for q, f in idx.decl_file.items() if q in type_qnames}
@@ -1709,9 +1710,8 @@ def index_declared_entity_files(ast: dict[str, Any]) -> dict[str, str]:
     per-edge ``dst_file``/``caller_file``/``callee_file`` backfill for each
     edge's *target* (Codex review).
     """
-    idx = _new_ast_indexes()
-    _index_declared_entities(ast, [], "", idx)
-    return idx.decl_file
+    # A copy: the indexes may be shared with other readers of this AST.
+    return dict(_ast_indexes(ast).decl_file)
 
 
 def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:
@@ -1733,11 +1733,54 @@ def parse_clang_ast_types(ast: dict[str, Any]) -> list[TypeEdge]:
     types and non-call body references). Edges are de-duplicated by
     ``(src, dst, kind)``.
     """
-    idx = _new_ast_indexes()
-    _index_declared_entities(ast, [], "", idx)
+    return list(
+        _AST_DERIVED.get_or_compute(
+            request_key(derived="type_edges", ast=id(ast)),
+            lambda: _parse_clang_ast_types(ast),
+            pin=ast,
+        )
+    )
+
+
+#: What this module derives from one AST, shared by every consumer that reads
+#: the same tree while :func:`ast_derived_scope` is open: the whole-TU
+#: indexes (:func:`_ast_indexes`) and the type edges built on them. Several
+#: consumers read one TU's tree: the L5 ``type_graph`` pass and
+#: ``override_graph``'s two parsers (each derives the class hierarchy from the
+#: ``TYPE_INHERITS`` edges), and on the header-only path the type-file index,
+#: the edges and the entity-file index. Each used to walk the whole AST again.
+#: Keyed on the tree's identity and pinned to it (``ScopedCache``'s safe
+#: ``id()`` keying), so a different -- or equal-but-distinct -- AST never
+#: hits; sound because no consumer mutates the AST it is handed, and the
+#: shared values are never handed out mutable (edges are frozen and copied
+#: into a fresh list, the entity-file index is copied). Outside a scope, or
+#: under ``ABICHECK_REFERENCE_MODE``, every call computes.
+_AST_DERIVED: ScopedCache = ScopedCache("buildsource.type_graph.ast_derived")
+
+
+def ast_derived_scope() -> AbstractContextManager[None]:
+    """Share this module's per-AST derivations for one unit of work."""
+    return _AST_DERIVED.scope()
+
+
+def _ast_indexes(ast: dict[str, Any]) -> _AstIndexes:
+    """The whole-TU indexes of *ast*: read-only to every caller."""
+
+    def build() -> _AstIndexes:
+        idx = _new_ast_indexes()
+        _index_declared_entities(ast, [], "", idx)
+        return idx
+
+    return _AST_DERIVED.get_or_compute(
+        request_key(derived="indexes", ast=id(ast)), build, pin=ast
+    )
+
+
+def _parse_clang_ast_types(ast: dict[str, Any]) -> tuple[TypeEdge, ...]:
+    idx = _ast_indexes(ast)
     edges: list[TypeEdge] = []
     _walk_types(ast, [], "", edges, idx)
-    return _dedupe_edges(edges)
+    return tuple(_dedupe_edges(edges))
 
 
 def augment_graph_with_types(

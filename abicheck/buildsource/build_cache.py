@@ -30,6 +30,7 @@ import json
 from pathlib import Path
 
 from ..model.execution_cache_scoped import DiskCache
+from ..storage.code_identity import abicheck_code_fingerprint
 from .build_evidence import BUILD_EVIDENCE_VERSION, BuildEvidence
 
 
@@ -54,6 +55,7 @@ def compute_build_cache_key(compile_db: Path, adapter_hint: str) -> str | None:
         location = str(compile_db)
     h = hashlib.sha256()
     h.update(f"v{BUILD_EVIDENCE_VERSION}\0{adapter_hint}\0{location}\0".encode())
+    h.update(f"code={abicheck_code_fingerprint()}\0".encode())
     h.update(data)
     return h.hexdigest()
 

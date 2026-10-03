@@ -35,15 +35,18 @@ on those code objects; each reports once and is disabled, and
 ``restart_events()`` re-arms them per test, so every other call in the suite
 costs nothing. (A global ``sys.setprofile`` hook was measured covering about
 2% of the suite in several minutes.) The code objects are found from every
-live function and their nested ``co_consts``. Live functions come from a
-whole-heap ``gc`` walk only when no other thread is alive -- a heap census
-beside a live thread breaks that thread's ``tuple(...)`` construction
-(``abicheck.workflows.memory_trace.gc_census_is_safe``) -- and otherwise
-by following references from every loaded module
-(:func:`namespace_functions`). A closure created at
+live function (``gc``) and their nested ``co_consts``. A closure created at
 run time reuses a nested code object that is already armed, so new code only
 appears when an ``only_mutate`` module is (re)imported: the scan is repeated
 only when those module objects change, not per test.
+
+The heap census runs only while this is the process's sole Python thread
+(``memory_trace.gc_census_is_safe``): a census beside a live thread can break
+that thread's ``tuple(...)`` construction. With another thread alive the scan
+walks the ``only_mutate`` modules' namespaces instead (functions, classes,
+descriptors, ``__wrapped__`` chains and containers), arms what it finds, and
+leaves the modules marked unscanned so the next test retries the full census.
+
 
 Activated by ``MUTATION_REACH_OUT=<dir>``: each worker writes the node ids it
 saw reach mutated code to ``<dir>/<worker>.json``.
@@ -97,73 +100,52 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
-def _slot_values(value: object) -> list[object]:
-    """The values *value* keeps in ``__slots__``, which have no ``__dict__``
-    (the detector registry's entries hold their ``requires_support`` lambda
-    this way)."""
-    if isinstance(value, type):
-        return []
-    out: list[object] = []
-    for klass in type(value).__mro__:
-        slots = klass.__dict__.get("__slots__", ())
-        for name in (slots,) if isinstance(slots, str) else slots:
-            if name.startswith("__") and not name.endswith("__"):
-                name = f"_{klass.__name__.lstrip('_')}{name}"  # mangled
-            if name not in ("__dict__", "__weakref__") and hasattr(value, name):
-                out.append(getattr(value, name))
-    return out
+def _namespace_functions(modules: list[str]) -> list[object]:
+    """Every function reachable from the named modules' namespaces.
 
-
-def namespace_functions(modules: list[types.ModuleType]) -> list[types.FunctionType]:
-    """Every function reachable from *modules* by following references:
-    module and class namespaces, instance attributes and slots, containers, method
-    descriptors, properties, ``functools.partial`` and ``__wrapped__``
-    (``lru_cache`` included), and closure cells. Pass every loaded module
-    to reach functions stored in another module's object, such as a lambda
-    handed to a registering decorator. Unlike ``gc.get_objects()`` it never
-    holds a reference to an object only another thread can reach, such as a
-    tuple that thread is still building. A container another thread resizes
-    mid-copy is skipped rather than retried."""
-    found: list[types.FunctionType] = []
+    The fallback when a heap census is unsafe. Follows class bodies (nested
+    classes too), ``staticmethod``/``classmethod``/``property`` wrappers,
+    ``functools.wraps`` ``__wrapped__`` chains and plain containers, so a
+    handler kept in a module-level registry is still found. Only a function
+    created inside another call and kept nowhere in a namespace is missed,
+    and :meth:`Monitor.arm` retries the full census for that.
+    """
+    found: list[object] = []
     seen: set[int] = set()
-    stack: list[object] = list(modules)
+    stack: list[object] = []
+    for name in modules:
+        module = sys.modules.get(name)
+        if module is not None:
+            stack.extend(list(vars(module).values()))
     while stack:
-        value = stack.pop()
-        if id(value) in seen:
+        obj = stack.pop()
+        if id(obj) in seen:
             continue
-        seen.add(id(value))
-        try:
-            if isinstance(value, types.FunctionType):
-                found.append(value)
-                stack.extend(c.cell_contents for c in value.__closure__ or ())
-            elif isinstance(value, staticmethod | classmethod):
-                stack.append(value.__func__)
-            elif isinstance(value, property):
-                stack.extend(f for f in (value.fget, value.fset, value.fdel) if f)
-            elif isinstance(value, functools.partial):
-                stack.append(value.func)
-            elif isinstance(value, dict):
-                stack.extend(list(value.values()))
-            elif isinstance(value, list | tuple | set | frozenset):
-                stack.extend(list(value))
-            if not isinstance(value, dict | types.FunctionType):
-                attrs = getattr(value, "__dict__", None)
-                if isinstance(attrs, dict | types.MappingProxyType):
-                    stack.extend(list(attrs.values()))
-                stack.extend(_slot_values(value))
-        except (RuntimeError, ValueError):  # resized mid-copy; empty cell
-            continue
+        seen.add(id(obj))
+        if isinstance(obj, types.FunctionType):
+            found.append(obj)
+            wrapped = getattr(obj, "__wrapped__", None)
+            if wrapped is not None:
+                stack.append(wrapped)
+        elif isinstance(obj, (staticmethod, classmethod)):
+            stack.append(obj.__func__)
+        elif isinstance(obj, property):
+            stack.extend(f for f in (obj.fget, obj.fset, obj.fdel) if f is not None)
+        elif isinstance(obj, type):
+            stack.extend(list(vars(obj).values()))
+        elif isinstance(obj, dict):
+            stack.extend(list(obj.values()))
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            stack.extend(list(obj))
     return found
 
 
-def live_functions(
-    modules: list[types.ModuleType], *, census: bool | None = None
-) -> list[types.FunctionType]:
-    """Every live function when a heap walk is safe (*census*, by default
-    ``gc_census_is_safe()``), else every function reachable from *modules*."""
-    if gc_census_is_safe() if census is None else census:
-        return [o for o in gc.get_objects() if isinstance(o, types.FunctionType)]
-    return namespace_functions(modules)
+def function_candidates(modules: list[str], *, heap_census: bool) -> list[object]:
+    """Objects that may be ``only_mutate`` functions: the whole heap when a
+    census is safe, else :func:`_namespace_functions`."""
+    if heap_census:
+        return gc.get_objects()
+    return _namespace_functions(modules)
 
 
 class Monitor:
@@ -185,18 +167,118 @@ class Monitor:
         self.hit = True
         return _MON.DISABLE
 
+    def _live_functions(
+        self, census: bool | None = None
+    ) -> Generator[types.FunctionType]:
+        """Every live function, or -- when another thread exists -- every
+        function reachable from the ``only_mutate`` modules' namespaces.
+
+        A heap census while another thread runs can hand out (and so break)
+        a tuple that thread is still building (bug class
+        ``gc-census-concurrent-thread``), so it is taken only when
+        ``gc_census_is_safe()``; the namespace walk is the fallback.
+
+        The walk follows namespaces, classes, containers, closures, partials,
+        bound methods, defaults and ``__wrapped__`` from every module whose
+        file is an only_mutate file. Its one structural limit: a function of
+        an only_mutate file loaded *without* registering a module in
+        ``sys.modules`` (a bare ``exec_module``) has no root it can start
+        from, so a test reaching only that copy is under-reported. No
+        thread-safe enumeration of the heap exists to close that; the
+        mutation lane's ``selection-check`` job, which compares the
+        selection with mutmut's own association, is the backstop.
+        """
+        if census is None:
+            census = gc_census_is_safe()
+        for obj in function_candidates(self.modules, heap_census=census):
+            if isinstance(obj, types.FunctionType):
+                yield obj
+        if census:
+            return
+        seen: set[int] = set()
+        # By file, not by name: the same only_mutate file can be imported
+        # under a name `module_names` did not predict (another sys.path
+        # entry, a test's own importlib load), and the census found those.
+        stack: list[object] = [
+            vars(m) for m in list(sys.modules.values()) if self._is_only_mutate(m)
+        ]
+        while stack:
+            obj = stack.pop()
+            if id(obj) in seen:
+                continue
+            seen.add(id(obj))
+            if isinstance(obj, dict):
+                stack.extend(obj.values())
+            elif isinstance(obj, (list, tuple, set, frozenset)):
+                # A callback table or registry held only in a container.
+                stack.extend(obj)
+            elif isinstance(obj, functools.partial):
+                stack.extend((obj.func, *obj.args, *obj.keywords.values()))
+            elif isinstance(obj, types.MethodType):
+                stack.append(obj.__func__)
+            elif isinstance(obj, type):
+                # The class's values directly: a temporary copy pushed here
+                # would be freed after its turn, and a later copy reusing
+                # its id() would be skipped as already seen.
+                stack.extend(vars(obj).values())
+            elif isinstance(obj, (staticmethod, classmethod, property)):
+                stack.extend(
+                    f
+                    for f in (
+                        getattr(obj, a, None)
+                        for a in ("__func__", "fget", "fset", "fdel")
+                    )
+                    if f
+                )
+            elif isinstance(obj, types.FunctionType):
+                yield obj
+                if (wrapped := getattr(obj, "__wrapped__", None)) is not None:
+                    stack.append(wrapped)
+                # A decorator's wrapper reaches the decorated function only
+                # through its closure (no functools.wraps, no __wrapped__).
+                for cell in obj.__closure__ or ():
+                    try:
+                        stack.append(cell.cell_contents)
+                    except ValueError:  # an empty cell
+                        pass
+                stack.extend(obj.__defaults__ or ())
+                stack.extend((obj.__kwdefaults__ or {}).values())
+
+    @functools.cached_property
+    def _basenames(self) -> frozenset[str]:
+        return frozenset(os.path.basename(p) for p in self.paths)
+
+    def _is_only_mutate(self, module: object) -> bool:
+        path = getattr(module, "__file__", None)
+        if not isinstance(path, str):
+            return False
+        # Called for every loaded module before every test: rule out the
+        # common case by basename before paying for a filesystem resolve.
+        if os.path.basename(path) not in self._basenames:
+            return False
+        try:
+            return str(Path(path).resolve()) in self.paths
+        except OSError:
+            return False
+
     def arm(self) -> None:
         """Enable PY_START on every only_mutate code object not yet armed,
         rescanning only when an only_mutate module was (re)imported."""
-        ids = tuple(id(sys.modules.get(name)) for name in self.modules)
+        # Every loaded module of an only_mutate file, not only the predicted
+        # names: one imported later under another name (a test's own
+        # importlib load) must trigger a rescan too.
+        ids = tuple(id(sys.modules.get(name)) for name in self.modules) + tuple(
+            sorted(id(m) for m in list(sys.modules.values()) if self._is_only_mutate(m))
+        )
         if ids == self.module_ids:
             return
         census = gc_census_is_safe()
         if census:
-            # A partial namespace walk leaves module_ids unset, so the next
-            # test (with the extra threads gone) gets the full census.
+            # Only a full census marks this module set done: after a partial
+            # namespace walk (another thread alive) the next test retries,
+            # so the census runs once this is the sole thread again.
             self.module_ids = ids
-        for obj in live_functions(list(sys.modules.values()), census=census):
+        for obj in self._live_functions(census):
             code = obj.__code__
             if code.co_filename not in self.paths or code in self.armed:
                 continue

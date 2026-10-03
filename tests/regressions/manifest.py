@@ -618,8 +618,14 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "moment the envelope changes, not at the moment they are "
             "written."
         ),
-        fixed_by=(1225,),
-        seed_tests=("tests/test_snapshot_envelope_out_of_band_readers.py",),
+        fixed_by=(1225, 1463),
+        seed_tests=(
+            "tests/test_snapshot_envelope_out_of_band_readers.py",
+            # The field-eval runner's reader, against a snapshot written by
+            # save_snapshot itself (the hand-built fixtures it replaced
+            # encoded the same stale flat shape the reader did).
+            "tests/test_eval_runner.py",
+        ),
         # `()` deliberately: the seed test calls the reader helpers directly
         # (importlib-loaded modules, no CliRunner, no Action step), so it
         # reaches neither surface. This field documents what a seed test
@@ -643,11 +649,14 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "applied to the right value on every path. A reader "
                     "that unwraps one document and then indexes a second, "
                     "un-unwrapped one in the same function passes the scan. "
-                    "The scan is also function-local: a reader that indexes "
-                    "a moved key on a dict some *other* helper loaded is not "
-                    "flagged, correctly when that helper unwraps (as "
-                    "`tests/_snapshot_document_reader.py` does) and silently "
-                    "when it does not."
+                    "The scan reaches one hop: a same-module caller passing "
+                    "a raw `json.load(s)` result (directly or through a local "
+                    "name) into a parameter the callee indexes a moved key on "
+                    "is flagged -- the shape that left the field-eval "
+                    "runner's source tier reading 0 compile units (#1463). A "
+                    "document that crosses a module boundary, travels "
+                    "through an attribute or container, or passes through "
+                    "more than one call is still not followed."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
             ),
@@ -665,6 +674,33 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
             ),
         ),
+    ),
+    BugClass(
+        id="extract.aggregate_layout_header_attribution",
+        invariant=(
+            "When one header in a multi-header aggregate parse fails, the "
+            "unparseable-header fallback must drop exactly the header whose "
+            "include chain raised the error, for any aggregate layout. The "
+            "header is the file the aggregate included at the failing frame "
+            "(the chain's next location), never one derived from the "
+            "frame's line number: castxml's aggregate gained a leading "
+            "compatibility-preamble include, which silently shifted the "
+            "'header i is on line i+1' arithmetic by one, so the fallback "
+            "dropped a parseable header, kept the broken one, and the dump "
+            "failed on every platform. An error reached only through the "
+            "preamble names no listed header and drops nothing."
+        ),
+        fixed_by=(1463,),
+        seed_tests=(
+            "tests/test_unparseable_header_fallback.py",
+            "tests/test_family_f3_identity.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "preamble_lines": ("0", "1", "3"),
+            "chain_depth": ("0", "1-4"),
+            "frame_style": ("clang", "gcc"),
+        },
     ),
     BugClass(
         id="registry.kind_completeness",

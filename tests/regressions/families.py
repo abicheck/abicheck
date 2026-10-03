@@ -200,6 +200,7 @@ _F2 = (
     "evidence.compare_dump_inline_routing_parity",
 )
 _F3 = (
+    "extract.aggregate_layout_header_attribution",
     "identity.environment_taint",
     "identity.name_and_referent_compared_as_one",
     "identity.pe_x86_c_decoration_alias",
@@ -238,6 +239,7 @@ _F5 = tuple(
         "perf.bounded_cache_budget_omits_what_it_retains",
         "perf.cache_fast_path_bypasses_shared_coordination",
         "perf.derived_cache_must_match_what_recomputing_would_give",
+        "cache.computed_output_keyed_without_code_identity",
         "perf.enumerable_value_space_allocated_per_occurrence",
         "perf.evidence_released_before_its_consumer_runs",
         "perf.fixed_layout_fast_path_field_decoding",

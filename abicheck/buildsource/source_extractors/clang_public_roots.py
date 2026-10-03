@@ -30,6 +30,7 @@ Pure: no clang invocation, only filesystem sampling of include trees.
 from __future__ import annotations
 
 import os
+import posixpath
 from pathlib import Path, PurePosixPath
 
 from ..build_evidence import CompileUnit
@@ -58,7 +59,16 @@ _PUBLIC_HEADER_SUFFIXES = (
 
 
 def _file_segments(path: str) -> tuple[str, ...]:
-    posix = path.replace("\\", "/")
+    """Lexically normalized path segments (``.``/``..`` folded, ``//`` collapsed).
+
+    The compiler reports a header the way it was reached: zstd's TUs include
+    ``../zstd.h`` from ``lib/common/``, so the decl location reads
+    ``lib/common/../zstd.h``. Without folding ``..`` that never suffix-matches
+    the public root ``lib/zstd.h`` and every declaration in it was classified
+    non-public. Lexical, not ``realpath``: no filesystem access, and it is the
+    same normalization the directory-root path (provenance) already applies.
+    """
+    posix = posixpath.normpath(path.replace("\\", "/")) if path else ""
     return tuple(p for p in PurePosixPath(posix).parts if p not in ("/", ".", ""))
 
 

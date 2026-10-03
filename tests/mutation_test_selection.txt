@@ -328,6 +328,7 @@ tests/test_enumtype_case_b_facts.py
 tests/test_env_matrix_digest_frozen_projection.py
 tests/test_environment_drift.py
 tests/test_error_handling.py
+tests/test_eval_runner.py
 tests/test_evidence_adequacy_e_s1.py
 tests/test_evidence_benchmark.py
 tests/test_evidence_provenance_completeness.py
@@ -689,6 +690,7 @@ tests/unit/report/test_result_counts.py
 tests/unit/report/test_review_groups.py
 tests/unit/report/test_review_sections_html.py
 tests/unit/storage/test_decode_fast_path.py
+tests/unit/storage/test_entity_id_domain_bridge.py
 tests/unit/storage/test_import_baseline_set.py
 tests/unit/storage/test_import_bundle_facts.py
 tests/unit/storage/test_import_v1.py
