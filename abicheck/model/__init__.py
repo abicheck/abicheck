@@ -41,16 +41,8 @@ resolves.
 
 from __future__ import annotations
 
-from ..name_classification import (
-    COMPILER_INTERNAL_TYPES as COMPILER_INTERNAL_TYPES,
-    canonicalize_type_name as canonicalize_type_name,
-    cv_qualifiers_only_differ as cv_qualifiers_only_differ,
-    func_signature_cv_only_differ as func_signature_cv_only_differ,
-    is_abi_surface_type_name as is_abi_surface_type_name,
-    is_compiler_internal_type as is_compiler_internal_type,
-    is_cxx_runtime_library as is_cxx_runtime_library,
-    is_non_abi_surface_type as is_non_abi_surface_type,
-)
+from typing import TYPE_CHECKING, Any
+
 from .availability import FactStatus as FactStatus
 from .declarations import Function as Function, Param as Param, Variable as Variable
 
@@ -112,6 +104,50 @@ from .vocabulary import (
     ScopeOrigin as ScopeOrigin,
     Visibility as Visibility,
 )
+
+if TYPE_CHECKING:
+    from ..name_classification import (
+        COMPILER_INTERNAL_TYPES as COMPILER_INTERNAL_TYPES,
+        canonicalize_type_name as canonicalize_type_name,
+        cv_qualifiers_only_differ as cv_qualifiers_only_differ,
+        func_signature_cv_only_differ as func_signature_cv_only_differ,
+        is_abi_surface_type_name as is_abi_surface_type_name,
+        is_compiler_internal_type as is_compiler_internal_type,
+        is_cxx_runtime_library as is_cxx_runtime_library,
+        is_non_abi_surface_type as is_non_abi_surface_type,
+    )
+
+#: Names re-exported from ``abicheck.name_classification``, resolved on first
+#: access rather than at import. ``name_classification`` is a model-layer
+#: module outside this package that imports ``model.execution_cache``, which
+#: runs this ``__init__`` first; binding its names here (or in any module
+#: this ``__init__`` loads) at import time read a half-initialized module
+#: whenever ``name_classification`` -- or anything reaching it before
+#: ``model`` -- was the first import, a circular ``ImportError``. Every
+#: model-package reference to it is therefore late-bound (a module object,
+#: looked up at call time), and ``tests/test_cold_import.py`` imports every
+#: ``abicheck`` module first, in a fresh interpreter, to keep that true.
+_NAME_CLASSIFICATION_REEXPORTS = frozenset(
+    {
+        "COMPILER_INTERNAL_TYPES",
+        "canonicalize_type_name",
+        "cv_qualifiers_only_differ",
+        "func_signature_cv_only_differ",
+        "is_abi_surface_type_name",
+        "is_compiler_internal_type",
+        "is_cxx_runtime_library",
+        "is_non_abi_surface_type",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _NAME_CLASSIFICATION_REEXPORTS:
+        import abicheck.name_classification as name_classification
+
+        return getattr(name_classification, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "AbiSnapshot",

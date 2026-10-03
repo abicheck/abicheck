@@ -33,7 +33,7 @@ Importers name this module directly.
 
 from __future__ import annotations
 
-from ..name_classification import INTERNAL_NAMESPACE_COMPONENTS, is_rtti_symbol
+import abicheck.name_classification as _name_classification
 
 __all__ = [
     "DEFAULT_INTERNAL_NAMESPACES",
@@ -64,7 +64,9 @@ INTERNAL_NAMESPACE_NAMES: frozenset[str] = frozenset(DEFAULT_INTERNAL_NAMESPACES
 def _internal_component_in_region(region: str) -> bool:
     """Return True if *region* -- a slice of a mangled name that contains only
     scope encoding -- carries a conventional internal-namespace component."""
-    return any(comp in region for comp in INTERNAL_NAMESPACE_COMPONENTS)
+    return any(
+        comp in region for comp in _name_classification.INTERNAL_NAMESPACE_COMPONENTS
+    )
 
 
 def owning_scope_components(symbol: str) -> list[str] | None:
@@ -147,7 +149,7 @@ def symbol_origin(symbol: str) -> str:
     RTTI artifacts or internal-namespace symbols rather than genuine public-API
     breaks (a common pattern in libraries built without ``-fvisibility=hidden``).
     """
-    if is_rtti_symbol(symbol):
+    if _name_classification.is_rtti_symbol(symbol):
         return "rtti"
     if has_internal_namespace_component(symbol):
         return "internal"

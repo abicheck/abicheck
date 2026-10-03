@@ -46,7 +46,8 @@ import enum
 import re
 from dataclasses import dataclass, field, replace
 
-from ..name_classification import canonicalize_type_name
+import abicheck.name_classification as _name_classification
+
 from .identity_literals import quoted_literal_spans as _quoted_literal_spans
 from .signature_normalization import canonicalize_function_signature_param_type
 
@@ -742,7 +743,7 @@ def entity_id_for_function(
                 (
                     "ret",
                     canonicalize_type_param_references(
-                        canonicalize_type_name(return_type),
+                        _name_classification.canonicalize_type_name(return_type),
                         type_param_names,
                     ),
                 )
