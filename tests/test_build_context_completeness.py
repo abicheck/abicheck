@@ -598,7 +598,7 @@ class TestForcedIncludeAmbiguity:
         # joined spelling of the same header are not a disagreement.
         ev = self._two_units(tmp_path, ["-include", "config.h"], ["-includeconfig.h"])
         result = resolve_header_compile_context(ev, [tmp_path / "widget.h"])
-        assert result.matched_unit_count == 2
+        assert len(result.matched_units) == 2
         assert _tokens(result)[-2:] == ["-include", "config.h"]
 
 
@@ -873,7 +873,7 @@ class TestIncludeSeedIsRestrictedToMatchedUnits:
         result = resolve_header_compile_context(ev, [header])
         assert [cu.id for cu in result.matched_units] == ["cu://widget"]
         # The historical read view stays exactly consistent with it.
-        assert result.matched_unit_count == len(result.matched_units) == 1
+        assert len(result.matched_units) == len(result.matched_units) == 1
 
 
 class TestDedupIncludeDirsAcrossCompositionSites:

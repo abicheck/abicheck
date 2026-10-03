@@ -105,7 +105,7 @@ def _project(tmp_path: Path) -> Path:
 
 
 def _trace(
-    project: Path, extra: list[str], inherited: dict[str, str] | None = None
+    project: Path, extra: list[str], inherited_worker: str | None = None
 ) -> set[str]:
     out = project / "reach"
     # The nested run is its own session: an outer xdist worker's identity
@@ -114,10 +114,12 @@ def _trace(
     # the nested worker of the same name, dropping that worker's hits.
     env = {
         **{k: v for k, v in os.environ.items() if not k.startswith("PYTEST_XDIST_")},
-        **(inherited or {}),
         "MUTATION_REACH_OUT": str(out),
         "PYTHONPATH": os.pathsep.join([str(REPO / "scripts"), str(project)]),
     }
+    env.pop("PYTEST_XDIST_WORKER", None)
+    if inherited_worker is not None:
+        env["PYTEST_XDIST_WORKER"] = inherited_worker
     proc = subprocess.run(  # noqa: S603 - fixed argv
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
          "-p", "mutation_reach_trace", *extra, "tests"],
@@ -180,15 +182,16 @@ def test_the_trace_records_exactly_the_reaching_tests(
     assert _trace(_project(tmp_path), workers) == _REACHING
 
 
-@pytest.mark.parametrize("workers", [[], ["-n", "2"]])
-def test_a_run_nested_in_an_xdist_worker_keeps_every_worker_file(
-    tmp_path: Path, workers: list[str]
+@pytest.mark.parametrize("inherited", ["gw0", "gw1", "main"])
+def test_a_worker_name_inherited_from_an_enclosing_run_loses_nothing(
+    tmp_path: Path, inherited: str
 ) -> None:
-    """A trace launched from inside an xdist worker inherits that worker's
-    ``PYTEST_XDIST_*`` variables; its controller must not write the file its
-    own ``gw0`` writes (which dropped every hit ``gw0`` recorded)."""
-    inherited = {"PYTEST_XDIST_WORKER": "gw0", "PYTEST_XDIST_WORKER_COUNT": "4"}
-    assert _trace(_project(tmp_path), workers, inherited) == _REACHING
+    """A trace run launched from inside an xdist worker inherits that
+    worker's ``PYTEST_XDIST_WORKER``. The inner controller must not take the
+    name and overwrite the inner worker of the same name with its own empty
+    set -- which is how this test file failed in CI's sharded unit lane,
+    whenever it landed on outer worker gw0 or gw1."""
+    assert _trace(_project(tmp_path), ["-n", "2"], inherited) == _REACHING
 
 
 def test_the_trace_is_independent_of_test_order(tmp_path: Path) -> None:

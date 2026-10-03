@@ -86,7 +86,7 @@ def type_name_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> s
         # qualifiers on a pointee position and participate in mangling —
         # `restrict` has zero ABI/mangling effect and is already tracked
         # as its own compatible-classified fact (Param.is_restrict /
-        # PARAM_RESTRICT_CHANGED, populated in _parse_function_params
+        # PARAM_RESTRICT_CHANGED, populated in parse_function_params
         # via resolve_cv_restrict below). Folding it into the generic
         # type-name spelling would make a restrict-only parameter change
         # look like an ordinary type mismatch and misfire the BREAKING
@@ -259,7 +259,7 @@ def type_alignment_bits(
     ``parse_variables``), this walks through cv-qualifiers, typedefs,
     elaborated types, and arrays to the nearest type node with ``align``.
     CastXML populates it with the compiler's computed alignment, as trusted
-    by ``_build_record_type`` for records. ``ArrayType`` carries no ``align``/``size``
+    by ``build_record_type`` for records. ``ArrayType`` carries no ``align``/``size``
     of its own (confirmed empirically: an array's alignment is always its
     element type's) — recursing into its ``type`` is required, not just
     an optimization, or every exported array global would silently fall

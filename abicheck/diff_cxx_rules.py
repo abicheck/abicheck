@@ -30,8 +30,8 @@ from .compare.vtable_evidence import (
 )
 from .diff_helpers import make_change
 from .model import Fact, Function, RecordType
-from .model.availability import FactStatus
 from .model.change_catalog.kinds import ChangeKind
+from .model.evidence_merge import is_completed_read
 
 # The Itanium/MSVC mangled-name scope-component parsers' real home is
 # model/mangled_name.py (ADR-061 D1): pure string decoding with no I/O,
@@ -1012,7 +1012,7 @@ def _fact_str_list_confirmed(fact: Fact[list[str]] | None) -> tuple[list[str], b
     """
     assert fact is not None
     value = fact.value if fact.is_present else []
-    return (value or []), fact.status is FactStatus.PRESENT
+    return (value or []), is_completed_read(fact)
 
 
 def _transitive_bases(

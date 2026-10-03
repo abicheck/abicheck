@@ -1185,7 +1185,7 @@ class TestPipelineIntegration:
     def test_pipeline_includes_step(self) -> None:
         from abicheck.post_processing import DEFAULT_PIPELINE
 
-        assert "detect_cpp_patterns" in DEFAULT_PIPELINE.step_names
+        assert "detect_cpp_patterns" in [s.name for s in DEFAULT_PIPELINE.steps]
 
     def test_serialization_tag_finding_flows_through_pipeline(self) -> None:
         from abicheck.post_processing import DEFAULT_PIPELINE

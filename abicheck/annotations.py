@@ -79,11 +79,12 @@ def _escape_annotation_data(data: str) -> str:
     return data.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
-def _truncate_message(message: str, max_length: int = _MAX_MESSAGE_LENGTH) -> str:
-    """Truncate message to max_length, appending ellipsis if truncated."""
-    if len(message) <= max_length:
+def _truncate_message(message: str) -> str:
+    """Truncate message to ``_MAX_MESSAGE_LENGTH``, appending ellipsis if
+    truncated."""
+    if len(message) <= _MAX_MESSAGE_LENGTH:
         return message
-    return message[: max_length - 3] + "..."
+    return message[: _MAX_MESSAGE_LENGTH - 3] + "..."
 
 
 def _parse_source_location(loc: str | None) -> tuple[str | None, str | None]:

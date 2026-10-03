@@ -292,8 +292,9 @@ def iter_json_indented(obj: Any, *, indent: int = 2, _level: int = 0) -> Iterato
 def join_json_indented(obj: Any, *, indent: int = 2) -> str:
     """The whole document as one string -- for callers that need one.
 
-    Exists so a compressed write (which needs the full byte string anyway)
-    and a test can share the streaming encoder rather than keeping a second
-    formatting path that could drift from it.
+    Exists so the one-shot zstd snapshot write (which needs the full text to
+    declare the frame's size, ``snapshot_codec.write_snapshot``) formats with
+    the streaming encoder rather than a second ``json.dumps`` path that could
+    drift from it.
     """
     return "".join(iter_json_indented(obj, indent=indent))

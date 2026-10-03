@@ -144,11 +144,17 @@ def test_old_new_default_to_old_value_new_value() -> None:
     assert added.new_value is None
 
 
+def _templated_kinds() -> frozenset[str]:
+    return frozenset(
+        k.value for k in ChangeKind if REGISTRY.description_template_for(k.value)
+    )
+
+
 def test_all_templates_use_only_known_vocabulary() -> None:
     # Guards against a template referencing a placeholder make_change does not
     # supply (which would raise KeyError at runtime for that kind).
     offenders: dict[str, set[str]] = {}
-    for kind_value in REGISTRY.templated_kinds():
+    for kind_value in _templated_kinds():
         template = REGISTRY.description_template_for(kind_value)
         assert template is not None
         unknown = _template_fields(template) - TEMPLATE_VOCAB
@@ -262,7 +268,7 @@ def test_template_renders_legacy_wording(
 def test_faithfulness_samples_are_templated_kinds() -> None:
     # Every hand-pinned sample must name a kind that actually owns a template.
     covered = {kind.value for kind, _, _ in _FAITHFULNESS_CASES}
-    assert covered <= set(REGISTRY.templated_kinds())
+    assert covered <= set(_templated_kinds())
 
 
 def test_every_templated_kind_renders_from_sentinels() -> None:

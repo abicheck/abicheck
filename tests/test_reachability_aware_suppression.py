@@ -364,7 +364,7 @@ class TestMarkReachability:
     ) -> None:
         """Codex review, fresh evidence: the default CastXML backend never
         qualifies Function.name/Variable.name with namespace context --
-        dumper_castxml.py's parse_variables()/_function_display_name() both
+        dumper_castxml.py's parse_variables()/function_display_name() both
         store the bare declaration ``name`` XML attribute, so a real
         public-header variable in namespace ``ns::detail`` reaches this
         pipeline as ``Variable(name="var", ...)``, not

@@ -122,7 +122,6 @@ from .type_reachability_spelling import (
     _typedef_spelling_targets as _typedef_spelling_targets,
     spelling_matches as spelling_matches,
     spellings_possible_in as spellings_possible_in,
-    type_string_references_name as type_string_references_name,
 )
 
 if TYPE_CHECKING:
@@ -131,7 +130,6 @@ if TYPE_CHECKING:
 __all__ = [
     "directly_referenced_stdlib_type_spellings",
     "directly_referenced_stdlib_types",
-    "type_string_references_name",
 ]
 
 

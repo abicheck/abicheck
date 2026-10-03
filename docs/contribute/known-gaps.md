@@ -7123,6 +7123,30 @@ dependency's code is ABI-compatible with what consumers already linked is a
 question about a third artifact abicheck was not given, which is
 `dependency-abi.transitive-break`'s territory, not this leaf's.
 
+### AArch64 AAPCS64 by-value aggregate passing is not modeled
+
+A struct passed or returned by value on AArch64 travels in SIMD registers
+when it is a homogeneous floating-point or short-vector aggregate (HFA/HVA,
+1-4 members of one type), in general registers when it is at most 16
+bytes, and indirectly otherwise (AAPCS64 §5.9.5). A change that moves an
+aggregate across one of those boundaries without changing its size -- one
+`float` member becoming an `int` -- breaks every compiled caller, and no
+`ChangeKind` reports it: the value-ABI trait diff
+(`dwarf_advanced._diff_value_abi_traits`) models only the SysV AMD64
+register/indirect rule and treats an AArch64 trait flip as a generic
+value-ABI change. `docs/reference/platforms.md` already lists HFA/HVA
+drift as not detected.
+
+A classifier for those boundaries
+(`macho_metadata.classify_aapcs64_aggregate`) existed as an unwired,
+unit-tested "modeling primitive"; the plan that was to wire it (G1) closed
+without doing so, and the dead-code plan's Stage D removed it (it is in git
+history, with its unit tests, `tests/test_macos_arm64_abi.py`). Wiring it is not a
+Mach-O concern -- AAPCS64 governs AArch64 ELF too -- so a fix belongs in the
+value-ABI trait path for `target_arch == "aarch64"`, needs member base
+types from DWARF, and needs an AArch64 toolchain to validate against real
+binaries, which this environment does not have.
+
 ### `compare --no-baseline` does not yet reproduce `scan`'s audit-mode findings
 
 Found while migrating the Phase 4 documentation and corpora of
@@ -8811,6 +8835,17 @@ invisible to internal tests precisely because nothing exercises the public
 
 
 ## `compare --dry-run`'s cost preview does not reflect `--since`'s changed-path seeding
+
+**Closed (2026-10-03).** The dry run now resolves the seed through the
+run's own `frontends/cli/compare_enrichment.resolve_compare_changed_seed`
+before it emits, localizes its collect mode with it, names the replay scope
+from the replay's own table (`workflows.changed_paths.replay_scope`), and
+passes the seed and mode to the cost preview. The same pass made the
+preview count the compile DB the run reads (`buildsource.inline.
+plan_compile_db`). `tests/test_compare_dry_run_compile_db.py` asserts the
+stated scope and the L4 TU count change with `--changed-path` (3 of its 16
+scope cases fail on the previous code). The account below is kept as the
+record of what was wrong.
 
 Found during the PR #1220 doc follow-up (Codex review): a two-sided
 `compare old.so new.so --depth source --since origin/main --dry-run`
@@ -11055,6 +11090,98 @@ caller has to restate it, and could resolve a config differently from the
 CLI. Deferred deliberately when F-23 landed: the request type should be one
 decision covering both cardinalities (ADR-061's "one model, any
 cardinality"), not a directory-only addition.
+
+## The comparability contract never records the target platform (2026-10-03)
+
+Found by the dead-code plan's Stage E parameter pass: no production call
+passes `comparability.compute_extraction_contract`'s `target_triple`,
+`pointer_width` or `endianness`. `dumper_contract._attach_extraction_contract`,
+the one real-extraction caller, omits all three, so every fresh contract's
+`profile_fields` hold `""` for them, and `-m32`/`--target=` reach the
+fingerprint no other way (`macro_ops` covers only `-D`/`-U`,
+`pass_through_flags` only `-include`). The gate rule
+`check_contracts_comparable` documents ("a cross-compiler flag set for only one
+side ... still raises") therefore cannot fire: OLD dumped with
+`--gcc-options=-m32` and NEW without, against the same x86-64 binary, are
+judged comparable, and declarations that differ only because of the target
+(`sizeof`, `#ifdef __LP64__`) are reported as ABI findings rather than
+`ProfileMismatchError`. The platform-identity carve-out that compares these
+fields with the binary's own architecture is likewise dead in production.
+
+Not wired in the parameter pass because it is a gate change, not a missing
+argument:
+
+- castxml's recorded `compiler_target_triple` is the emulated compiler's
+  `-dumpmachine`, which ignores `-m32`; only the clang frontend resolves the
+  effective triple (`dumper_toolchain._configured_target_triple`, which honours
+  `--target=`/`-m32`) and it hands it to the parser alone. A sound
+  `pointer_width`/`endianness` needs the macro query castxml's compiler
+  emulation already runs (`__SIZEOF_POINTER__`, `__BYTE_ORDER__`).
+- Every stored baseline carries `""` for all three. Recording real values
+  changes every fresh `profile_fingerprint`, so the gate needs a
+  legacy-unrecorded carve-out (an empty side is unknown, never a mismatch),
+  as `language_standard` has, or every existing baseline comparison would
+  start failing as not comparable.
+
+Proposed: record the effective triple on `ast_toolchain` for both frontends,
+derive width/endianness from the emulated compiler's macros, pass all three,
+and add the unrecorded-side carve-out with tests over {recorded, unrecorded} x
+{same, different} x {binary differs, binary same}. Owner: ADR-050.
+
+## The L2 header parse never captures a dependency file (2026-10-03)
+
+Also from Stage E: `compute_extraction_contract`'s `depfile_resolved_paths`
+and `generated_driver_path` are never passed, because no castxml/clang L2
+invocation requests `-MD -MF`. ADR-050 D1 describes `include_sequence` as
+hashing the content of every file the parse actually read under each external
+`-I` root, plus a system/toolchain bucket; with no depfile both are always
+empty. Two dumps that read different dependency headers (a newer
+`/opt/dep/include`, a libstdc++ update changing an ABI-relevant macro) get
+identical `profile_fingerprint`s, the under-counting this digest exists to
+prevent. `buildsource/include_graph.parse_depfile` already parses the format.
+Building the capture changes fresh fingerprints the same way the target
+platform entry above does, so it needs the same unrecorded-side carve-out.
+Owner: ADR-050; until then ADR-050 D1 overstates what is fingerprinted.
+
+## A snapshot's `build_mode` is never captured at dump time (2026-10-03)
+
+From Stage E: `build_mode.build_mode_from_signals` takes `raw_producer`
+(`DW_AT_producer`), `raw_comment` (ELF `.comment`) and `dwarf_language`, and
+no production call passes any of them. Its one caller,
+`diff_stdlib_impl`, passes mangled symbols only, so the stdlib dimensions
+(family, libstdc++ dual ABI, libc++ ABI version) are inferred at compare time
+while `compiler_family`, `language_std` and the provenance strings are always
+`UNKNOWN`/empty. No dump path sets `AbiSnapshot.build_mode` either: the field
+is only read back from a stored document that already carries one.
+`detect_compiler_family` and `detect_cxx_standard` are tested but have no
+production producer feeding them.
+
+The parameters are kept rather than removed, because removing them would
+leave both detectors reachable only from tests. The evidence exists
+elsewhere: the L3 compiler record (`buildsource/compiler_record.py`) parses
+the producer string, and the DWARF parse reads each CU's attributes. Proposed:
+carry `DW_AT_producer`/`DW_AT_language` out of the DWARF parse (and `.comment`
+out of `elf_metadata`), populate `build_mode` at dump time, and decide which
+detector reads it, with a test over {GCC, Clang, ICX} x {producer present,
+stripped} against the compiler's own banner. Owner: the build-mode work
+(`abicheck/build_mode.py`).
+
+## A stored package's extractor/resolver generation drift is never reported (2026-10-03)
+
+From Stage E: `storage.versioning.check_reader_compatibility` reports
+`semantics_differ` only when the caller passes its own
+`reader_extractor_generation`/`reader_resolver_generation`, and neither caller
+(`project_snapshot_store`, `storage/bundle_facts_package`) does. No build-side
+generation constant exists to pass, and nothing reads
+`ReaderCompatibility.semantics_differ`. So ADR-062 D2's non-fail-closed half
+is unbuilt: a package produced under an older resolver is read as if its
+derived results were today's, with no notice. The two fail-closed axes
+(package format, comparison contract) are wired and unaffected.
+
+Proposed: define the reader's current extractor and resolver generations next
+to `PACKAGE_FORMAT_VERSION`, bump them when extraction or resolution semantics
+change, pass them from both readers, and surface `semantics_differ` in the
+report that loaded the package. Owner: ADR-062.
 
 ## The clang backend's guard retry still maps an aggregate line to a header (2026-10-03)
 

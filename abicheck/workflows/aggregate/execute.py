@@ -33,7 +33,6 @@ from .fold import AggregateResult
 from .load import _load_report_file
 from .resolve import (
     ExpectedTargets,
-    OnMissingRequired,
     OnUnexpectedTarget,
     resolve_gate_policy,
 )
@@ -43,27 +42,18 @@ def aggregate(
     expected: ExpectedTargets | None,
     found: Mapping[str, _LoadedReport],
     *,
-    on_missing_required: OnMissingRequired | None = None,
-    on_unexpected_target: OnUnexpectedTarget | None = None,
     policy_source_hint: str = "manifest",
 ) -> AggregateResult:
     """Reconcile an expected-target set against the reports found.
 
     *expected* is ``None`` only in discovered-only mode, where the reports
-    present *are* the expected set and coverage is not gated.
-
-    *on_missing_required*/*on_unexpected_target* default to ``None``, meaning
-    "resolve via :func:`resolve_gate_policy`" (the manifest's own ``gate``
-    block, falling back to the hard-coded default) rather than to a fixed
-    enum value -- a caller that passes an explicit value here still forces
-    it, same as before this function grew manifest-awareness.
+    present *are* the expected set and coverage is not gated. The gate policy
+    comes from :func:`resolve_gate_policy` (the manifest's own ``gate`` block,
+    falling back to the hard-coded default).
     """
     discovered_only = expected is None
     on_missing_required, on_unexpected_target, policy_source = resolve_gate_policy(
-        expected,
-        explicit_missing_required=on_missing_required,
-        explicit_unexpected_target=on_unexpected_target,
-        source_hint=policy_source_hint,
+        expected, source_hint=policy_source_hint
     )
     if expected is None:
         expected = ExpectedTargets(targets={tid: True for tid in found}, head_sha=None)
@@ -186,8 +176,6 @@ def aggregate_reports_dir(
     *,
     expected: ExpectedTargets | None = None,
     discovered_only: bool = False,
-    on_missing_required: OnMissingRequired | None = None,
-    on_unexpected_target: OnUnexpectedTarget | None = None,
     policy_source_hint: str = "manifest",
     prefix: str = DEFAULT_REPORT_PREFIX,
 ) -> AggregateResult:
@@ -199,10 +187,9 @@ def aggregate_reports_dir(
     cannot detect a missing target. Raises :class:`AggregateError` for
     malformed input (a usage error, exit 64).
 
-    *on_missing_required*/*on_unexpected_target* default to ``None`` (resolve
-    via *expected*'s own manifest ``gate`` block, falling back to the
-    hard-coded default -- see :func:`resolve_gate_policy`); an explicit value
-    here still forces it. *policy_source_hint* names which expected-target
+    The gate policy resolves from *expected*'s own manifest ``gate`` block,
+    falling back to the hard-coded default (see :func:`resolve_gate_policy`).
+    *policy_source_hint* names which expected-target
     source *expected* came from (``"manifest"``/``"run-plan"``), reported
     back in the result's ``effective_policy.source`` when that source's
     ``gate`` block actually supplied a value.
@@ -222,7 +209,5 @@ def aggregate_reports_dir(
     return aggregate(
         None if discovered_only else expected,
         found,
-        on_missing_required=on_missing_required,
-        on_unexpected_target=on_unexpected_target,
         policy_source_hint=policy_source_hint,
     )

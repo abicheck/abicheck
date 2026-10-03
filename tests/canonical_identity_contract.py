@@ -220,7 +220,6 @@ UNVERIFIED = frozenset(
         "flexible_array_member_changed",
         "float_abi_changed",
         "fortify_source_weakened",
-        "frame_register_changed",
         "func_became_inline",
         "func_contract_attribute_added",
         "func_contract_attribute_removed",

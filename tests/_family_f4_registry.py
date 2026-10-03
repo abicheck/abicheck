@@ -325,7 +325,6 @@ HEURISTICS: dict[str, str] = {
     "abicheck.policy.contract_graph_encoding::is_schema1_canonical::affix.startswith:_SCHEMA1_DECL_PREFIXES + _SCHEMA1_TYPE_PREFIXES": "own_format",
     "abicheck.policy.exit_decision::ExitDecision.exit_without_analysis_assurance::affix.endswith:'_contribution'": "own_format",
     "abicheck.policy.outcome::<module>::re:'^(0(\\\\.[0-9]+)*|1(\\\\.0+)?)$'": "own_format",
-    "abicheck.policy.outcome_release::unclassified_release_contribution_fields::affix.endswith:'_contribution'": "own_format",
     "abicheck.policy.selectors::<module>::re:'<[^<>]*>'": "spelling",
     "abicheck.policy.selectors::_matches_source_location::re:':\\\\d+(?::\\\\d+)?$'": "user_rule",
     "abicheck.policy.selectors::_ns_match::affix.startswith:'_Z'": "grammar",

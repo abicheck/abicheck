@@ -3,8 +3,8 @@ a shorter spelling that starts where a longer match does.
 
 Oracle: a brute-force enumeration of every substring, independent of the
 compiled pattern -- a registered spelling at ``[i, e)`` whose left and right
-boundaries hold on the *real* text (``e == end`` counting as a boundary for
-the caller's window). The previous implementation is kept verbatim as a
+boundaries hold on the *real* text (``e == len(text)`` counting as a
+boundary). The previous implementation is kept verbatim as a
 second reference, to state the only intended difference: the new result is
 always a superset of the old one.
 """
@@ -31,10 +31,10 @@ def _is_token_char(ch: str) -> bool:
     return bool(_TOKEN.fullmatch(ch))
 
 
-def _oracle(vocab, text, start=0, end=None):
-    end = len(text) if end is None else end
+def _oracle(vocab, text):
+    end = len(text)
     out = []
-    for i in range(start, end):
+    for i in range(end):
         if i > 0 and _is_token_char(text[i - 1]):
             continue
         for e in range(end, i, -1):
@@ -132,13 +132,11 @@ def test_matches_brute_force_oracle_and_is_a_superset(vocab, data) -> None:
     pattern = compile_spelling_pattern(vocab)
     pieces = st.sampled_from(sorted(vocab) + _ATOMS)
     text = data.draw(st.lists(pieces, max_size=10).map("".join))
-    start = data.draw(st.integers(0, len(text)))
-    end = data.draw(st.integers(start, len(text)))
 
-    got = _spans(finditer_allow_nested(pattern, text, start, end))
-    assert got == _oracle(vocab, text, start, end)
+    got = _spans(finditer_allow_nested(pattern, text))
+    assert got == _oracle(vocab, text)
 
-    before = set(_spans(_previous(pattern, text, start, end)))
+    before = set(_spans(_previous(pattern, text)))
     assert before <= set(got)
 
 

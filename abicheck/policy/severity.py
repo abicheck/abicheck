@@ -164,35 +164,6 @@ def classify_change(
     return IssueCategory.ABI_BREAKING
 
 
-def classify_change_object(
-    change: HasKind,
-    *,
-    policy: str | None = None,
-    kind_sets: KindSets | None = None,
-    policy_file: object | None = None,
-) -> IssueCategory:
-    """Classify a *change* honouring its per-finding ``effective_verdict`` (A4).
-
-    Routes through :func:`checker_policy.effective_category` — the single place
-    a finding's category is decided — so an ADR-027 pattern-aware demotion (a
-    ``Change`` carrying ``effective_verdict``) reads compatible in the
-    severity-aware exit code and category counts, not just the verdict. Falls
-    back to kind-based ``classify_change`` for plain stubs with no override.
-
-    *policy_file* is optional and defaults to ``None`` (unchanged prior
-    behavior for every existing caller that doesn't pass it): without it,
-    only a *kind-global* `overrides:` entry baked into *kind_sets* (e.g. via
-    ``DiffResult._effective_kind_sets()``) is visible here -- a
-    selector-scoped `reclassify:` rule needs the real ``PolicyFile`` object,
-    which *kind_sets* alone cannot express (Codex review: a scan's
-    blocking-finding report was silently omitting a `reclassify:`-demoted
-    finding for exactly this reason).
-    """
-    return classify_effective_change(
-        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file
-    )
-
-
 def _reclassify_resolved_to_compatible(
     change: HasKind, policy_file: object | None, today: date | None = None
 ) -> bool:
@@ -723,16 +694,15 @@ class GateDecision:
     was introduced to close off.
 
     Attributes:
-        scheme: ``"legacy"`` (verdict-only exit code — no ``SeverityConfig``
-            was supplied) or ``"severity"`` (severity-aware exit code).
+        scheme: ``"severity"`` (severity-aware exit code) -- the only scheme
+            :func:`compute_gate_decision` computes; the legacy verdict-only
+            scheme has no per-category configuration to single a blocker
+            out from, so its callers never build one.
         exit_code: The resolved process exit code under this scheme.
         blocking: ``exit_code != 0``, named separately so callers don't need
             to know the exit-code convention.
         blocking_categories: The :class:`IssueCategory` names actually
-            responsible for a nonzero ``exit_code``. Always empty under the
-            ``"legacy"`` scheme, which has no per-category configuration to
-            single one out — legacy exit codes key off the single overall
-            verdict.
+            responsible for a nonzero ``exit_code``.
     """
 
     scheme: str
@@ -743,36 +713,24 @@ class GateDecision:
 
 def compute_gate_decision(
     changes: Sequence[HasKind],
-    severity_config: SeverityConfig | None,
+    severity_config: SeverityConfig,
     *,
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
-    legacy_exit_code: int = 0,
     today: date | None = None,
 ) -> GateDecision:
-    """Compute the single, canonical :class:`GateDecision` for *changes*.
+    """Compute the single, canonical severity :class:`GateDecision` for *changes*.
 
-    Without *severity_config* the gate is the legacy verdict-based scheme:
-    the caller supplies *legacy_exit_code* (typically from
-    :func:`legacy_exit_code` or a flow-specific floor, e.g. removed-library
-    escalation) and no category can be singled out as "the" blocker
-    (``blocking_categories`` is always empty in this scheme — there is no
-    per-category configuration to single one out from). None of this
-    function's three current call sites (``reporter._build_severity_json``,
-    ``sarif._severity_gate_properties``, ``cli_compare_release._release_gating_buckets`` (removed))
-    actually reach this branch — each already special-cases
-    ``severity_config is None`` itself before calling in, since their
-    own legacy-scheme needs differ from an empty ``blocking_categories``
-    (e.g. the former ``_release_gating_buckets``'s legacy branch needs three fixed
-    *named* buckets — breaking/api_break/risk — to walk, which this
-    branch's empty tuple can't supply). The legacy branch exists so a
-    caller that only ever wants a single, uniform :class:`GateDecision`
-    regardless of scheme has one to call — see ``tests/test_severity.py``'s
-    ``TestComputeGateDecision`` for its own direct coverage.
+    Only the severity-aware scheme has a decision to compute here: the legacy
+    verdict-based scheme has no per-category configuration to single a
+    blocker out from, and every caller (``gate_decision.
+    gate_decision_for_result``, ``cli_helpers_compare.
+    _scoped_severity_summary``) already handles ``severity_config is None``
+    itself before calling in.
 
-    With *severity_config*, ``exit_code`` (via :func:`compute_exit_code`)
-    and ``blocking_categories`` (via :func:`categorize_changes`) are both
+    ``exit_code`` (via :func:`compute_exit_code`) and
+    ``blocking_categories`` (via :func:`categorize_changes`) are both
     derived from the same *changes*/*kind_sets*/*policy_file*, so they can
     never disagree with each other the way two independently-computed
     values could — the root cause of two real bugs this function replaces
@@ -785,14 +743,6 @@ def compute_gate_decision(
     instead of hand-rolling the categorize-then-filter-to-error pattern
     again.
     """
-    if severity_config is None:
-        return GateDecision(
-            scheme="legacy",
-            exit_code=legacy_exit_code,
-            blocking=legacy_exit_code != 0,
-            blocking_categories=(),
-        )
-
     # ADR-049 D1 -- applied here as well as inside compute_exit_code, so the
     # blamed categories are computed over the same set the exit code was.
     # `categorize_changes` itself is deliberately left unfiltered: it is also

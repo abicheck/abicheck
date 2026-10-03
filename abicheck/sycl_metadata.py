@@ -345,16 +345,14 @@ def _default_plugin_search_paths() -> list[Path]:
     return paths
 
 
-def parse_sycl_metadata(
-    lib_dir: Path,
-    *,
-    extra_plugin_paths: list[Path] | None = None,
-) -> SyclMetadata | None:
+def parse_sycl_metadata(lib_dir: Path) -> SyclMetadata | None:
     """Extract SYCL metadata from a distribution directory.
+
+    Plugins are searched in *lib_dir*, ``<lib_dir>/sycl/`` and the
+    directories ``SYCL_PI_PLUGINS_DIR``/``SYCL_UR_ADAPTERS_DIR`` name.
 
     Args:
         lib_dir: Directory containing libsycl.so and/or PI plugins.
-        extra_plugin_paths: Additional directories to scan for plugins.
 
     Returns:
         SyclMetadata if SYCL artifacts detected, None otherwise.
@@ -369,8 +367,6 @@ def parse_sycl_metadata(
     sycl_subdir = lib_dir / "sycl"
     if sycl_subdir.is_dir():
         search_paths.append(sycl_subdir)
-    if extra_plugin_paths:
-        search_paths.extend(extra_plugin_paths)
     search_paths.extend(_default_plugin_search_paths())
 
     plugins = discover_sycl_plugins(search_paths)

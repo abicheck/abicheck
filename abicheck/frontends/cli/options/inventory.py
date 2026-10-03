@@ -22,8 +22,7 @@ The per-option ADR-068 D5 rulings that used to live here as
 Split out of ``cli_options.py`` when that module reached the 2000-line hard
 cap (CLAUDE.md "Files that are large — edit carefully"). This is pure
 data (family → flags, family → decorator, the flag-count budget ledger)
-plus one small reader function (:func:`count_visible_options`) — no Click
-decorators, no dependency on the rest of ``cli_options.py`` — so it is a
+— no Click decorators, no dependency on the rest of ``cli_options.py`` — so it is a
 leaf module re-exported from ``cli_options`` for every existing caller
 (``tests/test_cli_contract.py``, ``tests/test_config_rebalance.py``), the
 same pattern ``cli_profiles.py`` already established for the run-profile
@@ -155,22 +154,3 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: reader looking for "why did this number move" is actually served. It is
 #: not restated here, because a per-flag ruling table replaces the need for a
 #: running total to be self-explaining.
-#: Navigational meta-options excluded from the flag-count budget: they are
-#: not a per-run analysis input the ADR-037 D10.5 budget is bounding, just a
-#: help-screen escape hatch (G21.8 collapse M2's curated/full `compare --help`
-#: split, mirroring how Click's own auto-added ``--help`` was never a real
-#: ``cmd.params`` entry and so never counted either).
-_HELP_META_OPTION_NAMES = frozenset({"help", "help_all"})
-
-
-def count_visible_options(cmd: object) -> int:
-    """Count a Click command's user-visible (non-hidden) options (ADR-037 D10.5)."""
-    n = 0
-    for p in getattr(cmd, "params", []):
-        if getattr(p, "name", None) in _HELP_META_OPTION_NAMES:
-            continue
-        if getattr(p, "param_type_name", None) == "option" and not getattr(
-            p, "hidden", False
-        ):
-            n += 1
-    return n

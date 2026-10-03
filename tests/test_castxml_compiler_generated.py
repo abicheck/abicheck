@@ -24,7 +24,7 @@ trip a false-positive ``source_binary_provenance_mismatch``.
 castxml stamps ``artificial="1"`` on EVERY function-like element it
 synthesizes rather than parses from real source text — not just
 ``Constructor``/``Destructor`` (already read there for
-``_ctor_or_dtor_visibility``, see ``test_castxml_constructor_visibility.py``)
+``ctor_or_dtor_visibility``, see ``test_castxml_constructor_visibility.py``)
 but also a compiler-generated ``operator=``, emitted as an ``OperatorMethod``
 element carrying a real-looking Itanium mangled name and no other
 distinguishing marker. Confirmed against real castxml 0.7.0 output for
@@ -120,7 +120,7 @@ def _parse(**kwargs: str) -> dict[str, bool | None]:
     parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
     funcs = parser.parse_functions()
     # Real castxml mangled name, keyed by name -- for the ctors/dtor,
-    # `_function_mangled_name`'s own synthesized `__abicheck_ctor__.../
+    # `function_mangled_name`'s own synthesized `__abicheck_ctor__.../
     # ~Widget` key (not the bare "Widget", and not shared with `sum`'s or
     # `operator=`'s real symbols).
     by_mangled = {f.mangled: f.is_compiler_generated for f in funcs}

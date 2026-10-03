@@ -189,19 +189,6 @@ def test_build_consumer_graph_emits_requirement_edges() -> None:
     assert {n.provenance for n in g.nodes} == {CONSUMER_PROVENANCE}
 
 
-def test_build_consumer_graph_scopes_to_the_given_symbol_set() -> None:
-    """An ELF consumer's raw undefined-symbol table spans every DT_NEEDED
-    library; recording all of it would attribute another library's
-    requirements to this one."""
-    g = build_consumer_graph(
-        "training-service",
-        _reqs(_DISPATCHER, "_ZN5other4funcEv"),
-        symbols=frozenset({_DISPATCHER}),
-    )
-    reqs = {e.dst for e in g.edges if e.kind == "CONSUMER_REQUIRES_SYMBOL"}
-    assert reqs == {symbol_node_id(_DISPATCHER)}
-
-
 def test_build_consumer_graph_records_version_requirements() -> None:
     g = build_consumer_graph(
         "training-service",

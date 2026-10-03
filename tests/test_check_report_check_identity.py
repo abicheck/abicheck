@@ -15,14 +15,15 @@
 
 """G42 "Explicit check identifiers" tests for
 ``abicheck.buildsource.check_report.build_check_id``'s new
-``environment_id``/``explicit_id`` parameters -- split out of
+``explicit_id`` parameter -- split out of
 ``test_check_report.py`` (that file carries a ``no_growth`` debt-baseline
 entry in ``architecture/debt.yaml``, per this repo's own ``file-size``
 gate convention: grow via a new sibling test file, not by extending the
 file at its baseline).
 
-Covers the two new, composable ``check_id`` tail segments
-(``!<environment_id>``/``~<explicit_id>``) -- see
+Covers the ``~<explicit_id>`` ``check_id`` tail segment (the
+``!<environment_id>`` segment is reserved: the validators and parser accept
+it, but no generator produces it) -- see
 ``docs/contribute/plans/g42-check-identity-environments-and-provider-
 resolution.md``'s "Explicit check identifiers" section.
 ``test_check_report.py::TestBuildCheckId`` keeps its own pre-G42
@@ -51,25 +52,10 @@ class TestBuildCheckIdG42Tails:
         )
         assert check_id == "libpvxs@p#c@source~l4-plugin-rhel8"
 
-    def test_environment_id_appends_bang_tail_before_explicit_id(self):
-        """!<environment_id> composes before ~<explicit_id>, in that fixed
-        order."""
-        check_id = build_check_id(
-            "libpvxs",
-            "p",
-            "c",
-            "source",
-            environment_id="rhel8",
-            explicit_id="myid",
-        )
-        assert check_id == "libpvxs@p#c@source!rhel8~myid"
-
-    def test_no_explicit_or_environment_id_is_unqualified(self):
-        """Omitting both new params produces the byte-identical pre-G42
+    def test_no_explicit_id_is_unqualified(self):
+        """Omitting explicit_id produces the byte-identical pre-G42
         string -- the backward-compatibility guarantee."""
-        check_id = build_check_id(
-            "libpvxs", "p", "c", "source", environment_id=None, explicit_id=None
-        )
+        check_id = build_check_id("libpvxs", "p", "c", "source", explicit_id=None)
         assert check_id == "libpvxs@p#c@source"
 
     def test_two_checks_differing_only_in_explicit_id_do_not_collide(self):
@@ -85,10 +71,6 @@ class TestBuildCheckIdG42Tails:
         with pytest.raises(ValueError):
             build_check_id("libpvxs", "p", "c", "source", explicit_id="bad~id")
 
-    def test_rejects_unsafe_environment_id(self):
-        with pytest.raises(ValueError):
-            build_check_id("libpvxs", "p", "c", "source", environment_id="bad!id")
-
     def test_empty_string_explicit_id_is_treated_as_unset(self):
         """An empty string is falsy -- same "no explicit id" behavior as
         omitting the parameter entirely, not a validation error."""
@@ -102,26 +84,6 @@ class TestBuildCheckIdG42Tails:
         propagate a newline into the generated check_id."""
         with pytest.raises(ValueError):
             build_check_id("libpvxs", "p", "c", "source", explicit_id="l4-plugin\n")
-
-    def test_rejects_environment_id_with_a_trailing_newline(self):
-        with pytest.raises(ValueError):
-            build_check_id("libpvxs", "p", "c", "source", environment_id="rhel8\n")
-
-    def test_rejects_environment_id_starting_with_punctuation(self):
-        """Codex review, fresh evidence: build_check_id's own
-        validate_identifier() already required an initial alphanumeric
-        character for environment_id (same as explicit_id) -- this pins
-        that existing constructor-side behavior. The real gap Codex found
-        is that checker_types.CHECK_ID_PATTERN/contracts._CHECK_ID_RE and
-        the published JSON Schema independently spelled the environment_id
-        segment's charset as the more permissive [A-Za-z0-9._-]+ (no
-        initial-character constraint), so the public validators/parser
-        accepted an id (e.g. "...!_prod") this constructor could never
-        produce -- pinned by the sibling assertions in
-        test_report_schema.py (CHECK_ID_PATTERN via validate_check_id) and
-        test_aggregate_check_id_g42.py (_CHECK_ID_RE via parse_check_id)."""
-        with pytest.raises(ValueError):
-            build_check_id("libpvxs", "p", "c", "source", environment_id="_prod")
 
 
 class TestReportBuildersThreadExplicitId:

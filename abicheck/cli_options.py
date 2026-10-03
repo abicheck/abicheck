@@ -466,6 +466,13 @@ def policy_options(func: F) -> F:
         default=None,
         help="Suppression file (YAML) to filter known/intentional changes.",
     )(func)
+    return policy_option(func)
+
+
+def policy_option(func: F) -> F:
+    """``--policy NAME|PATH`` alone, for a command that classifies verdicts
+    but takes no suppression file (``project history``). The command also
+    receives ``policy_file_path`` (see :func:`_resolve_policy_operand`)."""
     func = click.option(
         "--policy",
         "policy",
@@ -1472,7 +1479,7 @@ def set_input_options(func: F) -> F:
 #: existing caller -- and every existing test importing them from here --
 #: reaches these decorators through this module.
 #: ADR-037 D10 CLI-contract metadata (family/flag tables, the compare
-#: flag-count budget ledger, and :func:`count_visible_options`) moved to
+#: flag-count budget ledger) moved to
 #: ``cli_options_contract.py`` when this module reached the 2000-line hard
 #: cap. Re-exported here so every existing caller — the ``cli-contract``
 #: gate's own tests and ``tests/test_config_rebalance.py`` — keeps its
@@ -1508,7 +1515,6 @@ from .frontends.cli.options.inventory import (  # noqa: E402
     REQUIRED_FAMILIES as REQUIRED_FAMILIES,
     RULINGS_BY_COMMAND as RULINGS_BY_COMMAND,
     VERDICT_EMITTING_COMMANDS as VERDICT_EMITTING_COMMANDS,
-    count_visible_options as count_visible_options,
 )
 from .frontends.cli.options.release import (  # noqa: E402
     app_usage_scope_options as app_usage_scope_options,

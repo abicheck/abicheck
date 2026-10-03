@@ -486,10 +486,6 @@ class TestSerialization:
         parsed = json.loads(s)
         assert parsed["version"] == "2.1.0"
 
-    def test_to_sarif_str_indented(self) -> None:
-        s = to_sarif_str(_make_result([]), indent=4)
-        assert "    " in s  # 4-space indent present
-
 
 # ---------------------------------------------------------------------------
 # Exit code contract tests

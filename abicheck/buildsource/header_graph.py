@@ -122,7 +122,6 @@ from .header_graph_ast_projection import (
     _PROVENANCE,
     HEADER_TYPE_GRAPH_PASS,
     HeaderGraphAstProjection,
-    project_header_graph_ast,
     seed_ast_graph,
 )
 from .type_graph import (
@@ -379,7 +378,6 @@ def _seed_flat_graph(
 
 def build_header_only_graph(
     snapshot: AbiSnapshot,
-    ast_root: dict[str, Any] | None = None,
     *,
     ast_projection: HeaderGraphAstProjection | None = None,
     public_header_paths: list[str] | None = None,
@@ -390,17 +388,15 @@ def build_header_only_graph(
 ) -> SourceGraphSummary:
     """Build a header-only semantic graph from an L2 :class:`AbiSnapshot`.
 
-    *ast_root* is a parsed ``clang -ast-dump=json`` tree over the same header
-    aggregate the L2 clang frontend parses (``dumper._clang_header_dump``) —
-    ``None`` when clang was unavailable/not selected, in which case the graph
-    still carries ``source_decl``/``header`` nodes (declaration-level
-    visibility from the snapshot alone) but no type/call edges.
-
-    *ast_projection* is that same evidence already reduced to
-    :class:`HeaderGraphAstProjection`, so the caller can drop the parsed
-    tree before this builder allocates anything (see that module's
-    docstring for the measurement). Observably equivalent to passing the
-    tree it came from, ``None`` included. Passing both raises.
+    *ast_projection* is a parsed ``clang -ast-dump=json`` tree over the same
+    header aggregate the L2 clang frontend parses
+    (``dumper._clang_header_dump``), already reduced to
+    :class:`HeaderGraphAstProjection` (``project_header_graph_ast``) so the
+    caller can drop the parsed tree before this builder allocates anything
+    (see that module's docstring for the measurement). ``None`` when clang
+    was unavailable/not selected, in which case the graph still carries
+    ``source_decl``/``header`` nodes (declaration-level visibility from the
+    snapshot alone) but no type/call edges.
 
     *public_header_paths*/*public_dir_paths* are the same public-header
     inputs already threaded through
@@ -452,10 +448,6 @@ def build_header_only_graph(
     own declarations but still ``private_header`` for its own header node
     (Codex review, fresh evidence).
     """
-    if ast_root is not None and ast_projection is not None:
-        raise ValueError(
-            "build_header_only_graph takes ast_root or ast_projection, not both"
-        )
     graph = SourceGraphSummary()
     header_segs, dir_segs, have_public_set = build_public_set(
         public_header_paths, public_dir_paths
@@ -513,9 +505,6 @@ def build_header_only_graph(
     for h in header_paths or ():
         header_node(h)
 
-    if ast_projection is None and ast_root is not None:
-        ast_projection = project_header_graph_ast(ast_root)
-        ast_root = None
     # The header AST's own ctor/dtor manglings are identity evidence that does
     # not depend on what the binary exports (model.snapshot_identity_table),
     # so an unchanged declaration keeps one node id across versions.

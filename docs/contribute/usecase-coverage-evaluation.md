@@ -20,7 +20,7 @@ map across all three.
 ## Headline
 
 abicheck is **exceptionally deep on the change-taxonomy axis and comparatively
-thin on the breadth axes.** The "what changed" dimension — **409 `ChangeKind`s**
+thin on the breadth axes.** The "what changed" dimension — **408 `ChangeKind`s**
 in a 5-tier policy model, **193 calibrated example cases** (159 binary shared-library competitor lanes plus 34 dedicated fixture/source lanes), ABICC + libabigail
 parity — is essentially complete and has diminishing returns.
 
@@ -72,12 +72,12 @@ A real invocation is a point in this space:
 
 | Use case | Status | Notes |
 |---|---|---|
-| Change taxonomy | `complete` | 409 change kinds; 193 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
+| Change taxonomy | `complete` | 408 change kinds; 193 ground-truth entries; parity tests; fixture/source-only L2/L5/source cases are tracked separately from binary `.so` competitor lanes |
 | **Release recommendation (semver + SONAME)** | `complete` | semver bump + SONAME action emitted in reports |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |
 | Windows PE/MSVC | `complete` | **G1 closed**: `native-compare` CI step runs `compare` on MinGW DLLs; MSVC+PDB lane asserts struct-growth + removed-export verdicts |
-| macOS Mach-O/ARM64 | `complete` | **G1 closed**: `native-compare` CI step runs `compare` on Apple-clang dylibs; AAPCS64 HFA/HVA + 16-byte boundary modeled + unit-tested |
+| macOS Mach-O/ARM64 | `complete` | **G1 closed**: `native-compare` CI step runs `compare` on Apple-clang dylibs; AAPCS64 HFA/HVA passing drift not modeled (known gap) |
 | `compare`/release/baseline/Debian/ABICC | `complete` | dedicated CLIs + tests |
 | Reporting: JSON/SARIF/JUnit | `complete` | versioned schema + 34 SARIF / 55 JUnit tests |
 | Reporting: Markdown/HTML | `complete` | structural coverage across verdict tiers + sections + escaping (G3 done) |

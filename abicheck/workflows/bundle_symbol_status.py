@@ -72,7 +72,7 @@ _UNKNOWN_TYPE_SENTINEL = "?"
 #: `"? &"`/`"? &&"` for a reference with no resolvable target;
 #: `dumper_castxml.py`'s `PointerType`/`ReferenceType`/
 #: `RValueReferenceType` handling appends `"*"`/`"&"`/`"&&"` to whatever
-#: `_type_name_uncached` returned for the inner type, so an unresolved
+#: `type_name_uncached` returned for the inner type, so an unresolved
 #: pointee produces `"?*"`/`"?&"`/`"?&&"`. Both backends (plus
 #: `dwarf_metadata.py`, `pdb_parser.py`) separately return the bare
 #: literal `"..."` -- not the sentinel above -- when a type-resolution

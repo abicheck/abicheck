@@ -53,12 +53,9 @@ class TestToAggregateManifest:
         ]
         assert "head_sha" not in manifest
 
-    def test_head_sha_comes_from_the_plan_unless_overridden(self) -> None:
+    def test_head_sha_comes_from_the_plan(self) -> None:
         plan = RunPlan(head_sha="deadbeef", checks=[])
         assert to_aggregate_manifest(plan)["head_sha"] == "deadbeef"
-        assert (
-            to_aggregate_manifest(plan, head_sha="cafef00d")["head_sha"] == "cafef00d"
-        )
 
     def test_produces_a_manifest_aggregate_itself_accepts(self) -> None:
         """Not just shape-compatible on paper -- feed it straight into

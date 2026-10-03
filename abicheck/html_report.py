@@ -44,7 +44,6 @@ from typing import TYPE_CHECKING, Any, cast
 from .html_template import _CSS as _CSS
 from .model.change_catalog.kinds import HasKind
 from .policy.classification import evidence_status_for_result, impact_for
-from .policy.evidence_status import EvidenceStatus
 
 # ADR-061 Phase 2 item 1: the pure HTML projection half of this module.
 # Every ``compute_*`` below returns one of these frozen structs (or, for the
@@ -97,7 +96,6 @@ if TYPE_CHECKING:
 def compute_full_change_rows(
     changes: Iterable[object],
     evidence_tiers: Sequence[str] = (),
-    evidence_status_override: EvidenceStatus | None = None,
 ) -> tuple[ChangeRow, ...]:
     """Resolve every fact a changes-table row needs for one change: the four
     registry-lookup decisions (kind string, category, impact text, ABICC
@@ -114,14 +112,6 @@ def compute_full_change_rows(
 
     *evidence_tiers* lets an UNATTRIBUTED finding's impact text carry the
     same evidence caveat the JSON/Markdown views already do (Codex review).
-
-    *evidence_status_override*, when given, wins over the tier-derived
-    status for every row -- appcompat's own relevant-changes table (Codex
-    review, fresh evidence) needs this: a finding in `breaking_for_app` is
-    proven by the supplied consumer's own import table, independent of what
-    the library-to-library comparison's evidence_tiers alone show, the same
-    override `reporter.py`'s JSON projection already stamps
-    (`EvidenceStatus.CONSUMER_PROVEN`) for the identical finding set.
     """
     rows = []
     for ch in changes:
@@ -130,7 +120,7 @@ def compute_full_change_rows(
         relevance = getattr(ch, "contract_relevance", None)
         assurance = getattr(ch, "contract_assurance", None)
         decision = getattr(ch, "compatibility_decision", None)
-        evidence_status = evidence_status_override or (
+        evidence_status = (
             evidence_status_for_result(cast(HasKind, ch), evidence_tiers)
             if kind
             else None
@@ -535,7 +525,6 @@ def build_html_document(
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
     demangle: bool = True,
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
     """Resolve every fact the HTML report needs into one JSON-shaped
@@ -548,33 +537,21 @@ def build_html_document(
     metrics, which sections exist, ABICC severity-band classification for
     the ``compat_html`` layout) lives here, never in the renderer.
 
-    *report_document* (ADR-061 Phase 2 gap C), when given, is the one shared
-    ``report_mode="full"`` document ``report.build.build_report_document``
-    already built for this render -- ``service_render.render_output``'s
-    ``html`` branch builds it once and forwards it here. Its
-    ``disposition_audit`` field is reused verbatim (reconstructed into a
-    :class:`~abicheck.report.disposition_audit.DispositionAudit` via
-    ``DispositionAudit.from_dict``) instead of a second, independently-
-    resolved call to :func:`~abicheck.report.disposition_audit.
-    compute_disposition_audit` over the same ledger -- the same convergence
-    Markdown's own ``report_document`` parameter already applies. HTML's
-    remaining facts (bucketing into removed/changed/added, per-section rows,
-    the ``compat_html`` ABICC-clone layout's severity-band tables, gate/
-    scoped-verdict cards) are not yet shared-document fields -- see
-    ``docs/contribute/adr/061-responsibility-package-architecture.md``'s Gap
-    C status note for why those remain HTML-specific computation for now. A
-    direct caller with no such document (an existing Tier-2/test call site)
-    keeps the prior, independent-build behaviour.
-
-    *envelope* (ADR-061 gap C) supersedes it: the completed
-    :class:`~abicheck.report.envelope.ReportEnvelope` this render projects
-    carries that same shared document *plus* the two facts HTML used to
-    resolve for itself -- the severity gate behind its CI-gate card, and one
-    already-resolved verdict/category per change behind its section rows. The
-    bucketing and row layout above stay HTML's own presentation; what a row
-    *says* about a finding no longer is.
+    *envelope* (ADR-061 gap C), when given, is the completed
+    :class:`~abicheck.report.envelope.ReportEnvelope` this render projects.
+    Its shared ``report_mode="full"`` document supplies ``disposition_audit``
+    verbatim (reconstructed via ``DispositionAudit.from_dict``) instead of a
+    second, independently-resolved :func:`~abicheck.report.
+    disposition_audit.compute_disposition_audit` over the same ledger; its
+    gate drives the CI-gate card, and its one already-resolved verdict/
+    category per change drives the section rows. The bucketing and row
+    layout stay HTML's own presentation; what a row *says* about a finding
+    is the envelope's. HTML's remaining facts (bucketing, the
+    ``compat_html`` layout's severity-band tables) are not shared-document
+    fields -- see ADR-061's Gap C status note. A direct caller with no
+    envelope (a test, ``write_html_report``) keeps the independent build.
     """
-    shared_document = resolved_document(envelope, report_document)
+    shared_document = resolved_document(envelope)
     shared_disposition_audit = (
         DispositionAudit.from_dict(
             cast(
@@ -864,7 +841,6 @@ def generate_html_report(
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
     demangle: bool = True,
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> str:
     """Generate a standalone ABICC-compatible HTML ABI report.
@@ -886,8 +862,6 @@ def generate_html_report(
             alongside "Compatibility" so a configured severity gate (e.g. an
             addition promoted to ``error``) is visible even when the
             Compatibility verdict itself reads COMPATIBLE.
-        report_document: See :func:`build_html_document`'s own docstring
-            (ADR-061 Phase 2 gap C) -- forwarded unchanged.
         envelope: The completed ``ReportEnvelope`` this render projects (ADR-061
             gap C) -- forwarded unchanged; see :func:`build_html_document`.
 
@@ -907,7 +881,6 @@ def generate_html_report(
         show_impact=show_impact,
         severity_config=severity_config,
         demangle=demangle,
-        report_document=report_document,
         envelope=envelope,
     )
     return render_html_document(document)
@@ -1060,12 +1033,11 @@ def write_html_report(
     title: str | None = None,
     compat_html: bool = False,
     report_kind: str = "binary",
-    *,
-    demangle: bool = True,
 ) -> None:
     """Write HTML report to *output_path*, creating parent directories as
-    needed -- passing ``demangle`` through, unlike the CLI's own
-    ``--no-demangle`` this writer previously had no equivalent for."""
+    needed. ``compat check`` is its one caller; *report_kind* is ``"source"``
+    for the source-only reports it writes (``-source``,
+    ``-src-report-path``)."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     content = generate_html_report(
         result,
@@ -1076,6 +1048,5 @@ def write_html_report(
         title=title,
         compat_html=compat_html,
         report_kind=report_kind,
-        demangle=demangle,
     )
     output_path.write_text(content, encoding="utf-8")

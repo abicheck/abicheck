@@ -18,7 +18,7 @@ ADR-061 gap B/E: this module is a thin, delegation-only public compatibility
 facade (``architecture/modules.yaml``'s ``public_root_surfaces`` — this
 module itself stays deliberately unclassified). The real codec —
 ``snapshot_to_dict``/``snapshot_to_json``/``snapshot_content_digest``/
-``decode_snapshot``/``finalize_snapshot``/``load_snapshot_document``/
+``decode_snapshot``/``finalize_snapshot``/
 ``save_snapshot``/``write_snapshot``, the schema-version history, and every
 per-field decode rule — lives in :mod:`abicheck.storage.snapshot_codec`,
 classified ``storage``. This facade exists for two reasons a genuinely
@@ -73,7 +73,6 @@ __all__ = [
     "load_bundle_facts",
     "load_snapshot",
     "digest_scope",
-    "load_snapshot_document",
     "run_scoped_digest_cache",
     "save_bundle_facts",
     "save_snapshot",
@@ -99,7 +98,6 @@ from .storage.snapshot_codec import (
     SCHEMA_VERSION as SCHEMA_VERSION,
     decode_snapshot,
     finalize_snapshot,
-    load_snapshot_document as load_snapshot_document,
     save_snapshot as save_snapshot,
     snapshot_content_digest as snapshot_content_digest,
     snapshot_to_dict as snapshot_to_dict,

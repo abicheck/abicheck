@@ -545,17 +545,18 @@ def test_docs_snapshot_schema_version_matches_constant():
 
 class TestLoadSnapshotDocumentRejectsNonObjectRoot:
     """CodeRabbit review: json.loads() can return a list/str/number/bool for
-    arbitrary JSON text -- load_snapshot_document()'s own dict[str, Any]
+    arbitrary JSON text -- read_snapshot_document()'s own dict[str, Any]
     contract (and is_sectioned_document's "sections" key lookup) both
     assume a JSON object. A non-dict root must fail loudly, not surface as
     a confusing downstream error or a wrong is_sectioned_document verdict."""
 
     @pytest.mark.parametrize("content", ["[1, 2, 3]", '"just a string"', "42", "null"])
     def test_non_dict_root_raises_snapshot_error(self, tmp_path, content):
+        from _snapshot_document_reader import read_snapshot_document
+
         from abicheck.errors import SnapshotError
-        from abicheck.serialization import load_snapshot_document
 
         p = tmp_path / "not_an_object.json"
         p.write_text(content, encoding="utf-8")
         with pytest.raises(SnapshotError):
-            load_snapshot_document(p)
+            read_snapshot_document(p)

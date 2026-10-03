@@ -114,35 +114,6 @@ class TestFunctionFingerprint:
 
 
 # ---------------------------------------------------------------------------
-# BinarySummary tests
-# ---------------------------------------------------------------------------
-
-
-class TestBinarySummary:
-    def test_has_text_present(self) -> None:
-        s = BinarySummary(
-            sections={
-                ".text": SectionSummary(".text", 42, "x"),
-            }
-        )
-        assert s.has_text is True
-
-    def test_has_text_absent(self) -> None:
-        assert BinarySummary().has_text is False
-
-    def test_text_size(self) -> None:
-        s = BinarySummary(
-            sections={
-                ".text": SectionSummary(".text", 42, "x"),
-            }
-        )
-        assert s.text_size == 42
-
-    def test_text_size_absent(self) -> None:
-        assert BinarySummary().text_size is None
-
-
-# ---------------------------------------------------------------------------
 # match_renamed_functions tests
 # ---------------------------------------------------------------------------
 

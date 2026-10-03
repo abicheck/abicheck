@@ -126,7 +126,7 @@ def merge_presence(*facts: Fact[bool]) -> Fact[bool]:
         return Fact._make(FactStatus.PRESENT, True, diagnostics, producer)
     applicable = [f for f in readings if f.status is not FactStatus.NOT_APPLICABLE]
     if applicable and all(
-        f.status is FactStatus.PRESENT and f.value is False for f in applicable
+        is_completed_read(f) and f.value is False for f in applicable
     ):
         return Fact._make(FactStatus.PRESENT, False, diagnostics, producer)
     return _unknown(readings)
@@ -153,7 +153,7 @@ def merge_collection(
     union: frozenset[T] = frozenset().union(*(f.value or frozenset() for f in usable))
     status = (
         FactStatus.PRESENT
-        if all(f.status is FactStatus.PRESENT for f in applicable)
+        if all(is_completed_read(f) for f in applicable)
         else FactStatus.PARTIAL
     )
     return Fact._make(status, union, diagnostics, producer)
@@ -169,7 +169,7 @@ def presence_in(collection: Fact[frozenset[T]], item: T) -> Fact[bool]:
     if collection.is_present:
         if item in (collection.value or frozenset()):
             return Fact.present(True)
-        if collection.status is FactStatus.PRESENT:
+        if is_completed_read(collection):
             return Fact.present(False)
         return Fact._make(
             FactStatus.PARTIAL,

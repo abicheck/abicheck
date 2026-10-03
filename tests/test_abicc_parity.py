@@ -272,7 +272,7 @@ PARITY_CASES: list[tuple[str, str, str, str | None, str | None, str, str, str, s
     # castxml drops a `= delete`d member from its XML entirely, so v2 has no
     # element for it at all. abicheck now recovers a constructor overload's
     # visibility from source access when castxml gives no mangled name to
-    # check (see dumper_castxml._ctor_or_dtor_visibility), so the v1 copy ctor
+    # check (see extract.headers.castxml.functions.ctor_or_dtor_visibility), so the v1 copy ctor
     # is correctly seen as public, has no counterpart in v2, and FUNC_REMOVED
     # fires — BREAKING, matching reality. ABICC still misses it (unaffected,
     # separate tool), so this is now an abicheck-correct divergence, not parity.

@@ -105,7 +105,6 @@ UNSPECIFIED_TIER_BASELINE: frozenset[str] = frozenset(
         "field_lost_mutable",
         "field_lost_volatile",
         "fortify_source_weakened",
-        "frame_register_changed",
         "func_became_inline",
         "func_deleted",
         "func_deleted_dwarf",

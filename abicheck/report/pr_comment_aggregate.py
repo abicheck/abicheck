@@ -64,7 +64,6 @@ from ..pr_comment_base import CommentModel, Finding
 from .change_summary import ChangeSummary, fold_change_summaries
 from .pr_comment_members import (
     MAX_FOLDED_TARGETS,
-    MEMBER_REPORT_MAX_BYTES,
     MemberReportRefused,
     _limitation,
     _load_member,
@@ -378,7 +377,6 @@ def _fold_target(
     *,
     build_member_model: Callable[[dict[str, object]], CommentModel],
     base_dir: Path | None,
-    max_member_bytes: int,
 ) -> None:
     """Add one target's contribution to *fold*, in place."""
     tid = str(target.get("target_id", "?"))
@@ -419,7 +417,6 @@ def _fold_target(
             tid,
             build_member_model=build_member_model,
             base_dir=base_dir,
-            max_member_bytes=max_member_bytes,
         ),
         target=target,
         base_dir=base_dir,
@@ -482,7 +479,6 @@ def build_aggregate_model(
     *,
     build_member_model: Callable[[dict[str, object]], CommentModel],
     base_dir: Path | None,
-    max_member_bytes: int = MEMBER_REPORT_MAX_BYTES,
 ) -> CommentModel:
     """Fold an ``aggregate`` document, and its member reports, into one model.
 
@@ -515,7 +511,6 @@ def build_aggregate_model(
             target,
             build_member_model=build_member_model,
             base_dir=base_dir,
-            max_member_bytes=max_member_bytes,
         )
     if len(targets) > MAX_FOLDED_TARGETS:
         fold.incomplete.append(
@@ -634,7 +629,6 @@ def build_aggregate_model(
 
 
 __all__ = [
-    "MEMBER_REPORT_MAX_BYTES",
     "MemberReportRefused",
     "build_aggregate_model",
     "load_member_report",

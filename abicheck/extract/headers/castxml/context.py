@@ -35,10 +35,8 @@ Canonical entry point: construct a :class:`CastxmlParserContext` and call
 :meth:`CastxmlParserContext.build_id_map` once, before any entity module
 reads it. ``abicheck.dumper_castxml._CastxmlParser`` is this context's one
 production caller today; it holds the state below as ``self._ctx`` and
-exposes each field as a read-only property of the same old name so its
-still-unmigrated methods, and every existing external caller (tests
-included) that reads ``parser._id_map``/``parser._type_name_cache``/etc.
-directly, keep resolving unchanged.
+exposes only the fields its own still-unmigrated methods read as read-only
+properties. Anything else reads the context directly (``parser._ctx``).
 """
 
 from __future__ import annotations
@@ -48,8 +46,7 @@ from xml.etree.ElementTree import Element
 from ....provenance import build_public_set
 
 # castxml tags that represent a callable (free function, method, special
-# member, or operator). Shared with ``_CastxmlParser`` via re-export so the
-# existing ``_FUNCTION_TAGS`` class attribute keeps its value unchanged.
+# member, or operator).
 FUNCTION_TAGS: tuple[str, ...] = (
     "Function",
     "Method",
@@ -115,7 +112,7 @@ class CastxmlParserContext:
         self.type_name_cache: dict[str, str] = {}
         self.pointer_depth_cache: dict[str, int] = {}
         # method element id -> canonical vtable-slot key, resolved through any
-        # `overrides` chain. Populated lazily by ``_collect_virtual_methods``
+        # `overrides` chain. Populated lazily by ``collect_virtual_methods``
         # (still in ``dumper_castxml.py``); see its docstring for why this is
         # needed alongside vtable_index.
         self.vtable_slot_root: dict[str, int | str] = {}
@@ -123,7 +120,7 @@ class CastxmlParserContext:
         # in vtable_slot_root, for a method that itself overrides more than
         # one base slot (non-virtual multiple inheritance). A further-derived
         # override referencing this id by `overrides` must propagate to every
-        # one of these, not just the primary -- see _collect_virtual_methods.
+        # one of these, not just the primary -- see collect_virtual_methods.
         self.vtable_slot_extra_roots: dict[str, list[int | str]] = {}
 
     def build_id_map(self) -> None:

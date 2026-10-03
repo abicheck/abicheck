@@ -198,16 +198,20 @@ class TestExpectedInputSetReplacesDiscoveryDerivedCompleteness:
         """ "Deliberately excluded" is a distinct state from "missing": the
         caller asked for the narrowing, so it does not spoil sufficiency."""
         kept = tmp_path / "kept.hpp"
-        dropped = tmp_path / "dropped.hpp"
         kept.write_text(PACKED_SOURCE)
-        dropped.write_text(TEMPLATE_SOURCE)
-
-        result = find_pattern_facts(
-            [str(kept), str(dropped)], changed_paths=["kept.hpp"]
-        )
-        dispositions = {i.path: i.disposition for i in result.inputs.inputs}
-        assert dispositions[str(dropped)] is SourceInputDisposition.EXCLUDED
-        assert result.sufficient is True
+        inputs = SourceInputSet(
+            inputs=(
+                SourceInput(
+                    path=str(kept), disposition=SourceInputDisposition.SELECTED
+                ),
+                SourceInput(
+                    path=str(tmp_path / "dropped.hpp"),
+                    disposition=SourceInputDisposition.EXCLUDED,
+                ),
+            ),
+            licence=SourceReadLicence.live_extraction(),
+        ).with_read_outcomes({str(kept): True})
+        assert inputs.sufficient is True
 
     @pytest.mark.skipif(
         not hasattr(os, "mkfifo"),
@@ -527,8 +531,8 @@ class TestExpectedInputSetEdgeCases:
         ]
         assert inputs.sufficient is False
 
-    def test_no_changed_filter_keeps_every_candidate(self, tmp_path: Path) -> None:
-        """`changed_paths=None` is "no narrowing", distinct from an empty list."""
+    def test_a_directory_root_keeps_every_candidate(self, tmp_path: Path) -> None:
+        """Every walked candidate is expected evidence; none is narrowed away."""
         (tmp_path / "a.hpp").write_text(PACKED_SOURCE)
         (tmp_path / "b.hpp").write_text(TEMPLATE_SOURCE)
         result = find_pattern_facts([str(tmp_path)])
@@ -555,7 +559,7 @@ class TestExpectedInputSetEdgeCases:
         d.mkdir()
         f = d / "a.hpp"
         f.write_text(PACKED_SOURCE)
-        result = find_pattern_facts([str(d), str(f)], changed_paths=["a.hpp"])
+        result = find_pattern_facts([str(d), str(f)])
         dispositions = {i.path: i.disposition for i in result.inputs.inputs}
         assert dispositions[str(f)] is SourceInputDisposition.SCANNED
 
@@ -811,41 +815,6 @@ def test_resolve_source_inputs_without_a_licence_never_touches_disk(
     assert [i.disposition for i in inputs.inputs] == [
         SourceInputDisposition.NOT_LICENSED
     ] * 2
-
-
-def test_a_bare_filename_in_the_changed_list_matches_by_basename(
-    tmp_path: Path,
-) -> None:
-    """`_path_changed`'s basename fallback: a changed list holding just
-    `pub.hpp` must still select `<abs>/include/pub.hpp`, since the two are
-    rooted differently and neither is a tail of the other."""
-    inc = tmp_path / "include"
-    inc.mkdir()
-    (inc / "pub.hpp").write_text(PACKED_SOURCE)
-    (inc / "other.hpp").write_text(TEMPLATE_SOURCE)
-
-    result = find_pattern_facts([str(inc)], changed_paths=["pub.hpp"])
-    dispositions = {Path(i.path).name: i.disposition for i in result.inputs.inputs}
-    assert dispositions["pub.hpp"] is SourceInputDisposition.SCANNED
-    assert dispositions["other.hpp"] is SourceInputDisposition.EXCLUDED
-
-
-def test_a_changed_filter_with_no_join_predicate_narrows_nothing(
-    tmp_path: Path,
-) -> None:
-    """`resolve_source_inputs` is scanner-agnostic: a caller that passes
-    `changed_paths` but supplies no `path_changed` predicate has stated no way
-    to join the two, so nothing may be silently excluded on its behalf — the
-    safe direction, since a wrongly-excluded input would read as deliberate
-    scope rather than as a gap."""
-    f = tmp_path / "a.hpp"
-    f.write_text(PACKED_SOURCE)
-    inputs = resolve_source_inputs(
-        [str(f)],
-        changed_paths=["something-else.hpp"],
-        licence=SourceReadLicence.live_extraction(),
-    )
-    assert [i.disposition for i in inputs.inputs] == [SourceInputDisposition.SELECTED]
 
 
 class TestSourceInputSetMergeProperties:

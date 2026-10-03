@@ -65,24 +65,17 @@ class TestParseAccepted:
         assert parse_macro_definition(text).spelling == text
 
     @pytest.mark.parametrize("text", ACCEPTED)
-    @pytest.mark.parametrize("style,prefix", [("gnu", "-D"), ("cl", "/D")])
-    def test_renders_to_exactly_one_prefixed_token(
-        self, text: str, style: str, prefix: str
-    ) -> None:
+    def test_renders_to_exactly_one_prefixed_token(self, text: str) -> None:
         """D4: one definition is one argv token, always define-prefixed. The
         oracle is literal concatenation, independent of `token()`'s body."""
-        token = parse_macro_definition(text).token(style)
-        assert token == prefix + text
+        token = parse_macro_definition(text).token()
+        assert token == "-D" + text
         assert len(token.split()) == 1
 
     def test_bare_name_and_empty_value_are_distinct_states(self) -> None:
         assert parse_macro_definition("A") != parse_macro_definition("A=")
         assert parse_macro_definition("A").value is None
         assert parse_macro_definition("A=").value == ""
-
-    def test_unknown_token_style_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="unknown define token style"):
-            MacroDefinition("A").token("msvc")
 
 
 class TestParseRejected:
@@ -146,11 +139,10 @@ class TestParseRejected:
         domain rather than one adversarial example: whatever survives
         parsing, the rendered tail has exactly one token per definition and
         every one of them starts with the define switch."""
-        for style, prefix in (("gnu", "-D"), ("cl", "/D")):
-            tokens = macro_definition_tokens(parse_macro_definitions(ACCEPTED), style)
-            assert len(tokens) == len(ACCEPTED)
-            assert all(t.startswith(prefix) for t in tokens)
-            assert all(len(t.split()) == 1 for t in tokens)
+        tokens = macro_definition_tokens(parse_macro_definitions(ACCEPTED))
+        assert len(tokens) == len(ACCEPTED)
+        assert all(t.startswith("-D") for t in tokens)
+        assert all(len(t.split()) == 1 for t in tokens)
 
 
 class TestMergeProperties:
@@ -318,15 +310,14 @@ class TestDefineSpellingsFromTokens:
             "A=2",
         )
 
-    @pytest.mark.parametrize("style", ["gnu", "cl"])
-    def test_round_trips_every_distinctly_named_definition(self, style: str) -> None:
+    def test_round_trips_every_distinctly_named_definition(self) -> None:
         """Round trip over the accepted domain reduced to one entry per name
         -- ACCEPTED deliberately holds several spellings of `A`/`N`/`NAME`,
         which the reader now collapses last-wins by design."""
         defs = merge_macro_definitions((), parse_macro_definitions(ACCEPTED))
-        assert list(
-            define_spellings_from_tokens(macro_definition_tokens(defs, style))
-        ) == [d.spelling for d in defs]
+        assert list(define_spellings_from_tokens(macro_definition_tokens(defs))) == [
+            d.spelling for d in defs
+        ]
 
 
 class TestDefinesReceiptLine:

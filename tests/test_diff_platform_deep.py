@@ -1122,22 +1122,6 @@ class TestValueAbiTraitChanged:
         assert ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED in _kinds(r)
 
 
-class TestFrameRegisterChanged:
-    """Frame pointer register usage change."""
-
-    def test_frame_register_changed(self):
-        old_adv = AdvancedDwarfMetadata(
-            has_dwarf=True,
-            frame_registers={"_Z3foov": "rbp"},
-        )
-        new_adv = AdvancedDwarfMetadata(
-            has_dwarf=True,
-            frame_registers={"_Z3foov": "rsp"},
-        )
-        r = compare(_snap(dwarf_advanced=old_adv), _snap(dwarf_advanced=new_adv))
-        assert ChangeKind.FRAME_REGISTER_CHANGED in _kinds(r)
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # Mach-O Compatibility Version
 # ═══════════════════════════════════════════════════════════════════════════

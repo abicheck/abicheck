@@ -351,7 +351,7 @@ class TestEdgeCaseModelObjects:
         )
         snap.index()
         # First-wins: the first function should be in the map
-        f = snap.func_by_mangled("_Z3foov")
+        f = snap.function_map.get("_Z3foov")
         assert f is not None
         assert f.name == "foo"
 
@@ -369,7 +369,7 @@ class TestEdgeCaseModelObjects:
         )
         snap.index()
         # Should not crash
-        assert snap.func_by_mangled("") is not None
+        assert snap.function_map.get("") is not None
 
     def test_snapshot_with_very_long_names(self) -> None:
         """Snapshot with names exceeding 1000 characters."""
@@ -383,7 +383,7 @@ class TestEdgeCaseModelObjects:
             ],
         )
         snap.index()
-        f = snap.func_by_mangled(long_mangled)
+        f = snap.function_map.get(long_mangled)
         assert f is not None
         assert f.name == long_name
 
@@ -408,7 +408,7 @@ class TestEdgeCaseModelObjects:
             ],
         )
         snap.index()
-        assert snap.func_by_mangled("_Z_unicode_\u00e4\u00f6\u00fc") is not None
+        assert snap.function_map.get("_Z_unicode_\u00e4\u00f6\u00fc") is not None
         assert snap.var_by_mangled("_emoji_var") is not None
 
     def test_compare_snapshot_against_itself(self) -> None:

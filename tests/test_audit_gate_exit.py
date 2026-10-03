@@ -21,7 +21,6 @@ from abicheck.policy.audit_gate_exit import (
     SEVERITY_PRESET_DISABLES_AUDIT_GATE,
     audit_gate_enabled_for_severity_preset,
     audit_gate_exit_contribution,
-    fold_audit_gate_exit,
 )
 from abicheck.policy.classification import Verdict
 
@@ -136,17 +135,6 @@ class TestAuditGateExitContribution:
         (or silently fail to), it should simply find nothing to read."""
         findings = [_FakeChangeWithNoVerdict()]
         assert audit_gate_exit_contribution(findings, enabled=True) == 0
-
-
-class TestFoldAuditGateExit:
-    def test_raises_a_clean_zero(self) -> None:
-        assert fold_audit_gate_exit(0, AUDIT_GATE_EXIT_CODE) == AUDIT_GATE_EXIT_CODE
-
-    def test_never_lowers_a_higher_base(self) -> None:
-        assert fold_audit_gate_exit(7, AUDIT_GATE_EXIT_CODE) == 7
-
-    def test_zero_contribution_never_raises(self) -> None:
-        assert fold_audit_gate_exit(0, 0) == 0
 
 
 class TestCompareHelpAllDocumentsTheAuditGateAxis:

@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .checker_types import Change
+from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     BUNDLE_SONAME_COHORT,
     CPU_DISPATCH_ISA,
@@ -898,10 +899,14 @@ def detect_inline_body_renamed_member(
     old: AbiSnapshot,
     new: AbiSnapshot,
     changes: Iterable[Change],
-    namespaces: tuple[str, ...] = ("detail", "impl", "internal"),
+    namespaces: tuple[str, ...] = DEFAULT_INTERNAL_NAMESPACES,
 ) -> list[Change]:
     """Detect an inline public accessor whose body references a
     member that was renamed inside an internal-namespace type.
+
+    *namespaces* is the run's internal-namespace convention: the policy
+    file's ``internal_namespaces`` when stated, else the shared default
+    every other internal-namespace check reads.
 
     Heuristic: any ``field_renamed`` (or removed+added field pair) on a
     record type whose name segment matches an internal namespace,

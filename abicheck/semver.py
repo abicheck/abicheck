@@ -360,11 +360,9 @@ def stated_versioning_policy(result: DiffResult) -> VersioningPolicy | None:
     a run without one keeps ``policy_acceptance`` unset ("not evaluated")
     rather than reporting a default it never chose.
     """
-    policy_file = getattr(result, "policy_file", None)
-    if policy_file is None or not getattr(policy_file, "versioning_stated", False):
-        return None
-    policy = getattr(policy_file, "versioning", None)
-    return policy if isinstance(policy, VersioningPolicy) else None
+    from .policy.versioning_policy import stated_versioning_policy_of
+
+    return stated_versioning_policy_of(getattr(result, "policy_file", None))
 
 
 def recommend_release_for_report(result: DiffResult) -> ReleaseRecommendation:

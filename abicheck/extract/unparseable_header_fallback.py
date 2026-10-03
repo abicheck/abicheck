@@ -57,8 +57,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EXCLUDED_HEADERS_TOOLCHAIN_KEY",
-    "attribute_failing_headers",
-    "cross_header_conflicts",
     "parse_excluding_unparseable_headers",
 ]
 
@@ -86,40 +84,28 @@ def _norm(path: str | Path) -> str:
         return str(path)
 
 
-def attribute_failing_headers(stderr: str, headers: Sequence[Path]) -> set[int]:
-    """0-based indices into *headers* whose ``#include`` chain raised an error.
-
-    Each error is attributed through its include chain: when the outermost
-    frame is the aggregate (a file that is none of *headers*), the input is
-    the file that frame includes -- the chain's next entry -- looked up in
-    *headers* by path; only without such a frame does the innermost listed
-    file in the chain name it. The aggregate's line numbers are never read:
-    its layout belongs to whoever writes it (a preamble include precedes the
-    headers), so a line-to-index rule would silently blame a neighbour the
-    moment that layout changed. An error nothing in the chain attributes is
-    skipped, never guessed at.
-    """
-    return _scan_diagnostics(stderr, headers)[0]
-
-
-def cross_header_conflicts(stderr: str, headers: Sequence[Path]) -> set[int]:
-    """Indices of errors' headers whose diagnostic implicates another listed header.
-
-    An error is a *conflict* -- not attributable to one header -- when any
-    ``note:`` attached to it (``previous definition is here``, ``candidate``,
-    ...) attributes to a *different* listed header than the error itself.
-    Such a failure exists only because the two headers share one
-    translation unit (a redefinition, an ODR clash); dropping either one
-    would be an arbitrary choice, so the caller must fail instead. Returns
-    the error-side indices; an empty set means every attributed error is
-    self-contained.
-    """
-    return _scan_diagnostics(stderr, headers)[1]
-
-
 def _scan_diagnostics(
     stderr: str, headers: Sequence[Path]
 ) -> tuple[set[int], set[int]]:
+    """``(failing, conflicting)``: 0-based indices into *headers*.
+
+    *failing* holds the headers whose ``#include`` chain raised an error. Each
+    error is attributed through its include chain: when the outermost frame is
+    the aggregate (a file that is none of *headers*), the input is the file
+    that frame includes -- the chain's next entry -- looked up in *headers* by
+    path; only without such a frame does the innermost listed file in the
+    chain name it. The aggregate's line numbers are never read: its layout
+    belongs to whoever writes it (a preamble include precedes the headers), so
+    a line-to-index rule would silently blame a neighbour the moment that
+    layout changed. An error nothing in the chain attributes is skipped, never
+    guessed at.
+
+    *conflicting* holds the error-side indices whose error has a ``note:``
+    (``previous definition is here``, ``candidate``, ...) attributing to a
+    *different* listed header: such a failure exists only because the two
+    headers share one translation unit, so dropping either would be an
+    arbitrary choice and the caller must fail instead.
+    """
     index = {_norm(h): i for i, h in enumerate(headers)}
     failing: set[int] = set()
     conflicting: set[int] = set()

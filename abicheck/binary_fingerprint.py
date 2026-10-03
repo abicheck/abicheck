@@ -96,17 +96,6 @@ class BinarySummary:
 
     sections: dict[str, SectionSummary] = field(default_factory=dict)
 
-    @property
-    def has_text(self) -> bool:
-        """Return True if the summary includes a .text section."""
-        return ".text" in self.sections
-
-    @property
-    def text_size(self) -> int | None:
-        """Return .text section size, or None if absent."""
-        s = self.sections.get(".text")
-        return s.size if s is not None else None
-
 
 @dataclass(frozen=True)
 class RenameCandidate:

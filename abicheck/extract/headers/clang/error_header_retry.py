@@ -58,6 +58,10 @@ _DIRECT_INCLUDE_GUARD_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: How many exclude-and-reparse rounds :func:`retry_excluding_error_headers`
+#: runs before giving up, so a pathological cascade can't loop forever.
+_MAX_RETRY_ATTEMPTS = 5
+
 
 def _headers_failing_in_aggregate(
     stderr: str, agg_path: Path, n_headers: int
@@ -131,7 +135,6 @@ def retry_excluding_error_headers(
     write_agg: Callable[[list[Path]], None],
     agg_path: Path,
     active_headers: list[Path],
-    max_attempts: int = 5,
 ) -> subprocess.CompletedProcess[str]:
     """Drop headers whose aggregate compile ``#error``s and re-parse; return result.
 
@@ -140,7 +143,7 @@ def retry_excluding_error_headers(
     ``#error`` would otherwise abort the entire L2 parse. Exclude the offending
     top-level headers (identified by :func:`_headers_failing_in_aggregate`),
     rewrite the aggregate via *write_agg*, and retry *run_clang* — so the rest of
-    the public surface is still parsed. Bounded by *max_attempts* so a
+    the public surface is still parsed. Bounded by ``_MAX_RETRY_ATTEMPTS`` so a
     pathological cascade can't loop forever; a single-header ``-H`` (an umbrella
     file the user chose) is never reduced. Logs exactly which headers were dropped
     on success so the omission is never silent.
@@ -148,7 +151,9 @@ def retry_excluding_error_headers(
     excluded: list[Path] = []
     attempts = 0
     while (
-        result.returncode != 0 and len(active_headers) > 1 and attempts < max_attempts
+        result.returncode != 0
+        and len(active_headers) > 1
+        and attempts < _MAX_RETRY_ATTEMPTS
     ):
         bad = _headers_failing_in_aggregate(
             result.stderr or "", agg_path, len(active_headers)

@@ -83,7 +83,6 @@ def resolve_dump_collect_context(
     sources: Path | None,
     build_info: Path | None,
     headers: tuple[Path, ...],
-    inputs_pack: Path | None = None,
 ) -> tuple[str, tuple[Path, ...]]:
     """Resolve the --depth preset into the internal collect mode for a dump.
 
@@ -130,7 +129,6 @@ def resolve_dump_collect_context(
         and collect_mode != "off"
         and sources is None
         and build_info is None
-        and inputs_pack is None
     ):
         click.echo(
             f"Warning: evidence depth '{collect_mode}' was requested but no "

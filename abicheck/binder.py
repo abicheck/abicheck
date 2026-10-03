@@ -26,7 +26,7 @@ from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 
-from .model.elf_facts import ElfMetadata, SymbolBinding as ElfSymbolBinding
+from .model.elf_facts import SymbolBinding as ElfSymbolBinding
 from .resolver import DependencyGraph
 
 log = logging.getLogger(__name__)
@@ -53,11 +53,7 @@ class SymbolBinding:
     explanation: str  # Human-readable reason
 
 
-def compute_bindings(
-    graph: DependencyGraph,
-    metadata: dict[str, ElfMetadata] | None = None,
-    preload: list[str] | None = None,
-) -> list[SymbolBinding]:
+def compute_bindings(graph: DependencyGraph) -> list[SymbolBinding]:
     """Compute symbol bindings across the resolved dependency graph.
 
     For each DSO in the graph, looks up its imported (undefined) symbols and
@@ -65,10 +61,8 @@ def compute_bindings(
     linker's breadth-first search order.
 
     Args:
-        graph: A resolved dependency graph from ``resolve_dependencies()``.
-        metadata: Optional pre-parsed metadata per resolved path. If None,
-            uses the ``elf_metadata`` stored in each graph node.
-        preload: Optional list of DSO paths to treat as LD_PRELOAD (searched first).
+        graph: A resolved dependency graph from ``resolve_dependencies()``;
+            each node's own ``elf_metadata`` is what is bound.
 
     Returns:
         A list of SymbolBinding entries for all imports across all DSOs.
@@ -79,7 +73,7 @@ def compute_bindings(
     # Index: provider_path → { symbol_name → [(version, is_default, visibility)] }
     export_index: dict[str, dict[str, list[tuple[str, bool, str]]]] = {}
     for node_path, node in graph.nodes.items():
-        meta = (metadata or {}).get(node_path) or node.elf_metadata
+        meta = node.elf_metadata
         if meta is None:
             continue
         sym_map: dict[str, list[tuple[str, bool, str]]] = {}
@@ -93,11 +87,10 @@ def compute_bindings(
     # Determine search order: BFS from root gives the "breadth-first" loaded
     # order that the dynamic linker uses for symbol lookup.
     load_order = _compute_load_order(graph)
-    preload_paths = list(preload or [])
 
     # Process each DSO's imports.
     for node_path, node in graph.nodes.items():
-        meta = (metadata or {}).get(node_path) or node.elf_metadata
+        meta = node.elf_metadata
         if meta is None:
             continue
 
@@ -107,7 +100,6 @@ def compute_bindings(
                 sym_name=imp.name,
                 required_version=imp.version,
                 is_weak=(imp.binding == ElfSymbolBinding.WEAK),
-                preload_paths=preload_paths,
                 load_order=load_order,
                 export_index=export_index,
             )
@@ -312,13 +304,11 @@ def _resolve_import(
     sym_name: str,
     required_version: str,
     is_weak: bool,
-    preload_paths: list[str],
     load_order: list[str],
     export_index: dict[str, dict[str, list[tuple[str, bool, str]]]],
 ) -> SymbolBinding:
-    """Resolve a single imported symbol against the loaded DSO set."""
-    # Search order: preload → global load order (BFS).
-    search_order = preload_paths + load_order
+    """Resolve a single imported symbol against the loaded DSO set, searched
+    in the global (breadth-first) load order."""
 
     # Track whether we found the symbol name at all, with/without visibility.
     found_name_visible = False  # found with at least one visible version
@@ -326,7 +316,7 @@ def _resolve_import(
     first_provider = None  # first provider with a visible matching symbol
     first_hidden_provider = None  # first provider where symbol exists but is hidden
 
-    for provider_path in search_order:
+    for provider_path in load_order:
         # Skip self — a DSO doesn't provide its own imports.
         if provider_path == consumer:
             continue

@@ -69,7 +69,6 @@ def build_review_digest_document(
     result: Any,
     *,
     severity_config: Any = None,
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
     """The ``-o review=...`` digest as a ``ReportDocument``.
@@ -78,20 +77,13 @@ def build_review_digest_document(
     compute_review_digest` unchanged -- see that function's own docstring
     for what it drives (the merge-effect phrase).
 
-    *report_document* (ADR-061 gap C), when given, is the one canonical
-    ``report_mode="full"`` document ``report.build.build_report_document``
-    already built for this render -- ``service_render.render_output``'s
-    ``review`` branch builds it once and threads it down through
-    ``to_review_digest``. Its ``disposition_audit`` field is reused verbatim
-    here instead of a second, independently-resolved call to
-    ``compute_disposition_audit`` (the same ledger, the same arguments --
-    calling it twice cannot disagree, but building through the one shared
-    choke point is the point of this closure, not just its safety). A direct
-    caller with no such document (an existing Tier-2/test call site) keeps
-    the prior behaviour by passing nothing.
-
-    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` that
-    document belongs to. Beyond supplying the document, it carries the
+    *envelope* (ADR-061 gap C), when given, is the completed
+    ``ReportEnvelope`` this render projects. Its shared ``report_mode="full"``
+    document supplies ``disposition_audit`` verbatim instead of a second
+    ``compute_disposition_audit`` over the same ledger (calling it twice
+    cannot disagree, but building through the one shared choke point is the
+    point). A direct caller with no envelope builds it itself. The envelope
+    also carries the
     already-resolved per-finding verdicts the digest's "impacted symbols"
     list used to re-resolve through its own ``report_findings_for`` call --
     the same canonical primitive, but a second resolution of a decision this
@@ -99,7 +91,7 @@ def build_review_digest_document(
     which the merge-effect phrase now projects instead of a second
     ``compute_exit_code`` call of its own (CodeRabbit review).
     """
-    shared_document = resolved_document(envelope, report_document)
+    shared_document = resolved_document(envelope)
     shared_disposition_audit = (
         DispositionAudit.from_dict(
             cast("Mapping[str, Any]", shared_document.to_mapping()["disposition_audit"])

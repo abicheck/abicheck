@@ -62,10 +62,8 @@ from ...header_utils import include_operand_dirs
 from .contracts import ResolvedArtifactPlan
 from .embed_side import embed_side_build_source
 from .resolve import (
-    BaselineReuseContext,
     _gated_build_query_inputs,
     _seeded_includes_and_compile_context,
-    resolve_baseline_compile_context,
 )
 
 if TYPE_CHECKING:
@@ -94,9 +92,8 @@ class SideResolution:
     ``includes`` and the folded :class:`CompileContext`, both discarded after
     use -- but callers with a post-resolution hook that must agree with the
     primary parse (``perform_elf_dump``'s ADR-039 build-context collector and
-    header-graph second pass; the retired ``scan_engine``'s pair-aware baseline-context
-    reuse decision) need these values themselves, not just the snapshot. See
-    :func:`_resolve_side_snapshot_impl`.
+    header-graph second pass) need these values themselves, not just the
+    snapshot. See :func:`_resolve_side_snapshot_impl`.
 
     **Lifetime caveat (Codex review, fresh evidence)**: when the fold ran a
     trusted, zero-config *inferred* build-system query (no existing compile
@@ -106,26 +103,14 @@ class SideResolution:
     ``finally`` drains that cleanup right after the primary parse has
     consumed it, deliberately, to release its exclusive lock before a
     sibling collection (e.g. ``embed_build_source``'s own inferred query)
-    can run. Safe for *identity/comparison* (e.g. the retired ``scan_engine``'s
-    pair-aware baseline-context-reuse decision, which only compares these
-    values against another side's resolved header/include sets, never reads
-    a file under them) -- **not** safe for a caller intending to re-read a
-    file under one of these paths after this call returns. Closing that for
-    real needs the pair-aware/lifetime redesign PR 3A's "Known gaps" entry
-    already scopes as a dedicated follow-up, not merely exposing the values.
+    can run. Safe for *identity/comparison* -- **not** safe for a caller
+    intending to re-read a file under one of these paths after this call
+    returns.
     """
 
     snapshot: AbiSnapshot
     effective_includes: tuple[Path, ...]
     effective_compile_context: CompileContext | None
-    #: PR 3A blocker 6: the context the *other* (baseline) side's parse should
-    #: use, when the caller supplied a ``baseline_reuse_hint``. Identical to
-    #: ``effective_compile_context`` when no hint was given (no second side to
-    #: decide about) or when the two sides' resolved scopes match, and the
-    #: caller's own unfolded context when they genuinely diverge -- see
-    #: :class:`BaselineReuseContext` for why that is the correct fallback.
-    #: Defaulted, so a caller that ignores it is unaffected.
-    baseline_compile_context: CompileContext | None = None
 
 
 def resolve_side_snapshot(
@@ -142,8 +127,6 @@ def resolve_side_snapshot(
     debuginfod_url: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
-    symbols_only: bool = False,
-    debug_presence_only: bool = False,
     include_labels: dict[Path, str] | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
@@ -160,21 +143,9 @@ def resolve_side_snapshot(
     :attr:`abicheck.workflows.contracts.DumpRequest.lang_explicit`. Forwarded to
     :func:`abicheck.service.resolve_input` unchanged.
 
-    ``symbols_only``/``debug_presence_only`` (PR 3A, dump/scan resolver
-    convergence): forwarded to :func:`abicheck.service.resolve_input`
-    unchanged. Both default ``False``, matching that function's own
-    defaults, so every pre-existing caller (``compare``, ``dump``'s typed
-    pipeline) is unaffected — only ``scan``'s candidate-side resolution,
-    which supports a binary-depth/debug-presence-only scan, needs to pass a
-    non-default value. Before this, only the (now retired) ``scan_engine._build_new_snapshot``
-    (which calls :func:`abicheck.service.resolve_input` directly, bypassing
-    this shared primitive entirely) could express either flag — see
-    ``AGENTS.md``'s PR C entry for the gap this closes.
-
-    A thin wrapper over :func:`_resolve_side_snapshot_impl` (PR 3A, dump/scan
-    resolver convergence) — identical signature, identical behavior, for every
-    existing caller. Use the impl function directly when the caller also
-    needs the fold's effective ``includes``/``CompileContext`` back.
+    A thin wrapper over :func:`_resolve_side_snapshot_impl` for a caller that
+    needs only the snapshot; use the impl directly when the caller also needs
+    the fold's effective ``includes``/``CompileContext`` back.
     """
     return _resolve_side_snapshot_impl(
         side,
@@ -189,8 +160,6 @@ def resolve_side_snapshot(
         debuginfod_url=debuginfod_url,
         dwarf_only=dwarf_only,
         debug_format=debug_format,
-        symbols_only=symbols_only,
-        debug_presence_only=debug_presence_only,
         include_labels=include_labels,
         notify=notify,
     ).snapshot
@@ -210,8 +179,6 @@ def _resolve_side_snapshot_impl(
     debuginfod_url: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
-    symbols_only: bool = False,
-    debug_presence_only: bool = False,
     include_labels: dict[Path, str] | None = None,
     notify: Callable[[str], None] | None = None,
     build_config: Path | None = None,
@@ -219,17 +186,9 @@ def _resolve_side_snapshot_impl(
     build_compile_db: str | None = None,
     changed_paths: tuple[str, ...] = (),
     allow_build_query: bool | None = None,
-    build_config_locally_trusted: bool = False,
     build_config_explicit: bool = True,
-    baseline_reuse_hint: BaselineReuseContext | None = None,
     seed_collect_mode: str | None = None,
-    seed_lang_explicit: bool | None = None,
-    defer_cleanup: list[Callable[[], None]] | None = None,
-    source_extractor: str | None = None,
-    expand_public_header_roots: bool = False,
     source_frontend_from_folded_context: bool = False,
-    l4_public_headers: list[Path] | None = None,
-    l4_public_header_dirs: list[Path] | None = None,
     compile_db_tokens: tuple[str, ...] = (),
     compile_db_matched: bool = False,
 ) -> SideResolution:
@@ -238,17 +197,14 @@ def _resolve_side_snapshot_impl(
     PR 3A (dump/scan resolver convergence, CLI cleanup phase two): everything
     :func:`resolve_side_snapshot` already did, plus returning the fold's own
     effective ``includes``/:class:`CompileContext` (see :class:`SideResolution`)
-    and three extra optional pass-throughs (*changed_paths*,
-    *allow_build_query*, and the *symbols_only*/*debug_presence_only* pair)
-    that only ``scan``'s candidate-side resolution needs — every other caller
-    leaves them at their no-op defaults, so this is a strict superset of the
-    prior behavior, not a new decision point. *build_config*/*build_query*/
-    *build_compile_db* are the equivalent pass-through for ``dump``'s ELF
-    path, which keeps a live ``--config`` flag plus these programmatic
-    ``build_query``/``build_compile_db`` arguments -- PR 3C removed the CLI
-    flags of those two names, not the parameters themselves, since a
-    programmatic caller is the operator exactly as an explicit ``--config``
-    is.
+    and the optional pass-throughs below, each defaulting to a no-op.
+    *changed_paths* scopes L4 replay to the paths a change touched (ADR-043
+    D7). *build_config*/*build_query*/*build_compile_db* carry ``dump``'s
+    build inputs: its ELF path keeps a live ``--config`` flag plus these
+    programmatic ``build_query``/``build_compile_db`` arguments -- PR 3C
+    removed the CLI flags of those two names, not the parameters themselves,
+    since a programmatic caller is the operator exactly as an explicit
+    ``--config`` is.
 
     ``allow_build_query=None`` keeps this Tier-2 primitive's existing
     "never execute a build system as a side effect" default (``False``,
@@ -256,30 +212,14 @@ def _resolve_side_snapshot_impl(
     passes ``True`` (the CLI, once its own trust gate has already decided
     the query is authorized) opts into running one.
 
-    Eight further parameters exist so ``scan``'s candidate resolution could be
-    migrated onto this one primitive *without changing any of its own
-    behaviour* (PR 3A). Each defaults to what this function did before, so
-    ``compare``/``dump``'s typed pipelines are bit-for-bit unaffected; six are
-    forwarded straight to :func:`embed_side_build_source`, whose docstring
-    explains each (including *l4_public_headers*/*l4_public_header_dirs* --
-    the L4-only public-root override that closes the scan-vs-dump L4
-    root-set asymmetry that same docstring documents). The two that are this
-    function's own:
-
-    * *seed_collect_mode* — the collect mode handed to the L2 include/compile
-      seed. ``None`` keeps the pinned ``"off"``: a Tier-2 API call must never
-      *execute* a build system as a side effect of resolving an input (see
-      :func:`_seeded_includes_and_compile_context`). ``scan`` passes its real
-      collect mode, because the user typed a command that says so, and
-      dropping that would silently remove its zero-config inferred-build-query
-      include seeding for a source tree with no compile database.
-    * *seed_lang_explicit* — the seed's own ``lang_explicit``, when it differs
-      from the one the *parse* gets. ``None`` (the default) uses
-      *lang_explicit* for both, which is what every request-shaped caller
-      wants. ``scan`` has no ``lang_explicit`` on its CLI at all, but ``--lang
-      c`` is never its Click default and so is always a genuine request — it
-      therefore guards the seed with ``lang == "c"`` while leaving the parse's
-      own auto-detection alone, exactly as it did before this migration.
+    *seed_collect_mode* is the collect mode handed to the L2 include/compile
+    seed. ``None`` keeps the pinned ``"off"``: a Tier-2 API call must never
+    *execute* a build system as a side effect of resolving an input (see
+    :func:`_seeded_includes_and_compile_context`). ``dump`` passes its real
+    collect mode, because the user typed a command that says so.
+    *source_frontend_from_folded_context* selects the L4 replay compiler from
+    the folded context the L2 parse used rather than the caller's own (see
+    :func:`embed_side_build_source`).
 
     *compile_db_tokens*/*compile_db_matched* (ADR-063 Phase 1):
     forwarded verbatim to
@@ -290,16 +230,6 @@ def _resolve_side_snapshot_impl(
     ``docs/contribute/known-gaps.md``'s "ADR-063 Phase 1" entry for the
     mechanism this closes. Both default to falsy, so every existing caller
     of this function is unaffected.
-
-    *build_config_locally_trusted* -- ``False`` keeps ``build_config``'s
-    presence fully gated by *allow_build_query* (unchanged for ``dump``/
-    ``compare``'s typed pipelines). ``scan`` passes ``True``: its own CLI-side
-    consent gate (the retired ``cli_scan_helpers.resolve_effective_allow_query``, ADR-037
-    D4) only ever authorizes a config's *executable* ``build.query`` field,
-    never its bare presence, and blanket-nulling ``build_config`` here for
-    every other case would drop an ordinary ``--config`` file's *passive*
-    settings too -- see :func:`_gated_build_query_inputs`'s own docstring for
-    the full reasoning and the pre-migration behavior this restores.
     """
     # Real owner (`..input_resolution`), not the flat `abicheck.service`
     # facade this used to route through -- D6, never import back through
@@ -334,7 +264,6 @@ def _resolve_side_snapshot_impl(
         build_config,
         build_query,
         allow_build_query=bool(allow_build_query),
-        build_config_locally_trusted=build_config_locally_trusted,
     )
     # Phase 1 (dedup-and-convergence plan) Milestone A follow-up: the third
     # and (per the plan doc's own Phase 1 item list) last known hand-rolled
@@ -352,14 +281,11 @@ def _resolve_side_snapshot_impl(
                 side,
                 evidence,
                 lang=lang,
-                lang_explicit=(
-                    lang_explicit if seed_lang_explicit is None else seed_lang_explicit
-                ),
+                lang_explicit=lang_explicit,
                 build_config=_gated_build_config,
                 build_query=_gated_build_query,
                 build_compile_db=build_compile_db,
                 allow_build_query=bool(allow_build_query),
-                build_config_locally_trusted=build_config_locally_trusted,
                 build_config_explicit=build_config_explicit,
                 collect_mode=seed_collect_mode,
                 compile_db_tokens=compile_db_tokens,
@@ -422,8 +348,6 @@ def _resolve_side_snapshot_impl(
                 follow_linker_scripts=side.follow_linker_scripts,
                 dwarf_only=dwarf_only,
                 debug_format=debug_format,
-                symbols_only=symbols_only,
-                debug_presence_only=debug_presence_only,
                 include_labels=include_labels,
                 notify=notify,
                 # Provenance widening gets ONLY this side's own explicit -I
@@ -544,14 +468,9 @@ def _resolve_side_snapshot_impl(
                 build_config_explicit=build_config_explicit,
                 build_query=_gated_build_query,
                 build_compile_db=build_compile_db,
-                defer_cleanup=defer_cleanup,
-                source_extractor=source_extractor,
                 source_frontend_compile=(
                     compile_ctx if source_frontend_from_folded_context else None
                 ),
-                expand_public_header_roots=expand_public_header_roots,
-                l4_public_headers=l4_public_headers,
-                l4_public_header_dirs=l4_public_header_dirs,
             )
     finally:
         # Backstop only. The real drain happens in the nested `finally` around
@@ -567,17 +486,6 @@ def _resolve_side_snapshot_impl(
         snapshot=snap,
         effective_includes=tuple(includes),
         effective_compile_context=compile_ctx,
-        # PR 3A blocker 6: the pair-shaped answer, computed only when the
-        # caller handed in the second side's scope. Without a hint this is
-        # just `compile_ctx` -- there is no other side to decide about -- so
-        # every pre-existing caller reads exactly what it read before.
-        baseline_compile_context=resolve_baseline_compile_context(
-            baseline_reuse_hint,
-            folded=compile_ctx,
-            unfolded=evidence.compile,
-            headers=evidence.headers,
-            effective_includes=includes,
-        ),
     )
 
 

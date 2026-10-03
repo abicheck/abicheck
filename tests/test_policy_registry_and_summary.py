@@ -1,5 +1,5 @@
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-from abicheck.checker_policy import policy_for, policy_registry_markdown
+from abicheck.checker_policy import policy_for
 from abicheck.report_summary import build_summary, compatibility_metrics
 
 
@@ -7,12 +7,6 @@ def test_policy_registry_has_doc_slug_and_severity() -> None:
     entry = policy_for(ChangeKind.FUNC_REMOVED)
     assert entry.doc_slug == "func_removed"
     assert entry.severity == "error"
-
-
-def test_policy_registry_markdown_contains_header() -> None:
-    md = policy_registry_markdown()
-    assert "| ChangeKind | Default verdict | Severity | Doc slug |" in md
-    assert "`func_removed`" in md
 
 
 def test_summary_metrics_include_percentages() -> None:

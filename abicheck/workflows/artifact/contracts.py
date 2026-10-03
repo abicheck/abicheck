@@ -243,14 +243,6 @@ class ResolvedArtifactPlan:
         #: of the raw header list.
         self.public_header_dirs = public_header_dirs
 
-    def add_cleanup(self, cleanup: Callable[[], None]) -> None:
-        """Register a cleanup discovered after construction (e.g. during
-        execution rather than resolution, or after an earlier drain already
-        ran). Equivalent to ``self.pending_cleanups.append(cleanup)`` —
-        provided as a named method so a caller need not reach into the list
-        directly."""
-        self.pending_cleanups.append(cleanup)
-
     def run_cleanups(self) -> None:
         """Run every cleanup registered since the last drain exactly once,
         in registration order, never letting one failure skip the rest —

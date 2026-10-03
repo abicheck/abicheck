@@ -65,15 +65,11 @@ def embed_build_source(
     build_config_explicit: bool = True,
     clang_bin: str = "clang",
     collect_mode: str = "source-target",
-    build_query: str | None = None,
-    build_compile_db: str | None = None,
-    build_targets: tuple[str, ...] = (),
     changed_paths: tuple[str, ...] = (),
     extractor: str = "auto",
     public_headers: tuple[str, ...] = (),
     public_header_dirs: tuple[str, ...] = (),
     defer_cleanup: list[Callable[[], None]] | None = None,
-    quiet: bool = False,
 ) -> None:
     """CLI adapter over :func:`abicheck.buildsource.embed.embed_build_source`.
 
@@ -85,8 +81,7 @@ def embed_build_source(
       ``SnapshotError`` (an invalid pack) is operational -> a plain
       ``ClickException``, exit 1. Collapsing the two would tell a CI consumer
       the invocation was wrong when the data was.
-    * **The stream.** ``quiet`` is preserved as this layer's spelling; it
-      simply decides whether a stderr writer is handed to the engine.
+    * **The stream.** The engine's advisory messages go to stderr.
     """
     from .workflows.extraction import embed_build_source as _embed
 
@@ -99,17 +94,12 @@ def embed_build_source(
             build_config_explicit=build_config_explicit,
             clang_bin=clang_bin,
             collect_mode=collect_mode,
-            build_query=build_query,
-            build_compile_db=build_compile_db,
-            build_targets=build_targets,
             changed_paths=changed_paths,
             extractor=extractor,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             defer_cleanup=defer_cleanup,
-            on_warning=None
-            if quiet
-            else (lambda message: click.echo(message, err=True)),
+            on_warning=lambda message: click.echo(message, err=True),
         )
     except ValidationError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -127,9 +117,6 @@ def dump_source_only(
     build_id: str | None,
     no_git: bool,
     collect_mode: str = "source-target",
-    build_query: str | None = None,
-    build_compile_db: str | None = None,
-    build_targets: tuple[str, ...] = (),
     extractor: str = "auto",
     depth: str | None = None,
     include_dependencies: bool = False,
@@ -179,9 +166,6 @@ def dump_source_only(
         sources,
         build_config,
         collect_mode,
-        build_query=build_query,
-        build_compile_db=build_compile_db,
-        build_targets=build_targets,
         extractor=extractor,
         depth=depth,
         include_dependencies=include_dependencies,
@@ -319,9 +303,6 @@ def _write_snapshot_output(
     sources: Path | None = None,
     build_config: Path | None = None,
     collect_mode: str = "source-target",
-    build_query: str | None = None,
-    build_compile_db: str | None = None,
-    build_targets: tuple[str, ...] = (),
     extractor: str = "auto",
     inputs_pack: Path | None = None,
     depth: str | None = None,
@@ -348,16 +329,12 @@ def _write_snapshot_output(
     ``compare old.json new.json`` needs no out-of-band packs. *collect_mode* (the
     ADR-033 D2 CI evidence mode) selects which layers and replay scope to collect:
     ``build`` captures L3 build context only, ``off`` collects nothing.
-    *build_query* / *build_compile_db* / *build_targets* are programmatic-API-only
-    overrides of the ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` /
-    ``build.targets`` keys — none of the three has a CLI flag any more
-    (``--build-query``/``--build-compile-db`` were removed in PR 3C/3F,
-    ``--build-target`` later); every caller reaching this function from the
-    ``dump`` CLI passes none of them, so the effective value always comes from
-    a discovered or explicit ``.abicheck.yml``. *build_targets* (P0.2) scopes
-    Bazel evidence collection to the given root target(s) and their
-    transitive deps instead of a workspace-wide query. *extractor* is the L4
-    source-ABI
+    The ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` /
+    ``build.targets`` keys are the only source of those three values here —
+    none has a CLI flag any more (``--build-query``/``--build-compile-db``
+    were removed in PR 3C/3F, ``--build-target`` later), so
+    ``embed_build_source`` reads them from a discovered or explicit
+    ``.abicheck.yml``. *extractor* is the L4 source-ABI
     frontend — the same ``--ast-frontend`` knob that drives the L2 header AST
     (ADR-037 D8): one frontend choice across both pipeline stages. *clang_bin* is
     the caller-resolved L4 replay compiler (forwarded to ``embed_build_source``).
@@ -412,9 +389,6 @@ def _write_snapshot_output(
             build_config=build_config,
             build_config_explicit=build_config_explicit,
             collect_mode=collect_mode,
-            build_query=build_query,
-            build_compile_db=build_compile_db,
-            build_targets=build_targets,
             extractor=extractor,
             clang_bin=clang_bin,
             public_headers=tuple(str(p) for p in public_headers),

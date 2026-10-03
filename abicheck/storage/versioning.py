@@ -511,8 +511,6 @@ class ReaderCompatibility:
 def check_reader_compatibility(
     versions: StorageVersions,
     *,
-    supported_package_format: int = PACKAGE_FORMAT_VERSION,
-    supported_comparison_contract: int = COMPARISON_CONTRACT_VERSION,
     reader_extractor_generation: int | None = None,
     reader_resolver_generation: int | None = None,
 ) -> ReaderCompatibility:
@@ -568,12 +566,12 @@ def check_reader_compatibility(
     _instance_of(versions, StorageVersions, "versions")
     package_format = _stated_version(versions.package_format_version)
     comparison_contract = _stated_version(versions.comparison_contract_version)
-    if package_format > supported_package_format:
+    if package_format > PACKAGE_FORMAT_VERSION:
         return ReaderCompatibility(
             readable=False,
             reason=(
                 f"package format v{package_format} is newer than "
-                f"this build's v{supported_package_format}; upgrade abicheck to read it"
+                f"this build's v{PACKAGE_FORMAT_VERSION}; upgrade abicheck to read it"
             ),
         )
     if package_format <= UNSTATED_VERSION:
@@ -593,12 +591,12 @@ def check_reader_compatibility(
                 "produce a wrong verdict"
             ),
         )
-    if comparison_contract > supported_comparison_contract:
+    if comparison_contract > COMPARISON_CONTRACT_VERSION:
         return ReaderCompatibility(
             readable=False,
             reason=(
                 f"comparison contract v{comparison_contract} is newer "
-                f"than this build's v{supported_comparison_contract}; comparing without "
+                f"than this build's v{COMPARISON_CONTRACT_VERSION}; comparing without "
                 "it could produce a wrong verdict"
             ),
         )

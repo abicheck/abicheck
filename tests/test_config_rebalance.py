@@ -38,9 +38,7 @@ from abicheck.cli_options import (
     COMPARE_FLAG_BUDGET,
     DUMP_FLAG_BUDGET,
     RULINGS_BY_COMMAND,
-    count_visible_options,
 )
-from abicheck.frontends.cli.options.inventory import _HELP_META_OPTION_NAMES
 from abicheck.frontends.cli.options.rulings import OptionRuling
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.serialization import snapshot_to_json
@@ -86,6 +84,23 @@ def _api_break_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
 
 
 # ── precedence: CLI > config > default ─────────────────────────────────────────
+
+
+#: Navigational meta-options excluded from the flag-count budget: a
+#: help-screen escape hatch, not a per-run analysis input the ADR-037 D10.5
+#: budget bounds (Click's own ``--help`` was never a ``cmd.params`` entry).
+_HELP_META_OPTION_NAMES = frozenset({"help", "help_all"})
+
+
+def count_visible_options(cmd: object) -> int:
+    """A Click command's user-visible (non-hidden) options (ADR-037 D10.5)."""
+    return sum(
+        1
+        for p in getattr(cmd, "params", [])
+        if getattr(p, "name", None) not in _HELP_META_OPTION_NAMES
+        and getattr(p, "param_type_name", None) == "option"
+        and not getattr(p, "hidden", False)
+    )
 
 
 class TestConfigPrecedence:

@@ -128,11 +128,6 @@ def _charge_running_bytes(
     return charged_so_far + len(encoded)
 
 
-def _charge_document_bytes(document: object, *, context: str) -> None:
-    """`_charge_running_bytes` for a single, standalone document."""
-    _charge_running_bytes(document, 0, context=context)
-
-
 def _alias_element_count(aliases_by_library: object) -> int:
     """The total node count *aliases_by_library* (a `{library:
     [alias, ...]}`-shaped mapping, live or already-decoded) would cost to

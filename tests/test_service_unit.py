@@ -2204,8 +2204,8 @@ class TestCompareRequestAllowBuildQuery:
         un-consented config may contribute is the primitive's own job. Asserted
         through that primitive rather than in prose (Codex review, PR #1186:
         an earlier revision of this docstring claimed passive settings stayed
-        readable without consent, which is `scan`'s behaviour -- it passes
-        `build_config_locally_trusted` -- not `compare`'s). Under `compare`'s
+        readable without consent, which was the retired `scan`'s behaviour,
+        not `compare`'s). Under `compare`'s
         default the *whole* config is nulled, `build.compile_db` included; that
         is not a narrowing, because nothing on this path read `build_config`
         before the field existed.
@@ -2222,12 +2222,14 @@ class TestCompareRequestAllowBuildQuery:
         assert all(c["allow_build_query"] is None for c in calls)
         # What the primitive then does with that pair, both ways -- the real
         # observable contract, independent of this call site's own wording.
-        assert _gated_build_query_inputs(
-            cfg, None, allow_build_query=False, build_config_locally_trusted=False
-        ) == (None, None)
-        assert _gated_build_query_inputs(
-            cfg, None, allow_build_query=True, build_config_locally_trusted=False
-        ) == (cfg, None)
+        assert _gated_build_query_inputs(cfg, None, allow_build_query=False) == (
+            None,
+            None,
+        )
+        assert _gated_build_query_inputs(cfg, None, allow_build_query=True) == (
+            cfg,
+            None,
+        )
 
     def test_the_retired_scan_request_fields_were_not_absorbed(self) -> None:
         """Every other open `ScanRequest` field is ruled (b) -- dropped, not
@@ -3145,26 +3147,15 @@ class TestCompareRequestAdr055Evidence:
         with pytest.raises(SnapshotError, match="Invalid evidence pack"):
             run_compare_request(request)
 
-    def test_embedded_evidence_diffing_is_quiet(self, tmp_path, monkeypatch, capsys):
+    def test_embedded_evidence_diffing_is_quiet(self, tmp_path, capsys):
         """Codex review: prepare_embedded_build_source's coverage-table echoes
         and attach_evidence_metrics' timing-summary echo previously printed
         CLI tables to stderr unconditionally -- polluting a non-CLI caller's
-        stream with output it has no way to suppress. run_compare_request must
-        pass quiet=True through both."""
-        from abicheck import cli_buildsource_helpers
-
+        stream with output it has no way to suppress. run_compare_request calls
+        the engine (buildsource.evidence_report) directly and hands it no
+        output sink, so nothing reaches either stream."""
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
-
-        def fake_diff_embedded_build_source(*args, **kwargs):
-            assert kwargs.get("quiet") is True
-            return [], [], {"extractor.duration_seconds": 0.01}
-
-        monkeypatch.setattr(
-            cli_buildsource_helpers,
-            "diff_embedded_build_source",
-            fake_diff_embedded_build_source,
-        )
 
         request = CompareRequest(
             old=InputSpec.of(old_p, build_info=tmp_path), new=InputSpec.of(new_p)

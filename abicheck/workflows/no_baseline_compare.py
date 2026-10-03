@@ -128,8 +128,12 @@ def resolve_no_baseline_candidate(
     depth: str | None = None,
     version: str = "",
     debug_roots: list[Path] | None = None,
-    header_backend: str = "auto",
-    frontend_context: str = "host",
+    pdb: Path | None = None,
+    enable_debuginfod: bool = False,
+    debuginfod_url: str | None = None,
+    dwarf_only: bool = False,
+    debug_format: str | None = None,
+    collect_mode: str | None = None,
     include_labels: dict[Path, str] | None = None,
     compile: CompileContext | None = None,
     include_dependencies: bool = True,
@@ -167,6 +171,14 @@ def resolve_no_baseline_candidate(
     record_no_baseline_depth_evidence_contract_error`'s job, recorded as
     ADR-064's exit-7 axis on the result rather than raised during
     resolution, mirroring exactly what the two-sided native CLI path does.
+
+    The header backend and SYCL frontend context come from *compile*
+    (``compile.frontend``/``compile.frontend_context``), which outranks the
+    bare defaults this passes, exactly as on two operands. *collect_mode*,
+    when given, is the caller's already-resolved one (the CLI's rule adds
+    ``source.method``); ``None`` infers it from *depth* and the inputs. The
+    debug settings and *pdb* are the ``debug:`` block's, which two-sided
+    ``compare`` applies to each side it extracts.
     """
     from ..service_compare_evidence import collect_mode_for, resolve_side_evidence
     from .artifact.execute import resolve_side_snapshot
@@ -182,6 +194,7 @@ def resolve_no_baseline_candidate(
         build_info=build_info,
         build_config=build_config,
         debug_roots=debug_roots or [],
+        pdb=pdb,
         public_header_dirs=public_header_dirs or [],
         include_dependencies=include_dependencies,
         compile=compile,
@@ -197,16 +210,18 @@ def resolve_no_baseline_candidate(
     # invocation (Codex review, P1). ``pair_compile=None`` for the same reason
     # ``resolve_dump_request_evidence`` passes it: the pair-wide C++20 override
     # exists so two *sides* cannot disagree, and there is no second side here.
-    # *frontend_context* is SYCL's device/host AST selector (``DumpRequest``'s
-    # own ``"host"`` default), not the header backend -- they are separate
-    # axes, and conflating them makes every ordinary ELF audit demand a
-    # DPC++ compiler.
+    # ``frontend_context`` is SYCL's device/host AST selector, not the header
+    # backend: ``"host"`` is the request-level default, and a configured
+    # ``compile.frontend_context`` on *compile* outranks it. Conflating the
+    # two axes made every ordinary ELF audit demand a DPC++ compiler.
     evidence = resolve_side_evidence(
         side,
         depth=depth,
-        collect_mode=collect_mode_for(depth, side),
+        collect_mode=collect_mode
+        if collect_mode is not None
+        else collect_mode_for(depth, side),
         pair_compile=None,
-        frontend_context=frontend_context.lower(),
+        frontend_context="host",
     )
     public_files, public_dirs = (
         ([], [])
@@ -221,10 +236,14 @@ def resolve_no_baseline_candidate(
         evidence,
         lang=lang,
         lang_explicit=lang_explicit,
-        header_backend=header_backend,
+        header_backend="auto",
         fmt=None,
         public_headers=public_files,
         public_header_dirs=public_dirs,
+        enable_debuginfod=enable_debuginfod,
+        debuginfod_url=debuginfod_url,
+        dwarf_only=dwarf_only,
+        debug_format=debug_format,
         include_labels=include_labels,
         notify=notify,
     )
@@ -545,13 +564,27 @@ class NoBaselineAuditInputs:
     depth: str | None = None
     version: str = ""
     debug_roots: tuple[Path, ...] = ()
+    #: The collect mode the front end resolved (``--depth`` > ``source.
+    #: method`` > inferred), and the ``debug:`` block -- both applied to the
+    #: candidate exactly as two-sided ``compare`` applies them to a side.
+    collect_mode: str | None = None
+    pdb: Path | None = None
+    enable_debuginfod: bool = False
+    debuginfod_url: str | None = None
+    dwarf_only: bool = False
+    debug_format: str | None = None
     include_labels: dict[Path, str] | None = None
     include_dependencies: bool = False
     compile: CompileContext | None = None
+    #: Where resolution progress goes; the front end's own channel.
+    notify: Callable[[str], None] | None = None
     suppression: SuppressionList | None = None
     policy: str = "strict_abi"
     policy_file: PolicyFile | None = None
     scope_to_public_surface: bool = True
+    #: ``scope.public_symbols``: declarations forced public, the overlay
+    #: two-sided ``compare`` applies (``resolve_force_public_scope``).
+    force_public_symbols: frozenset[str] = frozenset()
     collapse_versioned_symbols: bool = False
     contract_evaluation: bool = False
     contract_mode: str | None = None
@@ -585,9 +618,16 @@ def audit_no_baseline_candidate(
         depth=inputs.depth,
         version=inputs.version,
         debug_roots=list(inputs.debug_roots),
+        pdb=inputs.pdb,
+        enable_debuginfod=inputs.enable_debuginfod,
+        debuginfod_url=inputs.debuginfod_url,
+        dwarf_only=inputs.dwarf_only,
+        debug_format=inputs.debug_format,
+        collect_mode=inputs.collect_mode,
         include_labels=inputs.include_labels,
         include_dependencies=inputs.include_dependencies,
         compile=inputs.compile,
+        notify=inputs.notify,
     )
     return run_no_baseline_compare(
         snapshot,
@@ -595,6 +635,7 @@ def audit_no_baseline_candidate(
         policy=inputs.policy,
         policy_file=inputs.policy_file,
         scope_to_public_surface=inputs.scope_to_public_surface,
+        force_public_symbols=set(inputs.force_public_symbols) or None,
         # ADR-068 D4/Phase 5: pattern-verdict modulation is unconditional on
         # every `compare` path now (no `--pattern-verdicts` flag exists any
         # more) -- this audit-only path gets the identical treatment.

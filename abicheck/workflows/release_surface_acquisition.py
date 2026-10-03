@@ -283,7 +283,6 @@ def acquire_release_surface(
     includes: list[Path],
     public_headers: list[Path],
     public_header_dirs: list[Path],
-    version: str = "unknown",
     backend: str = "auto",
     compile_context: object | None = None,
     header_inputs: Sequence[Path] = (),
@@ -326,7 +325,7 @@ def acquire_release_surface(
         try:
             snapshot = build_header_only_snapshot(
                 library_hint=headers[0],
-                version=version,
+                version="unknown",
                 headers=list(headers),
                 extra_includes=parse_includes,
                 dump_manifest=None,

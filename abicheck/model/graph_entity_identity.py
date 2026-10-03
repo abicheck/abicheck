@@ -111,7 +111,6 @@ __all__ = [
     "identity_for_typedef",
     "identity_for_variable",
     "is_linker_name",
-    "is_unresolved_node_id",
     "register_identity_alias",
     "SnapshotIdentities",
     "signature_key",
@@ -147,10 +146,6 @@ class GraphEntityIdentity:
     @property
     def resolved(self) -> bool:
         return self.state is IdentityState.RESOLVED
-
-
-def is_unresolved_node_id(node_id: str) -> bool:
-    return node_id.startswith(UNRESOLVED_PREFIX)
 
 
 def is_linker_name(spelling: str | None) -> bool:

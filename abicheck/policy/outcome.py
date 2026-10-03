@@ -427,7 +427,6 @@ def run_outcome_for_scan_fields(
     bundle_incomplete: bool = False,
     assurance: object | None = None,
     member_compatibility_verdict: str | None = None,
-    lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> RunOutcome:
     """Build a :class:`RunOutcome` for one of ``scan``'s ``(verdict,
     exit_code)`` report shapes -- the retired ``scan_engine.ScanOutcome``
@@ -560,7 +559,6 @@ def run_outcome_for_scan_fields(
         assurance=assurance,
         gate=gate,
         operational=operational,
-        lifecycle=lifecycle,
     )
 
 
@@ -688,7 +686,6 @@ def run_outcome_dict_for_scan(
     member_not_comparable: bool = False,
     bundle_incomplete: bool = False,
     member_verdicts: Iterable[object] | None = None,
-    lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> dict[str, Any]:
     """One-call convenience wrapping :func:`run_outcome_for_scan_fields` +
     :func:`scan_report_severity_exit_code` + ``.to_dict()`` -- what every
@@ -734,7 +731,6 @@ def run_outcome_dict_for_scan(
         bundle_incomplete=bundle_incomplete,
         assurance=scan_report_assurance_block(report),
         member_compatibility_verdict=getattr(worst_member, "value", None),
-        lifecycle=lifecycle,
     ).to_dict()
 
 

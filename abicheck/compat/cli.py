@@ -34,8 +34,6 @@ import click
 
 from ..dumper import dump
 from ..errors import ProfileMismatchError, ScopeMismatchError
-from ..html_report import write_html_report
-from ..reporter import to_json, to_markdown
 from ..serialization import save_snapshot
 from ..workflows.extraction import (
     suppress_streaming_prune,
@@ -98,7 +96,6 @@ from .run_inputs import (
     finish_live_compat_dump,
     resolve_and_narrow_headers,
 )
-from .xml_report import write_xml_report
 
 # Re-exports for backwards compatibility (these used to be defined inline).
 __all__ = [
@@ -1152,6 +1149,8 @@ def compat_check_cmd(  # noqa: PLR0913
         compat_html=compat_html,
         arch=arch,
         gcc_path=gcc_path,
+        source_only=source_only,
+        binary_only=binary_only,
     )
 
     _print_summary_and_exit(result, verdict, quiet, report_path)
@@ -1388,54 +1387,6 @@ def _resolve_report_path_and_mkdir(
     return report_path
 
 
-def _generate_compat_report(
-    r: DiffResult,
-    path: Path,
-    *,
-    fmt: str,
-    lib_name: str,
-    old_version: str,
-    new_version: str,
-    effective_title: str | None,
-    compat_html: bool,
-    arch: str | None,
-    gcc_path: str | None,
-) -> None:
-    """Write a single report file in the requested format."""
-    if fmt == "html":
-        write_html_report(
-            r,
-            output_path=path,
-            lib_name=lib_name,
-            old_version=old_version,
-            new_version=new_version,
-            old_symbol_count=r.old_symbol_count,
-            title=effective_title,
-            compat_html=compat_html,
-        )
-    elif fmt == "xml":
-        write_xml_report(
-            r,
-            output_path=path,
-            lib_name=lib_name,
-            old_version=old_version,
-            new_version=new_version,
-            old_symbol_count=r.old_symbol_count,
-            arch=arch or "",
-            compiler=_detect_compiler_version(gcc_path),
-        )
-    elif fmt == "json":
-        # `include_exit_decision=False`: this is ABICC-compat's own
-        # `report-format json`, whose real process exit follows the
-        # 0/1/2 ABICC scheme (`_classify_compat_error_exit_code`), not the
-        # native `legacy_exit_code`/`compute_exit_code` PR G1's `exit` block
-        # would compute -- emitting it here would disagree with the actual
-        # `compat check` exit code for the same run (Codex review).
-        path.write_text(to_json(r, include_exit_decision=False), encoding="utf-8")
-    else:
-        path.write_text(to_markdown(r, demangle=True), encoding="utf-8")
-
-
 def _write_all_reports(
     result: DiffResult,
     full_result: DiffResult,
@@ -1454,8 +1405,12 @@ def _write_all_reports(
     compat_html: bool,
     arch: str | None,
     gcc_path: str | None,
+    source_only: bool,
+    binary_only: bool,
 ) -> None:
-    """Write primary report, optional split reports, affected-symbols list, and stdout echo."""
+    """Write primary report, optional split reports, affected-symbols list, and stdout echo.
+
+    Each report's binary/source kind: ``frontends.cli.compat_report_file``."""
     _report_kwargs: dict[str, Any] = {
         "fmt": fmt,
         "lib_name": lib_name,
@@ -1464,22 +1419,36 @@ def _write_all_reports(
         "effective_title": effective_title,
         "compat_html": compat_html,
         "arch": arch,
-        "gcc_path": gcc_path,
+        "compiler_version": lambda: _detect_compiler_version(gcc_path),
     }
+    from ..frontends.cli.compat_report_file import (
+        primary_report_kind,
+        write_compat_report,
+    )
+
+    primary_kind = primary_report_kind(source_only=source_only, binary_only=binary_only)
     try:
-        _generate_compat_report(result, report_path, **_report_kwargs)
+        write_compat_report(
+            result, report_path, report_kind=primary_kind, **_report_kwargs
+        )
 
         if bin_report_path:
             bin_report_path.parent.mkdir(parents=True, exist_ok=True)
-            _generate_compat_report(
-                _filter_binary_only(full_result), bin_report_path, **_report_kwargs
+            write_compat_report(
+                _filter_binary_only(full_result),
+                bin_report_path,
+                report_kind="binary",
+                **_report_kwargs,
             )
             _do_echo(f"Binary report: {bin_report_path}", quiet)
 
         if src_report_path:
             src_report_path.parent.mkdir(parents=True, exist_ok=True)
-            _generate_compat_report(
-                _filter_source_only(full_result), src_report_path, **_report_kwargs
+            write_compat_report(
+                _filter_source_only(full_result),
+                src_report_path,
+                report_kind="source",
+                **_report_kwargs,
             )
             _do_echo(f"Source report: {src_report_path}", quiet)
 

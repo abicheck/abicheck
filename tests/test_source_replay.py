@@ -133,13 +133,8 @@ def test_scope_full_selects_every_unit() -> None:
     assert {u.id for u in units} == {"cu://a", "cu://b", "cu://c", "cu://d"}
 
 
-def test_scope_target_selects_units_of_target() -> None:
-    units = select_compile_units(_build(), scope="target", target_id="target://libfoo")
-    assert {u.id for u in units} == {"cu://a", "cu://b"}
-
-
-def test_scope_target_without_id_uses_attached_units() -> None:
-    # No explicit target: every unit attached to *some* target (drops cu://d).
+def test_scope_target_uses_attached_units() -> None:
+    # Every unit attached to *some* target (drops cu://d).
     units = select_compile_units(_build(), scope="target")
     assert {u.id for u in units} == {"cu://a", "cu://b", "cu://c"}
 
@@ -550,7 +545,6 @@ def test_unknown_scope_raises() -> None:
 
 def test_public_header_roots_collected_from_targets() -> None:
     assert public_header_roots_for(_build()) == ["include/bar.h", "include/foo.h"]
-    assert public_header_roots_for(_build(), "target://libfoo") == ["include/foo.h"]
 
 
 # -- CI mode mapping (ADR-033 D2) --------------------------------------------
@@ -1009,14 +1003,14 @@ def test_run_source_replay_links_selected_units() -> None:
         _build(),
         extractor,
         scope="target",
-        target_id="target://libfoo",
         public_header_roots=["include/foo.h"],
     )
+    # `target` scope: every unit attached to some build target (not cu://d).
     assert diagnostics == []
-    assert extractor.calls == ["cu://a", "cu://b"]
-    assert len(surface.reachable_declarations) == 2
+    assert sorted(extractor.calls) == ["cu://a", "cu://b", "cu://c"]
+    assert len(surface.reachable_declarations) == 3
     assert surface.coverage["replay_scope"] == "target"
-    assert surface.coverage["compile_units_parsed"] == 2
+    assert surface.coverage["compile_units_parsed"] == 3
 
 
 def test_run_source_replay_forwards_include_graph_for_precise_changed() -> None:
@@ -1045,12 +1039,12 @@ def test_run_source_replay_records_failures_as_diagnostics() -> None:
         _build(),
         extractor,
         scope="target",
-        target_id="target://libfoo",
         public_header_roots=["include/foo.h"],
     )
-    # cu://b failed → recorded as a diagnostic, cu://a still linked (partial L4).
+    # cu://b failed → recorded as a diagnostic, cu://a and cu://c still linked
+    # (partial L4).
     assert len(diagnostics) == 1 and "cu://b" in diagnostics[0]
-    assert len(surface.reachable_declarations) == 1
+    assert len(surface.reachable_declarations) == 2
     assert surface.coverage["extractor_failures"] == 1
 
 
@@ -1123,7 +1117,6 @@ def _replay_all(extractor, jobs, monkeypatch):
         _build_many(12),
         extractor,
         scope="target",
-        target_id="target://lib",
         public_header_roots=["include/foo.h"],
     )
 

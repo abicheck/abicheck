@@ -3041,7 +3041,6 @@ def test_resolve_header_backend_ast_frontend_env(
     # An out-of-enum ABICHECK_AST_FRONTEND value is ignored; auto then
     # fails closed to castxml.
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "bogus")
-    monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: True)
     assert _resolve_header_backend("auto") == "castxml"
 
 
@@ -3049,12 +3048,10 @@ def test_resolve_header_backend_auto_stays_castxml_without_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
-    monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: True)
     monkeypatch.setattr("abicheck.dumper_clang._clang_available", lambda *a, **k: True)
     assert _resolve_header_backend("auto") == "castxml"
     # Do not silently fall back to clang: clang AST lacks computed layout
     # evidence, so auto must fail closed through the castxml path.
-    monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: False)
     assert _resolve_header_backend("auto") == "castxml"
 
 
@@ -5014,7 +5011,6 @@ def test_resolve_header_backend_neither_tool_defaults_castxml(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
-    monkeypatch.setattr(dumper, "_castxml_available", lambda: False)
     monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: False)
     # Falls back to castxml so the existing "install castxml" error surfaces.
     assert _resolve_header_backend("auto") == "castxml"

@@ -1084,9 +1084,7 @@ def generate_run_plan(
     return plan, report
 
 
-def to_aggregate_manifest(
-    plan: RunPlan, *, head_sha: str | None = None
-) -> dict[str, Any]:
+def to_aggregate_manifest(plan: RunPlan) -> dict[str, Any]:
     """Project a :class:`RunPlan` down to ``abicheck aggregate --manifest``'s
     ``{"targets": [{"id", "required"}]}`` wire shape (ADR-047 §5's required
     sub-task).
@@ -1106,9 +1104,8 @@ def to_aggregate_manifest(
         "aggregate_manifest_version": AGGREGATE_MANIFEST_VERSION,
         "targets": [{"id": c.check_id, "required": c.required} for c in plan.checks],
     }
-    resolved_head_sha = head_sha if head_sha is not None else plan.head_sha
-    if resolved_head_sha:
-        manifest["head_sha"] = resolved_head_sha
+    if plan.head_sha:
+        manifest["head_sha"] = plan.head_sha
     # CLI cleanup phase two, PR 2: project the plan's own gate policy into
     # the manifest's `gate` block -- the same field `--manifest` reads,
     # so a run-plan and a hand-authored manifest express identical policy

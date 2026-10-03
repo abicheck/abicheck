@@ -43,7 +43,11 @@ from typing import Any
 
 import click
 
-from ...workflows.changed_paths import localized_collect_mode, resolve_changed_seed
+from ...workflows.changed_paths import (
+    ChangedPathSeed,
+    localized_collect_mode,
+    resolve_changed_seed,
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,24 @@ class CompareEnrichmentInputs:
         return localized_collect_mode(collect_mode, self.changed_paths)
 
 
+def resolve_compare_changed_seed(
+    since: str | None, changed_paths_opt: tuple[str, ...], sources: Path | None
+) -> ChangedPathSeed:
+    """``compare``'s changed-path seed, warning on ``stderr`` when it fails.
+
+    The one resolution the run and ``compare --dry-run`` both read, so the
+    dry run reports the source scope the run will replay. *sources* is the
+    tree ``git diff`` runs in (the candidate side's ``--sources`` when there
+    is one), matching ``scan``'s own behaviour.
+    """
+    return resolve_changed_seed(
+        changed_paths_opt,
+        since,
+        sources,
+        notify=lambda message: click.echo(message, err=True),
+    )
+
+
 def resolve_compare_enrichment_inputs(
     *,
     since: str | None,
@@ -78,19 +100,13 @@ def resolve_compare_enrichment_inputs(
 ) -> CompareEnrichmentInputs:
     """Resolve both inputs, warning through ``click.echo`` on a failed seed.
 
-    *sources* is the tree the ``git diff`` runs in (the candidate side's
-    ``--sources`` when there is one), matching ``scan``'s own behaviour.
-    *project_cfg* is the loaded ``.abicheck.yml``, consulted only for the
+    *sources* is the tree the seed's ``git diff`` runs in
+    (:func:`resolve_compare_changed_seed`). *project_cfg* is the loaded ``.abicheck.yml``, consulted only for the
     ``--abi3`` floor's D5 config default.
     """
     from ...cli_options import parse_abi3_floor
 
-    seed = resolve_changed_seed(
-        changed_paths_opt,
-        since,
-        sources,
-        notify=lambda message: click.echo(message, err=True),
-    )
+    seed = resolve_compare_changed_seed(since, changed_paths_opt, sources)
     floor = parse_abi3_floor(abi3)
     if floor is None:
         # D5: the project's declared floor, when the run did not state one.

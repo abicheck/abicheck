@@ -627,9 +627,9 @@ class TestCompatDumpRoundTrip:
         path = tmp_path / "dump.json"
         save_snapshot(snap, path)
 
-        from abicheck.serialization import load_snapshot_document
+        from _snapshot_document_reader import read_snapshot_document
 
-        data = load_snapshot_document(path)
+        data = read_snapshot_document(path)
         assert data["library"] == "libtest.so"
         assert data["version"] == "1.0"
         assert len(data["functions"]) == 1
@@ -1066,7 +1066,7 @@ class TestParseCompatDescriptorsMalformedContract:
         snap = _make_snapshot("1.0")
         old_p = tmp_path / "old.json"
         new_p = tmp_path / "new.json"
-        from abicheck.serialization import load_snapshot_document
+        from _snapshot_document_reader import read_snapshot_document
 
         save_snapshot(snap, old_p)
         save_snapshot(snap, new_p)
@@ -1074,7 +1074,7 @@ class TestParseCompatDescriptorsMalformedContract:
         # `save_snapshot` now writes) and re-write it flat -- still a fully
         # valid input (`snapshot_from_dict` reads either shape), and the
         # simplest way to inject a malformed top-level `contract` field.
-        raw = load_snapshot_document(new_p)
+        raw = read_snapshot_document(new_p)
         raw["contract"] = {"profile_fields": "not-a-dict"}
         new_p.write_text(json.dumps(raw), encoding="utf-8")
 

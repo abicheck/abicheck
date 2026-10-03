@@ -17,7 +17,7 @@
 ``compare``.
 
 ``castxml`` sometimes omits a constructor/destructor's real mangled name
-(see ``extract/headers/castxml/functions.py``'s ``_function_mangled_name``
+(see ``extract/headers/castxml/functions.py``'s ``function_mangled_name``
 fallback); the parser then synthesizes a stable, non-mangled snapshot key
 instead. Both the producer (the castxml parser, ``extract``) and several
 consumers that must recognize the shape (symbol-diff public-surface
@@ -37,7 +37,7 @@ from __future__ import annotations
 #: real mangled name castxml omitted. A class may have several overloaded
 #: constructors, so the prefix alone is not unique -- the caller appends the
 #: qualified scope and parameter signature after it (see
-#: ``extract/headers/castxml/functions.py``'s ``_function_display_name``).
+#: ``extract/headers/castxml/functions.py``'s ``function_display_name``).
 #: It is intentionally not a real ABI symbol, only a stable per-overload
 #: identity -- ``diff_symbols._public_functions()`` reads this to exempt such
 #: entries from its ELF-export-set narrowing, which they could never pass (the
@@ -51,8 +51,8 @@ def is_synthetic_ctor_key(key: str) -> bool:
 
 
 #: Marker for a snapshot key synthesized for a destructor whose real mangled
-#: name castxml omitted (see ``_CastxmlParser._function_display_name`` and
-#: ``_function_mangled_name``'s ``return name`` fallback). A class has at
+#: name castxml omitted (see ``extract.headers.castxml.functions.function_display_name`` and
+#: ``function_mangled_name``'s ``return name`` fallback). A class has at
 #: most one destructor, so — unlike constructors — no per-overload prefix is
 #: needed: the synthesized "~ClassName" display name is itself already a
 #: stable, unique identity. It is intentionally not a real ABI symbol (a real
@@ -61,7 +61,7 @@ def is_synthetic_ctor_key(key: str) -> bool:
 #: way it already does :data:`SYNTHETIC_CTOR_KEY_PREFIX`/
 #: :func:`is_synthetic_ctor_key`, to exempt such entries from its
 #: ELF-export-set narrowing, which they could never pass. Without this, a
-#: real virtual destructor's PUBLIC visibility (``_ctor_or_dtor_visibility``)
+#: real virtual destructor's PUBLIC visibility (``ctor_or_dtor_visibility``)
 #: was necessary but not sufficient: it would still be silently dropped
 #: before reaching the diff whenever ELF metadata is present (Codex review,
 #: PR #582 — found after the destructor-visibility fix, via the same Phase 2

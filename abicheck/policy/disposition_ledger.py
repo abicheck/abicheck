@@ -368,11 +368,10 @@ class DispositionLedger:
         record, not a second producer disagreeing with the first. A copy,
         not an in-place relabel, for the identical reason :meth:`with_gate`
         is a copy: a report projection must not mutate the ledger it
-        renders. *changes* not found in this ledger are silently ignored
-        (the same "duck-typed stand-in" tolerance every other lookup here
-        already has).
+        renders. Changes resolve through :meth:`indices_for`, so an alias
+        relabels its anchor's record; unrecorded ones are ignored.
         """
-        targets = {id(c) for c in changes}
+        targets = self.indices_for(changes)
         superseded = DispositionLedger()
         superseded._anchors = list(self._anchors)
         superseded._aliases = list(self._aliases)
@@ -386,9 +385,9 @@ class DispositionLedger:
                 rule=rule,
                 gate_excluded=True,
             )
-            if id(change) in targets
+            if index in targets
             else record
-            for record, change in zip(self._records, self._anchors)
+            for index, record in enumerate(self._records)
         ]
         return superseded
 

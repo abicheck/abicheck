@@ -449,12 +449,12 @@ def resolve_release_pack_application(
         return PackApplication(policy_overrides={}, resolved_config=config)
     check_resolved_config_applies_packs(
         config,
-        # `gate_supported` defaults to True: since CLI cleanup phase two "PR
-        # B" slice 2, the release fan-out folds a `kind: gate` pack's
-        # `severity.*` (no `exit_code_scheme` any more, PR G2) into its own
-        # raw severity inputs (`cli_compare_release_helpers.
-        # apply_release_gate_pack`) the same way `compare --pack` folds them
-        # into `ResolvedCompareConfig` -- see this function's own docstring.
+        # A `kind: gate` pack needs no check here: since CLI cleanup phase two
+        # "PR B" slice 2, the release fan-out folds its `severity.*` (no
+        # `exit_code_scheme` any more, PR G2) into its own raw severity inputs
+        # (`cli_compare_release_helpers.apply_release_gate_pack`) the same way
+        # `compare --pack` folds them into `ResolvedCompareConfig` -- see this
+        # function's own docstring.
         # `contract_evaluation` is this release invocation's own real value
         # (whether *this* run passed `--contract`) -- the same gate the
         # single-pair path applies via `resolve_and_apply`, now that this

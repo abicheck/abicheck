@@ -59,11 +59,17 @@ from .coverage_ledger import (
 ACCEPT_UNRESOLVED = "warn"
 
 #: How a CLI user reads the full ledger and accepts incomplete coverage.
-#: Both halves are reachable from `compare` and `scan --against`, which have
-#: `--format` and `--pack`.
+#: Both halves are reachable from `compare`, which has `-o` and `--pack`.
 CLI_MITIGATION = (
     "Use -o json=... for the full contract_coverage_failures ledger, "
     "or set contract.unresolved=warn to accept incomplete coverage."
+)
+
+#: :data:`CLI_MITIGATION` for a run whose ``contract.unresolved=warn``
+#: already accepted the failures: advising it again would send the reader
+#: looking for a change that changes nothing.
+_MITIGATION_WHEN_ACCEPTED = (
+    "Use -o json=... for the full contract_coverage_failures ledger."
 )
 
 
@@ -109,9 +115,7 @@ def _accepts_unresolved(ctx: Any) -> bool:
     return getattr(contract, "unresolved", None) == ACCEPT_UNRESOLVED
 
 
-def coverage_failure_diagnostic(
-    result: Any, *, base_exit: int = 0, mitigation: str = CLI_MITIGATION
-) -> str | None:
+def coverage_failure_diagnostic(result: Any, *, base_exit: int = 0) -> str | None:
     """Why this run's exit code was affected by coverage, or ``None``.
 
     Only ``-o json=...`` carries ``contract_coverage_failures``; markdown,
@@ -139,41 +143,15 @@ def coverage_failure_diagnostic(
         sorted({f"{f.side}/{f.provider}" for f in failures}),
         coverage_exit_for_context(ctx),
         base_exit,
-        mitigation,
     )
 
 
-def coverage_diagnostic_from_summary(summary: Any, *, base_exit: int = 0) -> str | None:
-    """The same notice, built from a rendered ``scan`` summary dict.
-
-    ``scan``'s CLI never holds the ``DiffResult`` -- ``_run_baseline_compare``
-    is shared with ``dry_run_estimate.run_scan()`` and returns a summary, which is
-    exactly why the announcement cannot live there. But that summary already
-    carries the ledger, so the command can explain its own exit without any
-    of the result plumbing (Codex review).
-    """
-    if not isinstance(summary, dict):
-        return None
-    failures = summary.get("contract_coverage_failures") or []
-    if not failures:
-        return None
-    floor = summary.get("contract_coverage_exit_contribution") or 0
-    where = sorted(
-        f"{f.get('side')}/{f.get('provider')}" for f in failures if isinstance(f, dict)
-    )
-    return _coverage_message(where, floor, base_exit)
-
-
-def _coverage_message(
-    where: list[str], floor: int, base_exit: int, mitigation: str = CLI_MITIGATION
-) -> str:
+def _coverage_message(where: list[str], floor: int, base_exit: int) -> str:
     """The one wording, so the two entry points cannot describe it differently.
 
-    *mitigation* is the only part a surface may vary, and it has to: the
-    advice is "here is how to see the rest and how to accept it", which is
-    not the same sentence for a caller that has no ``--format`` and no
-    ``--pack``. Everything before it -- what fell short, and what that did to
-    the exit code -- is the same fact for everyone.
+    What fell short, what that did to the exit code, and then
+    :data:`CLI_MITIGATION` -- how to see the rest and how to accept it, the
+    second half only while the run has not already accepted it.
     """
     if floor == 0:
         # `contract.unresolved=warn` accepted these. Staying silent here
@@ -200,7 +178,7 @@ def _coverage_message(
         "Contract coverage incomplete for the selected --contract domain: "
         + ", ".join(where)
         + f". {effect}. "
-        + mitigation
+        + (_MITIGATION_WHEN_ACCEPTED if floor == 0 else CLI_MITIGATION)
     )
 
 

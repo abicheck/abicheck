@@ -145,7 +145,6 @@ def parse_android_dump(
     *,
     source: str = "",
     target_id: str = "",
-    tu_id: str = "",
     public_header_roots: list[str] | None = None,
 ) -> SourceAbiTu:
     """Normalize an Android ``.sdump``/``.lsdump`` JSON object into a SourceAbiTu (D9).
@@ -160,7 +159,7 @@ def parse_android_dump(
     functions = [f for f in (data.get("functions") or []) if isinstance(f, dict)]
     global_vars = [g for g in (data.get("global_vars") or []) if isinstance(g, dict)]
     return SourceAbiTu(
-        tu_id=tu_id or (f"cu://{source}" if source else "android-header-abi"),
+        tu_id=f"cu://{source}" if source else "android-header-abi",
         target_id=target_id,
         extractor={"name": "android-header-abi", "version": ANDROID_EXTRACTOR_VERSION},
         source=source,

@@ -84,7 +84,6 @@ if TYPE_CHECKING:
     from .model.contract_conflicts import ContractSourceConflict
     from .policy_file import PolicyFile
     from .post_processing import PipelineContext
-    from .severity import KindSets
     from .suppression import SuppressionList
     from .surface import PublicSurface
 
@@ -203,7 +202,6 @@ class ContractEvaluationStage:
         *,
         policy: str,
         policy_file: PolicyFile | None,
-        kind_sets: KindSets | None = None,
     ) -> None:
         """Stamp each EVALUATED finding's own compatibility decision.
 
@@ -229,7 +227,6 @@ class ContractEvaluationStage:
             change.compatibility_decision = effective_verdict_for_change(
                 change,
                 policy=policy,
-                kind_sets=kind_sets,
                 policy_file=policy_file,
             )
 

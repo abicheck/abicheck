@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING
 from ...errors import SnapshotError, ValidationError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from ...compile_context import CompileContext
@@ -47,12 +46,7 @@ def embed_side_build_source(
     build_config_explicit: bool = True,
     build_query: str | None = None,
     build_compile_db: str | None = None,
-    defer_cleanup: list[Callable[[], None]] | None = None,
-    source_extractor: str | None = None,
     source_frontend_compile: CompileContext | None = None,
-    expand_public_header_roots: bool = False,
-    l4_public_headers: list[Path] | None = None,
-    l4_public_header_dirs: list[Path] | None = None,
 ) -> None:
     """Embed one side's inline L3-L5 build/source evidence into *snap*.
 
@@ -67,11 +61,8 @@ def embed_side_build_source(
     ``SnapshotError`` here
     (Codex review).
 
-    *changed_paths* (PR 3A, dump/scan resolver convergence): an optional
-    pass-through to ``embed_build_source``, defaulted to its existing no-op
-    value so every pre-existing caller (``compare``, ``dump``'s typed
-    pipeline) is unaffected — only ``scan``'s candidate-side resolution
-    passes a non-default value, for its POI-focused L4 replay scoping.
+    *changed_paths*: an optional pass-through to ``embed_build_source``
+    scoping L4 replay to the paths a change touched (ADR-043 D7).
 
     *build_config*/*build_query*/*build_compile_db* (Codex review, fresh
     evidence): the identical build inputs the caller already resolved for
@@ -86,68 +77,15 @@ def embed_side_build_source(
     fail to be satisfied despite the caller having supplied exactly what it
     needed.
 
-    The last four parameters exist so ``scan``'s candidate resolution can route
-    through this one primitive without any of its own long-standing behaviour
-    changing underneath it (CLI cleanup phase two, PR 3A). Each defaults to
-    exactly what this function did before, so every pre-existing caller
-    (``compare``, ``dump``'s typed pipeline) is bit-for-bit unaffected:
-
-    * *defer_cleanup* — ``scan`` owns the command-lifetime cleanup list its
-      collection's temp build dirs are drained from; ``compare``/``dump`` let
-      ``embed_build_source`` drain its own.
-    * *source_extractor* — the L4 replay frontend. ``None`` keeps this
-      function's own :func:`service_compare_evidence.effective_frontend`
-      resolution. ``scan`` passes ``"auto"``, which
-      ``buildsource.inline._make_source_extractor`` reads as clang, because
-      that is what ``scan`` has always done — making it match the other
-      resolvers would newly *require* castxml for a ``scan --depth source``
-      that works with clang today, a real behaviour change for real users
-      that cannot be verified without a castxml-capable lane (recorded as an
-      open divergence in the plan's PR 3A section, deliberately not closed by
-      the migration that added this parameter).
-    * *source_frontend_compile* — the context whose ``gcc_path``/
-      ``gcc_prefix`` selects the L4 replay compiler, when it is not
-      ``evidence.compile``. ``scan`` passes the *folded* (post-P0.3) context,
-      i.e. the one its L2 header AST was actually pointed at, which is what
-      this function's own ``clang_bin`` comment below says the intent is; the
-      two differ only when the caller set neither selector and the matched
-      compile unit named an MSVC/clang-cl driver.
-    * *expand_public_header_roots* — expand a public-header *directory* into
-      its individual files before handing the list to ``embed_build_source``.
-      ``scan`` does; the raw pass-through this function otherwise uses loses
-      ``clang_public_roots._equivalent_public_roots_for_unit``'s
-      single-sample mirror promotion for a directory root (a change switching
-      ``scan`` to the raw shape was landed and reverted for exactly that
-      regression — see the plan's 2026-08-20 note).
-    * *l4_public_headers*/*l4_public_header_dirs* — an override root set for
-      *this call's* ``embed_build_source`` invocation only, when the caller's
-      L2-facing *public_headers*/*public_header_dirs* need to stay narrower
-      than what L4 replay should classify against. ``scan`` needs exactly
-      this split: its L2/crosscheck-origin provenance
-      (the retired ``cli_scan_baseline._public_provenance_set``) deliberately did not
-      activate for a lone ``-H`` *file* with no accompanying directory (a
-      single header cannot establish a public directory boundary — see that
-      function's own docstring, and its pinned
-      ``test_lone_file_does_not_activate``), so changing that default to fix
-      L4 would also silently flip the origin/crosscheck-skip behavior every
-      other scan already relies on. But ``dump``'s write-time embed and
-      ``compare``'s implicit-dump operand both derive their public-header
-      roots via the more permissive ``split_public_header_inputs`` (every
-      ``-H`` file/dir is a root, no directory required) — so a `dump`
-      baseline for a lone-``-H``-file project correctly links its L4
-      declarations to binary symbols while a `scan --against` candidate for
-      the identical project silently degrades to zero matches, producing a
-      spurious ``source_decl_binary_symbol_mismatch``/
-      ``source_to_binary_mapping_changed`` RISK finding on an unchanged
-      library purely from this L2-vs-L4 root-set asymmetry (reproduced
-      end-to-end; PR 3A review). Defaults to ``None`` (use
-      *public_headers*/*public_header_dirs* unchanged, exactly as before this
-      parameter existed) for every pre-existing caller.
+    *source_frontend_compile*: the context whose ``gcc_path``/``gcc_prefix``
+    selects the L4 replay compiler, when it is not ``evidence.compile`` --
+    ``dump`` passes the *folded* (post-P0.3) context its L2 header AST was
+    actually pointed at. The two differ only when the caller set neither
+    selector and the matched compile unit named an MSVC/clang-cl driver.
     """
     import abicheck.service_compare_evidence as _sce
 
     from ...buildsource.embed import embed_build_source
-    from ...dry_run_estimate import expand_public_header_inputs
     from ...dumper_clang import resolve_source_frontend_clang_bin
     from ...extract.dump_manifest_roots import dump_manifest_public_roots
 
@@ -155,23 +93,15 @@ def embed_side_build_source(
     frontend_ctx = (
         source_frontend_compile if source_frontend_compile is not None else ctx
     )
+    # The S2 preprocessor pre-scan `compare()` runs later replays this side's
+    # compile units too, so it takes the same compiler selection as L4 --
+    # with the CL-mode exclusion, since it always passes GNU-mode flags.
+    snap.live_preprocessor_clang_bin = resolve_source_frontend_clang_bin(
+        frontend_ctx.gcc_path if frontend_ctx else None,
+        frontend_ctx.gcc_prefix if frontend_ctx else None,
+        fallback="clang++",
+    )
     manifest_roots = dump_manifest_public_roots(evidence.dump_manifest)
-    embed_headers = (
-        l4_public_headers if l4_public_headers is not None else public_headers
-    )
-    embed_header_dirs = (
-        l4_public_header_dirs
-        if l4_public_header_dirs is not None
-        else public_header_dirs
-    )
-    if expand_public_header_roots:
-        embedded_public_headers: tuple[str, ...] = tuple(
-            expand_public_header_inputs(
-                [*embed_headers, *embed_header_dirs, *manifest_roots]
-            )
-        )
-    else:
-        embedded_public_headers = tuple(str(p) for p in embed_headers)
     try:
         embed_build_source(
             snap,
@@ -184,11 +114,7 @@ def embed_side_build_source(
             build_targets=side.build_targets,
             collect_mode=evidence.collect_mode,
             changed_paths=changed_paths,
-            extractor=(
-                source_extractor
-                if source_extractor is not None
-                else _sce.effective_frontend(evidence.compile, header_backend)
-            ),
+            extractor=_sce.effective_frontend(evidence.compile, header_backend),
             # L4 source-ABI replay must invoke the compiler this input's own L2
             # header AST was pointed at (`gcc_path`/`gcc_prefix`), not
             # `embed_build_source`'s bare "clang" default -- the same fix
@@ -205,10 +131,9 @@ def embed_side_build_source(
                 frontend_ctx.gcc_prefix if frontend_ctx else None,
                 exclude_cl_style=False,
             ),
-            public_headers=embedded_public_headers,
-            public_header_dirs=tuple(str(p) for p in embed_header_dirs)
+            public_headers=tuple(str(p) for p in public_headers),
+            public_header_dirs=tuple(str(p) for p in public_header_dirs)
             + tuple(str(p) for p in manifest_roots),
-            defer_cleanup=defer_cleanup,
         )
     except ValidationError as exc:
         # The engine keeps usage and operational errors distinct (the CLI needs

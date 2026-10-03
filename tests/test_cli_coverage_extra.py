@@ -245,9 +245,9 @@ class TestDumpNativeBinary:
             )
             assert result.exit_code == 0
             assert out_file.exists()
-            from abicheck.serialization import load_snapshot_document
+            from _snapshot_document_reader import read_snapshot_document
 
-            data = load_snapshot_document(out_file)
+            data = read_snapshot_document(out_file)
             assert "functions" in data
 
 

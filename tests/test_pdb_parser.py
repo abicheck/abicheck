@@ -1066,13 +1066,13 @@ class TestTypeDatabaseExtended:
         db = self._make_db([(LF_FIELDLIST, fl), (LF_ENUM, enum_payload)])
         assert len(db.all_enums()) == 1
 
-    def test_all_procedures(self) -> None:
+    def test_procedure_lookup(self) -> None:
         db = self._make_db([(LF_PROCEDURE, _make_lf_procedure(0x74, 0, 0, 0))])
-        assert len(db.all_procedures()) == 1
+        assert db.get_procedure(0x1000) is not None
 
-    def test_all_mfunctions(self) -> None:
+    def test_mfunction_lookup(self) -> None:
         db = self._make_db([(LF_MFUNCTION, _make_lf_mfunction(0x74, 0, 0, 0, 0, 0))])
-        assert len(db.all_mfunctions()) == 1
+        assert db.get_mfunction(0x1000) is not None
 
     def test_modifier_volatile(self) -> None:
         mod_payload = _make_lf_modifier(0x74, is_volatile=True)
@@ -1174,11 +1174,11 @@ class TestTypeDatabaseExtended:
 
     def test_truncated_procedure_data(self) -> None:
         db = self._make_db([(LF_PROCEDURE, b"\x00" * 4)])  # < 12 bytes
-        assert len(db.all_procedures()) == 0
+        assert db.get_procedure(0x1000) is None
 
     def test_truncated_mfunction_data(self) -> None:
         db = self._make_db([(LF_MFUNCTION, b"\x00" * 4)])  # < 24 bytes
-        assert len(db.all_mfunctions()) == 0
+        assert db.get_mfunction(0x1000) is None
 
     def test_truncated_pointer_data(self) -> None:
         db = self._make_db([(LF_POINTER, b"\x00" * 4)])  # < 8 bytes

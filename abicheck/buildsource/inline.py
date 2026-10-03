@@ -57,6 +57,7 @@ import shlex
 import subprocess
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
@@ -366,6 +367,88 @@ def collect_inline_pack(
 # ── L3: compile-DB resolution ─────────────────────────────────────────────────
 
 
+#: :class:`CompileDbPlan` ``via`` values -- where a live side's L3 compile DB
+#: comes from, decided before anything runs.
+VIA_BUILD_INFO = "build_info"
+VIA_BUILD_QUERY = "build_query"
+VIA_CONFIG_COMPILE_DB = "config_compile_db"
+VIA_DISCOVERED = "discovered"
+VIA_EXPLICIT_MISSED = "explicit_missed"
+VIA_INFERRED_QUERY = "inferred_query"
+
+
+@dataclass(frozen=True)
+class CompileDbPlan:
+    """Which compile DB a live side's L3 collection reads, decided without
+    running anything (ADR-032 amended).
+
+    The one statement of the order :func:`_resolve_compile_db` follows, so the
+    run and ``compare --dry-run``'s cost preview cannot pick different DBs:
+    an explicit ``--build-info`` path (file or dir) → a trusted ``--config``
+    ``build.query`` (``via == VIA_BUILD_QUERY``: its result is only known by
+    running it) → ``build.compile_db`` in the source tree → an auto-discovered
+    ``compile_commands.json`` → abicheck's own inferred build-system query
+    (``VIA_INFERRED_QUERY``). An explicit input that resolved to nothing stops
+    the chain (``VIA_EXPLICIT_MISSED``): a cleaned or mistyped path must
+    surface, not be masked by a stale DB or a query under different flags.
+    """
+
+    via: str
+    path: Path | None = None
+    #: ``--build-info`` was given and held no compile DB (recorded as a
+    #: diagnostic by the run, whatever the chain then found).
+    build_info_missed: bool = False
+    #: The config states a ``build.query`` the run will not execute, because
+    #: the config was auto-discovered rather than operator-supplied.
+    untrusted_query_skipped: bool = False
+
+
+def plan_compile_db(
+    build_info: Path | None,
+    sources: Path | None,
+    cfg: BuildConfig,
+    *,
+    trusted_for_query: bool,
+    compile_db_explicit: bool,
+) -> CompileDbPlan:
+    """:class:`CompileDbPlan` for one side. Reads the filesystem; runs nothing."""
+    build_info_missed = False
+    if build_info is not None:
+        found = _compile_db_at(build_info)
+        if found is not None:
+            return CompileDbPlan(VIA_BUILD_INFO, found)
+        build_info_missed = True
+    # build.query (ADR-032 D5 query_build_system): a tree-supplied command that
+    # EMITS a compile DB / exports without a full build. Runs only when the config
+    # came from an explicit operator-supplied path; an auto-discovered
+    # .abicheck.yml is never trusted to execute, and its query is skipped.
+    untrusted_query = bool(cfg.query) and not trusted_for_query
+    if cfg.query and trusted_for_query:
+        return CompileDbPlan(VIA_BUILD_QUERY, None, build_info_missed)
+    # Only an *operator-supplied* build.compile_db (a `build_compile_db`
+    # argument from a programmatic caller, or an explicit --config path)
+    # counts as an explicit input whose miss suppresses fallback -- distinct
+    # from query-execution trust (review). A build.compile_db from an
+    # auto-discovered .abicheck.yml is not something the user chose, so a
+    # stale/cleaned path there still falls through.
+    explicit_missed = build_info_missed
+    if cfg.compile_db and sources is not None:
+        explicit_missed = explicit_missed or compile_db_explicit
+        for match in sorted(sources.glob(cfg.compile_db)):
+            if match.is_file():
+                return CompileDbPlan(
+                    VIA_CONFIG_COMPILE_DB, match, build_info_missed, untrusted_query
+                )
+    if explicit_missed:
+        return CompileDbPlan(
+            VIA_EXPLICIT_MISSED, None, build_info_missed, untrusted_query
+        )
+    discovered = _autodiscover_compile_db(sources)
+    if discovered is not None:
+        return CompileDbPlan(VIA_DISCOVERED, discovered, False, untrusted_query)
+    return CompileDbPlan(VIA_INFERRED_QUERY, None, False, untrusted_query)
+
+
 def _resolve_compile_db(
     build_info: Path | None,
     sources: Path | None,
@@ -379,89 +462,41 @@ def _resolve_compile_db(
 ) -> Path | None:
     """Resolve the compile DB to feed L3 (zero-config; ADR-032 amended).
 
-    Order: an explicit ``--build-info`` path (file or dir) → a trusted
-    ``--config`` ``build.query`` command result → ``build.compile_db`` in the
-    source tree → an auto-discovered ``compile_commands.json`` → the **inferred,
-    abicheck-authored** build-system query (cmake/make/bazel). No
-    ``--allow-build-query`` flag is required: providing ``--sources`` is the
-    request to collect build evidence. The only command never auto-run is an
-    arbitrary ``build.query`` string from an auto-discovered (untrusted)
-    ``.abicheck.yml`` — that still needs an explicit ``--config``.
+    :func:`plan_compile_db` decides where it comes from; this runs what the
+    plan names (a trusted ``build.query``, or the inferred query) and records
+    the diagnostics. No ``--allow-build-query`` flag is required: providing
+    ``--sources`` is the request to collect build evidence. The only command
+    never auto-run is an arbitrary ``build.query`` string from an
+    auto-discovered (untrusted) ``.abicheck.yml``.
     """
-    # Track whether the operator gave an EXPLICIT L3 input (--build-info or a
-    # build.compile_db path) that yielded nothing. If so, the default inferred
-    # query must not run: a cleaned/mistyped build-info path should surface, not
-    # be masked by a fresh `cmake`/`bazel` query under different flags (review).
-    explicit_input_missed = False
-    if build_info is not None:
-        found = _compile_db_at(build_info)
-        if found is not None:
-            return found
+    plan = plan_compile_db(
+        build_info,
+        sources,
+        cfg,
+        trusted_for_query=build_config_trusted_for_query,
+        compile_db_explicit=compile_db_explicit,
+    )
+    if plan.build_info_missed:
         merged.diagnostics.append(
             f"build-info {build_info}: no {_COMPILE_DB_NAME} found"
         )
-        explicit_input_missed = True
-
-    # build.query (ADR-032 D5 query_build_system): a tree-supplied command that
-    # EMITS a compile DB / exports without a full build. Runs only when the config
-    # came from an explicit operator-supplied path (build_config_trusted_for_query);
-    # an auto-discovered .abicheck.yml is never trusted to execute.
-    if cfg.query:
-        if not build_config_trusted_for_query:
-            extractors.append(
-                ExtractorRecord(
-                    name="build_query",
-                    status="skipped",
-                    detail=(
-                        "build.query ignored from auto-discovered .abicheck.yml; "
-                        "pass a trusted config with --config to permit queries"
-                    ),
-                )
+    if plan.untrusted_query_skipped:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query",
+                status="skipped",
+                detail=(
+                    "build.query ignored from auto-discovered .abicheck.yml; "
+                    "pass a trusted config with --config to permit queries"
+                ),
             )
-            # Untrusted query is never run — fall through to compile_db /
-            # auto-discovery / the abicheck-authored inferred query below.
-        else:
-            # Trusted operator config (--config): run its query automatically. No
-            # --allow-build-query flag is required any more — pointing abicheck at
-            # sources *is* the request to collect build evidence (ADR-032 amended).
-            queried = _run_build_query(cfg, sources, merged, extractors)
-            if queried is not None:
-                return queried
-            # The operator supplied an explicit query and it failed / produced no
-            # compile DB. Surface that — do NOT mask it by falling back to a
-            # compile_db glob, a stale auto-discovered DB from a prior/default
-            # configure, or abicheck's default inferred query, which would collect
-            # L3 with the wrong flags the custom query existed to avoid (review).
-            # The build_query diagnostic _run_build_query recorded explains the miss.
-            return None
-
-    if cfg.compile_db and sources is not None:
-        # Only an *operator-supplied* build.compile_db (a `build_compile_db`
-        # argument from a programmatic caller, or
-        # an explicit --config path) counts as an explicit input whose miss should
-        # suppress fallback — tracked by `compile_db_explicit`, which is distinct
-        # from query-execution trust (review): a `build_compile_db` makes the DB
-        # explicit without trusting a query, and a `build_query` trusts a query
-        # without making a DB explicit. A build.compile_db from an auto-discovered
-        # .abicheck.yml is not something the user chose, so a stale/cleaned path
-        # there still falls through to the zero-config inferred query.
-        if compile_db_explicit:
-            explicit_input_missed = True
-        for match in sorted(sources.glob(cfg.compile_db)):
-            if match.is_file():
-                return match
-
-    if explicit_input_missed:
-        # An explicit --build-info / build_compile_db / --config compile-DB input
-        # was given but resolved to nothing. Surface that miss rather than masking
-        # it with a stale auto-discovered DB OR abicheck's default inferred query
-        # under different flags — checked BEFORE auto-discovery so a stray
-        # build/compile_commands.json can't silently stand in (review).
-        return None
-
-    discovered = _autodiscover_compile_db(sources)
-    if discovered is not None:
-        return discovered
+        )
+    if plan.via == VIA_BUILD_QUERY:
+        # A failed operator query is surfaced, never masked by a compile_db
+        # glob, a stale DB or the inferred query (its diagnostic explains it).
+        return _run_build_query(cfg, sources, merged, extractors)
+    if plan.via != VIA_INFERRED_QUERY:
+        return plan.path
 
     if not allow_inferred_build_query:
         # An L2-only caller (--depth headers / collect_mode "off") reached the

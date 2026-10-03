@@ -48,7 +48,6 @@ from abicheck.policy.contract_finding_relevance import (
 )
 from abicheck.policy.evidence_status import EvidenceStatus, ReachabilityState
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
-from abicheck.report.document import ReportDocument
 from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from abicheck.report.render_json import render_mapping_as_json
 from abicheck.report.sarif_invocation import compute_sarif_invocation_exit
@@ -729,11 +728,10 @@ def to_sarif(
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> dict[str, Any]:
     """Convert a DiffResult to a SARIF 2.1.0 document (dict).
-    *envelope* (ADR-061 gap C), when given, is the one completed ``ReportEnvelope`` this render projects: its shared document supplies ``disposition_audit`` and its already-resolved ``gate`` drives the severity-gate block and the invocation exit contract, so SARIF decides neither for itself. *report_document* is the narrower, pre-envelope form of the same reuse (document only); the envelope wins when both are given, and a direct caller with neither keeps the prior, independent behaviour.
+    *envelope* (ADR-061 gap C), when given, is the one completed ``ReportEnvelope`` this render projects: its shared document supplies ``disposition_audit`` and its already-resolved ``gate`` drives the severity-gate block and the invocation exit contract, so SARIF decides neither for itself. A direct caller with no envelope keeps the independent behaviour.
     *severity_config*, when given, drives the invocation's ``exitCode`` from
     the actual severity-aware gate instead of inferring it purely from
     ``result.verdict`` — compatibility and "blocks CI" are independent
@@ -779,12 +777,12 @@ def to_sarif(
     tool_version = _tool_version()
     gate_decision = resolved_gate(envelope, result, severity_config)  # ADR-061 gap C
     disposition_audit_dict = disposition_audit_dict_reusing_document(
-        result, severity_config, resolved_document(envelope, report_document)
+        result, severity_config, resolved_document(envelope)
     )  # ADR-061 Phase 2 gap C
     from abicheck.report.envelope import env_matrix_digest_reusing_document
 
     _env_matrix_digest = env_matrix_digest_reusing_document(
-        result, resolved_document(envelope, report_document)
+        result, resolved_document(envelope)
     )  # ADR-061 gap C
     # Codex review: filtered so an expired rule -- which ReclassifyRule.
     # matches() would already refuse to apply -- isn't disclosed in
@@ -1328,23 +1326,19 @@ def to_sarif_not_comparable(
 
 def to_sarif_str(
     result: DiffResult,
-    indent: int = 2,
     *,
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
-    report_document: ReportDocument | None = None,
     envelope: ReportEnvelope | None = None,
 ) -> str:
-    """Serialize DiffResult to a SARIF JSON string; *report_document*/*envelope* are forwarded unchanged to :func:`to_sarif` (ADR-061 gap C)."""
+    """Serialize DiffResult to a SARIF JSON string; *envelope* is forwarded unchanged to :func:`to_sarif` (ADR-061 gap C)."""
     return render_mapping_as_json(
         to_sarif(
             result,
             show_only=show_only,
             report_mode=report_mode,
             severity_config=severity_config,
-            report_document=report_document,
             envelope=envelope,
         ),
-        indent=indent,
     )

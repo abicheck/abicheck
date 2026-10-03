@@ -172,7 +172,7 @@ class TestCaptureMetadata:
 
         assert CAPTURE_METADATA_KEY in canonical_json(payload)
         assert CAPTURE_METADATA_KEY not in canonical_json(
-            payload, drop_capture_metadata=True
+            strip_capture_metadata(payload)
         )
 
 

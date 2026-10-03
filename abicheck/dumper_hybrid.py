@@ -169,7 +169,7 @@ def _split_top_level_commas(s: str) -> list[str]:
     """Split *s* on commas at bracket depth 0 only.
 
     A castxml synthetic ctor key joins its parameter types with ``,``
-    (``dumper_castxml._function_mangled_name``'s ``",".join(ctor_identity_types)``)
+    (``extract.headers.castxml.functions.function_mangled_name``'s ``",".join(ctor_identity_types)``)
     with no escaping, so a single parameter type that itself contains a
     comma (``std::pair<int, int>``, any other multi-argument template) must
     not be split into two — that would understate the constructor's real
@@ -459,7 +459,7 @@ def _normalize_scope_for_matching(scope: str) -> str:
 def _synthetic_ctor_dtor_scope(key: str) -> tuple[str, str, str] | None:
     """``(marker, qualified_scope, param_sig)`` parsed back out of a castxml
     synthetic ctor/dtor key (the exact inverse of
-    ``dumper_castxml._CastxmlParser._function_mangled_name``'s synthesis).
+    ``extract.headers.castxml.functions.function_mangled_name``'s synthesis).
     ``param_sig`` is ``""`` for a destructor (never overloaded)."""
     if is_synthetic_ctor_key(key):
         body = key[len(SYNTHETIC_CTOR_KEY_PREFIX) :]
@@ -514,7 +514,7 @@ def _match_synthetic_ctor_dtor(
             return candidates[0]
         return None
     # Constructor: narrow by cv-normalized signature, same as the synthetic
-    # key's own identity (dumper_castxml._ctor_param_identity_type already
+    # key's own identity (extract.headers.castxml.functions.ctor_param_identity_type already
     # strips a top-level cv qualifier the same way real mangling would).
     wanted_sig = tuple(
         canonicalize_type_name(t) for t in _split_top_level_commas(param_sig)

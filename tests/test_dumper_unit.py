@@ -1,6 +1,6 @@
 """Unit tests for dumper.py internals — mock external tools.
 
-Covers _CastxmlParser methods, _castxml_available, _cache_key,
+Covers _CastxmlParser methods, _cache_key,
 _parse_vtable_index, _vt_sort_key, _pyelftools_exported_symbols,
 and _castxml_dump error paths.
 """
@@ -16,7 +16,6 @@ import pytest
 from abicheck.dumper import (
     _cache_key,
     _cache_path,
-    _castxml_available,
     _castxml_dump,
     _CastxmlParser,
     _is_kernel_binary,
@@ -27,21 +26,9 @@ from abicheck.dumper import (
     _safe_size,
     _vt_sort_key,
 )
+from abicheck.extract.headers.castxml.records import collect_virtual_methods
 from abicheck.model import Visibility
 from abicheck.name_classification import canonicalize_type_name
-
-# ── _castxml_available ──────────────────────────────────────────────────
-
-
-class TestCastxmlAvailable:
-    def test_returns_true_when_castxml_on_path(self, monkeypatch):
-        monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/castxml")
-        assert _castxml_available() is True
-
-    def test_returns_false_when_castxml_missing(self, monkeypatch):
-        monkeypatch.setattr(shutil, "which", lambda _: None)
-        assert _castxml_available() is False
-
 
 # ── _safe_mtime ──────────────────────────────────────────────────────────
 
@@ -1897,13 +1884,13 @@ class TestCastxmlParserVtable:
         assert derived_t.vtable == []
 
     def test_collect_virtual_methods_unresolvable_cid_returns_empty(self):
-        """_collect_virtual_methods() called directly with a class id that
+        """collect_virtual_methods() called directly with a class id that
         isn't in the id map (defensive guard -- unreachable through the
         normal _resolve()-gated recursive call, since _resolve already
         filters out dangling Base references before recursing)."""
         root = _xml_root(Element("Class", id="c1", name="C"))
         p = _CastxmlParser(root, set(), set())
-        assert p._collect_virtual_methods("does-not-exist") == {}
+        assert collect_virtual_methods(p._ctx, "does-not-exist") == {}
 
     def test_vtable_method_without_id_attribute_is_not_registered_as_slot_root(self):
         """A virtual method element missing its own `id` attribute (malformed

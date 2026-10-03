@@ -562,13 +562,6 @@ def compute_impact_table(
     )
 
 
-def _build_impact_table(
-    result: DiffResult,
-    displayed_changes: list[Change] | None = None,
-) -> list[str]:
-    return _rmd.render_impact_table(compute_impact_table(result, displayed_changes))
-
-
 # ---------------------------------------------------------------------------
 # Leaf-change mode helpers
 # ---------------------------------------------------------------------------
@@ -977,21 +970,21 @@ def _fmt_size(size_bytes: int) -> str:
 
 
 def compute_redundancy_note(result: DiffResult) -> _rmd.RedundancyNote | None:
-    """The structured intermediate for :func:`_append_redundancy_note`."""
+    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_redundancy_note`."""
     if result.redundant_count > 0:
         return _rmd.RedundancyNote(redundant_count=result.redundant_count)
     return None
 
 
 def compute_out_of_surface_note(result: DiffResult) -> _rmd.OutOfSurfaceNote | None:
-    """The structured intermediate for :func:`_append_out_of_surface_note`."""
+    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_out_of_surface_note`."""
     if result.scope_to_public_surface and result.out_of_surface_count:
         return _rmd.OutOfSurfaceNote(count=result.out_of_surface_count)
     return None
 
 
 def compute_suppression_note(result: DiffResult) -> _rmd.SuppressionNote | None:
-    """The structured intermediate for :func:`_append_suppression_note`."""
+    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_suppression_note`."""
     if not result.suppression_file_provided:
         return None
     entries: list[_rmd.SuppressedEntry] = []
@@ -1015,18 +1008,6 @@ def compute_suppression_note(result: DiffResult) -> _rmd.SuppressionNote | None:
     return _rmd.SuppressionNote(
         suppressed_count=result.suppressed_count, entries=tuple(entries)
     )
-
-
-def _append_redundancy_note(lines: list[str], result: DiffResult) -> None:
-    lines += _rmd.render_redundancy_note(compute_redundancy_note(result))
-
-
-def _append_out_of_surface_note(lines: list[str], result: DiffResult) -> None:
-    lines += _rmd.render_out_of_surface_note(compute_out_of_surface_note(result))
-
-
-def _append_suppression_note(lines: list[str], result: DiffResult) -> None:
-    lines += _rmd.render_suppression_note(compute_suppression_note(result))
 
 
 # ---------------------------------------------------------------------------
@@ -1222,10 +1203,6 @@ def compute_severity_summary(
     return _rmd.SeveritySummary(rows=tuple(rows))
 
 
-def _footer_lines() -> list[str]:
-    return _rmd.render_footer()
-
-
 def compute_library_files(
     old_meta: LibraryMetadata | None, new_meta: LibraryMetadata | None
 ) -> _rmd.LibraryFilesSection | None:
@@ -1382,7 +1359,7 @@ def compute_severity_sections(
 def compute_not_evaluated(
     not_evaluated: list[Change],
 ) -> _rmd.NotEvaluatedSection | None:
-    """The structured intermediate for :func:`_build_not_evaluated_section`.
+    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_not_evaluated_section`.
 
     Disclose the findings compatibility policy did not score (ADR-049 D1).
 
@@ -1409,14 +1386,10 @@ def compute_not_evaluated(
     return _rmd.NotEvaluatedSection(entries=tuple(entries))
 
 
-def _build_not_evaluated_section(not_evaluated: list[Change]) -> list[str]:
-    return _rmd.render_not_evaluated_section(compute_not_evaluated(not_evaluated))
-
-
 def compute_environment_drift(
     changes: list[Change],
 ) -> _rmd.EnvironmentDriftSection | None:
-    """The structured intermediate for :func:`_build_environment_drift_section`.
+    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_environment_drift_section`.
 
     Group environment/toolchain-drift findings under one heading.
 
@@ -1438,10 +1411,6 @@ def compute_environment_drift(
             for c in drift
         )
     )
-
-
-def _build_environment_drift_section(changes: list[Change]) -> list[str]:
-    return _rmd.render_environment_drift_section(compute_environment_drift(changes))
 
 
 # Verdict -> short merge-effect phrase for the reviewer digest.
@@ -1650,19 +1619,13 @@ def compute_review_digest(
 
 
 def compute_rtti_note(breaking: list[Change]) -> _rmd.RttiNote | None:
-    """The structured intermediate for :func:`_build_internal_rtti_note`."""
+    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_rtti_note`."""
     bd = surface_breakdown(breaking)
     if not (bd.rtti or bd.internal):
         return None
     return _rmd.RttiNote(
         rtti=bd.rtti, internal=bd.internal, total=bd.total, public=bd.public
     )
-
-
-def _build_internal_rtti_note(breaking: list[Change]) -> list[str]:
-    """Build the up-front note when breaking findings are mostly RTTI/internal
-    churn. Returns an empty list when there is nothing to note."""
-    return _rmd.render_rtti_note(compute_rtti_note(breaking))
 
 
 def compute_headline_table(
@@ -1692,7 +1655,7 @@ def compute_headline_table(
 
 
 def compute_confidence_section(result: DiffResult) -> _rmd.ConfidenceSection | None:
-    """The structured intermediate for :func:`_append_confidence_section`."""
+    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_confidence_section`."""
     conf = getattr(result, "confidence", None)
     if conf is None:
         return None
@@ -1717,16 +1680,11 @@ def compute_confidence_section(result: DiffResult) -> _rmd.ConfidenceSection | N
     )
 
 
-def _append_confidence_section(lines: list[str], result: DiffResult) -> None:
-    """Append confidence/evidence metadata section to markdown lines."""
-    lines += _rmd.render_confidence_section(compute_confidence_section(result))
-
-
 def compute_contract_conflicts_section(
     result: DiffResult,
 ) -> _ccm.ContractConflictsSection | None:
     """The structured intermediate for Workstream E slice S3's Markdown
-    section (:func:`_append_contract_conflicts_section`).
+    section (:func:`~abicheck.report.contract_conflicts_markdown.render_contract_conflicts_section`).
 
     ``None`` when ``contract_conflicts`` is not a list (contract evaluation
     never ran, or ran against a hand-built ``DiffResult`` that never set the
@@ -1755,17 +1713,10 @@ def compute_contract_conflicts_section(
     return _ccm.ContractConflictsSection(rows=rows)
 
 
-def _append_contract_conflicts_section(lines: list[str], result: DiffResult) -> None:
-    """Append Workstream E slice S3's contract-conflicts section, if any."""
-    lines += _ccm.render_contract_conflicts_section(
-        compute_contract_conflicts_section(result)
-    )
-
-
 def compute_policy_section(
     result: DiffResult, *, today: date | None = None
 ) -> _rmd.PolicySection:
-    """The structured intermediate for :func:`_append_policy_section`.
+    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_policy_section`.
 
     *today*: an envelope's ``resolved_today`` (ADR-061 gap C, Codex, fresh).
     """
@@ -1799,11 +1750,6 @@ def compute_policy_section(
     )
 
 
-def _append_policy_section(lines: list[str], result: DiffResult) -> None:
-    """Append policy metadata section to markdown lines."""
-    lines += _rmd.render_policy_section(compute_policy_section(result))
-
-
 _BUMP_EMOJI = {"major": "🔴", "minor": "🟢", "patch": "🟢", "none": "✅"}
 
 #: ``reporter_markdown._view_preamble`` (the opening block leaf/root-cause
@@ -1817,7 +1763,7 @@ _BUMP_EMOJI = {"major": "🔴", "minor": "🟢", "patch": "🟢", "none": "✅"}
 
 
 def compute_recommendation_section(result: DiffResult) -> _rmd.RecommendationSection:
-    """The structured intermediate for :func:`_append_recommendation_section`."""
+    """The structured intermediate for :func:`~abicheck.report.render_markdown.render_recommendation_section`."""
     rec = recommend_release_for_report(result)
     return _rmd.RecommendationSection(
         bump_emoji=_BUMP_EMOJI.get(rec.bump.value, ""),
@@ -1829,11 +1775,6 @@ def compute_recommendation_section(result: DiffResult) -> _rmd.RecommendationSec
             None if rec.policy_acceptance is None else rec.policy_acceptance.to_dict()
         ),
     )
-
-
-def _append_recommendation_section(lines: list[str], result: DiffResult) -> None:
-    """Append the release-recommendation section (semver bump + soname action)."""
-    lines += _rmd.render_recommendation_section(compute_recommendation_section(result))
 
 
 # ADR-063 T10: `to_markdown`/`to_review_digest`/`_to_markdown_leaf`/

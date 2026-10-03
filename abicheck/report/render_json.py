@@ -17,9 +17,7 @@ def render_json(document: ReportDocument, *, indent: int | None = 2) -> str:
     return json.dumps(document.to_mapping(), indent=indent)
 
 
-def render_mapping_as_json(
-    value: Mapping[str, object], *, indent: int | None = 2
-) -> str:
+def render_mapping_as_json(value: Mapping[str, object]) -> str:
     """Freeze an already-completed JSON-shaped report and render it.
 
     The one-step form for a builder that assembles its whole report as a
@@ -29,4 +27,4 @@ def render_mapping_as_json(
     so the freeze can never be skipped by a caller reaching for ``json.dumps``
     because the two-step form looked like ceremony.
     """
-    return render_json(ReportDocument.from_mapping(value), indent=indent)
+    return render_json(ReportDocument.from_mapping(value))

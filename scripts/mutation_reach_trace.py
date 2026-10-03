@@ -328,9 +328,10 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     mon = session.config.stash.get(_STATE, None)
     if not out or mon is None:
         return
-    # xdist's own record of this process's role, not $PYTEST_XDIST_WORKER:
-    # a run nested inside an xdist worker inherits that variable, so its
-    # controller would write the same file one of its own workers writes.
+    # xdist's own record of this process's role, never the environment: a
+    # trace run launched from inside another xdist worker inherits that
+    # worker's PYTEST_XDIST_WORKER, so its controller would take a worker's
+    # name and overwrite that worker's hits with its own empty set.
     workerinput = getattr(session.config, "workerinput", None)
     worker = workerinput["workerid"] if workerinput else "main"
     Path(out).mkdir(parents=True, exist_ok=True)

@@ -1657,17 +1657,6 @@ def test_linker_no_odr_for_same_name_in_different_headers() -> None:
     assert surface.odr_conflicts == []
 
 
-def test_linker_forced_public_overrides_visibility() -> None:
-    tu = SourceAbiTu(
-        functions=[
-            _entity("forced", "function", visibility="private_header", origin="SOURCE")
-        ],
-    )
-    surface = link_source_abi([tu], forced_public=["forced"])
-    assert any(e.qualified_name == "forced" for e in surface.reachable_declarations)
-    assert surface.roots["forced_public"] == ["forced"]
-
-
 # -- diff findings (D6) ------------------------------------------------------
 
 

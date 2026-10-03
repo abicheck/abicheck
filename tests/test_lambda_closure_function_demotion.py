@@ -184,7 +184,7 @@ class TestGenuinelyExportedSymbolStaysBreaking:
 
 class TestSyntheticCtorDtorKeysDemotedWhenTemplateNeverExported:
     """A castxml-synthesized ctor/dtor key can never equal a real exported
-    symbol by construction (see ``dumper_castxml._function_mangled_name``),
+    symbol by construction (see ``extract.headers.castxml.functions.function_mangled_name``),
     so the OWNING class/class-template is checked instead: if it has zero
     exported members under ANY instantiation on either side, no consumer
     could ever have linked against this instantiation's ctor/dtor either --

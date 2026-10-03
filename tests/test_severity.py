@@ -436,22 +436,6 @@ class TestCompatibilityDecision:
 
 
 class TestComputeGateDecision:
-    def test_legacy_scheme_uses_supplied_exit_code(self) -> None:
-        from abicheck.severity import compute_gate_decision
-
-        decision = compute_gate_decision([], None, legacy_exit_code=4)
-        assert decision.scheme == "legacy"
-        assert decision.exit_code == 4
-        assert decision.blocking is True
-        assert decision.blocking_categories == ()
-
-    def test_legacy_scheme_zero_exit_code_not_blocking(self) -> None:
-        from abicheck.severity import compute_gate_decision
-
-        decision = compute_gate_decision([], None, legacy_exit_code=0)
-        assert decision.scheme == "legacy"
-        assert decision.blocking is False
-
     def test_severity_scheme_addition_promoted_to_error(self) -> None:
         from abicheck.severity import compute_gate_decision, resolve_severity_config
 

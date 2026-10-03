@@ -64,11 +64,11 @@ LEGACY_LAYOUT_DIAGNOSTIC = "layout not recorded before semantic_ir document vers
 _LAYOUT_FIELDS = ("size_bits", "alignment_bits")
 
 
-def layout_fact(value: int | None, *, producer: str | None = None) -> Fact[int]:
+def layout_fact(value: int | None) -> Fact[int]:
     """``PRESENT`` for an established value, ``NOT_COLLECTED`` for ``None``."""
     if value is None:
         return Fact.not_collected()
-    return Fact.present(value, producer=producer)
+    return Fact.present(value)
 
 
 def record_layout_facts(record: RecordType) -> tuple[Fact[int], Fact[int]]:
@@ -82,9 +82,7 @@ def _fillable(fact: Fact[int]) -> bool:
     return fact.status is FactStatus.NOT_COLLECTED
 
 
-def with_record_layout(
-    ir: SemanticIR, records: Iterable[RecordType], *, producer: str | None = None
-) -> SemanticIR:
+def with_record_layout(ir: SemanticIR, records: Iterable[RecordType]) -> SemanticIR:
     """*ir* with every record occurrence's missing layout filled from *records*.
 
     A record contributes only through its own ``entity_id``; a record without
@@ -108,9 +106,7 @@ def with_record_layout(
         if known is None:
             continue
         size, align = (
-            layout_fact(value, producer=producer)
-            if _fillable(current) and value is not None
-            else current
+            layout_fact(value) if _fillable(current) and value is not None else current
             for value, current in zip(known, (entity.size_bits, entity.alignment_bits))
         )
         if size is not entity.size_bits or align is not entity.alignment_bits:

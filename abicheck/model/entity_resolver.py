@@ -125,7 +125,7 @@ class EntityResolver:
         checkout-directory-taint fix) *after* this resolver was already
         built from the persisted JSON — so without this remap,
         ``aliases``/``_canonical_to_v1``/``conflicts`` would still be keyed
-        by the OLD, pre-migration id, and ``canonical_id_for(node.id)``
+        by the OLD, pre-migration id, and ``aliases.get(node.id)``
         would silently return ``None`` for a node whose canonical identity
         was already resolved and persisted, forcing a spurious re-resolve
         (:meth:`resolve`'s idempotence never triggers, and a fresh
@@ -139,7 +139,7 @@ class EntityResolver:
         ``node.label``'s own raw, checkout-path-bearing spelling before this
         fix existed. A first revision of this method only remapped v1-id
         *keys*, leaving that persisted canonical *value* untouched -- so
-        ``canonical_id_for()`` still returned a checkout-dependent id that
+        ``aliases`` still held a checkout-dependent id that
         would never match a freshly-resolved graph's canonical id for the
         identical declaration. ``remap`` is applied to every string in this
         structure that could be either kind (it is a no-op for a
@@ -186,11 +186,6 @@ class EntityResolver:
             )
             for c in self.conflicts
         ]
-
-    def canonical_id_for(self, v1_id: str) -> str | None:
-        """The canonical identity *v1_id* resolved to, or ``None`` if
-        :meth:`resolve` was never called for it."""
-        return self.aliases.get(v1_id)
 
     def v1_id_for(self, canonical_id: str) -> str | None:
         """The representative (first-seen) v1 node id for *canonical_id*, or

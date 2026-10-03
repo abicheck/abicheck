@@ -294,21 +294,6 @@ def impact_caveat_for(evidence_status: EvidenceStatus | None) -> str:
     )
 
 
-def policy_registry_markdown() -> str:
-    """Build a markdown snippet for docs from the policy registry."""
-    lines = [
-        "| ChangeKind | Default verdict | Severity | Doc slug |",
-        "|---|---|---|---|",
-    ]
-    for kind in sorted(ChangeKind, key=lambda k: k.value):
-        entry = policy_for(kind)
-        lines.append(
-            f"| `{kind.value}` | `{entry.default_verdict.value}` | "
-            f"`{entry.severity}` | `{entry.doc_slug}` |"
-        )
-    return "\n".join(lines)
-
-
 def policy_kind_sets(
     policy: str,
 ) -> tuple[
@@ -512,7 +497,7 @@ def compute_verdict(
     - ``sdk_vendor``: source-level-only kinds (rename, access) downgraded
       from API_BREAK → COMPATIBLE (no warning for SDK consumers).
     - ``plugin_abi``: calling-convention kinds (CALLING_CONVENTION_CHANGED,
-      FRAME_REGISTER_CHANGED, VALUE_ABI_TRAIT_CHANGED) downgraded from
+      VALUE_ABI_TRAIT_CHANGED) downgraded from
       BREAKING → COMPATIBLE. Only valid when plugin and host are always
       rebuilt together from the same toolchain.
 

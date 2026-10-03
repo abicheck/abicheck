@@ -315,11 +315,13 @@ class AbiSnapshot:
     created_at: str | None = None  # ISO 8601 timestamp, auto-set at dump time
     build_id: str | None = None  # opaque CI identifier (run ID, build number, etc.)
     # Build-mode capture (schema v5) — normalized compiler / stdlib / std
-    # mode derived from DWARF DW_AT_producer, ELF .comment, and mangled
-    # symbol heuristics. Used to attribute layout/mangling differences
-    # to build configuration rather than real ABI breaks. See
+    # mode. Used to attribute layout/mangling differences to build
+    # configuration rather than real ABI breaks. No dump path populates it:
+    # it is read back from a stored document that carries it, and the
+    # stdlib-ABI detectors otherwise derive the stdlib dimensions from
+    # mangled symbols at compare time (``build_mode_from_signals``). See
     # ``abicheck/build_mode.py`` for the dataclass and detector logic.
-    # None when capture is unavailable or the dumper predates v5.
+    # None when nothing recorded it.
     build_mode: BuildMode | None = None
     # Optional on-disk artifact path that produced this snapshot.
     # Keyword-only (placed after all other fields) to prevent accidental positional binding.
@@ -508,6 +510,13 @@ class AbiSnapshot:
     live_source_evidence: bool = field(
         default=False, repr=False, compare=False, kw_only=True
     )
+    # Runtime-only, like `live_source_evidence`: the preprocessor the S2
+    # pre-scan runs for this side, resolved from the compile context its L4
+    # replay used (`workflows/artifact/embed_side.py`). `None` (a stored or
+    # unembedded snapshot) means the pre-scan's own `clang++` default.
+    live_preprocessor_clang_bin: str | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
 
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(
@@ -612,9 +621,6 @@ class AbiSnapshot:
             self.index()
         assert self._var_by_mangled is not None
         return self._var_by_mangled
-
-    def func_by_mangled(self, mangled: str) -> Function | None:
-        return self.function_map.get(mangled)
 
     def var_by_mangled(self, mangled: str) -> Variable | None:
         return self.variable_map.get(mangled)

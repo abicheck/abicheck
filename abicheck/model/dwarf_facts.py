@@ -159,18 +159,6 @@ class AdvancedDwarfMetadata:
     # All struct/class names seen (for cross-referencing in diff to avoid
     # false "packing removed" when a struct was simply deleted)
     all_struct_names: set[str] = field(default_factory=set)
-    # linkage_name → CFA register name for exported functions (from .eh_frame / .debug_frame).
-    # Typically "rsp" or "rbp" on x86-64; empty string when not present.
-    # A change from "rbp" (frame-pointer) to "rsp" (stack-pointer) or vice-versa
-    # indicates a calling-convention / frame-layout drift (#117).
-    frame_registers: dict[str, str] = field(default_factory=dict)
-    # linkage_name → frozenset of callee-saved register names for exported functions.
-    # Derived from CFI DW_CFA_offset / DW_CFA_rel_offset rules in the function prologue.
-    # On x86-64 SysV ABI the callee-saved set is {rbx,rbp,r12-r15}.
-    # On x86-64 ms_abi (Windows x64) it additionally includes {rdi,rsi,r10,r11}.
-    # Presence of rdi/rsi in the saved-registers set is a strong ELF-level signal
-    # that the function uses ms_abi, even when DW_AT_calling_convention is absent (GCC gap).
-    callee_saved_regs: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 def debug_info_present(*metadata: DwarfMetadata | AdvancedDwarfMetadata | None) -> bool:
@@ -225,11 +213,9 @@ def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
         return False
     # Every field `dwarf_advanced.diff_advanced_dwarf` reads, one per sub-diff:
     #   _diff_calling_conventions  -> calling_conventions
-    #   _diff_callee_saved_regs    -> callee_saved_regs
     #   _diff_value_abi_traits     -> value_abi_traits, return_value_sizes,
     #                                 return_memory_classified
     #   _diff_struct_packing       -> packed_structs, all_struct_names
-    #   _diff_frame_registers      -> frame_registers
     #   _diff_toolchain_flags      -> toolchain.abi_flags
     #   _diff_vector_abi_flags     -> toolchain.vector_abi_flags
     #   _diff_wchar_flags          -> toolchain.wchar_flags
@@ -264,8 +250,6 @@ def advanced_facts_collected(meta: AdvancedDwarfMetadata | None) -> bool:
         or meta.return_memory_classified
         or meta.packed_structs
         or meta.all_struct_names
-        or meta.frame_registers
-        or meta.callee_saved_regs
         or meta.toolchain.abi_flags
         or meta.toolchain.vector_abi_flags
         or meta.toolchain.wchar_flags

@@ -146,7 +146,6 @@ from .dumper_toolchain import (
     _ast_compile_provenance as _ast_compile_provenance,
     _ast_fallback_enabled as _ast_fallback_enabled,
     _auto_ast_fallback_eligible as _auto_ast_fallback_eligible,
-    _castxml_available as _castxml_available,
     _configured_target_triple as _configured_target_triple,
     _cplusplus_macro_for_standard as _cplusplus_macro_for_standard,
     _parser_ast_fallback_reason as _parser_ast_fallback_reason,

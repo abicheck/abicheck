@@ -1100,6 +1100,21 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "Removed by plans/dead-code-and-single-owner.md Stage D: the CFI pass"
+        " behind frame_register_changed never ran on a real comparison, and"
+        " dwarf_advanced.parse_advanced_dwarf duplicated"
+        " dwarf_unified.parse_dwarf; explicit_source_extractor and"
+        " policy_registry_markdown had no caller",
+        (
+            "frame_register_changed",
+            "FRAME_REGISTER_CHANGED",
+            "parse_advanced_dwarf",
+            "explicit_source_extractor",
+            "policy_registry_markdown",
+        ),
+        frozenset({"contribute/known-gaps.md"}),
+    ),
 )
 
 

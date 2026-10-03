@@ -67,7 +67,7 @@ accordingly:
 |----------|:-----------------------:|:---------------------------------------------:|
 | **Linux / ELF** | Unit **and** integration tests | **Validated in CI** (the baseline) |
 | **Windows / PE+PDB** | Unit tests for the PE/PDB parsers | **Validated in CI** for MinGW: the `native-compare` step (`integration.yml`, Windows leg) runs `compare` on MinGW-built DLLs. The `msvc` step additionally asserts MSVC+PDB verdicts (PDB layout depth best-effort) but runs **non-blocking** (`continue-on-error`, informational) until proven stable |
-| **macOS / Mach-O** | Unit tests for the Mach-O/ARM64 layer | **Validated in CI**: the `native-compare` step (`integration.yml`, macOS leg) runs `compare` on Apple-clang-built dylibs; AArch64 AAPCS64 HFA/HVA + 16-byte boundary modeled and unit-tested |
+| **macOS / Mach-O** | Unit tests for the Mach-O/ARM64 layer | **Validated in CI**: the `native-compare` step (`integration.yml`, macOS leg) runs `compare` on Apple-clang-built dylibs; AArch64 AAPCS64 HFA/HVA passing drift is not detected (see below) |
 
 Concretely: the core `compare` workflow is now exercised end-to-end on native
 PE and Mach-O binaries (built by the platform's own toolchain) in the

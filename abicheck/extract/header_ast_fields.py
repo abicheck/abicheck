@@ -55,7 +55,12 @@ from ..model.identity import EntityId
 from ..model.semantic_ir import SemanticIR
 from .semantic_normalizer import normalize_header_ast
 
-__all__ = ["HeaderAstFields", "parse_header_ast_fields"]
+__all__ = ["AST_SCOPE_ATTRIBUTES", "HeaderAstFields", "parse_header_ast_fields"]
+
+#: The parser attributes the shared normalization's scope key reads. Both
+#: header parsers carry all of them; ``_root`` first, since without it no
+#: key can tell two parses apart.
+AST_SCOPE_ATTRIBUTES = ("_root", "_pub_header_segs", "_pub_dir_segs")
 
 
 class _HeaderAstParser(Protocol):
@@ -106,16 +111,19 @@ def parse_header_ast_fields(
     single-flight only the canonical ``SemanticIR`` derived from it.
     """
     legacy = _parse_header_ast_legacy(parser)
-    if not ast_acquisition_active():
+    # The shared normalization is keyed on the parsed AST's identity. A
+    # parser that does not expose its root cannot be keyed: every such
+    # parse would share ``id(None)`` and receive the first one's IR, so it
+    # normalizes its own fields instead.
+    root = getattr(parser, AST_SCOPE_ATTRIBUTES[0], None)
+    if not ast_acquisition_active() or root is None:
         semantic_ir = _normalize_header_ast_fields(legacy, producer=producer)
     else:
-        root = getattr(parser, "_root", None)
         retain_ast_context_object(root)
         scope_key = repr(
             (
                 id(root),
-                tuple(getattr(parser, "_pub_header_segs", ())),
-                tuple(getattr(parser, "_pub_dir_segs", ())),
+                *(tuple(getattr(parser, a, ())) for a in AST_SCOPE_ATTRIBUTES[1:]),
                 getattr(parser, "_target_triple", None),
                 getattr(parser, "_is_cxx", None),
             )

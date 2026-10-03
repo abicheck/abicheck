@@ -1,8 +1,9 @@
 """tests/test_dwarf_unified.py — Unit tests for the unified DWARF pass.
 
-Verifies that parse_dwarf() produces identical results to calling
-parse_dwarf_metadata() + parse_advanced_dwarf() separately, and that
-backward-compatible shims work correctly.
+Verifies that parse_dwarf() produces identical results to an independent
+per-pass ELF open (``parse_dwarf_metadata`` for the basic half, the
+``_dwarf_advanced_oracle`` separate-open parse for the advanced half), and
+that the backward-compatible shim works correctly.
 
 Note: Tests that compile real ELF binaries are Linux-only — macOS/Windows
 compilers produce Mach-O/PE, and DWARF parsing requires ELF.
@@ -19,13 +20,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from _dwarf_advanced_oracle import parse_advanced_dwarf_separately
 
-from abicheck.dwarf_advanced import AdvancedDwarfMetadata  # noqa: E402
 from abicheck.dwarf_metadata import DwarfMetadata  # noqa: E402
 from abicheck.dwarf_unified import (  # noqa: E402
     DwarfSession,
     open_dwarf_session,
-    parse_advanced_dwarf,
     parse_dwarf,
     parse_dwarf_from_session,
     parse_dwarf_metadata,
@@ -89,7 +89,7 @@ class TestUnifiedEqualsSepaRate:
         so = _compile_so(tmp_path, "libtest", "int add(int a, int b) { return a+b; }")
         meta, adv = parse_dwarf(so)
         meta2 = parse_dwarf_metadata(so)
-        adv2 = parse_advanced_dwarf(so)
+        adv2 = parse_advanced_dwarf_separately(so)
         assert meta.has_dwarf == meta2.has_dwarf
         assert adv.has_dwarf == adv2.has_dwarf
 
@@ -121,7 +121,7 @@ class TestUnifiedEqualsSepaRate:
         _require_tool("gcc")
         so = _compile_so(tmp_path, "libtc", "int fn(void) { return 1; }")
         _, adv = parse_dwarf(so)
-        adv2 = parse_advanced_dwarf(so)
+        adv2 = parse_advanced_dwarf_separately(so)
         assert adv.toolchain.compiler == adv2.toolchain.compiler
         assert adv.toolchain.version == adv2.toolchain.version
 
@@ -131,7 +131,7 @@ class TestUnifiedEqualsSepaRate:
             tmp_path, "libcc", "int __attribute__((cdecl)) fn(int x) { return x; }"
         )
         _, adv = parse_dwarf(so)
-        adv2 = parse_advanced_dwarf(so)
+        adv2 = parse_advanced_dwarf_separately(so)
         assert adv.calling_conventions == adv2.calling_conventions
 
     def test_packed_structs_identical(self, tmp_path: Path) -> None:
@@ -143,7 +143,7 @@ class TestUnifiedEqualsSepaRate:
             "struct Hdr make(void) { struct Hdr h = {'x', 1}; return h; }",
         )
         _, adv = parse_dwarf(so)
-        adv2 = parse_advanced_dwarf(so)
+        adv2 = parse_advanced_dwarf_separately(so)
         assert adv.packed_structs == adv2.packed_structs
 
 
@@ -227,24 +227,12 @@ class TestShims:
         assert isinstance(result, DwarfMetadata)
         assert result.has_dwarf is True
 
-    def test_parse_advanced_dwarf_shim_returns_advanced_metadata(
-        self, tmp_path: Path
-    ) -> None:
-        _require_tool("gcc")
-        so = _compile_so(tmp_path, "libshim2", "int f(void) { return 0; }")
-        result = parse_advanced_dwarf(so)
-        assert isinstance(result, AdvancedDwarfMetadata)
-        assert result.has_dwarf is True
-
-    def test_shims_call_parse_dwarf_once_each(self, tmp_path: Path) -> None:
-        """Each shim calls parse_dwarf exactly once (no double-open)."""
+    def test_shim_calls_parse_dwarf_once(self, tmp_path: Path) -> None:
+        """The shim calls parse_dwarf exactly once (no double-open)."""
         _require_tool("gcc")
         so = _compile_so(tmp_path, "libshimcount", "int f(void) { return 0; }")
         with patch("abicheck.dwarf_unified.parse_dwarf", wraps=parse_dwarf) as mock:
             parse_dwarf_metadata(so)
-            assert mock.call_count == 1
-        with patch("abicheck.dwarf_unified.parse_dwarf", wraps=parse_dwarf) as mock:
-            parse_advanced_dwarf(so)
             assert mock.call_count == 1
 
 

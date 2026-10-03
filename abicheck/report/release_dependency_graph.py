@@ -118,7 +118,7 @@ def _depth(name: str, edges: Mapping[str, set[str]], memo: dict[str, int]) -> in
 
 
 def compute_release_dependency_graph(
-    document: Mapping[str, Any], *, max_nodes: int = MAX_GRAPH_NODES
+    document: Mapping[str, Any],
 ) -> ReleaseDependencyGraph:
     """Nodes and edges recorded in *document*; see the module docstring."""
     members = _member_rows(document)
@@ -182,7 +182,7 @@ def compute_release_dependency_graph(
         "external": 6,
     }
     ranked = sorted(status, key=lambda n: (order.get(status[n][0], 5), n))
-    kept = set(ranked[: max(0, max_nodes)])
+    kept = set(ranked[:MAX_GRAPH_NODES])
     nodes = tuple(
         GraphNode(name=n, status=status[n][0], detail=status[n][1], layer=layers[n])
         for n in sorted(kept, key=lambda n: (-layers[n], n))

@@ -46,6 +46,7 @@ from __future__ import annotations
 import itertools
 
 import pytest
+from _disposition_invariants import conservation_holds
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
@@ -57,7 +58,6 @@ from abicheck.contract_scoped_promotion import (
 from abicheck.model import AbiSnapshot
 from abicheck.policy.disposition_close import (
     close_consumer_scope,
-    conservation_holds,
     ledger_for,
     record_kept_change,
 )

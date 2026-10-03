@@ -152,17 +152,6 @@ def test_demotion_refused_below_header_tier(tier: EvidenceTier) -> None:
     assert not any(m["rule_id"] == "opaque-pointer-layout" for m in ledger)
 
 
-def test_disabled_is_noop() -> None:
-    old = _opaque_snapshot(opaque=True, size=None)
-    new = _opaque_snapshot(opaque=True, size=None)
-    changes = [_layout_change()]
-    ledger = apply_pattern_verdicts(
-        changes, old, new, evidence_tier=EvidenceTier.HEADER_AWARE, enabled=False
-    )
-    assert ledger == []
-    assert changes[0].effective_verdict is None
-
-
 def test_frozen_namespace_never_demoted() -> None:
     old = _opaque_snapshot(opaque=True, size=None)
     new = _opaque_snapshot(opaque=True, size=None)

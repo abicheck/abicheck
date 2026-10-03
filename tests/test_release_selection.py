@@ -27,10 +27,12 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.errors import ReleaseOperandContentError
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.release_selection import ReleaseSelection
 from abicheck.model.scope_acquisition import AcquisitionState, MemberAcquisition
 from abicheck.serialization import snapshot_to_json, write_snapshot
+from abicheck.workflows.release_inputs import collect_release_inputs
 from abicheck.workflows.release_plan import (
     build_declared_selection_record,
     build_release_plan,
@@ -278,8 +280,8 @@ class TestBuildReleasePlanFromDirectories:
     via ``package.discover_shared_libraries``, which only recognizes real
     ELF shared objects -- silently showing an empty/wrong plan for a
     directory of non-ELF supported inputs (e.g. ``.json`` snapshots) that
-    the real live-directory fan-out (``cli_helpers_compare.
-    _collect_release_inputs``) accepts just fine. These tests pin the fix:
+    the real live-directory fan-out (``workflows.release_inputs.
+    collect_release_inputs``) accepts just fine. These tests pin the fix:
     the preview must discover *exactly* what the real run would."""
 
     def test_json_snapshot_pair_is_discovered_and_would_compare(
@@ -311,13 +313,26 @@ class TestBuildReleasePlanFromDirectories:
         assert plan.would_compare_members
         assert plan.missing_required == ()
 
-    def test_empty_directories_produce_no_candidates(self, tmp_path: Path) -> None:
-        old_dir = tmp_path / "old"
-        new_dir = tmp_path / "new"
-        old_dir.mkdir()
-        new_dir.mkdir()
-        plan = build_release_plan_from_directories(old_dir, new_dir)
-        assert plan.entries == ()
+    @pytest.mark.parametrize("empty_side", ["old", "new"])
+    def test_a_side_with_no_supported_input_fails_like_the_real_run(
+        self, tmp_path: Path, empty_side: str
+    ) -> None:
+        """The preview used to repeat the discovery inline and answer an
+        empty plan here, while the real fan-out
+        (``collect_release_inputs``) refuses the directory. One owner now
+        answers both, so the preview fails exactly where the run would."""
+        dirs = {side: tmp_path / side for side in ("old", "new")}
+        for side, d in dirs.items():
+            d.mkdir()
+            if side != empty_side:
+                write_snapshot(
+                    AbiSnapshot(library="libfoo.so", version="1.0"), d / "libfoo.json"
+                )
+        (dirs[empty_side] / "README.txt").write_text("not an ABI input")
+        with pytest.raises(ReleaseOperandContentError, match="No supported ABI inputs"):
+            build_release_plan_from_directories(dirs["old"], dirs["new"])
+        with pytest.raises(ReleaseOperandContentError, match="No supported ABI inputs"):
+            collect_release_inputs(dirs[empty_side])
 
 
 class TestMemberAcquisitionFromDictRequired:

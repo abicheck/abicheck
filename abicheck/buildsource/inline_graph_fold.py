@@ -876,8 +876,6 @@ def fold_archive_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
     extractors: list[ExtractorRecord] | None,
-    *,
-    search_roots: tuple[Path, ...] = (),
 ) -> None:
     """``ar``-index introspection over *graph*'s ``static_library`` nodes
     (G29 Phase 5 item 6): populates ``ARCHIVE_CONTAINS_OBJECT``/
@@ -888,10 +886,8 @@ def fold_archive_graph(
     :func:`fold_include_graph`, this pass needs no compiler at all — it reads
     the archive's own symbol index off disk — so it always runs whenever the
     graph has at least one ``static_library`` node, independent of
-    ``with_call_graph``/clang availability. *search_roots* are tried, in
-    order, for a link-input path that is not already absolute; when omitted
-    (the ``inline.py`` caller's only use today), they default to
-    :func:`_default_archive_search_roots`.
+    ``with_call_graph``/clang availability. A link-input path that is not
+    already absolute is tried under :func:`_default_archive_search_roots`.
 
     Coverage honesty mirrors the clang-backed passes: ``archive_graph`` in
     ``extractor_passes`` means every ``static_library`` node the graph named
@@ -909,7 +905,7 @@ def fold_archive_graph(
         return  # no archive link inputs recorded — nothing to introspect
     rows = extractors if extractors is not None else []
     result = augment_graph_with_archives(
-        graph, search_roots=search_roots or _default_archive_search_roots(merged)
+        graph, search_roots=_default_archive_search_roots(merged)
     )
     if result.complete:
         graph.extractor_passes["archive_graph"] = True

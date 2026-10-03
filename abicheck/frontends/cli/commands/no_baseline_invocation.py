@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from ....compile_context import CompileContext
     from ....environment_matrix import EnvironmentMatrix
 
+from ....cli_resolve import _click_notify
 from ....model.sided_inputs import compose_sided_paths
 from ....report.no_baseline import (
     NO_BASELINE_SUPPORTED_FORMATS,
@@ -111,6 +112,9 @@ class _EvidenceInputs:
     build_info: Path | None
     build_config: Path | None
     depth: str | None
+    #: The collect mode the same rule two-sided ``compare`` uses resolves to:
+    #: ``--depth`` > ``source.method`` > inferred from the inputs > off.
+    collect_mode: str
 
 
 @dataclass(frozen=True)
@@ -133,6 +137,13 @@ class _CompileChoices:
     #: parse, and, with it, the `.abicheck.yml` `compile:` block this path
     #: passed as `compile=None` and therefore ignored entirely.
     context: CompileContext | None
+    #: The ``debug:`` block (``compare_config_settings``): applied to the
+    #: candidate exactly as two-sided ``compare`` applies it to each side.
+    pdb: Path | None
+    debuginfod: bool
+    debuginfod_url: str | None
+    dwarf_only: bool
+    debug_format: str | None
 
 
 @dataclass(frozen=True)
@@ -158,6 +169,9 @@ class _ScopeChoices:
 
     scope_to_public_surface: bool
     collapse_versioned_symbols: bool
+    #: ``scope.public_symbols``: declarations forced public, the same overlay
+    #: two-sided ``compare`` applies (``resolve_force_public_scope``).
+    force_public_symbols: frozenset[str] = frozenset()
     #: ADR-065 D6's ``scope.on_incomplete`` and the two ``release.*``
     #: discovery settings -- config-only, read off the same resolved config.
     #: Only an N-library audit has a member scope for them to act on; a
@@ -318,8 +332,6 @@ def resolve_no_baseline_invocation(
         list(kwargs.get("public_headers") or ()),
         list(kwargs.get("public_header_dirs") or ()),
     )
-    lang_src = ctx.get_parameter_source("lang") if ctx is not None else None
-
     # The project config, resolved exactly as a two-sided `compare` resolves
     # it -- same function, same auto-discovery, same CLI > config > default
     # precedence. Running before this resolution (and never reaching it) is
@@ -342,12 +354,33 @@ def resolve_no_baseline_invocation(
         route="a --no-baseline audit",
         reason="an overlay scopes a contract across two sides",
     )
+    # The config-only settings, read by the one function two-sided `compare`
+    # reads them through, so the two shapes cannot differ. `--lang`, the
+    # debug flags and `--source-method` have no CLI spelling left; reading
+    # the removed `lang` kwarg here audited a `compile.lang: c` project as C++.
+    from ....cli_compare_helpers import _resolve_compare_collect_mode
+    from ....cli_compare_options import _warn_force_public_ignored
+    from ....cli_helpers_compare import resolve_force_public_scope
+    from ..compare_config_settings import config_run_settings
+
+    run_settings = config_run_settings(resolved_cfg)
+    force_public, _ = resolve_force_public_scope(resolved_cfg.public_symbols, None)
+    _warn_force_public_ignored(force_public, bool(resolved_cfg.scope_public))
+    collect_mode, _ = _resolve_compare_collect_mode(
+        kwargs.get("depth"),
+        run_settings.source_method,
+        None,
+        kwargs.get("new_sources"),
+        None,
+        kwargs.get("new_build_info"),
+    )
     scope = _ScopeChoices(
         scope_to_public_surface=bool(resolved_cfg.scope_public),
         collapse_versioned_symbols=bool(
             kwargs.get("collapse_versioned_symbols")
             or resolved_cfg.collapse_versioned_symbols
         ),
+        force_public_symbols=frozenset(force_public),
         on_incomplete=resolved_cfg.on_incomplete_scope or "warn",
         dso_only=bool(resolved_cfg.release_dso_only),
         include_private_dso=bool(resolved_cfg.release_include_private_dso),
@@ -394,16 +427,22 @@ def resolve_no_baseline_invocation(
             build_info=kwargs.get("new_build_info"),
             build_config=kwargs.get("build_config"),
             depth=kwargs.get("depth"),
+            collect_mode=collect_mode,
         ),
         compile=_CompileChoices(
-            lang=kwargs.get("lang") or "c++",
-            lang_explicit=lang_src == click.core.ParameterSource.COMMANDLINE,
+            lang=run_settings.lang,
+            lang_explicit=run_settings.lang_explicit,
             include_dependencies=bool(kwargs.get("include_dependencies", False)),
             version=kwargs.get("new_version") or "",
             debug_roots=list(kwargs.get("debug_roots") or ())
             + list(kwargs.get("debug_roots_new") or ()),
             include_labels=kwargs.get("include_labels") or None,
             context=compile_context,
+            pdb=Path(run_settings.pdb_path) if run_settings.pdb_path else None,
+            debuginfod=run_settings.debuginfod,
+            debuginfod_url=run_settings.debuginfod_url,
+            dwarf_only=run_settings.dwarf_only,
+            debug_format=run_settings.effective_debug_format,
         ),
         scope=scope,
         contract=_ContractChoices(
@@ -488,13 +527,21 @@ def audit_inputs(
         depth=inv.evidence.depth,
         version=inv.compile.version,
         debug_roots=tuple(inv.compile.debug_roots),
+        collect_mode=inv.evidence.collect_mode,
+        pdb=inv.compile.pdb,
+        enable_debuginfod=inv.compile.debuginfod,
+        debuginfod_url=inv.compile.debuginfod_url,
+        dwarf_only=inv.compile.dwarf_only,
+        debug_format=inv.compile.debug_format,
         include_labels=inv.compile.include_labels,
         include_dependencies=inv.compile.include_dependencies,
         compile=inv.compile.context,
+        notify=_click_notify,
         suppression=suppression,
         policy=policy,
         policy_file=policy_file,
         scope_to_public_surface=inv.scope.scope_to_public_surface,
+        force_public_symbols=inv.scope.force_public_symbols,
         collapse_versioned_symbols=inv.scope.collapse_versioned_symbols,
         contract_evaluation=inv.contract.evaluation,
         contract_mode=inv.contract.mode,

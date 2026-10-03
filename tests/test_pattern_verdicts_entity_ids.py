@@ -71,21 +71,3 @@ def test_none_pair_is_the_default_and_reaches_both_sides_as_none(monkeypatch) ->
         [], _snap("old"), _snap("new"), evidence_tier=EvidenceTier.HEADER_AWARE
     )
     assert calls == [None, None]
-
-
-def test_disabled_never_calls_build_surface_graph(monkeypatch) -> None:
-    calls = []
-    monkeypatch.setattr(
-        pattern_verdicts_module,
-        "build_surface_graph",
-        lambda *a, **kw: calls.append(1),
-    )
-    result = apply_pattern_verdicts(
-        [],
-        _snap("old"),
-        _snap("new"),
-        evidence_tier=EvidenceTier.HEADER_AWARE,
-        enabled=False,
-    )
-    assert result == []
-    assert calls == []

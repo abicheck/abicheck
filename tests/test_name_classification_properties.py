@@ -34,7 +34,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from abicheck.name_classification import (
-    is_local_name_symbol,
+    LOCAL_NAME_PREFIX,
     is_stdlib_local_name_symbol,
 )
 
@@ -183,10 +183,10 @@ def test_stdlib_rooted_local_name_grammar_classified_correctly(
     user-specializable customization-point specialization (e.g.
     ``std::hash<MyType>``), which must not."""
     mangled, expected, has_gv = case
-    # is_local_name_symbol matches only the bare "_ZZ..." production, not
+    # LOCAL_NAME_PREFIX matches only the bare "_ZZ..." production, not
     # its "_ZGVZ..." guard-variable wrapper -- a distinct special-name
     # production of its own (Codex review, PR #641 follow-up, sixth P2).
-    assert is_local_name_symbol(mangled) == (not has_gv)
+    assert mangled.startswith(LOCAL_NAME_PREFIX) == (not has_gv)
     assert is_stdlib_local_name_symbol(mangled) == expected
 
 
@@ -202,5 +202,5 @@ def test_library_owned_local_name_grammar_never_classified_stdlib(
     regression (Codex review, PR #641)."""
     mangled, expected, has_gv = case
     assert expected is False
-    assert is_local_name_symbol(mangled) == (not has_gv)
+    assert mangled.startswith(LOCAL_NAME_PREFIX) == (not has_gv)
     assert is_stdlib_local_name_symbol(mangled) is False

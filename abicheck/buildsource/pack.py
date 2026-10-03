@@ -115,9 +115,7 @@ class BuildSourcePack:
         return out
 
     @classmethod
-    def from_embedded_dict(
-        cls, data: dict[str, Any], root: Path | str = ""
-    ) -> BuildSourcePack:
+    def from_embedded_dict(cls, data: dict[str, Any]) -> BuildSourcePack:
         """Reconstruct an in-memory pack from snapshot-embedded facts.
 
         ``root`` is empty for an embedded pack (it has no on-disk directory).
@@ -133,7 +131,7 @@ class BuildSourcePack:
 
             source_graph = SourceGraphSummary.from_dict(sg)
         return cls(
-            root=Path(root),
+            root=Path(""),
             manifest=manifest,
             build_evidence=BuildEvidence.from_dict(be) if be else None,
             source_abi=SourceAbiSurface.from_dict(sa) if sa else None,

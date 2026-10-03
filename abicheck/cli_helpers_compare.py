@@ -220,14 +220,6 @@ def resolve_force_public_scope(
     return forced, listed
 
 
-def _collect_additions(result: DiffResult) -> list[object]:
-    """Collect additive changes in a policy-independent way."""
-    from .checker_policy import COMPATIBLE_KINDS
-
-    addition_kinds = {k for k in COMPATIBLE_KINDS if k.value.endswith("_added")}
-    return [c for c in result.changes if c.kind in addition_kinds]
-
-
 #: Owned by ``binary_utils.py`` (a true leaf) to break the ADR-056 cycle
 #: `bundle -> cli_helpers_compare -> service -> dry_run_estimate -> bundle`; reached
 #: via ``workflows.extraction`` since ADR-061 P4. Re-exported for every caller.
@@ -247,23 +239,6 @@ from .workflows.extraction import (  # noqa: E402,I001
 from .workflows.extraction import (  # noqa: E402,I001
     _version_sort_key as _version_sort_key,
 )
-
-
-def _collect_release_inputs(path: Path) -> list[Path]:
-    """Collect compare-able inputs from a file or directory.
-
-    The Click-translating wrapper over :func:`abicheck.workflows.
-    release_inputs.collect_release_inputs` (the engine-side primitive --
-    ADR-061 gap D: it lives there so the release request/plan is resolvable
-    with no Click context at all). The message and exit code are unchanged.
-    """
-    from .errors import ReleaseOperandContentError
-    from .workflows.release_inputs import collect_release_inputs
-
-    try:
-        return collect_release_inputs(path)
-    except ReleaseOperandContentError as exc:
-        raise click.ClickException(str(exc)) from exc
 
 
 def _build_match_map(paths: list[Path]) -> tuple[dict[str, Path], list[str]]:

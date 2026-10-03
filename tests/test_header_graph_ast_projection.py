@@ -19,17 +19,17 @@ The bug *class* this states as an executable invariant (registry id
 ``perf.evidence_released_before_its_consumer_runs``) is not "the graph is
 still right for the one AST shape the optimizing PR happened to try". It is:
 
-    for **any** clang AST, a graph built from the projection of that AST is
-    indistinguishable from a graph built from the AST itself.
+    for **any** clang AST, the projection carries exactly what the graph
+    builder's four readers would read from the AST itself, and every member
+    of it reaches the graph.
 
 That is the property a memory-ordering change can break silently — a
 projection that forgets one of the four readers, or runs them in an order
 that loses the lazy ``entity_files`` case, produces a *smaller* graph, and a
 smaller graph is missing evidence, not a failing assertion. So the invariant
-is checked over generated ASTs (a small structural enumeration plus
-Hypothesis-composed trees), not over one hand-written fixture, and against
-an oracle that is the *other* code path rather than a second copy of the
-projection's own logic.
+is checked over an enumeration of AST shapes, not over one hand-written
+fixture, and against an oracle that is the four readers applied directly
+rather than a second copy of the projection's own logic.
 
 The second half is the mechanism, per AGENTS.md's differential-test rule: a
 test that asserts "the graph is the same" passes just as happily if the
@@ -50,7 +50,6 @@ import pytest
 
 from abicheck.buildsource.header_graph import build_header_only_graph
 from abicheck.buildsource.header_graph_ast_projection import (
-    HeaderGraphAstProjection,
     project_header_graph_ast,
 )
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin, Variable
@@ -305,32 +304,21 @@ def _build(snapshot: AbiSnapshot, **kw: Any) -> Any:
     )
 
 
-class TestProjectionIsObservationallyEqualToTheAst:
-    """The invariant, over generated inputs rather than one fixture."""
-
-    @pytest.mark.parametrize("ast_name", sorted(AST_CASES))
-    @pytest.mark.parametrize("snap_name", sorted(SNAPSHOT_CASES))
-    def test_graph_from_projection_matches_graph_from_ast(
-        self, ast_name: str, snap_name: str
-    ) -> None:
-        snapshot = SNAPSHOT_CASES[snap_name]
-        from_ast = _build(snapshot, ast_root=AST_CASES[ast_name])
-        from_projection = _build(
-            snapshot,
-            ast_projection=project_header_graph_ast(AST_CASES[ast_name]),
-        )
-        assert _graph_fingerprint(from_ast) == _graph_fingerprint(from_projection)
+class TestProjectionProperties:
+    """Properties of the projection itself, over every AST case."""
 
     def test_the_oracle_is_not_vacuous(self) -> None:
         """A fingerprint that collapsed to a constant would pass everything.
 
-        The matrix above is only meaningful if distinct ASTs actually
-        produce distinct fingerprints — the vacuity guard AGENTS.md's
-        "a matrix test needs an oracle" bullet requires on the oracle
-        itself.
+        ``test_blanking_a_member_changes_some_graph`` below is only
+        meaningful if distinct ASTs actually produce distinct fingerprints —
+        the vacuity guard AGENTS.md's "a matrix test needs an oracle" bullet
+        requires on the oracle itself.
         """
         fingerprints = {
-            name: _graph_fingerprint(_build(_snapshot(), ast_root=ast))
+            name: _graph_fingerprint(
+                _build(_snapshot(), ast_projection=project_header_graph_ast(ast))
+            )
             for name, ast in AST_CASES.items()
         }
         assert len(set(fingerprints.values())) > 1
@@ -340,9 +328,8 @@ class TestProjectionIsObservationallyEqualToTheAst:
     def test_projection_is_pure_and_repeatable(self, ast_name: str) -> None:
         """Projecting twice gives the same answer, and does not mutate the AST.
 
-        A reader that consumed the tree destructively would make the early
-        release above correct and the *degraded* re-parse path (an AST
-        handed to ``build_header_only_graph`` directly) silently wrong.
+        A reader that consumed the tree destructively would make a second
+        projection of the same tree silently smaller.
         """
         import copy
 
@@ -377,30 +364,16 @@ class TestProjectionIsObservationallyEqualToTheAst:
             not project_header_graph_ast(a).entity_files for a in AST_CASES.values()
         )
 
-    def test_absent_projection_degrades_exactly_like_an_absent_ast(self) -> None:
-        snapshot = SNAPSHOT_CASES["public_function"]
-        assert _graph_fingerprint(_build(snapshot)) == _graph_fingerprint(
-            _build(snapshot, ast_projection=None)
-        )
-
-    def test_supplying_both_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="not both"):
-            _build(
-                _snapshot(),
-                ast_root=AST_CASES["call_edge"],
-                ast_projection=HeaderGraphAstProjection(),
-            )
-
 
 class TestEveryProjectionMemberIsLoadBearing:
     """Guard the matrix above against a mutation it cannot see.
 
-    ``build_header_only_graph(snap, ast_root)`` now projects internally, so
-    "graph from AST == graph from projection" compares two paths that share
-    the projection: blanking one of its four members changes *both* sides
-    equally and the comparison still passes. Verified, not assumed — a
-    ``type_files={}`` mutation survived the whole matrix. Two independent
-    checks close it: the projection is compared against the four readers
+    ``build_header_only_graph`` takes only the projection, so no comparison
+    of two graph builds can notice a projection that blanks one of its four
+    members: both builds would read the same blanked member. (When the
+    builder still took a raw AST it projected internally, and a
+    ``type_files={}`` mutation survived a whole AST-vs-projection matrix for
+    exactly that reason.) Two independent checks close it: the projection is compared against the four readers
     themselves (an oracle that is not the projection's own code), and each
     member is shown to change a real graph, so a member that stopped being
     read could not go unnoticed either.

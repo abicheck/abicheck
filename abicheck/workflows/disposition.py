@@ -28,30 +28,9 @@ of relevant findings across every ``--used-by`` consumer, and
 ``close_consumer_scope`` has to be called once with that union rather than
 once per consumer (``apply_scope`` only demotes, so per-consumer calls would
 intersect the consumers' sets). See that function's own docstring.
-``record_suppressed_change``/``override_suppressed_change`` joined it for a
-second and third reason: the retired ``cli_scan_baseline._run_baseline_compare`` recorded
-a baseline scan's ``--crosscheck KEY=off`` disposition the same way
-``checker._filter_suppressed_changes`` records an ordinary ``--suppress``
-rule (AGENTS.md's "record before disposing" rule) -- the observed finding
-moves to ``suppressed_changes`` with its own rule/reason rather than being
-silently dropped from ``diff.changes``. Because that call happens *after*
-``compare_snapshots()`` already finalized the ledger, the plain (first-write-
-wins) recorder is a no-op there -- ``override_suppressed_change`` is the
-dedicated, explicitly-a-revision primitive that call site actually needs;
-see ``disposition_close.override_suppression``'s own docstring (that module,
-not ``disposition_ledger.py``: the 800-line production-file seam).
-``RuleProvenance`` joined for the same call site's fourth reason: a
-``--crosscheck KEY=off`` policy is not a suppression-file rule, so it builds
-its own synthetic provenance directly rather than duck-typing a fake
-``Suppression`` (Codex review, fourth round). ``Disposition`` joined for a
-fifth: that same call site's post-removal verdict recompute needs to tell
-which of ``DiffResult.redundant_changes`` were part of the original
-verdict-scored population (``Disposition.GATING``, per
-``disposition_close.finalize_ledger``'s own ``verdict_scored`` handling) --
-querying the ledger via ``DispositionLedger.record_for`` rather than
-re-deriving the ``caused_by_type``-based rule ``checker.compare()`` itself
-uses, which would be exactly the parallel-policy duplication this ledger
-exists to avoid (CodeRabbit review, PR #1172).
+``supersede_as_suppressed`` joined it for a second: the release fan-out's
+lockstep-SONAME suppression is decided after every member's ledger closed
+(see its own docstring).
 
 Re-export only, deliberately: ``policy/disposition_ledger.py``/
 ``disposition_close.py``/``policy/disposition_types.py``/
@@ -66,25 +45,16 @@ from typing import TYPE_CHECKING
 from ..policy.disposition_close import (
     close_consumer_scope as close_consumer_scope,
     ledger_for as ledger_for,
-    override_suppressed_change as override_suppressed_change,
 )
-from ..policy.disposition_ledger import (
-    DispositionLedger,
-    record_suppressed_change as record_suppressed_change,
-)
-from ..policy.disposition_types import Disposition as Disposition
-from ..policy.rule_provenance import RuleProvenance as RuleProvenance
+from ..policy.disposition_ledger import DispositionLedger
+from ..policy.rule_provenance import RuleProvenance
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
 
 __all__ = [
-    "Disposition",
-    "RuleProvenance",
     "close_consumer_scope",
     "ledger_for",
-    "override_suppressed_change",
-    "record_suppressed_change",
     "supersede_as_suppressed",
 ]
 

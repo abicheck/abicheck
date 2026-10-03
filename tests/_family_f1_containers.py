@@ -78,7 +78,6 @@ def _advanced(convention: str = "normal") -> AdvancedDwarfMetadata:
         ),
         calling_conventions={"_Z3fooi": convention},
         all_struct_names={"Point"},
-        frame_registers={"_Z3fooi": "rsp"},
     )
 
 

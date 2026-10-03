@@ -62,7 +62,6 @@ all of it back into the original, unchanged five-step pipeline.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -570,38 +569,6 @@ def finalize_snapshot(snap: AbiSnapshot) -> AbiSnapshot:
     return normalize_and_renumber_closure_identities_on_load(snap)
 
 
-def load_snapshot_document(path: str | Path) -> dict[str, Any]:
-    """*path*'s flat, `snapshot_to_dict()`-shaped document — the raw dict,
-    not a typed `AbiSnapshot` (`load_snapshot`'s own return). For a
-    document-only key `AbiSnapshot` itself does not carry (e.g. a real
-    `dump`'s own `dump_provenance`, folded in by the CLI after
-    `snapshot_to_dict()` already ran) rather than any real snapshot field.
-
-    Transparently unwraps the single-file sectioned shape
-    (`storage.sectioned_document`, Phase 8 redesign) the same way
-    `snapshot_from_dict` does internally, so a caller never needs to know
-    which of the two on-disk shapes *path* actually is.
-    """
-    from ..snapshot_io import read_snapshot_text
-
-    parsed: Any = json.loads(read_snapshot_text(path))
-    # json.loads() can return a list/str/number/bool/None for arbitrary
-    # JSON text -- this function's own dict[str, Any] contract (and
-    # is_sectioned_document's "sections" key lookup below) both assume a
-    # JSON object, so a non-dict root must fail loudly here rather than
-    # surface as a confusing downstream AttributeError/KeyError, or (for a
-    # list/str, where `in` is still syntactically valid but semantically
-    # wrong) silently misclassify as flat/sectioned (Codex review).
-    if not isinstance(parsed, dict):
-        raise SnapshotError(
-            f"{path}: expected a JSON object at the document root, got "
-            f"{type(parsed).__name__}"
-        )
-    if is_sectioned_document(parsed):
-        return from_sectioned_document(parsed)
-    return parsed
-
-
 def save_snapshot(
     snap: AbiSnapshot,
     path: str | Path,
@@ -644,7 +611,7 @@ def write_snapshot(
     when the size is known before compression starts, which a stream does
     not know. The default keeps that declaration -- and the reader's
     "truncated mid-header" cross-check it enables -- by encoding a zstd
-    write in one shot. A caller for which that check adds nothing passes
+    write in one shot (the same encoder, joined). A caller for which that check adds nothing passes
     ``False`` to stream zstd too: the snapshot cache, whose entries are
     private and treat any read failure as a miss.
     """
@@ -653,17 +620,20 @@ def write_snapshot(
         resolve_write_compression,
         write_snapshot_text,
     )
-
-    resolved = resolve_write_compression(Path(path), SnapshotCompression(compression))
-    if resolved is SnapshotCompression.ZSTD and zstd_content_size:
-        return write_snapshot_text(
-            snapshot_to_json(snap), path, compression=resolved, zstd_level=zstd_level
-        )
     from .acyclic_json import gc_paused
-    from .json_stream import iter_json_indented
+    from .json_stream import iter_json_indented, join_json_indented
     from .snapshot_encode import sectioned_document_for_write
     from .snapshot_stream_write import write_snapshot_text_stream
 
+    resolved = resolve_write_compression(Path(path), SnapshotCompression(compression))
+    if resolved is SnapshotCompression.ZSTD and zstd_content_size:
+        # One shot, so the frame can declare its size -- but formatted by the
+        # same encoder as every streamed write, not a second ``json.dumps``.
+        with gc_paused():
+            text = join_json_indented(sectioned_document_for_write(snap), indent=2)
+        return write_snapshot_text(
+            text, path, compression=resolved, zstd_level=zstd_level
+        )
     with gc_paused():
         return write_snapshot_text_stream(
             iter_json_indented(sectioned_document_for_write(snap), indent=2),

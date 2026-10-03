@@ -37,6 +37,7 @@ tests/test_artifact_plan.py
 tests/test_ast_backend_selection.py
 tests/test_ast_compile_provenance.py
 tests/test_atomic_to_int_regression.py
+tests/test_audit_gate_exit_properties.py
 tests/test_audit_report_schema_shape.py
 tests/test_baseline_manifest.py
 tests/test_baseline_pinning.py
@@ -155,6 +156,7 @@ tests/test_cli_helpers_compare_coverage.py
 tests/test_cli_new_features.py
 tests/test_cli_phase1.py
 tests/test_cli_project_history.py
+tests/test_cli_project_history_policy.py
 tests/test_cli_project_validate_use_cases.py
 tests/test_cli_report_redesign.py
 tests/test_cli_split_modules.py
@@ -166,6 +168,7 @@ tests/test_compare_budget_boundary.py
 tests/test_compare_changed_path_and_abi3.py
 tests/test_compare_config_public_header_dirs.py
 tests/test_compare_dispatch.py
+tests/test_compare_dry_run_compile_db.py
 tests/test_compare_env_matrix_digest_formats.py
 tests/test_compare_inline_embed_config_trust.py
 tests/test_compare_input_modes.py
@@ -189,6 +192,7 @@ tests/test_compat_extended.py
 tests/test_compat_html_env_matrix_digest.py
 tests/test_compat_input_dispatch.py
 tests/test_compat_multi_library_finding_ids.py
+tests/test_compat_report_kind.py
 tests/test_compat_stub_flag_announcement.py
 tests/test_compatibility_evaluation_frontend.py
 tests/test_compatibility_evaluation_receipts.py
@@ -361,7 +365,6 @@ tests/test_finding_identity.py
 tests/test_followup_100_101.py
 tests/test_format_compliance.py
 tests/test_fp_rate_gate.py
-tests/test_frame_register.py
 tests/test_frozen_namespace.py
 tests/test_frozen_namespace_single_matcher.py
 tests/test_func_deleted.py
@@ -405,6 +408,7 @@ tests/test_idioms_performance.py
 tests/test_impact_model.py
 tests/test_include_graph.py
 tests/test_incremental_compression.py
+tests/test_inline_body_internal_namespaces.py
 tests/test_inputs_pack.py
 tests/test_inputs_validate.py
 tests/test_integer_abi_equivalence.py
@@ -447,11 +451,13 @@ tests/test_negative.py
 tests/test_nested_struct_tag.py
 tests/test_new_detectors.py
 tests/test_no_baseline_compare.py
+tests/test_no_baseline_config_settings.py
 tests/test_no_baseline_d3_properties.py
 tests/test_no_baseline_report_formats.py
 tests/test_no_baseline_set_record.py
 tests/test_no_baseline_suppression_provenance.py
 tests/test_non_elf_artifact_membership.py
+tests/test_notice_advice_matches_setting.py
 tests/test_numpy_capi.py
 tests/test_object_size_policy.py
 tests/test_one_comparison_product_parity.py
@@ -489,6 +495,7 @@ tests/test_policy_registry_and_summary.py
 tests/test_post_manifest_config_overlay.py
 tests/test_post_manifest_scope.py
 tests/test_pr89_hard_gaps_schema.py
+tests/test_preprocessor_scan_compiler.py
 tests/test_presentation_analysis_separation.py
 tests/test_probe_examples.py
 tests/test_project_package_archive.py
@@ -651,6 +658,7 @@ tests/test_use_case_impact.py
 tests/test_use_case_per_finding.py
 tests/test_use_cases.py
 tests/test_used_by_gate_enrichment.py
+tests/test_validate_examples_unit.py
 tests/test_variable_case_b_facts.py
 tests/test_vector_abi.py
 tests/test_versioned_symbol_scheme.py
@@ -691,3 +699,4 @@ tests/unit/storage/test_import_bundle_facts.py
 tests/unit/storage/test_import_v1.py
 tests/unit/storage/test_sectioned_document.py
 tests/unit/storage/test_snapshot_io_fast_paths.py
+tests/unit/storage/test_snapshot_write_one_encoder.py

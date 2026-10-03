@@ -90,8 +90,13 @@ class TestRunnerLabelForOs:
         assert runner_label_for_os(os_value) is None
 
     def test_profile_exposes_its_own_label(self) -> None:
-        assert ProfileSpec(id="p", os="windows").runner_label == "windows-latest"
-        assert ProfileSpec(id="p").runner_label == DEFAULT_PROFILE_RUNNER_LABEL
+        assert (
+            runner_label_for_os(ProfileSpec(id="p", os="windows").os)
+            == "windows-latest"
+        )
+        assert (
+            runner_label_for_os(ProfileSpec(id="p").os) == DEFAULT_PROFILE_RUNNER_LABEL
+        )
 
 
 class TestDependencySourceSchema:

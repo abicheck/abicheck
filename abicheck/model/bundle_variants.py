@@ -151,10 +151,6 @@ class BundleVariantsConfig:
     def get(self, name: str) -> BundleVariantSpec | None:
         return next((v for v in self.variants if v.name == name), None)
 
-    @property
-    def required_names(self) -> frozenset[str]:
-        return frozenset(v.name for v in self.variants if v.required)
-
 
 def _variant_name_findings(name: object) -> list[str]:
     if not isinstance(name, str):

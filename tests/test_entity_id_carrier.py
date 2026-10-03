@@ -1078,7 +1078,7 @@ def test_reconciled_constructor_adopts_clangs_entity_id() -> None:
     clang = _hybrid_snap(functions=[clang_ctor], ast_producer="clang")
     merged = _hybrid.merge_snapshots(castxml, clang)
 
-    reconciled = merged.func_by_mangled(real_mangled)
+    reconciled = merged.function_map.get(real_mangled)
     assert reconciled is not None
     assert reconciled.entity_id == real_entity_id
     assert reconciled.entity_id.extra == ("mangled", real_mangled)

@@ -129,6 +129,7 @@ class TestEstimateCompareDryRunCost:
             new_sources=None,
             old_build_info=None,
             new_build_info=None,
+            collect_mode="off",
         )
         assert error is None
         assert estimates is not None
@@ -160,6 +161,7 @@ class TestEstimateCompareDryRunCost:
             new_sources=None,
             old_build_info=None,
             new_build_info=None,
+            collect_mode="off",
         )
         assert estimates is None
         assert error is not None
@@ -191,6 +193,7 @@ class TestAddCompareCostPreviewSection:
             new_sources=None,
             old_build_info=None,
             new_build_info=None,
+            collect_mode="off",
         )
         assert error is None
         result = DryRunResult(command="compare")

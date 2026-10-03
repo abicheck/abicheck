@@ -98,52 +98,6 @@ _NON_PUBLIC_ORIGINS = frozenset(
 )
 
 
-def type_string_references_name(type_string: str, name: str) -> bool:
-    """Whether *type_string* mentions *name* as a whole type token.
-
-    A plain ``name in type_string`` substring check would false-positive on
-    ``"std::string"`` appearing inside ``"std::stringstream"`` (a distinct
-    type) or ``"xstd::string"`` (not even the same namespace); this requires
-    non-identifier, non-``:``-scope characters (or the string boundary) on
-    both sides of the match, so ``"const std::string &"`` matches
-    ``"std::string"`` but ``"std::stringstream"`` does not.
-
-    >>> type_string_references_name("const std::string &", "std::string")
-    True
-    >>> type_string_references_name("std::stringstream", "std::string")
-    False
-    >>> type_string_references_name("xstd::string", "std::string")
-    False
-    >>> type_string_references_name("std::vector<std::string>", "std::string")
-    True
-    >>> type_string_references_name("std::string", "std::string")
-    True
-    """
-    start = 0
-    while True:
-        idx = type_string.find(name, start)
-        if idx == -1:
-            return False
-        # A "" boundary (start/end of the whole string) is always a valid
-        # token edge -- note that `"" in "_:"` is trivially True in Python
-        # (the empty string is a substring of anything), so that check must
-        # only run on an actual character, never on the "no character here"
-        # sentinel, or a match at the very start/end of type_string would be
-        # wrongly rejected.
-        before = type_string[idx - 1] if idx > 0 else ""
-        after_idx = idx + len(name)
-        after = type_string[after_idx] if after_idx < len(type_string) else ""
-        # Reads BOUNDARY_CHARS rather than repeating "_:" inline: the
-        # constant's whole purpose is that this manual check and the
-        # compiled alternation cannot drift, and this function had in fact
-        # been spelling the class out literally the entire time.
-        before_ok = before == "" or not (before.isalnum() or before in BOUNDARY_CHARS)
-        after_ok = after == "" or not (after.isalnum() or after in BOUNDARY_CHARS)
-        if before_ok and after_ok:
-            return True
-        start = idx + 1
-
-
 def _record_identity(name: str, qualified_name: str | None) -> str:
     """The best available fully-qualified spelling for a record: the
     dedicated ``qualified_name`` field when the producer populated it

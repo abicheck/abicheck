@@ -45,12 +45,12 @@ import itertools
 import json
 
 import pytest
+from _disposition_invariants import conservation_holds
 
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Variable, Visibility
 from abicheck.policy.disposition_close import (
-    conservation_holds,
     finalize_ledger,
     ledger_for,
 )

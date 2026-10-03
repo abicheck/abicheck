@@ -452,20 +452,25 @@ class TestReporterSectionSeverityLabel:
         assert _section_severity_label(None, "cat") == ""
 
 
+def _confidence_lines(result):
+    from abicheck.report.render_markdown import render_confidence_section
+    from abicheck.reporter_markdown import compute_confidence_section
+
+    return render_confidence_section(compute_confidence_section(result))
+
+
 class TestReporterConfidenceSection:
     def test_append_confidence_section_returns_early_when_missing(self) -> None:
         # Line 1229: result without a confidence attr → early return.
-        from abicheck.reporter import _append_confidence_section
 
         class _NoConf:
             confidence = None
 
         lines: list[str] = []
-        _append_confidence_section(lines, _NoConf())  # type: ignore[arg-type]
+        lines += _confidence_lines(_NoConf())  # type: ignore[arg-type]
         assert lines == []
 
     def test_append_confidence_section_renders(self) -> None:
-        from abicheck.reporter import _append_confidence_section
 
         result = _diff_result(
             [],
@@ -475,7 +480,7 @@ class TestReporterConfidenceSection:
             evidence_tier=EvidenceTier.DWARF_AWARE,
         )
         lines: list[str] = []
-        _append_confidence_section(lines, result)
+        lines += _confidence_lines(result)
         joined = "\n".join(lines)
         assert "Analysis Confidence" in joined
         assert "dwarf stripped" in joined
@@ -484,7 +489,6 @@ class TestReporterConfidenceSection:
         # E-S2 (Block 5): a --diagnostic-comparison run's per-dimension
         # breakdown surfaces as its own Markdown rows, not just the coarse
         # `assurance: none` flag.
-        from abicheck.reporter import _append_confidence_section
 
         result = _diff_result(
             [],
@@ -501,7 +505,7 @@ class TestReporterConfidenceSection:
             },
         )
         lines: list[str] = []
-        _append_confidence_section(lines, result)
+        lines += _confidence_lines(result)
         joined = "\n".join(lines)
         assert "Comparability: layout | unverified" in joined
         assert "Comparability: declaration | trusted" in joined
@@ -824,7 +828,7 @@ class TestPipelineFallbackKept:
         pipeline = PostProcessingPipeline([EnrichSourceLocations()])
         ctx = pipeline.run(list(changes), old, new)
         assert [c.symbol for c in ctx.kept] == ["bar"]
-        assert pipeline.step_names == ["enrich_source_locations"]
+        assert [s.name for s in pipeline.steps] == ["enrich_source_locations"]
 
 
 # ===========================================================================
@@ -918,16 +922,13 @@ class TestInternalLeakReachability:
         # the path is value-propagating; an `indirect:` marker flips it.
         from abicheck.internal_leak import _path_is_value_propagating
 
-        snap = _snap()  # type map unused now (markers are precomputed)
         assert (
-            _path_is_value_propagating(
-                ["Public", "field:impl_", "ns::detail::Impl"], snap
-            )
+            _path_is_value_propagating(["Public", "field:impl_", "ns::detail::Impl"])
             is True
         )
         assert (
             _path_is_value_propagating(
-                ["Public", "field:impl_", "indirect:edge", "ns::detail::Impl"], snap
+                ["Public", "field:impl_", "indirect:edge", "ns::detail::Impl"]
             )
             is False
         )

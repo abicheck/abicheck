@@ -61,12 +61,17 @@ from abicheck.model import (
     is_export_table_only_record,
     is_header_declared,
     is_public_export,
-    is_unknown,
     surface_fact_summary,
 )
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.policy.public_surface_query import PublicSurfaceQuery
 from abicheck.surface_graph import compute_surface_metrics
+
+
+def is_unknown(fact: Fact[bool]) -> bool:
+    """Neither confirmed true nor confirmed false: no usable evidence."""
+    return not is_confirmed_true(fact) and not is_confirmed_false(fact)
+
 
 #: Every way a producer can leave one of the three facts. "Unknown" is
 #: represented by all four of its real statuses, not just one, so an

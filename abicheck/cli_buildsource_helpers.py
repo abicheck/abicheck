@@ -90,14 +90,12 @@ def diff_embedded_build_source(
     new_snapshot: AbiSnapshot,
     old_snapshot: AbiSnapshot | None = None,
     policy_file: PolicyFile | None = None,
-    *,
-    quiet: bool = False,
 ) -> tuple[list[Change], list[dict[str, object]], dict[str, object]]:
     """CLI adapter over ``buildsource.evidence_report.diff_embedded_build_source``.
 
-    Supplies the stderr sink the engine deliberately does not own, and keeps the
-    ``quiet`` keyword for the CLI callers that already pass it (``quiet=True``
-    simply supplies no sink). See that function for the behaviour.
+    Supplies the stderr sink the engine deliberately does not own; a caller
+    that wants no output calls the engine directly with no sink (as
+    ``service_compare_pipeline`` does). See that function for the behaviour.
     """
     from .buildsource.evidence_report import diff_embedded_build_source as _diff
 
@@ -111,7 +109,7 @@ def diff_embedded_build_source(
             new_snapshot,
             old_snapshot,
             policy_file,
-            on_output=None if quiet else _echo,
+            on_output=_echo,
         )
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -127,8 +125,6 @@ def prepare_embedded_build_source(
     old_sources: Path | None,
     new_sources: Path | None,
     policy_file: PolicyFile | None = None,
-    *,
-    quiet: bool = False,
 ) -> tuple[
     list[Change] | None, list[dict[str, object]], dict[str, object], list[Change]
 ]:
@@ -150,7 +146,7 @@ def prepare_embedded_build_source(
             old_sources,
             new_sources,
             policy_file,
-            on_output=None if quiet else _echo,
+            on_output=_echo,
         )
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -160,13 +156,11 @@ def attach_evidence_metrics(
     result: DiffResult,
     metrics: dict[str, object],
     injected_changes: list[Change],
-    *,
-    quiet: bool = False,
 ) -> None:
     """CLI adapter over ``buildsource.evidence_report.attach_evidence_metrics``."""
     from .buildsource.evidence_report import attach_evidence_metrics as _attach
 
-    _attach(result, metrics, injected_changes, on_output=None if quiet else _echo)
+    _attach(result, metrics, injected_changes, on_output=_echo)
 
 
 def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:

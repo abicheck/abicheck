@@ -311,7 +311,7 @@ class TestAnonymousEnumLocationStripped:
     def test_reference_to_anonymous_enum_matches_its_own_declaration(self) -> None:
         """Round-3 review finding (Codex + CodeRabbit, independently): a
         *reference* to an anonymous enum (e.g. a field's type) went through
-        ``_type_name_uncached``'s bare ``el.get("name", "?")`` fallback,
+        ``type_name_uncached``'s bare ``el.get("name", "?")`` fallback,
         never the ``strip_anonymous_type_location`` normalization
         ``parse_enums()`` applies to the declaration itself -- so the
         reference and the declaration disagreed on spelling and never
@@ -397,7 +397,7 @@ class TestSyntheticCtorDtorKeysNormalizeEnclosingLambdaScope:
     """Residual half of the same defect (Codex review, follow-up): the
     class's own template-argument-embedded lambda location is stripped from
     ``RecordType.name``/``.qualified_name`` (above), but a Constructor's
-    synthesized identity key (``_function_mangled_name``'s
+    synthesized identity key (``function_mangled_name``'s
     ``SYNTHETIC_CTOR_KEY_PREFIX{scope}(...)``) and a Destructor's
     (``~{scope}``) are built from ``_enclosing_class_qualified_name`` ->
     ``_qualified_name``, which walked ``context`` copying each ancestor's raw
@@ -555,8 +555,8 @@ class TestQualifiedNameCheckoutIndependenceProperty:
         new_parser = _CastxmlParser(
             new_root, exported_dynamic=set(), exported_static=set()
         )
-        old_qn = old_parser._qualified_name(old_parser._id_map[leaf_id])
-        new_qn = new_parser._qualified_name(new_parser._id_map[leaf_id])
+        old_qn = old_parser._qualified_name(old_parser._ctx.id_map[leaf_id])
+        new_qn = new_parser._qualified_name(new_parser._ctx.id_map[leaf_id])
         # The core property: two checkouts differing ONLY in their absolute
         # root path always produce byte-identical qualified names, for any
         # nesting depth and any placement (or absence) of the lambda marker.
