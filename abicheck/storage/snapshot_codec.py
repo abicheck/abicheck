@@ -644,7 +644,7 @@ def write_snapshot(
     when the size is known before compression starts, which a stream does
     not know. The default keeps that declaration -- and the reader's
     "truncated mid-header" cross-check it enables -- by encoding a zstd
-    write in one shot. A caller for which that check adds nothing passes
+    write in one shot (the same encoder, joined). A caller for which that check adds nothing passes
     ``False`` to stream zstd too: the snapshot cache, whose entries are
     private and treat any read failure as a miss.
     """
@@ -653,17 +653,20 @@ def write_snapshot(
         resolve_write_compression,
         write_snapshot_text,
     )
-
-    resolved = resolve_write_compression(Path(path), SnapshotCompression(compression))
-    if resolved is SnapshotCompression.ZSTD and zstd_content_size:
-        return write_snapshot_text(
-            snapshot_to_json(snap), path, compression=resolved, zstd_level=zstd_level
-        )
     from .acyclic_json import gc_paused
-    from .json_stream import iter_json_indented
+    from .json_stream import iter_json_indented, join_json_indented
     from .snapshot_encode import sectioned_document_for_write
     from .snapshot_stream_write import write_snapshot_text_stream
 
+    resolved = resolve_write_compression(Path(path), SnapshotCompression(compression))
+    if resolved is SnapshotCompression.ZSTD and zstd_content_size:
+        # One shot, so the frame can declare its size -- but formatted by the
+        # same encoder as every streamed write, not a second ``json.dumps``.
+        with gc_paused():
+            text = join_json_indented(sectioned_document_for_write(snap), indent=2)
+        return write_snapshot_text(
+            text, path, compression=resolved, zstd_level=zstd_level
+        )
     with gc_paused():
         return write_snapshot_text_stream(
             iter_json_indented(sectioned_document_for_write(snap), indent=2),
