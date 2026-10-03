@@ -50,6 +50,7 @@ from functools import partial
 from pathlib import Path
 
 from .. import deadline, process_resources
+from ..storage.code_identity import abicheck_code_identity
 from .build_evidence import BuildEvidence, CompileUnit, Target
 from .source_abi import SOURCE_ABI_VERSION, SourceAbiSurface, SourceAbiTu
 from .source_extractors._argv import (
@@ -630,6 +631,7 @@ def compute_tu_cache_key(
     parts = [
         "abicheck-source-abi-cache",
         str(schema_version),
+        "code:" + abicheck_code_identity(),
         extractor_name,
         extractor_version,
         # Source *location* (not just content): two distinct TUs with identical

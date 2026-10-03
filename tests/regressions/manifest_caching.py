@@ -133,4 +133,36 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="cache.computed_output_keyed_without_code_identity",
+        invariant=(
+            "A disk cache entry that abicheck *computed* (a snapshot, "
+            "normalized build evidence, a per-TU source-ABI dump) is served "
+            "only to the same abicheck code that produced it: changing any "
+            "file of the package -- with or without a hand-bumped version "
+            "constant -- makes every such key miss, and changing it back "
+            "makes them hit again. Every `DiskCache` in the package is either "
+            "keyed by `storage.code_identity.abicheck_code_identity()` or "
+            "classified as storing an external tool's own output."
+        ),
+        fixed_by=(1466,),
+        seed_tests=("tests/test_code_identity.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The castxml/clang header-AST cache is classified as "
+                    "external-tool output and keyed by its inputs plus "
+                    "`_CASTXML_CACHE_SCHEMA_VERSION`/`_CLANG_CACHE_SCHEMA_"
+                    "VERSION`. abicheck generates part of that input (the "
+                    "aggregate header, its preamble, the emulation flags) and "
+                    "the clang entry is pruned by abicheck code, so a change "
+                    "there still relies on a hand bump. Hashing the generated "
+                    "aggregate and the pruner's own source into the key would "
+                    "close it without giving up the AST cache's cross-PR hit "
+                    "rate the way the whole-package identity would."
+                ),
+                reference="tests/test_code_identity.py DISK_CACHE_CLASSIFICATION",
+            ),
+        ),
+    ),
 )
