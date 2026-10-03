@@ -249,7 +249,6 @@ consumer that does not exist yet.
 |---|---|---|
 | `SemanticIR.occurrences_for`, `SemanticIRIndex.occurrences_for` | ADR-063 / [one-semantic-pipeline](one-semantic-pipeline.md) Phase 6 "PR 2" | Consumer cutover: `diff_symbols.py`/`diff_types.py` match through `SemanticIRIndex` instead of `AbiSnapshot.functions`/`variables`/`types`. |
 | `EvidenceView.available_depths` | ADR-063 / one-semantic-pipeline (`ResolvedExecutionContext`) | The depth floor (`enforce_requested_depth`) should read the resolved `EvidenceView` rather than recompute. |
-| `snapshot_digest_cache.digest_scope` | [design-hardening-from-defect-families](design-hardening-from-defect-families.md) F5, Phase 4 exit pending | No run opens the scope, so the run-scoped digest memo never engages; `compare`/the release fan-out must open it around `snapshot_content_digest`, with an H5 cell covering it. |
 | `GateOptions.effective_gate`, `workflows.gate.effective_gate_for_resolved_compare_config` | ADR-061; [duplication-and-convergence-assessment](duplication-and-convergence-assessment.md) P0 `EffectiveGate` | The release fan-out and native `compare` still gate from their own severity fields; both should read one `EffectiveGate`. |
 | `storage.import_baseline_set.import_baseline_set`/`export_baseline_set`, with `dto.baseline_set_metadata_from_dto`/`_to_dto` | ADR-062 (Proposed); [storage-format-v2](storage-format-v2.md); G40 | A baseline publish/load path in `compare` or `project` that goes through the BundleFacts→ProjectSnapshot adapter (streaming variant is a known gap). |
 | `storage.entity_ids.elf_symbol_occurrence` | ADR-062 Phase 0 (storage-format-v2 A0.2/A0.3) | A storage-v2 ELF symbol-occurrence producer (later ADR-062 phases). |
@@ -267,6 +266,11 @@ is deleted and one-semantic-pipeline now names the real function.
 producers stamp (ADR-063), used by the tests that check that tier; whether
 weaker tiers should stop counting as exported is the separate policy
 question ADR-063 leaves open, so it is kept as that question's inert reader.
+
+`snapshot_digest_cache.digest_scope` was listed here as rolling out; it is
+not. Both front ends open the same scope through `run_scoped_digest_cache`,
+and the measurement and the H5 cell that now covers it are recorded in
+design-hardening Phase 4, which this closes.
 
 ### Library API group — decided
 

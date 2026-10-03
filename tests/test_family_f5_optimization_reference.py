@@ -83,6 +83,10 @@ import example_catalog  # noqa: E402
 # records why no cell reaches the site today.
 
 R, B, H = "release.memo", "binary.memo", "headers.memo"
+#: A stored snapshot compared with a copy of itself: the one shape whose
+#: front end asks for ``snapshot_content_digest`` (no binary metadata, and the
+#: verbatim-field prefilter cannot tell the two apart).
+D = "same_content.memo"
 _NEEDS_L5 = "UNCOVERED: L3-L5 build-source graph extraction (needs a compile database + clang); no in-process fixture reaches it"
 COVERAGE: dict[str, str] = {
     # ---- memoized functions ----
@@ -144,7 +148,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.comparability_fields::scoped_cache::_PATH_MEMO": H,
     "abicheck.compare.detection_memo::scoped_cache::_MEMO": R,
     "abicheck.model.comparison_memo::scoped_cache::_MEMO": R,
-    "abicheck.storage.snapshot_digest_cache::scoped_cache::_SCOPE": "UNCOVERED: no cell's front end asks for snapshot_content_digest inside an open digest_scope (the earlier test-side bypass counted the scope's opening, not a lookup)",
+    "abicheck.storage.snapshot_digest_cache::scoped_cache::_SCOPE": D,
     "abicheck.model.graph_identity::shared_scoped_cache::_NORMALIZE_MEMO": "UNCOVERED: opened only while loading a stored L5 source graph; no cell carries one",
     "abicheck.compare.surface_reconcile::instance_memo::PAIR_MEMO": R,
     "abicheck.elf_symbol_filter::instance_memo::_EXPORTED_NAMES_MEMO": B,
@@ -203,7 +207,7 @@ def test_inventory_has_no_stale_entry() -> None:
 
 
 def test_every_coverage_value_is_a_known_cell_or_a_reasoned_gap() -> None:
-    cells = {R, B, H, "release.threads", "binary.sides"}
+    cells = {R, B, H, D, "release.threads", "binary.sides"}
     bad = {
         k: v
         for k, v in COVERAGE.items()
@@ -462,6 +466,31 @@ def test_single_pair_memo_bypass_matches_default(
     # must have bypassed at least the comparison-scoped ones.
     assert ref.calls.get("abicheck.model.comparison_memo::scoped_cache::_MEMO")
     _assert_same(optimized, reference, "single_pair.memo")
+
+
+def test_same_content_digest_memo_bypass_matches_default(
+    monkeypatch: pytest.MonkeyPatch, release: tuple[Path, Path]
+) -> None:
+    """The run-scoped digest memo (``storage.snapshot_digest_cache``),
+    consulted inside the scope the front end opens: a stored snapshot
+    compared with a byte-identical copy reaches ``snapshot_content_digest``
+    for both sides, and reference mode must route those lookups through the
+    bypass and still produce the same report."""
+    import shutil
+
+    old, _new = release
+    twin = old.parent / "twin.json"
+    shutil.copyfile(old / "libm2.so.json", twin)
+    args = (str(old / "libm2.so.json"), str(twin))
+    optimized = _run(*args)
+    ref = ReferenceMode()
+    ref.install(monkeypatch, _memo_sites())
+    reference = _run(*args)
+    unreached = [k for k in _cell_sites(D) if not ref.calls.get(k)]
+    assert not unreached, (
+        f"COVERAGE claims cell {D} reaches these sites, but their bypass was never called: {unreached}"
+    )
+    _assert_same(optimized, reference, D)
 
 
 # ── (e) warm in-process memo vs fresh ───────────────────────────────────────
