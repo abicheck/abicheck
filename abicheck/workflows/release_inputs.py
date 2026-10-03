@@ -63,6 +63,7 @@ from ..model.sided_inputs import compose_sided_paths
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from ..environment_matrix import EnvironmentMatrix
     from ..model.package_inventory import PackageInventory
     from .extraction import PackageExtractor
 
@@ -78,6 +79,7 @@ __all__ = [
     "resolve_release_headers",
     "resolve_release_package_side",
     "resolve_release_side",
+    "wheel_release_env_matrix",
 ]
 
 
@@ -680,4 +682,42 @@ def prepare_release_inputs(
         new.unclassified,
         old.inventory,
         new.inventory,
+    )
+
+
+def wheel_release_env_matrix(
+    env_matrix: EnvironmentMatrix | None, new_operand: Path
+) -> EnvironmentMatrix | None:
+    """The deployment contract a release's members are checked against.
+
+    When NEW is a wheel and nobody declared ``runtime_floors``, the wheel's
+    own claims become the contract (G26/G27): its platform tag's glibc/musl/
+    macOS floors and architecture, and its ``METADATA``'s numpy requirement
+    (``extract.wheel_tags.wheel_declared_runtime_floors``). Each member is
+    then checked against what *its own* wheel promises -- a binary needing a
+    newer glibc than the ``manylinux`` tag allows, or a NumPy C-API target
+    above the declared ``numpy`` floor.
+
+    A declared ``runtime_floors`` (``.abicheck.yml``'s ``deployment:`` block)
+    wins whole, rather than being merged key by key: it is the maintainer's
+    statement of the contract, and filling its gaps from the tag would add
+    claims they chose not to make. Every other field of *env_matrix* is kept.
+    A non-wheel NEW operand returns *env_matrix* unchanged.
+    """
+    if env_matrix is not None and env_matrix.runtime_floors:
+        return env_matrix
+    if not new_operand.is_file():
+        return env_matrix
+    from ..package import WheelExtractor
+
+    if not WheelExtractor().detect(new_operand):
+        return env_matrix
+    import dataclasses
+
+    from ..environment_matrix import EnvironmentMatrix
+    from ..extract.wheel_tags import wheel_declared_runtime_floors
+
+    base = env_matrix if env_matrix is not None else EnvironmentMatrix()
+    return dataclasses.replace(
+        base, runtime_floors=wheel_declared_runtime_floors(new_operand)
     )

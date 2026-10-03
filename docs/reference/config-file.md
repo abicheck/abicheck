@@ -574,6 +574,20 @@ deployment:
     backends: [level_zero, opencl]
 ```
 
+**Comparing wheels.** When NEW is a `.whl` and this block declares no
+`runtime_floors`, the wheel's own claims become them: its platform tag's
+floor (`GLIBC` from a `manylinux_X_Y` tag, `MUSLLINUX`,
+`MACOS_DEPLOYMENT_TARGET`), the single architecture it names (`WHEEL_ARCH`),
+`WHEEL_CONTEXT`, and the `numpy` requirement from its `METADATA`
+(`NUMPY_REQUIREMENT`). Each library in the wheel is then checked against
+what the wheel promises: a binary needing a newer glibc than the tag allows
+is `platform_baseline_floor_raised`, and a NumPy C-API target above the
+declared `numpy` floor is `numpy_metadata_understates_required_version`
+(plus `numpy_abi_major_incompatible` when the target needs NumPy 2 and the
+declaration still admits 1.x). A declared `runtime_floors` wins whole; the
+tag does not fill its gaps. `NUMPY_REQUIREMENT` can also be declared by hand
+as a PEP 440 specifier set (`""` for no floor).
+
 See [Environment & Toolchain Drift](../learn/environment-drift.md) for the
 full worked example, including CI/GitHub Action usage.
 

@@ -575,6 +575,12 @@ def compare_release_cmd(
 
     _setup_verbosity(verbose)
 
+    # G26/G27: a wheel's own tag and METADATA become the deployment contract
+    # its members are checked against, unless `runtime_floors` was declared.
+    from .workflows.release_inputs import wheel_release_env_matrix
+
+    env_matrix = wheel_release_env_matrix(env_matrix, new_dir)
+
     # ADR-065 S1: an explicit, identity-keyed release member selection --
     # see abicheck.model.release_selection's own docstring. `None` (no
     # --select/--select-required given) is a true no-op: every discovered

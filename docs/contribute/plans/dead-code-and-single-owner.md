@@ -252,8 +252,6 @@ consumer that does not exist yet.
 | `storage.import_baseline_set.import_baseline_set`/`export_baseline_set`, with `dto.baseline_set_metadata_from_dto`/`_to_dto` | ADR-062 (Proposed); [storage-format-v2](storage-format-v2.md); G40 | A baseline publish/load path in `compare` or `project` that goes through the BundleFacts→ProjectSnapshot adapter (streaming variant is a known gap). |
 | `storage.entity_ids.elf_symbol_occurrence` | ADR-062 Phase 0 (storage-format-v2 A0.2/A0.3) | A storage-v2 ELF symbol-occurrence producer (later ADR-062 phases). |
 | `binary_fingerprint.compute_function_fingerprints` | ADR-003 | `diff_symbols_renames.py`'s ELF-only rename path describes fingerprinting when a binary path is available; the call was never made. |
-| `wheel_tags.parse_manylinux_glibc_floor`/`parse_musllinux_floor`/`parse_macos_deployment_target_floor` | [g27-wheel-deployment-verification](g27-wheel-deployment-verification.md) | Auto-derive `runtime_floors` from a compared wheel's own platform tag; today every floor needs an explicit `--env-matrix`. |
-| `wheel_tags.parse_numpy_requirement_from_metadata`, `parse_wheel_numpy_requirement` | [g26-numpy-capi-envelope](g26-numpy-capi-envelope.md) | G26's "declared" side: `diff_numpy_capi` should read the wheel METADATA requirement through these. |
 | `acknowledgment_gate.fold_additions_review_exit` (live, but always `0`) | ADR-067 D6 | No front end passes `acknowledgments` to `checker.compare`, so the additions-review axis never fires. Wiring it needs an input (config key or flag), the axis inside `ExitDecision` (an `exit` block field and reason; today the CLI folds it after the decision, so the report's `exit.code` and the typed API would disagree with the process exit once it can fire), and the report schema bump that goes with that. |
 
 Two rows first listed here were not wiring gaps. `legacy_record_ir` was a
@@ -276,6 +274,19 @@ wiring is a format decision rather than a call: a detector sees only
 snapshots, so code hashes would have to be computed at dump time and stored
 on `ElfSymbol`, a snapshot schema bump inside ADR-050's comparability
 contract.
+
+The wheel rows (G26's `numpy` requirement parsers, G27's tag floor parsers
+and `parse_wheel_architecture_claim`) are **wired**: `compare old.whl
+new.whl` with no declared `runtime_floors` derives them from the NEW wheel
+(`extract.wheel_tags.wheel_declared_runtime_floors`, chosen by
+`workflows.release_inputs.wheel_release_env_matrix`), and
+`diff_numpy_capi.check_numpy_metadata_contract`, deleted as uncalled in
+#1448, is restored as the consumer of `NUMPY_REQUIREMENT` -- which also gives
+`numpy_metadata_understates_required_version` and
+`numpy_abi_major_incompatible` an emitter again.
+`tests/test_wheel_declared_contract.py` checks the glibc baseline and the
+NumPy contract against independent oracles and drives the CLI over real
+wheels.
 
 `EvidenceView.available_depths` was listed here as rolling out; it was a
 read-only restatement of the `--depth` ladder `evidence_depth.DEPTH_RANK`

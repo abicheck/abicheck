@@ -509,23 +509,16 @@ def parse_wheel_architecture_claim(filename: str) -> str | None:
     return _platform_machine_from_wheel_filename(filename)
 
 
-# G26: a wheel's *.dist-info/METADATA declares its runtime dependencies — the "declared" side of the NumPy C-API compatibility-envelope check (the binary-evidence "required" side comes from numpy_capi.py). Mirrors parse_manylinux_glibc_floor's role for G10: a pure function callers wire in programmatically (diff_numpy_capi.check_numpy_metadata_contract, which wired it, has been removed).
+# G26: a wheel's *.dist-info/METADATA declares its runtime dependencies — the "declared" side of the NumPy C-API compatibility-envelope check (the binary-evidence "required" side comes from numpy_capi.py). wheel_declared_runtime_floors carries it into runtime_floors['NUMPY_REQUIREMENT'], which diff_numpy_capi.check_numpy_metadata_contract checks.
 
 #: A real METADATA file is ordinarily a few KB even with a long dependency list; this bounds how much a single wheel's METADATA member is allowed to decompress to, so a malicious wheel can't zip-bomb this scan (a small compressed member declaring a tiny size that in fact decompresses to gigabytes) (CodeRabbit review).
 _MAX_METADATA_SIZE = 1_048_576
 
 
-def parse_wheel_numpy_requirement(
-    wheel_path: Path, environment: dict[str, str] | None = None
-) -> str | None:
-    """Extract the declared ``numpy`` version-specifier range from a wheel's ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
-
-    Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare ``Requires-Dist: numpy`` with no version constraint) for the numpy requirement(s) active for *environment*, or ``None`` when the wheel is unreadable, carries no ``.dist-info/METADATA`` member, or declares no such numpy dependency at all — including when the only ``numpy`` entry is gated behind an optional extra (e.g. ``numpy; extra == "test"``, only installed via ``pip install pkg[test]``, not a real runtime requirement) or an ordinary marker that doesn't hold for *environment*.
-
-    When *environment* is omitted, ``python_version``, ``python_full_version``, ``implementation_version``, ``implementation_name``, ``platform_python_implementation``, ``platform_system``, ``sys_platform``, ``os_name``, and (for single-architecture Linux/macOS tags) ``platform_machine`` are derived from the wheel's *own* filename tags (e.g. ``cp39`` -> ``python_version="3.9"``/``python_full_version="3.9.0"``/``implementation_version="3.9.0"``/``implementation_name="cpython"``/``platform_python_implementation="CPython"``, a ``macosx_11_0_arm64`` platform tag -> ``platform_system="Darwin"``/``sys_platform="darwin"``/``os_name="posix"``/``platform_machine="arm64"``) rather than defaulting to the interpreter running abicheck — evaluating a marker gated on any of these against the wrong interpreter/implementation/OS/architecture could hide a real under-declared floor on a wheel built for a different Python, implementation, platform, or CPU than the one running the scan (Codex review; both implementation-marker and all three OS-marker spellings are covered since real-world metadata uses any of them). ``implementation_version`` is derived for CPython (``cp``) tags only — see :func:`_implementation_version_from_wheel_filename` for why guessing it for any other implementation (e.g. PyPy) would be actively wrong rather than merely imprecise, unlike every other marker derived here. Falls back to the interpreter's own environment for whichever of these the filename doesn't pin down (e.g. a bare directory-derived METADATA path, the pure-Python ``any`` platform tag, a fat/universal macOS wheel, or a Windows tag, whose ``platform_machine`` isn't derived at all).
-
-    Known residual gap: a wheel tag naming a *range* rather than one exact value — either the Python-version axis (the ``abi3`` stable-ABI tag, ``cp39-abi3-...``, installable on Python 3.9 and every later 3.x minor; or a PEP 425 compressed multi-tag Python segment, ``cp310.cp311-...``, installable on either minor) or the architecture axis (a fat/universal macOS wheel, ``macosx_11_0_universal2``, or a PEP 600 compressed multi-tag platform segment spanning more than one architecture) — deliberately leaves the corresponding marker key(s) (``python_version``/``python_full_version``, or ``platform_machine``) undetermined rather than pinning a single (wrong) value (see :func:`_python_version_from_wheel_filename` and :func:`_platform_machine_from_wheel_filename`), which means those keys fall back to whatever interpreter/host abicheck is running on rather than being evaluated across the wheel's whole supported range — a real metadata gap that only affects some Python versions, or only one architecture slice, the wheel supports (e.g. a split requirement like ``numpy>=1.23; platform_machine == "x86_64"`` / ``numpy>=2; platform_machine == "arm64"``) could go undetected depending on the scanning host (Codex review). Correctly checking the full range/every architecture would mean evaluating markers at every value a wheel's metadata references along that axis and combining the results, which is meaningfully more than a wheel-tag-derivation fix; left as a known limitation of this G26-partial feature rather than attempted here.
-    """
+def wheel_metadata_text(wheel_path: Path) -> str | None:
+    """The wheel's ``*.dist-info/METADATA`` text, or ``None`` when the wheel
+    is unreadable, carries no such member, or the member exceeds
+    ``_MAX_METADATA_SIZE``."""
     try:
         with zipfile.ZipFile(wheel_path) as zf:
             metadata_info = next(
@@ -553,30 +546,54 @@ def parse_wheel_numpy_requirement(
             text = raw.decode("utf-8", errors="replace")
     except (OSError, zipfile.BadZipFile):
         return None
+    return text
+
+
+def wheel_marker_environment(filename: str) -> dict[str, str] | None:
+    """The PEP 508 marker environment a wheel's own filename tags pin down
+    (see :func:`parse_wheel_numpy_requirement`), or ``None`` when they pin
+    down nothing."""
+    derivers = (
+        ("python_version", _python_version_from_wheel_filename),
+        ("python_full_version", _python_full_version_from_wheel_filename),
+        (
+            "implementation_version",
+            _implementation_version_from_wheel_filename,
+        ),
+        ("implementation_name", _implementation_name_from_wheel_filename),
+        (
+            "platform_python_implementation",
+            _platform_python_implementation_from_wheel_filename,
+        ),
+        ("platform_system", _platform_system_from_wheel_filename),
+        ("sys_platform", _sys_platform_from_wheel_filename),
+        ("os_name", _os_name_from_wheel_filename),
+        ("platform_machine", _platform_machine_from_wheel_filename),
+    )
+    derived = {
+        key: value
+        for key, derive in derivers
+        if (value := derive(filename)) is not None
+    }
+    return derived or None
+
+
+def parse_wheel_numpy_requirement(
+    wheel_path: Path, environment: dict[str, str] | None = None
+) -> str | None:
+    """Extract the declared ``numpy`` version-specifier range from a wheel's ``*.dist-info/METADATA`` (``Requires-Dist: numpy...``).
+
+    Returns the specifier text (e.g. ``">=1.23.5,<3"``, or ``""`` for a bare ``Requires-Dist: numpy`` with no version constraint) for the numpy requirement(s) active for *environment*, or ``None`` when the wheel is unreadable, carries no ``.dist-info/METADATA`` member, or declares no such numpy dependency at all — including when the only ``numpy`` entry is gated behind an optional extra (e.g. ``numpy; extra == "test"``, only installed via ``pip install pkg[test]``, not a real runtime requirement) or an ordinary marker that doesn't hold for *environment*.
+
+    When *environment* is omitted, ``python_version``, ``python_full_version``, ``implementation_version``, ``implementation_name``, ``platform_python_implementation``, ``platform_system``, ``sys_platform``, ``os_name``, and (for single-architecture Linux/macOS tags) ``platform_machine`` are derived from the wheel's *own* filename tags (e.g. ``cp39`` -> ``python_version="3.9"``/``python_full_version="3.9.0"``/``implementation_version="3.9.0"``/``implementation_name="cpython"``/``platform_python_implementation="CPython"``, a ``macosx_11_0_arm64`` platform tag -> ``platform_system="Darwin"``/``sys_platform="darwin"``/``os_name="posix"``/``platform_machine="arm64"``) rather than defaulting to the interpreter running abicheck — evaluating a marker gated on any of these against the wrong interpreter/implementation/OS/architecture could hide a real under-declared floor on a wheel built for a different Python, implementation, platform, or CPU than the one running the scan (Codex review; both implementation-marker and all three OS-marker spellings are covered since real-world metadata uses any of them). ``implementation_version`` is derived for CPython (``cp``) tags only — see :func:`_implementation_version_from_wheel_filename` for why guessing it for any other implementation (e.g. PyPy) would be actively wrong rather than merely imprecise, unlike every other marker derived here. Falls back to the interpreter's own environment for whichever of these the filename doesn't pin down (e.g. a bare directory-derived METADATA path, the pure-Python ``any`` platform tag, a fat/universal macOS wheel, or a Windows tag, whose ``platform_machine`` isn't derived at all).
+
+    Known residual gap: a wheel tag naming a *range* rather than one exact value — either the Python-version axis (the ``abi3`` stable-ABI tag, ``cp39-abi3-...``, installable on Python 3.9 and every later 3.x minor; or a PEP 425 compressed multi-tag Python segment, ``cp310.cp311-...``, installable on either minor) or the architecture axis (a fat/universal macOS wheel, ``macosx_11_0_universal2``, or a PEP 600 compressed multi-tag platform segment spanning more than one architecture) — deliberately leaves the corresponding marker key(s) (``python_version``/``python_full_version``, or ``platform_machine``) undetermined rather than pinning a single (wrong) value (see :func:`_python_version_from_wheel_filename` and :func:`_platform_machine_from_wheel_filename`), which means those keys fall back to whatever interpreter/host abicheck is running on rather than being evaluated across the wheel's whole supported range — a real metadata gap that only affects some Python versions, or only one architecture slice, the wheel supports (e.g. a split requirement like ``numpy>=1.23; platform_machine == "x86_64"`` / ``numpy>=2; platform_machine == "arm64"``) could go undetected depending on the scanning host (Codex review). Correctly checking the full range/every architecture would mean evaluating markers at every value a wheel's metadata references along that axis and combining the results, which is meaningfully more than a wheel-tag-derivation fix; left as a known limitation of this G26-partial feature rather than attempted here.
+    """
+    text = wheel_metadata_text(wheel_path)
+    if text is None:
+        return None
     if environment is None:
-        derivers = (
-            ("python_version", _python_version_from_wheel_filename),
-            ("python_full_version", _python_full_version_from_wheel_filename),
-            (
-                "implementation_version",
-                _implementation_version_from_wheel_filename,
-            ),
-            ("implementation_name", _implementation_name_from_wheel_filename),
-            (
-                "platform_python_implementation",
-                _platform_python_implementation_from_wheel_filename,
-            ),
-            ("platform_system", _platform_system_from_wheel_filename),
-            ("sys_platform", _sys_platform_from_wheel_filename),
-            ("os_name", _os_name_from_wheel_filename),
-            ("platform_machine", _platform_machine_from_wheel_filename),
-        )
-        derived = {
-            key: value
-            for key, derive in derivers
-            if (value := derive(wheel_path.name)) is not None
-        }
-        environment = derived or None
+        environment = wheel_marker_environment(wheel_path.name)
     return parse_numpy_requirement_from_metadata(text, environment)
 
 
@@ -636,3 +653,48 @@ def parse_numpy_requirement_from_metadata(
         found = True
         combined &= req.specifier
     return str(combined) if found else None
+
+
+def wheel_declared_runtime_floors(wheel_path: Path) -> dict[str, str]:
+    """Every promise a wheel makes about where it runs, as ``runtime_floors``.
+
+    The same ``{key: value}`` vocabulary ``--env-matrix``'s
+    ``runtime_floors`` declares by hand (``environment_matrix._parse_runtime_floors``),
+    derived from the wheel itself so ``compare old.whl new.whl`` checks the
+    new wheel against its own claims (G26/G27):
+
+    * ``WHEEL_CONTEXT`` -- always ``"1"``: the input *is* a wheel, which is
+      the gate every wheel-only check requires.
+    * ``GLIBC`` -- the strictest manylinux glibc floor in the platform tag.
+    * ``MUSLLINUX`` -- ``"1"`` for a musllinux tag.
+    * ``MACOS_DEPLOYMENT_TARGET`` -- the macOS deployment target of the tag.
+    * ``WHEEL_ARCH`` -- the single architecture the tag claims, when it
+      claims exactly one.
+    * ``NUMPY_REQUIREMENT`` -- the declared ``numpy`` specifier from
+      ``METADATA`` (``""`` when the wheel declares no numpy floor), present
+      only when ``METADATA`` was readable, so an unreadable wheel is "not
+      known" rather than "declares nothing".
+
+    A key whose source the wheel does not carry is left out: an absent key
+    means "no claim", exactly as for a hand-written matrix.
+    """
+    name = wheel_path.name
+    floors: dict[str, str] = {"WHEEL_CONTEXT": "1"}
+    glibc = parse_manylinux_glibc_floor(name)
+    if glibc:
+        floors["GLIBC"] = glibc
+    if parse_musllinux_floor(name):
+        floors["MUSLLINUX"] = "1"
+    macos = parse_macos_deployment_target_floor(name)
+    if macos:
+        floors["MACOS_DEPLOYMENT_TARGET"] = macos
+    arch = parse_wheel_architecture_claim(name)
+    if arch:
+        floors["WHEEL_ARCH"] = arch
+    text = wheel_metadata_text(wheel_path)
+    if text is not None:
+        requirement = parse_numpy_requirement_from_metadata(
+            text, wheel_marker_environment(name)
+        )
+        floors["NUMPY_REQUIREMENT"] = requirement or ""
+    return floors

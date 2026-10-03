@@ -151,6 +151,8 @@ from .policy_file import PolicyFile
 from .workflows.comparison_input_receipt import comparison_input_receipt
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .buildsource.source_inputs import SourceReadLicence
     from .environment_matrix import EnvironmentMatrix
     from .model.identity import EntityId  # noqa: F401
@@ -763,6 +765,26 @@ def _contract_coverage_status(
     return "partial" if mixed else None
 
 
+def _numpy_metadata_contract_findings(
+    new: AbiSnapshot, floors: Mapping[str, str]
+) -> list[Change]:
+    """G26's declared-vs-required NumPy check, under the wheel gate.
+
+    Runs only for a wheel (``WHEEL_CONTEXT``) whose numpy requirement is
+    *known* (``NUMPY_REQUIREMENT`` present, ``""`` meaning "declares no numpy
+    floor"). An absent key means nobody told abicheck what the wheel
+    declares, which must not read as "declares nothing" -- that would flag
+    every NumPy extension compared with a hand-written ``--env-matrix``.
+    """
+    if not floors.get("WHEEL_CONTEXT") or "NUMPY_REQUIREMENT" not in floors:
+        return []
+    from .diff_numpy_capi import check_numpy_metadata_contract
+
+    return check_numpy_metadata_contract(
+        getattr(new, "numpy_capi", None), floors["NUMPY_REQUIREMENT"]
+    )
+
+
 def _env_matrix_contract_changes(
     new: AbiSnapshot,
     kept: list[Change],
@@ -853,6 +875,7 @@ def _env_matrix_contract_changes(
         check_wheel_tag_architecture_mismatch(new_elf, new_macho, floors),
         check_wheel_rpath_not_portable(new_elf, floors),
         check_wheel_closure_dependency_violation(new_elf, floors),
+        _numpy_metadata_contract_findings(new, floors),
     ):
         # Promote BEFORE suppression filtering (Codex review, P2): a
         # PLATFORM_BASELINE_FLOOR_RAISED/MACOS_DEPLOYMENT_TARGET_RAISED
@@ -1218,8 +1241,8 @@ def compare(
     # NumPy C-API compatibility-envelope delta (G26): needs only the two
     # snapshots' own numpy_capi field (no external wheel metadata), so this
     # runs unconditionally — unlike the wheel-metadata cross-check
-    # (the removed check_numpy_metadata_contract), which needed a declared
-    # numpy requirement compare() has no access to.
+    # (check_numpy_metadata_contract), which needs the declared requirement
+    # and runs with the other wheel checks in _runtime_floor_checks.
     if old is not None:
         from .diff_numpy_capi import diff_numpy_capi_surfaces
 

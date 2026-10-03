@@ -75,7 +75,7 @@ from typing import Any
 from .model.dataclass_scalar_validation import validate_scalar_str_fields
 from .model.dotted_version import parse_dotted_numeric_version
 from .model.frozen_str_dict import FrozenStrDict
-from .model.wheel_arch_claims import WHEEL_ARCH_CLAIMS
+from .model.runtime_floor_tokens import runtime_floor_token_error
 
 log = logging.getLogger(__name__)
 
@@ -376,14 +376,8 @@ def _parse_cuda_constraints(
 #: only the direct-constructor path bypassing from_dict's validation could
 #: set a non-numeric runtime_floors value at all).
 _NON_NUMERIC_RUNTIME_FLOOR_KEYS = frozenset(
-    {"WHEEL_ARCH", "MUSLLINUX", "WHEEL_CONTEXT"}
+    {"WHEEL_ARCH", "MUSLLINUX", "WHEEL_CONTEXT", "NUMPY_REQUIREMENT"}
 )
-
-#: The one `_NON_NUMERIC_RUNTIME_FLOOR_KEYS` member whose string value must
-#: additionally be a *recognized architecture token* -- see the `WHEEL_ARCH`
-#: validation branch in :func:`_parse_runtime_floors` (Codex review, PR
-#: #1221, Finding 1).
-_WHEEL_ARCH_RUNTIME_FLOOR_KEY = "WHEEL_ARCH"
 
 #: Presence-flag keys (MUSLLINUX, WHEEL_CONTEXT — unlike WHEEL_ARCH, which
 #: expects an actual architecture string, not a yes/no flag) where a YAML
@@ -470,27 +464,9 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
                 f"{type(value).__name__}: {value!r}"
             )
         floor = str(value)
-        if (
-            key_upper == _WHEEL_ARCH_RUNTIME_FLOOR_KEY
-            and floor.lower() not in WHEEL_ARCH_CLAIMS
-        ):
-            # Codex review, PR #1221, Finding 1: a WHEEL_ARCH value that
-            # merely passed the str-type check above (e.g. the typo'd
-            # "x86-64" for "x86_64", or any other unrecognized token) still
-            # loaded successfully as a valid EnvironmentMatrix -- but
-            # diff_wheel_deployment.check_wheel_tag_architecture_mismatch
-            # treats an unrecognized claim identically to "no claim
-            # declared" and reports nothing, silently disabling the hard
-            # wheel-architecture-mismatch gate a strict config believes it
-            # enabled. Validate against the exact vocabulary that detector
-            # recognizes (model.wheel_arch_claims.WHEEL_ARCH_CLAIMS, the one
-            # place both this parser and that detector's own per-claim dicts
-            # read from) rather than letting the two independently drift.
-            raise ValueError(
-                f"'runtime_floors.WHEEL_ARCH' {value!r} is not a recognized "
-                f"architecture token; expected one of "
-                f"{sorted(WHEEL_ARCH_CLAIMS)}"
-            )
+        token_error = runtime_floor_token_error(key_upper, value)
+        if token_error is not None:
+            raise ValueError(token_error)
         if key_upper not in _NON_NUMERIC_RUNTIME_FLOOR_KEYS:
             # Every dot-separated component must be purely numeric: the floor
             # contract parses with int() per component, so a "2.28-1" or "2.x"

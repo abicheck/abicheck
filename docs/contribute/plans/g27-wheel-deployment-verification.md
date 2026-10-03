@@ -21,9 +21,12 @@ real per-manylinux/musllinux-tag allowed-SONAME policy, out of scope here —
 see "Out of scope"); it only catches internally-inconsistent evidence
 (an absolute RPATH/RUNPATH entry; a vendored-looking dependency with no
 bundling mechanism at all). Windows, CPU-ISA-baseline, the full closure
-policy, and end-to-end CLI auto-derivation from a compared wheel's own
-filename tag (still requires an explicit `--env-matrix` today, for every
-check including G10's original `GLIBC` one) remain planned — see "Out of
+policy remain planned. End-to-end auto-derivation from a compared wheel's
+own filename tag has landed: `compare old.whl new.whl` with no declared
+`runtime_floors` checks every member against the NEW wheel's own tag
+(`workflows.release_inputs.wheel_release_env_matrix`,
+`extract.wheel_tags.wheel_declared_runtime_floors`,
+`tests/test_wheel_declared_contract.py`); the rest — see "Out of
 scope" below and the registry entry.
 
 ## Problem

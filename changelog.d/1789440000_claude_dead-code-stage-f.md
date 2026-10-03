@@ -27,3 +27,16 @@
   moved to `tests/`.
 - Removed `EvidenceView.available_depths`, an unread restatement of the
   `--depth` ladder `evidence_depth.DEPTH_RANK` owns.
+
+### Added
+
+- `compare old.whl new.whl` checks each library against the NEW wheel's own
+  claims when no `deployment.runtime_floors` is declared (G26/G27): the
+  platform tag's glibc/musl/macOS floor and architecture, and the `numpy`
+  requirement from `METADATA`. A binary needing a newer glibc than its
+  `manylinux` tag allows now reports `platform_baseline_floor_raised`, and a
+  NumPy C-API target above the declared `numpy` floor reports
+  `numpy_metadata_understates_required_version` (with
+  `numpy_abi_major_incompatible` across the 1.x/2.x boundary) — two kinds that
+  had no emitter. `deployment.runtime_floors.NUMPY_REQUIREMENT` declares the
+  requirement by hand.

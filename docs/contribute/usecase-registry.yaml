@@ -638,23 +638,16 @@ use_cases:
       (ADR-020b/ADR-068 D5) — no dedicated CLI flag; runtime_floors keys are
       matched case-insensitively, same as apply_runtime_floor_contract.
       package.parse_manylinux_glibc_floor() derives the floor from a
-      manylinux wheel tag (PEP 600 + legacy aliases) for programmatic/future
-      auto-derivation use — not yet wired into any CLI path.
+      manylinux wheel tag (PEP 600 + legacy aliases); `compare old.whl
+      new.whl` with no declared runtime_floors now derives the floor from the
+      NEW wheel's tag (G27, workflows.release_inputs.wheel_release_env_matrix).
       compare-release (directory/package release fan-out) DOES apply the
       project's declared deployment: block to every library in the fan-out
       now (ADR-068 D5's demotion resolves it once per release and forwards
       it unchanged to each library's own compare, cli_compare_release_
-      pairwise.py) — this check runs there too. The remaining gap is
-      auto-derivation, not fan-out support: this entry's own evidence
-      requires an explicit deployment.runtime_floors declaration everywhere,
-      single-pair or release alike. That auto-derivation gap is deliberately
-      out of scope for G10 (see its plan's acceptance
-      criteria, which this entry's evidence satisfies in full) and is
-      tracked as the multi-platform follow-up under G27
-      (UC-TC-wheel-deployment-claims): auto-deriving the floor from a
-      compared wheel's own tag and enforcing it end-to-end in a single
-      `compare old.whl new.whl` invocation, alongside the GLIBCXX/CXXABI/
-      musllinux/macOS/Windows extensions.
+      pairwise.py) — this check runs there too, and a wheel operand with no
+      declared floors uses its own tag (G27,
+      UC-TC-wheel-deployment-claims).
 
   - id: UC-TC-numpy-capi-envelope
     axis: toolchain
@@ -683,10 +676,10 @@ use_cases:
       numpy_capi_consumption_added/removed, numpy_target_floor_raised
       (wired into compare() unconditionally),
       numpy_metadata_understates_required_version, and
-      numpy_abi_major_incompatible (both via the standalone
-      check_numpy_metadata_contract, mirroring G10's
-      parse_manylinux_glibc_floor — not auto-wired into the CLI compare
-      path). NumPy's capsule-based C-API is invisible to ordinary
+      numpy_abi_major_incompatible (both via check_numpy_metadata_contract,
+      run whenever runtime_floors carries NUMPY_REQUIREMENT: derived from the
+      NEW wheel's METADATA in `compare old.whl new.whl`, or declared in
+      deployment.runtime_floors). NumPy's capsule-based C-API is invisible to ordinary
       symbol-table diffing.
       STILL PLANNED: the raw NPY_ABI_VERSION/NPY_API_VERSION hex constants
       (confirmed during implementation to need disassembly to recover — a
@@ -759,12 +752,11 @@ use_cases:
       non-wheel DSO declaring one must not get wheel-portability findings
       it never opted into (Codex review). Both ELF/Linux only; both new
       ChangeKinds: wheel_rpath_not_portable, wheel_closure_dependency_violation.
-      STILL PLANNED: end-to-end CLI auto-derivation (a single
-      `compare old.whl new.whl` deriving runtime_floors from the *new*
-      wheel's own filename tag with no .abicheck.yml deployment: block
-      needed — today all of the checks above, including G10's original
-      GLIBC one, still require an explicit deployment.runtime_floors
-      declaration); Windows UCRT/MSVC-runtime
+      Landed: end-to-end CLI auto-derivation — `compare old.whl new.whl`
+      derives runtime_floors from the NEW wheel's own tag and METADATA when
+      no deployment.runtime_floors is declared
+      (tests/test_wheel_declared_contract.py).
+      STILL PLANNED: Windows UCRT/MSVC-runtime
       requirement checking; CPU-ISA-baseline (dispatch-symbol-name
       heuristic) detection; the full per-tag allowed-dependency policy (the
       general wheel-closure check, beyond the vendored-hash-specific case
