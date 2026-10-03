@@ -153,10 +153,11 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             "to internal function`). Every census goes through "
             "`memory_trace.gc_object_count`, which reports `None` instead."
         ),
-        fixed_by=(1361,),
+        fixed_by=(1361, 1478),
         seed_tests=(
             "tests/test_gc_census_thread_safety.py",
             "tests/test_compare_release_concurrency_integration.py",
+            "tests/test_mutation_reach_trace.py",
         ),
         public_surfaces=("cli",),
         axes={
