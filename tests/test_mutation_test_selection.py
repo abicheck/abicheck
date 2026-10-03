@@ -187,6 +187,11 @@ def test_the_committed_selection_is_well_formed() -> None:
     always-on check; completeness itself is the weekly --check."""
     lines = gen.read_selection()
     assert lines, "an empty selection would make the stats pass run nothing"
+    if lines == gen.FULL_SELECTION:
+        # mutation_scope.py extend-selection rewrites the file to the whole
+        # suite in CI when a PR changes a conftest/helper; this test then
+        # runs inside that mutmut stats pass and must accept it.
+        return
     assert lines == sorted(set(lines))
     missing = [p for p in lines if not (REPO / p).is_file()]
     assert not missing, f"selection names files that do not exist: {missing}"
