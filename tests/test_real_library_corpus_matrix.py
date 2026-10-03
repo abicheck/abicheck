@@ -157,3 +157,42 @@ def test_a_timed_out_compare_makes_the_pair_not_evaluated(
     assert result["error"], "a timed-out library must leave the pair not evaluated"
     gate = rcc.evaluate_gate([_entry("p", "lib")], {"p": result}, None)
     assert not gate.passed
+
+
+# Each status the report can give a finding; only NOT_EVALUATED is unscored.
+_STATUSES = ("EVALUATED", "NOT_EVALUATED", None)
+_KINDS = ("func_removed_elf_only", "func_removed", "param_renamed", "enum_member_added")
+
+
+@pytest.mark.parametrize("status", _STATUSES)
+@pytest.mark.parametrize("kind", _KINDS)
+def test_only_a_scored_finding_counts_as_a_break(kind: str, status: str | None) -> None:
+    """The gate's break count is what policy scored, never the kind alone.
+
+    Oracle: a finding counts as a break iff policy evaluated it (status is not
+    ``NOT_EVALUATED``) and its kind is intrinsically breaking/API-breaking.
+    The zstd 1.5.5->1.5.7 report (verdict COMPATIBLE_WITH_RISK, summary
+    ``breaking: 0``) carried three unscored ``func_removed_elf_only`` findings
+    that the gate used to count as 3 BREAKING.
+    """
+    from abicheck.checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind
+
+    change = {"kind": kind}
+    if status is not None:
+        change["compatibility_evaluation_status"] = status
+    lib = rcc.summarize_report({"verdict": "X", "changes": [change, dict(change)]})
+    tot = rcc.pair_totals({"libraries": {"lib.so": lib}})
+    intrinsic = ChangeKind(kind) in BREAKING_KINDS | API_BREAK_KINDS
+    scored = status != "NOT_EVALUATED"
+    assert tot["breaking"] + tot["api_break"] == (2 if intrinsic and scored else 0)
+    # Recorded either way: an unscored finding stays visible as a count.
+    assert sum(tot["non_breaking"].values()) + tot["breaking"] + tot["api_break"] == 2
+    if not scored:
+        assert tot["non_breaking"] == {kind + rcc.NOT_EVALUATED_SUFFIX: 2}
+
+
+def test_scoring_matrix_is_not_vacuous() -> None:
+    from abicheck.checker_policy import BREAKING_KINDS, ChangeKind
+
+    assert any(ChangeKind(k) in BREAKING_KINDS for k in _KINDS)
+    assert any(ChangeKind(k) not in BREAKING_KINDS for k in _KINDS)

@@ -20,7 +20,12 @@ Runs ``abicheck compare`` over every pair in ``data/compat_corpus.json`` (real
 conda-forge release pairs with cited ground truth), writes one JSON result per
 pair, and gates the run:
 
-* a known-**compatible** pair fails on any BREAKING or API_BREAK finding;
+* a known-**compatible** pair fails on any BREAKING or API_BREAK finding
+  that compatibility policy actually scored. A finding the report marks
+  ``compatibility_evaluation_status: NOT_EVALUATED`` (contract relevance
+  unproven, ``gate_contribution`` 0) is still counted, under
+  ``<kind> (not evaluated)``, but as a non-breaking count: re-deriving a
+  break from the kind alone overrules the product's own decision;
 * a known-**incompatible** pair fails unless a BREAKING finding is reported
   (and every documented ``expected_break_kinds`` entry appears);
 * a pair that could not be evaluated fails -- a run that compared nothing is
@@ -63,6 +68,10 @@ CORPUS_SCHEMA = "compat_corpus.v1"
 BASELINE_SCHEMA = "compat_corpus_baseline.v1"
 RESULT_SCHEMA = "compat_corpus_result.v1"
 EXPECTATIONS = ("COMPATIBLE", "BREAKING")
+
+#: A finding policy did not score (ADR-049 D9): recorded, never a break.
+NOT_EVALUATED = "NOT_EVALUATED"
+NOT_EVALUATED_SUFFIX = " (not evaluated)"
 REQUIRED_PAIR_FIELDS = (
     "pair",
     "library",
@@ -178,7 +187,10 @@ def summarize_report(report: dict) -> dict:
     counts: dict[str, int] = {}
     for c in changes:
         if isinstance(c, dict) and isinstance(c.get("kind"), str):
-            counts[c["kind"]] = counts.get(c["kind"], 0) + 1
+            key = c["kind"]
+            if c.get("compatibility_evaluation_status") == NOT_EVALUATED:
+                key += NOT_EVALUATED_SUFFIX
+            counts[key] = counts.get(key, 0) + 1
     verdict = report.get("verdict") or (report.get("summary") or {}).get("verdict")
     return {"verdict": verdict, "counts_by_kind": dict(sorted(counts.items()))}
 
