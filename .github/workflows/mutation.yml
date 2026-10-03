@@ -470,7 +470,12 @@ jobs:
     # not to run; otherwise green only when every shard succeeded.
     name: mutmut (detector core)
     needs: [resolve, mutmut, selection-check]
-    if: always() && needs.resolve.outputs.run == 'true'
+    # !cancelled(), not always(): a run superseded by a newer push (the
+    # concurrency group cancels it) has nothing to report, and always() made
+    # it queue a runner just to post a misleading red check for commits
+    # nobody is looking at any more. A shard that *fails* -- including one
+    # stopped by its own timeout -- still reaches this job and fails it.
+    if: ${{ !cancelled() && needs.resolve.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

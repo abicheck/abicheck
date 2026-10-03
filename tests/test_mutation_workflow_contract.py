@@ -183,7 +183,8 @@ def test_every_gating_run_is_sharded_and_rolled_up_under_one_check() -> None:
     assert runs and all(r.count("--run") == r.count('--shard "$SHARD"') for r in runs)
     gate = wf["gate"]
     assert gate["name"] == "mutmut (detector core)"
-    assert "mutmut" in gate["needs"] and "always()" in gate["if"]
+    assert "mutmut" in gate["needs"] and "!cancelled()" in gate["if"]
+    assert "always()" not in gate["if"]
     assert "needs.resolve.outputs.run == 'true'" in gate["if"]
 
 
