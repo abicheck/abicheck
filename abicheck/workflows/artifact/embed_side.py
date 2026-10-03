@@ -93,6 +93,14 @@ def embed_side_build_source(
     frontend_ctx = (
         source_frontend_compile if source_frontend_compile is not None else ctx
     )
+    # The S2 preprocessor pre-scan `compare()` runs later replays this side's
+    # compile units too, so it takes the same compiler selection as L4 --
+    # with the CL-mode exclusion, since it always passes GNU-mode flags.
+    snap.live_preprocessor_clang_bin = resolve_source_frontend_clang_bin(
+        frontend_ctx.gcc_path if frontend_ctx else None,
+        frontend_ctx.gcc_prefix if frontend_ctx else None,
+        fallback="clang++",
+    )
     manifest_roots = dump_manifest_public_roots(evidence.dump_manifest)
     try:
         embed_build_source(

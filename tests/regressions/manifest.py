@@ -474,6 +474,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             # internal_namespaces. Oracle: the documented convention, and
             # agreement with internal_type_leaks_via_public_api.
             "tests/test_inline_body_internal_namespaces.py",
+            # The S2 pre-scan never received the configured compiler.
+            # Oracle: the option's documented selection rules, and L4's pick.
+            "tests/test_preprocessor_scan_compiler.py",
         ),
         known_gaps=(
             KnownGap(

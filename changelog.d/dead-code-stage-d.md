@@ -49,6 +49,15 @@
 
 ### Fixed
 
+- **The preprocessor pre-scan runs the compiler `.abicheck.yml` configures.**
+  `compile.compiler` (and a compiler prefix) selected the compiler for L4
+  source replay, but the pre-scan `compare` runs over the same compile units
+  always ran a bare `clang++`: with `icpx` or a cross prefix it probed with
+  the host compiler, or reported `clang++` missing on a host that has only
+  the configured one. It now uses the same selection as L4, except that a
+  CL-mode driver (`clang-cl`) falls back to `clang++`, since the pre-scan
+  passes GNU-mode flags.
+
 - **`inline_body_references_renamed_member` follows the policy's
   `internal_namespaces`.** The pimpl inline-accessor detector used its own
   three-name list (`detail`, `impl`, `internal`) instead of the run's

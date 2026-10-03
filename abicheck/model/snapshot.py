@@ -508,6 +508,13 @@ class AbiSnapshot:
     live_source_evidence: bool = field(
         default=False, repr=False, compare=False, kw_only=True
     )
+    # Runtime-only, like `live_source_evidence`: the preprocessor the S2
+    # pre-scan runs for this side, resolved from the compile context its L4
+    # replay used (`workflows/artifact/embed_side.py`). `None` (a stored or
+    # unembedded snapshot) means the pre-scan's own `clang++` default.
+    live_preprocessor_clang_bin: str | None = field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
 
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(
