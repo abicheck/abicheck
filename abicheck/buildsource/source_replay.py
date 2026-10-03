@@ -218,17 +218,32 @@ def select_compile_units(
         raise ValueError(
             f"unknown replay scope {scope!r}; expected one of {REPLAY_SCOPES}"
         )
-    units = build.compile_units
     if scope == "off":
         return []
     if scope == "full":
-        return list(units)
+        return [cu for cu in build.compile_units if not is_assembly_unit(cu)]
     inc = _norm_include_map(include_map)
     if scope == "headers-only":
-        return _select_headers_only(build, inc, public_header_roots)
-    if scope == "target":
-        return _select_target(build, target_id)
-    return _select_changed(build, frozenset(changed_paths), inc)
+        picked = _select_headers_only(build, inc, public_header_roots)
+    elif scope == "target":
+        picked = _select_target(build, target_id)
+    else:
+        picked = _select_changed(build, frozenset(changed_paths), inc)
+    return [cu for cu in picked if not is_assembly_unit(cu)]
+
+
+#: Source suffixes of assembler translation units. They declare no C/C++ ABI,
+#: so source replay has nothing to extract from them, and handing one to a
+#: C-family front end (castxml) produces unparseable output (zstd's
+#: ``huf_decompress_amd64.S`` in its library target). Case-sensitive on
+#: purpose: ``.S`` (preprocessed asm) and ``.s`` are both assembly, while
+#: ``.C`` is a C++ suffix.
+_ASSEMBLY_SUFFIXES = (".s", ".S", ".sx", ".asm")
+
+
+def is_assembly_unit(compile_unit: CompileUnit) -> bool:
+    """Whether *compile_unit* compiles an assembler source (not C-family)."""
+    return str(compile_unit.source).endswith(_ASSEMBLY_SUFFIXES)
 
 
 def _select_headers_only(
