@@ -12012,7 +12012,7 @@ from the snapshot's own records.
 *Authority, not a fidelity gate.* `compare/record_layout.py` follows the T3
 rule. A side whose IR has record occurrences is read from that IR alone.
 Otherwise the side is read from the adapter's projection of its own records
-(`legacy_record_ir`). Nothing re-reads `RecordType` to check the IR. The one
+(`legacy_record_occurrences`). Nothing re-reads `RecordType` to check the IR. The one
 supplement is a record with no `entity_id`: no producer can give it an
 occurrence, so it is projected under a synthetic identity that cannot
 collide with a real one. When exactly one side establishes a layout value,

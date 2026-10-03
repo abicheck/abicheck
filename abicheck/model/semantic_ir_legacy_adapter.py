@@ -125,7 +125,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SYNTHETIC_IDENTITY_EXTRA",
-    "legacy_record_ir",
     "legacy_record_occurrences",
     "legacy_record_key",
     "assert_constant_ir_consistent",
@@ -341,7 +340,7 @@ def legacy_record_key(record: RecordType) -> EntityId:
 
     Its producer-resolved ``entity_id`` when it has one -- the same key a
     real ``SemanticIR`` occurrence carries -- else a synthetic identity from
-    its qualified spelling, which only :func:`legacy_record_ir` produces.
+    its qualified spelling, which only :func:`legacy_record_occurrences` produces.
     """
     if record.entity_id is not None:
         return record.entity_id
@@ -377,11 +376,6 @@ def legacy_record_occurrences(
         )
         order.append(occ_id)
     return SemanticIR(occurrences=occurrences), tuple(order)
-
-
-def legacy_record_ir(records: Iterable[RecordType]) -> SemanticIR:
-    """:func:`legacy_record_occurrences`' IR alone."""
-    return legacy_record_occurrences(records)[0]
 
 
 def legacy_constant_ir(snapshot: AbiSnapshot, constants: dict[str, str]) -> SemanticIR:

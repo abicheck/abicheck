@@ -17,3 +17,5 @@
   provenance predicates, `parse_user_depth`, `Suppression.selector_matches`,
   `ExportSet.destinations`, `scan_bazel_scoping_failure` and
   `_l5_payload_empty`. No behavior change.
+- Removed `semantic_ir_legacy_adapter.legacy_record_ir`, an uncalled wrapper;
+  `compare/record_layout.py` reads through `legacy_record_occurrences`.

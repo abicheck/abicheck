@@ -248,8 +248,6 @@ consumer that does not exist yet.
 | Item | Owner | Remaining work to reach production |
 |---|---|---|
 | `SemanticIR.occurrences_for`, `SemanticIRIndex.occurrences_for` | ADR-063 / [one-semantic-pipeline](one-semantic-pipeline.md) Phase 6 "PR 2" | Consumer cutover: `diff_symbols.py`/`diff_types.py` match through `SemanticIRIndex` instead of `AbiSnapshot.functions`/`variables`/`types`. |
-| `semantic_ir_legacy_adapter.legacy_record_ir` | ADR-063 / one-semantic-pipeline, record-layout T3 rule | The plan says `compare/record_layout.py`'s no-IR fallback reads through it; no code does. Wire it, or correct the plan. |
-| `surface_facts.binary_export_match` | ADR-063; [evidence-entity-model](evidence-entity-model.md) | ADR-063 says the binary-exported fact is read back through it; the `surface_facts` accessors (e.g. `is_export_confirmed_absent`) do not call it yet. |
 | `EvidenceView.available_depths` | ADR-063 / one-semantic-pipeline (`ResolvedExecutionContext`) | The depth floor (`enforce_requested_depth`) should read the resolved `EvidenceView` rather than recompute. |
 | `snapshot_digest_cache.digest_scope` | [design-hardening-from-defect-families](design-hardening-from-defect-families.md) F5, Phase 4 exit pending | No run opens the scope, so the run-scoped digest memo never engages; `compare`/the release fan-out must open it around `snapshot_content_digest`, with an H5 cell covering it. |
 | `GateOptions.effective_gate`, `workflows.gate.effective_gate_for_resolved_compare_config` | ADR-061; [duplication-and-convergence-assessment](duplication-and-convergence-assessment.md) P0 `EffectiveGate` | The release fan-out and native `compare` still gate from their own severity fields; both should read one `EffectiveGate`. |
@@ -258,6 +256,16 @@ consumer that does not exist yet.
 | `binary_fingerprint.compute_function_fingerprints` | ADR-003 | `diff_symbols_renames.py`'s ELF-only rename path describes fingerprinting when a binary path is available; the call was never made. |
 | `wheel_tags.parse_numpy_requirement_from_metadata`, `parse_wheel_numpy_requirement` | [g26-numpy-capi-envelope](g26-numpy-capi-envelope.md) | G26's "declared" side: `diff_numpy_capi` should read the wheel METADATA requirement through these. |
 | `graph_backends.ingest_codeql_extends_results` | ADR-041 (partially phased), ADR-044 | L5 CodeQL collection calls it beside `ingest_codeql_call_results` when an extends-query result exists. |
+| `acknowledgment_gate.fold_additions_review_exit` (live, but always `0`) | ADR-067 D6 | No front end passes `acknowledgments` to `checker.compare`, so the additions-review axis never fires. Wiring it needs an input (config key or flag), the axis inside `ExitDecision` (an `exit` block field and reason; today the CLI folds it after the decision, so the report's `exit.code` and the typed API would disagree with the process exit once it can fire), and the report schema bump that goes with that. |
+
+Two rows first listed here were not wiring gaps. `legacy_record_ir` was a
+wrapper: `compare/record_layout.py` already reads through
+`legacy_record_occurrences`, and the plan named the wrapper, so the wrapper
+is deleted and one-semantic-pipeline now names the real function.
+`surface_facts.binary_export_match` is the reader of the export-match tier
+producers stamp (ADR-063), used by the tests that check that tier; whether
+weaker tiers should stop counting as exported is the separate policy
+question ADR-063 leaves open, so it is kept as that question's inert reader.
 
 ### Kept as library API (undocumented)
 
