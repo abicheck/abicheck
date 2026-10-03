@@ -35,7 +35,7 @@ over already-computed facts (D5: "policy changes acceptance; it never
 changes facts").
 
 The *other* D4/D5 evaluator ADR-066 S2 adds --
-``abicheck.workflows.history.evaluate_deprecation_compliance``, which checks
+``abicheck.workflows.history_deprecation.evaluate_deprecation_compliance``, which checks
 each observed ``removed`` lifecycle event against ``deprecation_window`` --
 lives in ``workflows/history.py`` instead of here: it operates on
 ``LongitudinalHistoryResult``, a ``workflows``-owned type this leaf ``policy``

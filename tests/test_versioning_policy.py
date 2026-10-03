@@ -44,6 +44,7 @@ from abicheck.policy.versioning_policy import (
     evaluate_release_acceptance,
     integrate_policy_acceptance,
 )
+from abicheck.policy_file import PolicyFile
 from abicheck.semver import SemverBump, recommend_release
 from abicheck.serialization import save_snapshot
 from abicheck.workflows.history import run_history_request
@@ -341,6 +342,11 @@ def _fn(name: str, *, deprecated: str | None = None) -> Function:
     return Function(name=name, mangled=name, return_type="int", deprecated=deprecated)
 
 
+def _stating(policy: VersioningPolicy) -> PolicyFile:
+    """A policy document whose ``versioning:`` block states *policy*."""
+    return PolicyFile(versioning=policy, versioning_stated=True)
+
+
 def _save(tmp_path: Path, version: str, functions: list[Function]) -> str:
     snap = AbiSnapshot(
         library="libmath.so",
@@ -365,7 +371,7 @@ class TestDeprecationCompliance:
         p3 = _save(tmp_path, "1.2.0", [add])
 
         policy = VersioningPolicy(deprecation_window=DeprecationWindow(min_releases=1))
-        result = run_history_request([p1, p2, p3], versioning_policy=policy)
+        result = run_history_request([p1, p2, p3], policy_file=_stating(policy))
 
         findings = {f.display_name: f for f in result.deprecation_compliance}
         assert findings["multiply"].status == "conforming"
@@ -383,7 +389,7 @@ class TestDeprecationCompliance:
         p3 = _save(tmp_path, "1.2.0", [add])
 
         policy = VersioningPolicy(deprecation_window=DeprecationWindow(min_releases=2))
-        result = run_history_request([p1, p2, p3], versioning_policy=policy)
+        result = run_history_request([p1, p2, p3], policy_file=_stating(policy))
 
         findings = {f.display_name: f for f in result.deprecation_compliance}
         assert findings["multiply"].status == "non_conforming"
@@ -394,7 +400,7 @@ class TestDeprecationCompliance:
         p2 = _save(tmp_path, "2.1.0", [])
 
         policy = VersioningPolicy(deprecation_window=DeprecationWindow(min_releases=1))
-        result = run_history_request([p1, p2], versioning_policy=policy)
+        result = run_history_request([p1, p2], policy_file=_stating(policy))
 
         findings = {f.display_name: f for f in result.deprecation_compliance}
         assert findings["fast"].status == "unknown"
@@ -408,7 +414,7 @@ class TestDeprecationCompliance:
         p2 = _save(tmp_path, "2.1.0", [])
 
         result = run_history_request(
-            [p1, p2], versioning_policy=built_in_default_versioning_policy()
+            [p1, p2], policy_file=_stating(built_in_default_versioning_policy())
         )
 
         findings = {f.display_name: f for f in result.deprecation_compliance}
@@ -443,7 +449,7 @@ class TestDeprecationCompliance:
         p4 = _save(tmp_path, "1.3.0", [keep])  # removed again, with no new deprecation
 
         policy = VersioningPolicy(deprecation_window=DeprecationWindow(min_releases=1))
-        result = run_history_request([p1, p2, p3, p4], versioning_policy=policy)
+        result = run_history_request([p1, p2, p3, p4], policy_file=_stating(policy))
 
         flappy_findings = [
             f for f in result.deprecation_compliance if f.display_name == "flappy"
@@ -469,7 +475,7 @@ class TestDeprecationCompliance:
         p5 = _save(tmp_path, "1.4.0", [keep])  # removed again, no new deprecation
 
         policy = VersioningPolicy(deprecation_window=DeprecationWindow(min_releases=1))
-        result = run_history_request([p1, p2, p3, p4, p5], versioning_policy=policy)
+        result = run_history_request([p1, p2, p3, p4, p5], policy_file=_stating(policy))
 
         flappy_findings = [
             f for f in result.deprecation_compliance if f.display_name == "flappy"
@@ -497,7 +503,7 @@ class TestDeprecationCompliance:
         p4 = _save(tmp_path, "1.3.0", [keep])  # removed, no fresh deprecation
 
         policy = VersioningPolicy(deprecation_window=DeprecationWindow(min_releases=1))
-        result = run_history_request([p1, p2, p3, p4], versioning_policy=policy)
+        result = run_history_request([p1, p2, p3, p4], policy_file=_stating(policy))
 
         flappy_findings = [
             f for f in result.deprecation_compliance if f.display_name == "flappy"
@@ -516,7 +522,7 @@ class TestDeprecationCompliance:
         p3 = _save(tmp_path, "1.2.0", [add])
 
         policy = VersioningPolicy(deprecation_window=DeprecationWindow(min_releases=1))
-        result = run_history_request([p1, p2, p3], versioning_policy=policy)
+        result = run_history_request([p1, p2, p3], policy_file=_stating(policy))
         d = result.to_dict()
         assert "deprecation_compliance" in d
         assert len(d["deprecation_compliance"]) == 1  # type: ignore[arg-type]

@@ -723,7 +723,6 @@ def project_history_cmd(
     _setup_verbosity(verbose)
 
     from .frontends.cli.options.params import _load_suppression_and_policy
-    from .policy.versioning_policy import stated_versioning_policy_of
 
     _, policy_file = _load_suppression_and_policy(None, policy, policy_file_path)
     try:
@@ -732,7 +731,6 @@ def project_history_cmd(
             versions=list(versions) if versions else None,
             policy=policy,
             policy_file=policy_file,
-            versioning_policy=stated_versioning_policy_of(policy_file),
         )
     except HistoryError as exc:
         raise click.UsageError(str(exc)) from exc
