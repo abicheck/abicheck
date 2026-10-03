@@ -23,6 +23,11 @@ import sys
 from pathlib import Path
 
 import pytest
+from _sycl_context_oracle import (
+    decode_and_select_frontend_context,
+    decode_frontend_contexts,
+    select_frontend_context,
+)
 
 from abicheck import deadline
 from abicheck.errors import (
@@ -33,10 +38,7 @@ from abicheck.errors import (
 from abicheck.sycl_context import (
     FrontendContext,
     _iter_json_documents,
-    decode_and_select_frontend_context,
     decode_and_select_frontend_context_from_path,
-    decode_frontend_contexts,
-    select_frontend_context,
 )
 
 _FIXTURE_DIR = Path(__file__).parent / "fixtures" / "g32" / "dpcpp"

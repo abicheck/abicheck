@@ -27,9 +27,7 @@ scan, release, aggregate, project, or dependency behavior" is exactly what
 this function does) rather than alongside its stored/live sibling in
 ``bundle_side_input.py`` -- that module is itself a grandfathered flat-root
 legacy file (see its own module docstring), and this is genuinely new
-compare-workflow coordination, not a resolution primitive that module's
-existing ``LiveBundleInput``/``StoredBundleFactsInput``/``resolve_bundle_
-side`` shapes already cover (Codex review, PR #1060: "put the stored-pair
+compare-workflow coordination (Codex review, PR #1060: "put the stored-pair
 workflow in workflows" -- the same reasoning that already moved
 ``known_libraries_for_new_side`` out to
 ``workflows/bundle_facts_library_overrides.py`` rather than growing
@@ -145,30 +143,22 @@ def compare_stored_bundle_facts_pair(
     codebase uses (never ``checker.compare`` directly). Mirrors
     :func:`~abicheck.bundle_side_input.compare_release_against_bundle_facts`'s
     own final step (a direct call into
-    :func:`~abicheck.model.bundle_facts.compare_bundle_from_facts`, never
-    :func:`~abicheck.bundle_side_input.compare_bundle_sides`/
-    :func:`~abicheck.bundle_side_input.resolve_bundle_side`) for the
-    identical reason documented there: each stored document is already
-    loaded in memory for the per-library matching loop below, and routing
-    through ``StoredBundleFactsInput``/``resolve_bundle_side`` instead would
-    reload and re-parse both documents from disk a second time for no
-    benefit.
+    :func:`~abicheck.model.bundle_facts.compare_bundle_from_facts`): each
+    stored document is already loaded in memory for the per-library
+    matching loop below, so the bundle-level pass reuses it rather than
+    reloading either document from disk.
 
     Refuses to diff two documents captured from different logical build
     variants (Codex review, PR #1060): ``BundleFacts.variant_fingerprint``
-    (``bundle_multibuild.variant_fingerprint`` -- stable build-axis identity
-    only, e.g. a CPU-only build vs. a SYCL/DPC build of the same source
-    tree) must match on both sides, or this raises ``ValueError`` rather
-    than silently intersecting their library names and diffing artifacts
-    that were never the same build to begin with -- the same "never union,
-    never silently pair a mismatch" discipline
-    ``bundle_multibuild.pair_variants`` already establishes for the
-    *multi*-variant case. This function deliberately doesn't route through
-    ``pair_variants`` itself: that machinery pairs whole *mappings* of
-    labelled variants (the not-yet-wired multibuild CLI/config surface --
-    see that module's own docstring), which is the wrong shape for two
-    single, already-identified documents -- a direct fingerprint-equality
-    check is the proportionate check for exactly two inputs. An ordinary
+    (stable build-axis identity only, e.g. a CPU-only build vs. a SYCL/DPC
+    build of the same source tree) must match on both sides, or this raises
+    ``ValueError`` rather than silently intersecting their library names
+    and diffing artifacts that were never the same build to begin with --
+    the same "never union, never silently pair a mismatch" discipline
+    ``compare/variant_pairing.pair_variant_views`` applies to a
+    multi-variant ``ProjectSnapshot`` package. For exactly two
+    already-identified documents a direct fingerprint-equality check is the
+    proportionate check. An ordinary
     document that never set a variant (``BundleFacts.variant_fingerprint``
     defaults to ``DEFAULT_VARIANT_FINGERPRINT``) is unaffected: both sides
     share that same default and compare equal.
@@ -183,8 +173,7 @@ def compare_stored_bundle_facts_pair(
 
     *old_max_json_object_nodes*/*new_max_json_object_nodes*, each when
     given, override ``bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`` for that
-    side's own load -- forwarded to ``serialization.load_bundle_facts``,
-    mirroring ``StoredBundleFactsInput``'s own field of the same purpose.
+    side's own load -- forwarded to ``serialization.load_bundle_facts``.
     ``None`` (the default) uses the library default for that side.
 
     *manifest_path*/*system_providers*/*cohorts*/*policy*/*policy_file*/
@@ -259,23 +248,21 @@ def compare_stored_bundle_facts_pair(
 
     # Codex review, PR #1060, fresh evidence after the mismatch check just
     # below landed: an empty variant_fingerprint carries no real identity
-    # evidence at all (bundle_multibuild.variant_fingerprint() itself never
-    # produces one -- the no-coordinates case is the DEFAULT_VARIANT_
-    # FINGERPRINT sentinel, never "" -- but the plain BundleFacts loader
+    # evidence at all (no capture path produces one -- the no-coordinates
+    # case is the DEFAULT_VARIANT_FINGERPRINT sentinel, never "" -- but the
+    # plain BundleFacts loader
     # preserves an empty string verbatim if the document was hand-authored
     # or otherwise malformed), so two such documents comparing "" == ""
     # would pass the equality check below despite neither side actually
     # attesting to being the same build. Reject rather than let an
-    # identity-free coincidence stand in for a real match, mirroring
-    # bundle_multibuild._index_by_fingerprint's own identical rejection for
-    # the multi-variant case.
+    # identity-free coincidence stand in for a real match.
     for _facts, _path in ((old_facts, old_facts_path), (new_facts, new_facts_path)):
         if not _facts.variant_fingerprint:
             raise ValueError(
                 f"{_path} has an empty variant_fingerprint -- "
-                "variant_fingerprint() never produces one (the no-coordinates "
-                "case is the DEFAULT_VARIANT_FINGERPRINT sentinel, not ''), "
-                "so this document did not come from it; fix the input rather "
+                "no capture path writes one (the no-coordinates case is the "
+                "DEFAULT_VARIANT_FINGERPRINT sentinel, not ''), so this "
+                "document was not captured by abicheck; fix the input rather "
                 "than comparing it on an empty, non-identifying key"
             )
     if old_facts.variant_fingerprint != new_facts.variant_fingerprint:
@@ -285,9 +272,9 @@ def compare_stored_bundle_facts_pair(
             f"{old_facts.variant_fingerprint!r} vs "
             f"{new_facts.variant_fingerprint!r}) -- refusing to diff them "
             "as if they were the same build. Compare two documents captured "
-            "from the same logical variant (or use "
-            "bundle_multibuild.pair_variants() for a genuine multi-variant "
-            "comparison)."
+            "from the same logical variant (or capture both releases with "
+            "`abicheck project capture-variants` and compare the packages "
+            "with --variant old=<name> --variant new=<name>)."
         )
 
     matched_keys = sorted(
@@ -423,8 +410,8 @@ def compare_stored_bundle_facts_pair(
     # (an explicit manifest, else old_facts.manifest) is the wrong contract
     # here -- it was written for the stored/live driver, whose NEW side is
     # never itself a BundleFacts document with its own captured manifest.
-    # Both sides genuinely can carry one here, so this mirrors
-    # compare_bundle_sides()'s own three-tier precedence instead: an
+    # Both sides genuinely can carry one here, so this uses a three-tier
+    # precedence instead: an
     # explicit --manifest always wins, then OLD's own captured manifest,
     # then NEW's -- rather than silently discarding a real NEW-only
     # manifest (which would drop its BUNDLE_MANIFEST_INSTANTIATION_REMOVED

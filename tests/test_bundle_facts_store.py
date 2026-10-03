@@ -533,8 +533,8 @@ class TestWriteBundleFactsPackageSchemaVersionConsistency:
 
 class TestWriteBundleFactsPackageVariantFingerprint:
     def test_empty_variant_fingerprint_is_rejected_not_normalized(self) -> None:
-        """`bundle_multibuild._index_by_fingerprint` already rejects an
-        empty fingerprint outright -- silently normalizing it into
+        """An empty fingerprint identifies no variant -- silently
+        normalizing it into
         `DEFAULT_VARIANT_FINGERPRINT` on write would let malformed facts
         pair with a legitimate default variant instead."""
         facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})

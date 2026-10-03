@@ -18,7 +18,7 @@ name: 'abicheck update-main-baseline'
 # wiring a consumer.** A cache entry is immutable once written, so this
 # workflow writes a NEW key on every run: `<key-prefix>-<profile-id>-
 # <head-sha>` (`abicheck.buildsource.baseline_publish.accepted_main_cache_key`
-# is this exact format's pure-Python mirror). A consumer restoring the
+# owns this format; the "Compute cache key" step below calls it). A consumer restoring the
 # latest entry (this workflow's own freshness-comparison step, or a future
 # caller wiring `accepted-main` into check-project.yml/check-single.yml --
 # neither restores from cache today; see docs/reference/publish-baseline.md's
@@ -223,11 +223,17 @@ jobs:
           path: 'build-output/${{ matrix.profile_id }}'
 
       # Cache keys computed once, up front, so every later step (restore,
-      # save) reads the identical values -- must exactly match
+      # save) reads the identical values. The key format has one owner,
       # abicheck.buildsource.baseline_publish.accepted_main_cache_key /
-      # accepted_main_cache_restore_prefix's format (tests/test_reusable_
-      # workflows.py pins this file's literal template string against that
-      # pure-Python mirror).
+      # accepted_main_cache_restore_prefix -- the documented consumer
+      # recipe (docs/reference/publish-baseline.md), called here rather
+      # than restated in bash. baseline-generation is folded into the key
+      # prefix when set: two scanner-compatibility generations must never
+      # share one cache-key namespace, or a PR that only bumped the
+      # generation would restore-keys-match the previous generation's
+      # entries. The generation is parsed the way actions/baseline accepts
+      # it (ASCII digits only) and folded as the integer the manifest
+      # records, so "03" keys as -g3, matching the manifest.
       - name: Compute cache key
         id: cache-key
         shell: bash
@@ -237,25 +243,34 @@ jobs:
           PROFILE_ID: ${{ matrix.profile_id }}
           HEAD_SHA: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
         run: |
-          # Fold baseline-generation into the key prefix itself, when set --
-          # two DIFFERENT scanner-compatibility generations must never share
-          # one cache-key namespace: without this, a scanner-upgrade PR that
-          # only bumped baseline-generation would still restore-keys-match
-          # the PREVIOUS generation's entries (same key-prefix, same
-          # profile), silently mixing generations in the accepted-main
-          # cache. Mutating KEY_PREFIX itself (not a separate variable)
-          # keeps the interpolation template below byte-identical to before
-          # -- tests/test_reusable_workflows.py's literal-template pin, and
-          # abicheck.buildsource.baseline_publish.accepted_main_cache_key()/
-          # accepted_main_cache_restore_prefix()'s own parity check, both
-          # already treat key_prefix as an opaque string, so this needs no
-          # change on that side either -- see accepted_main_cache_key()'s
-          # docstring.
-          if [[ -n "$BASELINE_GENERATION" ]]; then
-            KEY_PREFIX="${KEY_PREFIX}-g${BASELINE_GENERATION}"
-          fi
-          echo "cache-key=${KEY_PREFIX}-${PROFILE_ID}-${HEAD_SHA}" >> "$GITHUB_OUTPUT"
-          echo "restore-prefix=${KEY_PREFIX}-${PROFILE_ID}-" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          python3 -I -c "
+          import os
+
+          from abicheck.buildsource.baseline_publish import (
+              accepted_main_cache_key,
+              accepted_main_cache_restore_prefix,
+              parse_baseline_generation,
+          )
+
+          parts = {n: os.environ[n] for n in ('KEY_PREFIX', 'PROFILE_ID', 'HEAD_SHA')}
+          for name, value in parts.items():
+              if not value or any(c in value for c in '\r\n'):
+                  raise SystemExit(f'{name} must be a non-empty single line')
+          try:
+              generation = parse_baseline_generation(os.environ['BASELINE_GENERATION'])
+          except ValueError as exc:
+              raise SystemExit(str(exc))
+          key = accepted_main_cache_key(
+              parts['KEY_PREFIX'], parts['PROFILE_ID'], parts['HEAD_SHA'],
+              generation=generation,
+          )
+          prefix = accepted_main_cache_restore_prefix(
+              parts['KEY_PREFIX'], parts['PROFILE_ID'], generation=generation
+          )
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write(f'cache-key={key}\nrestore-prefix={prefix}\n')
+          "
 
       # `key` is this run's own cache key, keyed by head-sha (unique per
       # commit, not per run -- a rerun/retrigger of the same commit, or an

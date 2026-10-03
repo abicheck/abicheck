@@ -599,13 +599,11 @@ class TestEveryContainerGuardRefusesABinaryBuffer:
 
     def test_the_doors_that_use_them_refuse_it_too(self) -> None:
         """The guards are only worth what their call sites do with them."""
-        from abicheck.storage.identity import OccurrenceSet, group_by_entity
+        from abicheck.storage.identity import OccurrenceSet
 
         for buffer in (bytearray(), memoryview(b""), bytearray(b"ab")):
             with pytest.raises(TypeError):
                 OccurrenceSet().extend(buffer)
-            with pytest.raises(TypeError):
-                group_by_entity(buffer)
 
     def test_the_predicate_has_one_definition(self) -> None:
         """`canonical` and `guards` had reached this rule separately.

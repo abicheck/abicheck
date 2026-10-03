@@ -181,7 +181,6 @@
         "abicheck/python_api.py",
         "abicheck/python_ext.py",
         "abicheck/service_metadata_attach.py",
-        "abicheck/source_smoke.py",
         "abicheck/sycl_context.py",
         "abicheck/sycl_metadata.py",
         "abicheck/symvers_metadata.py",
@@ -323,7 +322,6 @@
         "abicheck/bundle_detector_heuristics.py",
         "abicheck/bundle_detectors.py",
         "abicheck/bundle_models.py",
-        "abicheck/bundle_multibuild.py",
         "abicheck/bundle_resolution_reachability.py",
         "abicheck/bundle_side_input.py",
         "abicheck/bundle_signature_evidence.py",
@@ -360,8 +358,7 @@
         "abicheck/service_header_scoped.py",
         "abicheck/service_input_resolution.py",
         "abicheck/dry_run_estimate.py",
-        "abicheck/stack_checker.py",
-        "abicheck/product_baseline.py"
+        "abicheck/stack_checker.py"
       ]
     },
     "report": {
@@ -560,7 +557,6 @@
       "bundle_detectors.py",
       "bundle_manifest.py",
       "bundle_models.py",
-      "bundle_multibuild.py",
       "bundle_resolution_reachability.py",
       "bundle_side_input.py",
       "bundle_signature_evidence.py",
@@ -645,7 +641,6 @@
     "bundle_detectors.py",
     "bundle_manifest.py",
     "bundle_models.py",
-    "bundle_multibuild.py",
     "bundle_resolution_reachability.py",
     "bundle_side_input.py",
     "bundle_signature_evidence.py",
@@ -839,7 +834,6 @@
     "pr_comment_sections.py",
     "probe_harness.py",
     "process_resources.py",
-    "product_baseline.py",
     "provenance.py",
     "python_api.py",
     "python_ext.py",
@@ -874,7 +868,6 @@
     "snapshot_cache.py",
     "snapshot_io.py",
     "snapshot_platform_blocks.py",
-    "source_smoke.py",
     "stable_abi.py",
     "stable_abi_data.py",
     "stack_binding_diff.py",

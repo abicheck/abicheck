@@ -12,9 +12,14 @@ implemented**: the declared-use-case half of Phase 4 —
 vocabulary (`USE_CASE_NODE_KINDS`/`USE_CASE_EDGE_KINDS` in
 `abicheck/buildsource/graph_facts.py`), and an optional
 `impact-use-cases.yaml` manifest (`use_case`/`entrypoints`/`tests`) that
-`build_use_case_graph`/`join_use_case_graph` promote to graph facts and join
-onto the library graph, mirroring slice 1's build/join API and mutation-safety
-discipline exactly. See "Slice 2: declared use cases" below.
+`build_use_case_graph`/`join_use_case_graph` promoted to graph facts and
+joined onto the library graph, mirroring slice 1's build/join API and
+mutation-safety discipline exactly. See "Slice 2: declared use cases" below.
+*(Amended 2026-10: that build/join pair never gained a caller — use-case
+impact is answered over the plain library graph by
+`explain_use_case_impact` — and was removed with its tests by
+`plans/dead-code-and-single-owner.md` Stage C. The `USE_CASE_*` vocabulary
+stays registered as reserved.)*
 **Update (2026-09-02):** `abicheck/impact/use_case_impact.py`'s
 `build_use_case_impact` (engine for `compare --use-cases MANIFEST`) is a
 further, real step past graph-building alone — a genuine report-level
@@ -327,7 +332,8 @@ decisions of its own:
   `source_decl` nodes (matched by id or label), so the join is again one
   shared node id, not a second disconnected graph needing a name-matching
   pass to reunite.
-- **The join is a deep copy** (`join_use_case_graph`), for the identical D3
+- **The join is a deep copy** (`join_use_case_graph`, since removed — see the
+  Status amendment), for the identical D3
   reason `join_consumer_graph` is: the library graph is shared with every
   other analysis of the same snapshot, and a shallow fold would leak one
   project's declared use cases onto the library graph's own nodes.

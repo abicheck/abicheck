@@ -102,8 +102,8 @@ def resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
     plain coincidence -- would be misclassified as a linker script by the
     regex probe below (Codex review, fresh evidence: reported for a real
     ELF DSO whose own content happened to contain
-    ``INPUT(libdoesnotexist.so)``, silently excluding it from both
-    :mod:`abicheck.product_baseline` packing and product comparison).
+    ``INPUT(libdoesnotexist.so)``, silently excluding it from product
+    comparison).
     """
     if detect_binary_format(path) is not None:
         return None, False
@@ -209,15 +209,9 @@ def _pe_is_dll_content(path: Path) -> bool:
     set in its COFF file header, identified from content rather than
     filename -- lets a DLL shipped under a nonstandard extension (a Python
     ``.pyd`` extension module) be recognized as a library
-    (`product_baseline.py`'s `_is_library_path`) and case-folded for
-    canonical matching (`_canonical_library_key` below) the same way a
-    conventional ``.dll`` already is, since a suffix check alone never
-    catches either (Codex review, fresh evidence).
-
-    Lives in this leaf module, not `product_baseline.py` (its original
-    home): `_canonical_library_key` needs it too, and `product_baseline.py`
-    already imports `_canonical_library_key` from here -- the reverse
-    import would cycle.
+    and case-folded for canonical matching (`_canonical_library_key`
+    below) the same way a conventional ``.dll`` already is, since a suffix
+    check alone never catches either (Codex review, fresh evidence).
     """
     try:
         with open(path, "rb") as f:

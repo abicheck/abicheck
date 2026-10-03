@@ -45,7 +45,7 @@ from __future__ import annotations
 import re
 
 from .graph_facts import GraphNode
-from .source_graph import SourceGraphSummary
+from .source_graph import SourceGraphSummary, _symbol_node_id
 
 #: Graph node kinds a type entity (as opposed to a function/variable
 #: ``source_decl``) can carry. Mirrors ``crosscheck._DECL_NODE_KINDS`` minus ``source_decl``.
@@ -307,3 +307,28 @@ def is_internal_dependency_node(
             return False
         return not looks_like_system_name(node.label or "")
     return False
+
+
+def defining_members(graph: SourceGraphSummary, symbol: str) -> list[tuple[str, str]]:
+    """``(archive label, member name)`` for every archive member *graph* records
+    as defining *symbol* — the localization read view
+    ("``cache_dispatch.o`` in ``libinternal_dispatch.a``").
+
+    Returns every match rather than one: an archive set may genuinely define
+    a symbol in more than one member, and picking one would be a guess.
+    Empty when the pass never ran, the archive wasn't readable, or the
+    symbol isn't index-backed — an absence of evidence, which a caller must
+    not render as "defined nowhere".
+    """
+    target = _symbol_node_id(symbol)
+    by_id = {n.id: n for n in graph.nodes}
+    out: list[tuple[str, str]] = []
+    for edge in graph.edges:
+        if edge.kind != "OBJECT_DEFINES_SYMBOL" or edge.dst != target:
+            continue
+        member = by_id.get(edge.src)
+        if member is None:
+            continue
+        archive = str((member.resolved or member.attrs).get("archive", ""))
+        out.append((archive, member.label or ""))
+    return sorted(set(out))

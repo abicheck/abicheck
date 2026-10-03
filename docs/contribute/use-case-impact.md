@@ -70,8 +70,8 @@ together, against the comparison it is already running. At least one side
 must carry a source graph — a `dump --sources`/`--build-info` snapshot, or
 any snapshot carrying the always-on header-only graph — and a pair with
 none on either side is a usage error rather than a silently missing
-section. Entrypoints are resolved reusing the exact same join
-`build_use_case_graph` performs internally, so the report can never
+section. Entrypoints are resolved by the same index
+`resolve_use_case_entrypoints` reports from, so the report can never
 disagree with what the comparison itself sees; an unresolved entrypoint is
 reported, never treated as a failure — the same "absence is not evidence of
 a wrong answer" discipline the rest of this page documents (see "Declared
@@ -185,30 +185,25 @@ no use cases declared, not an error.
 
 ```python
 from abicheck.impact.use_cases import (
-    build_use_case_graph,
-    join_use_case_graph,
     load_use_case_manifest,
+    resolve_use_case_entrypoints,
 )
 
 definitions = load_use_case_manifest("impact-use-cases.yaml")
-use_case_graph = build_use_case_graph(definitions, library_graph)
-joined = join_use_case_graph(library_graph, use_case_graph)
+for resolution in resolve_use_case_entrypoints(definitions, library_graph):
+    print(resolution.use_case, resolution.unresolved_entrypoints)
 ```
 
-`build_use_case_graph` resolves every `entrypoints` name against
+`resolve_use_case_entrypoints` resolves every `entrypoints` name against
 *`library_graph`* — the library's own L5 source graph or header-only graph
 (see [Build Info & Sources](../learn/build-source-data.md) for how that
-graph gets built in the first place) — and returns a small, standalone
-graph of `use_case`/`test_case` nodes and their edges. `join_use_case_graph`
-then folds that graph into a **deep copy** of the library graph, mirroring
-`consumer_graph.join_consumer_graph`'s identical reasoning: the library
-graph is shared with every other analysis of the same snapshot (internal-leak
-walks, the source-graph diff, a `--used-by` consumer join), so a shallow
-fold would leak one project's declared use cases onto the library's own
-public-entry nodes and corrupt every unrelated analysis of the same run.
-The join itself is nothing more than registering into the same evidence
-store: a node the library graph already has and a use case's edge also
-names ends up as one node carrying both producers' facts (ADR-046 D2).
+graph gets built in the first place) — by node id or by a label that names
+exactly one public entry, and reports which names resolved and which did
+not. `tests` are recorded as given: there is no graph node kind for an
+external test identifier to resolve against. The library graph is only
+read, never modified, so it stays safe to share with every other analysis
+of the same snapshot (internal-leak walks, the source-graph diff, a
+`--used-by` consumer join).
 
 ## Declared vs. observed use — and what "no trace" does *not* mean
 

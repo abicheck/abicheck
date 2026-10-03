@@ -990,7 +990,8 @@ provenance-receipt entry per resolved field.
   field and be reported as conflicting with it, which is the exact case D8
   says the explicit value resolves.
 - **This phase's gate is executable.** `cross_front_end_differences(a, b)`
-  compares two resolved configurations modulo exactly one permitted
+  (moved to `tests/_cross_front_end.py` in 2026-10: no run holds two
+  configs, so it is test code) compares two resolved configurations modulo exactly one permitted
   difference — which front end stated a value (`explicit_cli` vs.
   `api_request`, and the option spelling recorded with it), the two D7 puts in
   one precedence tier — and returns a per-field difference list.

@@ -47,12 +47,19 @@ def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:
     """Localize an exported symbol through the graph (ADR-031 D8 `graph explain`).
 
     Given a (mangled) binary symbol, walk the graph to report what produced and
-    reaches it: the exporting target(s), the source declaration(s) it maps to,
-    the public header(s) that declare those decls, the ABI-relevant build
-    option(s) that feed it, and the static callees of its declarations. Every
-    fact is graph-derived (provenance/confidence live on the edges), so the
-    result is explanatory, never an ABI verdict (ADR-031 D6).
+    reaches it: the exporting target(s), the static-archive member(s) that
+    define it (``cache_dispatch.o`` in ``libinternal_dispatch.a``, from the
+    archive pass's ``OBJECT_DEFINES_SYMBOL`` edges), the source
+    declaration(s) it maps to, the public header(s) that declare those decls,
+    the ABI-relevant build option(s) that feed it, and the static callees of
+    its declarations. Every fact is graph-derived (provenance/confidence live
+    on the edges), so the result is explanatory, never an ABI verdict
+    (ADR-031 D6). An empty member list is an absence of evidence (the
+    archive pass did not run, or the archive had no index), never "defined
+    nowhere".
     """
+    from ..model.source_graph_query import defining_members
+
     labels = _label_map(graph)
     kinds = _kind_map(graph)
     sym_id = _symbol_node_id(symbol)
@@ -97,6 +104,10 @@ def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:
         "symbol": symbol,
         "found": found,
         "exported_by_targets": names(targets),
+        "defined_in_archive_members": [
+            {"archive": archive, "member": member}
+            for archive, member in defining_members(graph, symbol)
+        ],
         "source_declarations": names(decls),
         "declared_in_headers": names(headers),
         "reached_by_build_options": names(options),
