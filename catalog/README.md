@@ -229,9 +229,8 @@ success means one `COVERED` row per current ground-truth entry, with no
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, `case129_struct_return_convention`, and
 `case60_base_class_position_changed`. `case89_inline_accessor_renamed_pimpl_member`
-left this list on the dead-code plan's branch (PR #1469): with headers and a
-stripped binary it now reaches `inline_body_references_renamed_member` and
-`BREAKING`, as the default/debug lane does.
+left this list when the pimpl inline-body detector stopped depending on DWARF
+for the record's namespace (#1470); it is `BREAKING` without debug info now.
 
 Release and stripped full-catalog lanes remain reported-only plus false-positive
 guarded. The fixed ten-case build/source proof is blocking. A complete
@@ -250,8 +249,7 @@ Recent build/source and ABI-mode examples:
 
 Current mode-specific backlog: stripped headers under-classifies
 `case103_toolchain_flag_drift`, `case117_no_unique_address`,
-`case129_struct_return_convention`, `case60_base_class_position_changed`, and
-`case69_trivial_to_nontrivial`;
+`case129_struct_return_convention`, and `case60_base_class_position_changed`;
 default/debug and release-header modes classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:

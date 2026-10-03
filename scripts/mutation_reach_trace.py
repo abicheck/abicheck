@@ -57,7 +57,6 @@ import importlib
 import json
 import os
 import sys
-import threading
 import tomllib
 import types
 from collections.abc import Generator
@@ -65,6 +64,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from abicheck.workflows.memory_trace import gc_census_is_safe
 
 #: ``sys.monitoring`` (3.12+), typed loosely: mypy here targets 3.11.
 _MON: Any = getattr(sys, "monitoring", None)
@@ -94,12 +95,6 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
     for const in code.co_consts:
         if isinstance(const, types.CodeType):
             yield from code_objects(const)
-
-
-def _census_is_safe() -> bool:
-    """``abicheck.workflows.memory_trace.gc_census_is_safe``, restated (as
-    ``perf_cache_reset`` does) so this plugin imports nothing it traces."""
-    return threading.active_count() == 1
 
 
 def _slot_values(value: object) -> list[object]:
@@ -161,10 +156,12 @@ def namespace_functions(modules: list[types.ModuleType]) -> list[types.FunctionT
     return found
 
 
-def live_functions(modules: list[types.ModuleType]) -> list[types.FunctionType]:
-    """Every live function when a heap walk is safe, else every function
-    reachable from *modules*."""
-    if _census_is_safe():
+def live_functions(
+    modules: list[types.ModuleType], *, census: bool | None = None
+) -> list[types.FunctionType]:
+    """Every live function when a heap walk is safe (*census*, by default
+    ``gc_census_is_safe()``), else every function reachable from *modules*."""
+    if gc_census_is_safe() if census is None else census:
         return [o for o in gc.get_objects() if isinstance(o, types.FunctionType)]
     return namespace_functions(modules)
 
@@ -194,8 +191,12 @@ class Monitor:
         ids = tuple(id(sys.modules.get(name)) for name in self.modules)
         if ids == self.module_ids:
             return
-        self.module_ids = ids
-        for obj in live_functions(list(sys.modules.values())):
+        census = gc_census_is_safe()
+        if census:
+            # A partial namespace walk leaves module_ids unset, so the next
+            # test (with the extra threads gone) gets the full census.
+            self.module_ids = ids
+        for obj in live_functions(list(sys.modules.values()), census=census):
             code = obj.__code__
             if code.co_filename not in self.paths or code in self.armed:
                 continue

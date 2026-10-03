@@ -260,6 +260,7 @@ _F5 = tuple(
     ]
 )
 _F8 = (
+    "extraction.aggregate_layout_inverted_by_line",
     "extraction.emulated_compiler_builtin_absent_from_frontend",
     "extraction.linker_summary_flag_read_as_the_fact",
     "scoping.system_header_layout_unrecognized",

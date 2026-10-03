@@ -56,7 +56,7 @@ for name in mrt.module_names(repo, paths):
     importlib.import_module(name)
 gc.collect()
 modules = list(sys.modules.values())
-assert mrt._census_is_safe()
+assert mrt.gc_census_is_safe()
 def armable(functions):
     return {
         f"{c.co_filename}:{c.co_firstlineno}:{c.co_qualname}"
