@@ -59,6 +59,8 @@ from typing import Any
 
 import pytest
 
+from abicheck.workflows.memory_trace import gc_census_is_safe
+
 #: ``sys.monitoring`` (3.12+), typed loosely: mypy here targets 3.11.
 _MON: Any = getattr(sys, "monitoring", None)
 
@@ -114,8 +116,18 @@ class Monitor:
         ids = tuple(id(sys.modules.get(name)) for name in self.modules)
         if ids == self.module_ids:
             return
-        self.module_ids = ids
-        for obj in gc.get_objects():
+        # A heap census beside another live thread can break that thread's
+        # `tuple(...)` (memory_trace.gc_census_is_safe). A test may leave a
+        # pool thread behind, so census only when this is the sole thread;
+        # otherwise walk the modules' namespaces and leave `module_ids`
+        # stale, so the next arm() retries the census and picks up any
+        # function only the heap can reach.
+        if gc_census_is_safe():
+            self.module_ids = ids
+            candidates: list[object] = gc.get_objects()
+        else:
+            candidates = self._namespace_functions()
+        for obj in candidates:
             if not isinstance(obj, types.FunctionType):
                 continue
             code = obj.__code__
@@ -125,6 +137,36 @@ class Monitor:
                 if nested.co_name != "<module>" and nested not in self.armed:
                     _MON.set_local_events(_TOOL_ID, nested, _MON.events.PY_START)
                     self.armed.add(nested)
+
+    def _namespace_functions(self) -> list[object]:
+        """Functions reachable from the only_mutate modules' globals and
+        (recursively) their classes, unwrapping method descriptors and
+        ``functools.wraps``. Misses only functions held nowhere but inside
+        a container or closure; the census on a later arm() covers those."""
+        found: list[object] = []
+        seen: set[int] = set()
+        stack: list[object] = []
+        for name in self.modules:
+            module = sys.modules.get(name)
+            if module is not None:
+                stack.extend(list(vars(module).values()))
+        while stack:
+            value = stack.pop()
+            if id(value) in seen:
+                continue
+            seen.add(id(value))
+            if isinstance(value, (staticmethod, classmethod)):
+                stack.append(value.__func__)
+            elif isinstance(value, property):
+                stack.extend(f for f in (value.fget, value.fset, value.fdel) if f)
+            elif isinstance(value, type):
+                stack.extend(list(vars(value).values()))
+            elif isinstance(value, types.FunctionType):
+                found.append(value)
+                wrapped = getattr(value, "__wrapped__", None)
+                if wrapped is not None:
+                    stack.append(wrapped)
+        return found
 
     def close(self) -> None:
         _MON.register_callback(_TOOL_ID, _MON.events.PY_START, None)
