@@ -196,17 +196,37 @@ def test_the_mutmut_lane_reads_the_committed_selection() -> None:
     assert gen.FULL_SELECTION == ["tests/"]
 
 
-def test_the_committed_selection_is_well_formed() -> None:
-    """Sorted, unique, and every entry an existing test file -- a cheap
-    always-on check; completeness itself is the weekly --check."""
-    lines = gen.read_selection()
-    assert lines, "an empty selection would make the stats pass run nothing"
-    assert lines == sorted(set(lines))
-    missing = [p for p in lines if not (REPO / p).is_file()]
-    assert not missing, f"selection names files that do not exist: {missing}"
-    assert all(
+def _well_formed_problems(lines: list[str], is_file) -> list[str]:  # type: ignore[no-untyped-def]
+    """Why *lines* is not a selection the stats pass can run, or ``[]``.
+
+    Either the whole suite, spelled ``gen.FULL_SELECTION`` (what a PR's
+    ``extend-selection`` widens to when it changes a shared test module), or
+    a sorted, unique list of existing ``tests/**/test_*.py`` files."""
+    if not lines:
+        return ["an empty selection would make the stats pass run nothing"]
+    if lines == gen.FULL_SELECTION:
+        return []
+    problems = []
+    if lines != sorted(set(lines)):
+        problems.append("not sorted and unique")
+    missing = [p for p in lines if not is_file(p)]
+    if missing:
+        problems.append(f"selection names files that do not exist: {missing}")
+    if not all(
         Path(p).name.startswith("test_") and p.startswith("tests/") for p in lines
+    ):
+        problems.append("an entry is not a tests/**/test_*.py file")
+    return problems
+
+
+def test_the_committed_selection_is_well_formed() -> None:
+    """A cheap always-on check; completeness itself is the weekly --check.
+    The mutation lane rewrites this file in place (``extend-selection``)
+    before its stats pass, which may run this very test against the result."""
+    problems = _well_formed_problems(
+        gen.read_selection(), lambda p: (REPO / p).is_file()
     )
+    assert not problems, problems
 
 
 # --------------------------------------------------------------------------
@@ -226,7 +246,7 @@ def _exists(paths: set[str]):
         ([], set(), _SEL),
         (["abicheck/diff_types.py", "README.md"], {"abicheck/diff_types.py"}, _SEL),
         (["tests/test_new.py"], {"tests/test_new.py"}, [*_SEL, "tests/test_new.py"]),
-        (["tests/sub/test_deep.py"], {"tests/sub/test_deep.py"}, [*_SEL, "tests/sub/test_deep.py"]),
+        (["tests/sub/test_deep.py"], {"tests/sub/test_deep.py"}, ["tests/sub/test_deep.py", *_SEL]),
         (["tests/test_a.py"], {"tests/test_a.py"}, _SEL),
         (["tests/test_gone.py"], set(), _SEL),
         (["tests/conftest.py"], {"tests/conftest.py"}, ["tests/"]),
@@ -252,6 +272,20 @@ def test_extend_selection_never_narrows() -> None:
         for path in changed:
             if path.startswith("tests/test_") and out != ["tests/"]:
                 assert path in out
+
+
+def test_every_extended_selection_is_one_the_lane_accepts() -> None:
+    """Exhaustive over a small universe: whatever `extend-selection` writes
+    over the committed file must pass the well-formedness check, since the
+    widened stats pass runs that check against it (a PR touching a test
+    helper once failed the mutation lane on its own `tests/` sentinel)."""
+    universe = ["tests/test_new.py", "tests/sub/test_deep.py", "tests/test_0.py",
+                "tests/conftest.py", "tests/_h.py", "abicheck/x.py"]  # fmt: skip
+    for mask in range(1 << len(universe)):
+        changed = [p for i, p in enumerate(universe) if mask >> i & 1]
+        out = scope.extend_selection(_SEL, changed, _exists(set(universe)))
+        exists = set(universe) | set(_SEL)
+        assert not _well_formed_problems(out, exists.__contains__), (changed, out)
 
 
 # ── census safety: the namespace fallback (gc-census-concurrent-thread) ─────

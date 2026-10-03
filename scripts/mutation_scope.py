@@ -268,6 +268,11 @@ def extend_selection(
     measurement. A changed shared test module (``conftest.py``, a helper)
     can change which files reach mutated code in ways no path rule can see,
     so it widens the run back to the whole suite. Never narrows.
+
+    The result is written back over the committed selection, which the
+    widened run itself checks (``test_the_committed_selection_is_well_formed``):
+    so it stays sorted, and the whole suite is spelled exactly as
+    ``gen_mutation_test_selection.FULL_SELECTION`` spells it.
     """
     out = list(selection)
     for path in changed:
@@ -282,7 +287,7 @@ def extend_selection(
                 out.append(path)
         else:
             return ["tests/"]
-    return out
+    return sorted(set(out))
 
 
 def pyproject_mutation_config_changed(old_text: str | None, new_text: str) -> bool:
