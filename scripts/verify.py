@@ -259,6 +259,23 @@ def _pyscript(path: str, *args: str) -> tuple[str, ...]:
     return (sys.executable, path, *args)
 
 
+def _pyscript_without_abicheck(path: str, *args: str) -> tuple[str, ...]:
+    """`_pyscript`, with the `abicheck` package made unimportable.
+
+    ``sys.modules["abicheck"] = None`` makes every ``import abicheck`` (and
+    any ``abicheck.*`` submodule import) raise ``ModuleNotFoundError`` even
+    though the dev venv has the package installed -- the condition a
+    docs-only install produces, reproduced without a second environment.
+    """
+    code = (
+        "import runpy, sys; "
+        "sys.modules['abicheck'] = None; "
+        "sys.argv = sys.argv[1:]; "
+        "runpy.run_path(sys.argv[0], run_name='__main__')"
+    )
+    return (sys.executable, "-c", code, path, *args)
+
+
 #: `check_bugfix_test_contract.py` exits 2 when its structural half passed but
 #: no PR body was available, so the declared half never ran. Mapping that to a
 #: skip is what keeps a local `--profile pr` from claiming CI parity over half
@@ -568,6 +585,20 @@ STEPS: tuple[Step, ...] = (
         description="mkdocs strict build (dangling refs, nav coverage)",
     ),
     Step(
+        # Generated example pages + catalog/README.md are current, checked
+        # with the `abicheck` package made unimportable. The generator must
+        # stay runnable without abicheck installed (pages.yml installs only
+        # the [docs] requirements before regenerating), and a PR once broke
+        # that while every dev-venv gate passed (PR #1279, see
+        # scripts/catalog_subjects.py). That guarantee used to rest on
+        # docs-pr.yml's lean install alone; blocking the import here makes
+        # it hold in every environment that runs this step, local included.
+        "examples-docs",
+        _pyscript_without_abicheck("scripts/gen_examples_docs.py", "--check"),
+        frozenset({PR, FULL}),
+        description="docs/reference/examples/ + catalog/README.md match gen_examples_docs.py (abicheck import blocked)",
+    ),
+    Step(
         # ABICHECK_MIN_EXECUTED (tests/conftest.py's silent-skip guard, also
         # used by every marker lane in CI): `castxml` being on PATH
         # doesn't guarantee gcc/g++ is too — without this, a partial
@@ -597,7 +628,11 @@ STEPS: tuple[Step, ...] = (
             "pytest",
             "tests/",
             "-m",
-            "integration",
+            # A test that also carries a tool-lane marker (libabigail/abicc/
+            # msvc) belongs to that lane, which runs it with the tool
+            # installed; selecting it here too ran it twice wherever the tool
+            # is present (tests/test_surface_scope_parity.py on Linux).
+            "integration and not libabigail and not abicc and not msvc",
             "--tb=short",
             "--ignore=tests/test_abi_examples.py",
             "--ignore=tests/test_cross_platform_integration.py",

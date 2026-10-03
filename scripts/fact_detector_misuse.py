@@ -84,6 +84,7 @@ from fact_detector_misuse_scope import (  # noqa: E402
     _locally_bound_constructor_shadow_names,
     _qualname_at,
     _resolve_effective_fact_names,
+    walk_tree,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -193,7 +194,7 @@ def _default_and_annotation_scope_overrides(
     `ClassDef` branch's own base/keyword loop.
     """
     overrides: dict[int, str] = {}
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, ast.ClassDef):
             enclosing = def_containing.get((node.lineno, node.col_offset), "<module>")
             for base_keyword_or_deco in (
@@ -273,7 +274,7 @@ def _deferred_annotation_compare_ids(tree: ast.Module) -> frozenset[int]:
     if not _module_has_deferred_annotations(tree):
         return frozenset()
     ids: set[int] = set()
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         annotations: list[ast.expr] = []
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             for arg in (
@@ -430,7 +431,7 @@ def fact_equality_misuse_sites(tree: ast.Module, rel: str) -> list[tuple[int, in
         return False
 
     sites: list[tuple[int, int]] = []
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if not isinstance(node, ast.Compare):
             continue
         if id(node) in deferred_annotation_compare_ids:

@@ -61,12 +61,13 @@ class _DuplicateKeyCheckingLoader(yaml.SafeLoader):
     The shared primitive is the right owner for every *manifest* format
     inside the package, but this module must stay importable with the
     `abicheck` package **not installed**: `scripts/gen_examples_docs.py`
-    imports it, and `.github/workflows/docs-pr.yml`'s `build-docs` job
-    installs only `mkdocs mkdocs-material mkdocs-redirects` before running
-    `gen_examples_docs.py --check`. Attempted and reverted (PR #1279): the
-    dedup passed every local gate -- the dev venv has abicheck installed --
-    and failed `build-docs` with `ModuleNotFoundError: No module named
-    'abicheck'`. `catalog_classification.py` carries the identical
+    imports it, `.github/workflows/pages.yml` runs that generator with only
+    the `[docs]` requirements installed, and `scripts/verify.py`'s
+    `examples-docs` step runs its `--check` with the `abicheck` import
+    blocked. Attempted and reverted (PR #1279): the dedup passed every
+    local gate -- the dev venv has abicheck installed -- and failed the
+    then docs-pr.yml `build-docs` job (a docs-only install) with
+    `ModuleNotFoundError: No module named 'abicheck'`. `catalog_classification.py` carries the identical
     constraint. To reproduce the CI condition locally, run the generator
     with a `sitecustomize` that blocks the `abicheck` import; a plain local
     run cannot see this.

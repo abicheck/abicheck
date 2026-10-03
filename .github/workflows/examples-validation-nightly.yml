@@ -9,8 +9,8 @@ name: Examples Validation (weekly cross-platform)
 # Windows/MinGW PE is intentionally NOT here: the example autodiscovery harness
 # requires castxml (not reliably installable on the Windows runner), so it could
 # only skip-all. Native PE-on-Windows coverage already lives in integration.yml's
-# Windows leg ("Native PE/Mach-O compare workflows": MinGW gcc, castxml-free),
-# which runs on PRs touching its inputs — a duplicate here would add no coverage.
+# `native-compare` step (MinGW gcc + ABICHECK_MIN_EXECUTED=5, castxml-free),
+# which runs on every engine PR — a nightly duplicate would add no real coverage.
 on:
   # Weekly, not daily (lean-up 2026-10-02). Measured, not guessed: of the 91
   # scheduled runs from 2026-06-14 to 2026-10-02 this lane was red for 80,

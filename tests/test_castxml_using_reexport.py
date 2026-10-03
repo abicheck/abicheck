@@ -95,10 +95,10 @@ _CASTXML_TIMEOUT_SECONDS = 60
 def _resolve_castxml_cc() -> tuple[str, str] | None:
     """Pick a real ``(cc_id, cc_bin)`` pair to emulate, mirroring
     ``dumper_ast_config._resolve_cc``'s own "msvc if cl.exe, else gnu" rule
-    — not just Linux/macOS's g++. The Windows leg of the ``integration-tests``
-    CI matrix installs castxml + MSVC's ``cl.exe`` but no g++/MinGW (see
-    ``.github/workflows/ci.yml``), so hardcoding ``g++`` here would break
-    that required leg. Returns ``None`` when neither compiler is on PATH,
+    — not just Linux/macOS's g++. The Windows leg of ``integration.yml``'s
+    ``integration`` matrix sets up castxml + MSVC's ``cl.exe`` and installs no
+    g++ of its own (see ``.github/workflows/integration.yml``), so hardcoding
+    ``g++`` here would break that leg. Returns ``None`` when neither compiler is on PATH,
     so the caller can skip instead of invoking a missing executable.
     """
     if shutil.which("g++") is not None:
