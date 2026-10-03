@@ -931,7 +931,7 @@ open list:
 | Item | Where it is |
 |---|---|
 | ~~`--scope-public-headers`, `--post-manifest`~~ | **Done** — Phase 9b/9c/9d (2026-10-03); `--contract` is the one contract mechanism |
-| `--instantiation-manifest` | `deferred` in `rulings.py`. Its blocker, a coordinated `contract.*` config home, is half-built: Phase 9c added `.abicheck.yml`'s `contract:` block, but `ContractConfig.overlays` is not yet populated through the ADR-049 D7 resolver (no receipt provenance for it). Routing `contract.overlays` through D7 is the prerequisite slice; the manifest can then join `OVERLAY_KINDS` |
+| `--instantiation-manifest` | `deferred` in `rulings.py`. Its blocker, a coordinated `contract.*` config home, now exists: Phase 9c added `.abicheck.yml`'s `contract:` block and its D7 receipt slice states `contract.overlays` at `project_config` tier. The manifest can join `OVERLAY_KINDS` next; what remains is deciding its trust boundary (it widens, not narrows) and its route coverage |
 | `--use-cases`, `--bundle-facts-library-manifest` | `deferred` in `rulings.py`, blocked on G29/ADR-057's `use_cases:` block and G42 respectively (neither landed) |
 | `--bundle-facts-out` | a permanent keep in `rulings.py` (revisit only if `dump` gains a release fan-out) — not open |
 | `--follow-deps`/`--search-path`/`--ld-library-path` → one `--environment` operand | G42 |
@@ -1044,10 +1044,19 @@ config key is a stderr note (a project property, not this invocation's;
 an unapplied narrowing overlay can only add findings). Same split on the
 `--no-baseline` audit; a stored-bundle-facts baseline rejects the `contract:`
 block with the other blocks it cannot honour. `tests/test_post_manifest_config_overlay.py`
-uses the flag as the oracle across three sibling pair shapes. The resolved
-`ContractConfig.overlays` field is still not populated from either spelling,
-and a pack assigning it stays rejected (`UNAPPLIED_PACK_FIELDS`); the
-persisted `post_manifest` provider record (under `--contract`) carries the applied allowlist and its digest, identically for either spelling — it does not record which spelling or path selected it.
+uses the flag as the oracle across three sibling pair shapes. A pack
+assigning `contract.overlays` stays rejected (`UNAPPLIED_PACK_FIELDS`).
+
+**D7 receipt for the overlay. Done** (2026-10-03). The resolved
+`ContractConfig.overlays` is now stated at `project_config` tier
+(`ProjectCompatibilityInputs.contract_overlays`, option
+`contract.overlays.post_manifest`, the config's path and digest), but only
+when the route applies the overlay: a single-pair `compare` under an explicit
+`--config`. A discovered config, the release fan-out and the audit leave it
+`built_in_default`, so the receipt never names an overlay the run did not
+use. The ledger's observed `post_manifest` hop is appended to that entry
+(`contract_context._merged_overlay_provenance`), so the persisted receipt
+names both which file selected the overlay and that it applied.
 
 **9d — `--post-manifest` deleted. Done** (2026-10-03). Exit 64 (`No such
 option`, no alias); `contract.overlays.post_manifest` is the only spelling.

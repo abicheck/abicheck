@@ -129,6 +129,7 @@ def resolve_cli_config(
     policy_sha256: str | None = None,
     project_sha256: str | None = None,
     symbols_list: Any = None,
+    project_overlays_applied: bool = False,
 ) -> Any:
     """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
 
@@ -138,6 +139,9 @@ def resolve_cli_config(
     *policy_sha256* identifying the ``@FILE`` form's list file when used.
     *project_sha256* is the digest of the ``.abicheck.yml`` bytes
     *project_cfg* was parsed from, naming a revision, not only a path.
+    *project_overlays_applied*: this route applies the config's
+    ``contract.overlays`` (a single-pair compare under an explicit
+    ``--config``), so the receipt states them at ``project_config`` tier.
 
     Raises whatever the canonical resolver raises (a D7 same-tier conflict, a
     D8 pack conflict, a malformed pack manifest); mapping those onto an exit
@@ -175,7 +179,10 @@ def resolve_cli_config(
             public_symbols_list=symbols_list,
         ),
         project=ProjectCompatibilityInputs.from_build_config(
-            project_cfg, path=project_path, sha256=project_sha256
+            project_cfg,
+            path=project_path,
+            sha256=project_sha256,
+            overlays_applied=project_overlays_applied,
         ),
     )
 

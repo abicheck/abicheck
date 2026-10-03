@@ -340,3 +340,59 @@ def test_the_action_strips_the_overlay_from_a_discovered_config(
     assert "contract.overlays.post_manifest was dropped" in capsys.readouterr().err
     untouched = {"scope": {"public": False}}
     assert strip_untrusted_execution_keys(untouched) == untouched
+
+
+def _overlay_receipt(doc: dict) -> tuple[list, dict]:
+    ec = doc["contract_context"]["evaluation_context"]
+    return (
+        ec["resolved_config"]["contract"]["overlays"],
+        ec["field_provenance"]["contract.overlays"],
+    )
+
+
+def test_the_receipt_names_the_config_that_selected_the_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-049 D7: an applied overlay is stated at ``project_config`` tier,
+    naming the config file and its digest a replay would re-read, with the
+    ledger's observation that it applied kept alongside. A discovered config's
+    overlay is not applied, so its receipt must not claim one either."""
+    import hashlib
+
+    old_p, new_p = _pair(tmp_path, "kernel_churn_demoted")
+    _manifest(tmp_path / "m.json")
+    cfg = _config(tmp_path, _KEY)
+    _, doc, err = _run(
+        str(old_p), str(new_p), "--contract", "public", "--config", str(cfg)
+    )
+    overlays, prov = _overlay_receipt(doc)
+    assert overlays == ["post_manifest"], err
+    assert prov["layer"] == "project_config"
+    assert prov["path"] == str(cfg)
+    assert prov["sha256"] == hashlib.sha256(cfg.read_bytes()).hexdigest()
+    hops = [(h["layer"], h.get("option")) for h in prov["selected_by"]]
+    assert ("project_config", "contract.overlays.post_manifest") in hops
+    assert any(layer == "api_request" for layer, _ in hops)  # observed applying
+
+    monkeypatch.chdir(tmp_path)  # cfg is now auto-discovered: not applied
+    _, discovered, _ = _run(str(old_p), str(new_p), "--contract", "public")
+    overlays, prov = _overlay_receipt(discovered)
+    assert overlays == []
+    assert prov["layer"] == "built_in_default"
+
+
+@pytest.mark.parametrize("applied", [True, False])
+@pytest.mark.parametrize("value", ["m.json", None])
+def test_project_inputs_state_an_overlay_only_when_the_route_applies_it(
+    applied: bool, value: str | None
+) -> None:
+    from abicheck.compatibility_evaluation_frontend import (
+        ProjectCompatibilityInputs,
+    )
+
+    inputs = ProjectCompatibilityInputs.from_build_config(
+        BuildConfig(contract_post_manifest=value), overlays_applied=applied
+    )
+    assert inputs is not None
+    expected = ("post_manifest",) if applied and value else ()
+    assert inputs.contract_overlays == expected

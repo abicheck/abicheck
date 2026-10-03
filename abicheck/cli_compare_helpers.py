@@ -676,6 +676,7 @@ def _resolve_evaluation_config(
     project_cfg: Any,
     cfg_path: Path | None,
     cfg_sha: str | None,
+    config_explicit: bool,
     policy: str,
     policy_file_path: Path | None,
     policy_file: PolicyFile | None,
@@ -733,6 +734,8 @@ def _resolve_evaluation_config(
             typed={n for n in typed_parameter_names() if _param_from_cli(n)},
             project_cfg=project_cfg,
             project_path=cfg_path,
+            # The overlay applies only from an explicitly named --config.
+            project_overlays_applied=config_explicit,
             # Both already loaded for the comparison itself; re-reading them
             # here could pair one content's digest with another's rules.
             policy_file=pf,
@@ -1964,6 +1967,7 @@ def run_compare(
         project_cfg=project_cfg,
         cfg_path=cfg_path,
         cfg_sha=cfg_sha,
+        config_explicit=config is not None,
         policy=policy,
         policy_file_path=policy_file_path,
         policy_file=pf,

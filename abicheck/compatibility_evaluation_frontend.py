@@ -550,10 +550,19 @@ class ProjectCompatibilityInputs:
     #: own shape -- parsing/validation stays the caller's job.
     policy_overrides: Mapping[str, str] = field(default_factory=dict)
     ownership: OwnershipRules | None = None  # ADR-075 D7, as the config spells it
+    #: ``contract.overlays`` -- the overlay kinds (``post_manifest``) the
+    #: config selects *and this route applies*: :meth:`from_build_config`
+    #: fills it only when told so, since a discovered config's narrowing
+    #: overlay is not trusted and a set-input route applies none -- stating
+    #: one there would record an overlay the run never used.
+    contract_overlays: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "public_symbols", _normalized_symbols(self.public_symbols)
+        )
+        object.__setattr__(
+            self, "contract_overlays", tuple(sorted(set(self.contract_overlays)))
         )
         # A frozen field holding a caller's mutable dict by reference is not
         # actually immutable (Codex review) -- copy into a real one.
@@ -571,6 +580,7 @@ class ProjectCompatibilityInputs:
         *,
         path: str | Path | None = None,
         sha256: str | None = None,
+        overlays_applied: bool = False,
     ) -> ProjectCompatibilityInputs | None:
         """Project a loaded ``.abicheck.yml`` onto the fields this resolver
         understands, or ``None`` when there is no config at all.
@@ -578,6 +588,8 @@ class ProjectCompatibilityInputs:
         *sha256* is the digest of the bytes *cfg* was parsed from, which a
         caller that read the file should pass so a composed receipt can catch
         drift in it (see the field's own note on why it is not computed here).
+        *overlays_applied* is the caller's statement that its route applies
+        the config's ``contract.overlays`` (see that field).
         """
         if cfg is None:
             return None
@@ -593,6 +605,11 @@ class ProjectCompatibilityInputs:
             severity_addition=cfg.severity_addition,
             policy_overrides=dict(getattr(cfg, "policy_overrides", None) or {}),
             ownership=project_ownership_inputs(cfg),
+            contract_overlays=(
+                ("post_manifest",)
+                if overlays_applied and getattr(cfg, "contract_post_manifest", None)
+                else ()
+            ),
         )
 
 
@@ -1164,7 +1181,19 @@ def resolve_compatibility_evaluation_config(
     )
     overlays, prov[CONTRACT_OVERLAYS_FIELD] = _resolve(
         CONTRACT_OVERLAYS_FIELD,
-        [],
+        [
+            _candidate(
+                SelectorLayer.PROJECT_CONFIG,
+                project.contract_overlays,
+                # Today's one overlay kind; its key, for a replay to re-read.
+                option="contract.overlays.post_manifest",
+                source_kind="contract_overlay",
+                sha256=project.sha256,
+                path=project.path,
+            )
+        ]
+        if project is not None and project.contract_overlays
+        else [],
         default=_default(()),
         pack=contract_pack_fields.get(CONTRACT_OVERLAYS_FIELD),
         pack_layer=layer,
