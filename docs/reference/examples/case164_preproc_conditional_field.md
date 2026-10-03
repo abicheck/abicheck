@@ -46,10 +46,10 @@ shipped layout never moves.
 
 ```bash
 # Context-free header read (no build evidence) -- the false positive:
-abicheck compare v1.abi.json v2.abi.json --scope-public-headers
+abicheck compare v1.abi.json v2.abi.json
 
 # With build-context reconciliation -- the phantom clears:
-abicheck compare v1.abi.json v2.abi.json --scope-public-headers \
+abicheck compare v1.abi.json v2.abi.json \
 ```
 
 ## Expected abicheck finding

@@ -782,12 +782,15 @@ class TestCompareCommand:
         old_f = _write_snap(tmp_path / "old.json", snap)
         new_f = _write_snap(tmp_path / "new.json", snap)
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text("scope:\n  public_symbols: [foo]\n", encoding="utf-8")
+        # scope.public: false is the config spelling of the retired
+        # --no-scope-public-headers (one-comparison-product Phase 9b).
+        cfg.write_text(
+            "scope:\n  public: false\n  public_symbols: [foo]\n", encoding="utf-8"
+        )
         result = _invoke(
             "compare",
             str(old_f),
             str(new_f),
-            "--no-scope-public-headers",
             "--config",
             str(cfg),
         )

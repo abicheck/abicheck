@@ -1270,7 +1270,6 @@ class TestCompareReleaseScopeAndChangedLibraries:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--scope-public-headers",
             "-o",
             "json=-",
         )
@@ -1305,7 +1304,6 @@ class TestCompareReleaseScopeAndChangedLibraries:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--scope-public-headers",
             "-o",
             "json=-",
         )

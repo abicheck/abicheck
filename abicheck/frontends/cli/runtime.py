@@ -756,7 +756,7 @@ def _finalize_compare_result(
     # manual_review_required for programmatic consumers).
     if result.scope_to_public_surface and not result.scope_resolved:
         click.echo(
-            "Warning: --scope-public-headers could not resolve the public "
+            "Warning: public-header scoping could not resolve the public "
             "surface (no header-derived public symbols); fell back to the full "
             "export table. Compatibility is UNCONFIRMED — treat this result as "
             "manual-review-required, not a clean public surface.",

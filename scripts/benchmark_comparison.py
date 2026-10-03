@@ -1065,7 +1065,10 @@ def run_abicheck_full(
                 "new=" + str(ast_packs["v2"]),
                 "--sources",
                 "new=" + str(ast_packs["v2"]),
-                "--no-scope-public-headers",
+                # scope.public: false -- the config spelling of the retired
+                # --no-scope-public-headers (one-comparison-product Phase 9b).
+                "--config",
+                str(REPO_DIR / "tests" / "fixtures" / "no_scope.abicheck.yml"),
             ]
         compare = subprocess.run(
             compare_cmd,

@@ -452,23 +452,11 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
     # entries here used to track. No entry remains for either, matching
     # the precedent of every other fully-retired option (e.g.
     # `--build-target`, PR #1219) never appearing in this dict at all.
-    "--scope-public-headers": _deferred(
-        "Phase 9 collapses this into `--contract public`/`--contract all` "
-        "so there is one contract mechanism rather than two. Explicitly "
-        "out of scope for this audit: the governing rule is 'never trade a "
-        "possible false negative for a shorter CLI', and pulling it "
-        "forward would do exactly that.",
-        blocker=(
-            "one-comparison-product Phase 9b: unblocked 2026-10-02; the "
-            "mapping is pinned by tests/test_contract_legacy_scope_mapping.py, "
-            "deletion pending the no-flag default decision (legacy scoping "
-            "stays on internally)"
-        ),
-    ),
     "--post-manifest": _deferred(
         "A second contract/scope mechanism next to --contract; Phase 9 "
-        "re-expresses it as a contract overlay. Same gate and same "
-        "reasoning as --scope-public-headers -- not touched here.",
+        "re-expresses it as a contract overlay, the way Phase 9b already "
+        "retired --scope-public-headers into --contract. Same rule: never "
+        "trade a possible false negative for a shorter CLI.",
         blocker=(
             "one-comparison-product Phase 9c: a `contract.overlays` config "
             "home feeding the existing post_manifest provider"

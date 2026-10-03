@@ -67,6 +67,10 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # flags: --old-variant/--new-variant -> one side-scoped --variant
         # ([old=|new=]VARIANT_ID), the same ADR-040 Lever 1 shape --header/
         # --version already use. No alias: the old pair exits 64.
+        # Phase 9b deleted --scope-public-headers/--no-scope-public-headers:
+        # --contract all is the measured replacement for the opt-out, and
+        # header-origin scoping stays on for a run with no --contract
+        # (.abicheck.yml's scope.public is its config spelling).
         "--abi3",
         "--budget",
         "--bundle-facts-library-manifest",
@@ -91,14 +95,12 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--instantiation-manifest",
         "--ld-library-path",
         "--no-baseline",
-        "--no-scope-public-headers",
         "--output",
         "--pack",
         "--performance-profile",
         "--policy",
         "--post-manifest",
         "--required-symbol",
-        "--scope-public-headers",
         "--search-path",
         "--select",
         "--select-required",

@@ -68,7 +68,6 @@ if TYPE_CHECKING:
 #: loudly on the other rather than resolving to "not stated".
 COMPARE_CONFIG_PARAMS: tuple[str, ...] = (
     "contract_mode",
-    "scope_public_headers",
     "policy",
     "policy_file_path",
     "suppress",
@@ -86,7 +85,7 @@ def typed_parameter_names() -> tuple[str, ...]:
     Read off the resolver's own
     :data:`~abicheck.compatibility_evaluation_frontend.DEFAULTED_COMPARE_PARAMETERS`
     rather than restated here: those are exactly the options whose click
-    default (``--policy strict_abi``, ``--scope-public-headers``) is
+    default (``--policy strict_abi``) is
     indistinguishable from a value the user chose, and a second copy of that
     list is a second thing to keep in sync. Every other option already
     spells "not given" as ``None``/``()``.
@@ -463,7 +462,6 @@ def resolve_release_pack_application_from_ctx(
     ctx: Any,
     *,
     contract_mode: str | None,
-    scope_public_headers: bool,
     policy: str,
     policy_file_path: Path | None,
     suppress: Path | None,
@@ -520,7 +518,6 @@ def resolve_release_pack_application_from_ctx(
         return resolve_release_pack_application(
             {
                 "contract_mode": contract_mode,
-                "scope_public_headers": scope_public_headers,
                 "policy": policy,
                 "policy_file_path": policy_file_path,
                 "suppress": suppress,
@@ -780,11 +777,11 @@ def _release_summary_effective_config_block(
     for a second field -- ``effective_config_fields_from_diff_result`` reads
     ``result.scope_to_public_surface``/``.scope_to_public_surface_requested``
     off whatever it's given, so a bare unset ``SimpleNamespace`` would fall
-    back to ``False``/``True`` regardless of what ``--scope-public-headers``
+    back to ``False``/``True`` regardless of what ``scope.public``
     actually resolved to. The release fan-out has no ``--post-manifest``/
     forced-public-symbols concept of its own (unlike single-pair ``compare``,
-    where the two can diverge), so both fields are simply the raw CLI value
-    here.
+    where the two can diverge), so both fields are simply the resolved
+    value here.
 
     *excluded_header_patterns* is the release's canonical ``--exclude-header``
     identity (``model.header_exclusion_record.canonical_exclusion_identity``

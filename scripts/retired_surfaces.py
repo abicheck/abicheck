@@ -1065,6 +1065,25 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
         frozenset(),
     ),
+    (
+        # one-comparison-product.md Phase 9b: the second contract mechanism
+        # beside --contract. Header-origin scoping stays on for a run with no
+        # --contract (`.abicheck.yml`'s `scope.public` is its config
+        # spelling); `--contract all` is the measured replacement for the
+        # opt-out (Phase 9a, tests/test_contract_legacy_scope_mapping.py).
+        "compare --scope-public-headers/--no-scope-public-headers "
+        "(--contract all|public, or scope.public in .abicheck.yml)",
+        ("--scope-public-headers", "--no-scope-public-headers"),
+        frozenset(
+            {
+                "contribute/known-gaps.md",
+                "contribute/config-key-review.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/public-contract-default.md",
+                "start/upgrading-to-0.6.md",
+            }
+        ),
+    ),
 )
 
 

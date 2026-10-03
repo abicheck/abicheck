@@ -132,9 +132,7 @@ class TestApplyToCompareConfigCharacterization:
         self, preset: str | None, data: st.DataObject
     ) -> None:
         levels = data.draw(_severity_levels())
-        resolved_cfg = resolve_compare_config(
-            None, cli_severity_preset=preset, cli_scope_public=None
-        )
+        resolved_cfg = resolve_compare_config(None, cli_severity_preset=preset)
         pack_application = PackApplication(policy_overrides={}, severity_levels=levels)
         got = apply_to_compare_config(resolved_cfg, pack_application)
 
@@ -152,8 +150,6 @@ class TestApplyToCompareConfigCharacterization:
         assert got.severity_active is True
 
     def test_inert_pack_is_a_true_no_op(self) -> None:
-        resolved_cfg = resolve_compare_config(
-            None, cli_severity_preset="strict", cli_scope_public=None
-        )
+        resolved_cfg = resolve_compare_config(None, cli_severity_preset="strict")
         pack_application = PackApplication(policy_overrides={})
         assert apply_to_compare_config(resolved_cfg, pack_application) == resolved_cfg

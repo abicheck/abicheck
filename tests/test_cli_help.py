@@ -170,7 +170,7 @@ class TestCompareHelpAllDisclosure:
             "--depth",
             "--sources",
             "--build-info",
-            "--scope-public-headers",
+            "--contract",
             "--verbose",
             "--dry-run",
         ):

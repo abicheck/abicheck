@@ -159,7 +159,7 @@ invoked:
 | Block | Present when |
 |---|---|
 | `severity` | severity-aware grading was resolved from *any* source — a `--severity-*` flag, a `.abicheck.yml` `severity:` map, a run profile, or a gate pack |
-| `scope` | `--scope-public-headers` was requested |
+| `scope` | public-header scoping was in effect (the default; `.abicheck.yml` `scope.public: false` turns it off) |
 | `contract_coverage_failures`, `contract_coverage_exit_contribution`, `contract_context` | `--contract` was passed |
 | `root_causes`, `root_cause_count` | `--view root-cause` |
 | `reason` | the comparison was refused (`verdict: null`) |

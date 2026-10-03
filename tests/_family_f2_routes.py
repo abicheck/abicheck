@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from _legacy_scope import no_scope_config_args
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -186,6 +187,10 @@ class Axis:
     render: Mapping[str, Any] = field(default_factory=dict)
     #: route -> reason the route explicitly rejects this setting (exit 64).
     unsupported: Mapping[str, str] = field(default_factory=dict)
+    #: ``.abicheck.yml`` keys the CLI half sets instead of a Click parameter
+    #: -- for a setting whose flag was retired into config (e.g.
+    #: ``scope.public``, one-comparison-product Phase 9b).
+    config_keys: tuple[str, ...] = ()
 
 
 def _suppress_file(tmp: Path) -> Path:
@@ -231,10 +236,13 @@ AXES: tuple[Axis, ...] = (
     ),
     Axis(
         "no_scope_public",
-        lambda t: ["--no-scope-public-headers"],
+        # --no-scope-public-headers was retired (Phase 9b); scope.public:
+        # false is the setting it overrode.
+        no_scope_config_args,
         lambda t: {"scope_public": False},
-        ("scope_public_headers",),
+        (),
         ("scope_public",),
+        config_keys=("scope.public",),
     ),
     Axis(
         "severity_strict",

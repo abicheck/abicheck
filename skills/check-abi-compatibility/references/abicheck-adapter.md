@@ -26,7 +26,6 @@ stop rather than proceed on an unvalidated surface.
 ```bash
 abicheck compare OLD NEW \
   --depth headers \
-  --scope-public-headers \
   --view root-cause \
   -o json=compare.json
 ```

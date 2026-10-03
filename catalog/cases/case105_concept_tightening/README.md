@@ -39,7 +39,7 @@ abicheck compare libtpl_v1.so libtpl_v2.so --header old=v1.h --header new=v2.h
 # L4 source-ABI replay actually catches it. Needs L3 build-context evidence
 # (a compile_commands.json) explicitly paired with a public-header root, so
 # abicheck knows the template is public and reachable, plus
-# --no-scope-public-headers on compare (the default L2 header-AST public-
+# --contract all on compare (the default L2 header-AST public-
 # surface scoping can't recognize `sum`/`Addable` as public because it
 # doesn't model concepts either):
 cat > v1.compile_commands.json <<EOF
@@ -71,7 +71,7 @@ EOF
 abicheck dump libtpl_v1.so -H v1.h -p v1.compile_commands.json --build-info v1.evidence -o v1.abi.json --config .abicheck.yml
 abicheck dump libtpl_v2.so -H v2.h -p v2.compile_commands.json --build-info v2.evidence -o v2.abi.json --config .abicheck.yml
 
-abicheck compare v1.abi.json v2.abi.json --no-scope-public-headers
+abicheck compare v1.abi.json v2.abi.json --contract all
 ```
 
 ## Expected abicheck finding

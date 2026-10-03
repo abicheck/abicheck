@@ -101,8 +101,12 @@ Scoping is **on by default**. When no public-header surface
 can be resolved — e.g. comparing two stripped `.so` files with no header or
 DWARF provenance — scoping is automatically a no-op and every finding is
 reported, so the default never hides anything it cannot place. Pass
-`--no-scope-public-headers` to force the unscoped report (every finding,
-regardless of surface).
+`--contract all` to force the unscoped report for one run (every finding,
+regardless of surface; it also turns on per-finding contract evaluation,
+adding the `contract_*` fields to the report), or set `.abicheck.yml`'s
+`scope.public: false` to keep it unscoped without contract evaluation. (The
+former CLI opt-in/opt-out flag pair was removed; scoping was already the
+default.)
 
 The ledger is **always** reported — there is no switch. (`--show-filtered`
 was removed; the scope/reconciliation ledger, the pattern-modulation ledger
@@ -131,7 +135,7 @@ scope:
 ```
 
 ```bash
-abicheck compare old.so new.so --scope-public-headers --config .abicheck.yml
+abicheck compare old.so new.so --config .abicheck.yml
 ```
 
 Entries match **exactly** — the raw symbol, or a qualified name's trailing
@@ -141,8 +145,8 @@ Entries match **exactly** — the raw symbol, or a qualified name's trailing
 
 Matching is on the symbol as recorded on the finding (mangled or demangled),
 plus the trailing `::` segment of a qualified name. Widening only ever *keeps* a
-finding — it can never hide a break — and only takes effect together with
-`--scope-public-headers`. It is the counterpart to suppression, which *narrows*
+finding — it can never hide a break — and only takes effect while
+public-header scoping is on (the default, `scope.public: true`). It is the counterpart to suppression, which *narrows*
 the surface; the two remain separate, auditable inputs.
 
 ### How it appears in each format
@@ -184,7 +188,7 @@ itself, distinct from the overall verdict confidence:
 
 **Text**: an audit block on stderr (the reason is shown in parentheses):
 ```text
-Filtered as non-public ABI surface (1 finding, --scope-public-headers):
+Filtered as non-public ABI surface (1 finding, public-header scoping):
   - type_size_changed: InternalCache (non-public-type)
 ```
 

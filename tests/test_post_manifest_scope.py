@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from _legacy_scope import no_scope_config_args
 from click.testing import CliRunner
 
 from abicheck.checker import compare
@@ -426,7 +427,7 @@ def test_post_manifest_ledger_shown_even_with_no_scope_public_headers(
             str(new_p),
             "--post-manifest",
             str(manifest),
-            "--no-scope-public-headers",
+            *no_scope_config_args(tmp_path),
             "-o",
             "json=-",
         ],
@@ -483,7 +484,7 @@ def test_compare_cli_post_manifest_keeps_omitted_old_pp_symbol_in_scope(
             str(new_p),
             "--post-manifest",
             str(manifest),
-            "--no-scope-public-headers",
+            *no_scope_config_args(tmp_path),
             "-o",
             "json=-",
         ],

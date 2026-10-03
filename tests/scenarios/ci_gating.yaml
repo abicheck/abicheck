@@ -165,8 +165,8 @@ scenarios:
       alone, and uses compare-release so sibling-library relationships in the
       bundle are analysed.
     flow:
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers -o json=abi.json
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers -o junit=abi.xml
+      - abicheck compare-release baseline/ pr-build/ -H include/ -o json=abi.json
+      - abicheck compare-release baseline/ pr-build/ -H include/ -o junit=abi.xml
     expected:
       # Block only on CONFIRMED public breaks; when scoping fell back the result
       # is unconfirmed and must be manual-review-only, never an auto-fail.
@@ -202,8 +202,8 @@ scenarios:
       ledger every run discloses) and communicate the release impact to reviewers via
       a job summary / PR comment rather than raw JSON.
     flow:
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers -o json=abi.json
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers -o json=reports/ -o markdown=-
+      - abicheck compare-release baseline/ pr-build/ -H include/ -o json=abi.json
+      - abicheck compare-release baseline/ pr-build/ -H include/ -o json=reports/ -o markdown=-
     expected:
       fail_when:
         - verdict in [BREAKING, API_BREAK]

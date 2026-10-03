@@ -59,7 +59,7 @@ Verdict: BREAKING (exit 4)
     link or dlsym() it can fail even without header evidence.
 ```
 
-`--scope-public-headers` is on by default and changes nothing here: nothing
+Public-header scoping is on by default and changes nothing here: nothing
 is filtered, because nothing can be proven non-public. (Comparing the same
 two `.so` files with no header at all, `-H` omitted entirely, reports the
 same underlying fact as a plain `func_removed`.)

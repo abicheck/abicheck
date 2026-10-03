@@ -126,7 +126,6 @@ def _resolve_compare_config(
     *,
     config: Path | None,
     severity_preset: str | None,
-    scope_public_headers: bool,
 ) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """This module's long-standing name for `frontends.cli.project_config.
     resolve_project_compare_config`.
@@ -140,7 +139,6 @@ def _resolve_compare_config(
     return resolve_project_compare_config(
         config=config,
         severity_preset=severity_preset,
-        scope_public_headers=scope_public_headers,
     )
 
 
@@ -707,7 +705,6 @@ def _resolve_evaluation_config(
     symbols_list: Any,
     contract_mode: str | None,
     contract_evaluation: bool,
-    scope_public_headers: bool,
     require_justification: bool,
     severity_preset: str | None,
     pack_paths: tuple[Path, ...],
@@ -739,7 +736,6 @@ def _resolve_evaluation_config(
         evaluation_config, pf, resolved_cfg = resolve_and_apply(
             {
                 "contract_mode": contract_mode,
-                "scope_public_headers": scope_public_headers,
                 "policy": policy,
                 "policy_file_path": policy_file_path,
                 "suppress": suppress,
@@ -1184,7 +1180,6 @@ def run_compare(
     ld_library_path: str,
     include_dependencies: bool,
     show_only: str | None,
-    scope_public_headers: bool,
     post_manifest_path: Path | None,
     report_mode: str,
     debug_roots: tuple[Path, ...],
@@ -1300,7 +1295,6 @@ def run_compare(
     cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
         config=config,
         severity_preset=severity_preset,
-        scope_public_headers=scope_public_headers,
     )
     sev_config = resolved_cfg.severity
     # `scope.exclude_headers` -- the config equivalent of `--exclude-header`
@@ -1315,6 +1309,8 @@ def run_compare(
     # value.
     if not exclude_headers:
         exclude_headers = tuple(getattr(project_cfg, "exclude_headers", ()) or ())
+    # One-comparison-product Phase 9b: no CLI flag any more -- scope.public
+    # (or its built-in True) is the whole answer for a run with no --contract.
     scope_public_headers = resolved_cfg.scope_public
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
@@ -1431,7 +1427,6 @@ def run_compare(
         release_pack_application = resolve_release_pack_application_from_ctx(
             ctx,
             contract_mode=contract_mode,
-            scope_public_headers=scope_public_headers,
             policy=policy,
             policy_file_path=policy_file_path,
             suppress=suppress,
@@ -1994,7 +1989,6 @@ def run_compare(
         symbols_list=symbols_list,
         contract_mode=contract_mode,
         contract_evaluation=contract_evaluation,
-        scope_public_headers=scope_public_headers,
         require_justification=require_justification,
         severity_preset=severity_preset,
         pack_paths=pack_paths,

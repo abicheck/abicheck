@@ -105,12 +105,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             ],
         },
         {
-            "name": "Public-surface scoping",
-            "options": [
-                "--scope-public-headers",
-            ],
-        },
-        {
             "name": "Debug info",
             # The format/debuginfod/dwarf-only knobs are config-only now (the
             # `debug:` config block, ADR-040 L2) -- their hidden CLI spellings
@@ -341,8 +335,6 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "depth",
         "sources",
         "build_info",
-        # Public-surface scoping
-        "scope_public_headers",
         # Contract domain (ADR-049 Phase 6/7) -- headline feature per the CLI
         # audit's proposed clean `compare` surface, and the one flag that asks
         # for a contract decision at all (cli_options.resolve_contract_evaluation).

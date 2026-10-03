@@ -16,10 +16,11 @@ named prerequisite or owned by another workstream (see
 [What remains in Phase 7](#phase-7l-external-cli-audit-2026-09-12-reconciled)). Phase 9's two named
 relevance-defect blockers in
 [`public-contract-default.md`](public-contract-default.md) Phase 6 are
-**closed** (2026-10-01; see [Phase 9](#phase-9-contract-mechanism-consolidation-gated-may-not-start-early)).
-It now waits only on accepting the `package`/`real_binaries` lane-coverage
-bound. Those lanes are covered by integration tests, not by the always-on
-measurement.
+**closed** (2026-10-01; see [Phase 9](#phase-9-contract-mechanism-consolidation-gated-may-not-start-early)),
+the lane-coverage bound was accepted (2026-10-02), and slices 9a (the
+`--contract all` scope fix) and 9b (`--scope-public-headers`/`--no-` deleted,
+2026-10-03) are done. What remains is 9c/9d, `--post-manifest` as a contract
+overlay.
 **Effort:** XL · **Risk:** high — this deleted a public command and moved
 capabilities between analysis paths. Phase ordering was the safety mechanism.
 
@@ -400,7 +401,7 @@ Click parameter, excluding `--help`/`--help-all`):
 
 | Command | Live | Audit end state (7l) | 2026-09-06 audit |
 |---|---|---|---|
-| `compare` | **43** | 25 | 78 accepted (4 hidden) |
+| `compare` | **42** (9b, 2026-10-03) | 25 | 78 accepted (4 hidden) |
 | `dump` | **20** | 13 | 39 |
 | `aggregate` | **5** | 4 | 6 |
 | `deps tree` | **6** | 6 | — |
@@ -456,7 +457,7 @@ Six cross-cutting blockers. Each gated a whole phase, not one row.
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion | **Landed** (Phase 4 commit 2); §3 #19/#28 |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public_header_dirs` | §3 #4, #5, #22 | **Solved** for both sources, threaded into `InputSpec.public_header_dirs`/`provenance.apply_provenance`. No new CLI flag. The file-vs-directory asymmetry is preserved verbatim (see `workflows/cross_source_evolution.py`'s module docstring) |
 | P5 | ADR-065 S3's package component inventories | `compare --no-baseline DIR` (§3 #16, #17); `--select-required` merge | **Open** — workstream A's, not this plan's |
-| P6 | `EntityId`-based public closure (ADR-063 Phase 2) and `public-contract-default.md` Phase 6's two relevance defects plus two uncovered measurement lanes | Phase 9 only | **Defects closed (2026-10-01).** The seed mismatch was closed earlier; the identity gap is closed by schema v54 slot identities captured at extraction, not by a string heuristic. **Open:** accepting the `package`/`real_binaries` coverage bound (integration-tested, not in the always-on measurement) |
+| P6 | `EntityId`-based public closure (ADR-063 Phase 2) and `public-contract-default.md` Phase 6's two relevance defects plus two uncovered measurement lanes | Phase 9 only | **Defects closed (2026-10-01).** The seed mismatch was closed earlier; the identity gap is closed by schema v54 slot identities captured at extraction, not by a string heuristic. The `package`/`real_binaries` coverage bound was **accepted** (2026-10-02, integration-tested rather than in the always-on measurement) |
 
 P1 and P5 are ADR-065 work this plan consumes rather than owns; starting them
 here would fork the model workstream A is building.
@@ -923,7 +924,7 @@ authoritative open list:
 
 | Item | Where it is |
 |---|---|
-| `--scope-public-headers` → `--contract public`, `--post-manifest` → a contract overlay | Phase 9, blocked on `public-contract-default.md` Phase 6 |
+| `--post-manifest` → a contract overlay (`--scope-public-headers` was retired in 9b) | Phase 9c/9d — unblocked, next |
 | `--instantiation-manifest`, `--use-cases`, `--bundle-facts-library-manifest`, `--bundle-facts-out` | `deferred`/keep rulings with named blockers in `rulings.py` |
 | `--follow-deps`/`--search-path`/`--ld-library-path` → one `--environment` operand | G42 |
 | `--abi3` armed from a declared floor | G26 |
@@ -996,13 +997,37 @@ the CLI and the typed API): an explicit `all`/`exports` domain disables
 header-origin demotion, which is the `public` domain's question. Pinned by
 `tests/test_contract_legacy_scope_mapping.py`.
 
-**Remaining slices.** 9b deletes `--scope-public-headers`/
-`--no-scope-public-headers` as CLI spellings (exit 64), keeping header
-scoping on internally for a run with no `--contract` — deleting it without
-that would silently flip every no-flag run. 9c gives `--post-manifest` a
-`contract.overlays` config home on the existing `post_manifest` provider;
-9d deletes the option. Retiring `scope.public`/`CompareRequest.scope_public`
-is a separate Python-API decision.
+**9b — the legacy scope flags deleted. Done** (2026-10-03).
+`--scope-public-headers`/`--no-scope-public-headers` are gone from `compare`
+(exit 64, `No such option`, no alias). Header-origin scoping stays on for a
+run with no `--contract`: `.abicheck.yml`'s `scope.public` (built-in `true`)
+is now the whole answer, so a no-flag run is unchanged. `--contract all`
+replaces the opt-out for one run; `scope.public: false` keeps the unscoped
+reading without contract evaluation; `--contract auto` takes its domain from
+`scope.public`. What went with the flag: the `scope` option family and its
+decorator (`cli_options.scope_options`, the `cli-contract` gate's required
+family), `resolve_compare_config`'s `cli_scope_public` argument, the
+receipt's typed `scope_public_headers` parameter, its `rulings.py` entry, and
+the stored-bundle-facts rejection of the flag (config `scope:` was already
+rejected there). Kept on purpose: the `LegacyScopeFlag` receipt vocabulary
+and `legacy_alias_*` reason codes, which stored reports reference, and
+`CompareRequest.scope_public`. User-facing text that named the flag now says
+"public-header scoping". `tests/test_contract_legacy_scope_mapping.py` keeps
+the 9a oracle on the setting that now spells each reading (no flag;
+`scope.public: false`) and pins that the no-flag run still scopes, and
+`tests/_legacy_scope.py` is the one spelling of the opt-out for tests. The
+F2 route-parity harness's axis moved from a Click parameter to a config key
+(`Axis.config_keys`), keeping the typed-API default guard through
+`CONFIG_DEFAULT_MAP`.
+
+**Remaining slices.** 9c gives `--post-manifest` a `contract.overlays`
+config home on the existing `post_manifest` provider; 9d deletes the option.
+Retiring `scope.public`/`CompareRequest.scope_public` is a separate
+Python-API decision. One asymmetry that decision should settle: the typed
+API always states `scope_public` (default `True`) at the `legacy_alias`
+layer, while a no-flag CLI run now resolves `contract.mode` from the
+built-in default, so the two receipts name different layers for the same
+value (they already did for any untyped CLI run before 9b).
 
 ### Re-homed from `cli-cleanup-phase-two.md`
 

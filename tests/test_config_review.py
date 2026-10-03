@@ -4,7 +4,8 @@
 - compare: explicit exit-code-scheme announcement on stderr
 - compare / dump: --debug-format selector (auto/dwarf/btf/ctf)
 - compare: --report-mode impact is the one way to ask for the impact table
-- compare-release: --scope-public-headers default ON + toggle, -j default 0,
+- compare-release: public-header scoping default ON (toggle retired into
+  --contract, Phase 9b), -j default 0,
   severity-aware exit aggregation
 - appcompat: --scope-public-headers wiring, -H/-I ignored-mode warning,
   severity options
@@ -336,17 +337,17 @@ class TestReportModeImpact:
 
 
 class TestCompareReleaseDefaults:
-    def test_scope_toggle_present(self):
-        out = CliRunner().invoke(main, ["compare", "--help"]).output
-        # The flag is documented (rich-click wraps the long toggle across panel
-        # lines, so assert the stable primary name) and is a boolean toggle.
-        assert "--scope-public-headers" in out
-        opt = next(
-            p
-            for p in main.commands["compare"].params
-            if getattr(p, "name", "") == "scope_public_headers"
-        )
-        assert "--no-scope-public-headers" in opt.secondary_opts
+    def test_scope_toggle_retired_into_contract(self):
+        # One-comparison-product Phase 9b: the --scope-public-headers/--no-
+        # toggle is gone (scoping stays on by default; scope.public in
+        # .abicheck.yml or --contract all turn it off), and --contract is the
+        # one documented contract mechanism.
+        out = CliRunner().invoke(main, ["compare", "--help-all"]).output
+        assert "--contract" in out
+        params = main.commands["compare"].params
+        assert "scope_public_headers" not in {getattr(p, "name", "") for p in params}
+        spellings = {o for p in params for o in (*p.opts, *p.secondary_opts)}
+        assert not {"--scope-public-headers", "--no-scope-public-headers"} & spellings
 
     def test_jobs_default_zero(self):
         # --jobs is in compare's advanced/release tier (G21.8 collapse M2).

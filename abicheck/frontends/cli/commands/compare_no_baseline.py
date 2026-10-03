@@ -376,16 +376,9 @@ def _resolve_no_baseline_invocation(
     _cfg_path, _project_cfg, resolved_cfg, _cfg_sha = resolve_project_compare_config(
         config=kwargs.get("config"),
         severity_preset=None,
-        # The flag's own value, not a coalesced default: `_cli_flag`
-        # inside consults Click's parameter *source* to tell "typed" from
-        # "defaulted", which is what lets the config win when it was not
-        # typed. Passing None here would read as "typed nothing".
-        scope_public_headers=bool(kwargs.get("scope_public_headers", True)),
     )
     scope = _ScopeChoices(
         scope_to_public_surface=bool(resolved_cfg.scope_public),
-        # CLI wins when the flag was typed; otherwise the config's own value,
-        # which `resolve_compare_config` has already folded in.
         collapse_versioned_symbols=bool(
             kwargs.get("collapse_versioned_symbols")
             or resolved_cfg.collapse_versioned_symbols

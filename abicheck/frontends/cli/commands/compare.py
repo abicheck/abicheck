@@ -58,7 +58,6 @@ from ....cli_options import (
     policy_options,
     reject_bundle_facts_manifest_without_old_bundle_facts,
     release_options,
-    scope_options,
     set_input_options,
     severity_options,
     two_sided_input_options,
@@ -654,7 +653,10 @@ def _embed_inline_source_side(
     default="",
     help="Simulated LD_LIBRARY_PATH (with --follow-deps).",
 )
-@scope_options  # --scope-public-headers/--no- (ADR-037 D3)
+# One-comparison-product Phase 9b: --scope-public-headers/--no- are gone.
+# Header-origin scoping stays on for a run with no --contract (built-in
+# default, or .abicheck.yml's scope.public); `--contract all` is the
+# measured replacement for --no-scope-public-headers (Phase 9a).
 # ADR-068 D4 / Phase 5: --show-filtered is gone; the ledger it echoed has
 # been unconditional since ADR-067 S1, so `--view filtered` is its spelling.
 @click.option(

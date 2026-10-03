@@ -1,0 +1,6 @@
+# scope.public: false -- the config spelling of the retired
+# --no-scope-public-headers (one-comparison-product Phase 9b). Used by
+# tests/validate_examples.py for catalog cases whose ground truth is
+# authored unscoped.
+scope:
+  public: false

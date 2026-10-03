@@ -15,7 +15,7 @@ not make it public, is owned by
 
 | Dial | What it does |
 |---|---|
-| `--scope-public-headers` / `--no-scope-public-headers` | restrict the surface to declarations reachable from the public headers |
+| public-header scoping (on by default; `.abicheck.yml` `scope.public: false` turns it off) | restrict the surface to declarations reachable from the public headers |
 | `--header` / `-H` | name the public headers explicitly |
 | a `.abicheck.yml` `scope:` map's public-symbols key | pin an explicit public symbol set when headers cannot express it (config-only; no CLI flag) |
 | `--contract public\|exports\|all\|auto` | ask for contract-relevance decisions, and choose the evidence domain they are judged against |
@@ -34,10 +34,13 @@ domain each finding is judged against.
 - `public` — the public-header surface.
 - `exports` — the binary's observed export table.
 - `all` — no domain restriction.
-- `auto` — evaluate, but leave the domain to the precedence chain below an
-  explicit CLI value: `--scope-public-headers`/`--no-scope-public-headers`,
-  then the project's `.abicheck.yml`. Use it when the domain is a project
-  decision already recorded elsewhere.
+- `auto` — evaluate, but leave the domain to the project's `.abicheck.yml`
+  (its `scope:` map's `public` key; `public` when unset). Use it when the
+  domain is a project decision already recorded elsewhere.
+
+For one run, `--contract all` turns public-header scoping off and
+`--contract public` names the scoped domain explicitly; there is no separate
+scoping flag.
 
 Omit the flag entirely and nothing about the run changes.
 

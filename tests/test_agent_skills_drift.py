@@ -88,9 +88,10 @@ def _walk(
     out: dict[tuple[str, ...], set[str]] = {
         path: {
             opt
-            # secondary_opts carries the `--no-x` half of a Click flag pair
-            # (`--scope-public-headers/--no-scope-public-headers`), which a
-            # skill legitimately names and `params.opts` alone does not list.
+            # secondary_opts carries the `--no-x` half of a Click flag pair,
+            # which a skill legitimately names and `params.opts` alone does
+            # not list. (No pair is live today: Phase 9b retired the last
+            # one, `--scope-public-headers/--no-scope-public-headers`.)
             for param in cmd.params
             for opt in (*param.opts, *param.secondary_opts)
             if opt.startswith("-")
@@ -579,7 +580,10 @@ def test_the_drift_check_actually_has_teeth():
     # it would defeat the point.
     assert CHANGE_KIND_VALUES - SCHEMA_PROPERTY_NAMES
     assert "--used-by" in ALL_OPTIONS
-    assert "--no-scope-public-headers" in ALL_OPTIONS  # a Click flag pair's other half
+    # A retired spelling must not be accepted (one-comparison-product Phase 9b),
+    # or skill prose naming it would pass the drift check.
+    assert "--no-scope-public-headers" not in ALL_OPTIONS
+    assert "--scope-public-headers" not in ALL_OPTIONS
     assert ("project", "validate") in COMMAND_PATHS
     # The positional-argument check must actually know `aggregate` needs one,
     # and must not miscount an option's value as an operand.
@@ -661,7 +665,6 @@ def _emitted_top_level_fields(tmp_path) -> set[str]:
         ["--severity-preset", "default"],
         ["--contract", "public"],
         ["--view", "root-cause"],
-        ["--scope-public-headers"],
     )
     runner = CliRunner()
     emitted: set[str] = set()

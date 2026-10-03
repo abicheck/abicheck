@@ -32,6 +32,7 @@ makes the next addition obvious.
 from __future__ import annotations
 
 import pytest
+from _legacy_scope import no_scope_config_args
 
 
 class TestEveryPublicRendererRejectsARetiredMode:
@@ -233,11 +234,14 @@ class TestARenderedDocumentOnStdoutIsNeverPollutedByALedger:
         result = CliRunner().invoke(main, args)
         return result
 
+    # Scoping is on by default, so the default run is the one carrying the
+    # ledger; scope.public: false (the config spelling of the retired
+    # --no-scope-public-headers, Phase 9b) is the run without it.
     @pytest.mark.parametrize(
-        "extra",
+        "scoped",
         [
-            pytest.param([], id="no-ledger"),
-            pytest.param(["--scope-public-headers"], id="scope-ledger"),
+            pytest.param(False, id="no-ledger"),
+            pytest.param(True, id="scope-ledger"),
         ],
     )
     @pytest.mark.parametrize(
@@ -255,7 +259,7 @@ class TestARenderedDocumentOnStdoutIsNeverPollutedByALedger:
         ],
     )
     def test_stdout_parses_for_every_machine_format(
-        self, tmp_path, cardinality, fmt, extra
+        self, tmp_path, cardinality, fmt, scoped
     ):
         import json
         import xml.etree.ElementTree as ET
@@ -265,6 +269,7 @@ class TestARenderedDocumentOnStdoutIsNeverPollutedByALedger:
             operands = [str(old_dir / "libfoo.json"), str(new_dir / "libfoo.json")]
         else:
             operands = [str(old_dir), str(new_dir)]
+        extra = [] if scoped else no_scope_config_args(tmp_path)
         result = self._run(["compare", *operands, *extra, "-o", f"{fmt}=-"])
         assert result.exit_code in (0, 2, 4), result.output
         stdout = result.stdout
@@ -286,7 +291,6 @@ class TestARenderedDocumentOnStdoutIsNeverPollutedByALedger:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--scope-public-headers",
                 "-o",
                 "json=-",
             ]
@@ -370,7 +374,6 @@ class TestTheReleaseReportCarriesItsDispositionLedgers:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--scope-public-headers",
                 "-o",
                 "json=-",
             ]
@@ -394,7 +397,6 @@ class TestTheReleaseReportCarriesItsDispositionLedgers:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--scope-public-headers",
                 "-o",
                 "json=-",
             ]
@@ -404,7 +406,6 @@ class TestTheReleaseReportCarriesItsDispositionLedgers:
                 "compare",
                 str(old_dir / "libfoo.json"),
                 str(new_dir / "libfoo.json"),
-                "--scope-public-headers",
                 "-o",
                 "json=-",
             ]
@@ -430,7 +431,7 @@ class TestTheReleaseReportCarriesItsDispositionLedgers:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--no-scope-public-headers",
+                *no_scope_config_args(tmp_path),
                 "-o",
                 "json=-",
             ]

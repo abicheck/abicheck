@@ -88,7 +88,7 @@ def echo_filtered_surface(
     n = result.out_of_surface_count
     click.echo(
         f"\nFiltered as non-public ABI surface ({n} "
-        f"{'finding' if n == 1 else 'findings'}, --scope-public-headers):",
+        f"{'finding' if n == 1 else 'findings'}, public-header scoping):",
         err=True,
     )
     for line in ledger_lines_for(

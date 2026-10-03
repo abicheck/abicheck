@@ -84,7 +84,7 @@ abicheck compare libmylib.v1.so libmylib.v2.so \
 ```
 
 The manifest surface is authoritative, so this works independently of
-`--scope-public-headers`; the filtered ledger is always reported so a clean
+public-header scoping; the filtered ledger is always reported so a clean
 verdict never hides that filtering happened.
 
 !!! note "Removed symbols and the `pp_*` namespace"

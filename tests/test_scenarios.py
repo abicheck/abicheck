@@ -37,6 +37,7 @@ from pathlib import Path
 
 import _yaml_fast
 import pytest
+from _legacy_scope import no_scope_config_args
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -230,7 +231,7 @@ def test_sc_exit_contract(tmp_path: Path) -> None:
         tmp_path,
         _lib("1", [_fn("use")], enums=[e1]),
         _lib("2", [_fn("use")], enums=[e2]),
-        "--no-scope-public-headers",
+        *no_scope_config_args(tmp_path),
     )
     assert api.exit_code == 2
     # BREAKING -> 4 (removed symbol)
@@ -258,13 +259,14 @@ def test_sc_public_surface_scope(tmp_path: Path) -> None:
     )
 
     # Without scoping the private break is a compliance error (issue #235).
-    # Scoping is on by default since ADR-024 Phase 5, so opt out explicitly here.
-    assert _compare(tmp_path, old, new, "--no-scope-public-headers").exit_code == 4
+    # Scoping is on by default since ADR-024 Phase 5, so opt out explicitly here
+    # (scope.public: false -- the retired --no-scope-public-headers' spelling).
+    assert _compare(tmp_path, old, new, *no_scope_config_args(tmp_path)).exit_code == 4
     # With public-header scoping it must NOT raise compliance errors: the only
     # change was to a private type, so the verdict is NO_CHANGE (exit 0). Assert
     # the verdict cell, not the word "BREAKING" (which also appears in the
     # severity legend).
-    scoped = _compare(tmp_path, old, new, "--scope-public-headers")
+    scoped = _compare(tmp_path, old, new)
     assert scoped.exit_code == 0
     # The default human output is the bounded terminal projection, whose
     # verdict line names the compatibility result directly. Asserted on that
@@ -280,13 +282,13 @@ def test_sc_public_surface_scope(tmp_path: Path) -> None:
 
 def test_sc_public_surface_scope_fallback(tmp_path: Path) -> None:
     # The "don't overclaim" half of issue #235. With no Visibility.PUBLIC
-    # symbols the public surface is unresolvable, so --scope-public-headers must
+    # symbols the public surface is unresolvable, so public-header scoping must
     # fall back to the full export table rather than silently report a clean
     # public surface: the private break is KEPT, the JSON records the fallback
     # as manual-review-required, and a warning is emitted to stderr.
     old = _lib("1", [], types=[_rec("InternalCache", 64)])
     new = _lib("2", [], types=[_rec("InternalCache", 128)])
-    res = _compare(tmp_path, old, new, "--scope-public-headers", "-o", "json=-")
+    res = _compare(tmp_path, old, new, "-o", "json=-")
     assert res.exit_code == 4  # fallback kept the break → still gated
     doc = json.loads(res.stdout)
     assert doc["scope"]["resolved"] is False
@@ -483,11 +485,16 @@ def test_sc_policy_profile(tmp_path: Path) -> None:
     # Mode isn't referenced by a public function, so opt out of default
     # public-header scoping (ADR-024 Phase 5) to exercise the policy contrast.
     assert (
-        _compare(tmp_path, old, new, "--no-scope-public-headers").exit_code == 2
+        _compare(tmp_path, old, new, *no_scope_config_args(tmp_path)).exit_code == 2
     )  # strict_abi: API break
     assert (
         _compare(
-            tmp_path, old, new, "--no-scope-public-headers", "--policy", "sdk_vendor"
+            tmp_path,
+            old,
+            new,
+            *no_scope_config_args(tmp_path),
+            "--policy",
+            "sdk_vendor",
         ).exit_code
         == 0
     )
@@ -758,7 +765,7 @@ def test_sc_cpp_vtable_break(tmp_path: Path) -> None:
             _shape(["_ZN5Shape4areaEv", "_ZN5Shape4drawEv", "_ZN5Shape9perimeterEv"])
         ],
     )
-    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "-o", "json=-")
+    res = _compare(tmp_path, old, new, *no_scope_config_args(tmp_path), "-o", "json=-")
     assert res.exit_code == 4
     doc = json.loads(res.output)
     assert doc["verdict"] == "BREAKING"
@@ -770,7 +777,7 @@ def test_sc_exported_var_removed(tmp_path: Path) -> None:
     # consumer that referenced it (var_removed → BREAKING), like a removed symbol.
     old = _lib("1", [_fn("a")], variables=[_var("g_count")])
     new = _lib("2", [_fn("a")], variables=[])
-    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "-o", "json=-")
+    res = _compare(tmp_path, old, new, *no_scope_config_args(tmp_path), "-o", "json=-")
     assert res.exit_code == 4
     doc = json.loads(res.output)
     assert doc["verdict"] == "BREAKING"
@@ -788,7 +795,7 @@ def test_sc_dual_abi_flip(tmp_path: Path) -> None:
         tmp_path,
         _lib("1", legacy),
         _lib("2", cxx11),
-        "--no-scope-public-headers",
+        *no_scope_config_args(tmp_path),
         "-o",
         "json=-",
     )
@@ -804,7 +811,7 @@ def test_sc_integer_model_flip(tmp_path: Path) -> None:
     # (integer_model_changed → BREAKING).
     old = _lib("1", [_fn("solve")], typedefs={"MKL_INT": "int"})
     new = _lib("2", [_fn("solve")], typedefs={"MKL_INT": "int64_t"})
-    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "-o", "json=-")
+    res = _compare(tmp_path, old, new, *no_scope_config_args(tmp_path), "-o", "json=-")
     assert res.exit_code == 4
     doc = json.loads(res.output)
     assert doc["verdict"] == "BREAKING"
@@ -823,7 +830,7 @@ def test_sc_toolchain_flag_drift(tmp_path: Path) -> None:
 
     old = _lib("1", [_fn("a")], dwarf_advanced=_adv({"-fno-exceptions"}))
     new = _lib("2", [_fn("a")], dwarf_advanced=_adv({"-fno-exceptions", "-ffast-math"}))
-    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "-o", "json=-")
+    res = _compare(tmp_path, old, new, *no_scope_config_args(tmp_path), "-o", "json=-")
     assert res.exit_code == 0
     doc = json.loads(res.output)
     assert doc["verdict"] == "COMPATIBLE"

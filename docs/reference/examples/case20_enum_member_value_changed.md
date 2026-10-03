@@ -20,7 +20,7 @@
 canonical case for this rule); this case is the variant exercising
 public-surface scoping — `ErrorCode` isn't reachable from any exported
 function/variable signature, so detection depends on
-`--no-scope-public-headers` (see "Minimum evidence" below). See
+`--contract all` (see "Minimum evidence" below). See
 `examples/CLAUDE.md`'s "Taxonomy" section.
 
 ## Verdict and consumer impact
@@ -44,7 +44,7 @@ stops recognizing the error condition.
 ```bash
 gcc -shared -fPIC -g old/lib.c -Iold -o libfoo_v1.so
 gcc -shared -fPIC -g new/lib.c -Inew -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so --no-scope-public-headers
+abicheck compare libfoo_v1.so libfoo_v2.so --contract all
 ```
 
 ## Expected abicheck finding
@@ -63,7 +63,7 @@ Verdict: BREAKING (exit 4)
 `min_evidence: L1` — DWARF's enumeration-type debug info
 (`DW_TAG_enumeration_type` / `DW_TAG_enumerator`) records `ERROR`'s constant
 value for both versions, so `-g` alone (no public headers) carries the fact.
-`--no-scope-public-headers` is needed here because `ErrorCode` isn't
+`--contract all` is needed here because `ErrorCode` isn't
 referenced by any function or variable's *type* (`get_result()` returns
 plain `int`) — with no header evidence to confirm the enum is genuinely
 part of the public API, abicheck's default public-surface scoping

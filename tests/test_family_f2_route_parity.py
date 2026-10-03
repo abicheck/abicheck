@@ -95,7 +95,6 @@ _UC = "uncovered"
 CLICK_ROUTING: dict[str, tuple[str, Any]] = {
     "policy": ("covered", ("policy_sdk_vendor", "policy_file")),
     "suppress": ("covered", ("suppress",)),
-    "scope_public_headers": ("covered", ("no_scope_public",)),
     "severity_preset": ("covered", ("severity_strict",)),
     "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
     "contract_mode": ("covered", ("contract_exports",)),
@@ -233,11 +232,25 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     "performance_profile": (_UC, "resource use only"),
 }
 
+
+def _cli_built_in_scope_public() -> bool:
+    from abicheck.cli_helpers_compare import resolve_compare_config
+
+    return resolve_compare_config(None, cli_severity_preset=None).scope_public
+
+
+#: ``.abicheck.yml`` key -> (typed-API field, the CLI's built-in default) for a
+#: setting with no Click parameter left. ``scope.public`` lost its flag in
+#: one-comparison-product Phase 9b; the typed API's ``scope_public`` default
+#: must still agree with what a no-flag, no-config CLI run resolves.
+CONFIG_DEFAULT_MAP: dict[str, tuple[tuple[str, str], Callable[[], Any]]] = {
+    "scope.public": (("CompareRequest", "scope_public"), _cli_built_in_scope_public),
+}
+
 #: Click dest -> ("CompareRequest"|"InputSpec", field) whose default must match.
 DEFAULT_MAP: dict[str, tuple[str, str]] = {
     "policy": ("CompareRequest", "policy"),
     "suppress": ("CompareRequest", "suppress"),
-    "scope_public_headers": ("CompareRequest", "scope_public"),
     "severity_preset": ("CompareRequest", "severity_preset"),
     "diagnostic_comparison": ("CompareRequest", "diagnostic_comparison"),
     "contract_mode": ("CompareRequest", "contract_mode"),
@@ -332,6 +345,13 @@ def default_agreement_violations() -> list[str]:
             out.append(
                 f"--{dest} defaults to {cli_d!r} but {owner}.{fname} to {api_d!r}"
             )
+    for key, ((owner, fname), cli_default) in CONFIG_DEFAULT_MAP.items():
+        api_d = _norm_default(_dataclass_default(owners[owner], fname))
+        if cli_default() != api_d:
+            out.append(
+                f"{key} defaults to {cli_default()!r} on the CLI but "
+                f"{owner}.{fname} to {api_d!r}"
+            )
     return out
 
 
@@ -381,7 +401,11 @@ def test_axes_agree_with_the_routing_table() -> None:
     for axis in AXES:
         if axis.name == "default":
             continue
-        assert axis.click_params and axis.request_fields, axis.name
+        assert (axis.click_params or axis.config_keys) and axis.request_fields, (
+            axis.name
+        )
+        for key in axis.config_keys:
+            assert key in CONFIG_DEFAULT_MAP, (axis.name, key)
         for p in axis.click_params:
             status, detail = CLICK_ROUTING[p]
             if status != "covered" or axis.name not in detail:

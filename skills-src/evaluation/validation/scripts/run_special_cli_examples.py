@@ -64,9 +64,9 @@ COMPARE_CASES: dict[str, CompareSpec] = {
         "v1.abi.json",
         "v2.abi.json",
         # one-comparison-product.md Phase 7i: --reconcile-build-context is
-        # gone -- ADR-039 reconciliation runs unconditionally now, so
-        # --scope-public-headers alone still exercises this case.
-        ("--scope-public-headers",),
+        # gone -- ADR-039 reconciliation runs unconditionally now -- and
+        # Phase 9b retired --scope-public-headers: public-header scoping is
+        # the default, so the plain comparison still exercises this case.
     ),
     "case170_env_runtime_floor_raised": CompareSpec("old.abi.json", "new.abi.json"),
     "case175_kabi_crc_changed": CompareSpec("v1.symvers", "v2.symvers"),

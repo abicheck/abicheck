@@ -73,7 +73,7 @@ the severity-aware scheme).
 | `--headers-dir1 DIR` / `--hd1` | `--header old=DIR` | Directories are scanned recursively; needs `castxml` or `clang` |
 | `--headers-dir2 DIR` / `--hd2` | `--header new=DIR` | Use `-H DIR` once when the same headers apply to both sides |
 | `--header-file1` / `--header-file2` | `--header old=FILE` / `--header new=FILE` | Same flags accept files or directories |
-| `--drop-private-types` | *(automatic)* | With headers, abicheck scopes findings to the public surface by default; opt out with `--no-scope-public-headers` |
+| `--drop-private-types` | *(automatic)* | With headers, abicheck scopes findings to the public surface by default; opt out with `--contract all` (one run) or `.abicheck.yml`'s `scope.public: false` |
 | `--suppressions FILE` / `--suppr` | `--suppress FILE` | Different file format: YAML instead of libabigail's INI sections — see [Suppressions](suppressions.md) and the translation section below |
 | `--no-default-suppression` | *(not needed)* | abicheck applies no default suppression specs |
 | `--debug-info-dir1 DIR` / `--d1` | `--debug-info old=DIR` | Sidecar/split debug trees; also takes a detached debug file or a debug package |

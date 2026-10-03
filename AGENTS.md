@@ -500,7 +500,9 @@ Core pipeline (in order of data flow):
      contract/gate-pack field assignments). Pure resolution logic
    - `compatibility_evaluation_wiring.py` — ADR-049 Phase 1's per-field
      front-end wirings: `resolve_legacy_contract_mode` (`contract.mode` from
-     the real `--scope-public-headers`/`--no-` flag),
+     the legacy alias — `.abicheck.yml`'s `scope.public` or the typed API's
+     `scope_public`; the CLI flag pair was deleted in one-comparison-product
+     Phase 9b),
      `resolve_internal_namespaces` (from a real `--policy` document),
      `resolve_selected_packs`/`resolve_policy_pack_overrides`/
      `resolve_pack_field_assignments` (real pack manifests → the three
@@ -512,8 +514,7 @@ Core pipeline (in order of data flow):
      resolver: assembles one `CompatibilityEvaluationConfig` (all seven
      namespaces + a per-field provenance receipt) from a front end's real
      inputs — `compare`'s own CLI kwargs plus the set of parameters actually
-     typed (`--policy`/`--scope-public-headers` carry non-`None` click
-     defaults), a typed `CompareRequest`, and the project's `.abicheck.yml`.
+     typed (`--policy` carries a non-`None` click default), a typed `CompareRequest`, and the project's `.abicheck.yml`.
      This phase's gate is an executable check in the test suite
      (`tests/_cross_front_end.py`'s `cross_front_end_differences()`):
      equivalent CLI and API input must resolve equally, modulo only which
@@ -608,10 +609,10 @@ Core pipeline (in order of data flow):
      is given `--contract`, which both activates the evaluation and selects
      the evidence domain it judges against: `public|exports|all` name one
      (ADR-049 Phase 6), while `auto` activates without naming one and lets
-     D7's lower tiers decide. Under `auto` the domain follows
-     `--scope-public-headers`/
-     `--no-scope-public-headers`, and an explicit value outranks that legacy
-     alias via `compatibility_evaluation_wiring.resolve_legacy_contract_mode`
+     D7's lower tiers decide. Under `auto` the domain follows the legacy
+     alias, `.abicheck.yml`'s `scope.public` (the CLI flag pair was deleted in
+     one-comparison-product Phase 9b), and an
+     explicit value outranks that legacy alias via `compatibility_evaluation_wiring.resolve_legacy_contract_mode`
      (D7 precedence). **No longer advisory** — see `contract_pipeline.py`
      below: since ADR-049 Phase 7 the decision runs *before* compatibility
      policy and determines whether policy scores the finding at all, so

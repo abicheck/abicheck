@@ -441,16 +441,18 @@ class ExplicitCompatibilityInputs:
     an untouched option contributes no candidate at all and the next layer
     down wins -- ADR-049 D7's "a selector layer only participates when it
     actually selected something". A front end whose own default is
-    non-``None`` (``--policy`` defaults to ``strict_abi``,
-    ``--scope-public-headers`` to ``True``) must therefore decide
-    *explicitness* before building this; :func:`compare_cli_inputs` does that
+    non-``None`` (``--policy`` defaults to ``strict_abi``) must therefore
+    decide *explicitness* before building this; :func:`compare_cli_inputs` does that
     from the set of parameters the user actually typed.
     """
 
     #: ``--contract`` / ``CompareRequest.contract_mode``.
     contract_mode: str | None = None
-    #: ``--scope-public-headers``/``--no-`` (the D2 legacy alias for
-    #: ``contract.mode``); ``None`` = flag untouched.
+    #: ``CompareRequest.scope_public`` (the D2 legacy alias for
+    #: ``contract.mode``); ``None`` = not stated. API-only: the CLI's
+    #: ``--scope-public-headers``/``--no-`` pair was deleted in
+    #: one-comparison-product Phase 9b, so a CLI run states this only
+    #: through the project tier's ``scope.public``.
     scope_public_headers: bool | None = None
     #: ``--policy`` / ``CompareRequest.policy``.
     policy_base: str | None = None
@@ -1120,8 +1122,10 @@ def resolve_compatibility_evaluation_config(
         scope_public_headers_is_explicit=explicit.scope_public_headers is not None,
         # An API caller set a request field, not a CLI flag -- and which
         # field depends on the request type, so it goes through `spell()`
-        # rather than hard-coding `CompareRequest`'s own name. `None` keeps
-        # the CLI's existing "the alias names itself" behaviour.
+        # rather than hard-coding `CompareRequest`'s own name. The live CLI
+        # never states this any more (Phase 9b deleted the flag); `None`
+        # keeps a directly-built CLI-front-end input naming the legacy alias
+        # it stands for, the vocabulary stored receipts already carry.
         option=None if front_end is FrontEnd.CLI else spell("", "scope_public"),
     )
     if legacy_mode is not None:
@@ -1666,9 +1670,7 @@ def _overrides_provenance(
 #: alone cannot distinguish "the user typed this" from "click filled it in".
 #: A live Click caller resolves these with
 #: ``ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE``.
-DEFAULTED_COMPARE_PARAMETERS: frozenset[str] = frozenset(
-    {"policy", "scope_public_headers"}
-)
+DEFAULTED_COMPARE_PARAMETERS: frozenset[str] = frozenset({"policy"})
 
 
 def _load_policy_file(path: str | Path) -> PolicyFile:
@@ -1737,7 +1739,8 @@ def compare_cli_inputs(
         )
     return ExplicitCompatibilityInputs(
         contract_mode=kwargs.get("contract_mode"),
-        scope_public_headers=_defaulted("scope_public_headers"),
+        # No CLI spelling since one-comparison-product Phase 9b: the
+        # project tier (`scope.public`) is the CLI's only legacy-alias input.
         policy_base=(
             kwargs.get("policy") if policy_base_option else _defaulted("policy")
         ),

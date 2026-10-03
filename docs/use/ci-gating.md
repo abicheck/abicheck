@@ -52,7 +52,8 @@ unscoped path:
 1. **Classify contract relevance — opt-in, `--contract`.** Only
    when this flag is set: each finding is classified against the selected
    [contract mode](../reference/compatibility-evaluation-config.md)
-   (`public`/`exports`/`all`, or the legacy `--scope-public-headers` alias)
+   (`public`/`exports`/`all`, or `auto`, which takes the domain from
+   `.abicheck.yml`'s legacy `scope.public` key)
    as one of five values — `IN_CONTRACT`, `NOT_APPLICABLE`,
    `PROVEN_OUT_OF_CONTRACT`, `UNKNOWN_UNPROVEN`, or `UNKNOWN_UNRESOLVED`.
    Only `IN_CONTRACT` and `NOT_APPLICABLE` are `EVALUATED`; the other three —
