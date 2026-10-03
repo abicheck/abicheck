@@ -148,6 +148,24 @@ class _CastxmlParser:
 
     # ── shared-context state, exposed for methods not yet migrated ─────────
 
+    # The AST root and public-root segments are part of the parser interface
+    # both header parsers share: ``extract/header_ast_fields.py`` keys its
+    # shared SemanticIR normalization on them, and ``dumper_toolchain.py``
+    # reads ``_root``. ``tests/test_header_ast_parser_interface.py`` checks
+    # both parsers carry every attribute those readers ask for.
+
+    @property
+    def _root(self) -> Element:
+        return self._ctx.root
+
+    @property
+    def _pub_header_segs(self) -> Any:
+        return self._ctx.pub_header_segs
+
+    @property
+    def _pub_dir_segs(self) -> Any:
+        return self._ctx.pub_dir_segs
+
     @property
     def _exported_dynamic(self) -> set[str]:
         return self._ctx.exported_dynamic
