@@ -32,9 +32,9 @@ margin, rather than an absolute wall-clock budget.
 
 Requires ``clang`` on ``PATH`` (any platform -- this only runs
 ``clang -ast-dump=json`` over a synthetic header, no shared-library
-compilation). ``integration`` marker wires it into ``ci.yml``'s
-``integration-tests`` job (``-m integration`` unconditionally on every
-push/PR), same as the DWARF-session scaling guard above.
+compilation). ``integration`` marker wires it into ``integration.yml``'s
+``integration`` job (``-m integration`` on every main push and engine PR),
+same as the DWARF-session scaling guard above.
 """
 
 from __future__ import annotations

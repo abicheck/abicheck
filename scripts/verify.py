@@ -597,7 +597,11 @@ STEPS: tuple[Step, ...] = (
             "pytest",
             "tests/",
             "-m",
-            "integration",
+            # A test that also carries a tool-lane marker (libabigail/abicc/
+            # msvc) belongs to that lane, which runs it with the tool
+            # installed; selecting it here too ran it twice wherever the tool
+            # is present (tests/test_surface_scope_parity.py on Linux).
+            "integration and not libabigail and not abicc and not msvc",
             "--tb=short",
             "--ignore=tests/test_abi_examples.py",
             "--ignore=tests/test_cross_platform_integration.py",

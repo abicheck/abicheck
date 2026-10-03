@@ -25,7 +25,7 @@ ABI verdicts.
 Gated behind the ``msvc`` marker; conftest skips it when ``cl.exe`` is not
 on PATH, so it is a no-op on Linux/macOS and on Windows runners without the
 MSVC dev environment activated. It runs for real in the dedicated
-``windows-msvc`` CI lane.
+``msvc`` step of ``integration.yml``'s Windows leg.
 
 Closes the MSVC + PDB backlog item (docs/contribute/backlog.md).
 """

@@ -1103,3 +1103,19 @@ def test_env_defaults_yield_to_the_caller_but_env_does_not(
     assert (seen["FLOOR"], seen["FIXED"], seen["OTHER"]) == ("20", "step", "d")
     assert _step("integration").env_defaults == {"ABICHECK_MIN_EXECUTED": "1"}
     assert "ABICHECK_MIN_EXECUTED" not in _step("integration").env
+
+
+def test_integration_step_leaves_tool_lane_tests_to_their_lanes() -> None:
+    """A test marked both `integration` and a tool-lane marker runs once, in
+    its tool's lane: the integration step's marker expression must exclude
+    every tool lane the full profile also runs."""
+    cmd = _step("integration").cmd
+    expr = cmd[cmd.index("-m") + 1]
+    for marker, lane in (
+        ("libabigail", "libabigail-parity"),
+        ("abicc", "abicc-parity"),
+        ("msvc", "msvc"),
+    ):
+        assert f"not {marker}" in expr, marker
+        lane_cmd = _step(lane).cmd
+        assert lane_cmd[lane_cmd.index("-m") + 1] == marker, lane

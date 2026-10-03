@@ -20,7 +20,7 @@ on:
       # `action/install-castxml.sh`. A change to one of those
       # decides how this workflow runs, so omitting it let such a change
       # merge without a single job that depends on it having run --
-      # `ci.yml`'s `heavy-parity-gate` already names the same set for the
+      # `integration.yml`'s `paths:` filter already names the same set for the
       # same reason ("re-pinning CastXML in action/install-castxml.sh ...
       # would otherwise land without a single job that uses CastXML having
       # run"). Enforced by tests/test_workflow_path_filter_closure.py,

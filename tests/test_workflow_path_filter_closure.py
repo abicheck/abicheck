@@ -22,7 +22,8 @@ single job that depends on it having run. The filter looks careful and is
 silently incomplete, so nothing fails; the gap is only visible the next
 time the skipped job would have caught something.
 
-`ci.yml`'s `heavy-parity-gate` already names `pyproject.toml`,
+`ci.yml`'s `heavy-parity-gate` (now `integration.yml`'s trigger-level
+`paths:` filter) already names `pyproject.toml`,
 `action/**`, `.github/actions/**` and `scripts/verify.py` for exactly this
 reason, and its own comment states the sharpest case: "re-pinning CastXML
 in action/install-castxml.sh ... would otherwise land without a single job

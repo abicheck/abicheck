@@ -11,7 +11,7 @@ suite as a whole is not quick: budget ~12 minutes at 4-way parallelism.
 | `integration` | castxml + gcc/g++ | DWARF/ELF parsing changes |
 | `libabigail` | abidiff + gcc/g++ | parity vs libabigail |
 | `abicc` | `abi-compliance-checker` + gcc/g++ | parity vs ABICC |
-| `msvc` | MSVC `cl.exe` (Windows) | MSVC+PDB end-to-end (`windows-msvc` CI lane) |
+| `msvc` | MSVC `cl.exe` (Windows) | MSVC+PDB end-to-end (`msvc` step, `integration.yml` Windows leg) |
 | `slow` | varies | hypothesis / property-based / perf — covered in CI on Linux/3.13 |
 | `golden` | golden files in `tests/golden/` | output-format snapshots |
 

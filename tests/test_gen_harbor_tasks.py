@@ -974,7 +974,7 @@ class TestSolveScriptsEndToEnd:
     toolchain but does not exclude the class from the default fast lane on
     a host that happens to have gcc/abicheck on PATH already (e.g. plain
     ubuntu-latest CI runners, or a contributor's own dev machine) --
-    `.github/workflows/ci.yml`'s `integration-tests` job already runs
+    `.github/workflows/integration.yml`'s `integration` job already runs
     `pytest -m integration` with castxml/gcc installed explicitly, so this
     class now runs there instead of silently riding along in the
     unit-tests job's `-m "not integration and ..."` fast lane.
