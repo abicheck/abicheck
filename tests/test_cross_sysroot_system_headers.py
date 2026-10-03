@@ -22,7 +22,6 @@ aarch64-linux-gnu g++ 13). The invariants:
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -33,6 +32,7 @@ import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.provenance import _is_bare_system_dir, _segments, is_system_header
+from abicheck.serialization import load_snapshot
 
 #: Real Debian cross-toolchain triples (``gcc-<ver>-<triple>`` package names).
 _DEBIAN_CROSS_TRIPLES = (
@@ -163,8 +163,7 @@ def test_cross_target_dump_keeps_what_the_host_dump_keeps(tmp_path: Path) -> Non
             capture_output=True,
             env=env,
         )
-        payload = json.loads(out.read_text())["sections"]["declarations"]["payload"]
-        return {fn["name"] for fn in payload["functions"]}
+        return {fn.name for fn in load_snapshot(out).declarations.functions}
 
     host = dump("host", "g++", None)
     cross = dump("cross", str(shim / "g++"), str(shim))

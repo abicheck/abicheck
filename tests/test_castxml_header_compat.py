@@ -23,7 +23,6 @@ AArch64 for 81 days). The invariants stated here:
 from __future__ import annotations
 
 import itertools
-import json
 import os
 import shutil
 import subprocess
@@ -35,6 +34,8 @@ import pytest
 
 from abicheck.extract import castxml_header_compat as compat
 from abicheck.extract.headers.castxml.location import is_builtin_element
+from abicheck.model import AbiSnapshot
+from abicheck.serialization import load_snapshot
 
 # -- Guard semantics, exhaustively, under the real preprocessor -------------
 
@@ -156,7 +157,7 @@ _FLOAT_HEADERS = (
 
 def _dump(
     tmp: Path, compiler_dir: Path | None, header: Path, lib: Path, monkeypatch
-) -> dict:
+) -> AbiSnapshot:
     if compiler_dir is not None:
         monkeypatch.setenv("PATH", f"{compiler_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp / "cache"))
@@ -177,7 +178,7 @@ def _dump(
         capture_output=True,
         env=os.environ.copy(),
     )
-    return json.loads(out.read_text())["sections"]["declarations"]["payload"]
+    return load_snapshot(out)
 
 
 def _write_case(tmp: Path) -> tuple[Path, Path]:
@@ -196,18 +197,15 @@ def _write_case(tmp: Path) -> tuple[Path, Path]:
     return header, src
 
 
-def _assert_clean(payload: dict) -> None:
-    text = json.dumps(
-        {
-            "types": payload.get("types"),
-            "names": [f["name"] for f in payload["functions"]],
-        }
+def _assert_clean(snap) -> None:
+    text = repr([t.name for t in snap.declarations.types]) + repr(
+        [f.name for f in snap.declarations.functions]
     )
     assert compat.FLOAT128_STANDIN not in text
-    q = next(f for f in payload["functions"] if f["name"] == "q")
-    assert q["return_type"] == compat.FLOAT128_SPELLING
-    assert [p["type"] for p in q["params"]] == [compat.FLOAT128_SPELLING]
-    assert any(f["name"] == "f" for f in payload["functions"])
+    q = next(f for f in snap.declarations.functions if f.name == "q")
+    assert q.return_type == compat.FLOAT128_SPELLING
+    assert [p.type for p in q.params] == [compat.FLOAT128_SPELLING]
+    assert any(f.name == "f" for f in snap.declarations.functions)
 
 
 @pytest.mark.integration
@@ -251,7 +249,7 @@ def test_aarch64_target_parses_libstdcxx_float_headers(
         check=True,
     )
     c_payload = _dump(tmp_path, shim, c_header, c_lib, monkeypatch)
-    assert any(f["name"] == "g" for f in c_payload["functions"])
+    assert any(f.name == "g" for f in c_payload.declarations.functions)
 
 
 @pytest.mark.integration
@@ -283,5 +281,11 @@ def test_preamble_is_inert_on_the_host_target(tmp_path: Path, monkeypatch) -> No
     # preamble (separate caches are given by the per-run XDG_CACHE_HOME).
     assert marker.exists(), "sitecustomize did not run; the comparison would be vacuous"
     if os.uname().machine in ("x86_64", "i686"):
-        assert with_preamble == without
+        assert (
+            with_preamble.declarations.functions,
+            with_preamble.declarations.types,
+        ) == (
+            without.declarations.functions,
+            without.declarations.types,
+        )
     _assert_clean(with_preamble)
