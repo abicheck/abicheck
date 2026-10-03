@@ -162,22 +162,7 @@ _NEEDS_STATIC = {
     "initial-exec": True,
     "local-exec": True,
 }
-
-
-def _targets_elf(cc: str) -> bool:
-    """MinGW (PE) and Apple (Mach-O) gcc spellings build no ELF to classify."""
-    r = subprocess.run([cc, "-dumpmachine"], capture_output=True, text=True)
-    triple = r.stdout.strip().lower()
-    return r.returncode == 0 and not any(
-        t in triple for t in ("mingw", "cygwin", "windows", "darwin", "apple")
-    )
-
-
-_COMPILERS = [
-    cc
-    for cc in ("gcc", "aarch64-linux-gnu-gcc")
-    if shutil.which(cc) and _targets_elf(cc)
-]
+_COMPILERS = [cc for cc in ("gcc", "aarch64-linux-gnu-gcc") if shutil.which(cc)]
 
 
 def _has_any_tls_dynamic_evidence(so: Path) -> bool:
@@ -195,7 +180,7 @@ def _has_any_tls_dynamic_evidence(so: Path) -> bool:
 @pytest.mark.skipif(
     not shutil.which("readelf"), reason="readelf required as the oracle"
 )
-@pytest.mark.skipif(not _COMPILERS, reason="no ELF-targeting C compiler")
+@pytest.mark.skipif(not _COMPILERS, reason="no C compiler")
 @pytest.mark.parametrize("cc", _COMPILERS)
 def test_every_tls_model_is_classified_by_its_semantics(
     cc: str, tmp_path: Path
@@ -223,6 +208,10 @@ def test_every_tls_model_is_classified_by_its_semantics(
             # local-exec in a shared object is a link error on some targets;
             # that is the toolchain refusing the model, not a classification.
             continue
+        if so.read_bytes()[:4] != b"\x7fELF":
+            # A host toolchain whose shared objects are not ELF (MinGW emits
+            # PE) has no ELF TLS relocations to classify.
+            pytest.skip(f"{cc} does not produce ELF shared objects")
         built[model] = needs_static
         meta = parse_elf_metadata(so)
         assert meta.has_tls_symbols

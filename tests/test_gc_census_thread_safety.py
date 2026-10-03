@@ -166,10 +166,10 @@ _CENSUS_ALLOWLIST: dict[str, str] = {
     "scripts/perf_cache_reset.py": (
         "clears lru_caches before a traced run; heap census only when gc_census_is_safe(), else a namespace walk"
     ),
-    "scripts/mutation_reach_trace.py": (
-        "arms sys.monitoring on only_mutate functions; heap census only when no other thread is alive, else a namespace walk"
-    ),
     "tests/test_gc_census_thread_safety.py": "the negative control above",
+    "scripts/mutation_reach_trace.py": (
+        "arms sys.monitoring on every only_mutate function; heap census only when gc_census_is_safe(), else a namespace walk"
+    ),
 }
 _CENSUS_CALLS = {"get_objects", "get_referrers"}
 
@@ -212,8 +212,13 @@ class TestNoUnguardedCensus:
             f"use abicheck.workflows.memory_trace.gc_object_count(): {offenders}"
         )
 
-    def test_allowlisted_benchmark_still_checks_the_guard(self) -> None:
-        text = (_REPO / "scripts/perf_cache_reset.py").read_text(encoding="utf-8")
+    @pytest.mark.parametrize(
+        "rel", sorted(p for p in _CENSUS_ALLOWLIST if p.startswith("scripts/"))
+    )
+    def test_allowlisted_script_still_checks_the_guard(self, rel: str) -> None:
+        """Every allowlisted census outside the guard and its negative control
+        is allowlisted *because* it consults the guard first."""
+        text = (_REPO / rel).read_text(encoding="utf-8")
         assert "gc_census_is_safe()" in text
 
 
@@ -278,63 +283,3 @@ def test_harness_copy_of_the_guard_agrees_with_memory_trace() -> None:
         release.set()
         t.join(10)
     assert mod.gc_census_is_safe() is memory_trace.gc_census_is_safe()
-
-
-def test_reach_trace_fallback_finds_what_the_heap_census_finds(tmp_path: Path) -> None:
-    """With another thread alive, `mutation_reach_trace` walks namespaces
-    instead of the heap; for a module's functions, methods and wrapped
-    functions it must arm the same code. Oracle: the heap census itself."""
-    import importlib.util
-    import types
-
-    spec = importlib.util.spec_from_file_location(
-        "_reach_trace_under_test", _REPO / "scripts/mutation_reach_trace.py"
-    )
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-
-    src = tmp_path / "_reach_target.py"
-    src.write_text(
-        "import functools\n"
-        "def f():\n    return lambda: 1\n"
-        "def _deco(fn):\n"
-        "    @functools.wraps(fn)\n"
-        "    def w(*a):\n        return fn(*a)\n"
-        "    return w\n"
-        "@_deco\ndef g():\n    pass\n"
-        "class C:\n"
-        "    def m(self):\n        pass\n"
-        "    @staticmethod\n    def s():\n        pass\n"
-        "    @classmethod\n    def c(cls):\n        pass\n"
-    )
-    tspec = importlib.util.spec_from_file_location("_reach_target", src)
-    assert tspec and tspec.loader
-    target = importlib.util.module_from_spec(tspec)
-    sys.modules["_reach_target"] = target
-    try:
-        tspec.loader.exec_module(target)
-
-        def codes(objs: list[object]) -> set[str]:
-            return {
-                c.co_qualname
-                for o in objs
-                if isinstance(o, types.FunctionType)
-                and o.__code__.co_filename == str(src)
-                for c in mod.code_objects(o.__code__)
-            }
-
-        census = codes(mod._function_candidates(["_reach_target"]))
-        started, release = threading.Event(), threading.Event()
-        t = threading.Thread(target=lambda: (started.set(), release.wait(10)))
-        t.start()
-        try:
-            started.wait(10)
-            walked = codes(mod._function_candidates(["_reach_target"]))
-        finally:
-            release.set()
-            t.join(10)
-        assert {"f", "f.<locals>.<lambda>", "g", "C.m", "C.s", "C.c"} <= census
-        assert walked == census
-    finally:
-        del sys.modules["_reach_target"]

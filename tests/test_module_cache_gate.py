@@ -48,8 +48,8 @@ _INTERNING = (
 
 #: ``<path>::<name>`` -> why this process-global state is safe to share.
 ALLOWLIST: dict[str, str] = {
-    "abicheck/model/name_heuristics.py::_REGISTRY": "the name-heuristic registry: one record per heuristic, written by register_name_heuristic at import, never per request or per comparison",
     "abicheck/model/execution_cache.py::_REGISTRY": "the cache wrapper's own registry: one record per cache definition, written at import, never per request",
+    "abicheck/model/name_heuristics.py::_REGISTRY": "the name-heuristic registry: one record per heuristic, written by register_name_heuristic at import, never per request or per comparison",
     "abicheck/storage/ast_cache_location.py::_REFERENCE_SCRATCH": "reference mode's scratch-directory list, kept only to delete them at exit; never read as a cache",
     "abicheck/buildsource/include_graph_workers.py::_SHARED_POOL": "the process-wide probe pool (a pool, not a cache); reference mode never uses it (an inline executor instead)",
     "abicheck/deadline.py::_active_pgroups": "Phase 6 subprocess supervisor's live process-group registry for SIGTERM cleanup; not a cache (out of Phase 4's scope)",
