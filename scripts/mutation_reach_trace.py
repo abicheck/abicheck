@@ -35,7 +35,12 @@ on those code objects; each reports once and is disabled, and
 ``restart_events()`` re-arms them per test, so every other call in the suite
 costs nothing. (A global ``sys.setprofile`` hook was measured covering about
 2% of the suite in several minutes.) The code objects are found from every
-live function (``gc``) and their nested ``co_consts``. A closure created at
+live function and their nested ``co_consts``. Live functions come from a
+``gc`` heap census when that is safe (this is the process's only Python
+thread, ``memory_trace.gc_census_is_safe``); with other threads alive a
+census can corrupt a tuple one of them is building, so the scan falls back
+to walking the ``only_mutate`` modules' namespaces (functions, class members,
+``__wrapped__`` chains). A closure created at
 run time reuses a nested code object that is already armed, so new code only
 appears when an ``only_mutate`` module is (re)imported: the scan is repeated
 only when those module objects change, not per test.
@@ -89,6 +94,46 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
+def namespace_functions(modules: list[types.ModuleType]) -> list[types.FunctionType]:
+    """Every function reachable from *modules*' namespaces: module-level
+    functions, class members (static/class methods, properties), nested
+    classes, container contents (dict/list/tuple/set), instance attributes
+    (stopping at other modules), and ``__wrapped__`` chains. The thread-safe stand-in for a heap
+    census; nested code objects are reached from these via ``code_objects``."""
+    found: dict[int, types.FunctionType] = {}
+    seen: set[int] = set()
+    stack: list[object] = [v for m in modules for v in vars(m).values()]
+    while stack:
+        obj = stack.pop()
+        if id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        if isinstance(obj, types.FunctionType):
+            found[id(obj)] = obj
+        elif isinstance(obj, (staticmethod, classmethod)):
+            stack.append(obj.__func__)
+        elif isinstance(obj, property):
+            stack.extend(f for f in (obj.fget, obj.fset, obj.fdel) if f is not None)
+        elif isinstance(obj, type):
+            stack.extend(vars(obj).values())
+        elif isinstance(obj, dict):
+            stack.extend(obj.values())
+        elif isinstance(obj, (list, tuple, set, frozenset)):
+            stack.extend(obj)
+        elif not isinstance(obj, types.ModuleType):
+            # Instances (a registry entry holding a ``requires_support=``
+            # lambda): their attributes. Never another module's namespace.
+            stack.extend(getattr(obj, "__dict__", {}).values())
+            slots = getattr(type(obj), "__slots__", ())
+            for slot in (slots,) if isinstance(slots, str) else slots:
+                if hasattr(obj, slot):
+                    stack.append(getattr(obj, slot))
+        wrapped = getattr(obj, "__wrapped__", None) if callable(obj) else None
+        if wrapped is not None:
+            stack.append(wrapped)
+    return list(found.values())
+
+
 class Monitor:
     def __init__(self, paths: frozenset[str], modules: list[str]) -> None:
         if _MON is None:
@@ -115,9 +160,7 @@ class Monitor:
         if ids == self.module_ids:
             return
         self.module_ids = ids
-        for obj in gc.get_objects():
-            if not isinstance(obj, types.FunctionType):
-                continue
+        for obj in self._live_functions():
             code = obj.__code__
             if code.co_filename not in self.paths or code in self.armed:
                 continue
@@ -125,6 +168,15 @@ class Monitor:
                 if nested.co_name != "<module>" and nested not in self.armed:
                     _MON.set_local_events(_TOOL_ID, nested, _MON.events.PY_START)
                     self.armed.add(nested)
+
+    def _live_functions(self) -> list[types.FunctionType]:
+        from abicheck.workflows.memory_trace import gc_census_is_safe
+
+        if gc_census_is_safe():
+            return [o for o in gc.get_objects() if isinstance(o, types.FunctionType)]
+        return namespace_functions(
+            [m for name in self.modules if (m := sys.modules.get(name)) is not None]
+        )
 
     def close(self) -> None:
         _MON.register_callback(_TOOL_ID, _MON.events.PY_START, None)

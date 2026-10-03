@@ -166,7 +166,13 @@ _CENSUS_ALLOWLIST: dict[str, str] = {
     "scripts/perf_cache_reset.py": (
         "clears lru_caches before a traced run; heap census only when gc_census_is_safe(), else a namespace walk"
     ),
+    "scripts/mutation_reach_trace.py": (
+        "arms sys.monitoring on live functions; heap census only when gc_census_is_safe(), else a namespace walk"
+    ),
     "tests/test_gc_census_thread_safety.py": "the negative control above",
+    "tests/test_mutation_test_selection.py": (
+        "census oracle for the reach tracer's namespace walk; skips unless gc_census_is_safe()"
+    ),
 }
 _CENSUS_CALLS = {"get_objects", "get_referrers"}
 
@@ -209,8 +215,11 @@ class TestNoUnguardedCensus:
             f"use abicheck.workflows.memory_trace.gc_object_count(): {offenders}"
         )
 
-    def test_allowlisted_benchmark_still_checks_the_guard(self) -> None:
-        text = (_REPO / "scripts/perf_cache_reset.py").read_text(encoding="utf-8")
+    @pytest.mark.parametrize(
+        "rel", ["scripts/perf_cache_reset.py", "scripts/mutation_reach_trace.py"]
+    )
+    def test_allowlisted_script_still_checks_the_guard(self, rel: str) -> None:
+        text = (_REPO / rel).read_text(encoding="utf-8")
         assert "gc_census_is_safe()" in text
 
 

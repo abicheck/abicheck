@@ -238,3 +238,33 @@ def test_extend_selection_never_narrows() -> None:
         for path in changed:
             if path.startswith("tests/test_") and out != ["tests/"]:
                 assert path in out
+
+
+def test_namespace_walk_matches_heap_census_on_only_mutate_modules() -> None:
+    """Oracle: a single-threaded heap census. The thread-safe namespace walk
+    the reach tracer falls back to must find every function a census finds
+    whose code lives in an ``only_mutate`` file (sampled over real modules)."""
+    import gc
+    import importlib
+    import types
+
+    import mutation_reach_trace as trace
+
+    from abicheck.workflows.memory_trace import gc_census_is_safe
+
+    if not gc_census_is_safe():
+        pytest.skip("heap census unsafe with other threads alive")
+    root = Path(__file__).resolve().parents[1]
+    paths = trace.only_mutate_paths(root)
+    names = trace.module_names(root, paths)
+    modules = [importlib.import_module(n) for n in names]
+    walked = {f.__code__ for f in trace.namespace_functions(modules)}
+    census = {
+        o.__code__
+        for o in gc.get_objects()
+        if isinstance(o, types.FunctionType) and o.__code__.co_filename in paths
+    }
+    nested = {c for code in walked for c in trace.code_objects(code)}
+    missing = {f"{c.co_filename}:{c.co_name}" for c in census if c not in nested}
+    assert len(walked) > 100
+    assert not missing, sorted(missing)[:20]
