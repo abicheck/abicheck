@@ -435,11 +435,6 @@ class PatternFactsResult:
         triggers.sort(key=lambda t: t.kind.value)
         return triggers
 
-    @property
-    def should_escalate(self) -> bool:
-        """True if any located construct warrants a deeper source-ABI scan."""
-        return any(fact.escalates for fact in self.facts)
-
     def merged(self, other: PatternFactsResult) -> PatternFactsResult:
         """Combine two scans of the same side run under *different* licences.
 

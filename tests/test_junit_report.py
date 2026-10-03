@@ -882,7 +882,7 @@ class TestSeverityConfig:
     def test_demoted_compatible_fails_under_strict_preset(self) -> None:
         """ADR-027 review: a --pattern-verdicts demotion to COMPATIBLE must
         still be a JUnit failure under a strict severity preset, matching the
-        severity-aware exit code (classify_change_object → QUALITY_ISSUES →
+        severity-aware exit code (classify_effective_change → QUALITY_ISSUES →
         error). Otherwise CI consuming the JUnit file misses the failure that
         the exit status reports."""
         from abicheck.severity import PRESET_STRICT

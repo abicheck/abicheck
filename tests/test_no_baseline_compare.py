@@ -285,6 +285,15 @@ class TestRunNoBaselineCompareEnvMatrix:
         assert no_baseline.diff.env_matrix_source_sha256 is None
 
 
+def _json_report(result):
+    """The JSON document the CLI writes for *result* (``render_no_baseline``)."""
+    import json
+
+    from abicheck.report.no_baseline import render_no_baseline
+
+    return json.loads(render_no_baseline(result, "json")[0])
+
+
 class TestNoBaselineReportEnvMatrixDigest:
     """Codex review (P2): the digest ``run_no_baseline_compare`` stamps onto
     its ``DiffResult`` must actually reach the rendered report -- carrying
@@ -306,10 +315,7 @@ class TestNoBaselineReportEnvMatrixDigest:
 
     def test_json_report_carries_the_digest(self) -> None:
         from abicheck.environment_matrix import EnvironmentMatrix
-        from abicheck.report.no_baseline import (
-            compute_no_baseline_document,
-            no_baseline_json_report,
-        )
+        from abicheck.report.no_baseline import compute_no_baseline_document
         from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
 
         matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
@@ -320,7 +326,7 @@ class TestNoBaselineReportEnvMatrixDigest:
         assert doc.env_matrix_source_sha256 == result.diff.env_matrix_source_sha256
         assert doc.env_matrix_source_sha256 is not None
 
-        report = no_baseline_json_report(result)
+        report = _json_report(result)
         assert (
             report["env_matrix_source_sha256"] == result.diff.env_matrix_source_sha256
         )
@@ -334,7 +340,6 @@ class TestNoBaselineReportEnvMatrixDigest:
 
         from abicheck.checker import compare
         from abicheck.environment_matrix import EnvironmentMatrix
-        from abicheck.report.no_baseline import no_baseline_json_report
         from abicheck.reporter import to_json
         from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
 
@@ -346,7 +351,7 @@ class TestNoBaselineReportEnvMatrixDigest:
         assert "env_matrix_source_sha256" in two_sided_report
 
         no_baseline = run_no_baseline_compare(candidate, env_matrix=matrix)
-        no_baseline_report = no_baseline_json_report(no_baseline)
+        no_baseline_report = _json_report(no_baseline)
         assert (
             no_baseline_report["env_matrix_source_sha256"]
             == two_sided_report["env_matrix_source_sha256"]
@@ -355,12 +360,11 @@ class TestNoBaselineReportEnvMatrixDigest:
     def test_json_report_omits_the_key_when_no_matrix_was_declared(self) -> None:
         """Omitted, not ``null`` -- matching every other additive optional
         key in this report (e.g. ``contract_coverage_failures``)."""
-        from abicheck.report.no_baseline import no_baseline_json_report
         from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
 
         candidate = self._candidate_requiring("2.34")
         result = run_no_baseline_compare(candidate)
-        report = no_baseline_json_report(result)
+        report = _json_report(result)
         assert "env_matrix_source_sha256" not in report
 
 
@@ -374,9 +378,8 @@ class TestNoBaselineReport:
         return run_no_baseline_compare(snapshot)
 
     def test_json_report_has_no_verdict_or_additions(self) -> None:
-        from abicheck.report.no_baseline import no_baseline_json_report
 
-        report = no_baseline_json_report(self._result())
+        report = _json_report(self._result())
         assert report["verdict"] is None
         assert report["changes"] == []
         assert report["run_outcome"]["compatibility"] is None
@@ -391,9 +394,10 @@ class TestNoBaselineReport:
         assert no_baseline_exit_code(self._result()) == 0
 
     def test_markdown_report_names_declared_absent(self) -> None:
-        from abicheck.report.no_baseline import no_baseline_markdown_report
 
-        text = no_baseline_markdown_report(self._result())
+        from abicheck.report.no_baseline import render_no_baseline
+
+        text = render_no_baseline(self._result(), "markdown")[0]
         assert "declared_absent" in text
         assert "no baseline" in text.lower()
 

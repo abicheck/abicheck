@@ -108,7 +108,6 @@ __all__ = [
     "SEVERITY_PRESET_DISABLES_AUDIT_GATE",
     "audit_gate_enabled_for_severity_preset",
     "audit_gate_exit_contribution",
-    "fold_audit_gate_exit",
 ]
 
 #: This axis's own exit code. Chosen from the codes ``compare``/
@@ -198,11 +197,3 @@ def audit_gate_exit_contribution(findings: Iterable[Any], *, enabled: bool) -> i
     return 0
 
 
-def fold_audit_gate_exit(base: int, contribution: int) -> int:
-    """*base* raised to this axis's floor -- the same ``max`` discipline
-    every other orthogonal axis in this codebase folds with. Never lowers
-    *base*, and *contribution* is always either ``0`` or
-    :data:`AUDIT_GATE_EXIT_CODE` -- never ``2``/``4``, so it can never be
-    mistaken for, or override, the compatibility family's own codes.
-    """
-    return max(base, contribution)

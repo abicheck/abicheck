@@ -262,22 +262,22 @@ class TestBinaryFormatDetection:
     """Test binary format detection from magic bytes."""
 
     def test_pe_magic_detected(self, tmp_path: Path) -> None:
-        """PE file with MZ magic should be detected by is_pe."""
-        from abicheck.pe_metadata import is_pe
+        """PE file with MZ magic should be detected as PE."""
+        from abicheck.binary_utils import detect_binary_format
 
         pe_file = _make_minimal_pe(tmp_path)
-        assert is_pe(pe_file) is True
+        assert detect_binary_format(pe_file) == "pe"
 
     def test_macho_magic_detected(self, tmp_path: Path) -> None:
-        """Mach-O file should be detected by is_macho."""
-        from abicheck.macho_metadata import is_macho
+        """Mach-O file should be detected as Mach-O."""
+        from abicheck.binary_utils import detect_binary_format
 
         macho_file = _make_minimal_macho(tmp_path)
-        assert is_macho(macho_file) is True
+        assert detect_binary_format(macho_file) == "macho"
 
     def test_all_macho_magics(self, tmp_path: Path) -> None:
         """All known Mach-O magic byte sequences should be detected."""
-        from abicheck.macho_metadata import is_macho
+        from abicheck.binary_utils import detect_binary_format
 
         magics = [
             b"\xfe\xed\xfa\xce",  # MH_MAGIC (32-bit)
@@ -291,26 +291,26 @@ class TestBinaryFormatDetection:
             f = tmp_path / f"macho_{i}.dylib"
             # Write magic + enough padding to be a plausible file
             f.write_bytes(magic + b"\x00" * 28)
-            assert is_macho(f) is True, f"Failed to detect Mach-O magic {magic.hex()}"
+            assert detect_binary_format(f) == "macho", (
+                f"Failed to detect Mach-O magic {magic.hex()}"
+            )
 
     def test_elf_magic_not_detected_as_pe_or_macho(self, tmp_path: Path) -> None:
         """ELF file should not be detected as PE or Mach-O."""
-        from abicheck.macho_metadata import is_macho
-        from abicheck.pe_metadata import is_pe
+        from abicheck.binary_utils import detect_binary_format
 
         elf_file = _make_minimal_elf(tmp_path)
-        assert is_pe(elf_file) is False
-        assert is_macho(elf_file) is False
+        assert detect_binary_format(elf_file) != "pe"
+        assert detect_binary_format(elf_file) != "macho"
 
     def test_random_bytes_not_detected(self, tmp_path: Path) -> None:
         """Random bytes should not be detected as any known format."""
-        from abicheck.macho_metadata import is_macho
-        from abicheck.pe_metadata import is_pe
+        from abicheck.binary_utils import detect_binary_format
 
         f = tmp_path / "random.bin"
         f.write_bytes(b"\x42\x43\x44\x45" * 16)
-        assert is_pe(f) is False
-        assert is_macho(f) is False
+        assert detect_binary_format(f) != "pe"
+        assert detect_binary_format(f) != "macho"
 
     def test_elf_shared_object_detection(self, tmp_path: Path) -> None:
         """_is_elf_shared_object should detect minimal ELF ET_DYN."""

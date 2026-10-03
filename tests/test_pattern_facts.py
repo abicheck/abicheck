@@ -265,7 +265,7 @@ def test_function_template_instantiation_escalates() -> None:
     res = PatternFactsResult(
         facts=scan_text("template void api<int>();", path="h.h"), files_scanned=1
     )
-    assert res.should_escalate is True
+    assert bool(res.escalation_triggers) is True
 
 
 # ── Comment / string-literal blanking avoids false positives ─────────────────
@@ -376,7 +376,7 @@ def test_snippet_out_of_range_returns_empty() -> None:
 def test_layout_construct_escalates_to_s5() -> None:
     facts = scan_text("#pragma pack(1)\nstruct S { int x; };", path="h.h")
     res = PatternFactsResult(facts=facts, files_scanned=1)
-    assert res.should_escalate is True
+    assert bool(res.escalation_triggers) is True
     triggers = res.escalation_triggers
     assert len(triggers) == 1
     assert triggers[0].kind is PatternKind.PRAGMA_PACK
@@ -388,7 +388,7 @@ def test_layout_construct_escalates_to_s5() -> None:
 def test_advisory_only_construct_does_not_escalate() -> None:
     facts = scan_text('extern "C" void f();', path="h.h")
     res = PatternFactsResult(facts=facts, files_scanned=1)
-    assert res.should_escalate is False
+    assert bool(res.escalation_triggers) is False
     assert res.escalation_triggers == []
 
 
@@ -643,7 +643,7 @@ def test_scan_files_aggregates_and_records_paths(tmp_path: Path) -> None:
     assert res.files_skipped == 0
     assert any(f.path.endswith("api.h") for f in res.facts)
     assert PatternKind.PRAGMA_PACK in {f.kind for f in res.facts}
-    assert res.should_escalate is True
+    assert bool(res.escalation_triggers) is True
 
 
 def test_scan_files_skips_missing_root_gracefully(tmp_path: Path) -> None:

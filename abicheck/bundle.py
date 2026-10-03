@@ -643,20 +643,10 @@ def _stored_library_identity(
 ) -> tuple[Path | None, tuple[str, ...], int]:
     """Best-effort real on-disk filename + filesystem aliases for a stored
     `ProjectSnapshot` sub-package directory at *path*, read from its sole
-    artifact's `ArtifactRef.native_identity` -- the same
-    `library_filename`/`filesystem_aliases` keys `bundle_facts_store.py`'s
-    own writer stamps there, defined in the shared leaf module `storage.
-    native_identity_aliases` rather than read back from `bundle_facts_store`
-    itself: that module is `workflows`-classified and imports `bundle_facts`
-    at module load, which reaches back into this module via a function-local
-    import (`bundle_snapshot_from_facts`) -- so a `bundle ->
-    bundle_facts_store` edge here would close a real
-    `bundle -> bundle_facts_store -> bundle_facts -> bundle` cycle
-    (`scripts/check_ai_readiness.py`'s `import-cycle-growth` check, see
-    `storage/native_identity_aliases.py`'s own docstring for the full
-    account). See `bundle_facts_store.py`'s module docstring for why there
-    are two independent, not-yet-reconciled writers of this native_identity
-    contract.
+    artifact's `ArtifactRef.native_identity` -- the
+    `library_filename`/`filesystem_aliases` keys older multi-artifact packages
+    stamped there (`storage.native_identity_aliases`, which explains why the
+    keys are read-only now).
 
     *nodes_so_far*/the returned `int` thread `decode_native_identity_
     aliases`'s own aggregate JSON-node budget across every artifact a

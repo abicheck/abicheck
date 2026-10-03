@@ -41,32 +41,6 @@ from .model.pe_facts import (
 log = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Magic detection
-# ---------------------------------------------------------------------------
-
-# PE files start with "MZ" (DOS stub), then at offset stored at 0x3C there is
-# the PE signature "PE\0\0".
-_MZ_MAGIC = b"MZ"
-
-
-def is_pe(path: Path) -> bool:
-    """Check if file is a PE binary (MZ magic + PE signature)."""
-    try:
-        with open(path, "rb") as f:
-            mz = f.read(2)
-            if mz != _MZ_MAGIC:
-                return False
-            f.seek(0x3C)
-            pe_offset_bytes = f.read(4)
-            if len(pe_offset_bytes) < 4:
-                return False
-            pe_offset = int.from_bytes(pe_offset_bytes, "little")
-            f.seek(pe_offset)
-            return f.read(4) == b"PE\x00\x00"
-    except OSError:
-        return False
-
 
 # ---------------------------------------------------------------------------
 # Public API

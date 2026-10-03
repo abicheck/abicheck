@@ -19,13 +19,13 @@ from __future__ import annotations
 
 import struct
 
+from abicheck.binary_utils import detect_binary_format
 from abicheck.macho_metadata import (
     MachoExport,
     MachoMetadata,
     MachoSymbolType,
     _version_field_to_str,
     _version_str,
-    is_macho,
     parse_macho_metadata,
 )
 
@@ -93,74 +93,74 @@ class TestVersionStr:
         assert _version_field_to_str(_Helper()) == "7.8.9"
 
 
-# ── is_macho magic detection ────────────────────────────────────────────
+# ── Mach-O magic detection ────────────────────────────────────────────
 
 
 class TestIsMacho:
     def test_macho_64_le(self, tmp_path):
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xcf\xfa\xed\xfe" + b"\x00" * 100)
-        assert is_macho(p) is True
+        assert detect_binary_format(p) == "macho"
 
     def test_macho_64_be(self, tmp_path):
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xcf" + b"\x00" * 100)
-        assert is_macho(p) is True
+        assert detect_binary_format(p) == "macho"
 
     def test_macho_32_le(self, tmp_path):
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xce\xfa\xed\xfe" + b"\x00" * 100)
-        assert is_macho(p) is True
+        assert detect_binary_format(p) == "macho"
 
     def test_macho_32_be(self, tmp_path):
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
-        assert is_macho(p) is True
+        assert detect_binary_format(p) == "macho"
 
     def test_fat_binary(self, tmp_path):
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xca\xfe\xba\xbe" + b"\x00" * 100)
-        assert is_macho(p) is True
+        assert detect_binary_format(p) == "macho"
 
     def test_fat_binary_swapped(self, tmp_path):
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xbe\xba\xfe\xca" + b"\x00" * 100)
-        assert is_macho(p) is True
+        assert detect_binary_format(p) == "macho"
 
     def test_fat64_binary(self, tmp_path):
         """FAT_MAGIC_64 (fat64 universal binary) must be recognized."""
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xca\xfe\xba\xbf" + b"\x00" * 100)
-        assert is_macho(p) is True
+        assert detect_binary_format(p) == "macho"
 
     def test_fat64_binary_swapped(self, tmp_path):
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\xbf\xba\xfe\xca" + b"\x00" * 100)
-        assert is_macho(p) is True
+        assert detect_binary_format(p) == "macho"
 
     def test_elf_not_macho(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        assert is_macho(p) is False
+        assert detect_binary_format(p) != "macho"
 
     def test_pe_not_macho(self, tmp_path):
         p = tmp_path / "test.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
-        assert is_macho(p) is False
+        assert detect_binary_format(p) != "macho"
 
     def test_nonexistent_file(self, tmp_path):
         p = tmp_path / "nope.dylib"
-        assert is_macho(p) is False
+        assert detect_binary_format(p) != "macho"
 
     def test_empty_file(self, tmp_path):
         p = tmp_path / "empty.dylib"
         p.write_bytes(b"")
-        assert is_macho(p) is False
+        assert detect_binary_format(p) != "macho"
 
     def test_short_file(self, tmp_path):
         p = tmp_path / "short.dylib"
         p.write_bytes(b"\xcf\xfa")
-        assert is_macho(p) is False
+        assert detect_binary_format(p) != "macho"
 
 
 # ── Serialization round-trip ─────────────────────────────────────────────

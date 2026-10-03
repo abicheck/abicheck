@@ -32,7 +32,7 @@ class TestEntityResolverResolve:
         r = EntityResolver()
         canonical = r.resolve(_node("decl://foo", usr="c:@F@foo#", name="foo"))
         assert canonical == "usr:c:@F@foo#"
-        assert r.canonical_id_for("decl://foo") == "usr:c:@F@foo#"
+        assert r.aliases.get("decl://foo") == "usr:c:@F@foo#"
 
     def test_falls_back_to_mangled_name_without_usr(self) -> None:
         r = EntityResolver()
@@ -60,8 +60,8 @@ class TestEntityResolverResolve:
         c1 = r.resolve(_node("decl://foo_v1", usr="c:@F@foo#", name="foo"))
         c2 = r.resolve(_node("decl://foo_v2_variant", usr="c:@F@foo#", name="foo"))
         assert c1 == c2
-        assert r.canonical_id_for("decl://foo_v1") == c1
-        assert r.canonical_id_for("decl://foo_v2_variant") == c1
+        assert r.aliases.get("decl://foo_v1") == c1
+        assert r.aliases.get("decl://foo_v2_variant") == c1
 
     def test_conflict_recorded_for_second_v1_id_sharing_a_canonical_identity(
         self,
@@ -126,8 +126,8 @@ class TestSourceGraphSummaryEntityResolution:
         g.add_node(_node("decl://foo", usr="c:@F@foo#", name="foo"))
         g.add_node(_node("decl://bar", mangled_name="_Z3barv", name="bar"))
         g.resolve_entities()
-        assert g.entity_resolver.canonical_id_for("decl://foo") == "usr:c:@F@foo#"
-        assert g.entity_resolver.canonical_id_for("decl://bar") == "mangled:_Z3barv"
+        assert g.entity_resolver.aliases.get("decl://foo") == "usr:c:@F@foo#"
+        assert g.entity_resolver.aliases.get("decl://bar") == "mangled:_Z3barv"
 
     def test_resolve_entities_is_safe_to_call_after_more_nodes_are_added(self) -> None:
         g = SourceGraphSummary()
@@ -148,14 +148,14 @@ class TestSourceGraphSummaryEntityResolution:
         g = SourceGraphSummary()
         g.add_node(_node("decl://foo", name="foo"))
         g.resolve_entities()
-        before = g.entity_resolver.canonical_id_for("decl://foo")
+        before = g.entity_resolver.aliases.get("decl://foo")
         assert not before.startswith("usr:")
 
         # A second producer registers the same node id with a USR now
         # available -- add_node merges this into the existing node's attrs.
         g.add_node(_node("decl://foo", usr="c:@F@foo#", name="foo"))
         g.resolve_entities()
-        after = g.entity_resolver.canonical_id_for("decl://foo")
+        after = g.entity_resolver.aliases.get("decl://foo")
         assert after == "usr:c:@F@foo#"
         assert after != before
 
@@ -197,9 +197,7 @@ class TestSourceGraphSummaryEntityResolution:
         # The graph is fully usable via its existing v1 ids -- resolve_entities()
         # still works on demand, same as any other summary.
         restored.resolve_entities()
-        assert (
-            restored.entity_resolver.canonical_id_for("decl://foo") == "usr:c:@F@foo#"
-        )
+        assert restored.entity_resolver.aliases.get("decl://foo") == "usr:c:@F@foo#"
 
     def test_hand_edited_null_entity_resolver_loads(self) -> None:
         """CodeRabbit review: a hand-edited pack with an explicit

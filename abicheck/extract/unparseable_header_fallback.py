@@ -57,8 +57,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "EXCLUDED_HEADERS_TOOLCHAIN_KEY",
-    "attribute_failing_headers",
-    "cross_header_conflicts",
     "parse_excluding_unparseable_headers",
 ]
 
@@ -84,34 +82,6 @@ def _norm(path: str | Path) -> str:
         return str(Path(path).resolve())
     except (OSError, RuntimeError):
         return str(path)
-
-
-def attribute_failing_headers(stderr: str, headers: Sequence[Path]) -> set[int]:
-    """0-based indices into *headers* whose ``#include`` chain raised an error.
-
-    Each error is attributed through its include chain: an outermost frame
-    in the aggregate (a file that is none of *headers*) at line ``N`` names
-    ``headers[N-1]`` (the aggregate includes header ``i`` on line ``i+1``);
-    only without such a frame does the innermost listed file in the chain
-    name it. An error nothing in the chain attributes is skipped, never
-    guessed at.
-    """
-    return _scan_diagnostics(stderr, headers)[0]
-
-
-def cross_header_conflicts(stderr: str, headers: Sequence[Path]) -> set[int]:
-    """Indices of errors' headers whose diagnostic implicates another listed header.
-
-    An error is a *conflict* -- not attributable to one header -- when any
-    ``note:`` attached to it (``previous definition is here``, ``candidate``,
-    ...) attributes to a *different* listed header than the error itself.
-    Such a failure exists only because the two headers share one
-    translation unit (a redefinition, an ODR clash); dropping either one
-    would be an arbitrary choice, so the caller must fail instead. Returns
-    the error-side indices; an empty set means every attributed error is
-    self-contained.
-    """
-    return _scan_diagnostics(stderr, headers)[1]
 
 
 def _scan_diagnostics(

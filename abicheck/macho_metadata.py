@@ -78,33 +78,6 @@ _FILETYPE_NAMES: dict[int, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Magic detection
-# ---------------------------------------------------------------------------
-
-# Mach-O magic numbers (both byte orders + fat/universal binaries)
-_MACHO_MAGICS = {
-    b"\xfe\xed\xfa\xce",  # MH_MAGIC (32-bit)
-    b"\xce\xfa\xed\xfe",  # MH_CIGAM (32-bit, swapped)
-    b"\xfe\xed\xfa\xcf",  # MH_MAGIC_64 (64-bit)
-    b"\xcf\xfa\xed\xfe",  # MH_CIGAM_64 (64-bit, swapped)
-    b"\xca\xfe\xba\xbe",  # FAT_MAGIC (universal binary)
-    b"\xbe\xba\xfe\xca",  # FAT_CIGAM (universal, swapped)
-    b"\xca\xfe\xba\xbf",  # FAT_MAGIC_64 (fat64 universal binary)
-    b"\xbf\xba\xfe\xca",  # FAT_CIGAM_64 (fat64, swapped)
-}
-
-
-def is_macho(path: Path) -> bool:
-    """Check if file starts with a Mach-O magic number."""
-    try:
-        with open(path, "rb") as f:
-            magic = f.read(4)
-            return magic in _MACHO_MAGICS
-    except OSError:
-        return False
-
-
 def _version_str(packed: int) -> str:
     """Convert packed Mach-O version (xxxx.yy.zz) to string."""
     major = (packed >> 16) & 0xFFFF
