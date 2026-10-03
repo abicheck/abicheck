@@ -67,6 +67,7 @@ from dataclasses import fields
 from pathlib import Path
 
 from ..storage.acyclic_json import loads_acyclic
+from ..storage.code_identity import abicheck_code_fingerprint
 from .call_graph import CallEdge
 from .header_graph_ast_projection import HeaderGraphAstProjection
 from .type_graph import TypeEdge
@@ -106,6 +107,7 @@ def encode_projection(projection: HeaderGraphAstProjection) -> str:
     return json.dumps(
         {
             "schema": PROJECTION_CACHE_SCHEMA,
+            "code": abicheck_code_fingerprint(),
             "type_edge_fields": _TYPE_EDGE_FIELDS,
             "call_edge_fields": _CALL_EDGE_FIELDS,
             "type_files": projection.type_files,
@@ -137,6 +139,10 @@ def decode_projection(blob: str) -> HeaderGraphAstProjection | None:
     if not isinstance(doc, dict):
         return None
     if doc.get("schema") != PROJECTION_CACHE_SCHEMA:
+        return None
+    # The projection is abicheck-computed output; its AST entry's key covers
+    # the AST, not the walker that projected it (`storage.code_identity`).
+    if doc.get("code") != abicheck_code_fingerprint():
         return None
     if doc.get("type_edge_fields") != _TYPE_EDGE_FIELDS:
         return None
