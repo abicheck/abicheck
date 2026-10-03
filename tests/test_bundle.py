@@ -2699,14 +2699,16 @@ class TestBuildBundleSnapshotFromMetadata:
         assert snap.libraries["libfoo.so.1"] == Path("libfoo.so.1")
         assert snap.libraries["libfoo.so.1"].name == "libfoo.so.1"
 
-    def test_explicit_root_overrides_the_derived_default(self) -> None:
+    def test_root_is_derived_from_the_first_surviving_librarys_parent(self) -> None:
         from abicheck.bundle import build_bundle_snapshot_from_metadata
 
         meta = _meta(soname="libfoo.so.1", exports=["foo"])
         snap = build_bundle_snapshot_from_metadata(
-            {"libfoo.so.1": meta}, root=Path("/explicit/root")
+            {"libfoo.so.1": meta},
+            paths={"libfoo.so.1": Path("/derived/root/libfoo.so.1")},
         )
-        assert snap.root == Path("/explicit/root")
+        assert snap.root == Path("/derived/root")
+        assert build_bundle_snapshot_from_metadata({}).root == Path()
 
     def test_resolution_graph_matches_direct_construction(self) -> None:
         # Cross-checks the primitive's resolution-graph output against

@@ -832,7 +832,6 @@ def build_bundle_snapshot_from_metadata(
     metadata: dict[str, ElfMetadata],
     *,
     paths: dict[str, Path] | None = None,
-    root: Path | None = None,
     probe_filesystem: bool = False,
     extra_aliases: dict[str, tuple[str, ...]] | None = None,
     probe_filesystem_names: frozenset[str] | None = None,
@@ -868,17 +867,13 @@ def build_bundle_snapshot_from_metadata(
             successful parse) is dropped, the same as a non-ELF/failed
             parse is dropped there.
         paths: Optional ``{library_name: Path}`` map used only for
-            :attr:`BundleSnapshot.libraries`' values and the default
-            *root* computation (both currently used only for their
-            ``.name``/``.parent`` — see ``_detect_soname_skew``'s own
+            :attr:`BundleSnapshot.libraries`' values and the
+            :attr:`BundleSnapshot.root` computation (both currently used
+            only for their ``.name``/``.parent`` — see ``_detect_soname_skew``'s own
             ``path.name`` SONAME fallback). A name with no entry here
             synthesizes ``Path(name)``, which still gives a sensible
             ``.name`` for that same fallback when *name* is (or ends in) a
             real filename — the common case for every caller so far.
-        root: Explicit bundle root. When omitted, derived from the first
-            surviving library's resolved path's parent (matching
-            :func:`build_bundle_snapshot`'s own behavior exactly when
-            *paths* holds real filesystem paths).
         probe_filesystem: Forwarded to :func:`_compute_resolution_graph`.
             Defaults to ``False`` — this function's whole contract is
             metadata-only resolution, so even a caller-supplied *paths*
@@ -955,13 +950,11 @@ def build_bundle_snapshot_from_metadata(
             else probe_filesystem_names
         ),
     )
-    # Use the first library's parent as the root if available; otherwise empty path
+    # The first surviving library's parent is the root (matching
+    # build_bundle_snapshot's own behavior exactly when *paths* holds real
+    # filesystem paths); otherwise an empty path.
     resolved_root = (
-        root
-        if root is not None
-        else (
-            next(iter(surviving_paths.values())).parent if surviving_paths else Path()
-        )
+        next(iter(surviving_paths.values())).parent if surviving_paths else Path()
     )
     return BundleSnapshot(
         root=resolved_root,

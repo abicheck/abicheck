@@ -34,17 +34,16 @@ zlib emits identically regardless of how the input was chunked. Verified
 differentially against ``gzip.compress`` in
 ``tests/test_incremental_compression.py``, including at chunk size 1.
 
-**zstd is byte-identical when the decoded size is known up front, and
-omits the frame's content-size field when it is not.** ``ZstdCompressor.
-chunker(size=...)`` reproduces the one-shot frame exactly; without a size
-the frame header simply carries no declared content size, which is a
-legal, fully supported zstd frame that ``snapshot_io._decompress_zstd``
-already reads (``validate_zstd_frame_completeness`` handles
-``CONTENTSIZE_UNKNOWN`` explicitly). The tradeoff is real and is stated
-rather than hidden: a size-unknown frame loses the *declared-size*
-cross-check that catches a frame truncated mid-header, so a caller that
-can cheaply state the total should, via *decoded_size*. Output is
-deterministic either way -- the same fragments always produce the same
+**zstd omits the frame's content-size field.** The streaming writer does
+not know the decoded total up front, so the frame header carries no
+declared content size, which is a legal, fully supported zstd frame that
+``snapshot_io._decompress_zstd`` already reads
+(``validate_zstd_frame_completeness`` handles ``CONTENTSIZE_UNKNOWN``
+explicitly). The tradeoff is real and is stated rather than hidden: a
+size-unknown frame loses the *declared-size* cross-check that catches a
+frame truncated mid-header, and it is not byte-identical to the one-shot
+frame (``ZstdCompressor.chunker(size=...)`` would be, given the size).
+Output is deterministic -- the same fragments always produce the same
 bytes.
 
 Neither encoder accumulates its own output: both are generators, and the
@@ -112,33 +111,17 @@ def _gzip_chunks(chunks: Iterable[bytes], *, level: int) -> Iterator[bytes]:
     yield struct.pack("<II", crc & 0xFFFFFFFF, size & 0xFFFFFFFF)
 
 
-def _zstd_chunks(
-    chunks: Iterable[bytes], *, level: int, decoded_size: int | None
-) -> Iterator[bytes]:
+def _zstd_chunks(chunks: Iterable[bytes], *, level: int) -> Iterator[bytes]:
     zstandard = _zstd_module()
     cctx = zstandard.ZstdCompressor(
         level=level,
         write_checksum=False,
         write_content_size=True,
     )
-    chunker = (
-        cctx.chunker() if decoded_size is None else cctx.chunker(size=decoded_size)
-    )
-    produced = 0
+    chunker = cctx.chunker()
     for chunk in chunks:
-        if not chunk:
-            continue
-        produced += len(chunk)
-        yield from chunker.compress(chunk)
-    if decoded_size is not None and produced != decoded_size:
-        # Better a hard error than a frame whose declared content size
-        # disagrees with its payload: that frame would decompress and then
-        # fail the reader's own completeness cross-check, which reports
-        # "corrupt or truncated" -- blaming storage for a producer bug.
-        raise SnapshotError(
-            f"streaming zstd write: declared decoded size {decoded_size} but "
-            f"the fragment stream produced {produced} bytes"
-        )
+        if chunk:
+            yield from chunker.compress(chunk)
     yield from chunker.finish()
 
 
@@ -147,20 +130,18 @@ def encode_chunks(
     compression: SnapshotCompression,
     *,
     zstd_level: int = ZSTD_LEVEL_BASELINE,
-    decoded_size: int | None = None,
 ) -> Iterator[bytes]:
     """Encode a fragment stream under *compression*, incrementally.
 
-    Yields storage-ready buffers. *decoded_size*, when known, is passed to
-    zstd so the frame declares its content size exactly as the one-shot
-    path does; it is unused by gzip, whose ISIZE trailer is accumulated as
-    the stream is consumed. ``NONE`` passes fragments straight through, so
-    one caller can hold one loop for all three envelopes.
+    Yields storage-ready buffers. gzip's ISIZE trailer is accumulated as
+    the stream is consumed; a zstd frame declares no content size (see the
+    module docstring). ``NONE`` passes fragments straight through, so one
+    caller can hold one loop for all three envelopes.
     """
     if compression is SnapshotCompression.NONE:
         return (c for c in chunks if c)
     if compression is SnapshotCompression.GZIP:
         return _gzip_chunks(chunks, level=GZIP_COMPRESSLEVEL)
     if compression is SnapshotCompression.ZSTD:
-        return _zstd_chunks(chunks, level=zstd_level, decoded_size=decoded_size)
+        return _zstd_chunks(chunks, level=zstd_level)
     raise SnapshotError(f"Cannot encode with compression={compression!r}")

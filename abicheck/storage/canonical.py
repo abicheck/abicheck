@@ -509,14 +509,11 @@ def strip_capture_metadata(value: Any) -> Any:
     return canonical
 
 
-def canonical_json(
-    value: Any, *, drop_capture_metadata: bool = False, indent: int | None = None
-) -> str:
+def canonical_json(value: Any, *, indent: int | None = None) -> str:
     """Serialize a value through :func:`canonical_form`.
 
-    ``drop_capture_metadata`` defaults to ``False``: the stored document keeps
-    its capture metadata, which is excluded from *hashing* only. ``indent``
-    affects only presentation — :func:`semantic_digest` never reads this
+    The stored document keeps its capture metadata, which is excluded from
+    *hashing* only (:func:`strip_capture_metadata`). ``indent`` affects only presentation — :func:`semantic_digest` never reads this
     function's output, so a pretty-printed object and a compact one are the
     same content by construction rather than by convention.
 
@@ -531,9 +528,7 @@ def canonical_json(
     make explicitly rather than to discover.
     """
     return json.dumps(
-        strip_capture_metadata(value)
-        if drop_capture_metadata
-        else canonical_form(value),
+        canonical_form(value),
         indent=indent,
         ensure_ascii=False,
         sort_keys=True,

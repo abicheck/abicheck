@@ -374,7 +374,6 @@ def reconcile_release_public_surface(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     include_dependencies: bool = False,
-    has_baseline: bool = True,
     lang_explicit: bool = False,
 ) -> ReleaseSurfaceStage:
     """Acquire both sides' surfaces once and reconcile the product contract.
@@ -467,7 +466,7 @@ def reconcile_release_public_surface(
 
     _, new_surface = _acquire("new", new_headers, new_includes)
     old_surface: ReleasePublicSurface | None = None
-    if has_baseline and old_headers:
+    if old_headers:
         _, old_surface = _acquire("old", old_headers, old_includes)
 
     reconciliation = reconcile_member_sets(

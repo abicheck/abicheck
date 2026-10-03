@@ -38,7 +38,6 @@ import pytest
 
 from abicheck.errors import SnapshotError
 from abicheck.snapshot_io import (
-    ZSTD_LEVEL_BASELINE,
     SnapshotCompression,
     encode_snapshot_bytes,
     read_snapshot_bytes,
@@ -127,26 +126,10 @@ class TestByteIdentityWithTheOneShotEncoder:
         assert streamed == encode_snapshot_bytes(raw, SnapshotCompression.GZIP)
         assert gzip.decompress(streamed) == raw
 
-    @pytest.mark.parametrize("chunk", [1, 7, 4096, 1 << 20])
-    def test_zstd_is_identical_when_the_decoded_size_is_known(self, chunk):
-        raw = _document(members=60).encode("utf-8")
-        streamed = b"".join(
-            encode_chunks(
-                iter([raw[i : i + chunk] for i in range(0, len(raw), chunk)]),
-                SnapshotCompression.ZSTD,
-                decoded_size=len(raw),
-            )
-        )
-        assert streamed == encode_snapshot_bytes(
-            raw, SnapshotCompression.ZSTD, zstd_level=ZSTD_LEVEL_BASELINE
-        )
-
-    def test_zstd_without_a_size_still_round_trips(self, tmp_path):
+    def test_zstd_without_a_declared_size_still_round_trips(self, tmp_path):
         """The documented tradeoff: a legal frame, no declared content size."""
         raw = _document(members=60).encode("utf-8")
-        streamed = b"".join(
-            encode_chunks(iter([raw]), SnapshotCompression.ZSTD, decoded_size=None)
-        )
+        streamed = b"".join(encode_chunks(iter([raw]), SnapshotCompression.ZSTD))
         assert streamed != encode_snapshot_bytes(raw, SnapshotCompression.ZSTD)
         dest = tmp_path / "f.json.zst"
         dest.write_bytes(streamed)
@@ -161,7 +144,6 @@ class TestByteIdentityWithTheOneShotEncoder:
                 encode_chunks(
                     iter([raw[i : i + chunk] for i in range(0, len(raw), chunk)]),
                     algorithm,
-                    decoded_size=len(raw),
                 )
             )
 
@@ -284,17 +266,6 @@ class TestFailureLeavesTheDestinationIntact:
         assert not dest.exists()
         assert list(tmp_path.iterdir()) == []
 
-    def test_a_mis_declared_zstd_size_is_a_hard_error_not_a_bad_frame(self, tmp_path):
-        dest = tmp_path / "f.json.zst"
-        with pytest.raises(SnapshotError, match="declared decoded size"):
-            write_snapshot_text_stream(
-                ["abc"],
-                dest,
-                compression=SnapshotCompression.ZSTD,
-                decoded_size=999,
-            )
-        assert not dest.exists()
-
 
 class TestUnsupportedEnvelope:
     def test_an_unencodable_compression_is_refused(self):
@@ -339,11 +310,8 @@ class TestEmptyFragments:
     def test_empty_fragments_change_nothing(self, algorithm):
         real = [b"alpha", b"beta", b"gamma" * 5000]
         padded = [b"", real[0], b"", b"", real[1], real[2], b""]
-        kwargs = {"decoded_size": sum(len(c) for c in real)}
-        if algorithm is not SnapshotCompression.ZSTD:
-            kwargs = {}
-        with_empties = b"".join(encode_chunks(iter(padded), algorithm, **kwargs))
-        without = b"".join(encode_chunks(iter(real), algorithm, **kwargs))
+        with_empties = b"".join(encode_chunks(iter(padded), algorithm))
+        without = b"".join(encode_chunks(iter(real), algorithm))
         assert with_empties == without
 
     @pytest.mark.parametrize("algorithm", ALGORITHMS)

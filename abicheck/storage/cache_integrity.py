@@ -72,14 +72,14 @@ def digest_file(entry: Path) -> str:
         return hashlib.file_digest(fh, "sha256").hexdigest()
 
 
-def record_digest(entry: Path, digest: str | None = None) -> None:
-    """Write *entry*'s sidecar (computing the digest when not given).
+def record_digest(entry: Path) -> None:
+    """Compute *entry*'s digest and write it to its sidecar.
 
     Best effort: an I/O failure leaves the entry without a sidecar, which a
     later read treats as unrecorded -- never as corrupt.
     """
     try:
-        value = digest if digest is not None else digest_file(entry)
+        value = digest_file(entry)
         fd, tmp = tempfile.mkstemp(dir=str(entry.parent), prefix=f".{entry.name}.")
         try:
             with os.fdopen(fd, "w", encoding="ascii") as out:

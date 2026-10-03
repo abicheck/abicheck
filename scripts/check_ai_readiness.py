@@ -2838,7 +2838,7 @@ CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
         # `compat/_helpers.compare_for_compat`, which `compat/cli.py` imports
         # as `compare`, so it carries the ABICC source-level parity step.
         "abicheck/compat/cli.py:371:19:dumper.dump",
-        "abicheck/compat/_helpers.py:187:8:checker.compare",
+        "abicheck/compat/_helpers.py:184:8:checker.compare",
         "abicheck/compat/cli.py:1234:15:dumper.dump",
     }
 )

@@ -35,8 +35,6 @@ from abicheck.workflows.aggregate import (
     AggregateError,
     CoverageStatus,
     ExpectedTargets,
-    OnMissingRequired,
-    OnUnexpectedTarget,
     aggregate_reports_dir,
     parse_check_id,
     parse_report_verdict,
@@ -68,8 +66,22 @@ def _write_report(
     return path
 
 
-def _expect(*required: str, optional: tuple[str, ...] = ()) -> ExpectedTargets:
-    return ExpectedTargets.from_lists(list(required), list(optional))
+def _expect(
+    *required: str,
+    optional: tuple[str, ...] = (),
+    gate: dict[str, str] | None = None,
+) -> ExpectedTargets:
+    """Build an expected-target set; *gate* is the manifest's own ``gate`` block."""
+    if gate is None:
+        return ExpectedTargets.from_lists(list(required), list(optional))
+    return ExpectedTargets.from_manifest_data(
+        {
+            "aggregate_manifest_version": "2.0",
+            "targets": [{"id": tid, "required": True} for tid in required]
+            + [{"id": tid, "required": False} for tid in optional],
+            "gate": gate,
+        }
+    )
 
 
 def _write_not_comparable_report(
@@ -296,14 +308,14 @@ class TestGateVsVerdict:
         assert r.targets[0].gate.blocking_categories == ("operational_error",)
 
     def test_operational_error_blocks_even_under_warn(self, tmp_path: Path):
-        # Under --on-missing-required warn a coverage gap is advisory, but an
-        # operational ERROR is a real per-report failure and must still block.
+        # Under a manifest `gate.missing_required: warn` a coverage gap is
+        # advisory, but an operational ERROR is a real per-report failure and
+        # must still block.
         _write_report(tmp_path, LINUX, "ERROR")
         _write_report(tmp_path, WINDOWS, "COMPATIBLE")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX, WINDOWS),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, WINDOWS, gate={"missing_required": "warn"}),
         )
         assert r.exit_code() == 4
 
@@ -341,8 +353,7 @@ class TestNotComparable:
         _write_report(tmp_path, WINDOWS, "COMPATIBLE")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX, WINDOWS),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, WINDOWS, gate={"missing_required": "warn"}),
         )
         assert r.exit_code() == 4
 
@@ -375,8 +386,7 @@ class TestNotComparable:
         # *coverage* gap (advisory under warn), unlike not_comparable above.
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, gate={"missing_required": "warn"}),
         )
         assert not r.targets[0].analyzed
         assert r.targets[0].gate is None
@@ -413,8 +423,7 @@ class TestCheckTargetAdvisorySentinelReasons:
         _write_report(tmp_path, LINUX, "NEW_TARGET")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, gate={"missing_required": "warn"}),
         )
         assert not r.targets[0].analyzed
         assert r.targets[0].reason is not None
@@ -425,8 +434,7 @@ class TestCheckTargetAdvisorySentinelReasons:
         _write_report(tmp_path, LINUX, "NO_BASELINE")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, gate={"missing_required": "warn"}),
         )
         assert not r.targets[0].analyzed
         assert r.targets[0].reason is not None
@@ -440,8 +448,7 @@ class TestCheckTargetAdvisorySentinelReasons:
         _write_report(tmp_path, LINUX, None)
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, gate={"missing_required": "warn"}),
         )
         assert r.targets[0].reason == "report carried no ABI verdict"
 
@@ -449,8 +456,7 @@ class TestCheckTargetAdvisorySentinelReasons:
         _write_report(tmp_path, LINUX, "NEW_TARGET")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, gate={"missing_required": "warn"}),
         )
         assert "new_target" in r.render_text()
 
@@ -458,8 +464,7 @@ class TestCheckTargetAdvisorySentinelReasons:
         _write_report(tmp_path, LINUX, "NEW_TARGET")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, gate={"missing_required": "warn"}),
         )
         target = r.to_dict()["targets"][0]
         assert "new_target" in target["reason"]
@@ -470,8 +475,7 @@ class TestCoveragePolicy:
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX, WINDOWS),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, WINDOWS, gate={"missing_required": "warn"}),
         )
         assert r.coverage is CoverageStatus.PARTIAL
         assert not r.coverage_blocking
@@ -490,8 +494,7 @@ class TestUnexpectedTargets:
         _write_report(tmp_path, MACOS, "BREAKING")  # not expected
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_unexpected_target=OnUnexpectedTarget.INCLUDE,
+            expected=_expect(LINUX, gate={"unexpected_target": "include"}),
         )
         assert r.coverage is CoverageStatus.COMPLETE  # expected set is fine
         assert MACOS in {t.target_id for t in r.unexpected_targets}
@@ -502,8 +505,7 @@ class TestUnexpectedTargets:
         _write_report(tmp_path, MACOS, "BREAKING")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_unexpected_target=OnUnexpectedTarget.WARN,
+            expected=_expect(LINUX, gate={"unexpected_target": "warn"}),
         )
         assert r.exit_code() == 0
         assert MACOS in {t.target_id for t in r.unexpected_targets}
@@ -513,8 +515,7 @@ class TestUnexpectedTargets:
         _write_report(tmp_path, MACOS, "BREAKING")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_unexpected_target=OnUnexpectedTarget.IGNORE,
+            expected=_expect(LINUX, gate={"unexpected_target": "ignore"}),
         )
         assert r.unexpected_targets == ()
         assert r.exit_code() == 0
@@ -524,8 +525,7 @@ class TestUnexpectedTargets:
         _write_report(tmp_path, MACOS, "COMPATIBLE")  # clean, but unexpected
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_unexpected_target=OnUnexpectedTarget.FAIL,
+            expected=_expect(LINUX, gate={"unexpected_target": "fail"}),
         )
         assert r.exit_code() == 1
 
@@ -538,8 +538,7 @@ class TestUnexpectedTargets:
         (tmp_path / "abi-report-macos-arm64.json").write_text("{ not json")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_unexpected_target=OnUnexpectedTarget.FAIL,
+            expected=_expect(LINUX, gate={"unexpected_target": "fail"}),
         )
         assert MACOS in {t.target_id for t in r.unexpected_targets}
         assert not any(t.analyzed for t in r.unexpected_targets)
@@ -553,8 +552,7 @@ class TestUnexpectedTargets:
         _write_report(tmp_path, MACOS, "BREAKING")  # not expected
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_unexpected_target=OnUnexpectedTarget.INCLUDE,
+            expected=_expect(LINUX, gate={"unexpected_target": "include"}),
         )
         assert r.exit_code() == 4
         assert r.compatibility_verdict is Verdict.BREAKING
@@ -803,8 +801,7 @@ class TestRendering:
         ).to_dict()
         warn = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX, WINDOWS),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, WINDOWS, gate={"missing_required": "warn"}),
         ).to_dict()
         assert fail["gate"]["exit_code"] != warn["gate"]["exit_code"]
 
@@ -840,13 +837,12 @@ class TestRendering:
     def test_text_pass_under_warn_does_not_claim_coverage_complete(
         self, tmp_path: Path
     ):
-        # A required target is missing but --on-missing-required warn lets the
+        # A required target is missing but `gate.missing_required: warn` lets the
         # gate pass; the Gate line must NOT claim required coverage is complete.
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         r = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX, WINDOWS),
-            on_missing_required=OnMissingRequired.WARN,
+            expected=_expect(LINUX, WINDOWS, gate={"missing_required": "warn"}),
         )
         assert r.passed
         text = r.render_text()
@@ -855,14 +851,13 @@ class TestRendering:
         assert "(advisory)" in text  # the coverage gap is still surfaced
 
     def test_text_fail_names_unexpected_targets(self, tmp_path: Path):
-        # Under --on-unexpected-target fail, the failure reason names the
+        # Under `gate.unexpected_target: fail`, the failure reason names the
         # offending unexpected target(s), not just the exit code.
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         _write_report(tmp_path, MACOS, "COMPATIBLE")  # unexpected, but clean
         text = aggregate_reports_dir(
             tmp_path,
-            expected=_expect(LINUX),
-            on_unexpected_target=OnUnexpectedTarget.FAIL,
+            expected=_expect(LINUX, gate={"unexpected_target": "fail"}),
         ).render_text()
         assert f"unexpected target(s) present: {MACOS}" in text
 

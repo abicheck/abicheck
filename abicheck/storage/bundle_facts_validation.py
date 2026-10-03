@@ -235,21 +235,20 @@ def load_bundle_facts_blob_json(
 def validate_bundle_archive_artifact_type(
     manifest: dict[str, Any],
     *,
-    expected: str = BUNDLE_ARCHIVE_ARTIFACT_TYPE,
     path: str | Path,
 ) -> None:
     """Reject a G40 archive manifest whose ``artifact_type`` marker is
-    missing or doesn't match *expected* -- the archive container's own
-    counterpart to
+    missing or isn't :data:`BUNDLE_ARCHIVE_ARTIFACT_TYPE` -- the archive
+    container's own counterpart to
     ``bundle_facts_serialization.looks_like_bundle_facts_document``'s
     plain-JSON marker check."""
     from ..errors import IncompatibleSnapshotSchemaError
 
     artifact_type = manifest.get("artifact_type")
-    if artifact_type != expected:
+    if artifact_type != BUNDLE_ARCHIVE_ARTIFACT_TYPE:
         raise IncompatibleSnapshotSchemaError(
             f"{path}: manifest artifact_type {artifact_type!r} is not "
-            f"{expected!r} -- not a BundleArchiveWriter-produced bundle "
+            f"{BUNDLE_ARCHIVE_ARTIFACT_TYPE!r} -- not a BundleArchiveWriter-produced bundle "
             "facts archive."
         )
 

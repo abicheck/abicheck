@@ -118,8 +118,6 @@ class JsonNestingTooDeepError(Exception):
 def check_json_container_budget(
     raw: bytes,
     max_container_nodes: int,
-    *,
-    max_nesting_depth: int = DEFAULT_MAX_JSON_NESTING_DEPTH,
 ) -> None:
     """Raise :class:`JsonContainerBudgetExceeded` once *raw* would cost
     `json.loads()` more than *max_container_nodes* Python-object
@@ -127,8 +125,8 @@ def check_json_container_budget(
     scalar leaf (string, number, ``true``/``false``/``null``) outside a
     string literal counts, since each is its own allocation regardless of
     shape -- or :class:`JsonNestingTooDeepError` once *raw* nests
-    containers deeper than *max_nesting_depth* (a container-only measure;
-    a scalar leaf never nests).
+    containers deeper than :data:`DEFAULT_MAX_JSON_NESTING_DEPTH` (a
+    container-only measure; a scalar leaf never nests).
 
     A pure pre-check: never decodes *raw*, never allocates a container of
     its own, and stops scanning the instant either budget is exceeded
@@ -142,7 +140,7 @@ def check_json_container_budget(
             if count > max_container_nodes:
                 raise JsonContainerBudgetExceeded(count)
             depth += 1
-            if depth > max_nesting_depth:
+            if depth > DEFAULT_MAX_JSON_NESTING_DEPTH:
                 raise JsonNestingTooDeepError(depth)
         elif token in _CLOSE_TOKENS:
             # A close with no matching open (malformed JSON) is not this

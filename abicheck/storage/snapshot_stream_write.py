@@ -45,7 +45,6 @@ def write_snapshot_text_stream(
     *,
     compression: SnapshotCompression = SnapshotCompression.AUTO,
     zstd_level: int | None = None,
-    decoded_size: int | None = None,
 ) -> SnapshotWriteResult:
     """Write a fragment stream through the same chokepoint, without joining.
 
@@ -61,8 +60,7 @@ def write_snapshot_text_stream(
     :func:`~abicheck.storage.incremental_encode.encode_chunks`, so neither
     the whole JSON document nor a whole encoded copy is ever materialised.
     gzip output is byte-identical to the one-shot ``_compress_gzip``; zstd
-    output is byte-identical when *decoded_size* is supplied and otherwise
-    omits the frame's declared content size (a legal frame the reader
+    output omits the frame's declared content size (a legal frame the reader
     already handles -- see that module's docstring for the tradeoff).
 
     The two size figures are counted independently now that they can
@@ -87,9 +85,7 @@ def write_snapshot_text_stream(
 
     def _counted() -> Iterator[bytes]:
         nonlocal stored
-        for buf in encode_chunks(
-            _encoded(), resolved, zstd_level=level, decoded_size=decoded_size
-        ):
+        for buf in encode_chunks(_encoded(), resolved, zstd_level=level):
             digest.update(buf)
             stored += len(buf)
             yield buf

@@ -283,8 +283,6 @@ class ExpectedTargets:
 def resolve_gate_policy(
     expected: ExpectedTargets | None,
     *,
-    explicit_missing_required: OnMissingRequired | None = None,
-    explicit_unexpected_target: OnUnexpectedTarget | None = None,
     source_hint: str = "manifest",
 ) -> tuple[OnMissingRequired, OnUnexpectedTarget, str]:
     """Resolve the effective gate policy, and where it came from.
@@ -293,56 +291,35 @@ def resolve_gate_policy(
     ``--on-missing-required``/``--on-unexpected-target`` CLI flags with a
     manifest-carried ``gate`` block, so "what policy applies" now has one
     versioned source of truth instead of two independently-typeable flags.
-    Precedence: an *explicit* value (for a direct API/test caller that still
-    wants to force one -- there is no longer a CLI spelling for this) wins
-    outright; otherwise *expected*'s own manifest ``gate`` block; otherwise
-    the hard-coded default (``FAIL``/``INCLUDE``, unchanged from before this
+    Precedence: *expected*'s own manifest ``gate`` block; otherwise the
+    hard-coded default (``FAIL``/``INCLUDE``, unchanged from before that
     PR). *source_hint* names which expected-target source this run actually
     used (``"manifest"``/``"run-plan"``) -- both are parsed through
     :meth:`ExpectedTargets.from_manifest_data`, so the field itself can't
     tell the two apart; the caller (``cli_aggregate.py``) knows which flag
     it received and passes the right label. Returns
     ``(missing_required, unexpected_target, policy_source)``, where
-    ``policy_source`` is ``"explicit"`` when the caller passed at least one
-    explicit override (Codex review, fresh evidence -- an earlier revision
-    reported this case as ``"default"``, which is factually wrong: the
-    *resolved* value is the caller's own override, not the hard-coded
-    default, so labeling it "default" misrepresents the audit field to
-    anyone reading ``effective_policy`` back), else *source_hint* when the
-    manifest supplied at least one of the two fields, else ``"default"``
-    (also the value for discovered-only mode, where *expected* is ``None``
-    and neither policy is applicable). This is a single scalar covering both
-    fields, same coarse-grained approximation the manifest/default split
-    already had before explicit overrides were distinguished -- a caller
-    overriding only one of the two fields still reports one combined source,
-    not independent per-field provenance.
+    ``policy_source`` is *source_hint* when the manifest supplied at least
+    one of the two fields, else ``"default"`` (also the value for
+    discovered-only mode, where *expected* is ``None`` and neither policy is
+    applicable). This is a single scalar covering both fields -- a manifest
+    setting only one of the two still reports one combined source, not
+    independent per-field provenance.
     """
     manifest_missing_required = expected.gate_missing_required if expected else None
     manifest_unexpected_target = expected.gate_unexpected_target if expected else None
     resolved_missing_required = (
-        explicit_missing_required
-        if explicit_missing_required is not None
-        else manifest_missing_required
+        manifest_missing_required
         if manifest_missing_required is not None
         else OnMissingRequired.FAIL
     )
     resolved_unexpected_target = (
-        explicit_unexpected_target
-        if explicit_unexpected_target is not None
-        else manifest_unexpected_target
+        manifest_unexpected_target
         if manifest_unexpected_target is not None
         else OnUnexpectedTarget.INCLUDE
     )
     manifest_supplied_something = (
         manifest_missing_required is not None or manifest_unexpected_target is not None
     )
-    has_explicit_override = (
-        explicit_missing_required is not None or explicit_unexpected_target is not None
-    )
-    if has_explicit_override:
-        policy_source = "explicit"
-    elif manifest_supplied_something:
-        policy_source = source_hint
-    else:
-        policy_source = "default"
+    policy_source = source_hint if manifest_supplied_something else "default"
     return resolved_missing_required, resolved_unexpected_target, policy_source

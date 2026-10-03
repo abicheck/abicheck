@@ -79,7 +79,6 @@ def enforce_ast_cache_budget(
     *,
     max_bytes: int | None = None,
     now: float | None = None,
-    min_age_seconds: float = MIN_AGE_SECONDS,
 ) -> list[Path]:
     """Evict least-recently-used entries until *cache_dir* fits *max_bytes*.
 
@@ -117,7 +116,7 @@ def enforce_ast_cache_budget(
     for recency, size, entry in sorted(entries, key=lambda e: (e[0], str(e[2]))):
         if total <= budget:
             break
-        if current - recency < min_age_seconds:
+        if current - recency < MIN_AGE_SECONDS:
             continue
         try:
             cache_integrity.evict(entry)

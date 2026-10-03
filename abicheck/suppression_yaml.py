@@ -124,9 +124,7 @@ def _raw_node_lookup(
     return merged_found, merged_node
 
 
-def _raw_scalar_lookup(
-    node: yaml.MappingNode, key: str, _visiting: frozenset[int] = frozenset()
-) -> tuple[bool, str | None]:
+def _raw_scalar_lookup(node: yaml.MappingNode, key: str) -> tuple[bool, str | None]:
     """``(found, raw_text)`` for *key* in mapping *node* -- the scalar-
     unwrapping specialization of :func:`_raw_node_lookup`; see its
     docstring for the full direct-vs-merged precedence rules, which apply
@@ -135,7 +133,7 @@ def _raw_scalar_lookup(
     input in every real caller of this function) is treated as not found,
     matching this function's original, narrower contract.
     """
-    found, value_node = _raw_node_lookup(node, key, _visiting)
+    found, value_node = _raw_node_lookup(node, key)
     if not found or not isinstance(value_node, yaml.ScalarNode):
         return False, None
     return True, None if value_node.tag == _NULL_TAG else str(value_node.value)

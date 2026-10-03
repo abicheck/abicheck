@@ -27,6 +27,7 @@ import json
 import pytest
 
 from abicheck.storage.json_budget import (
+    DEFAULT_MAX_JSON_NESTING_DEPTH,
     JsonContainerBudgetExceeded,
     JsonNestingTooDeepError,
     check_json_container_budget,
@@ -35,7 +36,7 @@ from abicheck.storage.json_budget import (
 
 def test_accepts_a_payload_within_both_budgets():
     raw = json.dumps({"a": [1, 2, {"b": []}], "c": {}}).encode()
-    check_json_container_budget(raw, max_container_nodes=100, max_nesting_depth=100)
+    check_json_container_budget(raw, max_container_nodes=100)
 
 
 def test_counts_object_nodes():
@@ -115,19 +116,18 @@ def test_raises_once_the_budget_is_first_exceeded_not_after_a_full_scan():
     assert excinfo.value.args[0] == 4  # stopped at the 4th container, not 1,000,001
 
 
-def test_nesting_depth_within_budget_is_accepted():
-    depth = 50
+def test_nesting_depth_exactly_at_the_budget_is_accepted():
+    depth = DEFAULT_MAX_JSON_NESTING_DEPTH
     raw = (("[" * depth) + ("]" * depth)).encode()
-    check_json_container_budget(raw, max_container_nodes=1000, max_nesting_depth=100)
+    check_json_container_budget(raw, max_container_nodes=1_000_000)
 
 
 def test_nesting_depth_exceeding_budget_raises_the_depth_error_not_the_count_error():
-    depth = 200
+    depth = DEFAULT_MAX_JSON_NESTING_DEPTH + 1
     raw = (("[" * depth) + ("]" * depth)).encode()
-    with pytest.raises(JsonNestingTooDeepError):
-        check_json_container_budget(
-            raw, max_container_nodes=1_000_000, max_nesting_depth=100
-        )
+    with pytest.raises(JsonNestingTooDeepError) as excinfo:
+        check_json_container_budget(raw, max_container_nodes=1_000_000)
+    assert excinfo.value.args[0] == depth
 
 
 def test_depth_regression_python_314_json_loads_no_longer_raises_recursionerror():
@@ -159,4 +159,4 @@ def test_close_without_matching_open_does_not_go_negative_or_crash():
     # Malformed JSON (unbalanced) -- not this pre-check's job to reject,
     # only to not crash on.
     raw = b"]]]}}}{{{[[["
-    check_json_container_budget(raw, max_container_nodes=1000, max_nesting_depth=1000)
+    check_json_container_budget(raw, max_container_nodes=1000)

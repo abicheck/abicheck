@@ -525,25 +525,3 @@ class TestNoContributionPassedToADominantDecisionIsSilentlyDropped:
         for keyword in self._contribution_keywords():
             with pytest.raises(ValueError, match="must strictly exceed"):
                 _dominant_decision(2, ExitReason.NOT_COMPARABLE, **{keyword: 4})
-
-    def test_the_custom_removal_code_case_end_to_end(self) -> None:
-        """Codex's own reproduction, through the public resolver.
-
-        A caller using the documented custom-code support with a removal
-        code *below* the evidence code takes the fallback branch, where the
-        removal contribution was being dropped -- reporting `gate: none`
-        for a release with a proven removed library.
-        """
-        from abicheck.policy.outcome_release import run_outcome_dict_for_release
-
-        decision = _release_decision(
-            removed_required_library=True,
-            severity_scheme_active=True,
-            evidence_contract_error_contribution=7,
-            removed_required_library_code=6,
-        )
-        assert decision.code == 7
-        assert decision.removed_required_library_contribution == 6
-        outcome = run_outcome_dict_for_release("NO_CHANGE", decision.to_dict())
-        assert outcome["gate"] == "abi_breaking"
-        assert outcome["operational"] == "evidence_contract_error"

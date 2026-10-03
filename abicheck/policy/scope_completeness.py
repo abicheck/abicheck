@@ -178,7 +178,6 @@ def incomplete_scope_diagnostic(
     policy: str | None,
     *,
     base_exit: int = 0,
-    mitigation: str = CLI_MITIGATION,
 ) -> str | None:
     """The one stderr wording for an incomplete scope, or ``None`` when the
     scope is complete -- mirrors ``contract_coverage_exit._coverage_message``
@@ -228,7 +227,7 @@ def incomplete_scope_diagnostic(
             f"Contributes {floor}, below the compatibility axis's own exit "
             f"{base_exit}, which stands"
         )
-    return f"{what} {effect}. {mitigation}"
+    return f"{what} {effect}. {CLI_MITIGATION}"
 
 
 #: How many member names one state's group spells out before "+N more".

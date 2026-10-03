@@ -239,7 +239,6 @@ def release_assurance_diagnostic(
     decision: ReleaseAssuranceDecision,
     *,
     base_exit: int = 0,
-    mitigation: str = CLI_MITIGATION,
 ) -> str | None:
     """The one stderr wording for a release's incomplete assurance, or
     ``None`` when nothing fell short or the setting was off.
@@ -274,7 +273,7 @@ def release_assurance_diagnostic(
             f"Contributes {floor}, below the compatibility axis's own exit "
             f"{base_exit}, which stands"
         )
-    return f"{what} {effect}. {mitigation}"
+    return f"{what} {effect}. {CLI_MITIGATION}"
 
 
 def _grouped_members(members: tuple[MemberAssurance, ...]) -> str:

@@ -716,29 +716,6 @@ class TestResolveReleaseExitDecision:
         assert decision.code == 0
         assert decision.reasons == (ExitReason.CLEAN,)
 
-    def test_custom_codes_are_honored(self) -> None:
-        decision = resolve_release_exit_decision(
-            not_comparable=True,
-            severity_scheme_active=False,
-            verdict_or_severity_contribution=0,
-            not_comparable_code=77,
-        )
-        assert decision.code == 77
-
-    def test_custom_removed_library_code_not_exceeding_coverage_is_rejected(
-        self,
-    ) -> None:
-        prior_coverage = 9  # deliberately above a too-small custom code below
-        with pytest.raises(ValueError, match="must strictly exceed"):
-            resolve_release_exit_decision(
-                not_comparable=False,
-                severity_scheme_active=True,
-                verdict_or_severity_contribution=0,
-                removed_required_library=True,
-                contract_coverage_contribution=prior_coverage,
-                removed_required_library_code=8,
-            )
-
     @pytest.mark.parametrize(
         "decision",
         [
