@@ -101,11 +101,13 @@ print("RESULT" + json.dumps(out))
 def _sessions(tmp_path: Path, plugin: bool) -> list[dict]:
     tests = tmp_path / "tests"
     tests.mkdir(parents=True, exist_ok=True)
-    (tests / "test_ids.py").write_text(_FIXTURE)
-    (tests / "test_module_mark.py").write_text(_MODULE_MARK)
+    # UTF-8 explicitly: the fixture holds "café", and Windows' locale default
+    # (cp1252) writes bytes Python then refuses to parse as source.
+    (tests / "test_ids.py").write_text(_FIXTURE, encoding="utf-8")
+    (tests / "test_module_mark.py").write_text(_MODULE_MARK, encoding="utf-8")
     (tmp_path / "pytest.ini").write_text("[pytest]\n")
     driver = tmp_path / "driver.py"
-    driver.write_text(_DRIVER)
+    driver.write_text(_DRIVER, encoding="utf-8")
     args = ["-p", "mutmut_stable_param_ids"] if plugin else []
     env = {**os.environ, "PYTHONPATH": str(REPO / "scripts")}
     proc = subprocess.run(  # noqa: S603 - fixed argv

@@ -3659,8 +3659,20 @@ def _workers_can_import_this_module() -> bool:
         return True
     # Search sys.path as the fresh worker will -- not importlib.util.find_spec,
     # which answers from sys.modules and so says yes to the invented name.
-    top = __name__.partition(".")[0]
-    return importlib.machinery.PathFinder.find_spec(top) is not None
+    # Every component, through its parent's search path: a findable top-level
+    # package says nothing about the submodule the worker must import. And the
+    # spec found must be this very file, not a same-named module elsewhere.
+    parts = __name__.split(".")
+    fullname = parts[0]
+    spec = importlib.machinery.PathFinder.find_spec(fullname)
+    for part in parts[1:]:
+        if spec is None or spec.submodule_search_locations is None:
+            return False
+        fullname = f"{fullname}.{part}"
+        spec = importlib.machinery.PathFinder.find_spec(
+            fullname, spec.submodule_search_locations
+        )
+    return spec is not None and spec.origin == __file__
 
 
 def main(argv: list[str] | None = None) -> int:
