@@ -2,7 +2,8 @@
 
 Status: Stage A done (PR #1448); Stage B item 1 and Stage C done; Stage B
 items 2-3 continue in [usecase-path-tracing](usecase-path-tracing.md);
-Stage D's first pass done, one item open.
+Stage D's first pass done; Stage E's parameter pass added, its list not
+yet decided.
 
 ## Why
 
@@ -159,18 +160,36 @@ removed, with a test over generated inputs that fails on the old code:
 | `extract/dwarf_subtree_index.subtree_ends` | Test hook: the oracle probe the subtree-index tests compare against pyelftools' own terminators. |
 | `storage/fact_availability.FactAvailability.establishes_absence`, `storage/identity.OccurrenceSet.is_ambiguous`/`occurrences_of` | The inert ADR-062 Phase 0 primitives (D3/D4) one-semantic-pipeline Phase 8 wires, kept for the same reason as Stage C's `for_entity`. |
 
-### Still open
-
-- **Parameters scan's deletion left behind.** The tool works on functions,
-  not parameters. `workflows/artifact/execute._resolve_side_snapshot_impl`
-  still takes `source_extractor`, `expand_public_header_roots`,
-  `l4_public_headers`/`l4_public_header_dirs`, `baseline_reuse_hint`,
-  `seed_lang_explicit` and `defer_cleanup` (and threads several into
-  `embed_side_build_source`), which neither remaining caller passes. The
-  general fix is a parameter pass in `scripts/production_references.py`
-  (a keyword parameter no production call site supplies), not a hand edit
-  of this one function.
-
 Recompute the list rather than editing a copy of it. A cache-reset or
 `reset_for_testing` hook that exists for test isolation is a test hook and
 is kept.
+
+## Stage E — parameters no production call passes
+
+Stage D left one item open: keywords `scan`'s deletion left on
+`workflows/artifact/execute._resolve_side_snapshot_impl`. The function stays
+live, so a function-level pass cannot see them. `usecase_paths.py dead` now
+runs a second pass, `production_references.dead_parameters`: a parameter
+with a default that no production call passes, so every production call
+runs the default. It needs no recording, and it matches calls by name and
+errs towards "passed" the way the function pass errs towards "live" (`**kw`
+passes everything, `*args` every positional slot, a function whose name has
+any non-call production use is reported as not checkable). Calls inside
+functions the function pass reports dead do not count, tests never count,
+and `import f as g` is followed within its file.
+`tests/test_production_references_parameters.py` checks it against
+generated packages whose oracle is what each generated call binds.
+
+First run on this branch: **146** parameters on **102** functions; 24 more
+on 17 functions the user docs name (public API, listed apart, as for
+functions); 185 functions not checkable. It finds the seven parameters
+Stage D named on `_resolve_side_snapshot_impl` plus an eighth,
+`build_config_locally_trusted`, and six on its wrapper
+`resolve_side_snapshot`. The rest is mixed: parameters left by deleted
+callers, test seams (`now`, `runner`, `env`), and tunables every caller
+leaves at the default (`indent`, `timeout`, `limit`).
+
+Next: decide each, module by module, the way Stages C and D did: remove the
+parameter (and whatever it threads), keep a test seam, or keep a tunable
+with the page or test that names it. Recompute the list rather than
+editing a copy of it.

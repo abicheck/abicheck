@@ -845,10 +845,17 @@ def unreached_functions(doc: dict) -> set[str]:
 
 
 def cmd_dead(args: argparse.Namespace) -> int:
-    from production_references import dead_report, render_markdown
+    from production_references import (
+        dead_parameters,
+        dead_report,
+        render_markdown,
+        render_parameters_markdown,
+    )
 
     doc = load_recording(args.recording)
-    report = dead_report(Path(args.root).resolve(), unreached_functions(doc))
+    root = Path(args.root).resolve()
+    report = dead_report(root, unreached_functions(doc))
+    params = dead_parameters(root, dead_functions=set(report.dead))
     if args.json:
         Path(args.json).write_text(
             json.dumps(
@@ -864,6 +871,8 @@ def cmd_dead(args: argparse.Namespace) -> int:
                         for fid, s in sorted(report.live.items())
                     },
                     "unverifiable": dict(sorted(report.unverifiable.items())),
+                    "dead_parameters": params.dead,
+                    "documented_parameters": params.documented,
                 },
                 indent=1,
             )
@@ -871,6 +880,7 @@ def cmd_dead(args: argparse.Namespace) -> int:
             encoding="utf-8",
         )
     print(render_markdown(report, limit=args.top))
+    print(render_parameters_markdown(params, limit=args.top))
     return 0
 
 
