@@ -109,7 +109,9 @@ a page that still presents one as live is flagged.
 --build-catalog DIR` followed by `usecase_paths.py dead` listed **127** dead
 functions (no production reference, undocumented), 26 named only in user
 docs and 76 named only by an ADR or plan. Worked module by module, the same
-way as Stage C.
+way as Stage C. Recomputed after the pass, the same recording lists **0**
+dead functions; the decided-but-kept ones below are now named by this plan,
+which is what moves them out of the dead list.
 
 A function with no production reference is dead whatever the platform: a
 missing Windows or macOS recording only explains why a function is
