@@ -28,6 +28,14 @@
   `AbiSnapshot.func_by_mangled` (use `function_map.get`), and about forty
   other unreferenced accessors and wrappers; see
   `docs/contribute/plans/dead-code-and-single-owner.md`, Stage D.
+- **Parameters left on the shared input resolver by `scan`'s removal.**
+  `workflows.artifact.execute._resolve_side_snapshot_impl`,
+  `resolve_side_snapshot` and `embed_side_build_source` lose the keyword
+  parameters only `scan` passed (`build_config_locally_trusted`,
+  `baseline_reuse_hint`, `l4_public_headers`, ...; 21 in all), and
+  `service_input_resolution.BaselineReuseContext`/
+  `resolve_baseline_compile_context` go with them. `compare` and `dump`
+  behave as before; see the plan's Stage E.
 
 ### Fixed
 

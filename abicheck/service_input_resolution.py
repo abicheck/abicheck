@@ -35,22 +35,18 @@ from .workflows.artifact.execute import (
     resolve_side_snapshot,
 )
 from .workflows.artifact.resolve import (
-    BaselineReuseContext,
     _gated_build_query_inputs,
     _seeded_includes_and_compile_context,
     is_raw_source_tree,
     reject_hybrid_source_frontend,
-    resolve_baseline_compile_context,
 )
 
 __all__ = [
-    "BaselineReuseContext",
     "SideResolution",
     "embed_side_build_source",
     "enforce_requested_depth",
     "is_raw_source_tree",
     "reject_hybrid_source_frontend",
-    "resolve_baseline_compile_context",
     "resolve_side_snapshot",
 ]
 

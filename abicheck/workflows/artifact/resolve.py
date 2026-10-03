@@ -29,16 +29,10 @@ than two implementations kept in sync by hand.
 Everything here was ``abicheck/service_input_resolution.py``'s, which in turn
 held it for ``service_compare_pipeline``. It kept moving inward because the
 rule it encodes is genuinely per-*input*: a change to how one artifact resolves
-must land on ``dump``, on both ``compare`` sides, and on ``scan``'s candidate
-at once. Pair-shaped decisions stayed behind in the pair workflow -- the
+must land on ``dump`` and on both ``compare`` sides at once. Pair-shaped decisions stayed behind in the pair workflow -- the
 pair-wide C++20 dialect override exists because two sides must agree on a
 standard, and the sequential-resolution rule is about two extractions running
 at once. Neither means anything for a lone artifact.
-
-:class:`BaselineReuseContext` is the one exception, and it is deliberate: it
-carries the *other* side's already-resolved scope as an opt-in hint, so a
-paired caller can ask the per-input resolver a pair-shaped question without
-the resolver acquiring standing knowledge of two sides.
 
 Mechanical note, inherited unchanged: everything this module needs from
 ``service`` is looked up **through the module object at call time**
@@ -51,7 +45,6 @@ cycle (AGENTS.md "What NOT to do").
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ...errors import ValidationError
@@ -65,118 +58,9 @@ if TYPE_CHECKING:
     from ..request_inputs import InputSpec
 
 __all__ = [
-    "BaselineReuseContext",
     "is_raw_source_tree",
     "reject_hybrid_source_frontend",
-    "resolve_baseline_compile_context",
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class BaselineReuseContext:
-    """The *other* side's resolved header/include scope, for a paired resolve.
-
-    PR 3A blocker 6 (CLI cleanup phase two). ``scan --against`` resolves one
-    side — the candidate — through the per-input machinery, then has to answer
-    a question that is inherently about *two* snapshots: may the candidate's
-    own P0.3 L3→L2 folded :class:`CompileContext` also be used to parse the
-    baseline, or must the baseline fall back to the caller's plain, unfolded
-    one?
-
-    That decision was hand-rolled inline in the retired ``scan_engine.run_scan_core`` as a
-    four-clause boolean expression, and it took three separate review rounds to
-    get right (the twelfth, thirteenth and fifteenth findings on the root
-    ``AGENTS.md``'s L3→L2-fold entry: gating on ``baseline_headers``
-    truthiness rather than content, then on headers alone while
-    ``-I old=``/``-I new=`` routed the two sides through different include
-    trees). It is exactly the kind of rule that must exist once, not once per
-    caller.
-
-    Deliberately **not** a widening of :func:`resolve_side_snapshot`'s general
-    single-input contract: this is an optional, opt-in hint, and a caller that
-    does not pass one is bit-for-bit unaffected — every field of
-    :class:`SideResolution` it does not touch keeps its previous meaning. The
-    per-input primitives stay per-input; this is the one pair-shaped fact a
-    ``scan`` caller can hand *in*, mirroring how
-    ``service_compare_pipeline``'s own docstring keeps pair-shaped decisions
-    out of the per-input layer rather than pretending they don't exist.
-    """
-
-    #: The old side's resolved header list (the retired ``cli_scan``'s
-    #: ``header_both + header_old``). Empty means "no old-side header scope of
-    #: its own", which reuses the candidate's.
-    baseline_headers: tuple[Path, ...] = ()
-    #: The old side's resolved include list (``include_both + include_old``),
-    #: built by the retired ``cli_scan`` completely independently of the header list —
-    #: which is why both have to be checked, not just one.
-    baseline_includes: tuple[Path, ...] = ()
-
-    def folded_context_is_reusable(
-        self,
-        *,
-        headers: Sequence[Path],
-        effective_includes: Sequence[Path],
-    ) -> bool:
-        """May the candidate's folded context also parse the baseline?
-
-        Only when the baseline's own resolved scope is either absent or
-        *identical in content* to the candidate's, on **both** axes.
-
-        Content, not truthiness, on the header axis: a bare, shared ``-H
-        api.h`` (no ``old=`` scoping — the ordinary, most common
-        ``scan --against`` usage) already makes ``baseline_headers`` truthy
-        and equal to the candidate's, since the retired ``cli_scan`` built it as
-        ``header_both + header_old``. Gating on mere truthiness treats every
-        scan with any headers at all as old-side-scoped and drops the fold for
-        the common case, which is the whole ``NOT_COMPARABLE`` bug this fold
-        exists to prevent.
-
-        And both axes, not just headers: ``-H api.h -I old=old-build -I
-        new=new-build`` shares one header list while routing each side through
-        a genuinely different include tree. Forwarding the new side's folded
-        ``-D``/``-std``/sysroot flags there would parse the old binary under
-        the new build's configuration.
-
-        There is no ``--build-info-old``/``--sources-old``, so no old-side
-        fold can be derived for the diverging case — the caller's plain,
-        unfolded context is the correct fallback, not a second guess.
-        """
-        if self.baseline_headers and list(self.baseline_headers) != list(headers):
-            return False
-        return not (
-            self.baseline_includes
-            and list(self.baseline_includes) != list(effective_includes)
-        )
-
-
-def resolve_baseline_compile_context(
-    hint: BaselineReuseContext | None,
-    *,
-    folded: CompileContext | None,
-    unfolded: CompileContext | None,
-    headers: Sequence[Path],
-    effective_includes: Sequence[Path],
-) -> CompileContext | None:
-    """The :class:`CompileContext` the *baseline* side's parse should use.
-
-    The one implementation of :meth:`BaselineReuseContext.
-    folded_context_is_reusable`'s consequence, shared by
-    the retired ``scan_engine.run_scan_core`` (which called it directly) and by
-    :func:`_resolve_side_snapshot_impl`'s ``baseline_reuse_hint`` parameter
-    (which reports the same answer on :class:`SideResolution` for whichever
-    slice finally routes ``scan``'s candidate resolution through the shared
-    primitive). Two callers, one rule — which is the point.
-
-    *hint* of ``None`` means the caller has no second side, so there is
-    nothing to decide: the folded context is simply this side's own.
-    """
-    if hint is None:
-        return folded
-    if hint.folded_context_is_reusable(
-        headers=headers, effective_includes=effective_includes
-    ):
-        return folded
-    return unfolded
 
 
 def is_raw_source_tree(path: Path | None) -> bool:
@@ -221,7 +105,6 @@ def _gated_build_query_inputs(
     build_query: str | None,
     *,
     allow_build_query: bool,
-    build_config_locally_trusted: bool = False,
 ) -> tuple[Path | None, str | None]:
     """The real trust gate on *build_config*/*build_query* -- shared by both
     the L2 seed and the L3-L5 embed step so a caller's permission decision is
@@ -233,11 +116,9 @@ def _gated_build_query_inputs(
     path to a ``.abicheck.yml`` that may itself carry a ``build.query`` key,
     so it carries the identical execution risk *by proxy of that one key* --
     it is forced to ``None`` unless *allow_build_query* is exactly ``True``,
-    regardless of what the caller passed, UNLESS *build_config_locally_
-    trusted* says otherwise (see below). ``build_query`` itself is always
-    gated the same way regardless of that flag -- it is a bare, always-
-    executable string with no downstream consumer that separately checks its
-    provenance. **``build_compile_db`` is deliberately not gated by this
+    regardless of what the caller passed. ``build_query`` is gated the same
+    way -- it is a bare, always-executable string with no downstream consumer
+    that separately checks its provenance. **``build_compile_db`` is deliberately not gated by this
     function** (see its own call sites) -- it is a bare path/glob naming an
     *existing* ``compile_commands.json``, a pure data read with "no such
     restriction" (matching this repo's own established ``dump
@@ -253,40 +134,10 @@ def _gated_build_query_inputs(
     deprecated no-op and has since been removed entirely; see
     ``buildsource/inline.py``'s own docstring).
 
-    *build_config_locally_trusted* (PR 3A, scan resolver convergence; Codex
-    review -- a real regression, not a hypothetical): ``build_config``'s own
-    *query* field is independently, correctly enforced downstream, at the
-    actual point of execution -- ``collect_inline_pack``'s
-    ``build_config_trusted_for_query`` parameter, computed presence-based
-    (``build_config is not None or build_query is not None``) by both of
-    this function's callers (``l2_seed._resolve_l2_seed_pack_args``,
-    ``cli_buildsource.embed_build_source``) before this gate here was ever
-    introduced. That downstream check is what actually decides whether
-    ``build.query`` may run; blanket-nulling ``build_config`` *here* as well
-    is a second, blunter gate keyed on a different signal
-    (*allow_build_query*) that also silently drops every *passive*,
-    non-executable setting the config carries (``build.compile_db``,
-    ``build.internal_namespaces``, ...) whenever that signal is not exactly
-    ``True`` -- which, for ``scan``, was the common case: the retired ``cli_scan_helpers.
-    resolve_effective_allow_query`` (ADR-037 D4 "level-implies-query") only
-    ever answers ``True`` when the config *itself* declares a ``build.query``
-    key AND an explicitly-pinned deep evidence level, so an ordinary
-    ``scan --config <path>`` whose config only sets ``build.compile_db``
-    lost that config entirely once this function started gating
-    ``build_config``'s bare presence for ``scan`` too. Passing this flag
-    restores ``scan``'s pre-migration behavior (``build_config`` always
-    forwarded ungated to both the seed and the embed step, trusting exactly
-    the downstream, presence-based gate) without weakening the default this
-    function already gives ``dump``/``compare``'s typed-API callers, which
-    have no equivalent CLI-side consent gate of their own and stay fully
-    gated (default ``False``, unchanged).
     """
-    gated_query = build_query if allow_build_query is True else None
-    if allow_build_query is True or build_config_locally_trusted:
-        gated_config = build_config
-    else:
-        gated_config = None
-    return gated_config, gated_query
+    if allow_build_query is True:
+        return build_config, build_query
+    return None, None
 
 
 def _fold_compile_db_tokens(
@@ -413,7 +264,6 @@ def _seeded_includes_and_compile_context(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     allow_build_query: bool = False,
-    build_config_locally_trusted: bool = False,
     collect_mode: str | None = None,
     compile_db_tokens: tuple[str, ...] = (),
     compile_db_matched: bool = False,
@@ -594,7 +444,6 @@ def _seeded_includes_and_compile_context(
         build_config,
         build_query,
         allow_build_query=allow_build_query,
-        build_config_locally_trusted=build_config_locally_trusted,
     )
 
     ctx = evidence.compile

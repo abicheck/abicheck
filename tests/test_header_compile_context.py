@@ -1334,69 +1334,6 @@ def test_resolve_side_snapshot_stamps_parsed_with_build_context(
     assert snap.parsed_with_build_context is True
 
 
-def test_resolve_side_snapshot_forwards_symbols_only_and_debug_presence_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """PR C (dump/scan resolver convergence): ``symbols_only``/
-    ``debug_presence_only`` reach ``service.resolve_input`` unchanged.
-
-    Before this, only ``scan_engine._build_new_snapshot`` (which calls
-    ``service.resolve_input`` directly, bypassing this shared primitive) could
-    express either flag — the shared ``resolve_side_snapshot``/
-    ``_resolve_side_snapshot_impl`` primitive silently dropped them, always
-    forwarding ``False``/``False`` regardless of what the caller passed.
-    """
-    from abicheck import service_input_resolution as sir
-    from abicheck.model import AbiSnapshot
-    from abicheck.service import InputSpec
-    from abicheck.service_compare_evidence import SideEvidence
-
-    so = tmp_path / "lib.so"
-    so.write_bytes(b"\x7fELF" + b"\x00" * 100)
-
-    captured: dict[str, object] = {}
-
-    def _fake_resolve_input(*args: object, **kwargs: object) -> AbiSnapshot:
-        captured.update(kwargs)
-        return AbiSnapshot(library="lib", version="1.0", from_headers=False)
-
-    import abicheck.workflows.input_resolution as input_resolution_mod
-
-    monkeypatch.setattr(input_resolution_mod, "resolve_input", _fake_resolve_input)
-
-    side = InputSpec(path=so, version="1.0")
-    evidence = SideEvidence(
-        headers=[], compile=None, collect_mode="off", dump_manifest=None
-    )
-    sir.resolve_side_snapshot(
-        side,
-        evidence,
-        lang="c++",
-        header_backend="auto",
-        fmt="elf",
-        public_headers=[],
-        public_header_dirs=[],
-        symbols_only=True,
-        debug_presence_only=True,
-    )
-    assert captured["symbols_only"] is True
-    assert captured["debug_presence_only"] is True
-
-    # Default is unchanged False/False for every pre-existing caller.
-    captured.clear()
-    sir.resolve_side_snapshot(
-        side,
-        evidence,
-        lang="c++",
-        header_backend="auto",
-        fmt="elf",
-        public_headers=[],
-        public_header_dirs=[],
-    )
-    assert captured["symbols_only"] is False
-    assert captured["debug_presence_only"] is False
-
-
 def test_resolve_side_snapshot_forwards_only_explicit_includes_as_public_include_search_dirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

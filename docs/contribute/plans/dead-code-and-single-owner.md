@@ -2,8 +2,8 @@
 
 Status: Stage A done (PR #1448); Stage B item 1 and Stage C done; Stage B
 items 2-3 continue in [usecase-path-tracing](usecase-path-tracing.md);
-Stage D's first pass done; Stage E's parameter pass added, its list not
-yet decided.
+Stage D's first pass done; Stage E's parameter pass added and its first
+group decided (`_resolve_side_snapshot_impl`); the rest of its list open.
 
 ## Why
 
@@ -189,7 +189,13 @@ Stage D named on `_resolve_side_snapshot_impl` plus an eighth,
 callers, test seams (`now`, `runner`, `env`), and tunables every caller
 leaves at the default (`indent`, `timeout`, `limit`).
 
-Next: decide each, module by module, the way Stages C and D did: remove the
+Decide each, module by module, the way Stages C and D did: remove the
 parameter (and whatever it threads), keep a test seam, or keep a tunable
 with the page or test that names it. Recompute the list rather than
 editing a copy of it.
+
+### Decided
+
+| Item | Decision |
+|---|---|
+| `_resolve_side_snapshot_impl`: `build_config_locally_trusted`, `baseline_reuse_hint`, `seed_lang_explicit`, `defer_cleanup`, `source_extractor`, `expand_public_header_roots`, `l4_public_headers`/`l4_public_header_dirs`; its wrapper `resolve_side_snapshot`: `enable_debuginfod`, `debuginfod_url`, `dwarf_only`, `debug_format`, `symbols_only`, `debug_presence_only` | **Removed**, with what they threaded: the impl's `symbols_only`/`debug_presence_only` (only the wrapper passed them), `embed_side_build_source`'s `defer_cleanup`/`source_extractor`/`expand_public_header_roots`/`l4_public_*` (its one caller is the impl), the trust gate's and the L2 seed's `build_config_locally_trusted`, and the pair-reuse decision behind `baseline_reuse_hint` (`BaselineReuseContext`, `resolve_baseline_compile_context`, `SideResolution.baseline_compile_context`, and `tests/test_baseline_reuse_context.py`). Every one existed for `scan`'s candidate resolution; no production call passed a non-default value, so `compare` and `dump` run exactly as before. Recomputed afterwards: 132 parameters on 100 functions, and the removals expose no new unpassed parameter. |

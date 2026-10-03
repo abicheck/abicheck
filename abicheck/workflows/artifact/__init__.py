@@ -35,20 +35,16 @@ from .execute import (
     resolve_side_snapshot,
 )
 from .resolve import (
-    BaselineReuseContext,
     is_raw_source_tree,
     reject_hybrid_source_frontend,
-    resolve_baseline_compile_context,
 )
 
 __all__ = [
-    "BaselineReuseContext",
     "ResolvedArtifactPlan",
     "SideResolution",
     "embed_side_build_source",
     "enforce_requested_depth",
     "is_raw_source_tree",
     "reject_hybrid_source_frontend",
-    "resolve_baseline_compile_context",
     "resolve_side_snapshot",
 ]
