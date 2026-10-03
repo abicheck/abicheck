@@ -196,3 +196,47 @@ def test_scoring_matrix_is_not_vacuous() -> None:
 
     assert any(ChangeKind(k) in BREAKING_KINDS for k in _KINDS)
     assert any(ChangeKind(k) not in BREAKING_KINDS for k in _KINDS)
+
+
+_REFUSED = {
+    "report_schema_version": "5.12",
+    "verdict": None,
+    "reason": {"kind": "scope_mismatch", "message": "not comparable"},
+    "run_outcome": {"operational": "not_comparable", "compatibility": None},
+}
+
+
+@pytest.mark.parametrize("expected", ["COMPATIBLE", "BREAKING"])
+@pytest.mark.parametrize(
+    "report",
+    [
+        _REFUSED,
+        {"verdict": None, "run_outcome": {"operational": "not_comparable"}},
+        {"verdict": None},
+        {},
+    ],
+    ids=["scope-mismatch", "no-reason", "bare-null-verdict", "empty-document"],
+)
+def test_a_report_without_a_verdict_leaves_the_pair_not_evaluated(
+    expected: str, report: dict
+) -> None:
+    """A comparison abicheck refused (protobuf 6->7: ``scope_mismatch``)
+    writes a report with no changes. The gate must not read "no changes" as
+    "compared, nothing found" -- a clean pass for a known-compatible pair on
+    a run that compared nothing. Oracle: whether the report carries a
+    verdict, independent of how the gate counts findings."""
+    lib = rcc.summarize_report(report)
+    assert lib["error"].startswith("abicheck reached no verdict")
+    entry = _entry("p", "lib") | {"expected": expected}
+    result = {"pair": "p", "libraries": {"lib.so": lib}, "error": lib["error"]}
+    gate = rcc.evaluate_gate([entry], {"p": result}, None)
+    assert not gate.passed
+    assert any("not evaluated" in f for f in gate.failures), gate.failures
+
+
+def test_a_report_with_a_verdict_is_evaluated() -> None:
+    """Negative control: a real verdict with zero findings is a result."""
+    lib = rcc.summarize_report({"verdict": "NO_CHANGE", "changes": []})
+    assert "error" not in lib
+    result = {"pair": "p", "libraries": {"lib.so": lib}}
+    assert rcc.evaluate_gate([_entry("p", "lib")], {"p": result}, None).passed

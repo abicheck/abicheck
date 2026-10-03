@@ -192,7 +192,22 @@ def summarize_report(report: dict) -> dict:
                 key += NOT_EVALUATED_SUFFIX
             counts[key] = counts.get(key, 0) + 1
     verdict = report.get("verdict") or (report.get("summary") or {}).get("verdict")
-    return {"verdict": verdict, "counts_by_kind": dict(sorted(counts.items()))}
+    out: dict[str, Any] = {
+        "verdict": verdict,
+        "counts_by_kind": dict(sorted(counts.items())),
+    }
+    if not verdict:
+        # abicheck reached no verdict: a refused comparison (``not_comparable``
+        # -- e.g. a scope_fingerprint mismatch) writes a report with no
+        # changes at all. Read as a result, that is "compared, found
+        # nothing" -- a clean pass for a known-compatible pair, on a run
+        # that compared nothing. It is that library's error instead, so the
+        # pair reads "not evaluated" with abicheck's own reason.
+        reason = report.get("reason") or {}
+        outcome = (report.get("run_outcome") or {}).get("operational")
+        kind = reason.get("kind") or outcome or "no verdict"
+        out["error"] = f"abicheck reached no verdict ({kind})"
+    return out
 
 
 def pair_totals(result: dict) -> dict:
@@ -437,8 +452,11 @@ def run_pair(
         )
         lib["compare_s"] = round(time.monotonic() - started, 1)
         result["libraries"][name] = lib
-    if any(lib.get("error") for lib in result["libraries"].values()):
-        result["error"] = "abicheck produced no report for at least one library"
+    errors = sorted(
+        {lib["error"] for lib in result["libraries"].values() if lib.get("error")}
+    )
+    if errors:
+        result["error"] = "; ".join(errors)
     return result
 
 
