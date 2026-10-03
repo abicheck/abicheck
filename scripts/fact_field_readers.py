@@ -110,6 +110,7 @@ from fact_field_readers_scope import (  # noqa: E402
     _locally_bound_names,
     _operator_attrgetter_aliases,
     _parent_map,
+    walk_tree,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -239,7 +240,7 @@ def _imported_class_aliases(tree: ast.Module) -> dict[str, str]:
             # module name is never checked either way.
             aliases[target] = value.attr
 
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
                 local = alias.asname or alias.name
@@ -327,7 +328,7 @@ def _builtins_getattr_aliases(
         ):
             qualified_candidates.append((target, value.value.id))
 
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name == "builtins":
@@ -424,7 +425,7 @@ def _builtins_symbol_aliases(
         ):
             qualified_candidates.append((target, value.value.id))
 
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "builtins":
             for alias in node.names:
                 if alias.name == symbol:
@@ -475,7 +476,7 @@ def _unbound_getattribute_receiver_aliases(tree: ast.Module) -> frozenset[str]:
         if isinstance(value, ast.Name):
             assign_candidates.append((target, value.id))
 
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "builtins":
             for alias in node.names:
                 if alias.name in ("object", "type"):
@@ -535,7 +536,7 @@ def _unbound_getattribute_method_aliases(
         ):
             qualified_candidates.append((target, value.value.id))
 
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
@@ -620,7 +621,7 @@ def _mapping_receiver_aliases(
         if isinstance(value, ast.Attribute) and value.attr == "__dict__":
             names.add(target)
 
-    for node in ast.walk(tree):
+    for node in walk_tree(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):

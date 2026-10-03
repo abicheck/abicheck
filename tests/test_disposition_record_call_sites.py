@@ -18,7 +18,7 @@
 Split out of `test_disposition_scope_matrix.py` (which reached the 1200-line
 test cap): these two tests scan every real `record(...)` call site under
 `abicheck/`, so they are `repo_scan` tests, run once by CI's
-`repo-scan-tests` job rather than on every unit leg.
+`ai-readiness` job (`verify.py --only repo-scan-tests`) rather than on every unit leg.
 """
 
 from __future__ import annotations
