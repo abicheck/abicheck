@@ -295,10 +295,13 @@ def entity_id_for_type(scope: ScopePath, leaf_name: str) -> EntityId:
     An *anonymous* struct/union has no name to disambiguate with at all, and
     ``ScopePath`` names only the containing scope, never the leaf
     declaration (this module's own docstring) -- so two anonymous sibling
-    records both passing ``leaf_name=""`` share one ``EntityId``.
-    :class:`Anonymous`'s ``ordinal`` disambiguates a *descendant's*
-    containing scope, not the anonymous declaration itself, and no producer
-    supplies a per-declaration ordinal for the latter.
+    records both passing ``leaf_name=""`` would share one ``EntityId``.
+    No producer passes one: castxml, clang JSON and DWARF each skip a
+    record/enum with neither a name nor an owning typedef's name (a typedef
+    name is the identity an unnamed one gets). :class:`Anonymous`'s
+    ``ordinal`` disambiguates a *descendant's* containing scope, not the
+    anonymous declaration itself; a producer that starts emitting unnamed
+    declarations needs a per-declaration discriminator here first.
     """
     return EntityId(scope=_scope_path(scope), kind=EntityKind.TYPE, leaf_name=leaf_name)
 

@@ -46,8 +46,35 @@
   `junit_report.to_junit_xml_multi` loses `report_mode` (the release
   fan-out it serves rejects `--view root-cause` first);
   `html_report.write_html_report` loses `demangle`.
+- **Further parameters no production call passed.** Each function now runs
+  what every caller already got. The ones a Python caller may notice:
+  `workflows.aggregate.execute.aggregate`/`aggregate_reports_dir` lose
+  `on_missing_required`/`on_unexpected_target` (state the policy in the
+  manifest's `gate` block, as `abicheck aggregate` does; the aggregate
+  report's `effective_policy.source` is no longer `"explicit"`, and the
+  schema still accepts that value from an older report);
+  `resolver.resolve_dependencies` and `stack_checker.check_single_env` lose
+  `max_file_size`; `policy.severity.compute_gate_decision` now requires a
+  `SeverityConfig` (the verdict-only scheme has no category to blame, and
+  every caller handled that case first); `buildsource.source_replay.
+  run_source_replay` loses `target_id`/`library`/`forced_public`, so its
+  `target` scope is every unit attached to a build target;
+  `buildsource.header_graph.build_header_only_graph` takes only
+  `ast_projection=` (project a parsed tree with
+  `project_header_graph_ast` first); `sycl_metadata.parse_sycl_metadata`
+  loses `extra_plugin_paths` (use `SYCL_PI_PLUGINS_DIR`); the pattern
+  pre-scan's input resolvers lose their `changed_paths` narrowing, whose
+  only caller was `scan`. The rest are internal; the plan's Stage E
+  (`docs/contribute/plans/dead-code-and-single-owner.md`) lists them.
 
 ### Fixed
+
+- **Coverage and scope notices no longer advise the setting a run already
+  has.** The contract-coverage notice ended "or set contract.unresolved=warn
+  to accept incomplete coverage" even when it opened "Accepted by
+  contract.unresolved=warn", and the incomplete-scope notice told a run
+  under `scope.on_incomplete: block` to set `block`. Each now offers only a
+  change that would change something.
 
 - **The preprocessor pre-scan runs the compiler `.abicheck.yml` configures.**
   `compile.compiler` (and a compiler prefix) selected the compiler for L4

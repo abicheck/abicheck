@@ -11100,3 +11100,43 @@ prevent. `buildsource/include_graph.parse_depfile` already parses the format.
 Building the capture changes fresh fingerprints the same way the target
 platform entry above does, so it needs the same unrecorded-side carve-out.
 Owner: ADR-050; until then ADR-050 D1 overstates what is fingerprinted.
+
+## A snapshot's `build_mode` is never captured at dump time (2026-10-03)
+
+From Stage E: `build_mode.build_mode_from_signals` takes `raw_producer`
+(`DW_AT_producer`), `raw_comment` (ELF `.comment`) and `dwarf_language`, and
+no production call passes any of them. Its one caller,
+`diff_stdlib_impl`, passes mangled symbols only, so the stdlib dimensions
+(family, libstdc++ dual ABI, libc++ ABI version) are inferred at compare time
+while `compiler_family`, `language_std` and the provenance strings are always
+`UNKNOWN`/empty. No dump path sets `AbiSnapshot.build_mode` either: the field
+is only read back from a stored document that already carries one.
+`detect_compiler_family` and `detect_cxx_standard` are tested but have no
+production producer feeding them.
+
+The parameters are kept rather than removed, because removing them would
+leave both detectors reachable only from tests. The evidence exists
+elsewhere: the L3 compiler record (`buildsource/compiler_record.py`) parses
+the producer string, and the DWARF parse reads each CU's attributes. Proposed:
+carry `DW_AT_producer`/`DW_AT_language` out of the DWARF parse (and `.comment`
+out of `elf_metadata`), populate `build_mode` at dump time, and decide which
+detector reads it, with a test over {GCC, Clang, ICX} x {producer present,
+stripped} against the compiler's own banner. Owner: the build-mode work
+(`abicheck/build_mode.py`).
+
+## A stored package's extractor/resolver generation drift is never reported (2026-10-03)
+
+From Stage E: `storage.versioning.check_reader_compatibility` reports
+`semantics_differ` only when the caller passes its own
+`reader_extractor_generation`/`reader_resolver_generation`, and neither caller
+(`project_snapshot_store`, `storage/bundle_facts_package`) does. No build-side
+generation constant exists to pass, and nothing reads
+`ReaderCompatibility.semantics_differ`. So ADR-062 D2's non-fail-closed half
+is unbuilt: a package produced under an older resolver is read as if its
+derived results were today's, with no notice. The two fail-closed axes
+(package format, comparison contract) are wired and unaffected.
+
+Proposed: define the reader's current extractor and resolver generations next
+to `PACKAGE_FORMAT_VERSION`, bump them when extraction or resolution semantics
+change, pass them from both readers, and surface `semantics_differ` in the
+report that loaded the package. Owner: ADR-062.
