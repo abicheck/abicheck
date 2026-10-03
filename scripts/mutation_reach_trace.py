@@ -51,6 +51,7 @@ import importlib
 import json
 import os
 import sys
+import threading
 import tomllib
 import types
 from collections.abc import Generator
@@ -89,6 +90,45 @@ def code_objects(code: types.CodeType) -> Generator[types.CodeType]:
             yield from code_objects(const)
 
 
+def _function_candidates(modules: list[str]) -> list[object]:
+    """Objects that may be functions defined in the ``only_mutate`` modules.
+
+    The whole heap when that is safe. A heap census beside another live thread
+    breaks that thread's ``tuple(...)`` construction
+    (``abicheck.workflows.memory_trace.gc_census_is_safe``), and a test may
+    leave a thread running, so with other threads alive this falls back to
+    the modules' globals, their classes' ``__dict__`` values, and what a
+    ``staticmethod``/``classmethod``/``functools.wraps`` wrapper holds. A
+    function created only inside a call is still reached through its parent's
+    nested code objects (:func:`code_objects`).
+    """
+    if threading.active_count() == 1:
+        return gc.get_objects()
+    found: list[object] = []
+    pending: list[object] = []
+    for name in modules:
+        module = sys.modules.get(name)
+        if module is None:
+            continue
+        for value in list(vars(module).values()):
+            pending.append(value)
+            if isinstance(value, type):
+                pending.extend(list(vars(value).values()))
+    for value in pending:
+        # Bounded: some objects synthesise any attribute on access.
+        for _ in range(8):
+            found.append(value)
+            if isinstance(value, (staticmethod, classmethod)):
+                value = value.__func__
+            elif isinstance(value, types.FunctionType):
+                value = vars(value).get("__wrapped__")
+            else:
+                break
+            if value is None:
+                break
+    return found
+
+
 class Monitor:
     def __init__(self, paths: frozenset[str], modules: list[str]) -> None:
         if _MON is None:
@@ -115,7 +155,7 @@ class Monitor:
         if ids == self.module_ids:
             return
         self.module_ids = ids
-        for obj in gc.get_objects():
+        for obj in _function_candidates(self.modules):
             if not isinstance(obj, types.FunctionType):
                 continue
             code = obj.__code__
