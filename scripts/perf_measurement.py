@@ -52,7 +52,9 @@ from __future__ import annotations
 import argparse
 import math
 import statistics
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 
 @dataclass(frozen=True)
@@ -276,3 +278,90 @@ def is_gateable(value: object) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
     return math.isfinite(value) and value > 0
+
+
+# ── Tail-exponent scaling gate ───────────────────────────────────────────────
+# Moved from benchmark_scaling.py: these are slope statistics over measured
+# points (anything with .size and .seconds), not scenario definitions.
+
+
+class SizedTiming(Protocol):
+    """One measured point: a workload size and its reported seconds."""
+
+    @property
+    def size(self) -> int: ...
+
+    @property
+    def seconds(self) -> float: ...
+
+
+#: Noise floor for the tail-exponent gate; see _check_exponent_gate.
+EXPONENT_FLOOR_SECONDS = 0.2
+
+
+def tail_low_seconds(points: Sequence[SizedTiming]) -> float:
+    """Seconds of the smaller of the two points :func:`tail_exponent` uses.
+
+    ``0.0`` when there is no tail pair, so the gate treats it as below any
+    floor (there is no slope to gate either way).
+    """
+    usable = sorted((p for p in points if p.seconds > 0), key=lambda p: p.size)
+    if len(usable) < 2:
+        return 0.0
+    return min(usable[-2].seconds, usable[-1].seconds)
+
+
+def tail_exponent(points: Sequence[SizedTiming]) -> float | None:
+    """Local log-log slope between the two largest sizes.
+
+    Fixed per-run costs (imports, demangler warm-up) flatten the full-range
+    least-squares fit at small sizes, hiding super-linear growth. The slope
+    between the two largest points is a cleaner asymptotic signal, so the
+    optional ``--max-exponent`` gate keys off this value.
+    """
+    usable = sorted((p for p in points if p.seconds > 0), key=lambda p: p.size)
+    if len(usable) < 2:
+        return None
+    a, b = usable[-2], usable[-1]
+    if a.size == b.size or a.seconds <= 0 or b.seconds <= 0:
+        return None
+    return math.log(b.seconds / a.seconds) / math.log(b.size / a.size)
+
+
+def check_exponent_gate(
+    scenario: str,
+    tail: float | None,
+    max_exponent: float,
+    *,
+    tail_low_seconds: float = math.inf,
+    floor_seconds: float = EXPONENT_FLOOR_SECONDS,
+) -> list[str]:
+    """Return a failure message if *tail* exponent exceeds *max_exponent*.
+
+    *tail_low_seconds* is the SMALLER of the two points the tail slope is
+    computed from. The floor is checked against it, not against the peak: a
+    slope is only as precise as its noisier endpoint, and checking the peak
+    let a scenario whose largest point had just crossed the floor (~0.25 s)
+    be gated on a slope whose other endpoint sat at ~0.1 s, deep in jitter --
+    so the gate flipped red on unchanged code (report_sarif, 1.48 vs 1.4).
+
+    Sub-``floor_seconds`` timings are dominated by fixed/overhead noise, so an
+    exponent computed from them is meaningless and would flag spuriously (e.g.
+    ``var_churn`` peaks at ~50 ms and its 15 µs→25 µs/change jitter reads as a
+    1.7 slope). The floor is higher than the baseline-regression noise floor
+    (50 ms) on purpose: a slope across two sizes amplifies jitter more than a
+    single-point comparison does. Every genuinely expensive O(n²)-*risk*
+    scenario (type/enum/typedef/union/vtable/opaque, fuzzy/version-node/versioned
+    rename) clears 200 ms at the tracked sizes, so they stay gated, while the
+    cheap-and-linear ones (severity, reporting, serialize, PE/Mach-O, var_churn)
+    are correctly skipped — a regression that makes one of *them* quadratic would
+    blow past 200 ms long before the largest tracked size and re-arm the gate.
+    """
+    if tail_low_seconds < floor_seconds:
+        return []
+    if tail is not None and tail > max_exponent:
+        return [
+            f"{scenario}: tail scaling exponent {tail:.2f} "
+            f"exceeds --max-exponent={max_exponent}"
+        ]
+    return []

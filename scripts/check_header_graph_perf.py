@@ -162,7 +162,7 @@ from typing import Any
 # this script, inserting the repo root only as a fallback -- NOT
 # unconditionally. This is what lets this exact script file be pointed at a
 # *different* installed abicheck than the one physically next to it:
-# performance.yml's `header-graph-regression` job runs THIS copy (the PR
+# performance.yml's `l2-cli-perf` job (its header-graph steps) runs THIS copy (the PR
 # head's) against both the head venv's and the base venv's separately-
 # installed packages, so both sides are measured with the identical
 # harness/statistics (Codex review on PR #768 — see benchmark_scaling.py's
