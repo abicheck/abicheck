@@ -67,7 +67,7 @@ from .l5_ast_run import AstPassOutcome, L5AstRun
 from .macro_graph import merge_decl_ranges, parse_tu_decl_ranges
 from .override_graph import merge_override_facts, parse_clang_ast_override_facts
 from .template_graph import merge_template_instantiations, parse_clang_ast_templates
-from .type_graph import merge_type_edges, parse_clang_ast_types
+from .type_graph import ast_derived_scope, merge_type_edges, parse_clang_ast_types
 
 if TYPE_CHECKING:
     from ..model.source_graph import SourceGraphSummary
@@ -146,16 +146,19 @@ def _run_unit(
     )
     results: list[Any] = []
     diagnostics: list[list[str]] = []
-    for p in passes:
-        own = list(dump_diagnostics)
-        result = None
-        if ast is not None:
-            try:
-                result = p.parse(ast, cu)
-            except p.parse_errors as exc:
-                own.append(f"could not parse clang AST JSON: {exc}")
-        results.append(result)
-        diagnostics.append(own)
+    # One TU's passes share its type graph: the type_graph pass and both
+    # override_graph parsers read the same tree (type_graph.ast_derived_scope).
+    with ast_derived_scope():
+        for p in passes:
+            own = list(dump_diagnostics)
+            result = None
+            if ast is not None:
+                try:
+                    result = p.parse(ast, cu)
+                except p.parse_errors as exc:
+                    own.append(f"could not parse clang AST JSON: {exc}")
+            results.append(result)
+            diagnostics.append(own)
     return cu, (results, diagnostics)
 
 
