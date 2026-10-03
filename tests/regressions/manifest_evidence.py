@@ -1021,7 +1021,10 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "dylib, while the headers stated the namespace all along."
         ),
         fixed_by=(1467,),
-        seed_tests=("tests/test_record_qualified_name.py",),
+        seed_tests=(
+            "tests/test_record_qualified_name.py",
+            "tests/test_family_f1_evidence_ablation.py",
+        ),
         public_surfaces=("cli",),
         axes={
             "debug_evidence": ("dwarf", "no-debug-info", "stripped"),

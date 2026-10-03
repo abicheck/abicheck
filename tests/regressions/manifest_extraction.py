@@ -106,7 +106,10 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "reaching `<math.h>` failed to parse there."
         ),
         fixed_by=(1467,),
-        seed_tests=("tests/test_castxml_header_compat.py",),
+        seed_tests=(
+            "tests/test_castxml_header_compat.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
         public_surfaces=("cli",),
         axes={
             "frontend": ("castxml",),
@@ -145,7 +148,10 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "AArch64, so `static_tls_introduced` never fired there."
         ),
         fixed_by=(1467,),
-        seed_tests=("tests/test_elf_static_tls.py",),
+        seed_tests=(
+            "tests/test_elf_static_tls.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
         axes={
             "machine": ("x86_64", "aarch64"),
             "tls_model": (
@@ -179,7 +185,10 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "declaration (7,707 functions instead of 7)."
         ),
         fixed_by=(1467,),
-        seed_tests=("tests/test_cross_sysroot_system_headers.py",),
+        seed_tests=(
+            "tests/test_cross_sysroot_system_headers.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
         public_surfaces=("cli",),
         axes={
             "frontend": ("castxml",),
