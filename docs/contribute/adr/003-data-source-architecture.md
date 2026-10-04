@@ -275,6 +275,7 @@ Lightweight binary fingerprinting using data already available in L0:
   - `match_renamed_functions(old_fps, new_fps)` → 3-pass matching (exact,
     size-only, fuzzy within 5% tolerance)
   - `compute_section_summary(binary_path)` → section-level triage
+    (removed 2026-10: it never had a production caller)
 - `fingerprint_renames` detector registered in `diff_symbols.py` — fires only
   in `elf_only_mode` when both snapshots have ELF metadata.
 - New `FUNC_LIKELY_RENAMED` change kind (verdict: `COMPATIBLE_WITH_RISK`).

@@ -35,6 +35,9 @@ import hashlib
 import logging
 from typing import IO, Any
 
+from elftools.common.exceptions import ELFError
+from elftools.construct import ConstructError
+
 log = logging.getLogger(__name__)
 
 #: Below this many bytes a function is a stub or trampoline; identical bytes
@@ -74,7 +77,14 @@ class CodeHasher:
         if shndx not in self._sections:
             try:
                 header = self._elf.get_section(shndx).header
-            except (IndexError, KeyError, ValueError, OSError) as exc:
+            except (
+                IndexError,
+                KeyError,
+                ValueError,
+                OSError,
+                ELFError,
+                ConstructError,
+            ) as exc:
                 log.debug("elf_code_hash: section %s unreadable: %s", shndx, exc)
                 header = None
             if header is None or header.sh_type == "SHT_NOBITS":

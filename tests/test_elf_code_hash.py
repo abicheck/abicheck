@@ -202,3 +202,25 @@ def test_real_stripped_library_rename_is_resolved_by_the_hash(tmp_path) -> None:
         c for c in compare(old, new).changes if c.kind is ChangeKind.FUNC_LIKELY_RENAMED
     ]
     assert [(c.old_value, c.new_value) for c in renames] == [("lib_mix", "lib_mix2")]
+
+
+@pytest.mark.parametrize("exc", ["elf", "construct", "index"])
+def test_malformed_section_lookup_is_unknown_not_an_error(exc) -> None:
+    from elftools.common.exceptions import ELFError
+    from elftools.construct import ConstructError
+
+    error = {
+        "elf": ELFError("bad"),
+        "construct": ConstructError("bad"),
+        "index": IndexError("bad"),
+    }[exc]
+
+    def get_section(_i):
+        raise error
+
+    elf = SimpleNamespace(
+        stream=io.BytesIO(b"\x00" * 64),
+        header=SimpleNamespace(e_machine="EM_X86_64"),
+        get_section=get_section,
+    )
+    assert CodeHasher(elf).hash(0, 16, 1) == ""
