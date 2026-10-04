@@ -114,6 +114,7 @@ from .identity import (
 )
 from .occurrence import OccurrenceId
 from .semantic_ir import CanonicalEntity, SemanticIR
+from .semantic_ir_declaration_facts import sync_snapshot_variable_facts
 from .semantic_ir_function_signature import (
     function_signature_facts,
     sync_snapshot_function_signatures,
@@ -711,3 +712,4 @@ def finalize_snapshot_semantic_ir(snapshot: AbiSnapshot) -> None:
     assert_snapshot_semantic_ir_consistent(snapshot)
     sync_snapshot_record_layout(snapshot)
     sync_snapshot_function_signatures(snapshot)
+    sync_snapshot_variable_facts(snapshot)

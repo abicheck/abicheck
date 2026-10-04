@@ -25,12 +25,12 @@ from typing import Any
 from .checker_types import Change
 from .compare import export_transition as _export_transition
 from .compare.constants import constant_index_pair, diff_constants
+from .compare.declaration_facts import access_changes, deprecation_changes
 from .compare.edge_query import export_table_covered
 from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
-from .compare.fact_gate import both_facts_present
 from .compare.function_signature import (
     FunctionSignatureIndex,
     function_signature_changes,
@@ -105,7 +105,6 @@ from .diff_symbols_variables import (
     _var_added,
     _var_removed,
     addition_evidence,
-    var_access_changes,
     variable_type_index_for,
 )
 from .elf_symbol_filter import (
@@ -1149,23 +1148,29 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _check_method_access_changes(
     old_map: dict[str, Function],
     new_map: dict[str, Function],
+    old: AbiSnapshot | None = None,
+    new: AbiSnapshot | None = None,
 ) -> list[Change]:
-    """Emit METHOD_ACCESS_CHANGED for narrowing access transitions, including a ctor/dtor pair only visible via synthetic-key format-drift reconciliation (``iter_matched_function_pairs``, PR #761 finding 2)."""
+    """Emit METHOD_ACCESS_CHANGED for narrowing access transitions, including a ctor/dtor pair only visible via synthetic-key format-drift reconciliation (``iter_matched_function_pairs``, PR #761 finding 2).
+
+    Access is read from each side's ``SemanticIR`` (``compare/
+    declaration_facts.py``, ADR-063 6B declaration-fact cohort)."""
+    old_index = function_signature_index(
+        old.canonical_ir if old is not None else None, old_map.values()
+    )
+    new_index = function_signature_index(
+        new.canonical_ir if new is not None else None, new_map.values()
+    )
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        if f_old.access != f_new.access and _is_access_narrowing(
-            f_old.access, f_new.access
-        ):
-            changes.append(
-                make_change(
-                    ChangeKind.METHOD_ACCESS_CHANGED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old=f_old.access.value,
-                    new=f_new.access.value,
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
+        changes += access_changes(
+            mangled,
+            f_old.name,
+            old_index.entity_for(f_old),
+            new_index.entity_for(f_new),
+            entity_id=f_old.entity_id or f_new.entity_id,
+            is_variable=False,
+        )
     return changes
 
 
@@ -1214,7 +1219,7 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     changes.extend(
-        _check_method_access_changes(*_reconciled_function_surfaces(old, new))
+        _check_method_access_changes(*_reconciled_function_surfaces(old, new), old, new)
     )
     excl = stdlib_namespaces_excluded(old, new)
     old_types = build_type_map(
@@ -1353,31 +1358,18 @@ def _diff_func_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     old_map, new_map = _reconciled_function_surfaces(old, new)
-
+    old_index = function_signature_index(old.canonical_ir, old_map.values())
+    new_index = function_signature_index(new.canonical_ir, new_map.values())
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        if not both_facts_present(f_old, f_new, "deprecated", mangled):
-            continue
-        if f_old.deprecated is None and f_new.deprecated is not None:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_DEPRECATED_ADDED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    detail=f_new.deprecated,
-                    new_value=f_new.deprecated,
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
-        elif f_old.deprecated is not None and f_new.deprecated is None:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_DEPRECATED_REMOVED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old_value=f_old.deprecated,
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
+        changes += deprecation_changes(
+            mangled,
+            f_old.name,
+            old_index.entity_for(f_old),
+            new_index.entity_for(f_new),
+            entity_id=f_old.entity_id or f_new.entity_id,
+            added=ChangeKind.FUNC_DEPRECATED_ADDED,
+            removed=ChangeKind.FUNC_DEPRECATED_REMOVED,
+        )
     return changes
 
 
@@ -1447,34 +1439,21 @@ def _diff_var_deprecated(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     old_map, new_map = _reconciled_variable_surfaces(old, new)
-
+    old_index = variable_type_index_for(old, old_map.values())
+    new_index = variable_type_index_for(new, new_map.values())
     for mangled, v_old in old_map.items():
         v_new = new_map.get(mangled)
         if v_new is None:
             continue
-        if not both_facts_present(v_old, v_new, "deprecated", mangled):
-            continue
-        if v_old.deprecated is None and v_new.deprecated is not None:
-            changes.append(
-                make_change(
-                    ChangeKind.VAR_DEPRECATED_ADDED,
-                    symbol=mangled,
-                    name=v_old.name,
-                    detail=v_new.deprecated,
-                    new_value=v_new.deprecated,
-                    entity_id=v_old.entity_id or v_new.entity_id,
-                )
-            )
-        elif v_old.deprecated is not None and v_new.deprecated is None:
-            changes.append(
-                make_change(
-                    ChangeKind.VAR_DEPRECATED_REMOVED,
-                    symbol=mangled,
-                    name=v_old.name,
-                    old_value=v_old.deprecated,
-                    entity_id=v_old.entity_id or v_new.entity_id,
-                )
-            )
+        changes += deprecation_changes(
+            mangled,
+            v_old.name,
+            old_index.entity_for(v_old),
+            new_index.entity_for(v_new),
+            entity_id=v_old.entity_id or v_new.entity_id,
+            added=ChangeKind.VAR_DEPRECATED_ADDED,
+            removed=ChangeKind.VAR_DEPRECATED_REMOVED,
+        )
     return changes
 
 
@@ -1570,4 +1549,20 @@ def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
     if old.ast_producer != "castxml" or new.ast_producer != "castxml":
         return []
-    return var_access_changes(*_reconciled_variable_surfaces(old, new))
+    old_map, new_map = _reconciled_variable_surfaces(old, new)
+    old_index = variable_type_index_for(old, old_map.values())
+    new_index = variable_type_index_for(new, new_map.values())
+    changes: list[Change] = []
+    for mangled, v_old in old_map.items():
+        v_new = new_map.get(mangled)
+        if v_new is None:
+            continue
+        changes += access_changes(
+            mangled,
+            v_old.name,
+            old_index.entity_for(v_old),
+            new_index.entity_for(v_new),
+            entity_id=v_old.entity_id or v_new.entity_id,
+            is_variable=True,
+        )
+    return changes

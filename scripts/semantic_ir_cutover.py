@@ -174,6 +174,25 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         ),
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
+    # ADR-063 6B declaration-fact cohort: deprecation, access and declared
+    # alignment read CanonicalEntity.deprecated/access/declared_alignment_bits.
+    # `deprecated`/`access` are also the IR facts' own names, so only the
+    # declaration-side `*_fact` spellings and `alignment_bits` are scanned.
+    MigratedCohort(
+        name="declaration_facts",
+        modules=("abicheck/compare/declaration_facts.py",),
+        forbidden_attributes=frozenset(
+            {
+                "deprecated_fact",
+                "access_fact",
+                "alignment_bits",
+                "alignment_bits_fact",
+                "variables",
+                "functions",
+            }
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
     # `functions` is deliberately NOT registered here yet. A first attempt
     # (abicheck/compare/functions.py's function_identity_index) built a
     # SemanticIRIndex per comparison but only ever looked up a function's

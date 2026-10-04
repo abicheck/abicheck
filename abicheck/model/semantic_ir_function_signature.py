@@ -44,6 +44,7 @@ from .fact import Fact
 from .identity import EntityId, EntityKind
 from .occurrence import OccurrenceId
 from .semantic_ir import CanonicalEntity, SemanticIR
+from .semantic_ir_declaration_facts import declaration_facts
 
 __all__ = [
     "LEGACY_SIGNATURE_DIAGNOSTIC",
@@ -97,6 +98,9 @@ def function_signature_facts(fn: Function) -> dict[str, Any]:
     """Every :data:`SIGNATURE_FIELDS` fact for *fn*, keyed by field name."""
     attrs = fn.contract_attributes
     return {
+        # Declaration facts every function also carries (deprecation,
+        # access) -- one fill writes both groups.
+        **declaration_facts(fn),
         "is_extern_c": Fact.present(bool(fn.is_extern_c)),
         "is_noexcept": Fact.present(bool(fn.is_noexcept)),
         "is_virtual": Fact.present(bool(fn.is_virtual)),

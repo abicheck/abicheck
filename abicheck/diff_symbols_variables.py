@@ -27,11 +27,11 @@ from typing import Any
 
 from .checker_types import Change
 from .compare import export_transition as _export_transition
+from .compare.declaration_facts import alignment_changes
 from .compare.edge_query import ObservedExportTable, observed_export_table
 from .compare.elf_only_demangle import (
     elf_only_demangled_name as _elf_only_demangled_name,
 )
-from .compare.fact_comparison import compare_facts
 from .compare.variables import (
     VariableTypeIndex,
     variable_type_changes,
@@ -70,95 +70,6 @@ def _is_access_narrowing(old_access: Any, new_access: Any) -> bool:
     """
     _RANK = {AccessLevel.PUBLIC: 0, AccessLevel.PROTECTED: 1, AccessLevel.PRIVATE: 2}  # pylint: disable=invalid-name
     return _RANK.get(new_access, 0) > _RANK.get(old_access, 0)
-
-
-def var_access_changes(
-    old_map: dict[str, Variable], new_map: dict[str, Variable]
-) -> list[Change]:
-    """``VAR_ACCESS_CHANGED``/``VAR_ACCESS_WIDENED`` for flipped variables.
-
-    The evidence gates (header-tier, "castxml"-producer-only,
-    reliability-gated) live with the registration in ``diff_symbols.py``'s
-    ``_diff_var_access`` (G31 Phase C continued — see
-    ``the stale 'castxml_var_access' fact family (model.snapshot_reliability)``'s own docstring for
-    the full reasoning); by the time this runs both sides are known-safe.
-
-    That whole-snapshot gate only says the producer is trustworthy when it
-    ran — it does not guarantee ``access_fact`` reached ``PRESENT`` for
-    *this specific* variable (ADR-063 Phase 5B, the same "case-(a) field,
-    one whole-snapshot reliability flag" shape ``compare.va_list_diff.
-    diff_va_list_params`` already closed for ``Param.is_va_list``). Each
-    pair is gated through :func:`~.compare.fact_comparison.compare_facts`
-    rather than the old bare-value comparison, so a variable whose evidence
-    is incomplete on either side is skipped instead of silently read as
-    "confirmed public" (``AccessLevel.PUBLIC`` is both this field's normal
-    resting value and a real answer — see ``Variable.access``'s own
-    comment in ``model/declarations.py``).
-    """
-    changes: list[Change] = []
-    for mangled, v_old in old_map.items():
-        v_new = new_map.get(mangled)
-        if v_new is None:
-            continue
-        access_cmp = compare_facts(
-            v_old.access_fact, v_new.access_fact, AccessLevel.PUBLIC
-        )
-        if not access_cmp.is_comparable:
-            continue
-        old_access, new_access = access_cmp.old_value, access_cmp.new_value
-        if old_access == new_access:
-            continue
-        kind = (
-            ChangeKind.VAR_ACCESS_CHANGED
-            if _is_access_narrowing(old_access, new_access)
-            else ChangeKind.VAR_ACCESS_WIDENED
-        )
-        changes.append(
-            make_change(
-                kind,
-                symbol=mangled,
-                name=v_old.name,
-                old=old_access.value if old_access is not None else "?",
-                new=new_access.value if new_access is not None else "?",
-                entity_id=v_old.entity_id or v_new.entity_id,
-            )
-        )
-    return changes
-
-
-def _check_variable_alignment(
-    mangled: str, v_old: Variable, v_new: Variable
-) -> list[Change]:
-    """Emit a change when a variable's declared alignment changed.
-
-    Tri-state: None = not captured (older snapshots / dumpers without
-    alignment support) — skip rather than compare.
-    """
-    if v_old.alignment_bits is None or v_new.alignment_bits is None:
-        return []
-    if v_old.alignment_bits == v_new.alignment_bits:
-        return []
-    return [
-        make_change(
-            ChangeKind.VAR_ALIGNMENT_CHANGED,
-            symbol=mangled,
-            name=v_old.name,
-            old=str(v_old.alignment_bits),
-            new=str(v_new.alignment_bits),
-            entity_id=v_old.entity_id or v_new.entity_id,
-        )
-    ]
-
-
-_UNKNOWN_TYPE = "?"
-
-
-def _type_unknown(type_name: str | None) -> bool:
-    """An unresolved type spelling -- a stripped side's placeholder, not a
-    real type. Mirrors ``diff_symbols``' own predicate of the same name; the
-    two are independent one-liners over the same sentinel rather than a
-    cross-module import between two modules that already import one way."""
-    return type_name is None or type_name.strip() == _UNKNOWN_TYPE
 
 
 def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
@@ -285,7 +196,11 @@ def _check_variable(
     cv-only difference there would misreport a breaking ``VAR_TYPE_CHANGED``
     (Codex review, PR #582).
     """
-    changes = _check_variable_alignment(mangled, v_old, v_new)
+    old_entity, new_entity = old_index.entity_for(v_old), new_index.entity_for(v_new)
+    entity_id = v_old.entity_id or v_new.entity_id
+    changes = alignment_changes(
+        mangled, v_old.name, old_entity, new_entity, entity_id=entity_id
+    )
     # The export axis is independent of every type/qualifier comparison and
     # must survive their early returns -- an unknown type on a stripped side
     # says nothing about whether the symbol is still exported
@@ -295,9 +210,9 @@ def _check_variable(
         mangled,
         v_old.name,
         (v_old.type, v_new.type),
-        old_index.entity_for(v_old),
-        new_index.entity_for(v_new),
-        entity_id=v_old.entity_id or v_new.entity_id,
+        old_entity,
+        new_entity,
+        entity_id=entity_id,
         cv_facts_reliable=cv_facts_reliable,
     )
 

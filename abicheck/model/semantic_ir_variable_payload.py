@@ -37,6 +37,7 @@ from .declarations import Variable
 from .declarator_qualifiers import _is_declarator_group, _split_at_trailing_param_list
 from .fact import Fact
 from .semantic_ir import CanonicalEntity, canonical_cv_qualification
+from .semantic_ir_declaration_facts import declaration_facts
 
 __all__ = ["DWARF_PRODUCER", "variable_canonical_entity"]
 
@@ -340,6 +341,7 @@ def variable_canonical_entity(var: Variable, producer: str) -> CanonicalEntity:
         canonical_spelling=_variable_spelling_fact(var, producer),
         producer=producer,
         cv_qualification=_variable_cv_qualification_fact(var, producer),
+        **declaration_facts(var),
     )
 
 

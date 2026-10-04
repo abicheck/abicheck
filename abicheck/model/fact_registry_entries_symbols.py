@@ -328,7 +328,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_symbols:_diff_func_deprecated",),
+        consumed_by=("abicheck.model.semantic_ir_declaration_facts:declaration_facts",),
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
@@ -350,7 +350,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_symbols:_diff_var_deprecated",),
+        consumed_by=("abicheck.model.semantic_ir_declaration_facts:declaration_facts",),
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
@@ -415,7 +415,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_symbols_variables:var_access_changes",),
+        consumed_by=("abicheck.model.semantic_ir_declaration_facts:declaration_facts",),
         notes=(
             "public/protected/private for a static class member. Case (a), "
             "and the one registered fact whose value type is neither a "

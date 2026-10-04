@@ -12083,12 +12083,28 @@ the whole unit lane disagreed only on deliberately ablated facts. Gate:
 `functions`/`function_map`; `ref_qualifier`/`is_variadic` share names with
 the IR facts, so the name-based scan cannot police them).
 
-*Still open.* The other function families (linkage, noexcept, virtual,
-explicit, hidden friend, contract attributes, exception spec, vtable index)
-and variable alignment/access/deprecation still read the declaration
-objects; each needs its facts in the IR first. Pairing still runs on
-`SymbolIdentityIndex` over the declaration store, and the store itself is
-Phase 10's removal.
+**Landed (same PR): the function-qualifier and declaration-fact cohorts.**
+The v3 document also carries `is_extern_c`/`is_noexcept`/`is_virtual`/
+`is_explicit`/`is_hidden_friend`/`hidden_friend_owner`/`contract_attributes`/
+`exception_spec`/`vtable_index` on every function occurrence, and
+`deprecated` (`()` = confirmed not deprecated, `(message,)` otherwise --
+a bare `[[deprecated]]` has an empty message, so `""` cannot mean "none")/
+`access`/`declared_alignment_bits` on function and variable occurrences
+(`model/semantic_ir_declaration_facts.py`, which copies each source
+`Fact`'s status rather than inventing one). Every per-pair function check in
+`diff_symbols._check_function_signature`, the inline hidden-friend pass, and
+the deprecation/access/alignment detectors now decide from those facts
+(`compare/function_signature.py`, `compare/declaration_facts.py`); gate
+entries `function_signature` and `declaration_facts`. The H1 ablation corpus
+gained a virtual method with a recorded slot and a hidden friend with an
+owner so every new fact is ablated.
+
+*Still open.* `FUNC_OVERRIDE_SPECIFIER_*` (gated on per-snapshot
+`fact_provenance`, which the IR does not carry), parameter defaults/renames/
+restrict/`va_list`/pointer levels, constructor-overload ambiguity, inline
+transitions and deletion detection still read the declaration objects.
+Pairing still runs on `SymbolIdentityIndex` over the declaration store, and
+the store itself is Phase 10's removal.
 
 ---
 

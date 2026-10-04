@@ -30,6 +30,7 @@ from abicheck.model.availability import FactStatus
 from abicheck.model.identity import EntityKind, entity_id_for_function
 from abicheck.model.occurrence import OccurrenceId
 from abicheck.model.semantic_ir import CanonicalEntity, SemanticIR
+from abicheck.model.semantic_ir_declaration_facts import DECLARATION_FIELDS
 from abicheck.model.semantic_ir_function_signature import (
     LEGACY_SIGNATURE_DIAGNOSTIC,
     SIGNATURE_FIELDS,
@@ -232,7 +233,7 @@ class TestCodec:
         doc = semantic_ir_to_document(snap.canonical_ir, {})
         doc["semantic_ir"]["version"] = 2
         for occ in doc["semantic_ir"]["occurrences"]:
-            for name in SIGNATURE_FIELDS:
+            for name in (*SIGNATURE_FIELDS, *DECLARATION_FIELDS):
                 del occ["entity"][name]
         ir, _ = semantic_ir_from_document(doc)
         (entity,) = ir.occurrences.values()

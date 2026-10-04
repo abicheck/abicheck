@@ -182,6 +182,18 @@ class CanonicalEntity:
     )
     exception_spec: Fact[str] = field(default_factory=lambda: Fact.not_collected())
     vtable_index: Fact[int] = field(default_factory=lambda: Fact.not_collected())
+    #: Function and variable declaration facts (ADR-063 6B, declaration-fact
+    #: cohort): the deprecation as ``(message,)`` (``()`` when confirmed not
+    #: deprecated), the ``AccessLevel`` value, and a variable's declared
+    #: alignment in bits. Each keeps the status its producer gave the source
+    #: ``Fact`` -- see ``model/semantic_ir_declaration_facts.py``.
+    deprecated: Fact[tuple[str, ...]] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    access: Fact[str] = field(default_factory=lambda: Fact.not_collected())
+    declared_alignment_bits: Fact[int] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
     producer: str = ""
 
     def __post_init__(self) -> None:
@@ -213,11 +225,12 @@ class CanonicalEntity:
             flag = getattr(self, name)
             if flag.is_present and not isinstance(flag.value, bool):
                 raise ValueError(f"{name} must carry a bool, got {flag.value!r}")
-        slot = self.vtable_index
-        if slot.is_present and (
-            isinstance(slot.value, bool) or not isinstance(slot.value, int)
-        ):
-            raise ValueError(f"vtable_index must carry an int, got {slot.value!r}")
+        for name in ("vtable_index", "declared_alignment_bits"):
+            slot = getattr(self, name)
+            if slot.is_present and (
+                isinstance(slot.value, bool) or not isinstance(slot.value, int)
+            ):
+                raise ValueError(f"{name} must carry an int, got {slot.value!r}")
         cv = self.cv_qualification
         # `is_present`, not `status is PRESENT`: `PARTIAL` is usable evidence
         # everywhere else in this IR (`Fact.is_present`,

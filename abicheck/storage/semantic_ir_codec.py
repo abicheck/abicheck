@@ -57,6 +57,7 @@ from ..model.fact import Fact
 from ..model.identity import EntityKind
 from ..model.occurrence import OccurrenceId, canonical_key
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
+from ..model.semantic_ir_declaration_facts import DECLARATION_FIELDS
 from ..model.semantic_ir_function_signature import (
     LEGACY_SIGNATURE_DIAGNOSTIC,
     SIGNATURE_FIELDS,
@@ -103,7 +104,7 @@ _LAYOUT_FACTS = ("size_bits", "alignment_bits")
 #: fills them from the snapshot's own records). A newer version is refused,
 #: never read as if it were this one.
 IR_DOCUMENT_VERSION = 3
-_INT_VALUED_FACTS = (*_LAYOUT_FACTS, "vtable_index")
+_INT_VALUED_FACTS = (*_LAYOUT_FACTS, "vtable_index", "declared_alignment_bits")
 
 #: The function-signature facts (ADR-063 6B, function-signature cohort).
 #: Written only for a ``FUNCTION`` occurrence, from document version 3 on; an
@@ -111,6 +112,9 @@ _INT_VALUED_FACTS = (*_LAYOUT_FACTS, "vtable_index")
 #: ``LEGACY_SIGNATURE_DIAGNOSTIC`` and the load path fills them from the
 #: snapshot's own functions (``model/semantic_ir_function_signature.py``).
 _SIGNATURE_FACTS = SIGNATURE_FIELDS
+#: Written for ``FUNCTION`` and ``VARIABLE`` occurrences from version 3 on
+#: (``model/semantic_ir_declaration_facts.py``).
+_DECLARATION_FACTS = DECLARATION_FIELDS
 _BOOL_VALUED_FACTS = (
     "is_variadic",
     "is_extern_c",
@@ -130,6 +134,7 @@ _TUPLE_VALUED_FACTS = (
     "parameter_type_spellings",
     "parameter_kinds",
     "contract_attributes",
+    "deprecated",
 )
 
 
@@ -258,7 +263,11 @@ def _fact_from_dict(
 
 
 def _entity_to_dict(
-    entity: CanonicalEntity, *, is_record: bool, is_function: bool = False
+    entity: CanonicalEntity,
+    *,
+    is_record: bool,
+    is_function: bool = False,
+    is_variable: bool = False,
 ) -> dict[str, Any]:
     """One ``CanonicalEntity``'s wire form: every ``Fact`` field (the layout
     pair only for a record), plus ``producer`` when the entity names one
@@ -269,6 +278,7 @@ def _entity_to_dict(
         for name, fact in entity.fact_items()
         if (is_record or name not in _LAYOUT_FACTS)
         and (is_function or name not in _SIGNATURE_FACTS)
+        and (is_function or is_variable or name not in _DECLARATION_FACTS)
     }
     if entity.producer:
         document["producer"] = entity.producer
@@ -276,7 +286,12 @@ def _entity_to_dict(
 
 
 def _entity_from_dict(
-    raw: Any, *, is_record: bool, version: int, is_function: bool = False
+    raw: Any,
+    *,
+    is_record: bool,
+    version: int,
+    is_function: bool = False,
+    is_variable: bool = False,
 ) -> CanonicalEntity:
     """Rebuild a ``CanonicalEntity``, requiring every fact field the writer
     emits — see :data:`_FACT_FIELDS` and :data:`_LAYOUT_FACTS`."""
@@ -292,6 +307,19 @@ def _entity_from_dict(
             facts[name] = (
                 Fact.not_collected(LEGACY_LAYOUT_DIAGNOSTIC)
                 if is_record
+                else Fact.not_collected()
+            )
+            continue
+        carries_declaration = (is_function or is_variable) and version >= 3
+        if name in _DECLARATION_FACTS and not carries_declaration:
+            if name in data:
+                raise ValueError(
+                    f"semantic_ir entity carries {name!r}, which this document "
+                    "version does not write for this kind"
+                )
+            facts[name] = (
+                Fact.not_collected(LEGACY_SIGNATURE_DIAGNOSTIC)
+                if is_function or is_variable
                 else Fact.not_collected()
             )
             continue
@@ -371,6 +399,7 @@ def semantic_ir_to_document(
                         entity,
                         is_record=occ_id.entity_id.kind is EntityKind.TYPE,
                         is_function=occ_id.entity_id.kind is EntityKind.FUNCTION,
+                        is_variable=occ_id.entity_id.kind is EntityKind.VARIABLE,
                     ),
                 }
                 # Sorted, never the mapping's incidental insertion order: two
@@ -474,6 +503,7 @@ def semantic_ir_from_document(
             entry.get("entity"),
             is_record=occ_id.entity_id.kind is EntityKind.TYPE,
             is_function=occ_id.entity_id.kind is EntityKind.FUNCTION,
+            is_variable=occ_id.entity_id.kind is EntityKind.VARIABLE,
             version=version,
         )
     return SemanticIR(occurrences=occurrences), conflicts
