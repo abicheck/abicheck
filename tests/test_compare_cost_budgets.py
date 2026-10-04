@@ -47,6 +47,7 @@ from audit_repeated_calls import (  # noqa: E402
     BUDGET_FILE,
     BUDGETED_FUNCTIONS,
     MODES,
+    PER_DECL_FUNCTIONS,
     count_subprocess_spawns,
     measure_budgets,
 )
@@ -58,7 +59,11 @@ _HINT = "re-record with `python scripts/audit_repeated_calls.py --write-budgets`
 
 
 def test_budget_file_covers_every_mode_and_function() -> None:
-    expected_keys = {f"repeats:{n}" for n in BUDGETED_FUNCTIONS} | {"subprocess_spawns"}
+    expected_keys = (
+        {f"repeats:{n}" for n in BUDGETED_FUNCTIONS}
+        | {"subprocess_spawns"}
+        | {f"per_decl_x10:{n}" for n in PER_DECL_FUNCTIONS}
+    )
     assert set(_RECORDED) == set(MODES)
     for mode, figures in _RECORDED.items():
         assert set(figures) == expected_keys, (

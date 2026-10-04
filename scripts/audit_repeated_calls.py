@@ -178,6 +178,20 @@ BUDGETED_FUNCTIONS: tuple[str, ...] = (
     "resolve_public_surface",
 )
 
+#: Hot per-declaration helpers whose *call count per declaration* is pinned
+#: (``per_decl_x10:<name>``: ten times the worst calls-per-declaration ratio,
+#: rounded up). A growth gate cannot see a helper going from 3 to 9 calls per
+#: declaration -- that is still linear -- but every such step is a real
+#: constant-factor regression on a large library.
+PER_DECL_FUNCTIONS: tuple[str, ...] = (
+    "canonicalize_type_name",
+    "demangle_one_batched",
+    "in_public_surface",
+    "in_source_declaration_index",
+    "qualified_declaration_name",
+    "type_identifiers",
+)
+
 MODES: dict[str, dict[str, object]] = {
     "default": {},
     "contract": {"contract_evaluation": True, "contract_mode": "public"},
@@ -223,6 +237,41 @@ def _workloads():
     return WORKLOADS
 
 
+def _profile_named_calls(
+    thunk: Callable[[], object], names: tuple[str, ...]
+) -> dict[str, int]:
+    """Total calls of each first-party function whose bare name is in *names*."""
+    import cProfile
+    import pstats
+
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        thunk()
+    finally:
+        profiler.disable()
+    totals = dict.fromkeys(names, 0)
+    for (filename, _line, func), stat in pstats.Stats(profiler).stats.items():  # type: ignore[attr-defined]
+        if filename.startswith(PACKAGE_ROOT) and func in totals:
+            totals[func] += stat[1]
+    return totals
+
+
+def _declaration_count(*snapshots: object) -> int:
+    """Declarations plus their parameters, fields and enumerators: the
+    entities a per-declaration helper is legitimately asked about. Counting
+    declarations alone made a 200-parameter signature look like 200 calls
+    of waste."""
+    total = 0
+    for snap in snapshots:
+        d = snap.declarations  # type: ignore[attr-defined]
+        total += len(d.variables)
+        total += sum(1 + len(f.params) for f in d.functions)
+        total += sum(1 + len(t.fields) for t in d.types)
+        total += sum(1 + len(e.members) for e in d.enums)
+    return max(total, 1)
+
+
 def measure_budgets(
     tag: str = "budget", modes: tuple[str, ...] | None = None
 ) -> dict[str, dict[str, int]]:
@@ -232,7 +281,9 @@ def measure_budgets(
       budgeted function in one ``compare()``, over every workload and both
       :data:`BUDGET_SIZES`;
     * ``subprocess_spawns`` -- the most child processes one ``compare()``
-      started.
+      started;
+    * ``per_decl_x10:<function>`` -- for :data:`PER_DECL_FUNCTIONS`, ten
+      times the worst calls-per-declaration ratio, rounded up.
 
     Each run salts its names with a fresh *tag*, so a process-wide cache
     (the demangler's) never hides a spawn a cold run would make.
@@ -244,6 +295,7 @@ def measure_budgets(
         kwargs = MODES[mode]
         figures: dict[str, int] = {f"repeats:{name}": 0 for name in BUDGETED_FUNCTIONS}
         figures["subprocess_spawns"] = 0
+        figures.update({f"per_decl_x10:{name}": 0 for name in PER_DECL_FUNCTIONS})
         for workload, build in sorted(_workloads().items()):
             for n in BUDGET_SIZES:
                 old, new = build(n, f"{tag}_{mode}_{workload}_{n}_")
@@ -257,6 +309,13 @@ def measure_budgets(
                 old, new = build(n, f"{tag}_spawn_{mode}_{workload}_{n}_")
                 spawns = count_subprocess_spawns(lambda: compare(old, new, **kwargs))
                 figures["subprocess_spawns"] = max(figures["subprocess_spawns"], spawns)
+                old, new = build(n, f"{tag}_decl_{mode}_{workload}_{n}_")
+                decls = _declaration_count(old, new)
+                for name, calls in _profile_named_calls(
+                    lambda: compare(old, new, **kwargs), PER_DECL_FUNCTIONS
+                ).items():
+                    key = f"per_decl_x10:{name}"
+                    figures[key] = max(figures[key], -(-calls * 10 // decls))
         out[mode] = figures
     return out
 
@@ -275,6 +334,70 @@ def write_budgets() -> None:
     BUDGET_FILE.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+
+
+@dataclass(frozen=True)
+class CostedRepeat:
+    """A function's same-argument repeats, weighted by what they cost."""
+
+    function: str
+    repeats: int
+    calls: int
+    cumulative_seconds: float
+
+    @property
+    def wasted_seconds(self) -> float:
+        # The repeated share of the function's cumulative time. Cumulative
+        # times nest (a caller's includes its callees'), so rows are an
+        # upper-bound ranking signal, not an additive budget.
+        return (
+            self.cumulative_seconds * self.repeats / self.calls if self.calls else 0.0
+        )
+
+    def describe(self) -> str:
+        return f"{self.wasted_seconds:8.3f}s  {self.repeats:7d}/{self.calls:<7d} repeated  {self.function}"
+
+
+def cost_weighted_repeats(
+    build: Callable[[str], tuple[object, object]],
+    run: Callable[[object, object], object],
+) -> list[CostedRepeat]:
+    """Rank first-party functions by the time their same-argument repeats cost.
+
+    *build(tag)* returns a fresh ``(old, new)`` pair; it is called twice with
+    different tags -- once under :mod:`cProfile` for cumulative time, once
+    under the repeat audit (the two hooks cannot share a run) -- so neither
+    measurement sees caches the other warmed.
+    """
+    import cProfile
+    import pstats
+
+    old, new = build("cost_profile_")
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        run(old, new)
+    finally:
+        profiler.disable()
+    cumulative: dict[str, tuple[int, float]] = {}
+    for (filename, line, func), stat in pstats.Stats(profiler).stats.items():  # type: ignore[attr-defined]
+        if filename.startswith(PACKAGE_ROOT):
+            site = f"{Path(filename).relative_to(REPO).as_posix()}:{line}"
+            cumulative[site] = (stat[1], stat[3])
+
+    old, new = build("cost_audit_")
+    repeats: dict[str, tuple[str, int]] = {}
+    for row in audit_repeated_calls(lambda: run(old, new)):
+        site = row.function.split("(", 1)[0]
+        name, total = repeats.get(site, (row.function, 0))
+        repeats[site] = (name, total + row.wasted)
+
+    out = []
+    for site, (name, wasted) in repeats.items():
+        calls, cum = cumulative.get(site, (0, 0.0))
+        if calls:
+            out.append(CostedRepeat(name, min(wasted, calls), calls, cum))
+    return sorted(out, key=lambda r: -r.wasted_seconds)
 
 
 def _main(argv: list[str] | None = None) -> int:
@@ -300,6 +423,11 @@ def _main(argv: list[str] | None = None) -> int:
         help="hide rows called fewer times than this",
     )
     parser.add_argument(
+        "--by-cost",
+        action="store_true",
+        help="rank by estimated time the repeats cost (cumulative time x repeated share) instead of by count",
+    )
+    parser.add_argument(
         "--write-budgets",
         action="store_true",
         help=f"re-measure and rewrite {BUDGET_FILE.relative_to(REPO)} (a reviewed change: commit it with its reason)",
@@ -309,6 +437,19 @@ def _main(argv: list[str] | None = None) -> int:
     if args.write_budgets:
         write_budgets()
         print(f"wrote {BUDGET_FILE.relative_to(REPO)}")
+        return 0
+
+    if args.by_cost:
+        for name in args.workload or sorted(workloads):
+            rows = cost_weighted_repeats(
+                lambda tag, name=name: workloads[name](args.n, f"{tag}{name}_"),
+                lambda old, new: compare(old, new, **MODES[args.mode]),
+            )
+            print(
+                f"== {name} (n={args.n}, mode={args.mode}): top repeats by estimated cost"
+            )
+            for r in rows[: args.top]:
+                print("  " + r.describe())
         return 0
 
     for name in args.workload or sorted(workloads):
