@@ -42,6 +42,8 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `lang_explicit` | `bool` | `False` |
 | `pack_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `project_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
+| `acknowledgments_path` | `Path \| None` | `None` |
+| `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
 | `severity_preset` | `str \| None` | `None` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
@@ -291,6 +293,8 @@ Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
+| `acknowledgments` | `AcknowledgmentList \| None` | `None` |
+| `acknowledgment_policy` | `AcknowledgmentPolicy \| None` | `None` |
 
 **Returns:** `DiffResult`
 
@@ -447,6 +451,8 @@ Compare two ABI inputs and return the classified diff result.
 | `project_policy_overrides` | `dict[Any, Any] \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `exclude_headers` | `tuple[str, ...]` | `()` |
+| `acknowledgments_path` | `Path \| None` | `None` |
+| `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
 
 **Returns:** `CompareResult`
 

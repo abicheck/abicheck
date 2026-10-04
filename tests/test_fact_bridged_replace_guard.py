@@ -108,6 +108,11 @@ _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
     ("abicheck/workflows/release_member_request.py", "member_request"): (
         "ReleaseMemberCompareRequest: a typed request, no Fact-bridged fields."
     ),
+    ("abicheck/policy/exit_decision_precedence.py", "_dominant_decision"): (
+        "ExitDecision: plain int contributions and a reason tuple, no "
+        "Fact[T]-bridged field; the mapping is every contribution the prior "
+        "decision carries, read off its own dataclass fields."
+    ),
     ("abicheck/model/fact.py", "replace_with_fact_sync"): (
         "This *is* the fact-syncing wrapper — it derives each bridged "
         "field's sibling into the same call."
