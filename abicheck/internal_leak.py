@@ -1525,12 +1525,14 @@ def detect_call_graph_leaks(
         keys = candidate_lookup_keys(
             dname, *(t.qualified_name for t in triggers if t.qualified_name)
         )
-        old_pp: list[str] = []
-        new_pp: list[str] = []
+        # Ordered de-duplication through dicts: a list-membership scan per
+        # path is quadratic in the number of proof paths a trigger collects.
+        old_pp: dict[str, None] = {}
+        new_pp: dict[str, None] = {}
         for key in keys:
-            old_pp.extend(p for p in old_call_paths.get(key, []) if p not in old_pp)
-            new_pp.extend(p for p in new_call_paths.get(key, []) if p not in new_pp)
-        proof_paths = old_pp + [p for p in new_pp if p not in old_pp]
+            old_pp.update(dict.fromkeys(old_call_paths.get(key, [])))
+            new_pp.update(dict.fromkeys(new_call_paths.get(key, [])))
+        proof_paths = list(old_pp) + [p for p in new_pp if p not in old_pp]
         if not proof_paths:
             continue
         out.append(_build_call_graph_leak_change(dname, triggers, proof_paths))

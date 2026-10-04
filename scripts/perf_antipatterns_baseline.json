@@ -23,8 +23,6 @@
     "abicheck/frontends/cli/commands/compare_bundle_facts.py::_render_json::parse-or-copy-in-loop": 1,
     "abicheck/frontends/cli/help.py::_make_help_callback._help_callback::list-membership-in-loop": 1,
     "abicheck/impact/consumer_graph.py::join_consumer_graph::parse-or-copy-in-loop": 2,
-    "abicheck/internal_leak.py::detect_call_graph_leaks::list-membership-in-loop": 3,
-    "abicheck/model/graph_facts.py::_compute_occurrences::list-membership-in-loop": 1,
     "abicheck/policy/outcome.py::worst_real_verdict::list-membership-in-loop": 1,
     "abicheck/policy/type_spelling.py::<module>::regex-compile-in-loop": 1,
     "abicheck/report/build.py::_snapshot_abi_snapshot::parse-or-copy-in-loop": 1,

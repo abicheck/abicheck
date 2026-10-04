@@ -64,6 +64,7 @@ from .compare.template_surface import (
     template_angle_depth,
 )
 from .diff_helpers import make_change
+from .model.execution_cache import memoized
 from .model.graph_identity import _normalize_graph_identity
 from .model.name_heuristics import LazyFactInput
 from .model.surface_facts import is_public_export
@@ -205,6 +206,7 @@ def _matching_close_paren(qualified: str, open_index: int) -> int:
     return -1
 
 
+@memoized(maxsize=1 << 16)
 def _strip_param_signature(qualified: str) -> str:
     """Strip a function's parameter-list signature (from its own top-level
     ``(``), preserving any ``::`` namespace/class qualification.
@@ -698,6 +700,7 @@ def detect_internal_template_leaks(
 # ---------------------------------------------------------------------------
 
 
+@memoized(maxsize=1 << 16)
 def _cpo_function_stem(qname: str) -> str:
     """A function's CPO stem: the reduction `_func_names` compares on, named
     once so the cross-kind join keys on exactly what the comparison uses.
