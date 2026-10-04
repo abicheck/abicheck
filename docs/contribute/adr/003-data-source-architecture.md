@@ -269,6 +269,9 @@ Lightweight binary fingerprinting using data already available in L0:
 
 - `abicheck/binary_fingerprint.py` — standalone module with:
   - `compute_function_fingerprints(binary_path)` → code-hash fingerprints
+    (2026-10: superseded by dump-time hashing into `ElfSymbol.code_hash`,
+    `extract/elf_code_hash.py`, snapshot schema v56; equal hashes confirm a
+    match, unequal hashes are no evidence, since relative displacements move)
   - `match_renamed_functions(old_fps, new_fps)` → 3-pass matching (exact,
     size-only, fuzzy within 5% tolerance)
   - `compute_section_summary(binary_path)` → section-level triage

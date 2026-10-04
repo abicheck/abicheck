@@ -63,6 +63,11 @@
 - A dominant exit reason (for example a budget overflow) no longer resets the
   other exit-axis contributions recorded under it to `0` in the report.
 
+- A stripped-library comparison now recognizes a renamed function even
+  when another added function has the same size: the dump records a hash of
+  each exported function's code (snapshot schema 56), and identical code
+  breaks the tie. Older snapshots carry no hash and behave as before.
+
 ### Fixed
 
 - A directory/package `compare` no longer treats a non-binary file whose

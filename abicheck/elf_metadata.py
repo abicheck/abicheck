@@ -44,6 +44,7 @@ from elftools.elf.gnuversions import (
 )
 from elftools.elf.sections import SymbolTableSection
 
+from .extract.elf_code_hash import CodeHasher
 from .extract.elf_static_tls import has_static_tls_relocation
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
@@ -1078,10 +1079,14 @@ def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
     # which also explains why this is scoped rather than cached). Measured
     # on a real oneDAL build below in that module's docstring.
     with buffered_string_table(string_table_of(section)):
-        _parse_dynsym_entries(section, meta)
+        _parse_dynsym_entries(
+            section, meta, CodeHasher(getattr(section, "elffile", None))
+        )
 
 
-def _parse_dynsym_entries(section: SymbolTableSection, meta: ElfMetadata) -> None:
+def _parse_dynsym_entries(
+    section: SymbolTableSection, meta: ElfMetadata, hasher: CodeHasher
+) -> None:
     """The symbol walk itself, with the string table already buffered.
 
     Split from :func:`_parse_dynsym` only so the buffering wraps the whole
@@ -1147,6 +1152,13 @@ def _parse_dynsym_entries(section: SymbolTableSection, meta: ElfMetadata) -> Non
                 visibility=vis_str.replace("STV_", "").lower(),
                 origin_lib=_guess_symbol_origin(name, meta.needed),
                 value_alignment=_value_alignment(int(sym.entry.st_value)),
+                code_hash=(
+                    hasher.hash(
+                        int(sym.entry.st_value), sym.entry.st_size, sym.entry.st_shndx
+                    )
+                    if type_str == "STT_FUNC"
+                    else ""
+                ),
             )
         )
 

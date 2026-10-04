@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 55,
+  "schema_version": 56,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -61,7 +61,7 @@ maps are verbatim; each `payload` is elided.)*
 
 | Key | Meaning |
 |---|---|
-| `schema_version` | The **document's** version — one integer, currently **`55`**. Top-level so a loader can read it without parsing the rest. |
+| `schema_version` | The **document's** version — one integer, currently **`56`**. Top-level so a loader can read it without parsing the rest. |
 | `sections` | The nine named sections. Each carries its own `section_kind`, `section_schema_version` and `payload`. |
 | `section_schema_versions` | A flat map of the same per-section versions, so a reader can check them without walking `sections`. |
 
@@ -123,7 +123,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`55`**. See
+The current value is **`56`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -341,6 +341,13 @@ for", never "none". The debug-type join (`compare/debug_type_join.py`)
 reports a conflicted name as ambiguous rather than trusting the first
 definition.
 
+(v56) `elf.symbols[].code_hash` — a 128-bit BLAKE2b hex digest of an
+exported function's code bytes, written only when computed. The stripped-binary
+rename check reads it: equal hashes confirm a same-size rename and break a tie
+between two same-size candidates. Unequal hashes are not treated as evidence,
+because a relative call or data reference changes when the same function moves.
+An absent key means "not hashed".
+
 (v55) `public_header_identifiers_fact` — every identifier token the public
 header set's raw text spells, every preprocessor branch included (comments and
 literals stripped). `--contract public` reads it to tell "no public header
@@ -472,7 +479,7 @@ model rather than against either physical layout. Optional keys are omitted or `
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `55`). |
+| `schema_version` | int | Snapshot format version (currently `56`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -631,7 +638,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare -o json=-`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `55`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `56`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

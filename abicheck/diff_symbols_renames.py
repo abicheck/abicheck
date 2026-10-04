@@ -76,9 +76,9 @@ def _should_filter_transitive_runtime_symbols(snap: AbiSnapshot) -> bool:
 _FUNC_LIKE_TYPES = frozenset({SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTYPE})
 
 # Minimum shared leading/trailing run (in characters) between two unqualified
-# leaf names for a *hash-less* (size-only / fuzzy) match to count as a rename.
-# When no code hash is available — the only mode the snapshot/elf_only path can
-# reach — a "rename" is inferred purely from a coincidental symbol-size
+# leaf names for a match to count as a rename. A code hash (schema v56+) can
+# confirm a size match but never replaces this gate; without one, a "rename"
+# is inferred purely from a coincidental symbol-size
 # collision, which on a large library pairs completely unrelated functions that
 # merely share a byte size (observed on real libLLVM diffs: e.g. fixupIndexV4 ->
 # SmallVectorImpl<...>). A genuine rename or namespace relocation keeps a
@@ -349,8 +349,8 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     (``Class::get`` vs ``Class::set``), different template specializations of
     one name (``foo<int>`` vs ``foo<long>``), and same-name parameter changes
     (``foo(int)`` vs ``foo(long)``) — all of which are distinct ABI symbols.
-    Used only to gate hash-less matches, where size alone is not evidence of
-    identity.
+    Gates every match: size alone is not evidence of identity, and identical
+    code bytes are not either (two unrelated stubs compile alike).
     """
     if old_name == new_name:
         return True
@@ -403,13 +403,12 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
 
 
 def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
-    """Build FunctionFingerprint dict from ELF metadata (size-only, no code hash).
+    """Build FunctionFingerprint dict from ELF metadata.
 
-    Uses ElfSymbol.size from .dynsym to create fingerprints for rename matching.
-    Includes FUNC, IFUNC, and NOTYPE symbols — matching dumper.py's
+    Uses ElfSymbol.size from .dynsym, and ElfSymbol.code_hash where the dump
+    recorded one (schema v56+; "" otherwise, which the matcher reads as "no
+    hash"). Includes FUNC, IFUNC, and NOTYPE symbols — matching dumper.py's
     ``exported_dynamic_funcs`` categorization for elf_only_mode snapshots.
-    Code hashing requires the binary file and is handled by
-    ``binary_fingerprint.compute_function_fingerprints()`` when a path is available.
     """
     if snap.elf is None:
         return {}
@@ -428,7 +427,7 @@ def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
         result[sym.name] = FunctionFingerprint(
             name=sym.name,
             size=sym.size,
-            code_hash="",  # no code hash from metadata alone
+            code_hash=sym.code_hash,
         )
     return result
 
@@ -497,9 +496,8 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
     if not old_fps or not new_fps:
         return changes
 
-    # Matches in this path are hash-less (size-only), inferred from symbol size
-    # alone since _fingerprints_from_elf has no code bytes. Pass the name-
-    # similarity predicate into the matcher so it participates in candidate
+    # A size match is not identity, and a code hash only confirms one. Pass
+    # the name-similarity predicate into the matcher so it participates in candidate
     # *selection*: a coincidental same-size symbol can neither be reported as a
     # rename nor greedily consume a partner that a plausible rename should claim.
     # P11: one batched c++filt warm so the rename gate's demangle() hits cache, not per-symbol forks.

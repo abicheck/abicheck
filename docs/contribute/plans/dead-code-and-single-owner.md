@@ -251,7 +251,7 @@ consumer that does not exist yet.
 | `GateOptions.effective_gate`, `workflows.gate.effective_gate_for_resolved_compare_config` | ADR-061; [duplication-and-convergence-assessment](duplication-and-convergence-assessment.md) P0 `EffectiveGate` | **Single-pair `compare` cut over (2026-10):** the process exit, the report's `exit` block, the typed API's `exit_decision`, the `--used-by`/`--required-symbol` scoped gate and the effective-config digest all resolve from one `EffectiveGate`; none takes a scheme beside a severity map (`tests/test_effective_gate_single_input.py` scans for that shape). The release fan-out was checked and has no split pair: its scheme is not an input but `severity_exit_code is None`, and that code's one producer (`cli_compare_release_helpers._compute_release_severity_exit_code(library_results, gate)`) returns `None` exactly when `gate.severity is None`; `fail_on_removed`/`require_complete_analysis` are independent axes. The precomputed code stays, since it must be computed while each member's `DiffResult` still exists. |
 | `storage.import_baseline_set.import_baseline_set`/`export_baseline_set`, with `dto.baseline_set_metadata_from_dto`/`_to_dto` | ADR-062 (Proposed); [storage-format-v2](storage-format-v2.md); G40 | A baseline publish/load path in `compare` or `project` that goes through the BundleFacts→ProjectSnapshot adapter (streaming variant is a known gap). |
 | `storage.entity_ids.elf_symbol_occurrence` | ADR-062 Phase 0 (storage-format-v2 A0.2/A0.3) | A storage-v2 ELF symbol-occurrence producer (later ADR-062 phases). |
-| `binary_fingerprint.compute_function_fingerprints` | ADR-003 | `diff_symbols_renames.py`'s ELF-only rename path describes fingerprinting when a binary path is available; the call was never made. |
+| `binary_fingerprint.compute_function_fingerprints` | ADR-003 | **Replaced (2026-10):** the dump hashes each exported function (`extract/elf_code_hash.py`) into `ElfSymbol.code_hash` (snapshot schema v56), and the `fingerprint_renames` detector reads it. The file-reading function and its private section-buffering helpers were deleted rather than kept as a second extraction path. A hash only confirms a match (equal bytes) or breaks a same-size tie; unequal hashes are no evidence, and the name predicate gates every pass. |
 | `acknowledgment_gate.additions_review_exit_contribution` | ADR-067 D6 | **Wired (2026-10) for a single-pair and directory/package `compare` and the typed API:** an `ExitDecision` axis (`additions_review_contribution`, schema 5.13); `.abicheck.yml`'s `acknowledgment:` block supplies the records and the gate; the Action publishes `ADDITIONS_UNACKNOWLEDGED`. The release fan-out `max`s each member's contribution; `CompareRequest` carries both settings. |
 
 Two rows first listed here were not wiring gaps. `legacy_record_ir` was a
@@ -269,11 +269,10 @@ out; it is the documented library sibling of `ingest_codeql_call_results`
 either. `docs/use/build-evidence-setup.md` now names it beside the call
 graph reader.
 
-`binary_fingerprint.compute_function_fingerprints` stays listed, but the
-wiring is a format decision rather than a call: a detector sees only
-snapshots, so code hashes would have to be computed at dump time and stored
-on `ElfSymbol`, a snapshot schema bump inside ADR-050's comparability
-contract.
+`binary_fingerprint.compute_function_fingerprints` needed a format decision
+rather than a call, since a detector sees only snapshots: code hashes are now
+computed at dump time and stored on `ElfSymbol` (schema v56). A pre-v56 side
+carries no hashes, and the detector then runs exactly as before.
 
 The wheel rows (G26's `numpy` requirement parsers, G27's tag floor parsers
 and `parse_wheel_architecture_claim`) are **wired**: `compare old.whl
