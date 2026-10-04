@@ -48,9 +48,11 @@ from .semantic_ir_declaration_facts import declaration_facts
 
 __all__ = [
     "LEGACY_SIGNATURE_DIAGNOSTIC",
+    "overlay_established_facts",
     "SIGNATURE_FIELDS",
     "function_signature_facts",
     "sync_snapshot_function_signatures",
+    "with_declaration_signature",
     "with_function_signatures",
 ]
 
@@ -156,6 +158,34 @@ def function_signature_facts(fn: Function) -> dict[str, Any]:
             else Fact.present(bool(fn.is_variadic))
         ),
     }
+
+
+def with_declaration_signature(
+    entity: CanonicalEntity, fn: Function
+) -> CanonicalEntity:
+    """*entity* with every signature fact *fn* establishes taken from *fn*;
+    *entity* itself when they already agree.
+
+    The comparison-time counterpart of :func:`with_function_signatures`:
+    that fill only writes ``NOT_COLLECTED`` facts, so it cannot repair a copy
+    made stale by a later edit of *fn*. A fact *fn* does not establish keeps
+    the occurrence's own value (a producer's ``FAILED``/``UNSUPPORTED``)."""
+    return overlay_established_facts(entity, function_signature_facts(fn))
+
+
+def overlay_established_facts(
+    entity: CanonicalEntity, facts: dict[str, Fact[Any]]
+) -> CanonicalEntity:
+    """*entity* with each established fact of *facts* replacing its own
+    when the two differ; *entity* itself when nothing differs."""
+    updates: dict[str, Any] = {}
+    for name, value in facts.items():
+        if value.status is FactStatus.NOT_COLLECTED:
+            continue
+        held = getattr(entity, name)
+        if held.status is not value.status or held.value != value.value:
+            updates[name] = value
+    return dataclasses.replace(entity, **updates) if updates else entity
 
 
 def with_function_signatures(

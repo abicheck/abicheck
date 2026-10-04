@@ -171,19 +171,26 @@ def test_end_to_end_compare_reads_top_level_const(old_t, new_t, expected) -> Non
     assert var_kinds == {expected}
 
 
-def test_the_ir_is_the_authority_not_the_variable() -> None:
+def test_the_declaration_wins_over_a_stale_ir_copy_only_where_it_speaks() -> None:
+    """A named occurrence is a boundary copy of its declaration: an
+    established projected fact replaces a disagreeing copy, a fact the
+    projection leaves ``NOT_COLLECTED`` keeps the occurrence's own value."""
     var = _var("int")
     occ = OccurrenceId(var.entity_id)
     ir = SemanticIR(
         occurrences={
             occ: CanonicalEntity(
                 canonical_spelling=Fact.present("long"),
-                cv_qualification=Fact.present(()),
+                cv_qualification=Fact.present(("const",)),
             )
         }
     )
-    index = variable_type_index(ir, [var], lambda v: pytest.fail("not projected"))
-    assert variable_type_facts(index.entity_for(var)) == ("long", False)
+    fresh = CanonicalEntity(
+        canonical_spelling=Fact.present("int"),
+        cv_qualification=Fact.not_collected(),
+    )
+    index = variable_type_index(ir, [var], lambda v: fresh)
+    assert variable_type_facts(index.entity_for(var)) == ("int", True)
 
 
 def test_an_unnamed_variable_on_an_ir_side_is_projected() -> None:

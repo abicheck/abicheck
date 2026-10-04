@@ -122,6 +122,14 @@ _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
         "DECLARATION_FIELDS facts."
     ),
     (
+        "abicheck/model/semantic_ir_function_signature.py",
+        "overlay_established_facts",
+    ): (
+        "CanonicalEntity: every field is itself a Fact (no legacy bridge "
+        "sibling); the mapping holds facts produced by the same formula as "
+        "the occurrence's own."
+    ),
+    (
         "abicheck/model/semantic_ir_declaration_facts.py",
         "with_variable_facts",
     ): (

@@ -56,6 +56,7 @@ stays with the caller's ``SymbolIdentityIndex``; the displayed ``old``/
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -63,8 +64,10 @@ from typing import TYPE_CHECKING
 
 from ..diff_helpers import bool_transition, make_change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.fact import Fact
 from ..model.identity import EntityKind
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
+from ..model.semantic_ir_function_signature import overlay_established_facts
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_variable_occurrences,
@@ -127,6 +130,21 @@ def variable_type_index(
     projected = {
         id(v): ir.occurrences[occ] for v, occ in zip(unnamed, order, strict=True)
     }
+    # Same staleness rule as ``function_signature_index``: a named
+    # occurrence's facts are a boundary copy of its declaration's, so an
+    # edit of a loaded snapshot's ``Variable`` is re-projected over it.
+    for v in variables:
+        entity = named.get(v.entity_id) if v.entity_id is not None else None
+        if entity is not None:
+            fresh = project(v)
+            projected[id(v)] = overlay_established_facts(
+                entity,
+                {
+                    f.name: getattr(fresh, f.name)
+                    for f in dataclasses.fields(fresh)
+                    if isinstance(getattr(fresh, f.name), Fact)
+                },
+            )
     return VariableTypeIndex(index=index, projected=projected)
 
 

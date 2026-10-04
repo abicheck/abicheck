@@ -58,6 +58,7 @@ from ..model.change_catalog.kinds import ChangeKind
 from ..model.fact import Fact
 from ..model.identity import EntityKind
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
+from ..model.semantic_ir_function_signature import with_declaration_signature
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
     legacy_function_signature_occurrences,
@@ -179,6 +180,15 @@ def function_signature_index(
     projected = {
         id(f): ir.occurrences[occ] for f, occ in zip(unnamed, order, strict=True)
     }
+    # A named occurrence's signature facts are a copy of its declaration's,
+    # written by the same formula at the snapshot boundary. A caller that
+    # edits a loaded snapshot's ``Function`` leaves that copy stale, so the
+    # declaration this comparison pairs is re-projected over it: the IR
+    # still owns identity and every fact the formula does not produce.
+    for f in functions:
+        entity = named.get(f.entity_id) if f.entity_id is not None else None
+        if entity is not None:
+            projected[id(f)] = with_declaration_signature(entity, f)
     return FunctionSignatureIndex(index=index, projected=projected)
 
 

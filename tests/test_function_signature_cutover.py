@@ -152,8 +152,12 @@ def test_oracle_is_not_vacuous() -> None:
     }
 
 
-def test_the_ir_is_the_authority_not_the_function() -> None:
+def test_the_declaration_wins_over_a_stale_ir_copy_only_where_it_speaks() -> None:
+    """The IR occurrence is a boundary copy of the declaration: where the
+    declaration establishes a fact it wins (an in-place edit after load);
+    where it does not (``is_explicit`` unset), the IR's own fact stands."""
     fn = _fn("int", ["int"], "", False)
+    assert fn.is_explicit is None
     entity = CanonicalEntity(
         canonical_spelling=Fact.not_collected(),
         return_type_spelling=Fact.present("long"),
@@ -161,10 +165,12 @@ def test_the_ir_is_the_authority_not_the_function() -> None:
         parameter_kinds=Fact.present(("",)),
         ref_qualifier=Fact.present(""),
         is_variadic=Fact.present(False),
+        is_explicit=Fact.present(True),
     )
     ir = SemanticIR(occurrences={OccurrenceId(fn.entity_id): entity})
-    index = function_signature_index(ir, [fn])
-    assert signature_of(index.entity_for(fn)).return_spelling == "long"
+    got = function_signature_index(ir, [fn]).entity_for(fn)
+    assert signature_of(got).return_spelling == "int"
+    assert got.is_explicit.value is True
 
 
 def test_end_to_end_compare_reads_the_ir() -> None:
@@ -306,3 +312,54 @@ class TestCutoverGate:
     def test_fires_on_a_legacy_signature_read(self, source: str) -> None:
         forbidden = frozenset({"return_type", "params", "functions", "function_map"})
         assert self._gate().legacy_collection_reads(ast.parse(source), forbidden)
+
+
+@pytest.mark.parametrize("edit", ["return", "param", "variable"])
+def test_editing_a_loaded_declaration_is_not_masked_by_its_ir_copy(edit) -> None:
+    """A loaded snapshot whose ``Function``/``Variable`` is edited in place
+    must compare by the edit, not by the stale boundary copy in its IR
+    (``scripts/demo_libz.py``'s pattern)."""
+    import copy
+
+    from abicheck.checker import compare as _compare
+    from abicheck.model import Param, Variable
+    from abicheck.model.identity import entity_id_for_variable
+
+    fn = Function(
+        name="f",
+        mangled="_Z1fi",
+        return_type="int",
+        params=[Param(name="a", type="int")],
+        entity_id=entity_id_for_function((), "f", mangled_name="_Z1fi"),
+    )
+    var = Variable(
+        name="g",
+        mangled="g",
+        type="int",
+        entity_id=entity_id_for_variable((), "g", mangled_name="g"),
+    )
+    ir = normalize_header_ast(
+        types=[],
+        enums=[],
+        typedefs_qualified={},
+        typedef_entity_ids={},
+        producer="castxml",
+        functions=[fn],
+        variables=[var],
+    )
+    old = AbiSnapshot(
+        library="l", version="1", functions=[fn], variables=[var], semantic_ir=ir
+    )
+    new = snapshot_from_dict(snapshot_to_dict(copy.deepcopy(old)))
+    (nf,) = new.declarations.functions
+    (nv,) = new.declarations.variables
+    if edit == "return":
+        nf.return_type = "long"
+        expected = ChangeKind.FUNC_RETURN_CHANGED
+    elif edit == "param":
+        nf.params[0].type = "long"
+        expected = ChangeKind.FUNC_PARAMS_CHANGED
+    else:
+        nv.type = "long"
+        expected = ChangeKind.VAR_TYPE_CHANGED
+    assert expected in {c.kind for c in _compare(old, new).changes}
