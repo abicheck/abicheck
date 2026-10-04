@@ -121,7 +121,7 @@ def rename_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
 
 
 def enum_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
-    k = max(10, n // 20)
+    k = max(2, n // 10)
 
     def enums(shift: int) -> list[EnumType]:
         return [
@@ -193,7 +193,7 @@ def nested_type_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
 
 
 def type_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
-    k = max(50, n // 20)
+    k = max(2, n // 10)
 
     def types(grow: bool) -> list[RecordType]:
         out = []
