@@ -443,3 +443,56 @@ class TestReconciliationIsComputedOncePerPair:
         assert [
             c for c in compare(old, without).changes if c.kind in _SURFACE_EXIT_KINDS
         ]
+
+
+class _CountingMap(dict):
+    """A surface map that counts full passes over its values."""
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+        self.value_passes = 0
+
+    def values(self):  # type: ignore[override]
+        self.value_passes += 1
+        return super().values()
+
+
+@pytest.mark.parametrize("n", [1, 7, 60, 400])
+def test_alias_resolved_keys_scan_the_other_surface_at_most_once(n: int) -> None:
+    # Every key misses the exact join and resolves, through the alias tier,
+    # to a declaration already on the other side's surface (Mach-O's `_`
+    # prefix reaches this path for nearly every symbol). Membership of each
+    # resolved peer must be answered without rescanning that surface per
+    # key, and the already-present peer must still be skipped, not admitted
+    # a second time under the alias key.
+    from abicheck.compare.surface_reconcile import reconcile_surfaces
+
+    old_decls = {
+        f"_f{i}": Function(name=f"f{i}", mangled=f"_f{i}", return_type="void")
+        for i in range(n)
+    }
+    new_decls = {
+        f"f{i}": Function(name=f"f{i}", mangled=f"f{i}", return_type="void")
+        for i in range(n)
+    }
+    old_map, new_map = _CountingMap(old_decls), _CountingMap(new_decls)
+    resolved: list[str] = []
+
+    def resolve_in_new(key: str, decl: Function) -> Function | None:
+        resolved.append(key)
+        return new_decls[key.removeprefix("_")]
+
+    def resolve_in_old(key: str, decl: Function) -> Function | None:
+        return old_decls["_" + key]
+
+    rec_old, rec_new = reconcile_surfaces(
+        old_map,
+        new_map,
+        old_all=old_decls,
+        new_all=new_decls,
+        resolve_in_old=resolve_in_old,
+        resolve_in_new=resolve_in_new,
+    )
+    assert len(resolved) == n  # the path under test actually ran, per key
+    assert new_map.value_passes <= 1 and old_map.value_passes <= 1
+    assert rec_new == new_decls and rec_old == old_decls

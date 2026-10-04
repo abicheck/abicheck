@@ -53,7 +53,7 @@ transitions (which DO change size or mangling) are covered above.
 from __future__ import annotations
 
 from .checker_types import Change
-from .demangle import demangle
+from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
@@ -192,6 +192,11 @@ def _diff_long_double(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     # Index added symbols that carry a long-double type by their LD-normalized
     # demangled form, so a removed LD symbol can find its renamed counterpart.
+    # One batch for both sides: the loops below demangle every added and
+    # removed symbol, and per-name calls fork one `c++filt` each for any name
+    # an earlier batch did not warm (all of them, on a Mach-O comparison).
+    # (`demangle_batch` itself skips names that are not Itanium-mangled.)
+    demangle_batch(sorted((*added, *removed)))
     added_by_key: dict[str, list[str]] = {}
     added_dem: dict[str, str] = {}
     for a in added:

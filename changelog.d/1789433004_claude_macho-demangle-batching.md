@@ -1,0 +1,4 @@
+### Performance
+
+- `compare` no longer starts one `c++filt` process per finding when the `cxxfilt` binding is absent and no earlier step warmed the names, which is what happens with Mach-O symbol spellings. The long-double pairing detector now demangles its added and removed symbols in one batch. Public-surface scoping batches every mangled symbol of the pass the first time a finding reaches its `demangle()` fallback. On a dumped 48-unit library with Mach-O spellings this went from 97 child processes to a constant 2 or 3, and from 397 to that constant for a release that only removes symbols.
+- Surface reconciliation checked whether each alias-resolved declaration was already on the other side's surface by scanning that whole surface, once per key: quadratic wherever most keys miss the exact join (Mach-O's `_` prefix). It now builds the identity set once.

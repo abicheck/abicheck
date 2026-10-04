@@ -61,11 +61,11 @@ Design constraints (ADR-024 §D5, anti-hiding):
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .demangle import demangle
+from .demangle import demangle, demangle_batch
 from .model import ScopeOrigin
 from .model.owner_recovery import (
     itanium_special_name_owner_identifiers,
@@ -573,14 +573,42 @@ def _is_undeclared_export_existence_change(
     return False
 
 
+def demangle_batch_on_first_need(changes: Iterable[Change]) -> Callable[[], None]:
+    """A callback that, the first time it runs, demangles in one batch every
+    mangled symbol among *changes*; later calls do nothing.
+
+    For :func:`classify_change_surface`'s ``on_demangle_needed``. Its
+    per-finding ``demangle()`` fallback forks a ``c++filt`` for every name no
+    earlier batch warmed when the ``cxxfilt`` binding is absent -- one
+    process per finding on a Mach-O comparison, where nothing else warms
+    those spellings. Batching on first need keeps the laziness: a pass whose
+    findings never reach the fallback forks nothing.
+    """
+    # `demangle_batch` itself skips names that are not Itanium-mangled.
+    pending: list[list[str]] = [sorted({c.symbol for c in changes if c.symbol})]
+
+    def warm() -> None:
+        if pending:
+            names = pending.pop()
+            if names:
+                demangle_batch(names)
+
+    return warm
+
+
 def classify_change_surface(
     change: Change,
     surf_old: PublicSurface,
     surf_new: PublicSurface,
     *,
     unions: SurfaceUnions | None = None,
+    on_demangle_needed: Callable[[], None] | None = None,
 ) -> tuple[bool, str | None]:
     """Classify *change* against the public surface.
+
+    *on_demangle_needed* runs before the ``demangle()`` fallback for a mangled
+    symbol neither structural parser reads; a caller classifying many findings
+    passes :func:`demangle_batch_on_first_need` so they share one batch.
 
     Returns ``(in_surface, reason)``. ``reason`` is ``None`` when the change
     is in-surface (kept); otherwise it is a stable ledger reason code
@@ -736,6 +764,8 @@ def classify_change_surface(
             # (e.g. `FUNC_REMOVED_ELF_ONLY`'s `demangled_symbol`). Removing
             # it entirely was a real precision regression on demangler-
             # equipped hosts for these shapes, not a host-independence fix.
+            if on_demangle_needed is not None:
+                on_demangle_needed()
             sym_for_types = demangle(sym) or sym
         return _type_identifiers(sym_for_types) | _type_identifiers(
             change.caused_by_type

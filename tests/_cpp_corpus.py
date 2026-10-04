@@ -59,8 +59,8 @@ def _changed(i: int, fraction: float) -> bool:
     return (i % 100) < round(fraction * 100)
 
 
-def _header(n: int, v2: bool, fraction: float) -> str:
-    out = ["#pragma once", "#include <cstddef>", "namespace lib {"]
+def _header(n: int, v2: bool, fraction: float, tag: str = "") -> str:
+    out = ["#pragma once", "#include <cstddef>", f"namespace lib{tag} {{"]
     for ns in range(NAMESPACES):
         out.append(f"namespace m{ns} {{ struct Ctx {{ int id; }}; }}")
     for i in range(n):
@@ -96,8 +96,8 @@ template <typename T> T tmpl{i}(T v, const Data{i}& d);
     return "\n".join(out) + "\n"
 
 
-def _source(n: int, v2: bool, fraction: float) -> str:
-    out = ['#include "lib.h"', "namespace lib {"]
+def _source(n: int, v2: bool, fraction: float, tag: str = "") -> str:
+    out = ['#include "lib.h"', f"namespace lib{tag} {{"]
     for i in range(n):
         ch = v2 and _changed(i, fraction)
         ns = i % NAMESPACES
@@ -126,14 +126,21 @@ class BuiltLibrary:
 
 
 def build_library(
-    root: Path, n: int, *, v2: bool = False, change_fraction: float = 0.1
+    root: Path, n: int, *, v2: bool = False, change_fraction: float = 0.1, tag: str = ""
 ) -> BuiltLibrary:
-    """Write and compile one side; returns the ``.so`` and its header."""
+    """Write and compile one side; returns the ``.so`` and its header.
+
+    *tag* salts the outer namespace, so every mangled name is new: the
+    demangling and spelling caches are process-wide, and two runs over the
+    same names would measure the second against a warm cache.
+    """
+    if tag and not tag.isidentifier():
+        raise ValueError(f"tag must be an identifier fragment: {tag!r}")
     root.mkdir(parents=True, exist_ok=True)
     header = root / "lib.h"
-    header.write_text(_header(n, v2, change_fraction), encoding="utf-8")
+    header.write_text(_header(n, v2, change_fraction, tag), encoding="utf-8")
     src = root / "lib.cpp"
-    src.write_text(_source(n, v2, change_fraction), encoding="utf-8")
+    src.write_text(_source(n, v2, change_fraction, tag), encoding="utf-8")
     so = root / "libgen.so"
     subprocess.run(
         [
@@ -161,8 +168,10 @@ def dump_library(lib: BuiltLibrary, version: str):
     return dump(lib.so, [lib.header], version=version, compiler="c++")
 
 
-def build_pair(root: Path, n: int, *, change_fraction: float = 0.1):
+def build_pair(root: Path, n: int, *, change_fraction: float = 0.1, tag: str = ""):
     """Build and dump v1 and v2; returns ``(old_snapshot, new_snapshot)``."""
-    v1 = build_library(root / "v1", n)
-    v2 = build_library(root / "v2", n, v2=True, change_fraction=change_fraction)
+    v1 = build_library(root / "v1", n, tag=tag)
+    v2 = build_library(
+        root / "v2", n, v2=True, change_fraction=change_fraction, tag=tag
+    )
     return dump_library(v1, "1.0"), dump_library(v2, "2.0")

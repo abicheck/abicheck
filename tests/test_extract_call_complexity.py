@@ -55,7 +55,8 @@ def _offenders(small: dict[str, int], large: dict[str, int]) -> list[str]:
 
 def test_dump_call_counts_grow_subquadratically(tmp_path: Path) -> None:
     def counts(n: int) -> dict[str, int]:
-        lib = build_library(tmp_path / f"d{next(_runs)}_{n}", n)
+        run = next(_runs)
+        lib = build_library(tmp_path / f"d{run}_{n}", n, tag=f"r{run}")
         holder = {}
         c = profile_call_counts(
             lambda: holder.setdefault("snap", dump_library(lib, "1.0"))
@@ -76,10 +77,18 @@ def test_compare_of_dumped_libraries_grows_subquadratically(
     tmp_path: Path, change_fraction: float
 ) -> None:
     def counts(n: int) -> dict[str, int]:
-        root = tmp_path / f"c{next(_runs)}_{n}"
-        old = dump_library(build_library(root / "v1", n), "1.0")
+        run = next(_runs)
+        root = tmp_path / f"c{run}_{n}"
+        # Salted per run: corpus names repeat across sizes otherwise, and a
+        # process-wide demangle/spelling memo warmed by an earlier run makes
+        # the small size look cheaper than it is -- a phantom superlinear
+        # site at the large size (seen on macOS, where nothing else warms it).
+        tag = f"r{run}"
+        old = dump_library(build_library(root / "v1", n, tag=tag), "1.0")
         new = dump_library(
-            build_library(root / "v2", n, v2=True, change_fraction=change_fraction),
+            build_library(
+                root / "v2", n, v2=True, change_fraction=change_fraction, tag=tag
+            ),
             "2.0",
         )
         holder = {}
@@ -92,3 +101,67 @@ def test_compare_of_dumped_libraries_grows_subquadratically(
         f"compare() over dumped libraries (change_fraction={change_fraction}) grew faster than (size ratio)^1.5:\n  "
         + "\n  ".join(offenders[:10])
     )
+
+
+def _macho_spelled(snapshot):
+    # Clang on macOS records declarations with the Mach-O global prefix
+    # (`__Z...`); the export table's `_Z...` spelling then reaches the
+    # per-name demangling paths no earlier batch warms. Reproduced here on
+    # an ELF dump so the Linux lane covers what only the macOS lane saw.
+    for decl in (*snapshot.declarations.functions, *snapshot.declarations.variables):
+        if decl.mangled and decl.mangled.startswith("_Z"):
+            decl.mangled = "_" + decl.mangled
+    return snapshot
+
+
+def test_child_processes_per_compare_stay_constant_with_macho_spellings(
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from audit_repeated_calls import count_subprocess_spawns
+
+    spawned = {}
+    for n in (SMALL, LARGE):
+        run = next(_runs)
+        root, tag = tmp_path / f"m{run}_{n}", f"r{run}"
+        old = _macho_spelled(
+            dump_library(build_library(root / "v1", n, tag=tag), "1.0")
+        )
+        new = _macho_spelled(
+            dump_library(
+                build_library(root / "v2", n, v2=True, change_fraction=1.0, tag=tag),
+                "2.0",
+            )
+        )
+        spawned[n] = count_subprocess_spawns(lambda o=old, w=new: compare(o, w))
+    # A demangler batch per consumer at most; forking per name made this
+    # grow with n (48 per consumer at n=48 before the batching fix).
+    assert spawned[LARGE] <= max(spawned[SMALL], 3), spawned
+
+
+def test_child_processes_stay_constant_for_a_removals_only_release(
+    tmp_path: Path,
+) -> None:
+    # A release that only removes units: the long-double pairing returns
+    # early (it needs added names too), so nothing warms the removed `_Z`
+    # names before surface classification's per-finding `demangle()`
+    # fallback reaches them -- that pass must batch them itself.
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    from audit_repeated_calls import count_subprocess_spawns
+
+    spawned = {}
+    for n in (SMALL, LARGE):
+        run = next(_runs)
+        root, tag = tmp_path / f"x{run}_{n}", f"r{run}"
+        old = _macho_spelled(
+            dump_library(build_library(root / "v1", n, tag=tag), "1.0")
+        )
+        new = _macho_spelled(
+            dump_library(build_library(root / "v2", n // 4, tag=tag), "2.0")
+        )
+        spawned[n] = count_subprocess_spawns(lambda o=old, w=new: compare(o, w))
+    assert spawned[LARGE] <= max(spawned[SMALL], 3), spawned

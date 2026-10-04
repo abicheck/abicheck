@@ -25,4 +25,7 @@ the weekly report surfaces: a candidate marked *accepted* has a reason, and a
 | Namespace-shape detectors demangled the public surface per detector; now once per snapshot via `detection_memo` | `repeats:*` budgets |
 | `mask_operator_symbols`, `template_angle_depth`, `_strip_param_signature`, `_cpo_function_stem` recomputed per call; memoized | `repeats:*` budgets, H5 coverage rows |
 | Legacy surface-fact fallback allocated a new `Fact` per read; now shared constants | `legacy_signature_churn` workload |
+| Long-double pairing and public-surface scoping forked one `c++filt` per name on hosts without `cxxfilt` whenever no earlier batch had warmed those names (Mach-O spellings); now one batch each, the surface one only on first need | `tests/test_demangle_batching_consumers.py`; Mach-O-spelled corpus gates in `tests/test_extract_call_complexity.py` |
+| `_admit` in `compare/surface_reconcile.py` rescanned the other surface per alias-resolved key (quadratic on Mach-O) | `tests/test_surface_reconciliation_properties.py::test_alias_resolved_keys_scan_the_other_surface_at_most_once` |
+| The real-library call-count gate reused corpus names across sizes, so process-wide demangle memos made the small size look cheap (phantom superlinear sites on macOS); names are now salted per run | `tests/_cpp_corpus.py` `tag` |
 | Proof-path de-dup in `internal_leak.py` and `_compute_occurrences` used list membership | `perf-antipatterns` baseline |
