@@ -89,5 +89,5 @@
   (`exit.additions_review_contribution`, reason `additions_review`, report
   schema 5.13) instead of a fold applied after the decision, so the report's
   `exit.code` and the process exit cannot disagree once the axis fires.
-  `acknowledgment_gate.fold_additions_review_exit` is removed. No exit code
-  changes today: no front end supplies acknowledgment records yet.
+  `acknowledgment_gate.fold_additions_review_exit` is removed. The axis is
+  only non-zero under `unacknowledged_additions: block` (see Added).
