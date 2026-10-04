@@ -71,6 +71,14 @@ SIGNATURE_FIELDS = (
     "contract_attributes",
     "exception_spec",
     "vtable_index",
+    "is_override",
+    # The parameter cohort.
+    "parameter_names",
+    "parameter_defaults",
+    "parameter_pointer_depths",
+    "parameter_restrict",
+    "parameter_va_list",
+    "return_pointer_depth",
 )
 
 #: Stamped on a signature fact decoded from a pre-v3 ``semantic_ir`` document.
@@ -96,6 +104,15 @@ def _optional(value: Any) -> Fact[Any]:
 
 def function_signature_facts(fn: Function) -> dict[str, Any]:
     """Every :data:`SIGNATURE_FIELDS` fact for *fn*, keyed by field name."""
+
+    def _flag(fact: Any) -> str:
+        """A per-parameter ``Fact[bool]`` as ``"true"``/``"false"``, or ``""``
+        when its producer did not establish it (``compare_facts``' non-available
+        sides)."""
+        if fact is None or fact.status not in (FactStatus.PRESENT, FactStatus.PARTIAL):
+            return ""
+        return "true" if fact.value else "false"
+
     attrs = fn.contract_attributes
     return {
         # Declaration facts every function also carries (deprecation,
@@ -110,6 +127,19 @@ def function_signature_facts(fn: Function) -> dict[str, Any]:
         "contract_attributes": _optional(None if attrs is None else tuple(attrs)),
         "exception_spec": _optional(fn.exception_spec),
         "vtable_index": _optional(fn.vtable_index),
+        "is_override": _optional(fn.is_override),
+        "parameter_names": Fact.present(tuple(p.name or "" for p in fn.params)),
+        "parameter_defaults": Fact.present(tuple(p.default for p in fn.params)),
+        "parameter_pointer_depths": Fact.present(
+            tuple(int(p.pointer_depth) for p in fn.params)
+        ),
+        "parameter_restrict": Fact.present(
+            tuple(_flag(p.is_restrict_fact) for p in fn.params)
+        ),
+        "parameter_va_list": Fact.present(
+            tuple(_flag(p.is_va_list_fact) for p in fn.params)
+        ),
+        "return_pointer_depth": Fact.present(int(fn.return_pointer_depth)),
         "return_type_spelling": Fact.present(fn.return_type),
         "parameter_type_spellings": Fact.present(tuple(p.type for p in fn.params)),
         "parameter_kinds": Fact.present(tuple(_param_kind(p) for p in fn.params)),

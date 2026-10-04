@@ -38,7 +38,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.compare.va_list_diff:diff_va_list_params",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_function_signature:function_signature_facts",
+        ),
         notes=(
             "CastXML never populates this fact at all — its blanket "
             "False is unconditionally correct-as-not-collected, on "
@@ -372,7 +374,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_param_qualifiers:param_restrict_changes",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_function_signature:function_signature_facts",
+        ),
         notes=(
             "Whether the parameter is a restrict-qualified pointer. Case "
             "(a): a plain bool whose False cannot distinguish "

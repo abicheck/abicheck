@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import functools
 import re
-from collections.abc import Callable, Container, Mapping
+from collections.abc import Callable, Container, Iterator, Mapping
 from typing import Any
 
 from .checker_types import Change
@@ -38,6 +38,16 @@ from .compare.function_signature import (
 )
 from .compare.functions import function_identity_index
 from .compare.naming_conventions import PREFIX_RENAME
+from .compare.parameter_facts import (
+    ParameterView,
+    override_changes,
+    parameter_default_changes,
+    parameter_rename_changes,
+    parameter_view,
+    pointer_level_changes,
+    restrict_changes,
+    va_list_changes,
+)
 from .compare.surface_reconcile import (
     RECONCILED_FUNCTIONS,
     RECONCILED_VARIABLES,
@@ -962,6 +972,27 @@ def _both_header_aware(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     )
 
 
+def _parameter_view_pairs(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_map: dict[str, Function],
+    new_map: dict[str, Function],
+) -> Iterator[tuple[str, Function, Function, ParameterView, ParameterView]]:
+    """Every matched function pair (``iter_matched_function_pairs``) with each
+    side's per-parameter facts read from its ``SemanticIR`` (ADR-063 6B
+    parameter cohort, ``compare/parameter_facts.py``)."""
+    old_index = function_signature_index(old.canonical_ir, old_map.values())
+    new_index = function_signature_index(new.canonical_ir, new_map.values())
+    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
+        yield (
+            mangled,
+            f_old,
+            f_new,
+            parameter_view(old_index.entity_for(f_old)),
+            parameter_view(new_index.entity_for(f_new)),
+        )
+
+
 @registry.detector("param_defaults")
 def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect parameter default value changes/removals.
@@ -1002,7 +1033,9 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     def _param_defaults_producer(snap: AbiSnapshot, f: Function) -> str | None:
         return fact_producer(snap, func_fact_key(f.mangled, "param_defaults"))
 
-    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, old_map, new_map
+    ):
         old_producer = _param_defaults_producer(old, f_old)
         new_producer = _param_defaults_producer(new, f_new)
         if (
@@ -1011,40 +1044,20 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             and old_producer != new_producer
         ):
             continue
-        # Compare parameter defaults pairwise
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            if p_old.default is not None and p_new.default is None:
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_DEFAULT_VALUE_REMOVED,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value=p_old.default,
-                        new_value=None,
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
-            elif (
-                p_old.default is not None
-                and p_new.default is not None
-                and p_old.default != p_new.default
-            ):
-                if default_value_fingerprint_comparison_unreliable(
-                    old, new, old_producer, new_producer, p_old.default, p_new.default
-                ):
-                    continue
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_DEFAULT_VALUE_CHANGED,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old_value=p_old.default,
-                        new_value=p_new.default,
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
+        changes += parameter_default_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+            value_comparison_unreliable=functools.partial(
+                default_value_fingerprint_comparison_unreliable,
+                old,
+                new,
+                old_producer,
+                new_producer,
+            ),
+        )
 
     return changes
 
@@ -1061,26 +1074,16 @@ def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if old.from_headers_inferred or new.from_headers_inferred:
         return changes
     old_map, new_map = _reconciled_function_surfaces(old, new)
-
-    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            if (
-                p_old.type == p_new.type
-                and p_old.name
-                and p_new.name
-                and p_old.name != p_new.name
-            ):
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_RENAMED,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(i),
-                        old=p_old.name,
-                        new=p_new.name,
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, old_map, new_map
+    ):
+        changes += parameter_rename_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
 
     return changes
 
@@ -1097,50 +1100,17 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         new
     )
 
-    for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        return_known = not (
-            _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type)
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, old_map, new_map
+    ):
+        changes += pointer_level_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+            params_unconfirmed=params_unconfirmed,
         )
-        # Return pointer depth
-        if (
-            return_known
-            and f_old.return_pointer_depth != f_new.return_pointer_depth
-            and (f_old.return_pointer_depth > 0 or f_new.return_pointer_depth > 0)
-        ):
-            changes.append(
-                make_change(
-                    ChangeKind.RETURN_POINTER_LEVEL_CHANGED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old=str(f_old.return_pointer_depth),
-                    new=str(f_new.return_pointer_depth),
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
-
-        if params_unconfirmed:
-            continue
-
-        # Param pointer depths
-        for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
-            # Skip individually unresolved params ("?"): depth falls back to 0
-            # and would read as a phantom level change (matches _check_params_change).
-            if _type_unknown(p_old.type) or _type_unknown(p_new.type):
-                continue
-            if p_old.pointer_depth != p_new.pointer_depth and (
-                p_old.pointer_depth > 0 or p_new.pointer_depth > 0
-            ):
-                changes.append(
-                    make_change(
-                        ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
-                        symbol=mangled,
-                        name=f_old.name,
-                        detail=str(p_old.name or i),
-                        old=str(p_old.pointer_depth),
-                        new=str(p_new.pointer_depth),
-                        entity_id=f_old.entity_id or f_new.entity_id,
-                    )
-                )
 
     return changes
 
@@ -1331,16 +1301,25 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     the same reasoning ``fact_provenance.both_known_backed_fact`` encodes
     for ``deprecated``/``is_scoped``.
 
-    The loop itself lives in ``diff_param_qualifiers`` (this file is at the
-    2000-line hard cap); the registration stays HERE so the detector keeps
-    its original position in the registry, which orders findings in every
-    report. See that module's docstring.
+    The per-parameter comparison reads the IR (``compare/parameter_facts.
+    py``, ADR-063 6B parameter cohort); the registration stays HERE so the
+    detector keeps its original position in the registry, which orders
+    findings in every report.
     """
-    from .diff_param_qualifiers import param_restrict_changes
-
     if not _both_header_aware(old, new):
         return []
-    return param_restrict_changes(*_reconciled_function_surfaces(old, new))
+    changes: list[Change] = []
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, *_reconciled_function_surfaces(old, new)
+    ):
+        changes += restrict_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
+    return changes
 
 
 @registry.detector("func_deprecated")
@@ -1392,38 +1371,21 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
     changes: list[Change] = []
     old_map, new_map = _reconciled_function_surfaces(old, new)
 
+    old_index = function_signature_index(old.canonical_ir, old_map.values())
+    new_index = function_signature_index(new.canonical_ir, new_map.values())
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
             continue
-        if f_old.is_override is None or f_new.is_override is None:
-            continue
         if not both_known_backed_fact(old, new, func_fact_key(mangled, "is_override")):
             continue
-        if f_old.is_override == f_new.is_override:
-            continue
-        if f_new.is_override:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old_value="no override",
-                    new_value="override",
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
-        else:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old_value="override",
-                    new_value="no override",
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
+        changes += override_changes(
+            mangled,
+            f_old.name,
+            parameter_view(old_index.entity_for(f_old)),
+            parameter_view(new_index.entity_for(f_new)),
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
     return changes
 
 
@@ -1463,19 +1425,25 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     Header-tier, "clang"-producer-ONLY (deliberately NOT "hybrid" -- unlike
     ``param_restrict``'s gate just above), and reliability-gated -- see
-    ``diff_param_qualifiers.param_va_list_changes`` for the full reasoning
-    (G31 Phase C continued, Codex review).
-
-    The loop lives in ``diff_param_qualifiers`` (this file is at the
-    2000-line hard cap); registration stays HERE for registry ordering.
+    ``compare/parameter_facts.va_list_changes`` (G31 Phase C continued,
+    Codex review); registration stays HERE for registry ordering.
     """
-    from .diff_param_qualifiers import param_va_list_changes
-
     if not _both_header_aware(old, new):
         return []
     if old.ast_producer != "clang" or new.ast_producer != "clang":
         return []
-    return param_va_list_changes(*_reconciled_function_surfaces(old, new))
+    changes: list[Change] = []
+    for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
+        old, new, *_reconciled_function_surfaces(old, new)
+    ):
+        changes += va_list_changes(
+            mangled,
+            f_old.name,
+            v_old,
+            v_new,
+            entity_id=f_old.entity_id or f_new.entity_id,
+        )
+    return changes
 
 
 @registry.detector("constants")

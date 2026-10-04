@@ -104,7 +104,16 @@ _LAYOUT_FACTS = ("size_bits", "alignment_bits")
 #: fills them from the snapshot's own records). A newer version is refused,
 #: never read as if it were this one.
 IR_DOCUMENT_VERSION = 3
-_INT_VALUED_FACTS = (*_LAYOUT_FACTS, "vtable_index", "declared_alignment_bits")
+_INT_VALUED_FACTS = (
+    *_LAYOUT_FACTS,
+    "vtable_index",
+    "declared_alignment_bits",
+    "return_pointer_depth",
+)
+#: Tuple-valued facts whose elements are integers, or strings that may be
+#: ``null`` (a parameter with no default), rather than plain strings.
+_INT_TUPLE_FACTS = ("parameter_pointer_depths",)
+_NULLABLE_STR_TUPLE_FACTS = ("parameter_defaults",)
 
 #: The function-signature facts (ADR-063 6B, function-signature cohort).
 #: Written only for a ``FUNCTION`` occurrence, from document version 3 on; an
@@ -122,6 +131,7 @@ _BOOL_VALUED_FACTS = (
     "is_virtual",
     "is_explicit",
     "is_hidden_friend",
+    "is_override",
 )
 
 #: The ``CanonicalEntity`` fields carrying a tuple-valued ``Fact``. JSON has
@@ -135,6 +145,11 @@ _TUPLE_VALUED_FACTS = (
     "parameter_kinds",
     "contract_attributes",
     "deprecated",
+    "parameter_names",
+    "parameter_defaults",
+    "parameter_pointer_depths",
+    "parameter_restrict",
+    "parameter_va_list",
 )
 
 
@@ -204,8 +219,18 @@ def _fact_value(
     if not as_tuple:
         return identity_text(raw, f"semantic_ir {field_name} value")
     entries = row_sequence(raw, f"semantic_ir {field_name} value")
+    if field_name in _INT_TUPLE_FACTS:
+        for index, entry in enumerate(entries):
+            if isinstance(entry, bool) or not isinstance(entry, int):
+                raise ValueError(
+                    f"semantic_ir {field_name} value[{index}] must be an integer"
+                )
+        return tuple(entries)
+    nullable = field_name in _NULLABLE_STR_TUPLE_FACTS
     return tuple(
-        identity_text(entry, f"semantic_ir {field_name} value[{index}]")
+        None
+        if nullable and entry is None
+        else identity_text(entry, f"semantic_ir {field_name} value[{index}]")
         for index, entry in enumerate(entries)
     )
 

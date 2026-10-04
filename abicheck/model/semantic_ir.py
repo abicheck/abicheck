@@ -109,6 +109,7 @@ _BOOL_FACTS = (
     "is_virtual",
     "is_explicit",
     "is_hidden_friend",
+    "is_override",
 )
 
 
@@ -182,6 +183,30 @@ class CanonicalEntity:
     )
     exception_spec: Fact[str] = field(default_factory=lambda: Fact.not_collected())
     vtable_index: Fact[int] = field(default_factory=lambda: Fact.not_collected())
+    is_override: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    #: Per-parameter facts (ADR-063 6B, parameter cohort), one entry per
+    #: parameter: the names, the default expressions (``None`` where a
+    #: parameter has none), the pointer depths, and the ``restrict``/
+    #: ``va_list`` flags as ``"true"``/``"false"``, ``""`` where the producer
+    #: did not establish that parameter's flag. Plus the return pointer depth.
+    parameter_names: Fact[tuple[str, ...]] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    parameter_defaults: Fact[tuple[str | None, ...]] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    parameter_pointer_depths: Fact[tuple[int, ...]] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    parameter_restrict: Fact[tuple[str, ...]] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    parameter_va_list: Fact[tuple[str, ...]] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    return_pointer_depth: Fact[int] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
     #: Function and variable declaration facts (ADR-063 6B, declaration-fact
     #: cohort): the deprecation as ``(message,)`` (``()`` when confirmed not
     #: deprecated), the ``AccessLevel`` value, and a variable's declared
@@ -225,7 +250,7 @@ class CanonicalEntity:
             flag = getattr(self, name)
             if flag.is_present and not isinstance(flag.value, bool):
                 raise ValueError(f"{name} must carry a bool, got {flag.value!r}")
-        for name in ("vtable_index", "declared_alignment_bits"):
+        for name in ("vtable_index", "declared_alignment_bits", "return_pointer_depth"):
             slot = getattr(self, name)
             if slot.is_present and (
                 isinstance(slot.value, bool) or not isinstance(slot.value, int)

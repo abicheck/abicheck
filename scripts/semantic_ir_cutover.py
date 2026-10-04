@@ -193,6 +193,26 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         ),
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
+    # ADR-063 6B parameter cohort: defaults, renames, pointer levels,
+    # restrict, va_list and override read the per-parameter CanonicalEntity
+    # facts; snapshot-level producer gates stay with the caller.
+    MigratedCohort(
+        name="parameter_facts",
+        modules=("abicheck/compare/parameter_facts.py",),
+        forbidden_attributes=frozenset(
+            {
+                "params",
+                "default",
+                "pointer_depth",
+                "return_pointer_depth",
+                "is_restrict_fact",
+                "is_va_list_fact",
+                "functions",
+                "function_map",
+            }
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
     # `functions` is deliberately NOT registered here yet. A first attempt
     # (abicheck/compare/functions.py's function_identity_index) built a
     # SemanticIRIndex per comparison but only ever looked up a function's
