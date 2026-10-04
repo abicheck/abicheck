@@ -590,7 +590,6 @@ python3 scripts/benchmark_comparison.py --tools abicheck abidiff
 | Scenario | Recommended |
 |----------|-------------|
 | New CI pipeline, full accuracy | `abicheck compare` |
-| Migrating from ABICC XML pipeline | `abicheck compare` (see [Upgrading to 0.6](../start/upgrading-to-0.6.md#a5-compat-the-abicc-drop-in-is-removed)) |
 | Strict gate (any addition = fail) | `abicheck compare --severity-preset strict` |
 | Debug build available, DWARF check | `abicheck compare` (castxml already better) |
 | Quick ELF-only sanity check | `abidiff` (fast, 28% (21/74) but catches symbol removals) |

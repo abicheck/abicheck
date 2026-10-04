@@ -171,5 +171,4 @@ the right default.
 - **Plugin author** → [Plugin Systems](../use/plugin-systems.md)
 - **Distro / package maintainer** → [Multi-Binary Releases](../use/multi-binary.md),
   package mode in the [GitHub Action](../use/github-action.md)
-- **Migrating** → [from ABICC](upgrading-to-0.6.md#a5-compat-the-abicc-drop-in-is-removed),
-  [from libabigail](../use/from-libabigail.md)
+- **Migrating** → [from libabigail](../use/from-libabigail.md)

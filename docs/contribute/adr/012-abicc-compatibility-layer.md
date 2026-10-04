@@ -7,8 +7,8 @@ ABICC drop-in — `compat check`/`compat dump`, XML descriptors, ABICC Perl
 before 0.6. It was the last front end calling `dumper.dump()`/`checker.compare()`
 directly, outside the shared dump/compare pipelines, so it could not receive
 fixes made there; keeping it would have meant a second migration of a frozen
-legacy layer. `abicheck compat` now exits `64` naming `compare`, and
-`docs/start/upgrading-to-0.6.md` maps each ABICC flag to `compare`.
+legacy layer. There is no tombstone or migration shim: `abicheck compat` is
+an ordinary unknown command, and `compare` is the only comparison command.
 abi-compliance-checker remains a benchmark (`tests/test_abicc_parity.py`).
 The decision record below is kept as history.
 **Decision maker:** Nikolay Petrov

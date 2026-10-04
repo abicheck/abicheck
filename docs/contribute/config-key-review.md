@@ -141,7 +141,7 @@ inputs. So a team **can** share one YAML suppression source across `compat` and
 `compare` today.
 
 **Recommendation:** No bridge needed — just make sure the
-from-abicc guide (since removed with `compat`; see [Upgrading to 0.6](../start/upgrading-to-0.6.md#a5-compat-the-abicc-drop-in-is-removed)) documents that `--suppress
+from-abicc guide (since removed with `compat`) documents that `--suppress
 <yaml>` works in `compat` too, so users migrating off ABICC plaintext lists know
 the shared YAML path exists.
 

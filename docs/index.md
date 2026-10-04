@@ -112,7 +112,6 @@ needs:
 
 **Migrating from another tool?**
 
-- [Migrating from ABICC](start/upgrading-to-0.6.md#a5-compat-the-abicc-drop-in-is-removed)
 - [Migrating from libabigail](use/from-libabigail.md)
 
 **Contributing or extending abicheck?**

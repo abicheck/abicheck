@@ -680,29 +680,10 @@ def _resolve_input_impl(
             "resulting object files or the shared library built from them instead."
         )
 
-    hint = _ABICC_DUMP_HINT if _starts_like_an_abicc_perl_dump(path) else ""
     raise ValidationError(
         f"Cannot detect format of '{path}'. "
-        "Expected: ELF (.so), PE (.dll), Mach-O (.dylib), or JSON snapshot." + hint
+        "Expected: ELF (.so), PE (.dll), Mach-O (.dylib), or JSON snapshot."
     )
-
-
-#: ABICC Perl `ABI.dump` input was removed with the `compat` front end; a
-#: migrating user who still passes one is told why it is refused and what
-#: replaces it, rather than only that the format is unknown.
-_ABICC_DUMP_HINT = (
-    " This looks like an abi-compliance-checker Perl dump, which is no longer"
-    " accepted: regenerate the snapshot with `abicheck dump BINARY -H HEADERS`."
-)
-
-
-def _starts_like_an_abicc_perl_dump(path: Path) -> bool:
-    try:
-        with open(path, "rb") as f:
-            head = f.read(_SNIFF_BYTES)
-    except OSError:
-        return False
-    return head.lstrip().startswith(b"$VAR1")
 
 
 def collect_metadata(path: Path) -> LibraryMetadata | None:

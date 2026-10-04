@@ -240,16 +240,11 @@ _EXIT_NOT_COMPARABLE = 16
 
 #: Retired root commands whose replacement the error message names.
 #: ``scan`` (ADR-068 Phase 6) split across ``compare``'s baseline and
-#: no-baseline modes; ``compat`` (the ABICC drop-in, removed before 0.6) has no
-#: flag-compatible successor, only ``compare``.
+#: no-baseline modes.
 RETIRED_ROOT_COMMANDS: dict[str, str] = {
     "scan": (
         "`scan` was removed -- use `compare` (with a stored baseline) or "
         "`compare --no-baseline` (audit-only, no stored baseline) instead."
-    ),
-    "compat": (
-        "`compat` (the abi-compliance-checker drop-in) was removed -- use "
-        "`compare OLD NEW`; the 'Upgrading to 0.6' guide maps its flags."
     ),
 }
 

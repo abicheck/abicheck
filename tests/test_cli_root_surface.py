@@ -122,15 +122,26 @@ def test_removed_command_is_a_usage_error(removed: str) -> None:
 @pytest.mark.parametrize("retired", sorted(RETIRED_ROOT_COMMANDS))
 def test_a_retired_command_names_its_replacement(retired: str) -> None:
     """A retired command whose replacement is not obvious from its name
-    (`scan`, `compat`) exits 64 like every other removed command, but the
-    error names `compare`. Kept separate from `_REMOVED_COMMANDS`: "compat"
-    is a substring of ordinary help text ("compatibility"), so the strict
-    help-text check below cannot hold it."""
+    (`scan`) exits 64 like every other removed command, but the error names
+    `compare`."""
     result = CliRunner().invoke(main, [retired, "--help"])
     assert result.exit_code == 64, result.output
     assert "no such command" in result.output.lower()
     assert "`compare" in result.output
     assert retired not in main.commands
+
+
+def test_compat_is_an_ordinary_unknown_command() -> None:
+    """The ABICC `compat` drop-in is gone with no tombstone: it is a plain
+    Click usage error (exit 64), like any word that was never a command.
+    Kept out of `_REMOVED_COMMANDS` only because "compat" is a substring of
+    ordinary help text ("compatibility"), which that list's strict help-text
+    check cannot tolerate."""
+    assert "compat" not in main.commands
+    assert "compat" not in RETIRED_ROOT_COMMANDS
+    result = CliRunner().invoke(main, ["compat", "check"])
+    assert result.exit_code == 64
+    assert "no such command" in result.output.lower()
 
 
 def test_help_shows_exactly_the_public_commands() -> None:

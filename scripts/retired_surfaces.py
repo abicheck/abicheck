@@ -969,7 +969,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         "the ABICC `compat` command (`compat check`/`compat dump`), its"
         " `abicheck/compat/` package, the ABICC-clone HTML/XML report"
         " layouts, and ABICC Perl `.dump` input to `compare` -- hard removal,"
-        " no alias; `abicheck compat` exits 64 naming `compare`",
+        " no alias or tombstone; `abicheck compat` is an ordinary unknown command",
         (
             "abicheck compat",
             "`compat check`",

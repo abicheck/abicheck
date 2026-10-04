@@ -190,23 +190,6 @@ class TestResolveInput:
         assert result is snap
         mock.assert_called_once()
 
-    @pytest.mark.parametrize("name", ["ABI.dump", "dump.pl", "libfoo"])
-    def test_an_abicc_perl_dump_is_refused_with_a_migration_hint(self, tmp_path, name):
-        """ABICC Perl dumps were an input only through the removed `compat`
-        importer. Refused like any unknown file, but the message says what
-        the file is and what replaces it."""
-        p = tmp_path / name
-        p.write_text("  \n$VAR1 = {};\n")
-        with pytest.raises(ValidationError, match="abi-compliance-checker Perl dump"):
-            resolve_input(p, is_elf=False)
-
-    def test_other_unknown_text_gets_no_abicc_hint(self, tmp_path):
-        p = tmp_path / "notes.txt"
-        p.write_text("VAR1 is mentioned, but this is not a dump\n")
-        with pytest.raises(ValidationError) as excinfo:
-            resolve_input(p, is_elf=False)
-        assert "Perl dump" not in str(excinfo.value)
-
     def test_include_dependencies_threads_to_run_dump(self, tmp_path):
         p = tmp_path / "lib.so"
         p.write_bytes(b"\x7fELF" + b"\x00" * 100)

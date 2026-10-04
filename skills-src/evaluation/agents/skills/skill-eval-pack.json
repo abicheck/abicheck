@@ -881,7 +881,7 @@
       "roots": [
         ".agents/skills/set-up-abi-compatibility-ci"
       ],
-      "tree": "sha256:d23ca7b4068b3526cb70c84fa83624e48187c9f436a38030bed3b83f0ff2be91"
+      "tree": "sha256:1243d0f5ae93cad45c0fe947e3c100390705818d04f059789e15816a1df098a9"
     }
   }
 }

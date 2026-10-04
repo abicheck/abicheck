@@ -17,7 +17,7 @@
 [Vision](vision.md) ·
 [Which command do I need?](#which-command-do-i-need) ·
 [Benchmarks](https://abicheck.github.io/abicheck/reference/tool-comparison/) ·
-[Migrate from ABICC / libabigail](#migrating-from-another-tool)
+[Migrate from libabigail](#migrating-from-another-tool)
 
 </div>
 
@@ -333,7 +333,6 @@ Snapshots, custom policies, rendering, and the CLI/API parity table: [Python API
 
 ## Migrating from another tool
 
-- **From `abi-compliance-checker`:** point `abicheck compare` at the binaries and headers your XML descriptors name; the upgrade guide maps each ABICC flag (`-skip-symbols`, `-symbols-list`, `-strict`, ...) to its `compare` equivalent. [Upgrading to 0.6 → `compat` is removed](https://abicheck.github.io/abicheck/start/upgrading-to-0.6/#a5-compat-the-abicc-drop-in-is-removed).
 - **From libabigail:** `abidiff old.so new.so` becomes `abicheck compare old.so new.so`; the guide maps every header, suppression, and debug-info flag and translates `abidiff`'s exit bitmask to abicheck's scalar codes. [Migrating from libabigail](https://abicheck.github.io/abicheck/use/from-libabigail/).
 
 ## Platform support
