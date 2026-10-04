@@ -647,9 +647,11 @@ narrower mode") or what a consumer decodes:
   (default `True`) deletes the per-TU files once the merge is durable, so a
   later ingest cannot double-count TUs from both the merged file and its
   stale sources.
-- **Compression** (`inputs_emit.append_source_facts(..., compress=True)` /
-  `write_inputs_pack(..., compress=True)` / `compact_inputs_pack(...,
-  compress=True)`, #22) gzips the facts file (stdlib `gzip` — no new
+- **Compression** (#22) gzips the facts file: a producer names it `.gz`
+  when calling `inputs_emit.append_source_facts` (amended 2026-10: the
+  former `compress=` flag, a second spelling of that suffix, was removed;
+  `compact_inputs_pack` and the one-call `write_inputs_pack` are no longer
+  production API) (stdlib `gzip` — no new
   dependency). `inputs_pack.read_source_facts()` decompresses `.jsonl.gz`/
   `.json.gz` transparently, so an ingester never needs to know a pack was
   compressed.

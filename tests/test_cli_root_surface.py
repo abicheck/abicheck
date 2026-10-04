@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """Root command-surface behavior tests (ADR-043, consolidated by ADR-054;
-``scan`` retired by ADR-068 Phase 6).
+``scan`` retired by ADR-068 Phase 6, ``compat`` removed with ADR-012).
 
 The pre-1.0 CLI reset required the public root surface to show *exactly*
 ``dump``, ``compare``, ``scan``, ``deps``, ``compat``, plus ``aggregate``
@@ -34,10 +34,11 @@ and folds the standalone
 are dropped from the public CLI entirely (the former stays a library
 function, the latter is now `aggregate --run-plan`). ADR-068 Phase 6 then
 removed ``scan`` itself outright — it duplicated ``compare``
-(with/without a stored baseline) — with no alias and no deprecation period.
+(with/without a stored baseline) — with no alias and no deprecation period,
+and the ABICC drop-in ``compat`` was removed the same way.
 
 The public root surface is therefore *exactly* ``dump``, ``compare``,
-``deps``, ``compat``, ``aggregate``, ``project`` — with no hidden
+``deps``, ``aggregate``, ``project`` — with no hidden
 aliases, and no deprecated shims for the deleted commands (``appcompat``,
 ``plugin-check``, ``baseline``, ``collect``, ``merge``,
 ``recommend-collect-mode``, ``debian-symbols``, ``doctor``, ``config``,
@@ -60,13 +61,13 @@ from click.testing import CliRunner
 
 from abicheck import cli
 from abicheck.cli import main
+from abicheck.frontends.cli.runtime import RETIRED_ROOT_COMMANDS
 
 _PUBLIC_COMMANDS = frozenset(
     {
         "dump",
         "compare",
         "deps",
-        "compat",
         "aggregate",
         "project",
     }
@@ -118,6 +119,31 @@ def test_removed_command_is_a_usage_error(removed: str) -> None:
     assert "no such command" in result.output.lower()
 
 
+@pytest.mark.parametrize("retired", sorted(RETIRED_ROOT_COMMANDS))
+def test_a_retired_command_names_its_replacement(retired: str) -> None:
+    """A retired command whose replacement is not obvious from its name
+    (`scan`) exits 64 like every other removed command, but the error names
+    `compare`."""
+    result = CliRunner().invoke(main, [retired, "--help"])
+    assert result.exit_code == 64, result.output
+    assert "no such command" in result.output.lower()
+    assert "`compare" in result.output
+    assert retired not in main.commands
+
+
+def test_compat_is_an_ordinary_unknown_command() -> None:
+    """The ABICC `compat` drop-in is gone with no tombstone: it is a plain
+    Click usage error (exit 64), like any word that was never a command.
+    Kept out of `_REMOVED_COMMANDS` only because "compat" is a substring of
+    ordinary help text ("compatibility"), which that list's strict help-text
+    check cannot tolerate."""
+    assert "compat" not in main.commands
+    assert "compat" not in RETIRED_ROOT_COMMANDS
+    result = CliRunner().invoke(main, ["compat", "check"])
+    assert result.exit_code == 64
+    assert "no such command" in result.output.lower()
+
+
 def test_help_shows_exactly_the_public_commands() -> None:
     result = CliRunner().invoke(main, ["--help"])
     assert result.exit_code == 0
@@ -134,8 +160,8 @@ def test_help_shows_exactly_the_public_commands() -> None:
 
 def test_help_groups_commands_by_role() -> None:
     """Root help groups the verbs into role panels (rich-click COMMAND_GROUPS):
-    core-analysis verbs, `aggregate` under workflow composition, `compat` under
-    legacy — not one flat list. Falls back cleanly when rich-click is absent."""
+    core-analysis verbs, `aggregate` under workflow composition, `project` under
+    project integration — not one flat list. Falls back cleanly when rich-click is absent."""
     pytest.importorskip("rich_click")
     result = CliRunner().invoke(main, ["--help"])
     assert result.exit_code == 0

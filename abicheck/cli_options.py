@@ -66,7 +66,7 @@ F = TypeVar("F", bound=Callable[..., object])
 # returns ``(side, Path)`` pairs). The command bodies stay on their existing
 # internal kwargs (``headers`` / ``old_headers_only`` / …) — the two helpers below
 # translate the sided tuples back into those kwargs at the boundary, so the engine,
-# the Tier-2 service, and the ABICC compat layer are untouched.
+# and the Tier-2 service are untouched.
 
 
 def split_sided_include_paths(

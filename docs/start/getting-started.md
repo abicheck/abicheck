@@ -31,7 +31,6 @@ you're unsure, start with `abicheck compare` — it's the default workflow.
 | **Gate a pull request** against a real baseline, with the deepest evidence available (headers + build + sources)? | `abicheck compare OLD NEW --depth source --since origin/main` | [Evidence Depth](../use/evidence-depth.md) |
 | Will this binary load and resolve correctly in this sysroot — and does its dependency tree have unresolved symbols? | `abicheck deps tree` (`--sysroot /rootfs` for a specific root) | [CLI Usage](../use/cli-usage.md) |
 | Did anything in the dependency stack change between two sysroots / images? | `abicheck deps compare --old-root … --new-root …` | [CLI Usage](../use/cli-usage.md) |
-| I'm migrating from `abi-compliance-checker` and want the same flags. | `abicheck compat` | [Migrating from ABICC](../use/from-abicc.md) |
 | Save a reusable ABI baseline for CI. | `abicheck dump` | [Creating and Comparing a Baseline](../use/create-baseline.md) |
 
 For the full decision matrix — every artifact layout, accuracy tier, and CI
@@ -68,7 +67,7 @@ Jump straight to your persona:
 - **CI owner** → [GitHub Action](../use/github-action.md), [Severity Configuration](../use/severity.md), [Output Formats](../use/output-formats.md)
 - **Plugin author** → [Plugin Systems](../use/plugin-systems.md)
 - **Distro / package maintainer** → [Multi-Binary Releases](../use/multi-binary.md)
-- **Migrating from ABICC / libabigail** → [from ABICC](../use/from-abicc.md), [from libabigail](../use/from-libabigail.md)
+- **Migrating from libabigail** → [from libabigail](../use/from-libabigail.md)
 
 Background reading:
 

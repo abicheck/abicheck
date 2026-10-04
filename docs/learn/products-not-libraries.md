@@ -226,7 +226,6 @@ change whether a sibling's declaration counts:
 | `compare OLD_DIR NEW_DIR` (directory or package) | acquired once per side from the run's own headers |
 | `compare old-bundle-facts.json NEW_DIR` | recorded in the stored document for OLD; acquired from the live NEW dump |
 | `compare old-bundle-facts.json new-bundle-facts.json` | recorded in each stored document |
-| `compat check` with a multi-library descriptor | the union of the descriptor's own libraries' header evidence |
 
 Two consequences are worth stating, because they are what stop the shared
 model from over-reaching:
@@ -241,12 +240,7 @@ model from over-reaching:
   borrow the other side's. A NEW release dumped at binary depth promises
   nothing this tool can see, and asserting that it still promises whatever
   OLD did would turn every deliberately retired declaration into a missing
-  export. On the `compat` path a descriptor that declares no headers
-  likewise yields no release-level finding at all.
-
-The `compat` path has no release JSON envelope of its own, so its
-release-level findings are folded into the merged ABICC-shaped result
-rather than a separate section.
+  export.
 
 ## Fan-out and fan-in
 

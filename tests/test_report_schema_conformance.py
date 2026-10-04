@@ -153,21 +153,6 @@ def _enum_fields(obj: dict[str, Any]) -> dict[str, set[str]]:
     }
 
 
-def test_assurance_vocabulary_matches_the_schema_enums() -> None:
-    from abicheck.policy.analysis_assurance_merge import _AXIS_WORST_LAST
-
-    enums = _enum_fields(_schema("compare_report")["$defs"]["analysis_assurance"])
-    checked = 0
-    for axis, scale in _AXIS_WORST_LAST.items():
-        if axis not in enums:
-            continue
-        checked += 1
-        assert set(scale) == enums[axis], (axis, sorted(set(scale) ^ enums[axis]))
-    # Vacuity guard: the comparison really ran over the enumerated fields.
-    assert checked >= 1
-    assert "schema_staleness_status" in enums
-
-
 def test_audit_and_compare_share_one_assurance_shape() -> None:
     compare = _schema("compare_report")["$defs"]["analysis_assurance"]
     audit = _schema("audit_report")["$defs"]["analysis_assurance"]

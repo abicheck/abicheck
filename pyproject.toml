@@ -146,11 +146,9 @@ disallow_untyped_calls = false
 disable_error_code = ["attr-defined"]
 
 [[tool.mypy.overrides]]
-# Click decorators (@click.command, @click.option, etc.) are untyped.
-# ``compat/cli.py`` additionally subclasses ``click.Group`` (typed as Any)
-# and threads click-managed list[str] values through helper accessors, so
-# we also relax ``no-any-return`` / ``misc`` there. ``cli_dump_helpers``
-# similarly subclasses ``click.ClickException`` (typed as Any ->
+# Click decorators (@click.command, @click.option, etc.) are untyped, so
+# we also relax ``no-any-return`` / ``misc`` here. ``cli_dump_helpers``
+# subclasses ``click.ClickException`` (typed as Any ->
 # "cannot subclass Any" / ``misc``) for ``DumpDepthNotSatisfiedError``.
 module = [
     "abicheck.cli_resolve",
@@ -172,7 +170,6 @@ module = [
     "abicheck.cli_graph",
     "abicheck.cli_pr_comment",
     "abicheck.cli_stack",
-    "abicheck.compat.cli",
     # ADR-061 Phase 4 moved `cli.py`'s command bodies and shared runtime here;
     # they carry the same click-decorator surface `cli` itself did.
     "abicheck.frontends.cli.commands.compare",
@@ -212,14 +209,6 @@ module = [
 ]
 disallow_untyped_decorators = false
 disable_error_code = ["no-any-return", "misc", "import-untyped"]
-
-[[tool.mypy.overrides]]
-# ``defusedxml`` is untyped, so every parse it performs is ``Any`` and a
-# helper that narrows the result to the stdlib ``Element`` it genuinely
-# returns reads as ``no-any-return``. Scoped to the one module that parses
-# ABICC descriptors rather than relaxed package-wide.
-module = ["abicheck.compat.descriptor"]
-disable_error_code = ["no-any-return"]
 
 [[tool.mypy.overrides]]
 # ``PolicyFileParam`` subclasses ``click.ParamType``. Depending on
@@ -355,7 +344,7 @@ version = "literal: pyproject.toml: project.version"
 # package. Listing individual files here produced a `mutants/abicheck/` with
 # no `__init__.py` and 14 of 272 modules, which shadows the real package as a
 # namespace package: `import abicheck` resolved to that partial copy and
-# `abicheck.__version__` / `abicheck.compat` were simply absent, so mutmut
+# `abicheck.__version__` and whole subpackages were simply absent, so mutmut
 # aborted at "failed to collect stats" before generating a single result.
 # (The editable install cannot save it — its finder is *appended* to
 # sys.meta_path, so the path finder reaches `mutants/` first.)

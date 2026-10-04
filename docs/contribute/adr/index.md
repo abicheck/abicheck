@@ -104,7 +104,7 @@ against the code as unverified, regardless of how confident it reads.
 | [009](009-verdict-system-and-exit-codes.md) | Verdict System and Exit Code Contract | Accepted — implemented |
 | [010](010-policy-profile-system.md) | Policy Profile System | Accepted — implemented |
 | [011](011-change-classification-taxonomy.md) | ABI Change Classification Taxonomy | Accepted — implemented |
-| [012](012-abicc-compatibility-layer.md) | ABICC Drop-In Compatibility Layer | Accepted — implemented |
+| [012](012-abicc-compatibility-layer.md) | ABICC Drop-In Compatibility Layer | Deprecated — Retired: `compat` command removed |
 | [013](013-suppression-system.md) | Suppression System Design | Accepted — implemented |
 | [014](014-output-format-strategy.md) | Output Format Strategy | Accepted — implemented |
 | [015](015-snapshot-serialization.md) | Snapshot Serialization and Schema Versioning | Accepted — implemented |

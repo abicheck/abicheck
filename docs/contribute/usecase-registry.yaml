@@ -359,10 +359,12 @@ use_cases:
   - id: UC-WF-abicc-compat
     axis: workflow
     name: ABICC drop-in replacement
-    status: complete
-    evidence:
-      modules: [abicheck/compat/cli.py]
-      tests: [tests/test_abicc_parity.py]
+    status: by_design_excluded
+    note: >
+      The `compat` drop-in shipped and was removed before 0.6 (ADR-012,
+      retired). Migrating teams move onto `compare`; the 0.6 upgrade guide
+      maps each ABICC flag. abi-compliance-checker remains a benchmark
+      (tests/test_abicc_parity.py).
 
   - id: UC-WF-stack-deps
     axis: workflow
@@ -612,7 +614,7 @@ use_cases:
       stack-check render paths are exercised by the workflow E2E tests.
     evidence:
       modules: [abicheck/reporter.py, abicheck/html_report.py]
-      tests: [tests/test_format_compliance.py, tests/test_sprint9_html.py, tests/test_report_sections.py]
+      tests: [tests/test_sprint9_html.py, tests/test_report_sections.py]
 
   # ── toolchain / language standard ───────────────────────────────────────────
   - id: UC-TC-glibc-floor

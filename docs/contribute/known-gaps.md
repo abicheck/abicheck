@@ -6974,6 +6974,11 @@ rather than a review-round fix.
 
 ### `<skip_headers>` cannot stop a transitively-reached header being analyzed
 
+**Update (2026-10): the descriptor half is moot.** The ABICC `compat` front
+end, its XML descriptors and `model/header_skip_rules.py` were removed, so no
+run reads `<skip_headers>`/`<skip_including>` any more. The limitation below
+still holds for native `--exclude-header`, which shares it exactly.
+
 **The glob question this entry used to record is closed.** It asked whether
 real ABICC globs in `<skip_headers>`, and left descriptor skips matched as
 exact basenames or paths in the meantime -- under which every tree-relative
@@ -8532,7 +8537,8 @@ directory/package fan-out. The other three drivers that compare several
 libraries at once — a stored `BundleFacts` baseline against a live release
 (`workflows.release_public_surface.stored_old_live_new_reconciliation`), two
 stored documents (`workflows.bundle_stored_pair_compare`), and a
-multi-library ABICC descriptor (`compat.multi_library_run`) — each reconcile
+multi-library ABICC descriptor (`compat.multi_library_run`, removed with the
+`compat` front end in 2026-10) — each reconcile
 one product contract through the same
 `workflows.release_public_surface.reconcile_member_sets` and enter the same
 `member_pass_scope` ownership for their member pass. What remains scoped to
@@ -9046,7 +9052,8 @@ violations, blocked" pattern this ADR's other gaps already use for
   shaped. Same fix shape as the two entries above: split the rendering
   functions out to a `report`-owned sibling before either half gets a
   real target.
-- `abicheck/compat/descriptor.py` (target: `extract` — ABICC XML
+- **Closed (2026-10) by deletion, with the rest of `abicheck/compat/`:**
+  `abicheck/compat/descriptor.py` (target: `extract` — ABICC XML
   descriptor parsing, the same shape as the already-`extract`-classified
   `compat/abicc_dump_import.py`) — blocked because `abicheck/compat/cli.py`
   (`frontends`) imports it directly (both the runtime `parse_descriptor`
@@ -9056,7 +9063,7 @@ violations, blocked" pattern this ADR's other gaps already use for
   both already `workflows`) — blocked because
   `abicheck/post_processing_reachability.py` (`policy`) also imports it
   directly (lazily); `policy` may not import `workflows`.
-- `abicheck/compat/_helpers.py` (target: `frontends` — split directly out
+- **Closed (2026-10) by deletion:** `abicheck/compat/_helpers.py` (target: `frontends` — split directly out
   of `compat/cli.py` per its own module docstring, implements ABICC CLI
   translations, imports `click`, and is imported only by `compat/cli.py`
   itself, already `frontends`-classified) — blocked because its own body

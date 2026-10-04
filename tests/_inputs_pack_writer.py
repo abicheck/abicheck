@@ -46,7 +46,8 @@ def write_inputs_pack(
     Materializes ``manifest.json`` + ``source_facts/facts.jsonl`` and, when
     *compile_db* is given, copies it to ``build/compile_commands.json`` and
     records it in the manifest. Round-trips through ``ingest_inputs_pack``.
-    *compress* gzips the facts file (P1 #22); see :func:`append_source_facts`.
+    *compress* gzips the facts file (P1 #22) by naming it ``.gz``, the one way
+    :func:`append_source_facts` states compression.
     """
     root = Path(root)
     (root / SOURCE_FACTS_DIR).mkdir(parents=True, exist_ok=True)
@@ -59,7 +60,8 @@ def write_inputs_pack(
         binary=binary,
         headers=list(headers),
     )
-    append_source_facts(root, tus, filename=DEFAULT_FACTS_FILE, compress=compress)
+    filename = f"{DEFAULT_FACTS_FILE}.gz" if compress else DEFAULT_FACTS_FILE
+    append_source_facts(root, tus, filename=filename)
     if compile_db is not None:
         dst = root / DEFAULT_COMPILE_DB_REL
         dst.parent.mkdir(parents=True, exist_ok=True)

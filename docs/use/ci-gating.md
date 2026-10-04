@@ -153,7 +153,7 @@ is a tool/runtime error, never a verdict (usage errors exit `64`). Since
 there is no pin, the way to guarantee a given scheme is to control whether a
 severity setting is present at all — see the recipes below.
 Full matrix, including app/plugin-scoped comparisons (`compare --used-by`/
-`--required-symbol`), `deps`, `compat`, and multi-library codes:
+`--required-symbol`), `deps`, and multi-library codes:
 [Exit Codes](../reference/exit-codes.md).
 
 ## How the knobs interact

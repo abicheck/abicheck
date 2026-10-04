@@ -622,16 +622,6 @@ class TestRenderOutputValidation:
 class TestServiceImportPaths:
     """Verify that service.py correctly imports from compat subpackage."""
 
-    def test_looks_like_perl_dump_importable(self):
-        from abicheck.compat.abicc_dump_import import looks_like_perl_dump
-
-        assert callable(looks_like_perl_dump)
-
-    def test_import_abicc_perl_dump_importable(self):
-        from abicheck.compat.abicc_dump_import import import_abicc_perl_dump
-
-        assert callable(import_abicc_perl_dump)
-
     def test_service_sniff_does_not_trigger_deprecation(self):
         """Verify service module doesn't trigger the deprecation warning."""
         import warnings

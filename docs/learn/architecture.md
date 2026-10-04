@@ -43,7 +43,7 @@ AST and debug-info layers, then diffs the two snapshots to produce a verdict:
 
 ```mermaid
 flowchart TD
-    CLI["abicheck CLI<br/>(dump · compare · compat check/dump)"]
+    CLI["abicheck CLI<br/>(dump · compare)"]
     FMT{"Format detection<br/>(ELF / PE / Mach-O)"}
     ELF["ELF<br/>pyelftools"]
     PE["PE/COFF<br/>pefile"]

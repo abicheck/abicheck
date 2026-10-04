@@ -841,52 +841,6 @@ def test_every_rule_less_suppressed_bucket_write_is_recorded() -> None:
             )
 
 
-def test_a_merged_suppression_list_keeps_each_rule_source() -> None:
-    """The ABICC front end merges a `--suppress` document with rules
-    synthesized from `-skip-*` options. The merged list has no single source
-    path, so a list-level answer reports `None` for *every* rule — including
-    the ones that really did come from the file."""
-    from abicheck.policy.disposition_ledger import rule_provenance
-
-    from_file = Suppression(symbol="a", reason="from yaml")
-    from_flag = Suppression(symbol="b", reason="from -skip-symbol")
-    file_list = SuppressionList([from_file], source_path="/tmp/suppressions.yml")
-    flag_list = SuppressionList([from_flag])
-    merged = SuppressionList.merge(file_list, flag_list)
-
-    assert merged.source_path is None  # honest: two origins, no single one
-    assert merged.source_for(from_file) == "/tmp/suppressions.yml"
-    assert merged.source_for(from_flag) is None
-
-    from abicheck.policy.disposition_ledger import _source_file_for
-
-    assert _source_file_for(merged, from_file) == "/tmp/suppressions.yml"
-    assert _source_file_for(merged, from_flag) is None
-    assert rule_provenance(from_file, source_file=None).rule_id is not None
-
-
-def test_merged_rule_provenance_reaches_a_real_comparison(tmp_path) -> None:
-    """…and end to end, through `compare()` and the report: a finding hidden
-    by a file-backed rule names the file even when the rule set reaching the
-    engine was merged with programmatic rules."""
-    path = tmp_path / "suppress.yml"
-    path.write_text(
-        "version: 1\nsuppressions:\n  - symbol_pattern: '.*gone0.*'\n"
-        "    reason: from the document\n    allow_public_break: true\n",
-        encoding="utf-8",
-    )
-    merged = SuppressionList.merge(
-        SuppressionList.load(path),
-        SuppressionList([Suppression(symbol="unrelated", reason="from a flag")]),
-    )
-    old, new = _snapshots(removed=1)
-    audit = compute_disposition_audit(compare(old, new, merged))
-    assert len(audit.rules) == 1
-    rule, _ = audit.rules[0]
-    assert rule.source_file == str(path)
-    assert rule.reason == "from the document"
-
-
 def test_a_substituting_step_records_one_observation_not_two() -> None:
     """`DowngradeOpaqueStructChanges` replaces a breaking layout finding with
     a compatible one describing the *same* observation. Counting the original

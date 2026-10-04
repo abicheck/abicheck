@@ -88,8 +88,7 @@ fix it in place rather than adding a parallel workflow. Common findings:
   candidate with itself): always green. Never "fix" a failing check this way.
 - `abi-compliance-checker`/`abidiff` scripts: abicheck can replace them, but
   migrating is a separate decision — see
-  [migrating from ABICC](https://abicheck.github.io/abicheck/use/from-abicc/) and
-  [from libabigail](https://abicheck.github.io/abicheck/use/from-libabigail/).
+  [migrating from libabigail](https://abicheck.github.io/abicheck/use/from-libabigail/).
 
 ## Optional add-ons (offer when relevant)
 

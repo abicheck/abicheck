@@ -748,9 +748,7 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
         "(parameter names aren't part of the mangled signature or "
         "calling convention) nor C/C++ source compatibility is affected: "
         "neither language has named arguments. Generated bindings, "
-        "documentation or IDE tooling keyed on the old name may be. "
-        "`abicheck compat` still reports it as a source-level problem, "
-        "matching abi-compliance-checker.",
+        "documentation or IDE tooling keyed on the old name may be.",
         description_template="Parameter renamed: {name} param {detail}: {old} → {new}",
         entity=_ENT.FUNCTION,
         operation=_OP.MODIFIED,

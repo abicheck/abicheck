@@ -27,11 +27,11 @@ class TestSniffTextFormat:
         missing = tmp_path / "no_such_file.txt"
         assert _sniff_text_format(missing) == "unknown"
 
-    def test_perl_dump_detected(self, tmp_path):
-        """A file starting with $VAR1 is detected as perl format."""
+    def test_abicc_perl_dump_is_not_a_recognised_format(self, tmp_path):
+        """An ABICC Perl dump ($VAR1) is no longer an input format."""
         f = tmp_path / "dump.pl"
         f.write_text("$VAR1 = {\n  'key' => 'value'\n};", encoding="utf-8")
-        assert _sniff_text_format(f) == "perl"
+        assert _sniff_text_format(f) == "unknown"
 
     def test_json_detected(self, tmp_path):
         """A file starting with '{' is detected as json format."""
@@ -90,23 +90,6 @@ class TestResolveInputErrors:
         )
         with pytest.raises(click.ClickException, match="Failed to dump"):
             _resolve_input(so, [hdr], [], "1.0", "c++", is_elf=True)
-
-    def test_perl_import_error(self, tmp_path, monkeypatch):
-        """When perl dump import fails, _resolve_input wraps the error."""
-        import click
-        import pytest
-
-        f = tmp_path / "bad.dump"
-        f.write_text("$VAR1 = {\n  broken\n};", encoding="utf-8")
-
-        monkeypatch.setattr(
-            "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
-            lambda _p: (_ for _ in ()).throw(ValueError("parse error")),
-        )
-        with pytest.raises(
-            click.ClickException, match="Failed to import ABICC Perl dump"
-        ):
-            _resolve_input(f, [], [], "1.0", "c++", is_elf=False)
 
     def test_unknown_format_error(self, tmp_path):
         """A file with unrecognized format raises UsageError."""

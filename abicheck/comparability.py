@@ -34,7 +34,7 @@ native ``compare`` CLI command (``cli_compare_helpers.run_compare`` — a
 ``--diagnostic-comparison`` flag, a schema-conformant ``verdict: null`` JSON
 report, exit ``16``), ``cli_compare_release.py``'s directory/package fan-out
 (a per-library ``"not_comparable"`` verdict string, dominating the release
-rollup, exit ``16``), ``compat/cli.py``'s ``compat check`` (exit ``9``),
+rollup, exit ``16``), the retired ABICC ``compat check`` (exit ``9``),
 the retired ``scan --against`` (``cli_scan.py``/``scan_engine.py``, a
 ``NOT_COMPARABLE`` verdict, exit ``6``), ``stack_checker.py``'s
 ``deps compare`` (``StackChange.not_comparable_reason``, exit ``5``), the

@@ -338,20 +338,6 @@ class TestHtmlMetadata:
         assert "4096" in html
         assert "8192" in html
 
-    def test_compat_html_metadata(self):
-        from abicheck.html_report import generate_html_report
-
-        r = _result(
-            verdict=Verdict.NO_CHANGE,
-            changes=[],
-            old_meta=_meta("/old.so", "aabbccdd", 1024),
-            new_meta=_meta("/new.so", "eeff0011", 2048),
-        )
-        html = generate_html_report(r, compat_html=True)
-        assert "Library Files" in html
-        assert "/old.so" in html
-        assert "/new.so" in html
-
 
 class TestHtmlEnrichments:
     def test_impact_in_html(self):

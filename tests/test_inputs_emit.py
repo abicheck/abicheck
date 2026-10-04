@@ -320,13 +320,12 @@ def test_append_source_facts_compress_supports_incremental_appends(
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     append_source_facts(
-        pack, [_tu("foo", mangled="_Z3foov")], filename="shared.jsonl", compress=True
+        pack, [_tu("foo", mangled="_Z3foov")], filename="shared.jsonl.gz"
     )
     append_source_facts(
         pack,
         [_tu("bar", mangled="_Z3barv", source="src/bar.cpp")],
-        filename="shared.jsonl",
-        compress=True,
+        filename="shared.jsonl.gz",
     )
     assert not (pack / "source_facts" / "shared.jsonl").exists()
     assert (pack / "source_facts" / "shared.jsonl.gz").is_file()
@@ -339,10 +338,9 @@ def test_append_source_facts_compress_supports_incremental_appends(
 def test_append_source_facts_infers_compression_from_gz_filename(
     tmp_path: Path,
 ) -> None:
-    # compress=False (the default) with a caller-supplied ".gz" filename must
-    # still be written compressed, not silently as plaintext under a
-    # misleading name that read_source_facts() would then fail to decompress
-    # (CodeRabbit review, P2).
+    # A caller-supplied ".gz" filename must be written compressed, never as
+    # plaintext under a misleading name that read_source_facts() would then
+    # fail to decompress (CodeRabbit review, P2).
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
     path = append_source_facts(
@@ -356,29 +354,29 @@ def test_append_source_facts_infers_compression_from_gz_filename(
 
 
 @pytest.mark.parametrize(
-    ("filename", "compress", "expected_name"),
+    ("filename", "expected_name"),
     [
-        ("tu", True, "tu.jsonl.gz"),
-        ("tu", False, "tu.jsonl"),
-        ("tu.gz", False, "tu.jsonl.gz"),
+        ("tu", "tu.jsonl"),
+        ("tu.gz", "tu.jsonl.gz"),
+        ("tu.json", "tu.json"),
+        ("tu.json.gz", "tu.json.gz"),
+        ("tu.jsonl.gz", "tu.jsonl.gz"),
     ],
 )
 def test_append_source_facts_normalizes_extensionless_filename(
-    tmp_path: Path, filename: str, compress: bool, expected_name: str
+    tmp_path: Path, filename: str, expected_name: str
 ) -> None:
     """The default directory scan _iter_source_fact_files() runs on every
     later read only recognizes *.jsonl(.gz)/*.json(.gz) -- a caller-
     supplied filename without one of those extensions (e.g.
-    append_source_facts(..., filename="tu", compress=True)) wrote a file
+    append_source_facts(..., filename="tu.gz")) wrote a file
     that scan could never find. The write succeeded with no diagnostic,
     but ingest/validate silently read zero TUs from it -- the same class
     of bug already fixed for compact_inputs_pack's output_filename
     (Codex review, P2)."""
     pack = tmp_path / "abicheck_inputs"
     init_inputs_pack(pack, library="libfoo.so", created_by="abicheck-cc")
-    path = append_source_facts(
-        pack, [_tu("foo", mangled="_Z3foov")], filename=filename, compress=compress
-    )
+    path = append_source_facts(pack, [_tu("foo", mangled="_Z3foov")], filename=filename)
     assert path.name == expected_name
 
     ingested = ingest_inputs_pack(pack)

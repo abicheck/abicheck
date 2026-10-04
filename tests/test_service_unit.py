@@ -59,10 +59,10 @@ class TestSniffTextFormat:
         p.write_text('{"library": "test"}')
         assert sniff_text_format(p) == "json"
 
-    def test_perl_format(self, tmp_path):
+    def test_abicc_perl_dump_is_unknown(self, tmp_path):
         p = tmp_path / "dump.pl"
         p.write_text("$VAR1 = { 'Headers' => {} };")
-        assert sniff_text_format(p) == "perl"
+        assert sniff_text_format(p) == "unknown"
 
     def test_unknown_format(self, tmp_path):
         p = tmp_path / "test.txt"
@@ -539,43 +539,6 @@ class TestResolveInput:
         ):
             with pytest.raises(SnapshotError, match="Failed to load JSON"):
                 resolve_input(p, is_elf=False)
-
-    def test_perl_format(self, tmp_path):
-        p = tmp_path / "dump.pl"
-        p.write_text("$VAR1 = {};")
-        snap = AbiSnapshot(library="test", version="1.0")
-        with patch(
-            "abicheck.workflows.input_resolution.detect_binary_format",
-            return_value=None,
-        ):
-            with patch(
-                "abicheck.workflows.input_resolution.sniff_text_format",
-                return_value="perl",
-            ):
-                with patch(
-                    "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
-                    return_value=snap,
-                ):
-                    result = resolve_input(p, is_elf=False)
-        assert result is snap
-
-    def test_perl_import_error(self, tmp_path):
-        p = tmp_path / "dump.pl"
-        p.write_text("$VAR1 = {};")
-        with patch(
-            "abicheck.workflows.input_resolution.detect_binary_format",
-            return_value=None,
-        ):
-            with patch(
-                "abicheck.workflows.input_resolution.sniff_text_format",
-                return_value="perl",
-            ):
-                with patch(
-                    "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
-                    side_effect=ValueError("parse fail"),
-                ):
-                    with pytest.raises(SnapshotError, match="ABICC Perl"):
-                        resolve_input(p, is_elf=False)
 
     def test_unknown_format_raises(self, tmp_path):
         p = tmp_path / "mystery"
@@ -1864,12 +1827,6 @@ class TestCollectMetadata:
     def test_json_snapshot_returns_none(self, tmp_path):
         p = tmp_path / "snap.json"
         p.write_text('{"library": "test"}')
-        meta = collect_metadata(p)
-        assert meta is None
-
-    def test_perl_dump_returns_none(self, tmp_path):
-        p = tmp_path / "dump.pl"
-        p.write_text("$VAR1 = {};")
         meta = collect_metadata(p)
         assert meta is None
 

@@ -120,7 +120,7 @@ not a frontend translation.
 
 ## Public compatibility
 
-`cli.py`, `compat/cli.py`, and `service.py` remain the documented public
+`cli.py` and `service.py` remain the documented public
 entry points during migration. A supported CLI flag or Python API function
 may delegate to a `frontends` module, but this package must never import
 back through those root facades.

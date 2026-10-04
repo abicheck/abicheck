@@ -265,7 +265,7 @@ provable by comparing two artifacts.
 
 > abicheck's `compare` mode is the only one with the full verdict vocabulary —
 > in particular the `API_BREAK` distinction between *source* breaks and *binary*
-> breaks. Legacy `compat` mode and other tools generally collapse that
+> breaks. Other tools generally collapse that
 > distinction. See [Verdicts](../verdicts.md) and
 > [Tool Comparison](../../reference/tool-comparison.md).
 

@@ -31,7 +31,7 @@ Pipeline order (data flow):
 ## When adding code here
 
 - Read the matching section of the root `CLAUDE.md` before touching `cli.py`,
-  `diff_platform.py`, `dumper.py`, or `compat/cli.py` — they are large
+  `diff_platform.py` or `dumper.py` — they are large
   legacy files, not a design precedent (see this directory's `AGENTS.md`
   "Working with legacy large modules": a file already above its recorded
   adoption baseline may not exceed that baseline, but may regrow up to it

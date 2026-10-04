@@ -177,7 +177,7 @@ def _stamp_provenance(
 
 
 def _collect_metadata(path: Path) -> LibraryMetadata | None:
-    """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, Perl dump, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
+    """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
     if path.is_dir():
         # A storage-v2 `ProjectSnapshot` package dir (the one directory
         # `classify_compare_operand` still routes through the single-pair
@@ -186,7 +186,7 @@ def _collect_metadata(path: Path) -> LibraryMetadata | None:
         # apply, without `read_bytes()` raising `IsADirectoryError` first.
         return None
     text_fmt = _sniff_text_format(path)
-    if text_fmt in ("json", "perl", "symvers"):
+    if text_fmt in ("json", "symvers"):
         return None
 
     import hashlib
@@ -238,6 +238,17 @@ _EXIT_USAGE_ERROR = 64
 _EXIT_NOT_COMPARABLE = 16
 
 
+#: Retired root commands whose replacement the error message names.
+#: ``scan`` (ADR-068 Phase 6) split across ``compare``'s baseline and
+#: no-baseline modes.
+RETIRED_ROOT_COMMANDS: dict[str, str] = {
+    "scan": (
+        "`scan` was removed -- use `compare` (with a stored baseline) or "
+        "`compare --no-baseline` (audit-only, no stored baseline) instead."
+    ),
+}
+
+
 class _AbicheckGroup(_RootGroupBase):
     """Root group that maps Click *usage* errors to a dedicated exit code.
 
@@ -247,32 +258,27 @@ class _AbicheckGroup(_RootGroupBase):
     just that code to ``_EXIT_USAGE_ERROR`` so an invalid invocation is never
     mistaken for an ABI verdict. Other ``ClickException``s (exit 1, used for
     operational failures such as malformed input or an expired strict waiver),
-    verdict exits (``SystemExit`` 2/4), and the ``compat`` error scheme (3–11)
-    are deliberately left untouched.
+    and verdict exits (``SystemExit`` 2/4) are deliberately left untouched.
     """
 
     def resolve_command(
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:
-        """Give the retired ``scan`` root command a named-replacement error.
+        """Give a retired root command a named-replacement error.
 
-        ``scan`` was removed outright (ADR-068 Phase 6, no alias, no
-        deprecation period) — every other retired root command falls through
-        to Click's plain ``No such command`` usage error, but ``scan``'s
-        replacement is not obvious from the name alone (it split across
-        ``compare``'s baseline-vs-no-baseline modes), so this is the one
-        retired command worth naming its replacement for. Still surfaces the
-        literal phrase ``No such command`` so it remains indistinguishable
-        from every other retired command under
+        A retired command is removed outright (no alias, no deprecation
+        period); most fall through to Click's plain ``No such command``
+        usage error. The ones in :data:`RETIRED_ROOT_COMMANDS` have a
+        replacement that is not obvious from the name alone, so the error
+        names it. Still surfaces the literal phrase ``No such command`` so it
+        remains indistinguishable from every other retired command under
         ``test_cli_root_surface.py``'s generic parametrized check, and still
         exits 64 via ``_AbicheckGroup.main``'s usage-error remap below (a
         ``UsageError`` defaults to Click exit code 2).
         """
-        if args and args[0] == "scan":
+        if args and args[0] in RETIRED_ROOT_COMMANDS:
             raise click.UsageError(
-                "No such command 'scan'. `scan` was removed -- use "
-                "`compare` (with a stored baseline) or `compare --no-baseline` "
-                "(audit-only, no stored baseline) instead."
+                f"No such command '{args[0]}'. {RETIRED_ROOT_COMMANDS[args[0]]}"
             )
         return super().resolve_command(ctx, args)  # type: ignore[no-any-return]
 
@@ -692,7 +698,7 @@ def _finalize_compare_result(
     ) -> Path:  # a text snapshot/manifest can coincidentally match the INPUT()/GROUP() probe -- skip linker-script resolution for it (Codex review)
         return (
             p
-            if _sniff_text_format(p) in ("json", "perl", "symvers")
+            if _sniff_text_format(p) in ("json", "symvers")
             else resolve_linker_script_chain(p)
         )
 

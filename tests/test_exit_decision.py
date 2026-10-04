@@ -60,19 +60,7 @@ from abicheck.policy.exit_decision_precedence import (
     resolve_scan_exit_decision,
 )
 from abicheck.reporter import to_json
-from abicheck.schemas import load_compare_report_schema
 from abicheck.serialization import snapshot_to_json
-
-try:
-    import jsonschema
-except ImportError:  # pragma: no cover - exercised only when jsonschema absent
-    jsonschema = None
-
-from tests.schema_validation import validate_instance
-
-_requires_jsonschema = pytest.mark.skipif(
-    jsonschema is None, reason="jsonschema not installed"
-)
 
 
 class TestResolveExitDecision:
@@ -1114,18 +1102,9 @@ class TestCompareEvidenceContractAndBudgetAxes:
             assert "budget_overflow" not in report["exit"]["reasons"]
 
 
-class TestIncludeExitDecisionFlag:
-    """Codex review: ``compat/cli.py``'s own ``-report-format json`` reuses
-    this exact ``reporter.to_json`` function, but ``compat check``'s real
-    process exit follows a different, ABICC-style 0/1/2 scheme
-    (``_classify_compat_error_exit_code``) than the native
-    ``legacy_exit_code``/``compute_exit_code`` the ``exit`` block computes --
-    emitting it unconditionally would report a code that disagrees with the
-    actual ``compat check`` exit for the same run. ``include_exit_decision``
-    is the flag that keeps them apart; ``compat/cli.py``'s own call site
-    passes ``False``, and these tests pin `to_json` itself -- the real
-    function both callers share -- rather than only the CLI wrapper.
-    """
+class TestExitBlockIsAlwaysEmitted:
+    """Every native report carries the `exit` block; the one caller that
+    opted out (the removed ABICC `compat` front end) is gone."""
 
     def test_default_includes_the_exit_block(self) -> None:
         old, new = _breaking_pair()
@@ -1133,42 +1112,3 @@ class TestIncludeExitDecisionFlag:
         report = json.loads(to_json(result))
         assert "exit" in report
         assert report["exit"]["code"] == 4
-
-    def test_include_exit_decision_false_omits_it(self) -> None:
-        old, new = _breaking_pair()
-        result = compare(old, new)
-        report = json.loads(to_json(result, include_exit_decision=False))
-        assert "exit" not in report
-        # Every other field this function always writes stays present --
-        # this flag turns off exactly one block, nothing else.
-        assert report["verdict"] == "BREAKING"
-        assert "changes" in report
-
-    def test_include_exit_decision_false_also_applies_to_alternate_modes(
-        self,
-    ) -> None:
-        """``leaf`` was the other mode here until plan slice 7o retired it."""
-        old, new = _breaking_pair()
-        result = compare(old, new)
-        for mode in ("impact", "root-cause"):
-            report = json.loads(
-                to_json(result, report_mode=mode, include_exit_decision=False)
-            )
-            assert "exit" not in report, mode
-
-    @_requires_jsonschema
-    def test_include_exit_decision_false_still_validates_against_schema(
-        self,
-    ) -> None:
-        """``exit`` is schema-optional (not in ``required``) specifically so
-        this -- what ``compat check``'s JSON output actually produces -- still
-        validates against the same ``report_schema_version`` it stamps
-        (Codex review: an earlier revision required ``exit`` unconditionally,
-        so a ``compat`` report claiming schema 2.41 while omitting the block
-        failed to validate against its own advertised schema).
-        """
-        old, new = _breaking_pair()
-        result = compare(old, new)
-        report = json.loads(to_json(result, include_exit_decision=False))
-        assert "exit" not in report
-        validate_instance(report, load_compare_report_schema())

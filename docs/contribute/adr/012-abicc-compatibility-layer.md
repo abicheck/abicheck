@@ -1,14 +1,16 @@
 # ADR-012: ABICC Drop-In Compatibility Layer
 
 **Date:** 2026-03-18
-**Status:** Accepted — implemented. **Amendment:** this ADR predates the
-Tier-2 service boundary introduced by ADR-037 (D10.1, enforced by the
-`cli-contract` AI-readiness check). `abicheck/compat/cli.py` still calls
-`checker.compare()` directly rather than routing through
-`service.run_compare` / `service.compare_snapshots`, consistent with its
-"thin adapter" design below — the automated `cli-contract` gate scans
-root-level `cli*.py` and does not currently cover the `compat/` subpackage,
-so this is not enforced.
+**Status:** Deprecated — Retired: `compat` command removed (2026-10). The
+ABICC drop-in — `compat check`/`compat dump`, XML descriptors, ABICC Perl
+`ABI.dump` input, and the ABICC-styled HTML/XML report layouts — was removed
+before 0.6. It was the last front end calling `dumper.dump()`/`checker.compare()`
+directly, outside the shared dump/compare pipelines, so it could not receive
+fixes made there; keeping it would have meant a second migration of a frozen
+legacy layer. There is no tombstone or migration shim: `abicheck compat` is
+an ordinary unknown command, and `compare` is the only comparison command.
+abi-compliance-checker remains a benchmark (`tests/test_abicc_parity.py`).
+The decision record below is kept as history.
 **Decision maker:** Nikolay Petrov
 
 ---

@@ -664,17 +664,6 @@ class TestDemanglingIsIdempotentAndReachesEveryHumanPath:
         assert "bar() [_Z3barv]" in md
         assert "bar() [bar()" not in md, "demangled twice"
 
-    def test_the_bypassing_human_path_asks_for_demangling(self):
-        """`compat check` never reaches `service_render`, so nothing else
-        would apply it for it; its report files are written by
-        `frontends/cli/compat_report_file.py`."""
-        import pathlib
-
-        src = pathlib.Path("abicheck", "frontends/cli/compat_report_file.py").read_text(
-            encoding="utf-8"
-        )
-        assert "demangle=True" in src
-
 
 class TestThePatternModulationLedgerRendersWhatTheProducerWrites:
     """Built from a real `PatternModulation`, never a hand-made dict.

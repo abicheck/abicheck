@@ -13,10 +13,6 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
-from abicheck.compat.abicc_dump_import import (
-    import_abicc_perl_dump,
-    looks_like_perl_dump,
-)
 from abicheck.model import AbiSnapshot, Function, Param, Variable
 from abicheck.policy_file import PolicyFile
 from abicheck.reporter import to_json, to_markdown, to_stat, to_stat_json
@@ -460,66 +456,7 @@ class TestEdgeCaseModelObjects:
 
 
 # ---------------------------------------------------------------------------
-# 6. compat/abicc_dump_import.py edge cases
-# ---------------------------------------------------------------------------
-
-
-class TestAbiccDumpImportEdgeCases:
-    def test_looks_like_perl_dump_false_positive(self) -> None:
-        """Text that starts with $VAR1 but has malformed content."""
-        assert looks_like_perl_dump("$VAR1 = garbage that is not perl;")
-
-    def test_malformed_perl_dump_file(self, tmp_path: Path) -> None:
-        """File starting with $VAR1 but containing unparseable Perl."""
-        p = tmp_path / "bad.dump"
-        p.write_text("$VAR1 = { 'unclosed_brace ;", encoding="utf-8")
-        with pytest.raises(ValueError):
-            import_abicc_perl_dump(p)
-
-    def test_empty_perl_dump(self, tmp_path: Path) -> None:
-        """File with $VAR1 = {};  -- valid empty hash."""
-        p = tmp_path / "empty.dump"
-        p.write_text("$VAR1 = {};", encoding="utf-8")
-        snap = import_abicc_perl_dump(p)
-        assert isinstance(snap, AbiSnapshot)
-        assert snap.declarations.functions == []
-        assert snap.declarations.variables == []
-
-    def test_perl_dump_minimal_sections(self, tmp_path: Path) -> None:
-        """Perl dump with minimal sections: TypeInfo and SymbolInfo empty."""
-        content = (
-            "$VAR1 = {\n"
-            "  'TypeInfo' => {},\n"
-            "  'SymbolInfo' => {},\n"
-            "  'LibraryName' => 'libtest.so',\n"
-            "  'LibraryVersion' => '0.1',\n"
-            "};\n"
-        )
-        p = tmp_path / "minimal.dump"
-        p.write_text(content, encoding="utf-8")
-        snap = import_abicc_perl_dump(p)
-        assert snap.library == "libtest.so"
-        assert snap.version == "0.1"
-        assert snap.declarations.functions == []
-
-    def test_perl_dump_not_starting_with_var1(self, tmp_path: Path) -> None:
-        """File that does not start with $VAR1 -- should raise."""
-        p = tmp_path / "notperl.dump"
-        p.write_text("{'key': 'value'}", encoding="utf-8")
-        with pytest.raises(ValueError, match="Invalid ABICC Perl dump"):
-            import_abicc_perl_dump(p)
-
-    def test_looks_like_perl_dump_empty_string(self) -> None:
-        """Empty string should not look like a Perl dump."""
-        assert not looks_like_perl_dump("")
-
-    def test_looks_like_perl_dump_with_leading_whitespace(self) -> None:
-        """Leading whitespace before $VAR1 should still be detected."""
-        assert looks_like_perl_dump("   \n  $VAR1 = {};")
-
-
-# ---------------------------------------------------------------------------
-# 7. Reporter edge cases
+# 6. Reporter edge cases
 # ---------------------------------------------------------------------------
 
 

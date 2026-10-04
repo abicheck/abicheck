@@ -527,11 +527,7 @@ def suppression_config_for(suppression: object) -> SuppressionConfig | None:
     Returns ``None`` only when no list was supplied at all.
 
     A list *without* a ``source_sha256`` is still a selected source: the
-    public constructor and :meth:`~abicheck.suppression.SuppressionList.merge`
-    both produce this digest-less but fully active form -- the ABICC
-    compatibility front end (``compat/_helpers.py``) builds every one of its
-    ``-skip-symbols``/``-skip-internal-*`` lists that way, and ``merge()``
-    drops both inputs' digests even when each half *was* read from a file.
+    public constructor produces this digest-less but fully active form.
     Returning ``None`` for those recorded "no suppression source was selected
     at all" while rules were actively suppressing findings (Codex review,
     fresh evidence) -- the same absent-vs-empty conflation

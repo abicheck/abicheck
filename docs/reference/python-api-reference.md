@@ -263,7 +263,7 @@ Remove every directory :func:`resolve_release_compare_plan` allocated for *plan*
 
 ## `collect_metadata`
 
-Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, Perl dump, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it.
+Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it.
 
 | Parameter | Type | Default |
 |---|---|---|
@@ -514,7 +514,7 @@ Resolve *request* into one :class:`~abicheck.model.AbiSnapshot`.
 
 ## `sniff_text_format`
 
-Read a small header chunk and return ``'json'``, ``'perl'``, ``'symvers'``, or ``'unknown'``.
+Read a small header chunk and return ``'json'``, ``'symvers'``, or ``'unknown'``.
 
 | Parameter | Type | Default |
 |---|---|---|

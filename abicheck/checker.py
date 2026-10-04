@@ -1421,8 +1421,7 @@ def compare(
     from .contract_context import suppression_config_for
 
     # `suppression.source_sha256` alone is `None` for a digest-less but
-    # fully active list (the public constructor, ABICC's -skip-symbols
-    # lists, SuppressionList.merge() all produce this shape) --
+    # fully active list (the public constructor produces this shape) --
     # `suppression_config_for`'s rule_identities()-content-digest fallback
     # handles it (Codex review, PR #803).
     _suppression_config = suppression_config_for(suppression)

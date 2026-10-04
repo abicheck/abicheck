@@ -37,7 +37,7 @@ inputs:
   # ── Library inputs ──────────────────────────────────────────────────────────
   old-library:
     description: >
-      Path to the old library, JSON snapshot, or ABICC Perl dump. Required
+      Path to the old library or JSON snapshot. Required
       for a two-sided compare; omit it (and abi-baseline) to run an
       audit-only `compare --no-baseline` against new-library alone instead
       (the replacement for a baseline-less `mode: scan`/`audit: true`

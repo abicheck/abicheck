@@ -29,10 +29,6 @@ generated: false
 - Built-in profiles: `--policy strict_abi|sdk_vendor|plugin_abi`
 - Custom profile file: `--policy <yaml>`
 
-`abicheck compat` intentionally does **not** expose `--policy`; it stays aligned
-with ABICC-compatible behavior (`strict_abi` semantics) plus its own legacy flags
-like `-strict`/`--strict-mode`.
-
 ## Usage
 
 ```bash
@@ -329,10 +325,6 @@ For `abicheck compare`, exit codes are the same for all policies — only the ve
 > `compare` to severity-based exit codes, where `1` means an error-level
 > finding — see [CI Gating → the two exit-code schemes](ci-gating.md#the-two-exit-code-schemes)
 > and the canonical [exit code reference](../reference/exit-codes.md).
-
-For `abicheck compat`, policy still affects verdict classification, but command-level
-options (`-strict`, `--strict-mode`, legacy compatibility behavior) can additionally
-modify the final process exit status. Treat the table above as `compare` semantics.
 
 ---
 

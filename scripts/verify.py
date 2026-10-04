@@ -696,9 +696,10 @@ STEPS: tuple[Step, ...] = (
         description="libabigail parity lane (marker-scoped)",
     ),
     Step(
-        # Marker-scoped for the same reason as libabigail-parity above —
-        # tests/test_abicc_parity_extended.py also carries @pytest.mark.abicc.
-        # ABICHECK_MIN_EXECUTED='10' matches ci.yml's abicc-parity job floor.
+        # Marker-scoped for the same reason as libabigail-parity above. Checks
+        # native `compare` verdicts against the real abi-compliance-checker
+        # (tests/test_abicc_parity.py); ABICHECK_MIN_EXECUTED='10' matches
+        # ci.yml's abicc-parity job floor.
         "abicc-parity",
         _py("pytest", "tests/", "-m", "abicc", "--tb=short"),
         frozenset({FULL}),

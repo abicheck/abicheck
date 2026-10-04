@@ -21,8 +21,7 @@ fragment. The ``render_*`` function here consumes that structure and returns
 the same HTML string the pre-split function used to build in one step.
 
 The two low-level per-change formatters (``abbr_symbol_text``,
-``render_changes_table``) and the ABICC-style ``render_compat_changes_table``
-live here too, moved rather than left in ``html_report.py``, for the same
+``render_changes_table``) live here too, moved rather than left in ``html_report.py``, for the same
 reason ``_format_change_md`` moved into ``render_markdown.py``: each takes a
 JSON-safe :class:`ChangeRow` and returns a formatted string with no
 ``DiffResult``/``Change`` traversal or policy decision of its own, so it
@@ -32,11 +31,6 @@ than in ``html_report.py``, which needs to call into this module for every
 modules. ``html_report.py`` re-exports the ones it still calls directly
 under their original private names (``_abbr_symbol_text``, ``_changes_table``)
 so every existing call site and its direct test coverage resolves unchanged.
-``render_compat_changes_table`` has no such wrapper: the whole-document
-closure moved its only caller (the ABICC-compatible layout) onto
-``report.render_html_document`` directly, retiring the pre-split
-``_compat_changes_table`` alongside it -- see this module's own test suite
-(``tests/unit/report/test_render_html.py``) for its direct coverage now.
 
 Every per-section ``render_*`` function here is behaviour-preserving by
 construction: each was extracted line-for-line from the pre-split function it
@@ -142,12 +136,6 @@ class ChangeRow:
     compatibility_decision: str | None
     contract_evidence_refs: tuple[str, ...]
     correlated_change_kind: str | None
-    #: Schema 4.6's per-finding `Change.library` -- the DSO a multi-library
-    #: `compat check` attributed this finding to, `None` for every scalar
-    #: comparison. Carried here because the default report is HTML: without
-    #: it two paired DSOs' otherwise-identical findings were indistinguishable
-    #: in the one projection most readers actually open (Codex review).
-    library: str | None = None
 
 
 def render_changes_table(rows: tuple[ChangeRow, ...], demangle: bool = True) -> str:
@@ -167,14 +155,6 @@ def render_changes_table(rows: tuple[ChangeRow, ...], demangle: bool = True) -> 
 
         # Build extended description with impact + affected + location
         desc_parts = [desc]
-        # First, not last: in a multi-library report the DSO is *which
-        # library this is about*, so a reader scanning two identical
-        # descriptions needs it before the detail, not after it.
-        if row.library:
-            desc_parts.append(
-                f"<div style='font-size:0.82em; color:#00695c; margin-top:2px;'>"
-                f"📚 Library: <code>{html.escape(row.library)}</code></div>"
-            )
         if row.impact:
             desc_parts.append(
                 f"<div style='font-size:0.85em; color:#666; margin-top:3px;'>"
@@ -256,42 +236,6 @@ def render_changes_table(rows: tuple[ChangeRow, ...], demangle: bool = True) -> 
     {body}
   </tbody>
 </table>"""
-
-
-def render_compat_changes_table(
-    rows: tuple[ChangeRow, ...],
-    show_severity: bool = False,
-) -> str:
-    """Render a changes table in ABICC style."""
-    if not rows:
-        return "<p>No changes.</p>"
-    h = html.escape
-    out_rows = []
-    for row in rows:
-        sym = h(row.symbol)
-        desc = h(row.description)
-        old_val = h(row.old_value)
-        new_val = h(row.new_value)
-        sev_cell = f"<td>{row.severity}</td>" if show_severity else ""
-        # Cross-detector correlation: this ABICC-compatible table has its own
-        # separate rendering from render_changes_table above, needing the same
-        # note (Codex review, fresh evidence).
-        if row.correlated_change_kind:
-            desc += (
-                f"<div style='font-size:0.82em; color:#999; margin-top:2px;'>"
-                f"🔗 See also: <code>{h(row.correlated_change_kind)}</code></div>"
-            )
-        out_rows.append(
-            f"<tr><td class='sym'>{sym}</td><td>{h(row.kind)}</td>"
-            f"{sev_cell}<td>{desc}</td><td>{old_val}</td><td>{new_val}</td></tr>"
-        )
-    sev_hdr = "<th>Severity</th>" if show_severity else ""
-    return (
-        f"<table class='problem'><thead><tr>"
-        f"<th>Symbol</th><th>Kind</th>{sev_hdr}"
-        f"<th>Description</th><th>Old</th><th>New</th>"
-        f"</tr></thead><tbody>{''.join(out_rows)}</tbody></table>"
-    )
 
 
 # ---------------------------------------------------------------------------

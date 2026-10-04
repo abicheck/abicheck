@@ -299,8 +299,8 @@ reads "declaration not established" rather than "no declaration". Then
 recorded exclusion patterns were matched by: `"glob"` for the native
 `--exclude-header` (fnmatch, plus a `*/<pattern>` try), `"abicc"` for a
 descriptor's `<skip_headers>` under ABICC's own three rule classes
-(basename, component-boundary path/directory, compiled pattern — see
-`abicheck/model/header_skip_rules.py`), and the legacy `"exact"` for a
+(basename, component-boundary path/directory, compiled pattern; written only
+by the since-removed ABICC `compat` front end, still read), and the legacy `"exact"` for a
 descriptor snapshot written before those rule classes existed, when a
 descriptor skip was a plain basename-or-path membership test. The same
 pattern text is not the same scope under any two of them — `fftw/fftw.h`

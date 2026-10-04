@@ -51,9 +51,7 @@ def record_achieved_header_exclusions(
     not exist -- the reader was told that "anything only they declared was
     not observed" about headers this run had parsed in full.
 
-    The descriptor path (``compat.run_inputs.record_descriptor_skips``) has
-    always recorded achieved patterns only; this is the native
-    ``--exclude-header`` path answering the same question the same way.
+    The native ``--exclude-header`` path records achieved patterns only.
     Unmatched rules keep their own, separate configuration-hygiene warning
     (:func:`unmatched_exclusion_warning`) -- they are a typo to fix, not
     coverage that was lost.

@@ -4,9 +4,9 @@
 
 `tests/test_release_public_surface.py` states the model itself against the
 live directory `compare` fan-out. This module states the *uniformity*
-claim: the three other drivers that compare several libraries at once --
-a stored `BundleFacts` baseline against a live release, two stored
-documents, and a multi-library ABICC descriptor -- reconcile the same one
+claim: the two other drivers that compare several libraries at once --
+a stored `BundleFacts` baseline against a live release, and two stored
+documents -- reconcile the same one
 product contract rather than repeating the Cartesian-product defect on
 their own path.
 
@@ -144,14 +144,6 @@ class TestTheUnionIsTakenOnEveryDriver:
         assert reconciliation is not None
         assert _missing_symbols(reconciliation) == []
 
-    def test_compat_descriptor(self) -> None:
-        from abicheck.compat.multi_library_run import _release_contract_findings
-
-        findings = _release_contract_findings(_members(), _members())
-        assert [
-            f.symbol for f in findings if f.kind == ChangeKind.PUBLIC_NOT_EXPORTED
-        ] == []
-
 
 class TestARealRemovalIsStillReportedOnce:
     """The complement, and the reason the fold is not just suppression."""
@@ -186,14 +178,6 @@ class TestARealRemovalIsStillReportedOnce:
         )
         assert _missing_symbols(reconciliation) == ["api_c"]
 
-    def test_compat_descriptor(self) -> None:
-        from abicheck.compat.multi_library_run import _release_contract_findings
-
-        findings = _release_contract_findings(_members(count=2), self._kept())
-        assert sorted(
-            f.symbol for f in findings if f.kind == ChangeKind.PUBLIC_NOT_EXPORTED
-        ) == ["api_c"]
-
 
 class TestNoDriverInventsAContract:
     """A side recording no public-header evidence records no contract."""
@@ -217,13 +201,6 @@ class TestNoDriverInventsAContract:
         assert (
             _stored_pair_public_surface(_Facts(members), _Facts(members), members)
             is None
-        )
-
-    def test_compat_descriptor_records_none(self) -> None:
-        from abicheck.compat.multi_library_run import _release_contract_findings
-
-        assert (
-            _release_contract_findings(self._binary_only(), self._binary_only()) == []
         )
 
     def test_an_unresolved_side_is_not_an_empty_promise(self) -> None:
@@ -517,119 +494,6 @@ class TestTheStoredEnvelopeCarriesTheSection:
         assert not any("api_c" in line for line in lines)
 
 
-class TestTheCompatCommandReallyFoldsIt:
-    """The ABICC descriptor path, through the real command.
-
-    The helpers above are unit-tested directly; this asserts the command
-    actually reaches them -- the gap a helper-only test cannot close, and
-    the one that would let the whole fold sit unreachable behind a loop
-    nobody wired.
-    """
-
-    def _run(self, tmp_path, monkeypatch, new_members):
-        from click.testing import CliRunner
-
-        from abicheck.checker import DiffResult, Verdict
-        from abicheck.cli import main
-
-        old_desc = tmp_path / "old.xml"
-        new_desc = tmp_path / "new.xml"
-        old_desc.write_text("<descriptor/>", encoding="utf-8")
-        new_desc.write_text("<descriptor/>", encoding="utf-8")
-        monkeypatch.setattr(
-            "abicheck.compat.run_inputs._load_descriptor_or_dump",
-            lambda *_a, **_k: AbiSnapshot(library="product", version="1.0"),
-        )
-        old_members = _members(count=2)
-        names = sorted(new_members)
-        monkeypatch.setattr(
-            "abicheck.compat.cli._plan_library_pairs",
-            lambda *_a, **_k: (
-                [(tmp_path / name, tmp_path / name) for name in names],
-                [],
-                [],
-            ),
-        )
-
-        def _pair(index: int):
-            name = names[index]
-            return old_members[sorted(old_members)[index]], new_members[name]
-
-        # The command resolves member 0 through `_take_snapshots_with_logging`
-        # (it keeps the per-phase log handlers) and each later member through
-        # two `_snapshot_from_compat_input` calls, OLD then NEW -- so this
-        # counter advances one member every second call.
-        calls = {"one": 0}
-
-        def _take(*_a, **_k):
-            old, new = _pair(0)
-            return old, "1.0", new, "2.0"
-
-        def _one(*_a, **_k):
-            member = 1 + calls["one"] // 2
-            old, new = _pair(member)
-            wanted = old if calls["one"] % 2 == 0 else new
-            calls["one"] += 1
-            return wanted, "2.0"
-
-        monkeypatch.setattr("abicheck.compat.cli._take_snapshots_with_logging", _take)
-        monkeypatch.setattr("abicheck.compat.cli._snapshot_from_compat_input", _one)
-        monkeypatch.setattr(
-            "abicheck.compat.cli.compare",
-            lambda old, new, **_k: DiffResult(
-                old_version="1.0",
-                new_version="2.0",
-                library=new.library,
-                verdict=Verdict.NO_CHANGE,
-                changes=[],
-            ),
-        )
-        report = tmp_path / "report.html"
-        runner = CliRunner()
-        outcome = runner.invoke(
-            main,
-            [
-                "compat",
-                "check",
-                "-lib",
-                "product",
-                "-old",
-                str(old_desc),
-                "-new",
-                str(new_desc),
-                # Into the test's own directory: the ABICC console summary
-                # prints counts rather than symbols, so the assertion has to
-                # read the report the user actually gets -- and the default
-                # path would write into the repository working tree.
-                "-report-path",
-                str(report),
-            ],
-        )
-        return outcome, report.read_text(encoding="utf-8") if report.exists() else ""
-
-    def test_a_sibling_declaration_is_not_demanded_from_every_member(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        outcome, report = self._run(tmp_path, monkeypatch, _members(count=2))
-        assert outcome.exit_code == 0, outcome.output
-        assert "public_not_exported" not in report
-
-    def test_a_declaration_nothing_exports_is_still_reported(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        """The vacuity guard: the same command over a product that really
-        did drop `api_c` must still say so, or the assertion above would
-        hold for a command that folded nothing because it found nothing."""
-        dropped = {
-            name: _snapshot(name, declares=_PRODUCT_API, exports=exports)
-            for name, exports in (("liba.so", ("api_a",)), ("libb.so", ("api_b",)))
-        }
-        outcome, report = self._run(tmp_path, monkeypatch, dropped)
-        assert "api_c" in report
-        # Exactly once, not once per member -- the cardinality law itself.
-        assert report.count("public_not_exported") == 1
-
-
 class TestTheResolvedPolicyDocumentReachesReleaseScoring:
     """A `--policy` document moves a member's finding and the release-level
     finding that replaced it, or it has moved a check's meaning by moving
@@ -847,115 +711,6 @@ class TestTheStoredEnvelopesGateBearingKeys:
             public_surface_reconciliation = None
 
         assert public_surface_markdown_lines(_Result()) == []
-
-
-class TestAReleaseFindingReachesTheVerdict:
-    """A finding in the report that never reached the verdict is a gate
-    bypass, not a cosmetic gap. The ABICC path merges its member verdicts
-    *before* the release-level findings exist, so the fold has to re-score.
-    """
-
-    def _merged(self, verdict_name: str):
-        from abicheck.checker import Verdict
-        from abicheck.checker_types import DiffResult
-
-        return DiffResult(
-            old_version="1.0",
-            new_version="2.0",
-            library="product",
-            verdict=Verdict(verdict_name),
-            changes=[],
-        )
-
-    def _members_holder(self, *, missing: bool):
-        from abicheck.compat.multi_library_run import _MemberSnapshots
-
-        holder = _MemberSnapshots()
-        new = (
-            {
-                name: _snapshot(name, declares=_PRODUCT_API, exports=exports)
-                for name, exports in (("liba.so", ("api_a",)), ("libb.so", ("api_b",)))
-            }
-            if missing
-            else _members(count=2)
-        )
-        old = _members(count=2)
-        for index, name in enumerate(sorted(new)):
-            holder.record(index, None, None, old[sorted(old)[index]], new[name])
-        # `record` keys off the member name it is given; re-key to the real
-        # names so both sides line up the way the command's own loop does.
-        holder.old = dict(zip(sorted(new), old.values(), strict=True))
-        holder.new = new
-        return holder
-
-    def test_the_merged_verdict_is_raised_by_a_release_finding(self) -> None:
-        result = self._members_holder(missing=True).fold_into(
-            self._merged("NO_CHANGE"), policy="strict_abi"
-        )
-        assert [c.kind for c in result.changes] == [ChangeKind.PUBLIC_NOT_EXPORTED]
-        assert result.verdict.value == "COMPATIBLE_WITH_RISK"
-
-    def test_a_satisfied_contract_leaves_the_verdict_alone(self) -> None:
-        """The vacuity guard: the fold must be driven by the finding, not
-        applied unconditionally."""
-        result = self._members_holder(missing=False).fold_into(
-            self._merged("NO_CHANGE"), policy="strict_abi"
-        )
-        assert result.changes == []
-        assert result.verdict.value == "NO_CHANGE"
-
-    @pytest.mark.parametrize("worse", ["API_BREAK", "BREAKING"])
-    def test_the_fold_never_lowers_a_members_verdict(self, worse: str) -> None:
-        """Monotonic: a member's real break outranks a release-level risk
-        finding, and the fold may never trade one for the other."""
-        result = self._members_holder(missing=True).fold_into(
-            self._merged(worse), policy="strict_abi"
-        )
-        assert result.verdict.value == worse
-
-
-class TestTheWorstVerdictFoldIsOrdinal:
-    """`_worst_verdict`'s own contract, decoupled from the descriptor path.
-
-    A reusable max-by-rank primitive, so it gets the property treatment the
-    repo asks for rather than only its caller's example.
-    """
-
-    _ORDER = (
-        "NO_CHANGE",
-        "COMPATIBLE",
-        "COMPATIBLE_WITH_RISK",
-        "API_BREAK",
-        "BREAKING",
-    )
-
-    def _fold(self, current: str, release: str):
-        from abicheck.checker import Verdict
-        from abicheck.compat.multi_library_run import _worst_verdict
-
-        return _worst_verdict(Verdict(current), release).value
-
-    def test_every_pair_yields_the_worse_of_the_two(self) -> None:
-        """Exhaustive over the whole 5x5 domain, against an oracle derived
-        from the ordinal itself rather than from the function's own body."""
-        disagreements = [
-            (a, b, self._fold(a, b), expected)
-            for a in self._ORDER
-            for b in self._ORDER
-            if (expected := max(a, b, key=self._ORDER.index)) != self._fold(a, b)
-        ]
-        assert disagreements == []
-
-    def test_it_is_never_lowered(self) -> None:
-        for a in self._ORDER:
-            for b in self._ORDER:
-                assert self._ORDER.index(self._fold(a, b)) >= self._ORDER.index(a)
-
-    def test_an_unknown_release_spelling_never_wins(self) -> None:
-        """Fail-safe rather than fail-open: a spelling this scale does not
-        know must not outrank a real verdict by accident."""
-        for a in self._ORDER:
-            assert self._fold(a, "NOT_A_VERDICT") == a
 
 
 class TestStoredInventoriesAreNotNarrowed:

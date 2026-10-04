@@ -59,11 +59,11 @@ class TestClassifyErrorBranches:
         assert result is False
         assert "cannot read JSON candidate" in caplog.text
 
-    def test_fallback_sniff_accepts_perl_dump(self, tmp_path: Path) -> None:
-        """FallbackSniffClassifier accepts a Perl dump on odd extension (line 205)."""
+    def test_fallback_sniff_rejects_an_abicc_perl_dump(self, tmp_path: Path) -> None:
+        """An ABICC Perl dump is no longer an input, whatever its extension."""
         p = tmp_path / "dump.weirdext"
         p.write_text(_PERL_DUMP_HEAD, encoding="utf-8")
-        assert FallbackSniffClassifier().accepts(p) is True
+        assert FallbackSniffClassifier().accepts(p) is False
 
     def test_fallback_sniff_json_read_error_returns_false(self, caplog) -> None:
         """FallbackSniffClassifier handles OSError on the JSON re-read (213-215)."""

@@ -25,10 +25,6 @@ Owning the chrome in one module is the point: a stylesheet, layout or
 accessibility fix is edited here instead of being hunted across three renderers
 that previously each re-emitted the same ``<!DOCTYPE html> … </html>`` skeleton
 and footer by hand (architecture-deepening candidate N-A).
-
-This module is for the abicheck-native palette only. The ABICC-clone report
-format (``_COMPAT_CSS`` in ``html_report``) is a deliberately distinct chrome
-that mirrors abi-compliance-checker's own markup and stays separate.
 """
 
 from __future__ import annotations

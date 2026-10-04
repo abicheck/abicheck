@@ -119,9 +119,7 @@ def _context() -> dict:
 
 
 def _report(old: AbiSnapshot, new: AbiSnapshot) -> str:
-    return to_json(
-        compare_policy.compare_snapshots(old, new), include_exit_decision=True
-    )
+    return to_json(compare_policy.compare_snapshots(old, new))
 
 
 @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
