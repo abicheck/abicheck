@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import io
 import random
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -157,6 +158,7 @@ _V2 = (
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(sys.platform != "linux", reason="needs a toolchain that emits ELF")
 def test_real_stripped_library_rename_is_resolved_by_the_hash(tmp_path) -> None:
     """A stripped library renames ``lib_mix`` and adds a same-size decoy. By
     size alone the rename is ambiguous; the dump-time hash resolves it."""
