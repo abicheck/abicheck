@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.checker import compare
 from abicheck.checker_policy import BREAKING_KINDS, RISK_KINDS, ChangeKind
 from abicheck.model import AbiSnapshot, Fact, RecordType, TypeField
@@ -579,6 +581,66 @@ class TestStdlibEmbeddingAttribution:
         assert present.description.count("embeds a standard-library type by value") == 1
         # The change whose type is absent from `new` is left untouched.
         assert "embeds a standard-library type by value" not in missing.description
+
+    @pytest.mark.parametrize("order", ["grouped", "interleaved", "reversed"])
+    @pytest.mark.parametrize("width", [1, 3, 17])
+    def test_per_record_scan_never_mixes_records(self, order: str, width: int) -> None:
+        # The per-record memo must merge findings of the *same* record (each
+        # names exactly that record's std:: members) and keep two records
+        # distinct (neither borrows the other's members, nor a plain record
+        # any) -- whatever order the findings arrive in. Oracle: each record's
+        # own field list, computed here, not via _embedded_stdlib_fields.
+        from abicheck.checker_types import Change
+        from abicheck.diff_filtering import _attribute_stdlib_embedding
+
+        specs = {
+            "A": [(f"a{i}", "std::string") for i in range(width)],
+            "B": [(f"b{i}", "std::vector<int>") for i in range(width)],
+            "P": [(f"p{i}", "int") for i in range(width)],
+        }
+        new = _snap(
+            "2",
+            types=[
+                RecordType(
+                    name=n,
+                    kind="struct",
+                    size_bits=64 * width,
+                    fields=[
+                        TypeField(name=f, type=t, offset_bits=64 * i)
+                        for i, (f, t) in enumerate(fs)
+                    ],
+                )
+                for n, fs in specs.items()
+            ],
+        )
+        per = {
+            n: [
+                Change(
+                    kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+                    symbol=n,
+                    description=f"{f} moved",
+                )
+                for f, _ in fs
+            ]
+            for n, fs in specs.items()
+        }
+        if order == "grouped":
+            changes = [c for n in specs for c in per[n]]
+        elif order == "interleaved":
+            changes = [c for trio in zip(*per.values(), strict=True) for c in trio]
+        else:
+            changes = [c for n in reversed(list(specs)) for c in reversed(per[n])]
+        _attribute_stdlib_embedding(changes, new)
+        for name, fields in specs.items():
+            for c in per[name]:
+                for other, ofields in specs.items():
+                    for f, t in ofields:
+                        named = f"{f} ({t})" in c.description
+                        assert named == (other == name and t.startswith("std::")), (
+                            c.description,
+                            other,
+                            f,
+                        )
 
 
 class TestNamespaceQualifiedTypeMatching:

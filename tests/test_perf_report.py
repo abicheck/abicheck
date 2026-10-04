@@ -21,3 +21,26 @@ def test_report_has_every_section_and_writes_file(tmp_path):
         assert heading in text
     hot = text.split("## Hot functions")[1].split("##")[0]
     assert "abicheck/" in hot and "(compare)" not in hot
+
+
+def test_weekly_report_step_never_runs_on_pull_request_input():
+    # Trust boundary: the step executes repository code, so it must not run on
+    # pull_request (PR-controlled code) and must interpolate no event text
+    # into its shell. Parsed structurally, comments excluded.
+    import yaml
+
+    wf = yaml.safe_load(
+        (
+            Path(__file__).resolve().parent.parent / ".github/workflows/performance.yml"
+        ).read_text(encoding="utf-8")
+    )
+    steps = [
+        s
+        for job in wf["jobs"].values()
+        for s in job.get("steps", [])
+        if "perf_report.py" in str(s.get("run", ""))
+    ]
+    assert len(steps) == 1
+    (step,) = steps
+    assert step["if"].replace(" ", "") == "github.event_name!='pull_request'"
+    assert "${{" not in step["run"]
