@@ -66,30 +66,34 @@ def _header(n: int, v2: bool, fraction: float, tag: str = "") -> str:
     for i in range(n):
         ch = v2 and _changed(i, fraction)
         ns = i % NAMESPACES
+        # Fixed width: no unit's name is a prefix of another's (`Data1` of
+        # `Data17`), which would make prefix-candidate work grow with the
+        # share of multi-digit indices rather than with the library.
+        u = f"{i:04d}"
         extra = "  long added;\n" if ch else ""
         ptype = "long" if ch else "int"
         bump = 7 if ch else 0
         out.append(
             f"""namespace m{ns} {{
-struct Data{i} {{
+struct Data{u} {{
   int a;
   double b;
   char tag[4];
 {extra}}};
-typedef Data{i} Alias{i};
-typedef Alias{i} Alias{i}_t;
-enum class Mode{i} {{ off = 0, on = {1 + bump}, fast = 9 }};
-class Svc{i} {{
+typedef Data{u} Alias{u};
+typedef Alias{u} Alias{u}_t;
+enum class Mode{u} {{ off = 0, on = {1 + bump}, fast = 9 }};
+class Svc{u} {{
 public:
-  virtual ~Svc{i}();
-  virtual int run(const Alias{i}_t& d, Mode{i} m);
+  virtual ~Svc{u}();
+  virtual int run(const Alias{u}_t& d, Mode{u} m);
   virtual void reset(Ctx* c);
   int counter;
 }};
-int free{i}({ptype} x, Data{i}* d);
-int over{i}(int x);
-int over{i}(double x);
-template <typename T> T tmpl{i}(T v, const Data{i}& d);
+int free{u}({ptype} x, Data{u}* d);
+int over{u}(int x);
+int over{u}(double x);
+template <typename T> T tmpl{u}(T v, const Data{u}& d);
 }}"""
         )
     out.append("}")
@@ -101,18 +105,22 @@ def _source(n: int, v2: bool, fraction: float, tag: str = "") -> str:
     for i in range(n):
         ch = v2 and _changed(i, fraction)
         ns = i % NAMESPACES
+        # Fixed width: no unit's name is a prefix of another's (`Data1` of
+        # `Data17`), which would make prefix-candidate work grow with the
+        # share of multi-digit indices rather than with the library.
+        u = f"{i:04d}"
         ptype = "long" if ch else "int"
         out.append(
             f"""namespace m{ns} {{
-Svc{i}::~Svc{i}() {{}}
-int Svc{i}::run(const Alias{i}_t& d, Mode{i} m) {{ return d.a + static_cast<int>(m); }}
-void Svc{i}::reset(Ctx* c) {{ c->id = 0; }}
-int free{i}({ptype} x, Data{i}* d) {{ return static_cast<int>(x) + d->a; }}
-int over{i}(int x) {{ return x; }}
-int over{i}(double x) {{ return static_cast<int>(x); }}
-template <typename T> T tmpl{i}(T v, const Data{i}& d) {{ return v + static_cast<T>(d.a); }}
-template int tmpl{i}<int>(int, const Data{i}&);
-template double tmpl{i}<double>(double, const Data{i}&);
+Svc{u}::~Svc{u}() {{}}
+int Svc{u}::run(const Alias{u}_t& d, Mode{u} m) {{ return d.a + static_cast<int>(m); }}
+void Svc{u}::reset(Ctx* c) {{ c->id = 0; }}
+int free{u}({ptype} x, Data{u}* d) {{ return static_cast<int>(x) + d->a; }}
+int over{u}(int x) {{ return x; }}
+int over{u}(double x) {{ return static_cast<int>(x); }}
+template <typename T> T tmpl{u}(T v, const Data{u}& d) {{ return v + static_cast<T>(d.a); }}
+template int tmpl{u}<int>(int, const Data{u}&);
+template double tmpl{u}<double>(double, const Data{u}&);
 }}"""
         )
     out.append("}")
