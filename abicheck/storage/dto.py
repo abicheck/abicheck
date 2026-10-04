@@ -193,7 +193,9 @@ _SPECIALIZED_SECTION_KINDS = frozenset(
 SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     # v2 (ADR-063 6B, snapshot schema v53): record occurrences carry
     # size_bits/alignment_bits, and the IR document is stamped "version": 2.
-    SEMANTIC_IR_SECTION_KIND: 2,
+    # v3 (ADR-063 6B, function-signature cohort): function occurrences carry
+    # the five signature facts, and the IR document is stamped "version": 3.
+    SEMANTIC_IR_SECTION_KIND: 3,
     # ADR-063 Phase 8's full D8 split: every `LEGACY_SECTION_KINDS` entry is
     # its own independent axis from version 1 on, so a future `"binary"`
     # schema change never forces a bump on `"declarations"`.
@@ -220,6 +222,24 @@ def _semantic_ir_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
             f"{SEMANTIC_IR_SECTION_KIND!r} section v1 carries an IR document "
             "version, which only a v2 writer emits"
         )
+    return payload
+
+
+def _semantic_ir_v2_to_v3(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Semantic IR v2 -> v3: the payload is unchanged. A v2 IR document is
+    stamped ``"version": 2`` (or carries none, from a v1 section), and
+    ``semantic_ir_codec`` reads its function occurrences as "signature never
+    recorded"; the snapshot load fills them from the functions
+    (``semantic_ir_function_signature``). A v2 section whose IR claims
+    version 3 or later was not written by a v2 writer, so it is refused."""
+    ir = payload.get("semantic_ir")
+    if isinstance(ir, Mapping):
+        version = ir.get("version", 1)
+        if isinstance(version, int) and not isinstance(version, bool) and version > 2:
+            raise ValueError(
+                f"{SEMANTIC_IR_SECTION_KIND!r} section v2 carries IR document "
+                f"version {version}, which only a v3 writer emits"
+            )
     return payload
 
 
@@ -251,7 +271,7 @@ _MIGRATIONS: Mapping[
 ] = {
     **{kind: {} for kind in SECTION_SCHEMA_VERSIONS},
     BUNDLE_COMPOSITION_SECTION_KIND: {1: _bundle_composition_v1_to_v2},
-    SEMANTIC_IR_SECTION_KIND: {1: _semantic_ir_v1_to_v2},
+    SEMANTIC_IR_SECTION_KIND: {1: _semantic_ir_v1_to_v2, 2: _semantic_ir_v2_to_v3},
 }
 
 

@@ -114,6 +114,10 @@ from .identity import (
 )
 from .occurrence import OccurrenceId
 from .semantic_ir import CanonicalEntity, SemanticIR
+from .semantic_ir_function_signature import (
+    function_signature_facts,
+    sync_snapshot_function_signatures,
+)
 from .semantic_ir_record_layout import record_layout_facts, sync_snapshot_record_layout
 
 if TYPE_CHECKING:
@@ -133,6 +137,7 @@ __all__ = [
     "assert_typedef_ir_consistent",
     "legacy_constant_ir",
     "legacy_function_ir",
+    "legacy_function_signature_occurrences",
     "legacy_typedef_ir",
     "legacy_variable_occurrences",
     "producer_entity_id",
@@ -451,6 +456,34 @@ def legacy_variable_occurrences(
     return SemanticIR(occurrences=occurrences), tuple(order)
 
 
+def legacy_function_signature_occurrences(
+    functions: Iterable[Function],
+) -> tuple[SemanticIR, tuple[OccurrenceId, ...]]:
+    """Project functions into a real ``SemanticIR`` carrying their signature
+    facts (ADR-063 6B, function-signature cohort), one occurrence per
+    function plus each function's occurrence in input order --
+    :func:`legacy_variable_occurrences`' shape. The payload is
+    ``semantic_ir_function_signature.function_signature_facts``, the same
+    formula the load-time fill applies to a real IR.
+    """
+    occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+    seen: dict[EntityId, int] = {}
+    order: list[OccurrenceId] = []
+    for fn in functions:
+        key = fn.entity_id or _synthetic_entity_id(
+            EntityKind.FUNCTION, fn.mangled or fn.name
+        )
+        ordinal = seen.get(key, 0)
+        seen[key] = ordinal + 1
+        occ_id = OccurrenceId(key, str(ordinal) if ordinal else "")
+        occurrences[occ_id] = CanonicalEntity(
+            canonical_spelling=Fact.not_collected(),
+            **function_signature_facts(fn),
+        )
+        order.append(occ_id)
+    return SemanticIR(occurrences=occurrences), tuple(order)
+
+
 def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:
     """Project one comparison's (already ELF/API-surface-selected) function
     collection into a real ``SemanticIR`` -- the fallback half of
@@ -677,3 +710,4 @@ def finalize_snapshot_semantic_ir(snapshot: AbiSnapshot) -> None:
     again after a storage decode assigns ``semantic_ir``."""
     assert_snapshot_semantic_ir_consistent(snapshot)
     sync_snapshot_record_layout(snapshot)
+    sync_snapshot_function_signatures(snapshot)

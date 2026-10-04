@@ -392,7 +392,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_symbols:_params_differ",),
+        consumed_by=("abicheck.model.semantic_ir_function_signature:_param_kind",),
         notes=(
             "value/pointer/reference/rvalue-reference. Case (a), like "
             "Variable.access below: ParamKind.VALUE is both this field's "

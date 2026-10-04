@@ -157,6 +157,23 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         ),
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
+    # ADR-063 6B function-signature cohort: FUNC_RETURN_CHANGED/
+    # FUNC_PARAMS_CHANGED/FUNC_REF_QUAL_CHANGED/FUNC_VARIADIC_* read the five
+    # CanonicalEntity signature facts (semantic_ir v3, schema v57) through
+    # each side's index; a Function's own signature fields and a snapshot's
+    # functions are off limits here. An unnamed function is projected through
+    # the adapter's legacy_function_signature_occurrences.
+    MigratedCohort(
+        name="function_signature",
+        modules=("abicheck/compare/function_signature.py",),
+        # `ref_qualifier`/`is_variadic` are not listed: they are also the
+        # CanonicalEntity facts' own names, which this name-based scan cannot
+        # tell apart from the Function fields of the same name.
+        forbidden_attributes=frozenset(
+            {"return_type", "params", "functions", "function_map"}
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
     # `functions` is deliberately NOT registered here yet. A first attempt
     # (abicheck/compare/functions.py's function_identity_index) built a
     # SemanticIRIndex per comparison but only ever looked up a function's

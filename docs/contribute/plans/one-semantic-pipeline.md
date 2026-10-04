@@ -12063,11 +12063,32 @@ Verification: `tests/test_variable_cutover.py` (Hypothesis equivalence over
 IR/adapter mixes against a hand-written oracle, authority, projection-vs-
 normalizer agreement, gate firing).
 
-*Functions remain open.* `canonical_spelling` combines return and parameter
-types into one string; the function detectors need per-position spellings,
-`ref_qualifier` and variadic status. Carrying those is a `CanonicalEntity`
-schema change (v54), a stored-format decision to approve before it lands,
-as v53 was.
+**Landed (2026-10-04, same PR): the function-signature cohort, with the
+schema bump it needed (v57, approved by the maintainer).** `CanonicalEntity`
+gained `return_type_spelling`/`parameter_type_spellings`/`parameter_kinds`/
+`ref_qualifier`/`is_variadic`, written for `FUNCTION` occurrences only in a
+`semantic_ir` document stamped `"version": 3` (`ProjectSnapshot` section v3,
+v2->v3 migration). The spellings are deliberately the producer's raw ones:
+the detectors' cv- and scalar-equivalence predicates decide on raw text, so a
+canonical form would have changed verdicts. The facts are filled at the
+snapshot boundary from the final `Function` objects
+(`model/semantic_ir_function_signature.py`, the record-layout fill's shape),
+not by the per-backend normalizer, so a hybrid merge records no new conflicts
+and a pre-v57 document reaches the checker with the same facts.
+`compare/function_signature.py` decides the four families per side with the
+T3 authority rule; an unestablished fact is a recorded decline (T9), which the
+evidence-ablation gate required. A shadow run of the old and new paths over
+the whole unit lane disagreed only on deliberately ablated facts. Gate:
+`MIGRATED_COHORTS` entry `function_signature` (`return_type`/`params`/
+`functions`/`function_map`; `ref_qualifier`/`is_variadic` share names with
+the IR facts, so the name-based scan cannot police them).
+
+*Still open.* The other function families (linkage, noexcept, virtual,
+explicit, hidden friend, contract attributes, exception spec, vtable index)
+and variable alignment/access/deprecation still read the declaration
+objects; each needs its facts in the IR first. Pairing still runs on
+`SymbolIdentityIndex` over the declaration store, and the store itself is
+Phase 10's removal.
 
 ---
 

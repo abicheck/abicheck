@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Callable, Container, Mapping
 from typing import Any
@@ -29,8 +30,12 @@ from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
-from .compare.fact_comparison import compare_facts
 from .compare.fact_gate import both_facts_present
+from .compare.function_signature import (
+    FunctionSignatureIndex,
+    function_signature_changes,
+    function_signature_index,
+)
 from .compare.functions import function_identity_index
 from .compare.naming_conventions import PREFIX_RENAME
 from .compare.surface_reconcile import (
@@ -126,13 +131,8 @@ from .model import (
     AbiSnapshot,
     AccessLevel,
     Function,
-    Param,
-    ParamKind,
     RecordType,
     Variable,
-    canonicalize_type_name,
-    cv_qualifiers_only_differ,
-    func_signature_cv_only_differ,
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
@@ -340,17 +340,6 @@ def _reconciled_variable_surfaces(
     )
 
 
-def _format_params(params: list[Param]) -> str:
-    """Format a parameter list as a human-readable string.
-
-    ``Param.type`` already carries pointer/reference sigils (e.g. ``int *``,
-    ``Foo &``), so we use it directly — appending ``_KIND_SUFFIX`` would
-    duplicate them.
-    """
-    parts = [p.type for p in params]
-    return ", ".join(parts) if parts else "(none)"
-
-
 _elf_only_demangled_name = elf_only_demangled_name
 _prewarm_elf_only_demangling = prewarm_elf_only_demangling
 
@@ -427,153 +416,6 @@ def _check_removed_function(
         # Change.surface_facts).
         surface_facts=surface_fact_summary(f_old),
     )
-
-
-def _check_return_type_change(
-    mangled: str,
-    f_old: Function,
-    f_new: Function,
-    *,
-    is_llp64: bool = False,
-) -> list[Change]:
-    """Emit a change if the return type was modified."""
-    # RD2-5: a stripped side reports return_type "?"; that is unknown, not a change.
-    if _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type):
-        return []
-    if canonicalize_type_name(f_old.return_type) == canonicalize_type_name(
-        f_new.return_type
-    ):
-        return []
-    # A pointee/by-value const-or-volatile qualification change (e.g.
-    # ``char *`` -> ``const char *``) does not change the return register or
-    # calling convention; it is a source/API-signature difference, not a
-    # binary ABI break (ISSUE-29/52: libuv/Wayland const-pointer churn).
-    if cv_qualifiers_only_differ(f_old.return_type, f_new.return_type):
-        return []
-    # A top-level BY-VALUE cv change on the return type (``int`` -> ``volatile
-    # int``) is absent from the function's mangled name entirely, unlike the
-    # equivalent field/variable case — see func_signature_cv_only_differ's
-    # docstring (Codex review, PR #582).
-    if func_signature_cv_only_differ(f_old.return_type, f_new.return_type):
-        return []
-    # A name-only change between ABI-equivalent integer spellings (e.g.
-    # long -> long long, size_t -> unsigned long on LP64) is not a binary ABI
-    # break: same width, signedness, and calling convention.
-    if _abi_equivalent_scalar(f_old.return_type, f_new.return_type, is_llp64):
-        return []
-    return [
-        make_change(
-            ChangeKind.FUNC_RETURN_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=f_old.return_type,
-            new=f_new.return_type,
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
-def _params_differ(p_old: Param, p_new: Param, is_llp64: bool) -> bool:
-    """Whether two positionally-matched parameters differ in an ABI-relevant way."""
-    if _type_unknown(p_old.type) or _type_unknown(p_new.type):
-        return False  # diffing a known type against unknown is meaningless
-    # Gated through compare_facts rather than a bare `p_old.kind !=
-    # p_new.kind`: neither header-AST backend
-    # determined a parameter's indirection kind at all before schema v45
-    # (the stale 'param_kind' fact family (model.snapshot_reliability)), so every parameter's `kind`
-    # read the dataclass's own resting ParamKind.VALUE -- comparing that raw
-    # default against DWARF's real POINTER/REFERENCE/RVALUE_REF reading
-    # fabricated FUNC_PARAMS_CHANGED for every pointer/reference parameter
-    # whenever a header-derived snapshot was compared against a
-    # DWARF-derived one of the identical, unchanged library. Same shape as
-    # is_restrict/is_va_list's own producer gate (diff_param_qualifiers.py):
-    # a pair whose evidence is incomplete on either side is skipped here,
-    # not read as "confirmed same/different" -- the type-spelling comparison
-    # below (which already renders a pointer/reference in the spelling
-    # itself, e.g. "S*"/"S *") is what still catches a real kind change on
-    # such a pair.
-    kind_cmp = compare_facts(p_old.kind_fact, p_new.kind_fact, ParamKind.VALUE)
-    if kind_cmp.is_comparable and kind_cmp.old_value != kind_cmp.new_value:
-        return True
-    if canonicalize_type_name(p_old.type) == canonicalize_type_name(p_new.type):
-        return False
-    # A pointee/by-value const-or-volatile qualification change (e.g.
-    # ``wl_display *`` -> ``const wl_display *``) leaves the parameter's
-    # calling convention and binary layout identical — it is source/API churn,
-    # not a binary ABI break (ISSUE-29/52).
-    if cv_qualifiers_only_differ(p_old.type, p_new.type):
-        return False
-    # A top-level BY-VALUE cv change (``int`` -> ``volatile int``) is, unlike
-    # the equivalent field/variable case, not merely layout-neutral but
-    # genuinely absent from the function's type/mangled name — see
-    # func_signature_cv_only_differ's docstring (Codex review, PR #582).
-    if func_signature_cv_only_differ(p_old.type, p_new.type):
-        return False
-    # Same kind, different spelling: not a change if the integer types are
-    # ABI-equivalent (long -> long long, size_t -> unsigned long on LP64).
-    return not _abi_equivalent_scalar(p_old.type, p_new.type, is_llp64)
-
-
-def _check_params_change(
-    mangled: str,
-    f_old: Function,
-    f_new: Function,
-    *,
-    params_unconfirmed: bool = False,
-    is_llp64: bool = False,
-) -> list[Change]:
-    """Emit a change if the parameter list was modified."""
-    # RD2-5: suppress only when one side is a stripped symbols-only stub (its
-    # empty param list is "unknown", not "zero args"). Otherwise compare
-    # position-by-position, ignoring only the individual parameters whose type is
-    # the unresolved "?" sentinel — diffing a known type against unknown is
-    # meaningless, but an unrelated unknown must not mask a real change on a
-    # fully-known parameter (e.g. f(?, int) -> f(?, long)). Parameter *count*
-    # changes are always real in a resolved snapshot (Codex reviews, PR #275).
-    if params_unconfirmed:
-        return []
-    changed: bool
-    if len(f_old.params) != len(f_new.params):
-        changed = True
-    else:
-        changed = any(
-            _params_differ(p_old, p_new, is_llp64)
-            for p_old, p_new in zip(f_old.params, f_new.params)
-        )
-    if not changed:
-        return []
-    return [
-        make_change(
-            ChangeKind.FUNC_PARAMS_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=_format_params(f_old.params),
-            new=_format_params(f_new.params),
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
-
-
-def _check_ref_qualifier_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the ref-qualifier (&/&&) was modified."""
-    old_rq = f_old.ref_qualifier or ""
-    new_rq = f_new.ref_qualifier or ""
-    if old_rq == new_rq:
-        return []
-    return [
-        make_change(
-            ChangeKind.FUNC_REF_QUAL_CHANGED,
-            symbol=mangled,
-            name=f_old.name,
-            old=repr(old_rq),
-            new=repr(new_rq),
-            old_value=old_rq or "(none)",
-            new_value=new_rq or "(none)",
-            entity_id=f_old.entity_id or f_new.entity_id,
-        )
-    ]
 
 
 def _check_linkage_change(
@@ -659,33 +501,6 @@ def _check_explicit_change(
             f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
         ),
         removed_values=("explicit", "implicit"),
-        entity_id=f_old.entity_id or f_new.entity_id,
-    )
-
-
-def _check_variadic_change(
-    mangled: str, f_old: Function, f_new: Function
-) -> list[Change]:
-    """Emit a change if the C ellipsis (...) was added or removed.
-
-    Tri-state — skip when either snapshot did not record variadicness
-    (older snapshots / dumpers without the field).
-    """
-    return bool_transition(
-        f_old.is_variadic,
-        f_new.is_variadic,
-        mangled,
-        skip_none=True,
-        added=(
-            ChangeKind.FUNC_VARIADIC_ADDED,
-            f"Function became variadic (gained ...): {f_old.name}",
-        ),
-        added_values=("fixed-arity", "variadic"),
-        removed=(
-            ChangeKind.FUNC_VARIADIC_REMOVED,
-            f"Function is no longer variadic (lost ...): {f_old.name}",
-        ),
-        removed_values=("variadic", "fixed-arity"),
         entity_id=f_old.entity_id or f_new.entity_id,
     )
 
@@ -814,26 +629,37 @@ def _check_function_signature(
     *,
     params_unconfirmed: bool = False,
     is_llp64: bool = False,
+    signatures: tuple[FunctionSignatureIndex, FunctionSignatureIndex] | None = None,
 ) -> list[Change]:
-    """Compare signatures and qualifiers of two matched functions."""
-    changes: list[Change] = []
-    changes.extend(_check_return_type_change(mangled, f_old, f_new, is_llp64=is_llp64))
-    changes.extend(
-        _check_params_change(
-            mangled,
-            f_old,
-            f_new,
-            params_unconfirmed=params_unconfirmed,
-            is_llp64=is_llp64,
+    """Compare signatures and qualifiers of two matched functions.
+
+    The return/parameter/ref-qualifier/variadic half reads each side's
+    ``SemanticIR`` through *signatures* (``compare/function_signature.py``,
+    ADR-063 6B function-signature cohort). Without one -- a caller pairing
+    two functions outside a snapshot comparison -- each side is projected on
+    its own, with the same formula.
+    """
+    if signatures is None:
+        signatures = (
+            function_signature_index(None, [f_old]),
+            function_signature_index(None, [f_new]),
         )
+    head, ref_qual, variadic = function_signature_changes(
+        mangled,
+        f_old.name,
+        signatures[0].entity_for(f_old),
+        signatures[1].entity_for(f_new),
+        entity_id=f_old.entity_id or f_new.entity_id,
+        params_unconfirmed=params_unconfirmed,
+        is_llp64=is_llp64,
     )
-    changes.extend(_check_ref_qualifier_change(mangled, f_old, f_new))
+    changes: list[Change] = head + ref_qual
     changes.extend(_check_linkage_change(mangled, f_old, f_new))
     changes.extend(_check_noexcept_change(mangled, f_old, f_new))
     changes.extend(_check_virtual_change(mangled, f_old, f_new))
     changes.extend(check_hidden_friend_change(mangled, f_old, f_new))
     changes.extend(_check_explicit_change(mangled, f_old, f_new))
-    changes.extend(_check_variadic_change(mangled, f_old, f_new))
+    changes.extend(variadic)
     changes.extend(_check_contract_attributes_change(mangled, f_old, f_new))
     changes.extend(_check_exception_spec_change(mangled, f_old, f_new))
     changes.extend(_check_vtable_index_change(mangled, f_old, f_new))
@@ -900,6 +726,7 @@ def _match_old_function(
     params_unconfirmed: bool = False,
     is_llp64: bool = False,
     old_exported_symbols: Container[str] = frozenset(),
+    check_signature: Callable[..., list[Change]] | None = None,
 ) -> list[Change]:
     """Classify a single old function: matched by mangled, extern-C fallback, or removed.
 
@@ -910,10 +737,11 @@ def _match_old_function(
     same rule the hand-rolled name multimap this replaced used, now living
     in the shared primitive every other flat join uses too).
     """
+    check = check_signature or _check_function_signature
     f_new_exact = new_index.get(mangled)
     if f_new_exact is not None:
         return list(
-            _check_function_signature(
+            check(
                 mangled,
                 f_old,
                 f_new_exact,
@@ -948,7 +776,7 @@ def _match_old_function(
     )
     if name_match is not None:
         result = list(
-            _check_function_signature(
+            check(
                 f_old.name,
                 f_old,
                 name_match.declaration,
@@ -1084,9 +912,19 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     matched_by_name: set[str] = set()
 
+    # ADR-063 6B function-signature cohort: the signature comparison reads
+    # each side's SemanticIR; pairing stays with the identity index above.
+    signatures = (
+        function_signature_index(old.canonical_ir, old_map.values()),
+        function_signature_index(new.canonical_ir, new_map.values()),
+    )
+    check_signature = functools.partial(
+        _check_function_signature, signatures=signatures
+    )
+
     ctor_dtor_consumed_old, ctor_dtor_consumed_new, ctor_dtor_changes = (
         reconcile_ctor_dtor_key_drift(
-            old_map, new_map, _check_function_signature, params_unconfirmed, is_llp64
+            old_map, new_map, check_signature, params_unconfirmed, is_llp64
         )
     )
     changes.extend(ctor_dtor_changes)
@@ -1105,6 +943,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 params_unconfirmed,
                 is_llp64,
                 old_exported_symbols=_old_exported_functions,
+                check_signature=check_signature,
             )
         )
 

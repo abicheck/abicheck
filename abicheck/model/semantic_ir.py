@@ -140,6 +140,24 @@ class CanonicalEntity:
     #: step with the ``RecordType`` they describe.
     size_bits: Fact[int] = field(default_factory=lambda: Fact.not_collected())
     alignment_bits: Fact[int] = field(default_factory=lambda: Fact.not_collected())
+    #: A function's signature, per position (ADR-063 6B, function-signature
+    #: cohort). ``NOT_COLLECTED`` for every non-function kind. The spellings
+    #: are the producer's own, *not* canonicalized: the signature detectors'
+    #: cv- and scalar-equivalence predicates read raw spellings, so storing a
+    #: canonical form would change what they decide. ``parameter_kinds`` holds
+    #: one ``ParamKind`` value per parameter, ``""`` where the producer did not
+    #: establish that parameter's kind. See ``model/semantic_ir_function_signature.py``.
+    return_type_spelling: Fact[str] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    parameter_type_spellings: Fact[tuple[str, ...]] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    parameter_kinds: Fact[tuple[str, ...]] = field(
+        default_factory=lambda: Fact.not_collected()
+    )
+    ref_qualifier: Fact[str] = field(default_factory=lambda: Fact.not_collected())
+    is_variadic: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
     producer: str = ""
 
     def __post_init__(self) -> None:
@@ -167,6 +185,9 @@ class CanonicalEntity:
                 isinstance(layout.value, bool) or not isinstance(layout.value, int)
             ):
                 raise ValueError(f"{name} must carry an int, got {layout.value!r}")
+        variadic = self.is_variadic
+        if variadic.is_present and not isinstance(variadic.value, bool):
+            raise ValueError(f"is_variadic must carry a bool, got {variadic.value!r}")
         cv = self.cv_qualification
         # `is_present`, not `status is PRESENT`: `PARTIAL` is usable evidence
         # everywhere else in this IR (`Fact.is_present`,

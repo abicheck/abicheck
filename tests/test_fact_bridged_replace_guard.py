@@ -113,6 +113,14 @@ _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
         "Fact[T]-bridged field; the mapping is every contribution the prior "
         "decision carries, read off its own dataclass fields."
     ),
+    (
+        "abicheck/model/semantic_ir_function_signature.py",
+        "with_function_signatures",
+    ): (
+        "CanonicalEntity: every field is itself a Fact (no legacy bridge "
+        "sibling); the mapping is the five signature facts named by "
+        "SIGNATURE_FIELDS."
+    ),
     ("abicheck/model/fact.py", "replace_with_fact_sync"): (
         "This *is* the fact-syncing wrapper — it derives each bridged "
         "field's sibling into the same call."
