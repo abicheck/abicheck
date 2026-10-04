@@ -138,6 +138,7 @@ __all__ = [
     "assert_typedef_ir_consistent",
     "legacy_constant_ir",
     "legacy_function_ir",
+    "legacy_function_signature_entity",
     "legacy_function_signature_occurrences",
     "legacy_typedef_ir",
     "legacy_variable_occurrences",
@@ -477,12 +478,18 @@ def legacy_function_signature_occurrences(
         ordinal = seen.get(key, 0)
         seen[key] = ordinal + 1
         occ_id = OccurrenceId(key, str(ordinal) if ordinal else "")
-        occurrences[occ_id] = CanonicalEntity(
-            canonical_spelling=Fact.not_collected(),
-            **function_signature_facts(fn),
-        )
+        occurrences[occ_id] = legacy_function_signature_entity(fn)
         order.append(occ_id)
     return SemanticIR(occurrences=occurrences), tuple(order)
+
+
+def legacy_function_signature_entity(fn: Function) -> CanonicalEntity:
+    """One function's :func:`legacy_function_signature_occurrences` payload,
+    without the ``SemanticIR`` around it."""
+    return CanonicalEntity(
+        canonical_spelling=Fact.not_collected(),
+        **function_signature_facts(fn),
+    )
 
 
 def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:

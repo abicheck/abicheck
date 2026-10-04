@@ -239,7 +239,7 @@ class CanonicalEntity:
         # reduction and the hybrid merge's backfill — treat a value the
         # entity does not carry as usable evidence (Codex review).
         for name, fact in self.fact_items():
-            if fact.is_present and fact.value is None:
+            if fact.value is None and fact.is_present:
                 raise ValueError(
                     f"{name} is {fact.status.value} but carries no value; "
                     "confirmed absence is spelled with this field's own "

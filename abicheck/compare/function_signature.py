@@ -49,6 +49,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from ..diff_helpers import bool_transition, make_change
@@ -61,7 +62,7 @@ from ..model.semantic_ir import CanonicalEntity, SemanticIR
 from ..model.semantic_ir_function_signature import with_declaration_signature
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
-    legacy_function_signature_occurrences,
+    legacy_function_signature_entity,
     semantic_ir_covers_kind,
 )
 from ..name_classification import (
@@ -70,6 +71,7 @@ from ..name_classification import (
     func_signature_cv_only_differ,
 )
 from .declined_comparisons import record_declined
+from .detection_memo import memoized
 
 if TYPE_CHECKING:
     from ..checker_types import Change
@@ -155,41 +157,77 @@ class FunctionSignatureIndex:
         return self.index.entity(fn.entity_id)
 
 
+#: One shared empty IR, so a side without function occurrences memoizes
+#: under one key rather than a fresh object per index.
+_EMPTY_IR = SemanticIR()
+
+
+def _named_signature_entities(ir: SemanticIR) -> dict[EntityId, CanonicalEntity]:
+    return {
+        eid: entity
+        for eid, entity in SemanticIRIndex(ir)
+        .entities_of_kind(EntityKind.FUNCTION)
+        .items()
+        if entity.return_type_spelling.is_present
+    }
+
+
+def _project(
+    functions: list[Function], named: dict[EntityId, CanonicalEntity]
+) -> list[CanonicalEntity]:
+    """Each function's entity: its named occurrence with the declaration
+    re-projected over it, or the legacy adapter's projection when the IR
+    cannot name it.
+
+    A named occurrence's signature facts are a copy of its declaration's,
+    written by the same formula at the snapshot boundary. A caller that edits
+    a loaded snapshot's ``Function`` leaves that copy stale, so the
+    declaration this comparison pairs wins where it establishes a fact; the
+    IR still owns identity and every fact the formula does not produce."""
+    out: list[CanonicalEntity] = []
+    for fn in functions:
+        entity = named.get(fn.entity_id) if fn.entity_id is not None else None
+        out.append(
+            legacy_function_signature_entity(fn)
+            if entity is None
+            else with_declaration_signature(entity, fn)
+        )
+    return out
+
+
 def function_signature_index(
     semantic_ir: SemanticIR | None, functions: Iterable[Function]
 ) -> FunctionSignatureIndex:
     """One side's index -- see the module docstring for the rule.
 
     *functions* are the objects the caller will pair; the adapter half is
-    keyed by object.
+    keyed by object. Inside a ``detection_memo_scope`` (one ``compare()``,
+    which builds ~20 indexes over the same functions) each function's entity
+    is projected once per IR; declarations must not be edited inside it.
     """
-    functions = list(functions)
     covered = semantic_ir is not None and semantic_ir_covers_kind(
         semantic_ir, EntityKind.FUNCTION
     )
-    index = SemanticIRIndex(
-        semantic_ir if covered and semantic_ir is not None else SemanticIR()
+    ir_used = semantic_ir if covered and semantic_ir is not None else _EMPTY_IR
+    # id(fn) -> (fn, entity); the function is held so its id stays unique.
+    seen: dict[int, tuple[Function, CanonicalEntity]] = memoized(
+        "function_signature_entities", ir_used, None, dict
     )
-    named = {
-        eid: entity
-        for eid, entity in index.entities_of_kind(EntityKind.FUNCTION).items()
-        if entity.return_type_spelling.is_present
-    }
-    unnamed = [f for f in functions if f.entity_id is None or f.entity_id not in named]
-    ir, order = legacy_function_signature_occurrences(unnamed)
-    projected = {
-        id(f): ir.occurrences[occ] for f, occ in zip(unnamed, order, strict=True)
-    }
-    # A named occurrence's signature facts are a copy of its declaration's,
-    # written by the same formula at the snapshot boundary. A caller that
-    # edits a loaded snapshot's ``Function`` leaves that copy stale, so the
-    # declaration this comparison pairs is re-projected over it: the IR
-    # still owns identity and every fact the formula does not produce.
-    for f in functions:
-        entity = named.get(f.entity_id) if f.entity_id is not None else None
-        if entity is not None:
-            projected[id(f)] = with_declaration_signature(entity, f)
-    return FunctionSignatureIndex(index=index, projected=projected)
+    functions = list(functions)
+    missing = [
+        f for f in functions if (hit := seen.get(id(f))) is None or hit[0] is not f
+    ]
+    if missing:
+        named = memoized(
+            "function_signature_named",
+            ir_used,
+            None,
+            partial(_named_signature_entities, ir_used),
+        )
+        for f, entity in zip(missing, _project(missing, named), strict=True):
+            seen[id(f)] = (f, entity)
+    projected = {id(f): seen[id(f)][1] for f in functions}
+    return FunctionSignatureIndex(index=SemanticIRIndex(ir_used), projected=projected)
 
 
 def _decline(mangled: str, what: str, both: bool) -> None:
