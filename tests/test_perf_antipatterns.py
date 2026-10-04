@@ -94,6 +94,11 @@ def _rules(src: str) -> list[str]:
             "sort-in-loop",
         ),
         ("def f(xs, pool):\n    for x in xs:\n        pool.sort()\n", "sort-in-loop"),
+        # a while condition's walrus does not make an unrelated name vary
+        (
+            "def f(read, pool):\n    while (chunk := read()):\n        y = sorted(pool)\n",
+            "sort-in-loop",
+        ),
         (
             "def f(xs):\n    out = ''\n    for x in xs:\n        out += x\n",
             "str-concat-in-loop",
@@ -137,6 +142,9 @@ def test_rule_fires_on_its_shape(src: str, rule: str) -> None:
         "def f(items):\n    for it in items:\n        ', '.join(sorted(it.names))\n",
         # the sorted collection changes every iteration
         "def f(xs):\n    acc = []\n    for x in xs:\n        acc.append(x)\n        top = sorted(acc)\n",
+        # a while condition's walrus rebinds its target every iteration
+        "def f(read):\n    while (chunk := read()):\n        sorted(chunk)\n",
+        "import copy\ndef f(read):\n    while (chunk := read()):\n        copy.copy(chunk)\n",
         # sorted in a comprehension element is per-element by construction
         "def f(groups):\n    return [sorted(g) for g in groups]\n",
         # an error path runs at most once

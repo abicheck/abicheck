@@ -245,6 +245,11 @@ def _varying_in(loop: ast.For | ast.AsyncFor | ast.While) -> set[str]:
     out: set[str] = set()
     if not isinstance(loop, ast.While):
         out.update(n.id for n in ast.walk(loop.target) if isinstance(n, ast.Name))
+    else:
+        # `while (chunk := read()):` rebinds `chunk` every iteration.
+        out.update(
+            n.target.id for n in ast.walk(loop.test) if isinstance(n, ast.NamedExpr)
+        )
     for stmt in loop.body:
         for node in ast.walk(stmt):
             if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):

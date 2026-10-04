@@ -71,8 +71,10 @@ def _hot_functions(pairs, top: int) -> list[tuple[str, float, int]]:
     for old, new in pairs:
         profiler = cProfile.Profile()
         profiler.enable()
-        compare(old, new)
-        profiler.disable()
+        try:
+            compare(old, new)
+        finally:
+            profiler.disable()
         for (filename, line, func), stat in pstats.Stats(profiler).stats.items():  # type: ignore[attr-defined]
             if filename.startswith(PACKAGE_ROOT):
                 site = f"{Path(filename).relative_to(REPO).as_posix()}:{line}({func})"
