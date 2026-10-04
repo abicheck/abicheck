@@ -139,13 +139,20 @@ def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
     same population as :func:`_func_index_items`: a declaration whose export
     vanished is still declared."""
     from ..demangle import demangle_batch
+    from .detection_memo import memoized
 
-    mangled = [
-        f.mangled
-        for f in snap.declarations.functions
-        if f.mangled.startswith("_Z") and in_source_declaration_index(f)
-    ]
-    return demangle_batch(mangled) if mangled else {}
+    def compute() -> dict[str, str]:
+        mangled = [
+            f.mangled
+            for f in snap.declarations.functions
+            if f.mangled.startswith("_Z") and in_source_declaration_index(f)
+        ]
+        return demangle_batch(mangled) if mangled else {}
+
+    # Three namespace-shape detectors ask this of both snapshots in one
+    # pass (``diff_namespaces.detect_namespace_patterns`` opens the scope);
+    # outside a scope this calls straight through.
+    return memoized("batch_demangle_public", snap, None, compute)
 
 
 def _build_std_reexport_change(declared: str, underlying: str) -> Change:
