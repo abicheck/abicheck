@@ -285,6 +285,193 @@ def add_remove(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
     return _pair({"functions": old}, {"functions": new})
 
 
+# ---------------------------------------------------------------------------
+# Further scaling axes. Each still grows with ``n``, but along a dimension
+# the entity-count workloads above hold fixed -- where quadratic behaviour
+# tends to hide: per-finding relations, per-call string cost, per-record
+# width, and ambiguity resolution.
+# ---------------------------------------------------------------------------
+
+
+def fan_in_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Graph connectivity: a *fixed* handful of records, each used by ``n/4``
+    functions, all of which grow -- every type finding relates to a growing
+    number of affected functions (``types x functions`` enrichment)."""
+    k = 4
+
+    def types(grow: bool) -> list[RecordType]:
+        return [
+            RecordType(
+                name=f"{tag}Hub{j}",
+                kind="struct",
+                size_bits=64 if grow else 32,
+                fields=[TypeField(name="a", type="int", offset_bits=0)]
+                + ([TypeField(name="b", type="int", offset_bits=32)] if grow else []),
+            )
+            for j in range(k)
+        ]
+
+    funcs = []
+    for i in range(n):
+        nm, st = f"{tag}use{i}", f"{tag}Hub{i % k}"
+        funcs.append(
+            _fn(
+                nm,
+                f"_Z{len(nm)}{nm}P{len(st)}{st}",
+                params=[Param(name="h", type=f"{st} *")],
+            )
+        )
+    return _pair(
+        {"functions": funcs, "types": types(False)},
+        {"functions": list(funcs), "types": types(True)},
+    )
+
+
+def sparse_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Change fraction: ``n`` functions of which only 10% change -- the
+    unchanged majority must not cost per-finding work."""
+    old, new = [], []
+    for i in range(n):
+        nm = f"{tag}s{i}"
+        mangled = f"_Z{len(nm)}{nm}i"
+        old.append(_fn(nm, mangled, params=[Param(name="a", type="int")]))
+        changed = i % 10 == 0
+        new.append(
+            _fn(
+                nm,
+                mangled,
+                ret="long" if changed else "int",
+                params=[Param(name="a", type="long" if changed else "int")],
+            )
+        )
+    return _pair({"functions": old}, {"functions": new})
+
+
+def deep_scope_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Nesting depth: a fixed set of functions whose namespace depth grows
+    with ``n`` -- per-call cost of demangling, canonicalisation and scope
+    parsing grows with the spelling, so any per-*segment* rescan shows."""
+    depth = max(2, n // 10)
+    # The tag salts only the outermost segment: enough for uniqueness, and a
+    # tag repeated in every segment made ~1000-character names c++filt
+    # declines to demangle, which measured the demangler's fallback instead.
+    segments = [f"{tag}n0", *(f"n{d}" for d in range(1, depth))]
+    scope = "::".join(segments)
+    mangled_scope = "".join(f"{len(seg)}{seg}" for seg in segments)
+    old, new = [], []
+    for i in range(10):
+        leaf = f"f{i}"
+        mangled = f"_ZN{mangled_scope}{len(leaf)}{leaf}Ei"
+        old.append(
+            _fn(f"{scope}::{leaf}", mangled, params=[Param(name="a", type="int")])
+        )
+        new.append(
+            _fn(
+                f"{scope}::{leaf}",
+                mangled,
+                ret="long",
+                params=[Param(name="a", type="long")],
+            )
+        )
+    return _pair({"functions": old}, {"functions": new})
+
+
+def wide_record_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Width: a few records whose field count grows with ``n``; every field's
+    type changes, and a few functions take each record by pointer."""
+    k = 4
+
+    def types(changed: bool) -> list[RecordType]:
+        out = []
+        for j in range(k):
+            fields = [
+                TypeField(
+                    name=f"f{m}",
+                    type="long" if changed else "int",
+                    offset_bits=m * (64 if changed else 32),
+                )
+                for m in range(n)
+            ]
+            out.append(
+                RecordType(
+                    name=f"{tag}W{j}",
+                    kind="struct",
+                    size_bits=n * (64 if changed else 32),
+                    fields=fields,
+                )
+            )
+        return out
+
+    funcs = []
+    for j in range(k):
+        nm, st = f"{tag}wide{j}", f"{tag}W{j}"
+        funcs.append(
+            _fn(
+                nm,
+                f"_Z{len(nm)}{nm}P{len(st)}{st}",
+                params=[Param(name="w", type=f"{st} *")],
+            )
+        )
+    return _pair(
+        {"functions": funcs, "types": types(False)},
+        {"functions": list(funcs), "types": types(True)},
+    )
+
+
+def wide_signature_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Width: a few functions whose parameter count grows with ``n``; every
+    parameter's type changes."""
+    old, new = [], []
+    for j in range(4):
+        nm = f"{tag}many{j}"
+        mangled = f"_Z{len(nm)}{nm}" + "i" * n
+        old.append(
+            _fn(nm, mangled, params=[Param(name=f"p{m}", type="int") for m in range(n)])
+        )
+        new.append(
+            _fn(
+                nm, mangled, params=[Param(name=f"p{m}", type="long") for m in range(n)]
+            )
+        )
+    return _pair({"functions": old}, {"functions": new})
+
+
+def short_name_collisions(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Ambiguity: one short record name (``Ctx``) declared in ``n/4``
+    namespaces, each used by its own function, and every one grows -- the
+    unique-short-name and qualified-identity paths do real work."""
+    k = max(2, n // 4)
+
+    def types(grow: bool) -> list[RecordType]:
+        return [
+            RecordType(
+                name=f"{tag}ns{j}::Ctx",
+                kind="struct",
+                size_bits=64 if grow else 32,
+                fields=[TypeField(name="id", type="int", offset_bits=0)]
+                + (
+                    [TypeField(name="extra", type="int", offset_bits=32)]
+                    if grow
+                    else []
+                ),
+            )
+            for j in range(k)
+        ]
+
+    funcs = []
+    for i in range(n):
+        j = i % k
+        ns = f"{tag}ns{j}"
+        nm = f"{ns}::use{i}"
+        leaf = f"use{i}"
+        mangled = f"_ZN{len(ns)}{ns}{len(leaf)}{leaf}EPNS_3CtxE"
+        funcs.append(_fn(nm, mangled, params=[Param(name="c", type=f"{ns}::Ctx *")]))
+    return _pair(
+        {"functions": funcs, "types": types(False)},
+        {"functions": list(funcs), "types": types(True)},
+    )
+
+
 WORKLOADS: dict[str, Workload] = {
     "signature_churn": signature_churn,
     "legacy_signature_churn": legacy_signature_churn,
@@ -294,4 +481,10 @@ WORKLOADS: dict[str, Workload] = {
     "nested_type_churn": nested_type_churn,
     "type_churn": type_churn,
     "add_remove": add_remove,
+    "fan_in_churn": fan_in_churn,
+    "sparse_churn": sparse_churn,
+    "deep_scope_churn": deep_scope_churn,
+    "wide_record_churn": wide_record_churn,
+    "wide_signature_churn": wide_signature_churn,
+    "short_name_collisions": short_name_collisions,
 }
