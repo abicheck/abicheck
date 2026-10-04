@@ -76,23 +76,6 @@ scenarios:
       Needs a real ELF binary + dependency tree; the resolver/binder is
       unit-tested (tests/test_stack_checker.py). End-to-end fixture pending.
 
-  - id: SC-ABICC-DROPIN
-    title: Drop-in replacement for an existing ABICC pipeline
-    persona: Migrating team (from abi-compliance-checker)
-    narrative: >
-      A team with an existing ABICC pipeline switches to abicheck without
-      changing their inputs/flags, using `abicheck compat check` for ABICC
-      parity (XML descriptors, ABICC-style exit codes).
-    flow:
-      - abicheck compat check -lib libfoo -old old.xml -new new.xml
-    expected:
-      exit_code: 1   # ABICC-style: BREAKING
-    validates: UC-WF-abicc-compat
-    automated: false
-    status: planned
-    note: >
-      Needs ABICC XML descriptors / binaries; ABICC parity is covered by
-      tests/test_abicc_parity.py. End-to-end descriptor fixture pending.
 
   - id: SC-DEBIAN-SYMBOLS
     title: Maintain a Debian symbols file for a package

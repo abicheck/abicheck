@@ -227,7 +227,6 @@ def append_source_facts(
     tus: Iterable[SourceAbiTu],
     *,
     filename: str = DEFAULT_FACTS_FILE,
-    compress: bool = False,
 ) -> Path:
     """Append per-TU dumps as JSON-Lines to ``source_facts/<filename>``.
 
@@ -235,8 +234,8 @@ def append_source_facts(
     Returns the file written. The caller is responsible for having created the
     manifest (see :func:`init_inputs_pack`).
 
-    *compress* (P1 #22) gzips the file (a ``.gz`` suffix is appended to
-    *filename* if not already present) — pure execution policy, never changes
+    A *filename* ending in ``.gz`` (P1 #22) gzips the file — pure execution
+    policy, never changes
     the decoded facts a reader gets back (``inputs_pack.read_source_facts``
     decompresses transparently). Gzip append semantics differ from plain-text
     append (each ``gzip.open(..., "ab")`` call writes an independent member,
@@ -247,14 +246,13 @@ def append_source_facts(
     root = Path(root)
     facts_dir = root / SOURCE_FACTS_DIR
     facts_dir.mkdir(parents=True, exist_ok=True)
-    # Infer compression from a caller-supplied ".gz" filename too: a mismatch
-    # (compress=False with a ".gz"-named file) would silently write plaintext
-    # under a name read_source_facts() later tries to gunzip (CodeRabbit
-    # review, P2).
-    compress = compress or filename.endswith(".gz")
+    # The ".gz" suffix is the one statement of compression, so a ".gz"-named
+    # file can never hold plaintext read_source_facts() would try to gunzip
+    # (CodeRabbit review, P2).
+    compress = filename.endswith(".gz")
     # The default directory scan _iter_source_fact_files() only recognizes
     # *.jsonl(.gz)/*.json(.gz) -- a caller-supplied basename without one of
-    # those extensions (e.g. filename="tu", with or without compress=True)
+    # those extensions (e.g. filename="tu" or "tu.gz")
     # wrote a file that scan could never find, so it silently vanished from
     # every later ingest/validate. Normalize to the canonical .jsonl
     # extension before the optional .gz suffix, same fix already applied to

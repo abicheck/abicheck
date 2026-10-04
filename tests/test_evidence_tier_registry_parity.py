@@ -26,9 +26,9 @@ one branch:
   -- so the new ``func_added_elf_only`` was reported as a removal.
 * Four addition consumers listed ``FUNC_ADDED`` and not
   ``FUNC_ADDED_ELF_ONLY``, while their removal counterparts *did* list
-  ``FUNC_REMOVED_ELF_ONLY``, so ``-warn-newsym`` ignored it, ``-strict``
-  mis-promoted it, HTML/compat XML counted zero added symbols, and its
-  lifecycle event was dropped (Codex review).
+  ``FUNC_REMOVED_ELF_ONLY``, so the (since removed) ABICC ``compat``
+  options ignored or mis-promoted it, the reports counted zero added
+  symbols, and its lifecycle event was dropped (Codex review).
 
 Both were found one consumer at a time. This states the rule instead, over
 every ``*_elf_only`` pair that exists or is added later, so the next one
@@ -124,44 +124,6 @@ def test_an_addition_registry_matches_its_removal_counterpart() -> None:
             if present_add and not present_rm:
                 offenders.add(f"{name}: has {added.value}, missing {removed.value}")
     assert not offenders, sorted(offenders)
-
-
-def test_a_pure_elf_only_addition_is_an_addition_everywhere_it_is_known() -> None:
-    """The consumers with no removal counterpart to compare against, checked
-    directly: ``-warn-newsym``'s new-symbol set and ``-strict``'s
-    addition-only set both treat an ELF-only function addition as what it
-    is."""
-    from abicheck.compat import _helpers
-
-    assert ChangeKind.FUNC_ADDED_ELF_ONLY in _helpers._NEW_SYMBOL_KINDS
-    assert ChangeKind.FUNC_ADDED in _helpers._NEW_SYMBOL_KINDS
-
-    # `-strict`'s own set is a local inside `_apply_strict`, so it is checked
-    # through behaviour rather than by reaching into the function: a result
-    # whose only change is an ELF-only addition must not be promoted.
-    from abicheck.checker_policy import Verdict
-    from abicheck.checker_types import Change, DiffResult
-
-    addition_only = DiffResult(
-        old_version="1.0",
-        new_version="2.0",
-        library="libfoo.so",
-        verdict=Verdict.COMPATIBLE,
-        changes=[Change(ChangeKind.FUNC_ADDED_ELF_ONLY, "gained", "new export")],
-    )
-    assert _helpers._apply_strict(addition_only).verdict == Verdict.COMPATIBLE
-
-    # The control: a non-addition under `-strict` *is* promoted, so the
-    # assertion above is about the addition set and not about `-strict`
-    # being inert.
-    with_a_real_change = DiffResult(
-        old_version="1.0",
-        new_version="2.0",
-        library="libfoo.so",
-        verdict=Verdict.COMPATIBLE,
-        changes=[Change(ChangeKind.FUNC_PARAMS_CHANGED, "f", "signature")],
-    )
-    assert _helpers._apply_strict(with_a_real_change).verdict != Verdict.COMPATIBLE
 
 
 #: Kinds whose evidence-tier counterpart deliberately does not exist, with the

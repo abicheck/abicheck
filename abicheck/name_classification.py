@@ -522,10 +522,9 @@ def is_cxx_runtime_library(library: str | None) -> bool:
     """Return True if *library* names a C++ runtime / standard-library DSO that
     owns the ``std::`` namespace.
 
-    Accepts both SONAMEs (``libstdc++.so.6``, ``/usr/lib/libc++.so.1``) and the
-    short names that ``abicheck compat dump`` writes from the ABICC ``-lib``
-    flag (``stdc++``, ``c++``): the optional ``lib`` prefix is stripped before
-    matching the core stems.
+    Accepts both SONAMEs (``libstdc++.so.6``, ``/usr/lib/libc++.so.1``) and
+    short names (``stdc++``, ``c++``): the optional ``lib`` prefix is stripped
+    before matching the core stems.
     """
     if not library:
         return False

@@ -180,7 +180,6 @@ _F2 = (
     "config.option_dropped_at_a_dispatch_branch",
     "config.sided_shared_input_dropped",
     "config.command_specific_discovery",
-    "config.inferred_root_bypassed_by_a_second_entry_point",
     "evidence.entry_point_skips_extraction_record",
     "evidence.stored_snapshot_rederivation",
     "report.finding_entry_builder_parity",
@@ -229,7 +228,6 @@ _F4 = (
     "extraction.language_mode_export_evidence",
     "extraction.ast_wrapper_chain_traversal",
     "guard.proxy_predicate_overshoots_justification",
-    "config.rule_language_class_collapsed",
     "evidence.linker_reserved_export_symbols",
 )
 _F5 = tuple(

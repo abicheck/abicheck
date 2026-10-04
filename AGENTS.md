@@ -40,8 +40,9 @@ file owns development procedure, not direction.
 Mechanically: pure Python (3.11+); reads ELF, PE/COFF, and Mach-O binaries
 plus optional debug info, public headers, build data, and sources (L0–L5);
 detects 408 ABI/API change types categorized into `BREAKING_KINDS`,
-`API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`);
-drop-in replacement for abi-compliance-checker (ABICC).
+`API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
+Its ABICC drop-in (`abicheck compat`) was removed before 0.6;
+`abi-compliance-checker` remains a benchmark, not a command-line model.
 
 **Two different Python version numbers matter here, don't conflate them:**
 `pyproject.toml`'s `requires-python = ">=3.11"` is the *minimum supported*
@@ -263,7 +264,6 @@ Entry points:
   "large file, at the 2000-line hard cap" long after that stopped being
   true — exactly the drift the "don't trust hard-coded line counts" warning
   below is about.)
-- `abicheck/compat/cli.py` — ABICC-compatible CLI wrapper
 - `abicheck/__main__.py` — `python -m abicheck` entry
 
 Agent/script integration is via the CLI's structured JSON/SARIF output or
@@ -591,7 +591,7 @@ Core pipeline (in order of data flow):
      full account). PR B's
      other stated goal, the effective-config digest, has already landed for
      the native compare/release JSON path, and the `--stat` JSON summary -- non-JSON renderers (Markdown, review, SARIF,
-     JUnit, HTML) and `compat check` don't carry it, see that plan
+     JUnit, HTML) don't carry it, see that plan
      section's own PR B note for the exact scope). One review finding
      worth not rediscovering (historical — `--exit-code-scheme` itself is
      gone, but the underlying "read, don't re-derive" principle still
@@ -757,15 +757,14 @@ Core pipeline (in order of data flow):
    evolution-stated finding set. `workflows/release_public_surface.py`
    orchestrates the stage; `report/release_public_surface.py` owns the
    report section and the shared-finding fold.
-   **Four drivers, one model.** `workflows/release_public_surface.py`'s
+   **Three drivers, one model.** `workflows/release_public_surface.py`'s
    `reconcile_member_sets` is the driver-agnostic core and
    `member_pass_scope` the one place the ">1 member" rule lives, so a new
    multi-member driver wires to those rather than restating either: the
    live directory/package fan-out (`cli_compare_release*.py`), a stored
    `BundleFacts` baseline against a live release
-   (`stored_old_live_new_reconciliation`), two stored documents
-   (`workflows/bundle_stored_pair_compare.py`), and a multi-library ABICC
-   descriptor (`compat/multi_library_run.py`). Only the live path
+   (`stored_old_live_new_reconciliation`), and two stored documents
+   (`workflows/bundle_stored_pair_compare.py`). Only the live path
    *acquires* a surface; a stored side uses the contract its capture
    recorded (`BundleFacts.public_surface`, bundle-facts schema 4), falling
    back to one derived from its member snapshots for a pre-v4 document. A
@@ -1155,7 +1154,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `changekind-detector` | WARN | Every `ChangeKind` is produced somewhere (not orphaned) |
 | `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
 | `doc-count-sync` | ERROR on drift, WARN if anchor moved | Headline counts in docs (ChangeKind count, example-catalog size) match their source of truth (`len(ChangeKind)`, `ground_truth.json`) — this file (`AGENTS.md`) is included in the generic sweep, same as `README.md`/`CLAUDE.md` |
-| `cli-contract` | ERROR | No *unallowlisted* front-end `cli*.py`/`appcompat.py`/`compat/cli.py` module calls a Tier-1 core entry point (`checker.compare`, `dumper.dump`, `service.resolve_input`) directly — it must route through the Tier-2 service (`service.run_compare`/`compare_snapshots`, `service.run_dump`/`service_dump_pipeline.run_dump_request`, `service_input_resolution.resolve_side_snapshot`); ADR-037 D10.1, extended to the latter two per Phase 0 item 2 of `docs/contribute/plans/duplication-and-convergence-assessment.md`. A small set of reviewed, line-pinned legacy exceptions remain permitted via `CLI_CONTRACT_ALLOWLIST` in `scripts/check_ai_readiness.py` — the gate rejects only a *new*, unlisted direct call |
+| `cli-contract` | ERROR | No *unallowlisted* front-end `cli*.py`/`appcompat.py` module calls a Tier-1 core entry point (`checker.compare`, `dumper.dump`, `service.resolve_input`) directly — it must route through the Tier-2 service (`service.run_compare`/`compare_snapshots`, `service.run_dump`/`service_dump_pipeline.run_dump_request`, `service_input_resolution.resolve_side_snapshot`); ADR-037 D10.1, extended to the latter two per Phase 0 item 2 of `docs/contribute/plans/duplication-and-convergence-assessment.md`. `CLI_CONTRACT_ALLOWLIST` in `scripts/check_ai_readiness.py` held the reviewed, line-pinned legacy exceptions; the last ones left with the ABICC `compat` front end, so it is empty and any direct call fails |
 | `engine-cli-boundary` | ERROR | No engine-layer module (`service*.py`, `artifact_*.py`, `buildsource/**/*.py`, `workflows/artifact/**/*.py`) imports `click` or a `cli_*` sibling — the CLI is a frontend adapter over the engine, not the reverse. `ENGINE_CLI_BOUNDARY_ALLOWLIST` (`scripts/engine_cli_boundary.py`) is now empty — every pre-existing inversion was closed (Phase 1 of `docs/contribute/plans/duplication-and-convergence-assessment.md`, the rest deleted with `scan`) — so any engine-layer `click`/`cli_*` import fails outright |
 | `fact-detector-misuse` | ERROR | ADR-063 Phase 0 (`docs/contribute/plans/one-semantic-pipeline.md`): no direct `==`/`!=` comparison of a `Fact[T]`-typed value (a `<attr>_fact` field access, or a `Fact(...)`/`Fact.<classmethod>(...)` constructor call) anywhere under `abicheck/` — a detector must unwrap via `.status` first, never compare two `Fact[...]`s (or a `Fact[...]` against a bare value) directly, since `Fact[T]` deliberately doesn't override `__eq__` and a direct comparison silently falls back to structural dataclass equality over `status`/`value`/`diagnostics` together. Real, repo-wide AST scan (`scripts/fact_detector_misuse.py` + `fact_detector_misuse_aliases.py`/`fact_detector_misuse_scope.py`), resolving same-function local aliases, annotated parameters, constructor-classmethod aliases, and closure-scope shadowing — not a naive textual match. No baseline: any match is an unconditional error |
 | `fact-field-readers` | ERROR | ADR-063 Phase 0 (`docs/contribute/plans/one-semantic-pipeline.md`): no function outside `EXEMPT_FUNCTIONS` reads a `Fact[T]`-bridged legacy field (`RecordType.bases`/`virtual_bases`/`vtable`/`vptr_offset_bits`, `Param.is_va_list`) directly — via a plain attribute access, a `getattr(obj, "name", ...)` call (including a resolved `getattr`/`builtins` alias, excluding one locally shadowed by a parameter), an `operator.attrgetter(...)` call or a bound/unbound `__getattribute__` call (each through a resolved alias too), an `ast.AugAssign` target (`rec.bases += x`, an implicit read before the write), or a `case RecordType(bases=[]):` structural-pattern match (keyword or positional) — without first consulting its `Fact[...]` sibling's `.status`, which would collapse "confirmed empty/false" and "no evidence" onto the same value. Real, repo-wide AST scan, not a `diff_*.py` glob. `KNOWN_UNMIGRATED_READERS` records every currently-known reader site the same allowlist-and-shrink way `IMPORT_CYCLE_ALLOWLIST` does, keyed by enclosing function, attribute, the read's own outermost containing expression, its own exact source text, and a per-site occurrence rank — a new, unlisted site fails outright |
@@ -1498,9 +1497,10 @@ split-out module over growing the parent toward the cap.
 ### Adding a new top-level command
 
 **First, ask whether it should be a *root* command at all (ADR-043/ADR-054).**
-The public root surface is exactly `dump`, `compare`, `deps`, `compat`,
+The public root surface is exactly `dump`, `compare`, `deps`,
 `aggregate`, `project` — `scan` was retired by ADR-068 Phase 6, which deleted
-the command and its scan-only modules — and `tests/test_cli_root_surface.py`
+the command and its scan-only modules, and the ABICC `compat` drop-in was
+removed too — and `tests/test_cli_root_surface.py`
 pins that set as
 an executable contract, so a new root registration fails CI until the test is
 updated too. Before adding one, a new root command must clear **every** one of
@@ -1605,7 +1605,6 @@ Once a root command genuinely clears the bar above, pick the right home:
   file, never from a discovered one-member directory, so a PR-controlled
   NEW tree cannot narrow its way past `block`), `report/comparison_scope.py`
   (the section)
-- `compat` command: 0 = compatible, 1 = BREAKING, 2 = API_BREAK (source-level), 3-11 = errors (see `compat/cli.py:_classify_compat_error_exit_code`)
 - `64` = usage error (bad flags/inputs; `cli._EXIT_USAGE_ERROR`) — applies across commands
 - Full per-command matrix: `docs/reference/exit-codes.md`
 

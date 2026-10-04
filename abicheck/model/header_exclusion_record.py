@@ -16,13 +16,10 @@
 
 Lives in ``model`` rather than beside the matching rules in
 ``extract.header_exclusions``, and that is a dependency-direction fact
-rather than a taste one: three different layers produce a narrowed snapshot
-and each must record it. ``workflows.input_resolution`` handles the native
-``--exclude-header`` path, and ``compat.cli`` -- a ``frontends``-layer
-module, which may import ``model`` but not ``extract`` -- handles the
-descriptor's own ``<skip_headers>``/``<skip_including>``. Putting the
-recorder in ``extract`` made the second one a forbidden import (caught by
-``check_architecture.py``, not by review).
+rather than a taste one: more than one layer may narrow a snapshot and
+each must record it (``workflows.input_resolution`` handles the native
+``--exclude-header`` path), so the recorder sits where every layer may
+import it.
 
 The split is clean on its own terms too: *matching* a pattern against a
 header list is extraction's job; *setting a field on a snapshot* is a model
@@ -48,8 +45,11 @@ GLOB_MATCHING = "glob"
 #: different sets of headers for the same text.
 EXACT_MATCHING = "exact"
 #: A descriptor's ``<skip_headers>`` under real ABICC rule classes --
-#: basename, component-boundary path/directory, or compiled pattern (see
-#: :mod:`abicheck.model.header_skip_rules`). Its own rule rather than a
+#: basename, component-boundary path/directory, or compiled pattern. **No
+#: run produces this any more**: the ABICC ``compat`` front end that applied
+#: descriptors was removed, and with it the rule compiler. It stays
+#: recognised, like :data:`EXACT_MATCHING`, so a baseline it wrote still
+#: loads as the narrowing it really performed. Its own rule rather than a
 #: variant of :data:`EXACT_MATCHING`, for the same reason ``exact`` is not
 #: a variant of ``glob``: the same text names a different set of headers
 #: under each, so two sides narrowed under different rules are not

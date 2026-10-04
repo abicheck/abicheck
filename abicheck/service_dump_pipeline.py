@@ -603,8 +603,7 @@ def execute_dump_request(
 # The source-read licence, granted at the one function every ``DumpResult`` in
 # this pipeline returns through -- deliberately here rather than at each of the
 # three branches above (ELF/PE/Mach-O, binary-less header-only, binary-less
-# source-only). `service.run_dump` was stamped first, then the ABICC front end,
-# and the typed API's two binary-less dispatches still came back unlicensed:
+# source-only). `service.run_dump` was stamped first, and the typed API's two binary-less dispatches still came back unlicensed:
 # fixing execution branches one at a time is how that keeps happening, so the
 # grant sits at the join instead (Codex review, P2). Conditional and
 # idempotent, so the already-wrapped `run_dump` composing over this changes

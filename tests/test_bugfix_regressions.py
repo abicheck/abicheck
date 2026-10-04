@@ -243,19 +243,6 @@ class TestBug3MetadataCollection:
         finally:
             path.unlink()
 
-    def test_perl_dump_returns_none(self):
-        from abicheck.frontends.cli.runtime import _collect_metadata
-
-        with tempfile.NamedTemporaryFile(suffix=".dump", mode="w", delete=False) as f:
-            f.write("$VAR1 = { 'library' => 'lib.so' };")
-            f.flush()
-            path = Path(f.name)
-        try:
-            meta = _collect_metadata(path)
-            assert meta is None
-        finally:
-            path.unlink()
-
 
 # ── Bug 4: Policy overrides affect DiffResult section properties ─────────────
 

@@ -7,7 +7,6 @@ import pytest
 from abicheck.checker_policy import ChangeKind
 from abicheck.report_classifications import (
     ADDED_KINDS,
-    BINARY_ONLY_KINDS,
     BREAKING_KINDS,
     CHANGED_BREAKING_KINDS,
     ENVIRONMENT_DRIFT_KINDS,
@@ -16,8 +15,6 @@ from abicheck.report_classifications import (
     REMOVED_KINDS,
     category,
     is_breaking,
-    is_symbol_problem,
-    is_type_problem,
     kind_str,
     severity,
 )
@@ -39,12 +36,6 @@ class TestConstants:
         assert "func_added" in ADDED_KINDS
         assert "var_added" in ADDED_KINDS
         assert "type_added" in ADDED_KINDS
-
-    def test_binary_only_kinds_contains_expected_members(self):
-        assert isinstance(BINARY_ONLY_KINDS, frozenset)
-        assert "soname_changed" in BINARY_ONLY_KINDS
-        assert "symbol_type_changed" in BINARY_ONLY_KINDS
-        assert "calling_convention_changed" in BINARY_ONLY_KINDS
 
     def test_breaking_kinds_contains_expected_members(self):
         assert isinstance(BREAKING_KINDS, frozenset)
@@ -124,67 +115,6 @@ class TestSeverity:
 
     def test_low_severity_unknown(self):
         assert severity("totally_unknown") == "Low"
-
-
-# ---------------------------------------------------------------------------
-# is_type_problem()
-# ---------------------------------------------------------------------------
-
-
-class TestIsTypeProblem:
-    @pytest.mark.parametrize(
-        "kind_s",
-        [
-            "type_size_changed",
-            "struct_field_removed",
-            "union_field_type_changed",
-            "field_bitfield_changed",
-            "typedef_base_changed",
-            "enum_member_added",
-            "base_class_position_changed",
-        ],
-    )
-    def test_true_for_type_kinds(self, kind_s):
-        assert is_type_problem(kind_s) is True
-
-    @pytest.mark.parametrize(
-        "kind_s",
-        [
-            "func_removed",
-            "var_added",
-        ],
-    )
-    def test_false_for_non_type_kinds(self, kind_s):
-        assert is_type_problem(kind_s) is False
-
-
-# ---------------------------------------------------------------------------
-# is_symbol_problem()
-# ---------------------------------------------------------------------------
-
-
-class TestIsSymbolProblem:
-    @pytest.mark.parametrize(
-        "kind_s",
-        [
-            "func_removed",
-            "func_added",
-            "var_removed",
-            "var_type_changed",
-        ],
-    )
-    def test_true_for_symbol_kinds(self, kind_s):
-        assert is_symbol_problem(kind_s) is True
-
-    @pytest.mark.parametrize(
-        "kind_s",
-        [
-            "type_size_changed",
-            "soname_changed",
-        ],
-    )
-    def test_false_for_non_symbol_kinds(self, kind_s):
-        assert is_symbol_problem(kind_s) is False
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +204,6 @@ _ALL_KIND_VALUES: frozenset[str] = frozenset(k.value for k in ChangeKind)
 _HAND_MAINTAINED_KIND_SETS: dict[str, frozenset[str]] = {
     "REMOVED_KINDS": REMOVED_KINDS,
     "ADDED_KINDS": ADDED_KINDS,
-    "BINARY_ONLY_KINDS": BINARY_ONLY_KINDS,
     "ENVIRONMENT_DRIFT_KINDS": ENVIRONMENT_DRIFT_KINDS,
     "CHANGED_BREAKING_KINDS": CHANGED_BREAKING_KINDS,
     "HIGH_SEVERITY_KINDS": HIGH_SEVERITY_KINDS,

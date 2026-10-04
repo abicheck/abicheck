@@ -64,9 +64,8 @@ def to_markdown(
     show_recommendation: bool = False,
     # Stays `False`: the CLI demangles *once*, at the `service_render`
     # boundary, so flipping this default made the native path demangle twice
-    # and render `bar() [bar() [_Z3barv]]`. The one direct caller that
-    # genuinely needs it (`compat/cli.py`) passes it explicitly (Codex
-    # review, PR #1284).
+    # and render `bar() [bar() [_Z3barv]]`. A direct caller that has not
+    # demangled passes it explicitly (Codex review, PR #1284).
     demangle: bool = False,
     contract_evaluation: bool = False,
     envelope: ReportEnvelope | None = None,

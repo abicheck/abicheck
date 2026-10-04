@@ -113,30 +113,6 @@ class TestImplicitDepthIsNormalized:
         assert block.to_dict()["requested_depth_source"] == "explicit"
 
 
-class TestMergedRollUpNeverPresentsANormalizationAsARequest:
-    @pytest.mark.parametrize(
-        "sources",
-        list(itertools.product(("explicit", "implicit"), repeat=2))
-        + list(itertools.product(("explicit", "implicit"), repeat=3)),
-    )
-    def test_one_implicit_member_makes_the_release_implicit(
-        self, sources: tuple[str, ...]
-    ) -> None:
-        from abicheck.analysis_assurance import AnalysisAssurance
-        from abicheck.policy.analysis_assurance_merge import merge_analysis_assurance
-
-        blocks = [
-            AnalysisAssurance(
-                requested_depth="headers", requested_depth_source=src, status="complete"
-            )
-            for src in sources
-        ]
-        merged = merge_analysis_assurance(blocks)
-        assert merged is not None
-        expected = "explicit" if all(s == "explicit" for s in sources) else "implicit"
-        assert merged.requested_depth_source == expected
-
-
 class TestPositionalConstructorStaysBackwardCompatible:
     """A new ``AnalysisAssurance`` field is appended, never inserted.
 

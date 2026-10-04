@@ -18,8 +18,7 @@ The verdict→exit-code contract (BREAKING→4, API_BREAK→2, compatible→0) i
 encoded once in `severity.legacy_exit_code`. These tests lock that mapping and
 assert the two CLI flows that exit on a single verdict — `compare` and
 `compare-release` — produce the *same* code for the same verdict, so they can
-never drift apart. The `compat` flow uses a deliberately different scheme
-(0/1/2 + 3–11 errors); that distinction is asserted too.
+never drift apart.
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ from abicheck.checker import compare
 from abicheck.checker_policy import Verdict
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.policy.effective_gate import EffectiveGate
-from abicheck.policy.severity import _LEGACY_VERDICT_EXIT_CODE
 from abicheck.severity import legacy_exit_code
 
 
@@ -115,24 +113,6 @@ def test_compare_and_release_agree_for_each_verdict() -> None:
             _exit_compare_release, v.name, False, [], severity_exit_code=None
         )
         assert release_code == legacy_exit_code(v)
-
-
-def test_compat_scheme_is_distinct() -> None:
-    # The compat flow uses a deliberately different, wider exit-code scheme
-    # (3–11 for operational errors). Exercise its classifier and assert the codes
-    # it emits fall OUTSIDE the legacy compare range {0, 2, 4}, so the two schemes
-    # can never be accidentally unified.
-    from abicheck.compat._errors import _classify_compat_error_exit_code
-
-    legacy_codes = set(_LEGACY_VERDICT_EXIT_CODE.values())  # {0, 2, 4}
-    # 11 (interrupted) is emitted by compat but never by the legacy verdict
-    # mapping — proof the schemes are distinct. (Some numeric codes, e.g. 4,
-    # overlap by coincidence with different meanings; 11 cannot.)
-    interrupted = _classify_compat_error_exit_code(KeyboardInterrupt())
-    assert interrupted == 11
-    assert interrupted not in legacy_codes
-    # And the legacy mapping itself is unchanged.
-    assert legacy_exit_code(Verdict.BREAKING) == 4
 
 
 class TestReleaseContractCoverageFold:
@@ -506,15 +486,3 @@ class TestReleaseGlobalVerdict:
         bundle = cast(Any, SimpleNamespace(bundle_verdict=Verdict.COMPATIBLE))
         matrix = cast(Any, SimpleNamespace(verdict=Verdict.BREAKING))
         assert _release_global_verdict(bundle, matrix) == "BREAKING"
-
-
-def test_compat_not_comparable_exit_code_is_9_and_distinct_from_compare() -> None:
-    # ADR-050 D2: compat check's not_comparable code (9) is the one integer
-    # the 3-11 range documented no meaning for, and deliberately different
-    # from native compare's own not_comparable code (16) -- the two commands
-    # maintain independent, non-overlapping exit-code schemes.
-    from abicheck.compat._errors import _classify_compat_error_exit_code
-    from abicheck.errors import ProfileMismatchError, ScopeMismatchError
-
-    assert _classify_compat_error_exit_code(ProfileMismatchError("x")) == 9
-    assert _classify_compat_error_exit_code(ScopeMismatchError("x")) == 9

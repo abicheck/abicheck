@@ -252,17 +252,7 @@ lists the declarations that changed owner or contract. See
 
 ---
 
-## 3) "How does `compat` mode report API_BREAK?"
-
-`abicheck compat` uses ABICC-style report text, but still returns **exit code `2`**
-for source-level `API_BREAK` conditions.
-
-If you need an explicit `API_BREAK` verdict string in machine-readable output,
-use `abicheck compare -o json=-`.
-
----
-
-## 4) "Why are deep type changes not detected?"
+## 3) "Why are deep type changes not detected?"
 
 Check if the binary has DWARF debug info:
 
@@ -283,14 +273,14 @@ analysed automatically when `--debug-dump=follow-links` can resolve the path.
 
 ---
 
-## 5) CI script says success but report shows changes
+## 4) CI script says success but report shows changes
 
 Remember: `compare` exit code `0` includes both `NO_CHANGE` and `COMPATIBLE`.
 If you need exact policy, parse JSON verdict instead of checking `$? == 0`.
 
 ---
 
-## 6) Still unsure?
+## 5) Still unsure?
 
 Open an issue with:
 - command line used

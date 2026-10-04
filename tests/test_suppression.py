@@ -438,13 +438,6 @@ def test_labels_and_repr() -> None:
     assert "SuppressionList(3 rules)" in repr(sl)
 
 
-def test_merge_combines_lists() -> None:
-    a = SuppressionList([Suppression(symbol="a")])
-    b = SuppressionList([Suppression(symbol="b")])
-    m = SuppressionList.merge(a, b)
-    assert len(m) == 2
-
-
 def test_suppressions_must_be_list(tmp_path: Path) -> None:
     bad = write_yaml(
         tmp_path,

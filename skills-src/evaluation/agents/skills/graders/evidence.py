@@ -41,20 +41,18 @@ from .claim import VERDICT_ORDER
 #: an agent that only dumps both sides and reads the JSON by eye has not
 #: obtained a verdict from the tool, which is the distinction dimension 1
 #: grades.
-COMPARISON_SUBCOMMANDS = frozenset({"compare", "scan", "compat"})
+COMPARISON_SUBCOMMANDS = frozenset({"compare", "scan"})
 
 #: Exit statuses that mean *this command* produced a verdict — deliberately
 #: per command, because the same number means different things. `scan`'s 5 is a
 #: `--budget` overflow and its 6 is NOT_COMPARABLE, both of which happen before
-#: or instead of the comparison; `compat`'s 3-11 are tool and input failures
-#: (`compat/cli.py:_classify_compat_error_exit_code`). One shared set counted a
+#: or instead of the comparison. One shared set counted a
 #: failed extraction as evidence, which is how an evaluation reports a tool
 #: failure as a result.
 _VERDICT_EXITS = {
     # 0/2/4 legacy, 1 severity-aware, 8 --fail-on-removed-library.
     "compare": frozenset({0, 1, 2, 4, 8}),
     "scan": frozenset({0, 1, 2, 4}),
-    "compat": frozenset({0, 1, 2}),
 }
 
 #: "The two sides cannot be compared" — a real, deterministic outcome, but not
@@ -63,13 +61,12 @@ _VERDICT_EXITS = {
 #:
 #: One code per command, because each maintains an independent scheme
 #: (`docs/reference/exit-codes.md`): native `compare` answers 16, `scan
-#: --against` 6, `compat check` 9. Recognizing only `scan`'s made a correct
-#: not-comparable run on either other command read as "no comparison
-#: completed" — a false dimension-3 failure.
+#: --against` 6. Recognizing only `scan`'s made a correct not-comparable
+#: `compare` run read as "no comparison completed" — a false dimension-3
+#: failure.
 _NOT_COMPARABLE_EXITS = {
     "scan": frozenset({6}),
     "compare": frozenset({16}),
-    "compat": frozenset({9}),
 }
 
 #: Modes that resolve an invocation without running it. `--dry-run` is explicit
@@ -173,31 +170,15 @@ def subcommand(call: dict) -> str | None:
     return None
 
 
-def operation(call: dict) -> str | None:
-    """The token following the verb, when it is itself a word rather than a flag.
-
-    Only `compat` has a second level (`check` / `dump`), and Click requires it
-    immediately after the group, so this is enough to tell them apart.
-    """
-    argv = call.get("argv", [])
-    verb = subcommand(call)
-    if verb is None or verb not in argv:
-        return None
-    rest = argv[argv.index(verb) + 1 :]
-    return rest[0] if rest and not rest[0].startswith("-") else None
-
 
 def comparison_command(call: dict) -> str | None:
     """Which command this call is, if it genuinely compares two sides.
 
     Being the right verb is not enough, and classifying on the verb alone let
-    two one-sided operations count as comparisons:
+    a one-sided operation count as a comparison:
 
     * `scan` without `--against` is a one-build audit — the CLI's own help says
       so ("Absence of `--against` already means a one-build audit").
-    * `compat dump` creates a snapshot from an ABICC descriptor; `compat check`
-      is the comparison. Bare `compat <options>` auto-invokes `check`, so an
-      absent operation *is* a comparison.
     """
     verb = subcommand(call)
     if verb not in COMPARISON_SUBCOMMANDS:
@@ -212,8 +193,6 @@ def comparison_command(call: dict) -> str | None:
             token == "--against" or token.startswith("--against=") for token in argv
         )
         return "scan" if has_against else None
-    if verb == "compat":
-        return None if operation(call) == "dump" else "compat"
     return "compare"
 
 
@@ -239,11 +218,8 @@ def _option_tables(command: str | None) -> tuple[frozenset[str], frozenset[str]]
     """`(every option this command declares, the subset taking no value)`.
 
     Both halves come from Click's own command tree. The first is what keeps a
-    single-dash *long* option from being mistaken for a cluster of short ones:
-    `compat check` speaks ABICC's vocabulary (`-old`, `-new`, `-d1`), and
-    expanding `-old` into `-o ld` turned an ordinary comparison into a
-    self-comparison — a correct run failing the strictest dimension, which is
-    the one outcome that gets a gate switched off.
+    declared single-dash *long* option from being mistaken for a cluster of
+    short ones.
     """
     try:
         import click
@@ -266,9 +242,6 @@ def _option_tables(command: str | None) -> tuple[frozenset[str], frozenset[str]]
 
     every, valueless = options_of(cli_main)  # global options precede the verb
     target = cli_main.commands.get(command or "")
-    if isinstance(target, click.Group):
-        # `compat check` is the comparison; bare `compat` auto-invokes it.
-        target = target.commands.get("check", target)
     if target is not None:
         more_every, more_valueless = options_of(target)
         every |= more_every
@@ -337,11 +310,10 @@ def _expand_clusters(argv: list[str], command: str | None) -> list[str]:
                 and not token.startswith("--")
                 and "=" not in token
             )
-            # A declared single-dash *long* option is not a cluster. `compat
-            # check` speaks ABICC's vocabulary, and expanding `-old` into
-            # `-o ld` made an ordinary comparison read as a self-comparison —
-            # a correct run failing the strictest dimension, which is the one
-            # outcome that gets a gate switched off.
+            # A declared single-dash *long* option is not a cluster:
+            # expanding one would make an ordinary comparison read as a
+            # self-comparison — a correct run failing the strictest
+            # dimension.
             or token in every
         ):
             out.append(token)
@@ -382,12 +354,11 @@ def _positional_operands(argv: list[str], command: str | None = None) -> list[st
 
 
 #: Options that carry one of the two sides rather than a mere setting. Only
-#: `compare` names both sides positionally; `scan` takes the baseline through
-#: `--against`, and `compat check` takes both through `-old`/`-new` (with their
-#: `-d1`/`-d2`/`-n` aliases). Without these, `scan lib.so --against lib.so` and
-#: `compat check -old a.xml -new a.xml` are self-comparisons the operand rule
-#: cannot see, because each repeated token is an option's *value*.
-SIDE_OPTIONS = ("--against", "-old", "-d1", "-new", "-d2", "-n")
+#: `compare` names both sides positionally; `scan` took the baseline through
+#: `--against`. Without it, `scan lib.so --against lib.so` is a
+#: self-comparison the operand rule cannot see, because the repeated token is
+#: an option's *value*.
+SIDE_OPTIONS = ("--against",)
 
 
 def _named_sides(argv: list[str], command: str | None) -> list[str]:

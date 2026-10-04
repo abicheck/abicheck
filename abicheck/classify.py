@@ -15,7 +15,7 @@
 """File classification pipeline for compare-release input discovery.
 
 When ``compare-release`` is given a plain directory, it needs to decide which
-files inside are *ABI inputs* (ELF binaries, ABI snapshots, Perl dumps) and
+files inside are *ABI inputs* (ELF binaries, ABI snapshots) and
 which are incidental data files (SBOMs, templates, test fixtures, …).
 
 This module implements a composable **classifier pipeline** that answers that
@@ -57,13 +57,6 @@ def _detect_binary_format(path: Path) -> str | None:
     from .binary_utils import detect_binary_format
 
     return detect_binary_format(path)
-
-
-def _looks_like_perl_dump(head: str) -> bool:
-    """Return True if the text looks like an ABICC Perl dump."""
-    from .compat.abicc_dump_import import looks_like_perl_dump
-
-    return looks_like_perl_dump(head)
 
 
 _SNIFF_BYTES = 256  # same constant as cli.py
@@ -299,30 +292,16 @@ class CompressedAbiJsonClassifier(FileClassifier):
         )
 
 
-class PerlDumpClassifier(FileClassifier):
-    """Accept ``.pl`` / ``.pm`` files that look like ABICC Perl dumps."""
-
-    _PERL_EXTS: frozenset[str] = frozenset({".pl", ".pm"})
-
-    def accepts(self, path: Path) -> bool | None:
-        if path.suffix.lower() not in self._PERL_EXTS:
-            return None
-        head = _sniff_head(path)
-        return bool(_looks_like_perl_dump(head))
-
-
 class FallbackSniffClassifier(FileClassifier):
-    """Last-resort: files with arbitrary extensions that *sniff* as JSON/Perl.
+    """Last-resort: files with arbitrary extensions that *sniff* as JSON.
 
-    Applies the same ABI-marker validation as :class:`AbiJsonClassifier` /
-    :class:`PerlDumpClassifier` so that incidental JSON-like files (Jinja
+    Applies the same ABI-marker validation as :class:`AbiJsonClassifier` so
+    that incidental JSON-like files (Jinja
     templates starting with ``{%``, etc.) are still rejected.
     """
 
     def accepts(self, path: Path) -> bool | None:
         head = _sniff_head(path)
-        if _looks_like_perl_dump(head):
-            return True
         if head.startswith("{"):
             # Looks like JSON on a non-.json extension — apply ABI marker check.
             try:
@@ -352,7 +331,6 @@ _PIPELINE: list[FileClassifier] = [
     MagicByteClassifier(),
     AbiJsonClassifier(),
     CompressedAbiJsonClassifier(),
-    PerlDumpClassifier(),
     FallbackSniffClassifier(),
 ]
 

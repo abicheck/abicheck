@@ -37,8 +37,7 @@ external-tool names match ABICC's official documentation.
 
 > The default mode is **abicheck native** — you do not need `abidiff` or
 > `abi-compliance-checker` installed. The external modes are documented here
-> because abicheck reports parity against them ([Tool Comparison](../reference/tool-comparison.md))
-> and ships an ABICC-compatible CLI ([Migrating from ABICC](from-abicc.md)).
+> because abicheck reports parity against them ([Tool Comparison](../reference/tool-comparison.md)).
 
 ---
 

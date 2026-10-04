@@ -142,21 +142,6 @@ class TestVectorAbiPartition:
         assert meta.policy_overrides.get("plugin_abi") is Verdict.COMPATIBLE
 
 
-class TestVectorAbiBinaryOnly:
-    """The kind is producer-derived, so it must be treated as binary-only in
-    source-level reports (like toolchain_flag_drift)."""
-
-    def test_in_compat_binary_only_kinds(self) -> None:
-        from abicheck.compat.cli import _BINARY_ONLY_KINDS
-
-        assert ChangeKind.VECTOR_ABI_CHANGED in _BINARY_ONLY_KINDS
-
-    def test_in_report_binary_only_kinds(self) -> None:
-        from abicheck.report_classifications import BINARY_ONLY_KINDS
-
-        assert "vector_abi_changed" in BINARY_ONLY_KINDS
-
-
 class TestVectorAbiSerializationRoundTrip:
     """vector_abi_flags must survive a snapshot JSON round-trip so that
     comparisons run from saved snapshots still report the change."""

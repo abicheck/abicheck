@@ -43,8 +43,8 @@ thing.
 
 ### The root command surface
 
-0.6's root surface is `dump`, `compare`, `deps`, `compat`, `aggregate`,
-`project`. Three roles, and they do not overlap:
+0.6's root surface is `dump`, `compare`, `deps`, `aggregate`, `project`.
+Three roles, and they do not overlap:
 
 | Command | The question it answers |
 |---|---|
@@ -135,6 +135,12 @@ are still gone. `appcompat` and `plugin-check` became `compare --used-by` /
 `compare --required-symbol`. If you are coming from a release older than 0.5,
 read [Migrating to the Current CLI](../use/companion-commands.md) as well —
 it carries those per-release mappings.
+
+### A5. `compat` is removed
+
+The `compat` command group (`compat check`, `compat dump`) no longer exists,
+with no alias or replacement. Nor do ABICC XML descriptors, ABICC Perl
+`ABI.dump` input, or the ABICC-styled HTML/XML reports. Use `compare`.
 
 ### A4. Consumer scoping enriches, it does not replace
 
@@ -588,8 +594,6 @@ incomplete-evidence run that found nothing wrong.
 - `dump -o PATH` and the `dump` operand shape.
 - `-H`/`-I` meaning "both sides".
 - `--version old=`/`new=` defaults (`old`/`new`).
-- The `compat` drop-in interface. It is frozen; ABICC-compatible scripts are
-  unaffected by everything on this page.
 - The GitHub Action's per-side inputs (`old-header`, `new-header`,
   `old-version`, `debug-info1`, `devel-pkg1`, …). The wrapper maps them to
   the current flags internally. The Action's own `mode: scan` input **was**

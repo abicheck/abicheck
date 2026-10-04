@@ -163,8 +163,8 @@ jobs:
         if: (success() || failure()) && runner.os == 'Linux'
         run: python scripts/verify.py --profile full --only libabigail-parity --require-complete
       - name: ABICC parity
-        # tests/test_xml_parity.py's schema checks carry no marker, so the
-        # unit lane already runs them; nothing extra is needed here.
+        # Native `compare` verdicts against the real abi-compliance-checker;
+        # the step sets its own ABICHECK_MIN_EXECUTED.
         if: (success() || failure()) && runner.os == 'Linux'
         run: python scripts/verify.py --profile full --only abicc-parity --require-complete
       - name: End-to-end demo (libz)

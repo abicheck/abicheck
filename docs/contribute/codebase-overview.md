@@ -48,7 +48,6 @@ contract and its enforcement gate.
 | Post-processing/scope | `diff_filtering.py`, `post_processing.py`, `surface.py`, `surface_graph.py`, `internal_leak.py`, `idioms.py`, `elf_symbol_filter.py` | Public-surface resolution, evidence tiers, redundancy filtering, reachability, idiom recognition, and false-positive controls. |
 | Workflows | `cli.py`, `cli_compare_release.py`, `cli_appcompat.py`, `cli_stack.py`, `cli_baseline.py`, `cli_plugin.py`, `cli_probe.py`, `cli_surface.py`, `package.py`, `baseline.py`, `bundle.py`, `appcompat.py`, `stack_checker.py`, `resolver.py`, `binder.py`, `debian_symbols.py` | User-facing commands and higher-level workflows beyond a single pairwise compare. |
 | Reporting | `reporter.py`, `html_report.py`, `sarif.py`, `junit_report.py`, `stack_report.py`, `stack_html.py`, `appcompat_html.py`, `report_summary.py`, `annotations.py` | Markdown/JSON/SARIF/HTML/JUnit reports, CI annotations, and workflow-specific renderers. |
-| Compatibility | `compat/` | ABICC-compatible CLI, descriptor parsing, ABICC dump import, and XML report generation. |
 
 ---
 

@@ -345,20 +345,24 @@ class TestEvidenceReading:
         )
         assert ev.is_comparison({"argv": ["scan", "libfoo.so", "--against=old.json"]})
 
-    def test_compat_dump_creates_a_snapshot_rather_than_comparing(self):
-        assert not ev.is_comparison({"argv": ["compat", "dump", "-lib", "foo"]})
-        assert ev.is_comparison({"argv": ["compat", "check", "-lib", "foo"]})
-
-    def test_bare_compat_is_the_drop_in_check(self):
-        """`abicheck compat -lib foo -old v1.xml` auto-invokes `check`."""
-        assert ev.is_comparison({"argv": ["compat", "-lib", "foo", "-old", "v1.xml"]})
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["compat", "check", "-lib", "foo"],
+            ["compat", "-lib", "foo", "-old", "v1.xml"],
+            ["compat", "dump", "-lib", "foo"],
+        ],
+    )
+    def test_the_removed_compat_command_is_never_a_comparison(self, argv):
+        """`abicheck compat` was removed and exits 64; a run that calls it
+        obtained no verdict, whatever exit code it recorded."""
+        assert not ev.is_comparison({"argv": argv})
+        assert not ev.ran_to_a_verdict({"argv": argv, "exit_code": 0})
 
     @pytest.mark.parametrize(
         ("argv", "code"),
         [
             (["scan", "a.so", "--against", "b.json"], 5),  # --budget overflow
-            (["compat", "check", "-lib", "foo"], 5),  # tool/input failure
-            (["compat", "check", "-lib", "foo"], 8),
         ],
     )
     def test_a_failure_exit_is_not_a_verdict_for_that_command(self, argv, code):
@@ -413,7 +417,6 @@ class TestEvidenceReading:
         [
             (["compare", "a", "b"], 16),
             (["scan", "a.so", "--against", "b.json"], 6),
-            (["compat", "check", "-lib", "foo"], 9),
         ],
     )
     def test_each_command_has_its_own_not_comparable_exit(self, argv, code):
@@ -1325,8 +1328,6 @@ class TestSelfComparisonDetection:
             ["compare", "x.so", "--no-baseline", "x.so"],
             # Only `compare` names both sides positionally.
             ["scan", "lib.so", "--against", "lib.so"],
-            ["compat", "check", "-old", "a.xml", "-new", "a.xml"],
-            ["compat", "check", "-d1", "a.xml", "-d2", "a.xml"],
         ],
     )
     def test_one_operand_named_twice_is_caught_however_it_is_spelled(self, argv):
@@ -1351,7 +1352,6 @@ class TestSelfComparisonDetection:
                 "r.yaml",
             ],
             ["scan", "lib.so", "--against", "base.json"],
-            ["compat", "check", "-old", "a.xml", "-new", "b.xml"],
             ["dump", "old.so"],
         ],
     )
@@ -1437,23 +1437,10 @@ class TestShortOptionClusters:
             ["compare", "a.so", "b.so", "-vo", "report.json"],
             ["compare", "a.so", "b.so", "-j4"],
             ["compare", "a.so", "b.so", "-oreport.json"],
-            # ABICC's vocabulary is single-dash *long* options. Expanding
-            # `-old` into `-o ld` made an ordinary comparison read as a
-            # self-comparison — a correct run failing the strictest dimension.
-            ["compat", "check", "-old", "a.xml", "-new", "b.xml"],
-            ["compat", "check", "-d1", "a.xml", "-d2", "b.xml"],
         ],
     )
     def test_an_ordinary_invocation_survives_expansion(self, argv):
         assert not ev.compares_one_side_against_itself({"argv": argv})
-
-    def test_a_declared_long_option_is_not_a_cluster(self):
-        assert ev._expand_clusters(["compat", "check", "-old", "a.xml"], "compat") == [
-            "compat",
-            "check",
-            "-old",
-            "a.xml",
-        ]
 
 
 class TestVerdictRanking:

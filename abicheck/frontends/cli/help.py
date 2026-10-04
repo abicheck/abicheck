@@ -52,7 +52,7 @@ F = TypeVar("F", bound=Callable[..., object])
 # rather than one flat list, per the ADR-042/ADR-043 framing: the four
 # core-analysis verbs, the report-level `aggregate` fan-in (workflow
 # composition over already-produced reports, not a binary analysis), and the
-# ABICC-compat shim. rich-click keys these by the *exact* root command path,
+# advanced `project` group. rich-click keys these by the *exact* root command path,
 # which differs per entry point (the console script `abicheck`, `python -m
 # abicheck`, `python -m abicheck.cli`, and `main` under CliRunner) — a single
 # root token, so the `* <cmd>` wildcard the option panels use does not apply.
@@ -69,7 +69,6 @@ _ROOT_COMMAND_PANELS: list[dict[str, object]] = [
         "name": "Project integration (advanced)",
         "commands": ["project"],
     },
-    {"name": "Legacy compatibility", "commands": ["compat"]},
 ]
 COMMAND_GROUPS: dict[str, list[dict[str, object]]] = {
     root: _ROOT_COMMAND_PANELS
@@ -205,10 +204,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
     ],
     # The "* scan" panel used to live here; ADR-068 Phase 6 retired the
     # `scan` command outright.
-    # NB: the ABICC drop-in `compat check` (53 single-dash flags) renders with
-    # plain Click help — its group is not under the rich-click `main`, so panel
-    # config would be inert there. Its flags already carry help; the dialect's
-    # flat help is left as-is (ADR-037 non-goal to restyle the ABICC surface).
 }
 
 

@@ -1,8 +1,7 @@
 # Migrating from libabigail
 
 This guide maps a `libabigail` workflow — `abidiff`, `abidw`, `abipkgdiff` —
-onto the abicheck equivalents. Unlike the [ABICC migration](from-abicc.md),
-there is no flag-compatible wrapper mode: `abidiff` and `abicheck compare`
+onto the abicheck equivalents. There is no flag-compatible wrapper mode: `abidiff` and `abicheck compare`
 share the same shape (`tool old.so new.so` + header/suppression/debug-info
 options), so you migrate by swapping the command and translating a handful of
 flags, not by keeping the old ones.

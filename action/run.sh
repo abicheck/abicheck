@@ -1224,7 +1224,7 @@ _rm_overlay_on_early_exit() {
 # input_resolution.py) checks native-binary magic bytes FIRST, before any
 # text/JSON sniffing -- and *every* non-binary shape it goes on to accept
 # (a JSON snapshot, with or without leading whitespace before compression
-# or the `{`; an ABICC Perl dump; a raw BTF/CTF blob; a symvers file) is
+# or the `{`; a raw BTF/CTF blob; a symvers file) is
 # equally extraction-free for this decision's purposes: none of them are
 # parsed via -H/-I/ast-frontend/a compile: block at all. So rather than
 # re-deriving each of those formats' own sniffing rules one at a time here
@@ -1253,7 +1253,7 @@ _old_library_is_stored_snapshot() {
       ;;
   esac
   # Anything else this Action can plausibly receive as old-library (JSON,
-  # compressed JSON, an ABICC Perl dump, a raw BTF/CTF blob, symvers, or
+  # compressed JSON, a raw BTF/CTF blob, symvers, or
   # simply unrecognized content) performs no live header/debug extraction
   # of its own -- stored, from this decision's point of view.
   return 0

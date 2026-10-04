@@ -70,7 +70,6 @@ def build_report_document(
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
-    include_exit_decision: bool = True,
     contract_evaluation: bool = False,
     gate: GateDecision | None = None,
     today: date | None = None,
@@ -81,7 +80,7 @@ def build_report_document(
     Every keyword mirrors ``abicheck.service_render.render_output``'s own
     format-neutral options (``show_only``/``show_impact``/
     ``severity_config``/``require_complete_analysis``/
-    ``include_exit_decision``/``contract_evaluation``); a genuinely
+    ``contract_evaluation``); a genuinely
     format-specific presentation flag (HTML's ``demangle``, Markdown's
     ``show_recommendation``) is not a parameter here -- it belongs to the
     format's own render step, applied to a *projection* of this document,
@@ -248,7 +247,6 @@ def build_report_document(
         _displayed_with_scoped_only(result, changes, show_only),
         require_complete_analysis=require_complete_analysis,
         severity_config=severity_config,
-        include_exit_decision=include_exit_decision,
         today=today,
     )
     _add_detectors(d, result)

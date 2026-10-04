@@ -227,7 +227,6 @@ LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
 # Directories that must contain a CLAUDE.md for per-area agent context.
 REQUIRED_CLAUDE_MD_DIRS: tuple[Path, ...] = (
     PKG,
-    PKG / "compat",
     TESTS,
     DOCS,
     EXAMPLES,
@@ -2413,7 +2412,6 @@ _PRINT_ALLOWED: frozenset[str] = frozenset(
         "abicheck/cli_baseline.py",
         "abicheck/cli_compare_release.py",
         "abicheck/cli_debian_symbols.py",
-        "abicheck/compat/cli.py",
         "abicheck/reporter.py",
     }
 )
@@ -2821,27 +2819,11 @@ _RESOLVE_INPUT_WRAPPER_MODULES: frozenset[str] = frozenset({"cli_resolve"})
 # the second to leave this list: its `service.resolve_input()` call now
 # routes through `service_input_resolution.resolve_side_snapshot`, same as
 # every other resolver P0 item 4 converged.
-CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        # `appcompat.check_appcompat`'s two `dumper.dump()` call sites left
-        # this list in T5 (direct-bypass migration): both now route through
-        # `service.run_dump` instead.
-        # ABICC compatibility wrapper (P1 "ABICC compatibility is a parallel
-        # frontend and engine path"): its own parallel engine path calls
-        # both `dumper.dump()` and `checker.compare()` directly.
-        # Line-pinned, so these move whenever the file does. Still the same
-        # three sites, not new ones: one `dumper.dump` in the descriptor
-        # dump path, one in `_snapshot_from_compat_input`, and the single
-        # `checker.compare` the multi-library comparison loop shares across
-        # every paired library (kept a *single* call site deliberately --
-        # see that loop's own comment). That compare now lives in
-        # `compat/_helpers.compare_for_compat`, which `compat/cli.py` imports
-        # as `compare`, so it carries the ABICC source-level parity step.
-        "abicheck/compat/cli.py:371:19:dumper.dump",
-        "abicheck/compat/_helpers.py:184:8:checker.compare",
-        "abicheck/compat/cli.py:1234:15:dumper.dump",
-    }
-)
+# `appcompat.check_appcompat`'s two `dumper.dump()` call sites left this list
+# in T5 (direct-bypass migration): both now route through `service.run_dump`.
+# The ABICC `compat` front end's three direct calls left when the whole front
+# end was removed, which emptied the list.
+CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset()
 
 
 def _relative_import_level_for_source(path: Path) -> int:
@@ -2852,10 +2834,10 @@ def _relative_import_level_for_source(path: Path) -> int:
     module's own containing package, not from a fixed depth: a top-level
     module (``abicheck/cli.py``) reaches ``abicheck`` with a single dot
     (``from . import checker``, level 1), while a module one package
-    deeper (``abicheck/compat/cli.py``, whose own package is
-    ``abicheck.compat``) needs two (``from .. import checker``, level 2) —
-    a single dot there resolves to ``abicheck.compat.checker`` instead, a
-    different module entirely.
+    deeper (e.g. ``abicheck/frontends/foo.py``, whose own package is
+    ``abicheck.frontends``) needs two (``from .. import checker``, level 2)
+    — a single dot there resolves to ``abicheck.frontends.checker``
+    instead, a different module entirely.
     """
     depth = len(path.resolve().relative_to(PKG.resolve()).parent.parts)
     return depth + 1
@@ -3159,17 +3141,11 @@ def _resolve_input_wrapper_call_sites(tree: ast.Module) -> frozenset[tuple[int, 
 
 def _iter_cli_contract_sources() -> Iterable[Path]:
     """The front-end modules the contract covers: every ``cli*.py``, the
-    consumer-side ``appcompat.py`` (a verdict-emitting front-end too), and
-    ``compat/cli.py`` (the ABICC-compatible CLI wrapper — a *nested* front
-    end `PKG.glob("cli*.py")` alone would miss, per Phase 0 item 2 of
-    docs/contribute/plans/duplication-and-convergence-assessment.md). The MCP
+    consumer-side ``appcompat.py`` (a verdict-emitting front-end too). The MCP
     server was removed; agent integrations route through these same
     front ends (CLI or the typed Python API) rather than a separate tier."""
     yield from PKG.glob("cli*.py")
-    # `compat/_helpers.py` holds the compat front end's `compare_for_compat`,
-    # the one `checker.compare` call the ABICC wrapper makes (moved out of
-    # `compat/cli.py` with its ABICC-parity step), so it stays in view here.
-    for extra in ("appcompat.py", "compat/cli.py", "compat/_helpers.py"):
+    for extra in ("appcompat.py",):
         path = PKG / extra
         if path.is_file():
             yield path

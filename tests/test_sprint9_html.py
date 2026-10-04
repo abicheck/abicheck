@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from abicheck.html_report import generate_html_report, write_html_report
+from abicheck.html_report import generate_html_report
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -373,34 +372,6 @@ def test_xss_escape_new_value() -> None:
 
 
 # ---------------------------------------------------------------------------
-# write_html_report
-# ---------------------------------------------------------------------------
-
-
-def test_write_creates_dirs_and_file(tmp_path: Path) -> None:
-    r = _result()
-    out = tmp_path / "deep" / "nested" / "report.html"
-    write_html_report(r, out)
-    assert out.exists()
-    assert out.stat().st_size > 500
-
-
-def test_write_passes_old_symbol_count(tmp_path: Path) -> None:
-    r = _result(verdict="BREAKING", changes=[_ch("func_removed")])
-    out = tmp_path / "report.html"
-    write_html_report(
-        r,
-        out,
-        lib_name="libfoo",
-        old_version="1.0",
-        new_version="2.0",
-        old_symbol_count=50,
-    )
-    content = out.read_text()
-    assert "98.0%" in content  # (50-1)/50 * 100
-
-
-# ---------------------------------------------------------------------------
 # Verdict colours
 # ---------------------------------------------------------------------------
 
@@ -700,50 +671,6 @@ def test_gate_card_always_reflects_the_full_library_gate() -> None:
     assert "CI Gate (scoped)" not in out
     assert "CI Gate: FAIL (exit 4)" in out
     assert "Consumer-scoped verdict: COMPATIBLE" in out
-
-
-def test_gate_card_absent_from_abicc_compatible_layout() -> None:
-    """The ABICC-compatible layout (compat_html=True) is left unchanged even
-    when severity_config is supplied."""
-    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-    from abicheck.severity import resolve_severity_config
-
-    c = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
-    result = DiffResult(
-        old_version="1.0",
-        new_version="2.0",
-        library="libtest.so",
-        changes=[c],
-        verdict=Verdict.COMPATIBLE,
-    )
-    cfg = resolve_severity_config("default", addition="error")
-    out = generate_html_report(result, severity_config=cfg, compat_html=True)
-    assert "CI Gate" not in out
-
-
-def test_correlated_change_kind_rendered_in_abicc_compatible_layout() -> None:
-    # Codex review, fresh evidence: the ABICC-compatible layout
-    # (compat_html=True) has its own separate _compat_changes_table
-    # rendering, distinct from the default layout's _changes_table -- the
-    # "See also" note must reach it too.
-    from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-
-    c = Change(
-        ChangeKind.LAYOUT_UNVERIFIABLE,
-        "Foo",
-        "layout evidence unverifiable",
-        correlated_change_kind=ChangeKind.TYPE_VTABLE_CHANGED.value,
-    )
-    result = DiffResult(
-        old_version="1.0",
-        new_version="2.0",
-        library="libtest.so",
-        changes=[c],
-        verdict=Verdict.COMPATIBLE_WITH_RISK,
-    )
-    out = generate_html_report(result, compat_html=True)
-    assert "type_vtable_changed" in out
-    assert "See also" in out
 
 
 def test_scoped_verdict_box_absent_when_no_scoping() -> None:

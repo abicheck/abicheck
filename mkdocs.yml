@@ -106,7 +106,6 @@ nav:
       - Agent Skills: use/agent-skills.md
       - Skills in Your Repository: use/agent-skills-in-your-repo.md
       - Migrating to the Current CLI: use/companion-commands.md
-      - Migrating from ABICC: use/from-abicc.md
       - Migrating from libabigail: use/from-libabigail.md
   # G30/ADR-047's scenario-first GitHub Actions integration model -- "which
   # project-lifecycle scenario am I", distinct from User Guide's
@@ -170,7 +169,6 @@ nav:
     - Header-Backend Capabilities: reference/header-backend-capabilities.md
     - Fact/Capability Registry: reference/fact-registry.md
     - Tool Comparison: reference/tool-comparison.md
-    - ABICC Flag Reference: reference/abicc-flags.md
     - GitHub Action Inputs/Outputs: reference/github-action-inputs.md
     - Python API Reference: reference/python-api-reference.md
     - Machine-Readable Metadata: reference/machine-readable-metadata.md
@@ -321,7 +319,6 @@ nav:
       - ABI/API Taxonomy Coverage: contribute/abi-taxonomy-coverage.md
       - ABICC Parity Status: contribute/abicc-parity-status.md
       - ABICC Test Coverage Comparison: contribute/abicc-test-coverage-comparison.md
-      - ABICC Format Compliance: reference/abicc-format-compliance.md
       - libabigail Parity Matrix: contribute/libabigail-parity.md
       - Report Comparison: contribute/report-comparison.md
       - SYCL test/abi Coverage: reference/sycl-test-abi-coverage.md
@@ -713,7 +710,10 @@ plugins:
         user-guide/create-baseline.md: use/create-baseline.md
         user-guide/debian-symbols.md: use/debian-symbols.md
         user-guide/dump-compare-flags.md: use/dump-compare-flags.md
-        user-guide/from-abicc.md: use/from-abicc.md
+        user-guide/from-abicc.md: start/upgrading-to-0.6.md
+        use/from-abicc.md: start/upgrading-to-0.6.md
+        reference/abicc-flags.md: start/upgrading-to-0.6.md
+        reference/abicc-format-compliance.md: start/upgrading-to-0.6.md
         user-guide/from-libabigail.md: use/from-libabigail.md
         user-guide/github-action-recipes.md: use/github-action-recipes.md
         user-guide/github-action-source-scans.md: use/github-action-source-scans.md

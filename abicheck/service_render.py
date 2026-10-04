@@ -333,8 +333,8 @@ def _project_html(envelope: ReportEnvelope) -> str:
     """HTML.
 
     Gap-C disposition for HTML's own remaining facts: the ``removed``/
-    ``added``/``changed`` bucketing, the per-section ``ChangeRow`` tables and
-    ``compat_html``'s ABICC severity-band layout are **presentation** -- they
+    ``added``/``changed`` bucketing and the per-section ``ChangeRow`` tables
+    are **presentation** -- they
     arrange findings, and their already-resolved verdicts, into an HTML page's
     sections; no other format has that shape. The two that were decisions --
     the CI-gate card's gate and each row's verdict -- now read the envelope's

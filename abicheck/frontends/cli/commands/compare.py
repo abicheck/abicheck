@@ -752,8 +752,8 @@ def _embed_inline_source_side(
 def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     """Compare two ABI surfaces and report changes.
 
-    Each input (OLD, NEW) can be a .so shared library, a JSON snapshot from
-    'abicheck dump', or an ABICC Perl dump file. The format is auto-detected.
+    Each input (OLD, NEW) can be a .so shared library or a JSON snapshot from
+    'abicheck dump'. The format is auto-detected.
 
     When a .so file is given, headers (-H) are recommended for full ABI
     extraction. If headers are absent for ELF, abicheck falls back to

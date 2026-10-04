@@ -733,24 +733,6 @@ class TestResolvedContextContent:
         assert config.suppressions.sha256
         assert "suppressions" in config.provenance
 
-    def test_a_merged_suppression_list_keeps_its_rules(self, tmp_path) -> None:
-        """``SuppressionList.merge`` drops both halves' digests even when each
-        was file-loaded, so the merged list hit the same digest-less path."""
-        from abicheck.suppression import Suppression, SuppressionList
-
-        merged = SuppressionList.merge(
-            SuppressionList([Suppression(symbol="gone")], source_sha256="a" * 64),
-            SuppressionList([Suppression(symbol="other")], source_sha256="b" * 64),
-        )
-        assert merged.source_sha256 is None
-        old, new = _pair()
-        result = compare(old, new, suppression=merged, contract_evaluation=True)
-        assert result.contract_context is not None
-        config = result.contract_context.evaluation_context.resolved_config
-        assert config.suppressions is not None
-        assert config.suppressions.rules == merged.rule_identities()
-        assert len(config.suppressions.rules) == 2
-
     def test_explicit_overlays_reach_the_persisted_config(self) -> None:
         """``--public-symbol``/``--post-manifest`` decide membership, so the
         resolved configuration records them (Codex review, fresh evidence).

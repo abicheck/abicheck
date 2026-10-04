@@ -126,10 +126,9 @@ Some of the old companion functionality survives as a **command**:
 |---|---|
 | [`deps tree`](#deps-tree) | Resolve one binary's dependency closure and symbol bindings. |
 | [`deps compare`](#deps-compare) | Diff a binary's full dependency stack across two environments (was `stack-check`). |
-| `compat check` / `compat dump` | ABICC-compatible drop-in replacement commands — see [Migrating from ABICC](from-abicc.md) if you're moving from `abi-compliance-checker`. |
 
-The root surface **today** is `dump`, `compare`, `deps`, `compat`,
-`aggregate` and `project` — `scan` was retired in 0.6. None of the
+The root surface **today** is `dump`, `compare`, `deps`, `aggregate`
+and `project` — `scan` and `compat` were retired in 0.6. None of the
 orchestration commands (`aggregate`, the `project` group) are part of the
 companion-command consolidation this page describes; see the
 [CLI Reference](../reference/cli-reference.md) for the full current command

@@ -119,7 +119,7 @@ likely and costly.
 
 3. **CLI integration contracts**
    - Add more command-level tests for multi-output formats and failure diagnostics in
-     `compare`/`compat` scenarios.
+     `compare` scenarios.
    - Goal: keep user-facing behavior stable for CI consumers.
 
 4. **Integration matrix enrichment**

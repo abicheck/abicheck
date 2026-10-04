@@ -63,7 +63,6 @@ def test_dump_surface_covers_root_commands(dump_mod) -> None:  # type: ignore[no
     assert set(surface) == {
         "aggregate",
         "compare",
-        "compat",
         "deps",
         "dump",
         "project",

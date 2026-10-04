@@ -19,8 +19,8 @@ its ownership, and a snapshot that recorded none reads ``unknown``.
 ADR-075 D1/D2 routes every freshly extracted header snapshot through
 ``workflows.ownership_request.classify_extracted``. Only ``resolve_input``
 and the release surface did; the header-only ``dump`` (and typed
-``DumpRequest`` with no path), both ``compat`` live dumps and
-``appcompat``'s own dumps returned a snapshot with no ``extraction_scope``,
+``DumpRequest`` with no path), the (since removed) ``compat`` live dumps
+and ``appcompat``'s own dumps returned a snapshot with no ``extraction_scope``,
 so every reader fell back to ``ScopeOrigin`` for it.
 
 Three statements:
@@ -29,10 +29,9 @@ Three statements:
   below with how its result is stamped (or why it needs none). A new call
   site fails until it is classified; that is the class, not the four
   instances.
-* **Real entry points** -- ``dump -H`` with no binary and ``compat dump``
-  record a scope and classify every declaration (oracle: the
-  ``extraction_scope`` block the stored document carries, read back
-  through the real codec).
+* **Real entry point** -- ``dump -H`` with no binary records a scope and
+  classifies every declaration (oracle: the ``extraction_scope`` block the
+  stored document carries, read back through the real codec).
 * **Pre-v52** -- a stored snapshot from before the field loads ``unknown``
   (no scope, no per-declaration decision), never a guessed owner, and the
   ``public_not_exported`` coverage row says its obligations rest on header
@@ -75,8 +74,6 @@ _INVENTORY: dict[tuple[str, str, str], str] = {
     ("abicheck/workflows/input_resolution.py", "_resolve_input_impl", "cached_run_dump"): "stamped in resolve_input",
     ("abicheck/workflows/release_surface_acquisition.py", "_produce", "build_header_only_snapshot"): "stamped in _produce",
     ("abicheck/workflows/artifact/execute_header_only.py", "execute_header_only_dump_request", "build_header_only_snapshot"): "stamped in execute_header_only_dump_request",
-    ("abicheck/compat/cli.py", "compat_dump_cmd", "dump"): "stamped in finish_live_compat_dump",
-    ("abicheck/compat/cli.py", "_snapshot_from_compat_input", "dump"): "stamped in finish_live_compat_dump",
     ("abicheck/appcompat.py", "check_appcompat", "run_dump"): "stamped in check_appcompat",
     ("abicheck/stack_checker.py", "_run_abi_diff", "run_dump"): "no headers: binary-only, nothing to own",
     ("abicheck/probe_harness.py", "_snapshot_object_file", "dump"): "no headers (dwarf_only probe)",
@@ -295,23 +292,6 @@ def test_header_only_dump_records_ownership(tmp_path: Path) -> None:
     header, _ = _fixture(tmp_path)
     out = tmp_path / "ho.json"
     res = CliRunner().invoke(main, ["dump", "-H", str(header), "-o", str(out)])
-    assert res.exit_code == 0, res.output
-    _assert_classified(out)
-
-
-@pytest.mark.integration
-def test_compat_dump_records_ownership(tmp_path: Path) -> None:
-    _needs_tools()
-    header, lib = _fixture(tmp_path)
-    desc = tmp_path / "d.xml"
-    desc.write_text(
-        f"<version>1</version>\n<headers>{header}</headers>\n<libs>{lib}</libs>\n"
-    )
-    out = tmp_path / "c.json"
-    res = CliRunner().invoke(
-        main,
-        ["compat", "dump", "-lib", "x", "-dump", str(desc), "-dump-path", str(out)],
-    )
     assert res.exit_code == 0, res.output
     _assert_classified(out)
 

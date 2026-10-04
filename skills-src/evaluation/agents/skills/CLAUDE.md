@@ -170,8 +170,8 @@ more spellings than either originally handled — each gap verified against the
 real CLI before it was closed. Options sit *between* positionals
 (`compare x --format json x`); boolean flags consume nothing
 (`compare x -vv x`); short options pack into clusters that can carry a value
-(`-voreport.json` writes `report.json`); and `compat check` speaks ABICC's
-single-dash *long* options (`-old`, `-d1`), which are not clusters at all.
+(`-voreport.json` writes `report.json`); and a declared single-dash *long*
+option is not a cluster at all.
 
 Arity therefore comes from Click's own command tree rather than a list here —
 `compare` alone declares 50 boolean flags. When the table cannot be built the
@@ -225,7 +225,7 @@ Dimension 6 asks a claim to cite a call that could have produced it. That
 applies to a stated verdict, and — since a review found the null branch skipping
 the check entirely — to a `null` verdict given for `not_comparable`, which must
 cite a call that *determined* non-comparability (`compare` 16, `scan --against`
-6, `compat check` 9). Without it, a run that recorded nothing scored clean on
+6). Without it, a run that recorded nothing scored clean on
 the `not-comparable-pair` scenario by naming the outcome it was about to be
 graded against. The other three uncertainty kinds are exempt on purpose: a run
 that stops on shallow evidence may honestly have produced neither a verdict nor

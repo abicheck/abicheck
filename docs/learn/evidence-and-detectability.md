@@ -520,8 +520,7 @@ release, and a header directory is a public-symbol filter there, not an
 AST), ABICC's two workflows are DWARF-based or GCC-header-based (each
 missing the other's facts), and abicheck overlays every source it is given.
 The per-tool capability and per-case results are owned by
-[Tool Comparison](../reference/tool-comparison.md); abicheck's own ABICC
-drop-in `compat` mode is described in [Tool Modes](../use/tool-modes.md).
+[Tool Comparison](../reference/tool-comparison.md).
 
 ### e. Methods beyond ABI diff tools
 

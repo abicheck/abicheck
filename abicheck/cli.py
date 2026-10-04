@@ -44,7 +44,6 @@ import click
 # plain click.Group if rich-click is somehow unavailable so the CLI never
 # hard-fails.
 from . import __version__ as _abicheck_version, deadline
-from .compat.cli import compat_group
 from .frontends.cli import help as cli_help
 from .frontends.cli.runtime import _AbicheckGroup
 
@@ -67,11 +66,6 @@ def main() -> None:
     # detached clang/castxml process group started by deadline.run_bounded
     # (Codex review, PR #591).
     deadline.install_sigterm_cleanup()
-
-
-# ABICC-compatible subcommands. Eagerly imported above, deliberately: every
-# consumer of `abicheck.cli` must get them registered.
-main.add_command(compat_group)
 
 
 # ---------------------------------------------------------------------------

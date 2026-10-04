@@ -111,11 +111,6 @@ Examples:
 
 **CI action:** fail in API-strict pipelines or pipelines that test building from source; warn in ABI-only gates.
 
-> **Note:** `abicheck compat` *does* emit exit code `2` for `API_BREAK` conditions.
-> However, the `compat` HTML/text report uses ABICC-style phrasing
-> ("⚠️ API_BREAK — Source-level API change — recompilation required") rather than a bare
-> `API_BREAK` verdict string. Use `abicheck compare -o json=-` for machine-readable
-> verdict values.
 
 ---
 
@@ -255,7 +250,7 @@ covers `BREAKING`; `potential_breaking` covers both `API_BREAK` and
 > unreadable or unrecognised input — exits `64`, deliberately outside the
 > `0/2/4` space, so a usage error is never mistaken for a compatibility result.
 
-For every other command (`compat`, `scan`, `deps`, multi-library/release
+For every other command (`deps`, multi-library/release
 inputs) and the full summary matrix, see the authoritative
 [Exit Codes](../reference/exit-codes.md) reference. App- and plugin-scoped
 comparisons (`compare --used-by APP` / `compare --required-symbol SYM`) fold
@@ -300,9 +295,6 @@ ret=$?
 exit 0
 ```
 
-> For `compat` mode CI patterns, see [ABICC Compatibility](../use/from-abicc.md).
-> Note: in compat mode, exit `1` = BREAKING, exit `2` = API_BREAK.
-> Non-verdict failures use extended codes (`3`–`11`) — see [Exit Codes](../reference/exit-codes.md).
 
 ---
 

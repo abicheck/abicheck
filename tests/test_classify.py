@@ -13,12 +13,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from abicheck.classify import (
     AbiJsonClassifier,
     BinaryExtensionClassifier,
     FallbackSniffClassifier,
     MagicByteClassifier,
-    PerlDumpClassifier,
     is_supported_compare_input,
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -225,29 +226,6 @@ class TestAbiJsonClassifier:
             AbiJsonClassifier.FINGERPRINTS.pop()
 
 
-# ── PerlDumpClassifier ────────────────────────────────────────────────────────
-
-
-class TestPerlDumpClassifier:
-    clf = PerlDumpClassifier()
-
-    def test_non_perl_ext_passthrough(self, tmp_path: Path) -> None:
-        p = tmp_path / "libfoo.json"
-        p.write_text('{"x":1}')
-        assert self.clf.accepts(p) is None
-
-    def test_valid_perl_dump_accepted(self, tmp_path: Path) -> None:
-        p = tmp_path / "libfoo.pl"
-        p.write_text("$VAR1 = { 'library' => 'libfoo.so' };\n")
-        assert self.clf.accepts(p) is True
-
-    def test_pl_not_perl_dump_rejected(self, tmp_path: Path) -> None:
-        p = tmp_path / "script.pl"
-        p.write_text("#!/usr/bin/perl\nprint 'hello';\n")
-        # Not a $VAR1 dump → rejected
-        assert self.clf.accepts(p) is False
-
-
 # ── FallbackSniffClassifier ───────────────────────────────────────────────────
 
 
@@ -282,6 +260,19 @@ class TestPipeline:
     def test_abi_snapshot_json_accepted(self, tmp_path: Path) -> None:
         p = _write_abi_snapshot(tmp_path / "libfoo.json")
         assert is_supported_compare_input(p) is True
+
+    @pytest.mark.parametrize(
+        "name", ["ABI.dump", "libfoo.pl", "libfoo.pm", "libfoo.txt", "libfoo"]
+    )
+    def test_abicc_perl_dump_rejected_under_any_extension(
+        self, tmp_path: Path, name: str
+    ) -> None:
+        # ABICC Perl dumps were an ABI input only through the removed
+        # `compat` front end's importer; with it gone, no classifier may
+        # still claim one, whatever the file is called.
+        p = tmp_path / name
+        p.write_text("$VAR1 = {\n  'LibraryName' => 'libfoo.so',\n};\n")
+        assert is_supported_compare_input(p) is False
 
     def test_cyclonedx_sbom_rejected(self, tmp_path: Path) -> None:
         p = tmp_path / "auditwheel.cdx.json"

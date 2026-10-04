@@ -102,10 +102,7 @@ don't exactly match what was compiled, results will be unreliable.
   ```
   (`abicheck dump libfoo.so -H foo.h -I include/ --config .abicheck.yml`; see
   [Compile context for header parsing](../use/evidence-depth.md#compile-context-for-header-parsing-l2))
-- For `abicheck compat`, use `-s` (strict mode) to promote `COMPATIBLE`/`API_BREAK` to BREAKING:
-  `abicheck compat check -lib foo -old OLD.xml -new NEW.xml -s`
-  (use `--strict-mode api` to promote only `API_BREAK`; `-s` is not available on `abicheck compare`)
-- Cross-check with `abicheck compat check` (ABICC mode) for independent validation
+- To fail CI on any change, including compatible ones, use `--severity-preset strict`.
 
 ### System-include auto-detection (and what it does *not* fix)
 
@@ -173,8 +170,7 @@ ABI-sensitive types you want to guarantee are tracked.
   (relevant for semver policy: additive changes may still require a minor version bump)
 - Enum member addition is `COMPATIBLE` but can affect exhaustive `switch` statements
 
-For `abicheck compat` pipelines, use `-s` to treat `COMPATIBLE` as blocking.
-For `abicheck compare` pipelines, a bare `compare` never fails on
+A bare `compare` never fails on
 `COMPATIBLE`/addition findings at all (legacy exit scheme: `0` compatible,
 `2` source break, `4` ABI break — additions don't raise either). To block
 on them, set any severity value — `--severity-preset`, or a per-category key
@@ -186,17 +182,6 @@ and config key that used to do that were removed), so a severity setting
 always takes effect. See [Exit Codes](../reference/exit-codes.md) for the
 full contract — exit `2` under the severity-aware scheme means an
 error-level `potential_breaking` finding, not a `COMPATIBLE` addition.
-
----
-
-## `compat` Mode Verdict Limitations
-
-`abicheck compat` *does* emit exit code `2` for `API_BREAK` conditions, but the
-report text uses ABICC-style phrasing rather than a bare `API_BREAK` verdict string.
-Source-level-only breaks (e.g. `case31_enum_rename`, `case34_access_level`) will
-appear as warnings in the compat HTML/text report.
-
-Use `abicheck compare -o json=-` for precise machine-readable `API_BREAK` verdicts.
 
 ---
 

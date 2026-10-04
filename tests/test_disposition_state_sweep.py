@@ -593,15 +593,11 @@ def test_an_audit_without_overlays_says_nothing_about_them() -> None:
 
 
 class TestEveryHtmlPathCarriesTheAudit:
-    """ADR-067 D3 applies to *every* projection, including the ones a native
-    HTML branch returns before.
-
-    `build_html_document` short-circuits into the ABICC-compatible layout
-    before the native branch's sole audit construction, so a fully suppressed
-    comparison rendered as `--compat-html` showed no raw total, no
-    disposition counts and no coverage limitation at all — the exact "looks
-    clean" the audit exists to prevent. Surveyed across every HTML entry
-    point rather than fixing the one reported.
+    """ADR-067 D3 applies to every projection, HTML included: a fully
+    suppressed comparison must still state its raw total, disposition counts
+    and coverage limitation, never read as clean. (The ABICC-compatible
+    layout that once returned before the audit was built was removed with
+    `compat`.)
     """
 
     @staticmethod
@@ -633,60 +629,19 @@ class TestEveryHtmlPathCarriesTheAudit:
         )
         return compare(old, new, rules)
 
-    @pytest.mark.parametrize("compat_html", [False, True])
-    def test_a_fully_suppressed_run_never_renders_as_clean(self, compat_html):
-        """Both layouts, one assertion: the raw total and the rule reach the
-        page. Parametrized rather than written twice, so a third layout is a
-        row here instead of another silently-missing branch."""
+    def test_a_fully_suppressed_run_never_renders_as_clean(self):
+        """The raw total and the rule reach the page."""
         from abicheck.html_report import generate_html_report
 
         result = self._suppressed_run()
         assert result.changes == [], "the fixture's point: the gate is clean"
 
-        page = generate_html_report(result, compat_html=compat_html)
+        page = generate_html_report(result)
         assert "3" in page
         assert "Detected" in page or "detected" in page, (
             "the raw total must be stated somewhere on the page"
         )
         assert "uppressed" in page
-
-    def test_the_compat_layout_adds_no_abicc_element_ids(self):
-        """The audit is rendered inside the existing `Summary` div and as an
-        ordinary `table.summary`, because ABICC consumers key off this
-        layout's element ids — adding one would be a compatibility break in a
-        report whose whole purpose is drop-in compatibility.
-
-        Compared against the *same layout with no audit to show* rather than
-        a hand-written id list, so the control moves with the template.
-        """
-        import re
-
-        from abicheck.html_report import build_html_document
-
-        def _ids(page: str) -> set[str]:
-            return set(re.findall(r"id='([^']+)'", page)) | set(
-                re.findall(r'id="([^"]+)"', page)
-            )
-
-        from abicheck.report.document import ReportDocument
-        from abicheck.report.render_html_document import render_html_document
-
-        document = build_html_document(self._suppressed_run(), compat_html=True)
-        with_audit = render_html_document(document)
-        # The same document with the audit removed: the exact control, since
-        # every other fact on the page is identical by construction.
-        stripped = dict(document.to_mapping())
-        stripped["disposition_audit"] = {}
-        without = render_html_document(ReportDocument.from_mapping(stripped))
-        assert "Disposition Audit" in with_audit, (
-            "the precondition: this page really does carry the audit"
-        )
-        assert "Disposition Audit" not in without, (
-            "with nothing to state, the section must not appear at all"
-        )
-        assert _ids(with_audit) == _ids(without), (
-            "the audit introduced an element id into the ABICC layout"
-        )
 
     def test_the_overlay_total_survives_the_html_round_trip(self):
         """`_summary_table_from_mapping` rebuilt every audit field but this

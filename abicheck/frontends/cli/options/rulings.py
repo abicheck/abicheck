@@ -18,8 +18,6 @@
 ``compare`` and ``dump`` were ruled first (plan Phase 7k); ``aggregate`` and
 the ``project`` and ``deps`` subcommands followed, closing Phase 7's last
 open item.
-``compat`` is excluded on purpose: its options are frozen ABICC-compatible
-spellings (ADR-068 D7), so D5's guards are not the question there.
 
 **Every** visible option on either command has an entry here saying why it
 is still a CLI option, checked against D5's three guards:
