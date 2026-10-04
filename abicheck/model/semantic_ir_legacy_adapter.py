@@ -99,7 +99,7 @@ Leaf module: depends only on other ``model`` modules, per ADR-061 D1's
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from ..errors import SemanticIrAuthorityError
@@ -119,7 +119,7 @@ from .semantic_ir_record_layout import record_layout_facts, sync_snapshot_record
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .declarations import Function
+    from .declarations import Function, Variable
     from .entities import RecordType
     from .snapshot import AbiSnapshot
 
@@ -134,6 +134,7 @@ __all__ = [
     "legacy_constant_ir",
     "legacy_function_ir",
     "legacy_typedef_ir",
+    "legacy_variable_occurrences",
     "producer_entity_id",
     "producer_occurrence_disambiguator",
     "render_display_name",
@@ -414,6 +415,40 @@ def legacy_constant_ir(snapshot: AbiSnapshot, constants: dict[str, str]) -> Sema
             canonical_spelling=Fact.present(value)
         )
     return SemanticIR(occurrences=occurrences)
+
+
+def legacy_variable_occurrences(
+    variables: Iterable[Variable],
+    project: Callable[[Variable], CanonicalEntity],
+) -> tuple[SemanticIR, tuple[OccurrenceId, ...]]:
+    """Project variables into a real ``SemanticIR`` (ADR-063 6B, variable
+    cohort), one occurrence per variable, plus each variable's occurrence in
+    input order -- :func:`legacy_record_occurrences`' shape, for the same
+    reason: the caller has already paired specific declarations, so two that
+    share a key are kept apart by an ordinal disambiguator, never collapsed.
+
+    *project* computes the payload. It is injected rather than restated here
+    because the formula is the normalizer's own
+    (``extract.semantic_normalizer.variable_canonical_entity``), and this
+    module may not import ``extract``; restating it would be a second
+    reading of "canonical" for the adapter path to drift from.
+
+    Keyed by the variable's producer-resolved ``entity_id`` when it has one,
+    else a synthetic identity from its mangled spelling.
+    """
+    occurrences: dict[OccurrenceId, CanonicalEntity] = {}
+    seen: dict[EntityId, int] = {}
+    order: list[OccurrenceId] = []
+    for var in variables:
+        key = var.entity_id or _synthetic_entity_id(
+            EntityKind.VARIABLE, var.mangled or var.name
+        )
+        ordinal = seen.get(key, 0)
+        seen[key] = ordinal + 1
+        occ_id = OccurrenceId(key, str(ordinal) if ordinal else "")
+        occurrences[occ_id] = project(var)
+        order.append(occ_id)
+    return SemanticIR(occurrences=occurrences), tuple(order)
 
 
 def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:

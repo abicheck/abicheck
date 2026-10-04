@@ -22,7 +22,7 @@ cycle). ``diff_symbols._check_variable`` is the sole caller.
 
 from __future__ import annotations
 
-import re
+from collections.abc import Iterable
 from typing import Any
 
 from .checker_types import Change
@@ -32,7 +32,12 @@ from .compare.elf_only_demangle import (
     elf_only_demangled_name as _elf_only_demangled_name,
 )
 from .compare.fact_comparison import compare_facts
-from .diff_helpers import bool_transition, make_change
+from .compare.variables import (
+    VariableTypeIndex,
+    variable_type_changes,
+    variable_type_index,
+)
+from .diff_helpers import make_change
 from .diff_symbols_renames import _should_filter_transitive_runtime_symbols
 from .elf_symbol_filter import (
     exported_symbol_names,
@@ -40,6 +45,7 @@ from .elf_symbol_filter import (
 )
 from .model import AbiSnapshot, AccessLevel, Function, Variable
 from .model.change_catalog.kinds import ChangeKind
+from .model.semantic_ir_variable_payload import variable_canonical_entity
 from .model.surface_facts import (
     is_abi_visible,
     is_export_confirmed_absent,
@@ -47,9 +53,6 @@ from .model.surface_facts import (
     surface_fact_summary,
 )
 from .name_classification import (
-    _find_matching_close,
-    canonicalize_type_name,
-    func_signature_cv_only_differ,
     is_local_rtti_symbol,
 )
 
@@ -145,196 +148,6 @@ def _check_variable_alignment(
             entity_id=v_old.entity_id or v_new.entity_id,
         )
     ]
-
-
-_TRAILING_CONST_RE = re.compile(r"\s*\bconst\b\s*$")
-_LEADING_CONST_TOKEN_RE = re.compile(r"^\s*\bconst\b\s*")
-_CV_TOKEN_RE = re.compile(r"\b(?:const|volatile)\b")
-
-
-def _has_top_level_pointer_or_ref(canonical_type: str) -> bool:
-    """True if *canonical_type* has a ``*``/``&`` outside any ``<...>``
-    template-argument bracket.
-
-    A plain substring search for ``*``/``&`` would also match one nested
-    *inside* a template argument (e.g. ``std::vector<int *>`` — a by-value
-    vector of pointers, not itself a pointer), wrongly routing a pure
-    top-level const flip on that by-value variable into the
-    pointer/reference branch below, which only strips a *trailing* const —
-    but the top-level const here is leading (Codex review).
-    """
-    depth = 0
-    for ch in canonical_type:
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth = max(0, depth - 1)
-        elif ch in "*&" and depth == 0:
-            return True
-    return False
-
-
-def _last_sigil_in_range(canonical_type: str, start: int, end: int) -> int | None:
-    """Index of the last ``*``/``&`` in ``canonical_type[start:end]`` outside
-    any ``<...>`` bracket, or None. Same "top-level" definition as
-    ``_has_top_level_pointer_or_ref``, just reporting a position within a
-    sub-range instead of a whole-string boolean.
-    """
-    depth = 0
-    pos = None
-    for i in range(start, end):
-        ch = canonical_type[i]
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth = max(0, depth - 1)
-        elif ch in "*&" and depth == 0:
-            pos = i
-    return pos
-
-
-def _first_top_level_paren_span(canonical_type: str) -> tuple[int, int] | None:
-    """``(open_idx, close_idx)`` of the first top-level (non-``<...>``-
-    nested) ``(...)`` group, or None if there is none."""
-    depth = 0
-    for i, ch in enumerate(canonical_type):
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth = max(0, depth - 1)
-        elif ch == "(" and depth == 0:
-            close = _find_matching_close(canonical_type, i)
-            return i, min(close, len(canonical_type) - 1)
-    return None
-
-
-def _declarator_sigil_pos(canonical_type: str) -> int | None:
-    """Index of the variable's OWN declarator ``*``/``&``, as opposed to one
-    belonging to a parameter or array size nested further in the spelling.
-
-    A function-/array-pointer variable's canonical spelling is always
-    ``BaseType ( *quals)(...)``/``BaseType ( *quals)[...]`` — the FIRST
-    top-level ``(...)`` group is structurally this declarator (the actual
-    parameter list or array dimensions, if present, always comes after it).
-    Searching the whole string for the LAST top-level sigil instead (as an
-    earlier version of this function did) picks up a parameter's own
-    pointer sigil for a callback/function-pointer parameter (``"void (
-    *const)(int *)"`` — the last ``*`` is the parameter's, not the outer
-    declarator's), so its trailing ``const`` never gets recognized as the
-    variable's own (Codex review, PR #589). Falls back to the whole
-    string's last top-level sigil for a bare pointer with no parens at all
-    (``"int * const"``).
-    """
-    span = _first_top_level_paren_span(canonical_type)
-    if span is not None:
-        open_idx, close_idx = span
-        pos = _last_sigil_in_range(canonical_type, open_idx + 1, close_idx)
-        if pos is not None:
-            return pos
-    return _last_sigil_in_range(canonical_type, 0, len(canonical_type))
-
-
-def _has_real_trailing_group(canonical_type: str, after: int) -> bool:
-    """True if a top-level ``(...)``/``[...]`` group (skipping only
-    whitespace) starts at or after index *after*.
-
-    Used to recognize a member-function-POINTER's own trailing cv (``"void
-    (C:: *)(int) const"`` — the pointer points to a const member function):
-    once a REAL parameter list or array-dimension group follows the
-    declarator, anything trailing after IT is that group's own business
-    (member-function cv-qualification, a genuinely different, non-
-    interchangeable type — confirmed against real g++ mangling), never the
-    bare-pointer "trailing own const" case the end-of-string fallback below
-    exists for (CodeRabbit review, PR #589).
-    """
-    k = after
-    while k < len(canonical_type) and canonical_type[k].isspace():
-        k += 1
-    return k < len(canonical_type) and canonical_type[k] in "(["
-
-
-def _strip_trailing_declarator_const(canonical_type: str) -> str:
-    """Strip a top-level pointer/reference declarator's own trailing
-    ``const`` — whether at the absolute end of the string (a bare pointer,
-    ``"int * const"``) or immediately before the closing paren/bracket of a
-    function- or array-pointer declarator (``"void ( *const)()"``, ``"int
-    ( *const)[5]"`` — a variable whose type itself is a function or array
-    pointer, canonicalized with the qualifier directly after the ``*``, not
-    at the string's end). Only a run of pure cv tokens between the sigil and
-    that close counts; anything else there (a real parameter/element type)
-    means this isn't the simple ``"(*quals)"`` declarator shape, so fall
-    back to the plain end-of-string case — UNLESS a real parameter list or
-    array-dimension group follows the declarator (see
-    :func:`_has_real_trailing_group`), in which case a trailing end-of-string
-    ``const``/``volatile`` belongs to THAT group, not this declarator, and
-    must be left untouched entirely rather than risk stripping something
-    that isn't actually this declarator's own qualifier (CodeRabbit review,
-    PR #589, x2).
-    """
-    pos = _declarator_sigil_pos(canonical_type)
-    if pos is not None:
-        span_end = len(canonical_type)
-        for k in range(pos + 1, len(canonical_type)):
-            if canonical_type[k] in ")]":
-                span_end = k
-                break
-        span = canonical_type[pos + 1 : span_end]
-        if (
-            span_end < len(canonical_type)
-            and re.fullmatch(r"(?:\s|const|volatile)*", span)
-            and _CV_TOKEN_RE.search(span)
-        ):
-            # .strip(): canonicalize_type_name never puts whitespace directly
-            # after the sigil or directly before the declarator's closing
-            # bracket (e.g. an unchanged volatile-only declarator canonicalizes
-            # to "( *volatile)", not "( * volatile)") — removing "const" from
-            # a combined "const volatile"/"volatile const" span leaves a
-            # separator space stranded at whichever end "const" vacated,
-            # which must be trimmed to match that convention or an unrelated,
-            # unchanged volatile qualifier makes the two sides spuriously
-            # compare unequal (Codex review, PR #589).
-            new_span = re.sub(r"\bconst\b", "", span).strip()
-            return canonical_type[: pos + 1] + new_span + canonical_type[span_end:]
-        if span_end < len(canonical_type) and _has_real_trailing_group(
-            canonical_type, span_end + 1
-        ):
-            return canonical_type
-    return _TRAILING_CONST_RE.sub("", canonical_type)
-
-
-def _without_top_level_const(canonical_type: str) -> str:
-    """Strip the *top-level* ``const`` from an already-canonicalized type name.
-
-    ``canonicalize_type_name`` normalizes a leading ``const T`` to ``T
-    const`` (moving the qualifier immediately after what it qualifies) —
-    but only when the base type has no template args (``"<...>"``); for a
-    templated base it deliberately leaves the spelling untouched, so a
-    top-level const on e.g. ``std::vector<int>`` stays leading
-    (``"const std::vector<int>"``), not trailing.
-
-    So which end is "top-level" depends on whether a pointer/reference
-    sigil is present, not on template-ness:
-
-    - No ``*``/``&`` at all: the *whole object* is what's qualified, so a
-      const at *either* end (leading, for a templated base; trailing, the
-      east-const form for a non-template base) is the top-level qualifier
-      — strip whichever is present.
-    - A ``*``/``&`` present: the top-level (pointer-itself) qualifier is
-      always the trailing token (``"int * const"``, or ``"std::vector<int>
-      * const"``) regardless of template-ness — see
-      ``_strip_trailing_declarator_const`` for the function-/array-pointer
-      declarator's own variant of "trailing". A *leading* const there
-      (``"int const *"``, ``"const std::vector<int> *"``) qualifies the
-      pointee, not the pointer, and must NOT be stripped — collapsing it
-      would hide a real type change (the pointer itself is still writable;
-      only what it points to changed) behind a misleading "variable became
-      const" (Codex review, x2: the original non-template pointee-const
-      case, and the templated-base variant of the same issue).
-    """
-    if _has_top_level_pointer_or_ref(canonical_type):
-        return _strip_trailing_declarator_const(canonical_type)
-    stripped = _LEADING_CONST_TOKEN_RE.sub("", canonical_type)
-    return _TRAILING_CONST_RE.sub("", stripped)
 
 
 _UNKNOWN_TYPE = "?"
@@ -455,76 +268,49 @@ def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
 
 
 def _check_variable(
-    mangled: str, v_old: Variable, v_new: Variable, *, cv_facts_reliable: bool = True
+    mangled: str,
+    v_old: Variable,
+    v_new: Variable,
+    *,
+    old_index: VariableTypeIndex,
+    new_index: VariableTypeIndex,
+    cv_facts_reliable: bool = True,
 ) -> list[Change]:
     """Compare a matched pair of public variables.
 
-    *cv_facts_reliable* mirrors ``diff_types._field_type_genuinely_changed``:
-    a pre-v9 CastXML snapshot silently dropped ``volatile`` from a variable's
-    type spelling (no dedicated ``is_volatile`` fact to fall back on, unlike
-    ``TypeField``), so an unchanged legacy-vs-fresh pair would otherwise
-    misreport a breaking ``VAR_TYPE_CHANGED`` (Codex review, PR #582).
+    The type/const half reads each side's ``SemanticIR`` through
+    *old_index*/*new_index* (``compare/variables.py``, ADR-063 6B variable
+    cohort). *cv_facts_reliable* is ``False`` for a pre-v9 CastXML document,
+    which silently dropped ``volatile`` from a variable's type spelling, so a
+    cv-only difference there would misreport a breaking ``VAR_TYPE_CHANGED``
+    (Codex review, PR #582).
     """
     changes = _check_variable_alignment(mangled, v_old, v_new)
-    # The export axis is independent of every type/qualifier comparison below
-    # and must survive their early returns -- an unknown "?" type on a
-    # stripped side says nothing about whether the symbol is still exported --
-    # so it is folded in first (compare/export_transition.py).
+    # The export axis is independent of every type/qualifier comparison and
+    # must survive their early returns -- an unknown type on a stripped side
+    # says nothing about whether the symbol is still exported
+    # (compare/export_transition.py).
     changes += _export_transition.check_variable(mangled, v_old, v_new)
-    # RD2-5: a stripped side reports type "?"; unknown is not a type change.
-    if _type_unknown(v_old.type) or _type_unknown(v_new.type):
-        return changes
-    canon_old = canonicalize_type_name(v_old.type)
-    canon_new = canonicalize_type_name(v_new.type)
-    if canon_old != canon_new:
-        # A pure TOP-LEVEL const-qualifier flip is a real, common case where
-        # the type strings differ (the dumper bakes "const" into the type
-        # text) but the base type is otherwise identical — that's a const
-        # transition (below), not a base-type change. Only the trailing
-        # (top-level) const is stripped for this comparison — a pointee-level
-        # const (e.g. `int *` -> `const int *`) must still fall through to
-        # VAR_TYPE_CHANGED, since the pointer itself didn't become const.
-        is_pure_const_flip = (
-            v_old.is_const != v_new.is_const
-            and _without_top_level_const(canon_old)
-            == _without_top_level_const(canon_new)
-        )
-        if not is_pure_const_flip:
-            if not cv_facts_reliable and func_signature_cv_only_differ(
-                canon_old, canon_new
-            ):
-                # Legacy-snapshot cv noise: the type-string difference itself
-                # is untrustworthy (see this function's docstring), so don't
-                # fall through to the const-transition check below either —
-                # is_const may be equally unreliable for the same reason,
-                # and falling through would just resurface the same false
-                # positive as VAR_BECAME_CONST/VAR_LOST_CONST instead of
-                # VAR_TYPE_CHANGED (Codex review, PR #589).
-                return changes
-            return changes + [
-                make_change(
-                    ChangeKind.VAR_TYPE_CHANGED,
-                    symbol=mangled,
-                    name=v_old.name,
-                    old=v_old.type,
-                    new=v_new.type,
-                    entity_id=v_old.entity_id or v_new.entity_id,
-                )
-            ]
-    # const-qualification transitions only matter when the type is unchanged.
-    return changes + bool_transition(
-        v_old.is_const,
-        v_new.is_const,
+    return changes + variable_type_changes(
         mangled,
-        added=(
-            ChangeKind.VAR_BECAME_CONST,
-            f"Variable became const-qualified: {v_old.name} (writes now → SIGSEGV)",
-        ),
-        added_values=("non-const", "const"),
-        removed=(
-            ChangeKind.VAR_LOST_CONST,
-            f"Variable lost const qualifier: {v_old.name} (ODR / inlining break)",
-        ),
-        removed_values=("const", "non-const"),
+        v_old.name,
+        (v_old.type, v_new.type),
+        old_index.entity_for(v_old),
+        new_index.entity_for(v_new),
         entity_id=v_old.entity_id or v_new.entity_id,
+        cv_facts_reliable=cv_facts_reliable,
+    )
+
+
+def variable_type_index_for(
+    snap: AbiSnapshot, variables: Iterable[Variable]
+) -> VariableTypeIndex:
+    """*snap*'s :class:`~abicheck.compare.variables.VariableTypeIndex` over
+    the *variables* the caller pairs, projecting what the IR cannot name with
+    the normalizer's own formula under *snap*'s producer."""
+    producer = snap.ast_producer or ""
+    return variable_type_index(
+        snap.canonical_ir,
+        variables,
+        lambda var: variable_canonical_entity(var, producer),
     )

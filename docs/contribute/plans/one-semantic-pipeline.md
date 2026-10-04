@@ -12044,6 +12044,33 @@ every other detector family still reads the legacy collections.
 
 ---
 
+**Landed (2026-10-04): Phase 6B's fourth checker cutover -- variable type and
+const (`VAR_TYPE_CHANGED`/`VAR_BECAME_CONST`/`VAR_LOST_CONST`).** No schema
+change: the IR already carried both facts this family decides on
+(`canonical_spelling`, `cv_qualification`). `compare/variables.py` reads them
+per side with the record-layout cohort's authority rule (IR when it has an
+occurrence for the variable's `entity_id`, else the adapter's
+`legacy_variable_occurrences`, never both adjudicated). The projection
+formula moved to `model/semantic_ir_variable_payload.py` so the normalizer
+and the adapter share one implementation (`compare` may import only
+`model`); `extract/semantic_normalizer_artifacts.py` moved to
+`model/castxml_spelling_artifacts.py` for the same reason. Gate:
+`MIGRATED_COHORTS` entry `variables` (`type`/`is_const`/`variables`/
+`variable_map`). Two intentional refinements over the old read: top-level
+const (from `cv_qualification`, not `Variable.is_const`'s whole-spelling word
+search) and "unknown" covering any depth-zero unresolved component.
+Verification: `tests/test_variable_cutover.py` (Hypothesis equivalence over
+IR/adapter mixes against a hand-written oracle, authority, projection-vs-
+normalizer agreement, gate firing).
+
+*Functions remain open.* `canonical_spelling` combines return and parameter
+types into one string; the function detectors need per-position spellings,
+`ref_qualifier` and variadic status. Carrying those is a `CanonicalEntity`
+schema change (v54), a stored-format decision to approve before it lands,
+as v53 was.
+
+---
+
 ### Phase 3 — public surface as a graph query over one evidence graph (D5)
 
 **Landed (thirteen slices, 2026-08-31): the plumbing, not the traversal
@@ -15113,7 +15140,7 @@ already carries) -- closing that needs real structural evidence from the
 parser, not a normalizer-only text fix. These three artifact-recognition
 functions (`has_unresolved_component`, `is_castxml_opaque_function_type`,
 `CLANG_EXPR_FINGERPRINT_RE`) were split out into a new sibling leaf module,
-`extract/semantic_normalizer_artifacts.py`, once their accumulated
+`model/castxml_spelling_artifacts.py`, once their accumulated
 docstrings pushed `semantic_normalizer.py` itself past the AI-readiness
 gate's 800-line cap for a new file -- mirroring `model.declarator_
 qualifiers.py`'s own split from `model.signature_normalization.py` for the

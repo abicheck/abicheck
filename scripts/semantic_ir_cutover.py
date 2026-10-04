@@ -143,6 +143,20 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         forbidden_attributes=frozenset({"types", "size_bits", "alignment_bits"}),
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
+    # ADR-063 6B variable cohort: VAR_TYPE_CHANGED/VAR_BECAME_CONST/
+    # VAR_LOST_CONST read CanonicalEntity.canonical_spelling/cv_qualification
+    # through each side's index; a Variable's own type facts and a snapshot's
+    # variables are off limits here. Pairing stays with the caller's
+    # SymbolIdentityIndex, and an unnamed variable is projected through the
+    # adapter's legacy_variable_occurrences.
+    MigratedCohort(
+        name="variables",
+        modules=("abicheck/compare/variables.py",),
+        forbidden_attributes=frozenset(
+            {"type", "is_const", "variables", "variable_map"}
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
     # `functions` is deliberately NOT registered here yet. A first attempt
     # (abicheck/compare/functions.py's function_identity_index) built a
     # SemanticIRIndex per comparison but only ever looked up a function's

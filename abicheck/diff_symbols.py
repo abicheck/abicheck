@@ -102,6 +102,7 @@ from .diff_symbols_variables import (
     _var_removed,
     addition_evidence,
     var_access_changes,
+    variable_type_index_for,
 )
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
@@ -1290,13 +1291,22 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_vars, _reconciled_new_vars = _reconciled_variable_surfaces(old, new)
     new_vars_index = SymbolIdentityIndex.for_variables(_reconciled_new_vars)
     _prewarm_elf_only_demangling(old_vars, new_vars_index)
+    # ADR-063 6B variable cohort: the type/const comparison reads each side's
+    # SemanticIR; pairing stays with the identity index above.
+    old_types = variable_type_index_for(old, old_vars.values())
+    new_types = variable_type_index_for(new, _reconciled_new_vars.values())
     return diff_by_key(
         SymbolIdentityIndex.for_variables(old_vars),
         new_vars_index,
         on_removed=_var_removed,
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(
-            m, o, n, cv_facts_reliable=cv_facts_reliable
+            m,
+            o,
+            n,
+            old_index=old_types,
+            new_index=new_types,
+            cv_facts_reliable=cv_facts_reliable,
         ),
     )
 
