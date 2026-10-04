@@ -91,6 +91,9 @@ _NEEDS_L5 = "UNCOVERED: L3-L5 build-source graph extraction (needs a compile dat
 COVERAGE: dict[str, str] = {
     # ---- memoized functions ----
     "abicheck.storage.code_identity::memoized::abicheck_code_fingerprint": B,
+    "abicheck.model.semantic_ir_function_signature::memoized::_cached_entity": B,
+    "abicheck.model.semantic_ir_function_signature::memoized::_cached_facts": B,
+    "abicheck.model.semantic_ir_function_signature::memoized::_shared_present": B,
     "abicheck.storage.code_identity::memoized::abicheck_modules_fingerprint": H,
     "abicheck.buildsource.header_compile_context::memoized::_include_pattern": _NEEDS_L5,
     "abicheck.buildsource.source_extractors.castxml::memoized::_castxml_tool_version": "UNCOVERED: L4 castxml source extractor tool probe; build-source path only",
