@@ -476,15 +476,19 @@ _SOURCES = {
     "tests/test_dotted.py": "from regressions.manifest import BUG_CLASSES\n",
     "tests/test_unrelated.py": "import json\nfrom abicheck import util\n",
     "tests/test_mentions_in_text.py": "# _util is mentioned, never imported\nX = '_util'\n",
+    "tests/test_multiline.py": "from tests import (\n    os_helpers,\n    _mid,\n)\n",
+    "tests/test_submodule.py": "import tests.regressions.manifest\n",
 }
 
 
 @pytest.mark.parametrize(
     ("helper", "expected"),
     [
-        ("tests/_util.py", {"tests/test_direct.py", "tests/test_via_mid.py"}),
-        ("tests/_mid.py", {"tests/test_via_mid.py"}),
-        ("tests/regressions/manifest.py", {"tests/test_pkg_form.py", "tests/test_dotted.py"}),
+        ("tests/_util.py", {"tests/test_direct.py", "tests/test_via_mid.py", "tests/test_multiline.py"}),
+        ("tests/_mid.py", {"tests/test_via_mid.py", "tests/test_multiline.py"}),
+        ("tests/regressions/manifest.py", {"tests/test_pkg_form.py", "tests/test_dotted.py", "tests/test_submodule.py"}),
+        # A package initializer runs for every submodule import of it.
+        ("tests/regressions/__init__.py", {"tests/test_pkg_form.py", "tests/test_dotted.py", "tests/test_submodule.py"}),
     ],
 )  # fmt: skip
 def test_helper_importers_follows_every_import_spelling(
@@ -492,7 +496,9 @@ def test_helper_importers_follows_every_import_spelling(
 ) -> None:
     """Independent oracle: the expected sets are written by hand from the
     fixture's import lines, covering relative, aliased, package-attribute
-    and dotted spellings, and a transitive helper chain."""
+    and dotted spellings, a parenthesized multi-line import, a package
+    initializer reached through a submodule import, and a transitive
+    helper chain."""
     assert scope.helper_importers([helper], _SOURCES) == expected
 
 
@@ -503,7 +509,14 @@ def test_a_helper_change_adds_its_importers_and_nothing_else() -> None:
     check the stats pass runs against it."""
     present = set(_SOURCES)
     out = scope.extend_selection(_SEL, ["tests/_util.py"], _exists(present), _SOURCES)
-    assert out == sorted({*_SEL, "tests/test_direct.py", "tests/test_via_mid.py"})
+    assert out == sorted(
+        {
+            *_SEL,
+            "tests/test_direct.py",
+            "tests/test_via_mid.py",
+            "tests/test_multiline.py",
+        }
+    )
     assert out != gen.FULL_SELECTION
     assert not gen.selection_problems(out, lambda p: True)
 

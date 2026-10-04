@@ -47,6 +47,7 @@ partition ``only_mutate`` exactly.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import subprocess
 import sys
@@ -271,34 +272,48 @@ def _module_names(path: str) -> set[str]:
     return {".".join(parts[start:]) for start in range(len(parts))}
 
 
-def _imports_any(text: str, names: set[str]) -> bool:
+def _imported_modules(text: str) -> set[str] | None:
+    """Every dotted module an import statement in *text* can name.
+
+    ``from pkg import name`` yields both ``pkg`` and ``pkg.name``: *name*
+    may be a submodule. Relative dots are dropped. ``None`` when *text* does
+    not parse, which callers treat as "may import anything".
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return None
+    mods: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            mods.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            if base:
+                mods.add(base)
+            for alias in node.names:
+                mods.add(f"{base}.{alias.name}" if base else alias.name)
+    return mods
+
+
+def _imports_any(text: str, names: set[str], packages: set[str]) -> bool:
     """Does *text* import a module spelled as one of *names*?
 
-    Deliberately generous (a textual match on import statements, not name
-    resolution): a false positive only adds a test file to the stats pass.
+    A spelling matches exactly or as a dotted suffix (``tests._util`` for
+    ``_util``). A *packages* spelling (a changed ``__init__.py``) also
+    matches any submodule import, since importing ``pkg.sub`` runs
+    ``pkg/__init__.py``. Generous by design: a false positive only adds a
+    test file to the stats pass.
     """
-
-    def hit(mod: str) -> bool:
-        mod = mod.lstrip(".")
-        return any(mod == n or mod.endswith("." + n) for n in names)
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("from "):
-            parts = stripped.split(None, 3)
-            if len(parts) < 4 or parts[2] != "import":
-                continue
-            if hit(parts[1]):
-                return True
-            # `from pkg import helper` names the module in the import list.
-            for item in parts[3].strip("()\\ ").split(","):
-                name = item.strip().split(" as ")[0].strip()
-                if name and hit(f"{parts[1]}.{name}"):
-                    return True
-        elif stripped.startswith("import "):
-            for item in stripped[len("import ") :].split(","):
-                if hit(item.strip().split(" as ")[0].strip()):
-                    return True
+    mods = _imported_modules(text)
+    if mods is None:
+        return True
+    for mod in mods:
+        dotted = "." + mod + "."
+        if any(dotted.endswith("." + n + ".") for n in names):
+            return True
+        if any("." + n + "." in dotted for n in packages):
+            return True
     return False
 
 
@@ -314,10 +329,17 @@ def helper_importers(changed: Iterable[str], sources: Mapping[str, str]) -> set[
     frontier = set(changed)
     while frontier:
         names = set().union(*(_module_names(p) for p in frontier))
+        packages = set().union(
+            *(
+                _module_names(p)
+                for p in frontier
+                if PurePosixPath(p).name == "__init__.py"
+            )
+        )
         frontier = {
             path
             for path, text in sources.items()
-            if path not in reached and _imports_any(text, names)
+            if path not in reached and _imports_any(text, names, packages)
         }
         reached |= frontier
     return {p for p in reached if PurePosixPath(p).name.startswith("test_")}
