@@ -112,6 +112,7 @@ from mypy_override_targets import (  # noqa: E402
 from no_inline_gate_computation import (  # noqa: E402
     check_no_inline_gate_computation,
 )
+from perf_antipatterns import check_perf_antipatterns  # noqa: E402
 from semantic_ir_cutover import check_semantic_ir_cutover  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -3596,6 +3597,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "adr-index-nav-sync": check_adr_index_and_nav_sync,
     "adr-status-sync": check_adr_status_sync,
     "banned-imports": check_banned_imports,
+    "perf-antipatterns": check_perf_antipatterns,
     "project-snapshot-dto-no-asdict": check_project_snapshot_dto_no_asdict,
     "test-change-symbol-typed": check_test_change_symbol_is_typed,
     "cli-contract": check_cli_contract,
