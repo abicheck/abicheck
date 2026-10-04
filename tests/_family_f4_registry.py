@@ -260,7 +260,7 @@ HEURISTICS: dict[str, str] = {
     "abicheck.diff_stdlib_impl::_is_indirect_type::affix.endswith:(' const', ' volatile')": "spelling",
     "abicheck.diff_stdlib_impl::_public_type_embeds_stdlib_by_value::affix.endswith:'&'": "spelling",
     "abicheck.diff_stdlib_impl::_public_type_embeds_stdlib_by_value::affix.endswith:'*'": "spelling",
-    "abicheck.diff_symbols::<module>::re:'\\\\b(?:const|volatile)\\\\b'": "spelling",
+    "abicheck.compare.function_lifecycle::<module>::re:'\\\\b(?:const|volatile)\\\\b'": "spelling",
     "abicheck.diff_symbols_renames::<module>::re:'(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])'": "spelling",
     "abicheck.diff_symbols_renames::_diff_fingerprint_renames::affix.startswith:'_Z'": "grammar",
     "abicheck.diff_symbols_renames::_is_destructor_leaf::affix.startswith:'~'": "spelling",

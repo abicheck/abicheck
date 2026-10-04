@@ -213,6 +213,16 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         ),
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
+    # ADR-063 6B function-lifecycle cohort: inline transitions, deletion and
+    # the converting-constructor test read the function occurrence's facts.
+    MigratedCohort(
+        name="function_lifecycle",
+        modules=("abicheck/compare/function_lifecycle.py",),
+        forbidden_attributes=frozenset(
+            {"is_inline", "deleted_from_dwarf", "params", "functions", "function_map"}
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
     # `functions` is deliberately NOT registered here yet. A first attempt
     # (abicheck/compare/functions.py's function_identity_index) built a
     # SemanticIRIndex per comparison but only ever looked up a function's

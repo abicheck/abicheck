@@ -72,6 +72,9 @@ SIGNATURE_FIELDS = (
     "exception_spec",
     "vtable_index",
     "is_override",
+    "is_inline",
+    "is_deleted",
+    "deleted_from_dwarf",
     # The parameter cohort.
     "parameter_names",
     "parameter_defaults",
@@ -128,6 +131,9 @@ def function_signature_facts(fn: Function) -> dict[str, Any]:
         "exception_spec": _optional(fn.exception_spec),
         "vtable_index": _optional(fn.vtable_index),
         "is_override": _optional(fn.is_override),
+        "is_inline": Fact.present(bool(fn.is_inline)),
+        "is_deleted": Fact.present(bool(fn.is_deleted)),
+        "deleted_from_dwarf": Fact.present(bool(fn.deleted_from_dwarf)),
         "parameter_names": Fact.present(tuple(p.name or "" for p in fn.params)),
         "parameter_defaults": Fact.present(tuple(p.default for p in fn.params)),
         "parameter_pointer_depths": Fact.present(

@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import functools
-import re
 from collections.abc import Callable, Container, Iterator, Mapping
 from typing import Any
 
@@ -30,6 +29,12 @@ from .compare.edge_query import export_table_covered
 from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
+)
+from .compare.function_lifecycle import (
+    converting_ctor_signature,
+    deletion_kind,
+    inline_changes,
+    is_deleted,
 )
 from .compare.function_signature import (
     FunctionSignatureIndex,
@@ -137,7 +142,6 @@ from .finding_identity_ctor_dtor import (
 )
 from .model import (
     AbiSnapshot,
-    AccessLevel,
     Function,
     RecordType,
     Variable,
@@ -463,44 +467,27 @@ def _check_function_signature(
 def _check_inline_transitions(
     old_map: Mapping[str, Function],
     new_map: Mapping[str, Function],
+    old_snapshot: AbiSnapshot,
     new_snapshot: AbiSnapshot,
 ) -> list[Change]:
     """Detect inline/non-inline transitions for functions present in both
     snapshots -- including a ctor/dtor pair only visible via synthetic-key
     format-drift reconciliation (``iter_matched_function_pairs``, PR #761
     finding 2)."""
+    old_index = function_signature_index(old_snapshot.canonical_ir, old_map.values())
+    new_index = function_signature_index(new_snapshot.canonical_ir, new_map.values())
+    new_elf = new_snapshot.elf
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
-        if not f_old.is_inline and f_new.is_inline:
-            new_elf = new_snapshot.elf
-            still_exported = new_elf is not None and any(
-                s.name == mangled for s in new_elf.symbols
-            )
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_BECAME_INLINE,
-                    symbol=mangled,
-                    description=(
-                        f"Function became inline, symbol still exported: {f_old.name}"
-                        if still_exported
-                        else f"Function became inline (symbol may be removed from DSO): {f_old.name}"
-                    ),
-                    old_value="non-inline",
-                    new_value="inline",
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
-        elif f_old.is_inline and not f_new.is_inline:
-            changes.append(
-                make_change(
-                    ChangeKind.FUNC_LOST_INLINE,
-                    symbol=mangled,
-                    name=f_old.name,
-                    old="inline",
-                    new="non-inline",
-                    entity_id=f_old.entity_id or f_new.entity_id,
-                )
-            )
+        changes += inline_changes(
+            mangled,
+            f_old.name,
+            old_index.entity_for(f_old),
+            new_index.entity_for(f_new),
+            entity_id=f_old.entity_id or f_new.entity_id,
+            still_exported=new_elf is not None
+            and any(sym.name == mangled for sym in new_elf.symbols),
+        )
     return changes
 
 
@@ -612,8 +599,14 @@ def _detect_newly_deleted_functions(
     both_tables_read = export_table_covered(
         new_snapshot, "elf"
     ) and export_table_covered(old_snapshot, "elf")
+    old_index = function_signature_index(old_snapshot.canonical_ir, old_all.values())
+    new_index = function_signature_index(new_snapshot.canonical_ir, new_all.values())
+    drift_entities = function_signature_index(
+        old_snapshot.canonical_ir, drift_old_by_new_key.values()
+    )
     for mangled, f_new in new_all.items():
-        if not f_new.is_deleted:
+        new_entity = new_index.entity_for(f_new)
+        if is_deleted(new_entity) is not True:
             continue
         # Suppress only a *genuinely internal* DWARF-deleted member: not
         # exported now AND not exported before either. One that *was* an old
@@ -621,22 +614,23 @@ def _detect_newly_deleted_functions(
         # deletion and must still be reported (the removal-side path defers
         # to this detector for it).
         if (
-            f_new.deleted_from_dwarf
+            new_entity is not None
+            and new_entity.deleted_from_dwarf.value
             and both_tables_read
             and mangled not in exported
             and mangled not in old_exported
         ):
             continue
-        f_old_any = old_all.get(mangled) or drift_old_by_new_key.get(mangled)
+        f_old_any = old_all.get(mangled)
+        old_entity = old_index.entity_for(f_old_any) if f_old_any is not None else None
+        if f_old_any is None:
+            f_old_any = drift_old_by_new_key.get(mangled)
+            if f_old_any is not None:
+                old_entity = drift_entities.entity_for(f_old_any)
         if not _export_transition.deleted_declaration_is_public(f_new, f_old_any):
             continue
-        if f_old_any is not None and not f_old_any.is_deleted:
-            kind = (
-                ChangeKind.FUNC_DELETED_DWARF
-                if f_new.deleted_from_dwarf
-                else ChangeKind.FUNC_DELETED
-            )
-            deleted_entity_id = f_old_any.entity_id or f_new.entity_id
+        kind = deletion_kind(old_entity, new_entity)
+        if f_old_any is not None and kind is not None:
             changes.append(
                 make_change(
                     kind,
@@ -644,7 +638,7 @@ def _detect_newly_deleted_functions(
                     name=f_new.name,
                     old_value="callable",
                     new_value="deleted",
-                    entity_id=deleted_entity_id,
+                    entity_id=f_old_any.entity_id or f_new.entity_id,
                 )
             )
     return changes
@@ -771,7 +765,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes.extend(_detect_newly_deleted_functions(old_all, new_all_map, old, new))
 
     # FUNC_BECAME_INLINE / FUNC_LOST_INLINE: detect inline↔non-inline transitions
-    changes.extend(_check_inline_transitions(old_map, new_map, new))
+    changes.extend(_check_inline_transitions(old_map, new_map, old, new))
 
     # HIDDEN_FRIEND_ADDED / HIDDEN_FRIEND_REMOVED for the inline-only case.
     # Inline hidden friends have no external symbol (visibility=HIDDEN) so
@@ -795,13 +789,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
-# Word-boundary-anchored so a class whose own name merely *contains* "const"/
-# "volatile" (e.g. ``myconst``) is not corrupted by the strip — a blind
-# substring .replace() previously turned ``myconst`` into ``my`` and made the
-# copy/move constructor look like a converting overload (Codex review).
-_CV_QUALIFIER_RE = re.compile(r"\b(?:const|volatile)\b")
-
-
 def _converting_ctors_by_class(
     snap: AbiSnapshot, class_aliases: dict[str, str]
 ) -> dict[str, dict[tuple[str, ...], Function]]:
@@ -816,29 +803,18 @@ def _converting_ctors_by_class(
     constructors. Keyed by param-type tuple.
     """
     by_class: dict[str, dict[tuple[str, ...], Function]] = {}
-    for f in snap.declarations.functions:
+    functions = snap.declarations.functions
+    index = function_signature_index(snap.canonical_ir, functions)
+    for f in functions:
         owner = owner_class_of(f) or _synthetic_ctor_scope(f.mangled) or f.name
         canonical = class_aliases.get(owner) or class_aliases.get(
             owner.rsplit("::", 1)[-1]
         )
         if canonical is None:
             continue
-        if f.is_deleted or f.is_explicit is not False:
-            continue
-        if f.access != AccessLevel.PUBLIC:
-            continue
-        if not f.params:
-            continue
-        required = [p for p in f.params if p.default is None]
-        if len(required) > 1:
-            continue
-        arg_type = " ".join(
-            _CV_QUALIFIER_RE.sub("", f.params[0].type).replace("&", "").split()
-        )
-        if arg_type == f.name:
-            continue
-        sig = tuple(p.type for p in f.params)
-        by_class.setdefault(canonical, {})[sig] = f
+        sig = converting_ctor_signature(f.name, index.entity_for(f))
+        if sig is not None:
+            by_class.setdefault(canonical, {})[sig] = f
     return by_class
 
 

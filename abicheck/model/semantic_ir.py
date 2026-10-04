@@ -110,6 +110,9 @@ _BOOL_FACTS = (
     "is_explicit",
     "is_hidden_friend",
     "is_override",
+    "is_inline",
+    "is_deleted",
+    "deleted_from_dwarf",
 )
 
 
@@ -184,6 +187,9 @@ class CanonicalEntity:
     exception_spec: Fact[str] = field(default_factory=lambda: Fact.not_collected())
     vtable_index: Fact[int] = field(default_factory=lambda: Fact.not_collected())
     is_override: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    is_inline: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    is_deleted: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
+    deleted_from_dwarf: Fact[bool] = field(default_factory=lambda: Fact.not_collected())
     #: Per-parameter facts (ADR-063 6B, parameter cohort), one entry per
     #: parameter: the names, the default expressions (``None`` where a
     #: parameter has none), the pointer depths, and the ``restrict``/

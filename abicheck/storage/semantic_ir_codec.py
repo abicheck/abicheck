@@ -132,6 +132,9 @@ _BOOL_VALUED_FACTS = (
     "is_explicit",
     "is_hidden_friend",
     "is_override",
+    "is_inline",
+    "is_deleted",
+    "deleted_from_dwarf",
 )
 
 #: The ``CanonicalEntity`` fields carrying a tuple-valued ``Fact``. JSON has
