@@ -14,7 +14,7 @@ generated: false
 
 `abicheck` uses different exit codes for each command family.
 
-**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` had one too, but it was **retired outright** — see [that section's warning](#abicheck-scan-retired) before depending on any of its historical codes.
+**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `deps` has its own narrower contract, documented below. `scan` had one too, but it was **retired outright** — see [that section's warning](#abicheck-scan-retired) before depending on any of its historical codes. `compat` (the ABICC drop-in, with ABICC's `0/1/2` and its own `3`–`11`) was removed too; `abicheck compat` exits `64`.
 
 ## Contract relevance decides what the gate sees
 
@@ -913,41 +913,6 @@ exit 0
 
 ---
 
-## `abicheck compat`
-
-Matches `abi-compliance-checker` exit codes (ABICC drop-in):
-
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | No breaking changes (`NO_CHANGE` or `COMPATIBLE`) |
-| `1` | `BREAKING` (mirrors ABICC) |
-| `2` | `API_BREAK` (source-level break; non-verdict failures use extended codes below) |
-
-> Non-verdict/tool failures are classified via **Extended compat error codes (ABICC-style)** below (`3`, `4`, `5`, `6`, `7`, `8`, `9`, `10`, `11`).
-
----
-
-
-### Extended compat error codes (ABICC-style)
-
-In `abicheck compat`, non-verdict failures are further classified where possible:
-
-| Exit code | Typical cause |
-|-----------|---------------|
-| `3` | Required external command/tool is missing (for example `castxml`) |
-| `4` | Cannot access input files (missing or permission denied) |
-| `5` | Header compile/parsing failure during dump |
-| `6` | Invalid compat configuration/input (descriptor, suppression, regex flags) |
-| `7` | Failed to write report/output artifact |
-| `8` | Dump/analysis pipeline failure |
-| `9` | `not_comparable` — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced. Distinct from native `compare`'s own `16` — the two commands maintain independent exit-code schemes. |
-| `10` | Generic internal/tool failure fallback |
-| `11` | Interrupted run |
-
-> Note: classification is best-effort and context-dependent; `API_BREAK` remains `2`.
-
----
-
 ## `--dry-run` (`dump`, `compare`, `scan`, `deps tree`, `deps compare`)
 
 Every one of these five commands accepts `--dry-run`: it resolves and
@@ -973,20 +938,20 @@ one of those.
 
 ## Summary table
 
-| Verdict / State | `compare` exit (legacy) | `compare` exit (severity) | `scan` exit | `deps tree` exit | `deps compare` exit | `compat` exit |
-|-----------------|------------------------|--------------------------|-------------|-------------------|----------------------|---------------|
-| `NO_CHANGE` / `PASS` / compatible | `0` | `0` | `0` | `0` | `0` | `0` |
-| `COMPATIBLE` | `0` | `0` | `0`‡ | — | — | `0` |
-| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0` / `0`–`2`*‡ | — | — | `0` |
-| Additions only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — | n/a |
-| Quality issues only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — | n/a |
-| `WARN` (ABI risk) | — | — | — | — | `1` | — |
-| `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — | `2` |
-| `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` | `1` |
-| `--budget` overflow | — | — | `5` | — | — | — |
-| Missing dependencies/symbols | — | — | — | `1` | — | — |
-| Load failure | — | — | — | — | `4` | — |
-| Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† | `3/4/5/6/7/8/10/11` |
+| Verdict / State | `compare` exit (legacy) | `compare` exit (severity) | `scan` exit | `deps tree` exit | `deps compare` exit |
+|-----------------|------------------------|--------------------------|-------------|-------------------|----------------------|
+| `NO_CHANGE` / `PASS` / compatible | `0` | `0` | `0` | `0` | `0` |
+| `COMPATIBLE` | `0` | `0` | `0`‡ | — | — |
+| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0` / `0`–`2`*‡ | — | — |
+| Additions only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — |
+| Quality issues only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — |
+| `WARN` (ABI risk) | — | — | — | — | `1` |
+| `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — |
+| `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` |
+| `--budget` overflow | — | — | `5` | — | — |
+| Missing dependencies/symbols | — | — | — | `1` | — |
+| Load failure | — | — | — | — | `4` |
+| Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† |
 
 In the `scan` column, the value left of the `/` is the legacy (verdict-based)
 mapping — the default — and the value right of it applies once `scan
@@ -1032,26 +997,3 @@ the `compare` exit (severity) column on the same `*` terms, in **both**
 directions: `severity.addition: error` exits `1` on an additions-only diff,
 and `--severity-preset info-only` exits `0` on a `BREAKING` one. See
 ["`scan --against` and severity"](#scan-against-and-severity-retired-mirrored-compare).
-
----
-
-## Strict mode (`-s` / `-strict`)
-
-`compat` (and only `compat`) supports strict mode to promote lesser verdicts:
-
-```bash
-# Strict mode: COMPATIBLE + API_BREAK → exit 1 (BREAKING)
-abicheck compat -lib foo -old OLD.xml -new NEW.xml -s
-
-# Strict API-only: only API_BREAK → exit 1; COMPATIBLE stays exit 0
-abicheck compat -lib foo -old OLD.xml -new NEW.xml -s --strict-mode api
-```
-
-`--strict-mode` values:
-- `full` (default when `-s` is set): `COMPATIBLE` + `API_BREAK` → BREAKING
-- `api`: only `API_BREAK` → BREAKING; `COMPATIBLE` unchanged
-
-`--strict-mode` has no effect unless `-s` is also passed.
-
-> Note: `abicheck compare` does not have `-s` / `--strict` flags.
-> For compare-mode strict pipelines, use CI exit code logic (check exit `2` as a failure).

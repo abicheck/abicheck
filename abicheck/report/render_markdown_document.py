@@ -419,7 +419,7 @@ def build_markdown_document(
     supplies ``disposition_audit`` verbatim instead of a second
     ``compute_disposition_audit`` over the same ledger, and its per-finding
     verdict/category set drives the ``surface_changes`` section. A direct
-    caller with no envelope (a test, ``compat check``) builds both itself. The severity groups, headline table and
+    caller with no envelope (a test) builds both itself. The severity groups, headline table and
     per-change rows this function assembles stay Markdown's own presentation
     -- an arrangement of already-decided findings, not a second opinion about
     them.
@@ -696,9 +696,6 @@ def _kind_rollups_from_mapping(raw: object) -> tuple[KindRollup, ...]:
             kind=r["kind"],
             count=r["count"],
             sample_symbols=tuple(r["sample_symbols"]),
-            counts_by_library=tuple(
-                (lib, n) for lib, n in r.get("counts_by_library", ())
-            ),
         )
         for r in raw
     )

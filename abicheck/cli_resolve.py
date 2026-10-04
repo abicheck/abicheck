@@ -100,7 +100,7 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
 
 
 def _sniff_text_format(path: Path) -> str:
-    """Read a small header chunk and return 'json', 'perl', 'symvers', or 'unknown'. ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded decoded prefix, mirroring ``service.sniff_text_format`` (kept as a separate copy here rather than importing that one, matching this module's existing "no cross-import for this exact helper" shape)."""
+    """Read a small header chunk and return 'json', 'symvers', or 'unknown'. ADR-059: a gzip/zstd-compressed snapshot is recognized via a bounded decoded prefix, mirroring ``service.sniff_text_format`` (kept as a separate copy here rather than importing that one, matching this module's existing "no cross-import for this exact helper" shape)."""
     from .workflows.storage import bounded_decoded_prefix, detect_snapshot_compression
 
     try:
@@ -120,12 +120,8 @@ def _sniff_text_format(path: Path) -> str:
         head = raw.decode("utf-8", errors="replace").lstrip()
     except OSError:
         return "unknown"
-    from .workflows.extraction import looks_like_perl_dump, looks_like_symvers
+    from .workflows.extraction import looks_like_symvers
 
-    # Check Perl dump BEFORE JSON — a Perl dump can start with $VAR1 = {
-    # which would incorrectly match the JSON heuristic after the '{'
-    if looks_like_perl_dump(head):
-        return "perl"
     if head.startswith("{"):
         return "json"
     return "symvers" if looks_like_symvers(head) else "unknown"
@@ -373,7 +369,7 @@ def classify_compare_operand(path: Path) -> str:
     * ``"directory"`` — a plain directory of libraries, or a multi-artifact stored ``ProjectSnapshot`` package (ADR-062 A1.7); also a set input.
     * ``"app"``       — an ELF application/executable (or ambiguous PIE) that
       ``compare`` cannot pair as a library (hint the user at ``appcompat``).
-    * ``"file"``      — a single ``.so``/JSON/Perl dump, or a single-artifact
+    * ``"file"``      — a single ``.so``/JSON snapshot, or a single-artifact
       ``ProjectSnapshot`` package dir (ADR-062/063; a degraded one is a ``"directory"``, ADR-065 D8).
     """
     from .workflows.extraction import is_package

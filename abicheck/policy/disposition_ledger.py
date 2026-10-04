@@ -842,29 +842,18 @@ def record_suppressed_change(
         change,
         rule=rule,
         application_point=application_point,
-        source_file=_source_file_for(suppression, rule),
+        source_file=_source_file_for(suppression),
         dedupe_key=dedupe_key,
     )
 
 
-def _source_file_for(
-    suppression: object | None, rule: Suppression | None
-) -> str | None:
-    """The document *rule* came from, preferring its own per-rule origin.
+def _source_file_for(suppression: object | None) -> str | None:
+    """The document *rule* came from: its rule set's own ``source_path``.
 
-    A merged rule set (the ABICC front end combines a ``--suppress`` file with
-    rules synthesized from ``-skip-*`` options) has no single source path, so
-    the list-level answer is ``None`` there even for a rule that really did
-    come from the file. ``SuppressionList.source_for`` answers per rule; the
-    list-level ``source_path`` remains the fallback for any other rule-set
-    implementation.
+    Every rule in a ``SuppressionList`` comes from the one document the list
+    was loaded from (or none, for a programmatically-built list), so the
+    list-level path answers for each rule.
     """
-    if rule is not None:
-        source_for = getattr(suppression, "source_for", None)
-        if callable(source_for):
-            resolved = source_for(rule)
-            if resolved is not None:
-                return str(resolved)
     source_path = getattr(suppression, "source_path", None)
     return str(source_path) if source_path is not None else None
 

@@ -365,7 +365,23 @@ Every one is decided above except one, left by Stage G's move of
 Recomputed afterwards: 32 parameters on 20 functions, each kept above or
 recorded as a known gap.
 
-## What is left
+## Stage I — the ABICC `compat` front end
+
+Not a dead-code finding: `compat` had real callers. It was the last front end
+calling `dumper.dump`/`checker.compare` directly, and the convergence plan's
+P1 item was to rebuild it as an adapter over the shared pipelines. Removing
+it was decided instead (ADR-012, retired). Following its callers removed
+everything that existed only for it, so each went with it rather than staying
+as a newly orphaned owner: `model/header_skip_rules.py`,
+`policy/analysis_assurance_merge.py`, `policy/disposition_merge.py`, the
+ABICC Perl-dump classifier and importer (also a `compare` operand),
+`html_report`'s `compat_html` layout and `write_html_report`,
+`report_classifications`' `BINARY_ONLY_KINDS`/`is_type_problem`/
+`is_symbol_problem`, `SuppressionList.merge` with its per-rule sources,
+`pattern_preprocessor_scan.grant_live_source_licence`, `include_exit_decision`
+on the report builders, and the per-finding `library` field with the kind
+rollup's per-library counts. `CLI_CONTRACT_ALLOWLIST` is empty as a result.
+
 
 Nothing on the dead list is undecided. Remaining work is owned elsewhere:
 

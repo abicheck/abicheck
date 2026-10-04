@@ -123,172 +123,14 @@ AST (what the C++ type contract says), and DWARF (actual compiled layout for cro
 
 ---
 
-### abicheck (compat mode)
-
-Same analysis engine as `compare`, but accepts **ABICC-format XML descriptors**
-instead of snapshots:
-
-```xml
-<descriptor>
-  <version>1.0</version>
-  <headers>/path/to/include/foo.h</headers>
-  <libs>/path/to/libfoo.so</libs>
-</descriptor>
-```
-
-Used as a drop-in for ABICC-based CI pipelines (`abicheck compat check -lib foo -old v1.xml -new v2.xml`).
-
-**Why `compat` can't express everything `compare` can:**
-`compat` follows ABICC's verdict vocabulary: COMPATIBLE, BREAKING, NO_CHANGE.
-It has no way to represent source-level-only breaks that are binary-safe (for
-example an enum/member rename or reduced access level in a class method) —
-those collapse into COMPATIBLE or BREAKING depending on `--strict-mode`,
-losing the distinction `compare`'s `API_BREAK` verdict preserves. That's a
-command/evidence limitation of the ABICC-compatible vocabulary itself, not a
-detection gap in the underlying engine (same analysis passes as `compare`).
-
-**When to use `compat`:** When you have an existing ABICC XML pipeline and want to
-migrate to abicheck without rewriting scripts.
-**When to use `compare`:** For all new integrations — full verdict set including `API_BREAK`.
-
----
-
-### abicheck (strict mode)
-
-`compat` with `-s` / `--strict` flag. Promotes `COMPATIBLE` → `BREAKING` and
-`API_BREAK` → `BREAKING`.
-
-Two sub-modes via `--strict-mode`:
-- `full` (default with `-s`): `COMPATIBLE` + `API_BREAK` → `BREAKING` (matches ABICC `-strict`)
-- `api`: only `API_BREAK` → `BREAKING`, additive `COMPATIBLE` changes stay `COMPATIBLE`
-
-**Why strict deliberately disagrees with the ground truth:**
-Several catalog cases are legitimately `COMPATIBLE` or `API_BREAK`. `--strict-mode full`
-promotes these to `BREAKING` on purpose, just like ABICC `-strict` — that's the
-policy working as designed, not a detection miss. (`compat`/`strict` are no
-longer separate columns in the benchmark tables below — see the "Historical"
-note under [Pinned vendor benchmark summary](#pinned-vendor-benchmark-summary-2026-07-18-74-case-subset)
-for why.)
-
-**When to use strict:** CI gates where any COMPATIBLE addition (e.g. new symbol) should
-fail the build. Use `--strict-mode api` to avoid false positives on purely additive changes.
-
----
-
-### abidiff (ELF mode, no headers)
-
-```
-.so (v1) ──► abidw ──► ABI XML ──┐
-                                  ├──► abidiff ──► report
-.so (v2) ──► abidw ──► ABI XML ──┘
-```
-
-**Analysis basis:** DWARF (primary), CTF/BTF fallback; pure ELF symbol table if no debug info present.
-**Header requirement:** None (in ELF mode).
-**Compiler requirement:** None.
-
-abidiff reads type information from DWARF sections of the `.so` when available. If DWARF
-is absent it falls back to CTF (Oracle/Solaris-style binaries) or BTF (Linux kernel/eBPF
-modules), and finally to ELF symbol names only when no debug info is present.
-
-For our benchmark, all `.so` files are built with `-g` so DWARF is used throughout.
-
-**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below.
-abidiff misses anything that is not directly a symbol removal or a change that DWARF
-fully describes. Specifically:
-- Struct layout, vtable, return type changes → DWARF often marks as COMPATIBLE because
-  it cannot determine binary impact without header type context
-- Enum value semantics, typedef chains → COMPATIBLE
-- noexcept, static qualifier, const qualifier, access level → not in DWARF at all
-
-> **Stripped binaries (no debug info):** abidiff degrades to ELF-only (symbol names).
-> abicheck continues to work via castxml — header-based type analysis does not need
-> debug symbols. This makes abicheck significantly more useful for production binaries.
-
----
-
-### abidw + headers → abidiff
-
-```
-.so (v1) ──► abidw --headers-dir /path/to/headers/ ──► ABI XML ──┐
-                                                                   ├──► abidiff ──► report
-.so (v2) ──► abidw --headers-dir /path/to/headers/ ──► ABI XML ──┘
-```
-
-> Note: `--headers-dir` is a flag for **`abidw`** (the dumper), not `abidiff` itself.
-> The filtering happens at dump time; `abidiff` only compares the resulting XML.
-
-**`--headers-dir` role:** Filters which symbols are considered public API.
-It does **not** provide additional type information — `abidw` still reads types from DWARF.
-
-**Why abidiff+headers tracks abidiff in our suite:**
-Our benchmark examples are compiled with `-fvisibility=default`, meaning all symbols
-are exported by default. None of the headers use `__attribute__((visibility("hidden")))`.
-So the header filter changes nothing — all symbols are already public in both modes.
-The fundamental limitation is that abidiff relies on DWARF for types, not AST.
-Even with perfect headers, it cannot see noexcept, static-qualifier changes, or
-source-level-only changes that have no ELF/DWARF representation.
-
-**When would `--headers-dir` help?** If the library uses `visibility("hidden")` for internal
-symbols in the headers, `--headers-dir` would filter them out and reduce false positives.
-It does not improve detection of semantic changes.
-
----
-
-### ABICC (abi-dumper workflow)
-
-```
-.so (v1, compiled with -g) ──► abi-dumper ──► v1.abi ──┐
-                                                         ├──► abi-compliance-checker ──► report
-.so (v2, compiled with -g) ──► abi-dumper ──► v2.abi ──┘
-```
-
-**Analysis basis:** DWARF — same as abidiff, but through Perl-based abi-dumper.
-**Header requirement:** Optional (pass `-public-headers` to filter to public API).
-**Compiler requirement:** None. Debug build (`-g`) required.
-
-**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below. The abi-dumper workflow
-still times out or errors on specific C++ cases and can leave runaway
-`abi-compliance-checker` child processes if the outer wrapper is interrupted.
-
----
-
-### ABICC (XML / legacy mode)
-
-```
-v1.xml (headers dir + .so path) ──► abi-compliance-checker (invokes GCC internally) ──► report
-v2.xml (headers dir + .so path) ──┘
-```
-
-**Analysis basis:** GCC-compiled AST from headers.
-**Header requirement:** Yes — must point to headers directory.
-**Compiler requirement:** Yes — **GCC only**. Clang and icpx are not supported.
-
-**Why ABICC(xml) is slow and unreliable:**
-1. **GCC invocation per case** — even for 5-line headers, GCC startup costs dominate
-2. **Directory input causes redefinition errors** — if the descriptor's `<headers>` tag
-   points to a directory, `abi-compliance-checker` includes ALL `.h` files found there,
-   including duplicates from build subdirs → redefinition errors → wrong verdicts
-3. **GCC compatibility** — `abi-compliance-checker` uses `gcc -fdump-lang-class` internally,
-   whose output format changed between GCC major versions. ABICC 2.3 prints a compatibility
-   warning on every run when used with GCC 11+. Results may differ across GCC versions.
-4. **`case16_inline_to_non_inline`**: reliably hits 120s timeout
-
-**Current mitigation:** Pass a specific header file path instead of a directory
-in `<headers>`. This drops runtime from 120s → ~1s and fixes wrong verdicts.
-
-**Current benchmark result:** see the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below.
-
----
-
 ## Verdict vocabulary comparison
 
-| Verdict | abicheck compare | abicheck compat | abidiff | ABICC |
-|---------|:---:|:---:|:---:|:---:|
-| `NO_CHANGE` | ✅ | ✅ | ✅ (exit 0) | ⚠️ reports 100% compat |
-| `COMPATIBLE` | ✅ | ✅ | ✅ (exit 4) | ⚠️ reports 100% compat |
-| `API_BREAK` | ✅ | ❌ not supported | ❌ | ❌ |
-| `BREAKING` | ✅ | ✅ | ✅ (exit 8+) | ✅ |
+| Verdict | abicheck compare | abidiff | ABICC |
+|---------|:---:|:---:|:---:|
+| `NO_CHANGE` | ✅ | ✅ (exit 0) | ⚠️ reports 100% compat |
+| `COMPATIBLE` | ✅ | ✅ (exit 4) | ⚠️ reports 100% compat |
+| `API_BREAK` | ✅ | ❌ | ❌ |
+| `BREAKING` | ✅ | ✅ (exit 8+) | ✅ |
 
 `API_BREAK` = source-level break, binary-compatible. Example: parameter renamed,
 access level changed, pure API contract violation with no ABI binary change.
@@ -681,9 +523,7 @@ almost identical.
 > accepts `abicheck`, `abicheck_full`, `abidiff`, `abidiff_headers`,
 > `abicc_dumper`, `abicc_xml` now, so the original 2026-05-19 run's compat
 > (71/74, 95%) and strict (62/74, 83%) numbers can no longer be reproduced
-> verbatim; `abicheck compat`/`compat check -s` remain real CLI modes,
-> documented above under "How each tool analyses ABI", just no longer
-> re-benchmarked as separate harness columns.
+> verbatim, and the `compat` command itself was removed in 0.6.
 
 Release-pinned scan status from `python3 scripts/benchmark_comparison.py --suite pinned74 --abicc-mode both`
 on the original 74-case benchmark subset (same code commit `ffa860c` and `ground_truth.json` as the
@@ -750,7 +590,7 @@ python3 scripts/benchmark_comparison.py --tools abicheck abidiff
 | Scenario | Recommended |
 |----------|-------------|
 | New CI pipeline, full accuracy | `abicheck compare` |
-| Migrating from ABICC XML pipeline | `abicheck compat check` |
-| Strict gate (any addition = fail) | `abicheck compat check -s` |
+| Migrating from ABICC XML pipeline | `abicheck compare` (see [Upgrading to 0.6](../start/upgrading-to-0.6.md#a5-compat-the-abicc-drop-in-is-removed)) |
+| Strict gate (any addition = fail) | `abicheck compare --severity-preset strict` |
 | Debug build available, DWARF check | `abicheck compare` (castxml already better) |
 | Quick ELF-only sanity check | `abidiff` (fast, 28% (21/74) but catches symbol removals) |

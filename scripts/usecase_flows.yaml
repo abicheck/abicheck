@@ -87,11 +87,3 @@ flows:
     use_case: UC-WF-stack-deps
     argv: [deps, tree, "{v2}"]
 
-  - id: compat-abicc
-    use_case: UC-WF-abicc-compat
-    needs: [h1, h2]
-    steps:
-      - [compat, dump, -lib, libcase, -dump, "{d1}", -dump-path, "{out}/v1.json"]
-      - [compat, dump, -lib, libcase, -dump, "{d2}", -dump-path, "{out}/v2.json"]
-      - [compat, -lib, libcase, -old, "{out}/v1.json", -new, "{out}/v2.json",
-         -report-path, "{out}/compat.html"]

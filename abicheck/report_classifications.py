@@ -14,8 +14,8 @@
 
 """Shared change-kind classification constants for report generators.
 
-Centralises the frozensets and helpers used by both ``html_report.py`` and
-``compat/xml_report.py`` to avoid maintaining duplicate definitions.
+Centralises the frozensets and helpers the report generators share, so
+they are defined once.
 """
 
 from __future__ import annotations
@@ -58,68 +58,6 @@ ADDED_KINDS: frozenset[str] = frozenset(
         "union_field_added",
         "type_field_added",
         "type_field_added_compatible",
-    }
-)
-
-#: Binary-only kinds (excluded from source compatibility section).
-#: These are derived from ELF metadata or DWARF debug info and have no
-#: source-level visibility — recompiling from the same source with the
-#: same flags cannot produce these changes.
-BINARY_ONLY_KINDS: frozenset[str] = frozenset(
-    {
-        "soname_changed",
-        "needed_added",
-        "needed_removed",
-        "rpath_changed",
-        "runpath_changed",
-        "symbol_binding_changed",
-        "symbol_binding_strengthened",
-        "symbol_type_changed",
-        "symbol_size_changed",
-        "symbol_size_changed_internal",
-        "symbol_size_changed_const_object",
-        "ifunc_introduced",
-        "ifunc_removed",
-        "common_symbol_risk",
-        "symbol_version_defined_removed",
-        "symbol_version_required_added",
-        "symbol_version_required_removed",
-        "dwarf_info_missing",
-        "toolchain_flag_drift",
-        # DWARF-derived calling convention changes (#117)
-        "calling_convention_changed",
-        "value_abi_trait_changed",
-        "struct_return_convention_changed",
-        # DWARF producer-derived vector-function (SIMD clone) ABI flag drift
-        "vector_abi_changed",
-        # G23 Phase D2 — long-double representation flip (e.g. -mlong-double-64,
-        # ppc64 double-double ↔ IEEE binary128). Keeps the source signature
-        # identical and only changes the binary FP format, so it is source-invisible
-        # (mirrors compat/_helpers._BINARY_ONLY_KINDS).
-        "long_double_abi_changed",
-        # G23 Phase A — Linux ELF artifact facts (binary/link-level only). The B1
-        # thunk/VTT layout kinds are omitted on purpose (they mirror source-visible
-        # vtable/base changes, like vtable_slot_count_changed).
-        "elf_machine_changed",
-        "elf_class_changed",
-        "elf_abi_flags_changed",
-        "elf_osabi_changed",
-        "static_tls_introduced",
-        "static_tls_removed",
-        "cet_protection_weakened",
-        "cet_protection_improved",
-        "branch_protection_weakened",
-        "branch_protection_improved",
-        "symbol_binding_became_unique",
-        "symbol_binding_lost_unique",
-        # Toolchain/runtime environment drift (binutils & glibc skew): the linker
-        # and sysroot leave these in the artifact; recompiling the same source with
-        # the same flags on the same toolchain cannot produce them.
-        "runtime_floor_raised",
-        "dt_relr_introduced",
-        "dt_relr_removed",
-        "rpath_type_changed",
-        "hash_style_removed",
     }
 )
 
@@ -267,23 +205,6 @@ MEDIUM_SEVERITY_KINDS: frozenset[str] = frozenset(
 # Category classification
 # ---------------------------------------------------------------------------
 
-#: Prefixes for type-related problem kinds.
-TYPE_PROBLEM_PREFIXES: tuple[str, ...] = (
-    "type_",
-    "struct_",
-    "union_",
-    "field_",
-    "typedef_",
-    "enum_",
-    "base_class_",
-)
-
-#: Prefixes for symbol/interface-related problem kinds.
-SYMBOL_PROBLEM_PREFIXES: tuple[str, ...] = (
-    "func_",
-    "var_",
-)
-
 #: Category buckets for summary tables — mirrors ABICC section headers.
 CATEGORY_PREFIXES: list[tuple[str, tuple[str, ...]]] = [
     ("Functions", ("func_",)),
@@ -337,13 +258,3 @@ def severity(kind_s: str) -> str:
     if kind_s in MEDIUM_SEVERITY_KINDS:
         return "Medium"
     return "Low"
-
-
-def is_type_problem(kind_s: str) -> bool:
-    """Return True if the kind relates to a type problem."""
-    return any(kind_s.startswith(p) for p in TYPE_PROBLEM_PREFIXES)
-
-
-def is_symbol_problem(kind_s: str) -> bool:
-    """Return True if the kind relates to a symbol/interface problem."""
-    return any(kind_s.startswith(p) for p in SYMBOL_PROBLEM_PREFIXES)

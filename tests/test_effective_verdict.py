@@ -354,30 +354,6 @@ def test_leaf_mode_type_change_row_carries_the_unattributed_caveat() -> None:
     assert "available evidence does not fully confirm" in md
 
 
-def test_html_compat_report_impact_carries_the_unattributed_caveat() -> None:
-    """Same wiring gap as above, but through the `compat_html=True` (ABICC
-    clone) layout's own `_build_compat_problem_data` path. That layout's own
-    table (`render_compat_changes_table`) never displays the `impact` field
-    at all (by design, matching ABICC's own columns), so this checks the
-    resolved document data rather than the rendered HTML."""
-    from abicheck.html_report import build_html_document
-
-    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
-    result = DiffResult(
-        old_version="1.0",
-        new_version="2.0",
-        library="libx.so",
-        changes=[c],
-        verdict=Verdict.BREAKING,
-        evidence_tiers=["header", "elf"],
-    )
-    doc = build_html_document(result, lib_name="libx.so", compat_html=True)
-    mapping = doc.to_mapping()
-    removed_rows = mapping["compat"]["removed_rows"]
-    assert len(removed_rows) == 1
-    assert "available evidence does not fully confirm" in removed_rows[0]["impact"]
-
-
 def test_sarif_impact_carries_the_unattributed_caveat() -> None:
     """Codex review, fresh evidence: SARIF's per-result message was never
     given the evidence caveat -- only the kind-level (shared-across-findings)

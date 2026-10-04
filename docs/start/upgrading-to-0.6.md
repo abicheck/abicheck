@@ -43,8 +43,8 @@ thing.
 
 ### The root command surface
 
-0.6's root surface is `dump`, `compare`, `deps`, `compat`, `aggregate`,
-`project`. Three roles, and they do not overlap:
+0.6's root surface is `dump`, `compare`, `deps`, `aggregate`, `project`.
+Three roles, and they do not overlap:
 
 | Command | The question it answers |
 |---|---|
@@ -135,6 +135,45 @@ are still gone. `appcompat` and `plugin-check` became `compare --used-by` /
 `compare --required-symbol`. If you are coming from a release older than 0.5,
 read [Migrating to the Current CLI](../use/companion-commands.md) as well —
 it carries those per-release mappings.
+
+### A5. `compat` (the ABICC drop-in) is removed
+
+`abicheck compat check` and `abicheck compat dump` no longer exist, with no
+alias and no flag-compatible successor; `abicheck compat` exits `64` naming
+`compare`. The same removal takes out everything that existed only for it:
+reading ABICC XML descriptors, reading ABICC Perl `ABI.dump` files (as a
+`compare` operand too), and the ABICC-styled HTML and XML report layouts.
+abicheck is still benchmarked against `abi-compliance-checker`; it no longer
+imitates its command line.
+
+Move an ABICC invocation onto `compare`, pointing it at the binaries and
+headers a descriptor used to name:
+
+```bash
+# Before:
+abicheck compat check -lib libfoo -old v1.xml -new v2.xml -report-path report.html
+# After (v1.xml named libfoo.so.1 + include/; v2.xml named libfoo.so.2 + include/):
+abicheck compare libfoo.so.1 libfoo.so.2 -H include/ -o html=report.html
+```
+
+| ABICC / `compat` | `compare` |
+|---|---|
+| `-old OLD.xml -new NEW.xml` | `OLD NEW` (the `<libs>` binaries or `dump` snapshots) plus `-H` for each `<headers>` entry (`old=`/`new=` prefixes for per-side headers) |
+| `<include_paths>`, `<defines>`, `<gcc_options>` | `-I`, `-D`, or the `compile:` block in `.abicheck.yml` |
+| `<skip_headers>`, `<skip_including>` | `--exclude-header`, or `scope.exclude_headers` in `.abicheck.yml` |
+| `compat dump -dump V.xml` | `dump BINARY -H HEADERS -o V.json` |
+| `-report-path P` / `-report-format F` | `-o F=P` (`html`, `json`, `markdown`, `sarif`, `junit`); there is no ABICC-styled XML |
+| `-skip-symbols FILE` / `-skip-types FILE` | a [suppression file](../use/suppressions.md) (`symbol:`/`type_pattern:` rules), `--suppress` |
+| `-symbols-list FILE` | `--required-symbol SYMBOL` (repeatable) scopes the gate to the named exports |
+| `-strict` | `--severity-preset strict` |
+| `-warn-newsym` | a severity setting with `addition: error` ([Severity](../use/severity.md)) |
+| `-source` / `-binary` | no switch: `compare` reports a source-only break as `API_BREAK` (exit `2`) and a binary break as `BREAKING` (exit `4`) |
+| `-lib NAME`, `-vnum V` | the binary's own SONAME; `--version old=V1 --version new=V2` |
+| an ABICC Perl `ABI.dump` operand | regenerate it with `dump` from the binary and headers |
+
+Exit codes change with the command: ABICC's `0`/`1`/`2` and `compat`'s
+`3`-`11` error codes become `compare`'s `0`/`2`/`4`, with `64` for a usage
+error (see [Exit Codes](../reference/exit-codes.md)).
 
 ### A4. Consumer scoping enriches, it does not replace
 
@@ -588,8 +627,6 @@ incomplete-evidence run that found nothing wrong.
 - `dump -o PATH` and the `dump` operand shape.
 - `-H`/`-I` meaning "both sides".
 - `--version old=`/`new=` defaults (`old`/`new`).
-- The `compat` drop-in interface. It is frozen; ABICC-compatible scripts are
-  unaffected by everything on this page.
 - The GitHub Action's per-side inputs (`old-header`, `new-header`,
   `old-version`, `debug-info1`, `devel-pkg1`, …). The wrapper maps them to
   the current flags internally. The Action's own `mode: scan` input **was**

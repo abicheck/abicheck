@@ -179,64 +179,6 @@ class TestPluginAbiVerdict:
             )
 
 
-# ── CLI/report-filter policy integration ─────────────────────────────────────
-
-
-class TestCliPolicyFiltering:
-    def _mk_result(self, policy: str = "strict_abi", *kinds: ChangeKind) -> DiffResult:
-        return DiffResult(
-            old_version="1.0",
-            new_version="2.0",
-            library="lib.so",
-            changes=[_change(k) for k in kinds],
-            verdict=Verdict.NO_CHANGE,
-            policy=policy,
-        )
-
-    def test_filter_source_only_strict(self) -> None:
-        from abicheck.compat.cli import _filter_source_only
-
-        result = self._mk_result("strict_abi", ChangeKind.ENUM_MEMBER_RENAMED)
-        filtered = _filter_source_only(result)
-
-        assert filtered.policy == "strict_abi"
-        assert filtered.verdict == Verdict.API_BREAK
-        assert len(filtered.source_breaks) == 1
-
-    def test_filter_source_only_sdk_vendor_propagates_policy(self) -> None:
-        from abicheck.compat.cli import _filter_source_only
-
-        result = self._mk_result("sdk_vendor", ChangeKind.ENUM_MEMBER_RENAMED)
-        filtered = _filter_source_only(result)
-
-        # policy must be propagated — verdict AND .source_breaks both sdk_vendor
-        assert filtered.policy == "sdk_vendor"
-        assert filtered.verdict == Verdict.COMPATIBLE
-        assert len(filtered.source_breaks) == 0
-        assert len(filtered.compatible) == 1
-
-    def test_filter_binary_only_strict(self) -> None:
-        from abicheck.compat.cli import _filter_binary_only
-
-        result = self._mk_result("strict_abi", ChangeKind.CALLING_CONVENTION_CHANGED)
-        filtered = _filter_binary_only(result)
-
-        assert filtered.policy == "strict_abi"
-        assert filtered.verdict == Verdict.BREAKING
-        assert len(filtered.breaking) == 1
-
-    def test_filter_binary_only_plugin_abi_propagates_policy(self) -> None:
-        from abicheck.compat.cli import _filter_binary_only
-
-        result = self._mk_result("plugin_abi", ChangeKind.CALLING_CONVENTION_CHANGED)
-        filtered = _filter_binary_only(result)
-
-        assert filtered.policy == "plugin_abi"
-        assert filtered.verdict == Verdict.COMPATIBLE
-        assert len(filtered.breaking) == 0
-        assert len(filtered.compatible) == 1
-
-
 # ── CLI --policy end-to-end ───────────────────────────────────────────────────
 
 
@@ -447,14 +389,3 @@ class TestDiffResultPolicyAwareProperties:
         r = self._mk_result("plugin_abi", ChangeKind.CALLING_CONVENTION_CHANGED)
         assert len(r.breaking) == 0
         assert len(r.compatible) == 1
-
-
-class TestCompatPolicyExposure:
-    def test_compat_help_has_no_policy_flag(self) -> None:
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        result = CliRunner().invoke(main, ["compat", "--help"])
-        assert result.exit_code == 0, result.output
-        assert "--policy" not in result.output

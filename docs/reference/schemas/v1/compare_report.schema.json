@@ -2172,7 +2172,7 @@
     "effective_config_digest": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$",
-      "description": "CLI cleanup phase two, PR B (schema 2.45): a SHA-256 fingerprint of the resolved gate/policy/surface/contract configuration this comparison actually ran under, so two reports (or a report replayed later) can be compared for \"did the resolved configuration change\" without a byte-for-byte diff. Identical computation for compare, the directory/package release fan-out, and scan --against (see effective_config_fields below and effective_config_digest.py's own module docstring for the two resolution tiers it picks between). Schema-optional, like exit: absent from compat/cli.py's compat check --report-format json output, whose own transform options (-strict, -source/-binary, ...) this digest's native legacy/severity gate axes don't represent."
+      "description": "CLI cleanup phase two, PR B (schema 2.45): a SHA-256 fingerprint of the resolved gate/policy/surface/contract configuration this comparison actually ran under, so two reports (or a report replayed later) can be compared for \"did the resolved configuration change\" without a byte-for-byte diff. Identical computation for compare, the directory/package release fan-out, and scan --against (see effective_config_fields below and effective_config_digest.py's own module docstring for the two resolution tiers it picks between). Schema-optional, like exit: the removed ABICC compat check omitted both, so a report it wrote still validates."
     },
     "env_matrix_source_sha256": {
       "type": "string",
@@ -3188,7 +3188,7 @@
         },
         "library": {
           "type": "string",
-          "description": "Schema 4.6: the DSO this finding was attributed to in a multi-library compat run (an ABICC descriptor naming several <libs>, paired per SONAME stem). Absent -- never null -- for a scalar comparison, which is every pre-4.6 report. finding_id folds this value in when present, so two paired DSOs producing an otherwise-identical finding do not collide on one id."
+          "description": "Schema 4.6: the DSO this finding was attributed to in a multi-library ABICC compat run. No longer emitted: the compat front end was removed. Kept so a report that carries it still validates."
         },
         "symbol": {
           "type": "string"

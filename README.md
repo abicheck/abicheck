@@ -42,7 +42,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --header old=include/v1/ --header new=i
 - **Additions count.** A compatible release still lists every new function, variable, and enumerator, with a version-bump recommendation, so surface growth is reviewed rather than assumed.
 - **408 ABI/API change types**, and it keeps binary breaks (`BREAKING`) apart from source-only breaks (`API_BREAK`). It is the only tool in the [benchmark](#how-it-compares-to-other-tools) that reports `API_BREAK` as its own verdict; ABICC splits binary and source into separate reports without an equivalent verdict.
 - **Zero false positives** on the benchmark catalog, at 95.9% accuracy with headers and 99.5% with full evidence, where `abidiff` scores 28.5% and ABICC 44.6%.
-- **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), a typed [Python API](#python-api), and a drop-in `compat` mode for `abi-compliance-checker`. Pure Python, Linux/Windows/macOS.
+- **Made for CI.** Deterministic exit codes, SARIF/JSON/Markdown/HTML/JUnit, baselines, policies, suppressions, a [GitHub Action](#github-action), and a typed [Python API](#python-api). Pure Python, Linux/Windows/macOS.
 
 ## What a report looks like
 
@@ -267,7 +267,6 @@ The whole CLI is seven root commands. Most single-library projects only ever nee
 | Check a PR with source and build context, against a baseline | [`abicheck compare baseline.json build/libfoo.so --depth source --sources new=.`](https://abicheck.github.io/abicheck/use/evidence-depth/) (the stored baseline must already embed matching L3/L4 evidence from its own `dump --sources`/`--build-info`, or the mismatched extraction profiles between sides can exit `16` `NOT_COMPARABLE`) |
 | Validate a binary's whole dependency stack across two sysroots | [`abicheck deps compare`](https://abicheck.github.io/abicheck/use/cli-usage/) |
 | Save a reusable ABI snapshot | [`abicheck dump`](https://abicheck.github.io/abicheck/use/create-baseline/) |
-| Replace `abi-compliance-checker` without changing flags | [`abicheck compat`](https://abicheck.github.io/abicheck/use/from-abicc/) |
 | Fold per-target reports from a CI build matrix into one gate | [`abicheck aggregate`](https://abicheck.github.io/abicheck/use/aggregate-reports/) |
 | Declare and validate a multi-target, multi-profile **project** (advanced) | [`abicheck project`](https://abicheck.github.io/abicheck/reference/project-targets-schema/) |
 
@@ -334,7 +333,7 @@ Snapshots, custom policies, rendering, and the CLI/API parity table: [Python API
 
 ## Migrating from another tool
 
-- **From `abi-compliance-checker`:** `abicheck compat` accepts ABICC's flags, including `-symbols-list` / `-types-list` whitelists, so an existing pipeline keeps working while you move to `compare`. [Migrating from ABICC](https://abicheck.github.io/abicheck/use/from-abicc/).
+- **From `abi-compliance-checker`:** point `abicheck compare` at the binaries and headers your XML descriptors name; the upgrade guide maps each ABICC flag (`-skip-symbols`, `-symbols-list`, `-strict`, ...) to its `compare` equivalent. [Upgrading to 0.6 → `compat` is removed](https://abicheck.github.io/abicheck/start/upgrading-to-0.6/#a5-compat-the-abicc-drop-in-is-removed).
 - **From libabigail:** `abidiff old.so new.so` becomes `abicheck compare old.so new.so`; the guide maps every header, suppression, and debug-info flag and translates `abidiff`'s exit bitmask to abicheck's scalar codes. [Migrating from libabigail](https://abicheck.github.io/abicheck/use/from-libabigail/).
 
 ## Platform support

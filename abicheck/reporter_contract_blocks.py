@@ -73,7 +73,6 @@ def add_contract_context(
     *,
     require_complete_analysis: bool = False,
     severity_config: SeverityConfig | None = None,
-    include_exit_decision: bool = True,
     today: date | None = None,
 ) -> None:
     """ADR-049 Phase 4's persisted contract blocks, plus P0.4's
@@ -125,48 +124,30 @@ def add_contract_context(
     # Unconditional for a native `compare` call --
     # unlike `contract_context` below, every comparison has a compatibility
     # contribution, so there is always a decision to report, not just under
-    # `--contract`. `include_exit_decision=False` (only `compat/cli.py`
-    # passes this) skips it entirely: `compat check`'s own process exit
-    # follows an unrelated 0/1/2 ABICC-style scheme, so this block's
-    # native-scheme `code` would disagree with the real compat exit for the
-    # same run (Codex review).
-    if include_exit_decision:
-        # one-comparison-product.md P3: the abort-axes-aware wrapper, not the
-        # bare ordinary fold -- see its own docstring in
-        # policy/exit_decision_precedence.py for why it lives there.
-        from .policy.effective_gate import EffectiveGate
-        from .policy.exit_decision_precedence import (
-            resolve_compare_exit_decision_with_abort_axes,
-        )
+    # `--contract`.
+    # one-comparison-product.md P3: the abort-axes-aware wrapper, not the
+    # bare ordinary fold -- see its own docstring in
+    # policy/exit_decision_precedence.py for why it lives there.
+    from .policy.effective_gate import EffectiveGate
+    from .policy.exit_decision_precedence import (
+        resolve_compare_exit_decision_with_abort_axes,
+    )
 
-        d["exit"] = resolve_compare_exit_decision_with_abort_axes(
-            result,
-            EffectiveGate.from_severity(
-                severity_config, require_complete_analysis=require_complete_analysis
-            ),
-            today=today,
-        ).to_dict()
+    d["exit"] = resolve_compare_exit_decision_with_abort_axes(
+        result,
+        EffectiveGate.from_severity(
+            severity_config, require_complete_analysis=require_complete_analysis
+        ),
+        today=today,
+    ).to_dict()
     add_annotations(d, result, severity_config=severity_config, today=today)
     add_use_case_impact(d, result, displayed)
-    # Same `include_exit_decision` gate as the `exit` block above, for the
-    # identical reason (Codex review, PR #803, fresh evidence): the digest's
-    # `gate.exit_code_scheme`/`gate.severity.*` axes describe the *native*
-    # legacy/severity scheme, and carry no representation of `compat
-    # check`'s own transform/gate options (`-strict`, `-source`/`-binary`,
-    # `-warn-newsym`, ...) -- which are a materially different option
-    # vocabulary belonging to a different front end (`compat/cli.py`), not a
-    # gap in this digest's own field set to widen. Emitting it anyway would
-    # let two `compat check --report-format json` reports that differ only
-    # by `-strict` (a real verdict-changing transform) carry the identical
-    # digest, silently claiming "same effective configuration" the same way
-    # the `exit` block would if it weren't already skipped here.
-    if include_exit_decision:
-        add_effective_config_digest(
-            d,
-            result,
-            severity_config=severity_config,
-            require_complete_analysis=require_complete_analysis,
-        )
+    add_effective_config_digest(
+        d,
+        result,
+        severity_config=severity_config,
+        require_complete_analysis=require_complete_analysis,
+    )
 
     ctx = result.contract_context
     if ctx is None:
@@ -233,15 +214,7 @@ def add_effective_config_digest(
     :func:`~abicheck.effective_config_digest.effective_config_fields` itself
     picks the richest tier this comparison actually resolved (a full
     ``CompatibilityEvaluationConfig`` under ``--contract``/``--pack``, else
-    the policy/gate fields every comparison resolves regardless). The
-    caller (:func:`add_contract_context`) gates this the same way it gates
-    the ``exit`` block -- skipped when ``include_exit_decision=False``
-    (``compat/cli.py``'s ``compat check --report-format json``, Codex
-    review, PR #803, fresh evidence): the digest's gate axes describe the
-    *native* legacy/severity scheme and carry no representation of
-    ``compat check``'s own transform options (``-strict``, ``-source``/
-    ``-binary``, ...), so emitting it there would let two behaviorally
-    different compat reports claim the identical effective configuration.
+    the policy/gate fields every comparison resolves regardless).
     Both fields are schema-optional for exactly this reason, mirroring
     ``exit``'s own optional status.
 

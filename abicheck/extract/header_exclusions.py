@@ -200,11 +200,7 @@ def matched_exclusion_patterns(
     the run had parsed in full, and the comparability gate refused an
     otherwise-identical operand over a rule neither side had applied.
 
-    This is the rule the descriptor path has always used
-    (``model.header_skip_rules.achieved_exclusion_patterns``, via
-    ``compat.run_inputs.record_descriptor_skips``); the native
-    ``--exclude-header`` path recorded the request instead. The two now
-    answer the same question the same way.
+    The native ``--exclude-header`` path once recorded the request instead.
 
     Sorted and unique, matching :func:`unmatched_exclusion_patterns` -- the
     rules are a set, so two runs that stated the same thing must not read

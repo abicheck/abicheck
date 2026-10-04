@@ -53,7 +53,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..checker_types import LibraryMetadata
 from ..compile_context import CompileContext
-from ..errors import AbicheckError, SnapshotError, ValidationError
+from ..errors import SnapshotError, ValidationError
 from ..extract.header_exclusions import (
     apply_header_exclusions_to_inputs,
     reject_exclusions_against_a_manifest,
@@ -116,7 +116,7 @@ def detect_binary_format(path: Path) -> str | None:
 
 
 def sniff_text_format(path: Path) -> str:
-    """Read a small header chunk and return ``'json'``, ``'perl'``, ``'symvers'``, or ``'unknown'``.
+    """Read a small header chunk and return ``'json'``, ``'symvers'``, or ``'unknown'``.
 
     ADR-059: a gzip/zstd-compressed snapshot (``.abicheck.json.gz``/``.zst``,
     or any neutrally-named file carrying those magic bytes) is detected here
@@ -126,7 +126,6 @@ def sniff_text_format(path: Path) -> str:
     through to ``'unknown'``, same as any other unrecognized input, so
     archive/package resolution still gets its turn.
     """
-    from ..compat.abicc_dump_import import looks_like_perl_dump
     from ..snapshot_io import bounded_decoded_prefix, detect_snapshot_compression
 
     try:
@@ -146,8 +145,6 @@ def sniff_text_format(path: Path) -> str:
         head = raw.decode("utf-8", errors="replace").lstrip()
     except OSError:
         return "unknown"
-    if looks_like_perl_dump(head):
-        return "perl"
     if head.startswith("{"):
         return "json"
     from ..symvers_metadata import looks_like_symvers
@@ -179,17 +176,10 @@ def is_stored_snapshot_operand(path: Path) -> bool:
     former can *already carry* the pinned evidence -- and when it does not,
     that is the separately-recorded ceiling question ("``--depth`` is a floor
     for live extraction, not a ceiling for a pre-built snapshot"), not a
-    floor failure. Covers the three shapes `resolve_input` accepts: a single
+    floor failure. Covers the shapes `resolve_input` accepts: a single
     ``.abi.json`` file (including the gzip/zstd-compressed spellings, via
-    :func:`sniff_text_format`'s bounded decoded prefix), a directory-backed
-    storage-v2 ``ProjectSnapshot`` package, and an ABICC Perl dump.
-
-    That last one was classified as raw evidence in this function's first
-    form, which made ``--depth source`` exit 7 on a saved ABICC dump and 0 on
-    the equivalent ``.abi.json`` (Codex review, P2). Both are pre-built,
-    tool-produced ABI descriptions that this run parses rather than extracts;
-    for a tool that advertises itself as an ABICC drop-in, splitting them on
-    serialization format alone is arbitrary. A ``Module.symvers`` manifest and
+    :func:`sniff_text_format`'s bounded decoded prefix) and a directory-backed
+    storage-v2 ``ProjectSnapshot`` package. A ``Module.symvers`` manifest and
     a bare BTF/CTF blob stay on the raw-evidence side: they are inputs an ABI
     description is *derived* from, not one that was already written down.
 
@@ -210,7 +200,7 @@ def is_stored_snapshot_operand(path: Path) -> bool:
             return is_project_snapshot_package_dir(path)
         if is_project_package_archive(path):
             return True
-        return sniff_text_format(path) in {"json", "perl"}
+        return sniff_text_format(path) == "json"
     except OSError:
         return False
 
@@ -482,9 +472,8 @@ def _resolve_input_impl(
 
     1. Native binary (ELF / PE / Mach-O, detected by magic bytes)
     2. Raw BTF/CTF type-info blob
-    3. ABICC Perl dump (``$VAR1`` prefix) → :func:`import_abicc_perl_dump`
-    4. JSON snapshot (``{`` prefix) → :func:`load_snapshot`
-    5. GNU ld linker script (``INPUT()``/``GROUP()``) → follow to its target
+    3. JSON snapshot (``{`` prefix) → :func:`load_snapshot`
+    4. GNU ld linker script (``INPUT()``/``GROUP()``) → follow to its target
 
     For binary inputs (ELF/PE/Mach-O), the L2 header-only semantic graph
     (:func:`run_dump`'s ``_attach_header_graph`` step) is always attempted when
@@ -618,22 +607,6 @@ def _resolve_input_impl(
     # Text-based formats
     fmt = sniff_text_format(path)
 
-    if fmt == "perl":
-        from ..compat.abicc_dump_import import import_abicc_perl_dump
-
-        try:
-            return import_abicc_perl_dump(path)
-        except (
-            ValueError,
-            KeyError,
-            UnicodeDecodeError,
-            OSError,
-            AbicheckError,
-        ) as exc:
-            raise SnapshotError(
-                f"Failed to import ABICC Perl dump '{path}': {exc}"
-            ) from exc
-
     if fmt == "json":
         try:
             return load_snapshot(path)
@@ -707,14 +680,33 @@ def _resolve_input_impl(
             "resulting object files or the shared library built from them instead."
         )
 
+    hint = _ABICC_DUMP_HINT if _starts_like_an_abicc_perl_dump(path) else ""
     raise ValidationError(
         f"Cannot detect format of '{path}'. "
-        "Expected: ELF (.so), PE (.dll), Mach-O (.dylib), JSON snapshot, or ABICC Perl dump."
+        "Expected: ELF (.so), PE (.dll), Mach-O (.dylib), or JSON snapshot." + hint
     )
 
 
+#: ABICC Perl `ABI.dump` input was removed with the `compat` front end; a
+#: migrating user who still passes one is told why it is refused and what
+#: replaces it, rather than only that the format is unknown.
+_ABICC_DUMP_HINT = (
+    " This looks like an abi-compliance-checker Perl dump, which is no longer"
+    " accepted: regenerate the snapshot with `abicheck dump BINARY -H HEADERS`."
+)
+
+
+def _starts_like_an_abicc_perl_dump(path: Path) -> bool:
+    try:
+        with open(path, "rb") as f:
+            head = f.read(_SNIFF_BYTES)
+    except OSError:
+        return False
+    return head.lstrip().startswith(b"$VAR1")
+
+
 def collect_metadata(path: Path) -> LibraryMetadata | None:
-    """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, Perl dump, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
+    """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
     if path.is_dir():
         # A storage-v2 `ProjectSnapshot` package dir (the one directory
         # `resolve_input` resolves rather than rejecting) is not a single
@@ -726,7 +718,7 @@ def collect_metadata(path: Path) -> LibraryMetadata | None:
         # directly and needs the identical guard (Codex review).
         return None
     text_fmt = sniff_text_format(path)
-    if text_fmt in ("json", "perl", "symvers"):
+    if text_fmt in ("json", "symvers"):
         return None
 
     data = path.read_bytes()

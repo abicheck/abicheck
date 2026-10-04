@@ -310,10 +310,9 @@ def reconcile_member_sets(
     comparison acquires one by parsing, while a stored-baseline comparison
     reads one off the document it was recorded on (or derives it from the
     stored member snapshots). Keeping acquisition out of this function is
-    what lets all four drivers -- live, stored-versus-live, stored-versus-
-    stored, and the ABICC-compatible multi-library path -- share one
-    implementation of the reconciliation itself rather than three copies of
-    it that could drift.
+    what lets all three drivers -- live, stored-versus-live, and stored-
+    versus-stored -- share one implementation of the reconciliation itself
+    rather than copies of it that could drift.
     """
     new_index = build_bundle_export_index("new", new_members, failed_members=new_failed)
     old_index = (
@@ -512,9 +511,7 @@ def release_findings_verdict(
     """The verdict a bare set of release-level findings implies.
 
     :func:`release_surface_verdict`'s core, taken over findings rather than
-    a stage so a driver that holds only the findings (the ABICC descriptor
-    path, which folds them into one merged result) scores them by the same
-    rule instead of a second one.
+    a stage.
     """
     from ..policy.classification import (
         apply_policy_file_overrides,

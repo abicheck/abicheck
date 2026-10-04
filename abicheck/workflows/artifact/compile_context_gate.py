@@ -101,7 +101,7 @@ def side_effective_compile_context(
     from ..input_resolution import detect_binary_format, sniff_text_format
 
     fmt = detect_binary_format(path)
-    if fmt is None and sniff_text_format(path) not in ("json", "perl"):
+    if fmt is None and sniff_text_format(path) != "json":
         from ...binary_utils import resolve_linker_script_chain
 
         fmt = detect_binary_format(resolve_linker_script_chain(path))

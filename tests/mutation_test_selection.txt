@@ -6,9 +6,7 @@ tests/parity/test_no_baseline_parity.py
 tests/parity/test_pattern_facts_behavior.py
 tests/parity/test_preprocessor_facts_behavior.py
 tests/parity/test_source_depth_parity.py
-tests/test_abicc_compat_flags.py
 tests/test_abicc_full_parity.py
-tests/test_abicc_parity_extended.py
 tests/test_abicc_scenario_parity.py
 tests/test_abisnapshot_case_b_fact.py
 tests/test_acknowledgment.py
@@ -185,15 +183,6 @@ tests/test_compare_release_lockstep_soname.py
 tests/test_compare_release_parallel_dedup.py
 tests/test_compare_surface_graph.py
 tests/test_comparison_memo.py
-tests/test_compat.py
-tests/test_compat_cli_coverage.py
-tests/test_compat_dump_descriptor_expansion.py
-tests/test_compat_extended.py
-tests/test_compat_html_env_matrix_digest.py
-tests/test_compat_input_dispatch.py
-tests/test_compat_multi_library_finding_ids.py
-tests/test_compat_report_kind.py
-tests/test_compat_stub_flag_announcement.py
 tests/test_compatibility_evaluation_frontend.py
 tests/test_compatibility_evaluation_receipts.py
 tests/test_compile_context_gate.py
@@ -224,7 +213,6 @@ tests/test_contract_replay_node_ids.py
 tests/test_contract_shadow_measurement.py
 tests/test_contract_type_identities.py
 tests/test_cov95_cli.py
-tests/test_cov95_compat.py
 tests/test_cov95_diff_filtering.py
 tests/test_cov95_misc.py
 tests/test_cov95_reporting.py
@@ -363,7 +351,6 @@ tests/test_finding_evolution.py
 tests/test_finding_evolution_review_fixes.py
 tests/test_finding_identity.py
 tests/test_followup_100_101.py
-tests/test_format_compliance.py
 tests/test_fp_rate_gate.py
 tests/test_frozen_namespace.py
 tests/test_frozen_namespace_single_matcher.py

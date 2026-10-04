@@ -753,6 +753,12 @@ on which command produced the document.
 
 ### P1 — ABICC compatibility is a parallel frontend and engine path
 
+**Closed (2026-10) by removal, not migration.** The `compat` front end was
+deleted outright (ADR-012 retired; `docs/start/upgrading-to-0.6.md` maps its
+flags to `compare`), taking the last three `CLI_CONTRACT_ALLOWLIST` entries
+with it -- the allowlist is now empty. The analysis below is kept as the
+reason that decision was cheaper than the adapter it describes.
+
 `abicheck compat` intentionally keeps a distinct user-facing contract — that
 part is correct and should stay. But its implementation calls
 `dumper.dump` and `checker.compare` directly rather than through the typed
@@ -1169,7 +1175,8 @@ block-everything-immediately):
    already-documented call sites this same plan's P0/P1 sections name:
    `cli_dump_helpers.perform_elf_dump`, `appcompat.check_appcompat`'s two
    dump calls, `cli_scan_baseline`'s baseline resolution, and
-   `compat/cli.py`'s three direct calls). `cli_resolve.py`'s own
+   `compat/cli.py`'s three direct calls -- all gone now; the last three left
+   when `compat` was removed in 2026-10, emptying the allowlist). `cli_resolve.py`'s own
    `_resolve_input()` — the CLI's designated, framework-aware wrapper over
    `service.resolve_input` (see its module docstring) — is the one
    exemption from the `service.resolve_input` rule, the same role
@@ -2040,9 +2047,10 @@ drifting, just presentation computed over already-agreed facts.
 
 ### Phase 5 — Migrate compatibility and multi-artifact operations
 
-1. Make ABICC descriptors adapters into typed requests.
-2. Express `compat`'s strict/source-only/new-symbol behavior as evaluation
-   configuration where the shape allows it.
+1. ~~Make ABICC descriptors adapters into typed requests.~~ Moot: `compat`
+   was removed (2026-10).
+2. ~~Express `compat`'s strict/source-only/new-symbol behavior as evaluation
+   configuration where the shape allows it.~~ Moot, same reason.
 3. Introduce shared `ArtifactSet`, `ArtifactPair`, and
    `SetComparisonResult` types.
 4. Share matching and rollup primitives between release, `scan

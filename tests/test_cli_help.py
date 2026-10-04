@@ -120,7 +120,6 @@ def test_root_help_panels_survive_many_repeated_renders() -> None:
     assert "Core analysis" in first
     assert "Workflow composition" in first
     assert "Project integration" in first
-    assert "Legacy compatibility" in first
     for _ in range(50):
         later = runner.invoke(main, ["--help"]).output
         assert later == first

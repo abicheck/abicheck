@@ -1,4 +1,4 @@
-"""Coverage for code moved out of cli.py / dumper.py / compat/cli.py into
+"""Coverage for code moved out of cli.py / dumper.py into
 sibling sub-modules in PR #251. Exercises the moved helpers and command bodies
 directly so that the patch-level coverage of the new files reflects what was
 already covered when the code lived in the parent modules.
@@ -6,14 +6,12 @@ already covered when the code lived in the parent modules.
 
 from __future__ import annotations
 
-import errno
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.compat._errors import _classify_compat_error_exit_code, _compat_fail
 from abicheck.diff_platform_templates import (
     _extract_template_args,
     _split_top_level_args,
@@ -28,89 +26,6 @@ from abicheck.extract.headers.castxml.records import collect_virtual_methods
 # behavior around reading a diff-report file and is gone with the command.
 # `suppression.suggest_suppressions()` itself takes already-parsed
 # `list[dict]` and is unchanged — exercise it directly.
-
-
-# ── compat/_errors: error classification ────────────────────────────────────
-
-
-class TestCompatErrors:
-    """Exercise the error-classification helpers extracted to compat/_errors."""
-
-    def test_keyboard_interrupt_is_eleven(self) -> None:
-        assert _classify_compat_error_exit_code(KeyboardInterrupt()) == 11
-
-    def test_tool_missing_message_is_three(self) -> None:
-        assert (
-            _classify_compat_error_exit_code(
-                RuntimeError("castxml not found in PATH"),
-                context="parsing",
-            )
-            == 3
-        )
-
-    def test_compile_failure_is_five(self) -> None:
-        assert (
-            _classify_compat_error_exit_code(
-                RuntimeError("castxml failed: cannot compile"),
-            )
-            == 5
-        )
-
-    def test_descriptor_context_is_six(self) -> None:
-        assert (
-            _classify_compat_error_exit_code(
-                ValueError("bad XML"),
-                context="parsing descriptor",
-            )
-            == 6
-        )
-
-    def test_report_context_is_seven(self) -> None:
-        assert (
-            _classify_compat_error_exit_code(
-                RuntimeError("oops"),
-                context="writing report",
-            )
-            == 7
-        )
-
-    def test_dump_context_is_eight(self) -> None:
-        assert (
-            _classify_compat_error_exit_code(
-                RuntimeError("snapshot failed"),
-                context="running dump pipeline",
-            )
-            == 8
-        )
-
-    def test_fallback_is_ten(self) -> None:
-        assert _classify_compat_error_exit_code(RuntimeError("unknown")) == 10
-
-    def test_file_not_found_is_four(self, tmp_path: Path) -> None:
-        exc = FileNotFoundError(2, "No such file or directory", str(tmp_path / "x"))
-        assert _classify_compat_error_exit_code(exc, context="reading input") == 4
-
-    def test_permission_error_is_four(self) -> None:
-        assert _classify_compat_error_exit_code(PermissionError("denied")) == 4
-
-    def test_os_error_eacces_is_four(self) -> None:
-        exc = OSError(errno.EACCES, "access denied")
-        assert _classify_compat_error_exit_code(exc) == 4
-
-    def test_os_error_in_report_context_is_seven(self) -> None:
-        exc = OSError(errno.ENOSPC, "no space")
-        assert _classify_compat_error_exit_code(exc, context="writing report") == 7
-
-    def test_unrelated_os_error_falls_through(self) -> None:
-        # ENOSPC isn't classified by _classify_fs_error and the message has no
-        # known token, so we land on the catch-all (10).
-        assert _classify_compat_error_exit_code(OSError(errno.ENOSPC, "no space")) == 10
-
-    def test_compat_fail_exits_with_code(self) -> None:
-        with pytest.raises(SystemExit) as exc_info:
-            _compat_fail("loading descriptor", FileNotFoundError("missing"))
-        # FileNotFoundError → 4 (cannot access input files) unless tool-missing
-        assert exc_info.value.code == 4
 
 
 # ── cli_stack: command help / argument validation ───────────────────────────

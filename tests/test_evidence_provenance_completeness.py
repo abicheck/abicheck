@@ -134,11 +134,10 @@ class TestFieldDefaultsToNone:
         `candidate_side_enrichment`, `surface_facts` (the three split
         surface facts -- see `model/surface_facts.py`) immediately after
         `demangled_symbol`, then `entity_discriminator` (plan slice 7o's
-        per-finding entity for a polymorphic `ChangeKind`), then
-        `library` (the per-finding library a multi-library `compat check`
-        merge stamps -- see
-        `compat/multi_library._attribute_findings_to_their_library`), and finally `review_evidence`, which is the newest -- all eleven must stay keyword-only, and `library` must
-        stay last until some still-newer field is appended after it in turn.
+        per-finding entity for a polymorphic `ChangeKind`), and finally
+        `review_evidence`, which is the newest -- all ten must stay
+        keyword-only. (`library`, which sat between the last two, was removed
+        with the multi-library ABICC `compat` merge that set it.)
 
         The last two arrived on separate branches that merged here, which is
         exactly the case this test exists to catch: each branch's own copy
@@ -156,7 +155,6 @@ class TestFieldDefaultsToNone:
         assert by_name["demangled_symbol"].kw_only is True
         assert by_name["surface_facts"].kw_only is True
         assert by_name["entity_discriminator"].kw_only is True
-        assert by_name["library"].kw_only is True
         all_names = [f.name for f in dataclasses.fields(Change)]
         assert by_name["review_evidence"].kw_only is True
         assert all_names[-1] == "review_evidence", (
@@ -175,9 +173,9 @@ class TestFieldDefaultsToNone:
             == all_names.index("surface_facts") + 1
         ), "entity_discriminator must be appended immediately after surface_facts"
         assert (
-            all_names.index("library") == all_names.index("entity_discriminator") + 1
-        ), "library must be appended immediately after entity_discriminator"
-        assert all_names.index("review_evidence") == all_names.index("library") + 1
+            all_names.index("review_evidence")
+            == all_names.index("entity_discriminator") + 1
+        ), "review_evidence must be appended immediately after entity_discriminator"
         assert (
             all_names.index("entity_id") == all_names.index("evidence_provenance") + 1
         ), "entity_id must be appended immediately after evidence_provenance"

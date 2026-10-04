@@ -661,7 +661,7 @@ def classify_compare_pair(
     def _hashable_path(p: Path) -> Path:
         return (
             p
-            if sniff_text_format(p) in ("json", "perl", "symvers")
+            if sniff_text_format(p) in ("json", "symvers")
             else resolve_linker_script_chain(p)
         )
 

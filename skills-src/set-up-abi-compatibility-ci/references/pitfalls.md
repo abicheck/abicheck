@@ -86,7 +86,7 @@ fix it in place rather than adding a parallel workflow. Common findings:
   candidate with itself): always green. Never "fix" a failing check this way.
 - `abi-compliance-checker`/`abidiff` scripts: abicheck can replace them, but
   migrating is a separate decision — see
-  [migrating from ABICC](../../../docs/use/from-abicc.md) and
+  [migrating from ABICC](../../../docs/start/upgrading-to-0.6.md#a5-compat-the-abicc-drop-in-is-removed) and
   [from libabigail](../../../docs/use/from-libabigail.md).
 
 ## Optional add-ons (offer when relevant)

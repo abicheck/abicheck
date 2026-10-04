@@ -277,11 +277,11 @@ class TestSniffTextFormatExtra:
         f.write_text('  \n  {"library": "x"}', encoding="utf-8")
         assert _sniff_text_format(f) == "json"
 
-    def test_perl_detected(self, tmp_path: Path) -> None:
-        """Perl dump is detected correctly."""
+    def test_abicc_perl_dump_is_unknown(self, tmp_path: Path) -> None:
+        """An ABICC Perl dump is no longer a recognised input format."""
         f = tmp_path / "dump.pl"
         f.write_text("$VAR1 = {\n  'k' => 'v'\n};", encoding="utf-8")
-        assert _sniff_text_format(f) == "perl"
+        assert _sniff_text_format(f) == "unknown"
 
     def test_unknown_content(self, tmp_path: Path) -> None:
         """Unrecognized text returns 'unknown'."""

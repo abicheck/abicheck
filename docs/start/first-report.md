@@ -158,7 +158,7 @@ They fold with `max`, so they never lower a `2`/`4`:
 
 To tell these apart in CI, read the JSON report's `exit` block (its
 `reasons` and per-axis contributions), not the process exit alone. The full
-per-command matrix, including `compat` mode, is the
+per-command matrix is the
 [Exit Codes reference](../reference/exit-codes.md).
 
 ## Audit runs (`--no-baseline`)

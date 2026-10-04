@@ -2,7 +2,7 @@
 
 **abicheck** helps library and package maintainers understand and validate how their API/ABI evolves. Point it at two builds of a library (plus their headers) and it tells you what changed — additions, removals, modifications, dependency and deployment-requirement changes — whether existing binaries will keep working, which declared contract is affected (with `--contract`) and which known consumers (when you supply consumer binaries or use-case manifests), and what the supplied evidence could not establish. ABI/API compatibility analysis is the foundation; the [vision](contribute/vision.md) records where the tool is going from there.
 
-It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it's a drop-in replacement for `abi-compliance-checker`.
+It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries.
 
 > **Gate ABI in CI in 5 lines.** Drop the first-class
 > [GitHub Action](use/github-action.md) into any workflow — it installs
@@ -23,7 +23,6 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 - **408 detection rules** — symbol removal, signature changes, struct/class layout drift, vtable reordering, enum value shifts, qualifier changes, calling conventions, and many more. See the [Change Kind Reference](reference/change-kinds.md).
 - **Multiple output formats** — Markdown, JSON, SARIF (GitHub Code Scanning), HTML.
 - **Policy profiles** — `strict_abi`, `sdk_vendor`, `plugin_abi`, or custom YAML overrides.
-- **ABICC drop-in** — full flag parity for migrating from `abi-compliance-checker`.
 - **CI-ready** — clear exit codes, SARIF upload, snapshot-based baselines, first-class GitHub Action.
 - **Agent-friendly** — structured JSON/SARIF output and a typed [Python API](use/python-api.md) for AI-driven workflows; agents use the CLI or the API directly, no separate protocol server.
 - **Additions are changes too** — a compatible release still lists every new function, variable, and enumerator with a version-bump recommendation, so surface growth is reviewed, not assumed. See [Verdicts](learn/verdicts.md).
@@ -113,7 +112,7 @@ needs:
 
 **Migrating from another tool?**
 
-- [Migrating from ABICC](use/from-abicc.md)
+- [Migrating from ABICC](start/upgrading-to-0.6.md#a5-compat-the-abicc-drop-in-is-removed)
 - [Migrating from libabigail](use/from-libabigail.md)
 
 **Contributing or extending abicheck?**

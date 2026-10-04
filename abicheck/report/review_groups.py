@@ -182,7 +182,7 @@ def build_review_groups(findings: Sequence[ReportFinding]) -> tuple[ReviewGroup,
                 or facts.get("binary_exported") != "false"
             ):
                 family = kind
-        key = (change.library or "", _identity(finding), family)
+        key = ("", _identity(finding), family)
         buckets.setdefault(key, []).append(finding)
 
     expanded: list[tuple[tuple[str, str, str], list[ReportFinding]]] = []

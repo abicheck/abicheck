@@ -12,7 +12,7 @@ generated: false
 
 # Suppressions
 
-`abicheck compare` and `abicheck compat` support YAML suppressions via `--suppress`.
+`abicheck compare` supports YAML suppressions via `--suppress`.
 
 Use suppressions to silence known/accepted changes while keeping detection enabled.
 
@@ -243,12 +243,6 @@ abicheck compare old.so new.so \
   --header old=include/v1/ \
   --header new=include/v2/ \
   --suppress suppressions.yaml
-```
-
-For ABICC-compatible mode:
-
-```bash
-abicheck compat -lib libfoo.so -old old.dump -new new.dump --suppress suppressions.yaml
 ```
 
 ---

@@ -21,12 +21,10 @@ abicheck supports multiple output formats for different use cases:
 | Markdown | `-o markdown=-` | Complete navigable human report |
 | JSON | `-o json=-` | CI pipelines, machine processing |
 | SARIF | `-o sarif=-` | GitHub Code Scanning, SAST platforms |
-| HTML | `-o html=-` | Standalone reports, ABICC migration |
+| HTML | `-o html=-` | Standalone reports |
 | JUnit XML | `-o junit=-` | GitLab CI, Jenkins, Azure DevOps test dashboards |
 
 All formats support the report filtering options described below.
-The ABICC-compatible XML output (via `abicheck compat check`) includes
-redundancy annotations but does not support the `--view show=...` display filter.
 
 In addition to report formats, the composite GitHub Action can emit
 **GitHub Actions workflow command annotations** (`annotate: true`) that

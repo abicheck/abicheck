@@ -18,7 +18,7 @@
 ``aggregate`` folds the per-target ``compare``/``scan`` JSON reports produced
 by a CI build matrix into one gate decision. It is a *workflow-composition*
 command (like a report-level ``compare``): unlike the core-analysis commands
-(``dump``/``compare``/``scan``/``deps``/``compat``) it does not analyze a
+(``dump``/``compare``/``deps``) it does not analyze a
 binary — it reconciles already-produced reports against the set of targets the
 matrix was supposed to build.
 

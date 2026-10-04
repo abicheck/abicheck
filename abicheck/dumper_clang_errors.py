@@ -390,10 +390,9 @@ def run_clang_to_ast_file(
 #: which this env-var check honors via ``streaming_prune_suppressed()``
 #: below -- so enabling this var can never silently drop a declaration an
 #: explicit or default full-scope request asked to keep.
-#: ``compat/cli.py``'s ABICC-compat dump and ``appcompat.check_appcompat``'s
-#: two dumps (Codex review, PR #840, thread bdSMk) call ``dumper.dump()``
-#: directly with no dependency-scope wrapper of their own at all -- fixed by
-#: wrapping both in ``suppress_streaming_prune()`` themselves, the same
+#: ``appcompat.check_appcompat``'s two dumps (Codex review, PR #840, thread
+#: bdSMk) call ``dumper.dump()`` directly with no dependency-scope wrapper of
+#: their own at all -- fixed by wrapping them in ``suppress_streaming_prune()``, the same
 #: full/unscoped reasoning as the two choke points above, rather than
 #: teaching this module about a third caller shape.
 #:

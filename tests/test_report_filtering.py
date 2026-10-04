@@ -981,32 +981,6 @@ class TestHtmlRedundancy:
 
 
 # ---------------------------------------------------------------------------
-# XML (ABICC compat) format support
-# ---------------------------------------------------------------------------
-
-
-class TestXmlRedundancy:
-    def test_xml_redundant_count(self):
-        from abicheck.compat.xml_report import generate_xml_report
-
-        result = _make_result(
-            changes=[Change(ChangeKind.TYPE_SIZE_CHANGED, "T", "size")],
-            redundant_changes=[Change(ChangeKind.FUNC_PARAMS_CHANGED, "f", "changed")],
-        )
-        xml = generate_xml_report(result, lib_name="lib.so")
-        assert "<redundant_changes>1</redundant_changes>" in xml
-
-    def test_xml_caused_by_type(self):
-        from abicheck.compat.xml_report import generate_xml_report
-
-        c = Change(ChangeKind.TYPE_SIZE_CHANGED, "Config", "size changed")
-        c.caused_count = 3
-        result = _make_result(changes=[c])
-        xml = generate_xml_report(result, lib_name="lib.so")
-        assert "<caused_count>3</caused_count>" in xml
-
-
-# ---------------------------------------------------------------------------
 # _root_type_name: namespace preservation (architecture review fix #1)
 # ---------------------------------------------------------------------------
 

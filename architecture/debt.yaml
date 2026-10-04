@@ -574,17 +574,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/compat/cli.py",
-      "baseline_lines": 1518,
-      "target": "workflows-or-frontends",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_workflow_or_frontend_monolith",
-      "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/compatibility_evaluation_config.py",
       "baseline_lines": 1047,
       "target": "see ADR-061 ownership map",

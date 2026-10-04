@@ -5,10 +5,8 @@ from abicheck.report.finding import ReportFinding
 from abicheck.report.review_groups import build_review_groups
 
 
-def _finding(
-    kind: ChangeKind, symbol: str, *, library: str | None = None
-) -> ReportFinding:
-    change = Change(kind, symbol, kind.value, library=library)
+def _finding(kind: ChangeKind, symbol: str) -> ReportFinding:
+    change = Change(kind, symbol, kind.value)
     return ReportFinding(change, Verdict.BREAKING, IssueCategory.ABI_BREAKING)
 
 
@@ -41,17 +39,6 @@ def test_export_relationship_without_declaration_fact_remains_ambiguous() -> Non
         )
         == 2
     )
-
-
-def test_vtable_evidence_groups_but_same_name_in_different_dsos_does_not() -> None:
-    groups = build_review_groups(
-        (
-            _finding(ChangeKind.TYPE_VTABLE_CHANGED, "N::V", library="a.so"),
-            _finding(ChangeKind.VTABLE_SLOT_COUNT_CHANGED, "N::V", library="a.so"),
-            _finding(ChangeKind.TYPE_VTABLE_CHANGED, "N::V", library="b.so"),
-        )
-    )
-    assert [len(group.member_kinds) for group in groups] == [2, 1]
 
 
 def test_overloads_and_namespaces_remain_separate() -> None:
@@ -143,7 +130,7 @@ def test_inheritance_size_evidence_does_not_claim_an_exact_base_change() -> None
 # ---------------------------------------------------------------------------
 
 
-def _nameless_finding(kind: ChangeKind, *, library: str | None = None) -> ReportFinding:
+def _nameless_finding(kind: ChangeKind) -> ReportFinding:
     """A finding whose every name source is empty.
 
     `Change.symbol` is annotated `str` and production honours that — the one
@@ -152,7 +139,7 @@ def _nameless_finding(kind: ChangeKind, *, library: str | None = None) -> Report
     *empty string*, which is type-valid and which `qualified_name or
     demangled_symbol or symbol` resolves to unchanged.
     """
-    change = Change(kind, "", kind.value, library=library)
+    change = Change(kind, "", kind.value)
     return ReportFinding(change, Verdict.BREAKING, IssueCategory.ABI_BREAKING)
 
 
@@ -182,9 +169,9 @@ def test_the_sort_is_total_over_every_mix_of_named_and_nameless() -> None:
 
     population = [
         _nameless_finding(ChangeKind.FUNC_REMOVED),
-        _nameless_finding(ChangeKind.VAR_REMOVED, library="libb.so"),
+        _nameless_finding(ChangeKind.VAR_REMOVED),
         _finding(ChangeKind.FUNC_REMOVED, "_ZN1A3addEv"),
-        _finding(ChangeKind.VAR_REMOVED, "global_x", library="liba.so"),
+        _finding(ChangeKind.VAR_REMOVED, "global_x"),
     ]
     baseline = [g.group_id for g in build_review_groups(population)]
     for order in itertools.permutations(population):

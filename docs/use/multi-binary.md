@@ -585,10 +585,6 @@ all records *no contract* and the block is omitted — it never borrows the
 other side's, which would make every deliberately retired declaration read
 as a missing export.
 
-A multi-library `compat check` descriptor is reconciled the same way, but
-that path has no release JSON envelope, so its release-level findings are
-folded into the merged ABICC-shaped result instead of this block.
-
 `undocumented_exports_by_member` is deliberately counts, not a symbol-keyed
 map: a real product can carry hundreds of thousands of undocumented exports,
 and the symbols themselves stay where they are already attributed — each

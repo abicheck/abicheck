@@ -816,7 +816,7 @@
         "explain-abi-change",
         "set-up-abi-compatibility-ci"
       ],
-      "digest": "sha256:bd825407cdbfc2d6e33accb2e0f14b5984cc17707b959709c16ffe22d73d5314",
+      "digest": "sha256:31c6f39e7bb28dddc9ff2db1e6a6c5e1fcff8d6b50eca9f1c14dd1803992639d",
       "roots": [
         "skills-src/evaluation/agents/skills/grade_bundle.py",
         "skills-src/evaluation/agents/skills/graders",
@@ -881,7 +881,7 @@
       "roots": [
         ".agents/skills/set-up-abi-compatibility-ci"
       ],
-      "tree": "sha256:e8e11483ff2813564443f7c61aa5910416e96daea89019d85a12cbb8fed78ca5"
+      "tree": "sha256:d23ca7b4068b3526cb70c84fa83624e48187c9f436a38030bed3b83f0ff2be91"
     }
   }
 }

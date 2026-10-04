@@ -27,8 +27,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from abicheck.change_registry_types import Verdict
 from abicheck.checker import Change, ChangeKind, DiffResult, compare
 from abicheck.compatibility_evaluation_config import (
@@ -53,7 +51,6 @@ from abicheck.policy_file import PolicyFile
 from abicheck.reclassify import ReclassifyRule
 from abicheck.reporter import to_json
 from abicheck.severity import resolve_severity_config
-from tests.schema_validation import validate_instance
 
 
 def _identity(
@@ -596,65 +593,6 @@ class TestBaselineTierBuiltinPolicyIdentity:
         result = _result(policy="")
         fields = effective_config_fields_from_raw(result, severity_config=None)
         assert fields["policy.base"] == ""
-
-
-class TestCompatReportOmitsTheDigest:
-    """Codex review, PR #803, fresh evidence: compat/cli.py's own `compat
-    check --report-format json` reuses reporter.to_json with
-    include_exit_decision=False (its real process exit follows a different,
-    ABICC-style 0/1/2 scheme) -- but this digest's gate axes describe only
-    the *native* legacy/severity scheme and carry no representation of
-    compat-only transform options (-strict, -source/-binary, ...), so two
-    behaviorally different compat reports could carry the identical digest.
-    Mirrors the `exit` block's own existing include_exit_decision gate."""
-
-    def test_include_exit_decision_false_omits_the_digest(self):
-        result = _result()
-        report = json.loads(to_json(result, include_exit_decision=False))
-        assert "effective_config_digest" not in report
-        assert "effective_config_fields" not in report
-        # Every other field this function always writes stays present.
-        assert report["verdict"] == "NO_CHANGE"
-
-    def test_default_still_includes_the_digest(self):
-        result = _result()
-        report = json.loads(to_json(result))
-        assert report["effective_config_digest"].startswith("sha256:")
-
-    def test_include_exit_decision_false_still_validates_against_schema(self):
-        """Mirrors test_exit_decision.py's identically-named test for the
-        `exit` block -- both fields are schema-optional for the same
-        reason, so a compat report omitting them still validates against
-        its own advertised report_schema_version. Uses a real compare()
-        result (not the hand-built _result() helper) so every other
-        required field is genuinely populated the way to_json's real
-        callers produce it."""
-        pytest.importorskip("jsonschema")
-
-        from abicheck.model import AbiSnapshot, Function, Visibility
-        from abicheck.schemas import load_compare_report_schema
-
-        def _fn(name: str, mangled: str) -> Function:
-            return Function(
-                name=name,
-                mangled=mangled,
-                return_type="int",
-                visibility=Visibility.PUBLIC,
-            )
-
-        common = {"library": "libfoo.so.1", "from_headers": True}
-        old = AbiSnapshot(
-            version="1.0",
-            functions=[_fn("pub_a", "_Z5pub_av"), _fn("pub_b", "_Z5pub_bv")],
-            **common,
-        )
-        new = AbiSnapshot(
-            version="2.0", functions=[_fn("pub_a", "_Z5pub_av")], **common
-        )
-        result = compare(old, new)
-        report = json.loads(to_json(result, include_exit_decision=False))
-        assert "effective_config_digest" not in report
-        validate_instance(report, load_compare_report_schema())
 
 
 def _scoped_result(**dynamic_attrs) -> DiffResult:

@@ -80,7 +80,7 @@ include root (`-I third_party`) even though `bar/baz.h` itself is not part of
 as an include root.
 
 `compare` auto-detects each input: `.so` files are dumped on-the-fly, `.json`
-snapshots and ABICC Perl dumps (Data::Dumper `.dump` files) are loaded directly.
+snapshots are loaded directly.
 You can mix them freely (see below).
 
 If headers are not provided, `compare` uses whatever debug info is available
@@ -194,16 +194,6 @@ abicheck compare baseline-1.0.json ./build/libfoo.so \
 abicheck compare ./build-old/libfoo.so new-release.json \
   --header old=include/foo.h --version old=1.0-rc1
 ```
-
-### 4) ABICC-compatible invocation (for migration)
-
-For teams migrating from `abi-compliance-checker` — same flags, same XML
-descriptors — `abicheck compat check`/`compat dump` are a drop-in
-replacement. See [Migrating from ABICC](from-abicc.md) for the full flag
-table, behavior differences (`-strict` semantics, XML descriptor format),
-and worked examples, and the
-[ABICC Flag Reference](../reference/abicc-flags.md) for the exhaustive flag
-list.
 
 ## Writing a snapshot: `-o/--output` versus shell redirection
 

@@ -216,79 +216,6 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
-        id="config.rule_language_class_collapsed",
-        invariant=(
-            "A rule language with several matching *classes* is matched by "
-            "all of them or by none: implementing one class and applying it "
-            "to every rule makes every out-of-class rule match nothing, "
-            "silently, while the run still produces a confident verdict. "
-            "And a rule that matched nothing is never recorded as an "
-            "achieved narrowing of the analyzed surface."
-        ),
-        fixed_by=(1314,),
-        seed_tests=(
-            "tests/test_descriptor_skip_rules.py",
-            "tests/test_compat_dump_descriptor_expansion.py",
-        ),
-        public_surfaces=("compat check", "compat dump"),
-        axes={
-            "rule_class": ("name", "path", "directory", "pattern", "absolute"),
-            "separator": ("posix", "windows"),
-            "element": ("skip_headers", "skip_including"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "ABICC's `<skip_headers>` means 'do not include and do "
-                    "not analyze'. Both it and `<skip_including>` now "
-                    "correctly drop a header from the *direct* -H operand "
-                    "list, and only `<skip_headers>` is recorded as a real "
-                    "narrowing -- but neither can stop a header being parsed "
-                    "when another header reaches it through its own "
-                    "`#include`. The native `--exclude-header` path shares "
-                    "that limitation (both filter the resolved header list, "
-                    "post-walk), so closing it means a post-parse filter by "
-                    "defining header, not a change to either rule language. "
-                    "Until then the docs must not claim complete support for "
-                    "`<skip_headers>`."
-                ),
-                reference="docs/contribute/known-gaps.md",
-            ),
-        ),
-    ),
-    BugClass(
-        id="config.inferred_root_bypassed_by_a_second_entry_point",
-        invariant=(
-            "A resolution step that every entry point owes its inputs is "
-            "performed by every entry point. A front end that reaches past "
-            "the shared resolver into the low-level extractor gets a "
-            "different -- and usually worse -- answer than the identical "
-            "request through any other route, and the failure names neither "
-            "the step nor the front end."
-        ),
-        fixed_by=(1314,),
-        seed_tests=("tests/test_descriptor_include_inference.py",),
-        public_surfaces=("compat check", "compat dump"),
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "`resolve_inferred_header_roots` already existed and "
-                    "already returned the right root; the ABICC compat path "
-                    "expanded the descriptor's <headers> directory into "
-                    "individual files and called `dumper.dump` directly, so "
-                    "nothing inferred anything and MKL's own descriptor "
-                    "could not compile without a hand-added <include_paths>. "
-                    "The `cli-contract` AI-readiness check gates exactly this "
-                    "shape for `checker.compare`/`dumper.dump`/"
-                    "`service.resolve_input`, but `compat/cli.py` is on its "
-                    "reviewed legacy allowlist, so the gate did not catch "
-                    "this one. Shrinking that allowlist is the durable close."
-                ),
-                reference="scripts/check_ai_readiness.py CLI_CONTRACT_ALLOWLIST",
-            ),
-        ),
-    ),
-    BugClass(
         id="config.command_specific_discovery",
         invariant=(
             "Every command selects its project config with one rule "
@@ -370,9 +297,6 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             # `compare --no-baseline` resolved the project config and read
             # 6 of its fields. Oracle: the written `.abicheck.yml`.
             "tests/test_no_baseline_config_settings.py",
-            # `compat check -source`/`-src-report-path` never reached the
-            # HTML report's kind. Oracle: ABICC's own flag table.
-            "tests/test_compat_report_kind.py",
             # `project history --policy DOC` read the path as a profile name.
             # Oracle: the deprecation-window rule as the docs state it.
             "tests/test_cli_project_history_policy.py",

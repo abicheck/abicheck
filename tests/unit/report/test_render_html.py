@@ -32,8 +32,7 @@ document boundary itself: ``html_report.build_html_document`` must produce a
 genuinely JSON-shaped :class:`~abicheck.report.document.ReportDocument` --
 one that survives its own ``from_mapping``/``to_mapping`` round trip -- and
 ``report.render_html_document.render_html_document`` must be a pure,
-deterministic function of that document alone, for both the native and
-ABICC-compatible (``compat_html=True``) layouts.
+deterministic function of that document alone.
 """
 
 from __future__ import annotations
@@ -537,14 +536,13 @@ def test_every_rendered_section_reaches_the_document() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("compat_html", [False, True])
-def test_build_html_document_is_a_genuine_report_document(compat_html: bool) -> None:
+def test_build_html_document_is_a_genuine_report_document() -> None:
     """``build_html_document`` must return a :class:`ReportDocument` whose
     content is entirely JSON-safe scalars/lists/objects -- not merely an
     object that happens to render once. Round-tripping it through its own
     ``to_mapping``/``from_mapping`` (what every real consumer -- JSON
     serialization, a second render -- actually does) must reproduce an
-    identical document, for both the native and ABICC-compatible layouts.
+    identical document.
     """
     result = _result()
     document = build_html_document(
@@ -555,7 +553,6 @@ def test_build_html_document_is_a_genuine_report_document(compat_html: bool) -> 
         old_symbol_count=120,
         show_impact=True,
         severity_config=SeverityConfig(),
-        compat_html=compat_html,
     )
     assert isinstance(document, ReportDocument)
     mapping = document.to_mapping()
@@ -563,8 +560,7 @@ def test_build_html_document_is_a_genuine_report_document(compat_html: bool) -> 
     assert round_tripped.to_mapping() == mapping
 
 
-@pytest.mark.parametrize("compat_html", [False, True])
-def test_render_html_document_is_pure_and_deterministic(compat_html: bool) -> None:
+def test_render_html_document_is_pure_and_deterministic() -> None:
     """``render_html_document`` must be a pure function of the document
     alone: rendering the same document twice -- including a document that
     has been through a ``to_mapping``/``from_mapping`` round trip, i.e. a
@@ -579,7 +575,6 @@ def test_render_html_document_is_pure_and_deterministic(compat_html: bool) -> No
         lib_name="libfoo.so",
         show_impact=True,
         severity_config=SeverityConfig(),
-        compat_html=compat_html,
     )
     first = render_html_document(document)
     second = render_html_document(document)
@@ -787,39 +782,6 @@ def test_html_compatibility_metrics_reuse_the_envelope_s_findings() -> None:
 
     spy.assert_not_called()
     assert "100.0%" in html_out
-
-
-def test_html_compat_changes_table_empty_and_populated() -> None:
-    """``render_compat_changes_table`` -- the ABICC-style table renderer --
-    is reached only through the ReportDocument renderer; test it directly
-    at both its ``rows`` boundary cases, same as ``render_changes_table``
-    gets via the golden HTML suite."""
-    from abicheck.report.render_html import ChangeRow, render_compat_changes_table
-
-    assert render_compat_changes_table(()) == "<p>No changes.</p>"
-
-    row = ChangeRow(
-        kind="func_removed",
-        category="Functions",
-        impact="",
-        severity="High",
-        symbol="foo",
-        description="removed",
-        old_value="",
-        new_value="",
-        source_location=None,
-        affected_symbols=(),
-        caused_count=0,
-        contract_relevance=None,
-        contract_reason_code=None,
-        contract_assurance=None,
-        compatibility_decision=None,
-        contract_evidence_refs=(),
-        correlated_change_kind=None,
-    )
-    out = render_compat_changes_table((row,), show_severity=True)
-    assert "foo" in out
-    assert "High" in out
 
 
 def test_render_changes_table_empty_rows() -> None:

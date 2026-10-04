@@ -56,7 +56,7 @@ def _read(p: Path) -> str:
 # the CLI and the typed Python API depend on, an inversion the now-deleted
 # `scan_engine.py` (importing `click` and raising `click.ClickException`,
 # ADR-068 Phase 6) used to demonstrate. A frontend (`cli*.py`,
-# `compat/cli.py`) is on the *other* side of this boundary and is
+# `frontends/cli/`) is on the *other* side of this boundary and is
 # deliberately not covered here — it may import engine modules freely.
 # `dry_run_estimate.py` (the dry-run cost model / header-expansion module
 # `service_scan.py` was renamed to when its own scan half was deleted,
@@ -139,8 +139,8 @@ def _is_cli_component(name: str) -> bool:
     name — a CLI-frontend module spelling? Matches both the top-level
     ``cli_*.py`` sibling family (``cli_dump_helpers``, ...) and a bare
     ``cli`` component, which catches a *nested* CLI adapter package like
-    ``abicheck/compat/cli.py`` (imported as `.compat.cli`/`abicheck.compat
-    .cli`/`from .compat import cli`) that the top-level-only ``cli_*``
+    ``abicheck/frontends/cli/`` (imported as `.frontends.cli`/`abicheck.
+    frontends.cli`/`from .frontends import cli`) that the top-level-only ``cli_*``
     pattern would otherwise miss entirely."""
     return name == "cli" or name.startswith("cli_")
 
@@ -153,8 +153,8 @@ def _alias_is_real_submodule(base_dir: Path, alias_name: str) -> bool:
     dependency this check exists to catch: ``from .model import
     cli_default`` importing a plain constant named ``cli_default`` is not a
     CLI dependency at all, even though the imported name starts with
-    ``cli_``. A dotted *module path* (`mod` itself, e.g. the `.compat.cli`
-    in `from .compat.cli import x`) needs no such check — Python requires
+    ``cli_``. A dotted *module path* (`mod` itself, e.g. the `.frontends.cli`
+    in `from .frontends.cli import x`) needs no such check — Python requires
     every component of a dotted import path to already be a real
     module/package, so that part is unambiguous by construction; it's only
     the *trailing* imported name in `from X import name` that could be
@@ -343,7 +343,7 @@ def _package_shadows_attribute(base_dir: Path, alias_name: str) -> bool:
                     # base_dir's own submodule -- can still itself be a
                     # real CLI-frontend module (`from abicheck.cli import
                     # main as cli`, or a nested adapter like
-                    # `abicheck.compat.cli`): importing it already
+                    # `abicheck.frontends.cli`): importing it already
                     # constitutes the dependency this check exists to
                     # catch, independent of whether it also happens to
                     # shadow base_dir's own same-named submodule. Treated
@@ -531,7 +531,7 @@ def _engine_boundary_violations(
 ) -> list[str]:
     """Return one human description per prohibited alias *node* imports
     (``click`` or a ``cli``/``cli_*`` sibling — top-level or nested, e.g.
-    ``abicheck.compat.cli``), possibly more than one — an import statement
+    ``abicheck.frontends.cli``), possibly more than one — an import statement
     can name several targets on one line (`import click, abicheck.cli_new`;
     `from abicheck import cli_a, cli_b`), and each prohibited one is its own
     violation; returning only the first would let a second, added alias
@@ -542,7 +542,7 @@ def _engine_boundary_violations(
     or a CLI frontend" rule regardless of where in the file the import
     sits, and regardless of how deep the CLI module is nested (a
     ``cli_*.py`` sibling of ``cli.py``, or a ``cli.py`` living inside a
-    sub-package like ``compat/``). *rel* (the importing file's own
+    sub-package like ``frontends/``). *rel* (the importing file's own
     repo-relative path) is only used to resolve a relative import's base
     directory when verifying a trailing imported *alias* actually names a
     real submodule on disk (see ``_alias_is_real_submodule``) — a dotted
@@ -555,7 +555,7 @@ def _engine_boundary_violations(
             if parts[0] == "click":
                 found.append(f"import {alias.name}")
             # `import abicheck.cli_dump_helpers` / `import
-            # abicheck.compat.cli` (also catches a bare `... as X`, which
+            # abicheck.frontends.cli` (also catches a bare `... as X`, which
             # still binds the whole dotted path). Any component after
             # `abicheck`, not just the first, since a nested CLI adapter's
             # own cli-ness can show up several segments deep. No submodule
@@ -570,8 +570,8 @@ def _engine_boundary_violations(
     mod = node.module or ""
     mod_components = mod.split(".") if mod else []
     if node.level >= 1:
-        # Relative import: `from .cli_xxx import ...`, `from .compat.cli
-        # import ...`, `from . import cli_xxx`, or `from .compat import
+        # Relative import: `from .cli_xxx import ...`, `from .frontends.cli
+        # import ...`, `from . import cli_xxx`, or `from .frontends import
         # cli` (a nested adapter reached via an imported alias, not a
         # dotted `mod` component).
         if any(_is_cli_component(c) for c in mod_components):
@@ -587,10 +587,10 @@ def _engine_boundary_violations(
     if mod == "click" or mod.startswith("click."):
         return [f"from {mod} import ..."]
     if mod_components and mod_components[0] == "abicheck":
-        # `from abicheck.compat.cli import main` / `from abicheck import
+        # `from abicheck.frontends.cli import main` / `from abicheck import
         # cli_dump_helpers` — a dotted component naming the CLI module, or
         # (when `mod` itself has no such component, e.g. `from
-        # abicheck.compat import cli`) an imported alias naming it instead.
+        # abicheck.frontends import cli`) an imported alias naming it instead.
         # `mod_components[0]`, not just membership: `from vendor.abicheck
         # .cli import x` names an unrelated third-party `vendor.abicheck`
         # package, not this repo's own `abicheck` — matching the identical

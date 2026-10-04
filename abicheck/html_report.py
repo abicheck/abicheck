@@ -12,10 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Sprint 9: ABICC-compatible HTML report generator.
+"""Sprint 9: HTML report generator.
 
-Generates a self-contained HTML report that mirrors the structure of
-abi-compliance-checker (ABICC) reports:
+Generates a self-contained HTML report:
 
   - Verdict banner (BREAKING / COMPATIBLE / NO_CHANGE)
   - Binary Compatibility % metric (based on old exported symbol count)
@@ -31,7 +30,6 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
@@ -79,8 +77,6 @@ from .report_classifications import (
     CATEGORY_PREFIXES,
     REMOVED_KINDS,
     category,
-    is_symbol_problem,
-    is_type_problem,
     kind_str,
     severity,
 )
@@ -99,12 +95,12 @@ def compute_full_change_rows(
 ) -> tuple[ChangeRow, ...]:
     """Resolve every fact a changes-table row needs for one change: the four
     registry-lookup decisions (kind string, category, impact text, ABICC
-    severity band) plus every raw display field `render_changes_table`/
-    `render_compat_changes_table` read directly off a live `Change` before
-    ADR-061 Phase 2 item 1 closed for HTML.
+    severity band) plus every raw display field `render_changes_table`
+    read directly off a live `Change` before ADR-061 Phase 2 item 1 closed
+    for HTML.
 
     Building this once per render, rather than reading `Change` attributes
-    mid-render, is what lets those two functions -- and the whole-document
+    mid-render, is what lets that function -- and the whole-document
     `render_html_document` -- become pure `ReportDocument` projections: a
     `ChangeRow` is an ordinary, JSON-round-trippable value, so this replaces
     the previous `id(change)`-keyed `ChangeRowFactsById` lookup table (needed
@@ -156,7 +152,6 @@ def compute_full_change_rows(
                 correlated_change_kind=(
                     getattr(ch, "correlated_change_kind", None) or None
                 ),
-                library=getattr(ch, "library", None) or None,
             )
         )
     return tuple(rows)
@@ -455,62 +450,6 @@ def compute_scoped_verdict(result: DiffResult) -> ScopedVerdictData | None:
     )
 
 
-def _build_compat_problem_data(
-    changed: list[object],
-    added: list[object],
-    removed: list[object],
-    evidence_tiers: Sequence[str] = (),
-) -> dict[str, object]:
-    """Bucket ``changed`` into ABICC's type/symbol/other severity bands.
-
-    This is the one business decision the pre-split ``_generate_compat_html``
-    made mid-render (a registry lookup via `is_type_problem`/
-    `is_symbol_problem`/`severity`); resolving it here, once, is what lets
-    the compat-mode renderer make none of its own.
-
-    *evidence_tiers* is threaded into `compute_full_change_rows` so an
-    UNATTRIBUTED finding's impact text carries the same evidence caveat the
-    JSON/Markdown views already do (Codex review).
-    """
-    type_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
-    symbol_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
-    other_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
-    for ch in changed:
-        ks = kind_str(ch)
-        sev = severity(ks)
-        if is_type_problem(ks):
-            type_problems[sev].append(ch)
-        elif is_symbol_problem(ks):
-            symbol_problems[sev].append(ch)
-        else:
-            other_problems[sev].append(ch)
-
-    def _rows_by_severity(
-        bucket: dict[str, list[object]],
-    ) -> dict[str, list[dict[str, object]]]:
-        return {
-            sev: [
-                dataclasses.asdict(row)
-                for row in compute_full_change_rows(items, evidence_tiers)
-            ]
-            for sev, items in bucket.items()
-        }
-
-    return {
-        "added_rows": [
-            dataclasses.asdict(row)
-            for row in compute_full_change_rows(added, evidence_tiers)
-        ],
-        "removed_rows": [
-            dataclasses.asdict(row)
-            for row in compute_full_change_rows(removed, evidence_tiers)
-        ],
-        "type_problems": _rows_by_severity(type_problems),
-        "symbol_problems": _rows_by_severity(symbol_problems),
-        "other_problems": _rows_by_severity(other_problems),
-    }
-
-
 def build_html_document(
     result: DiffResult,
     lib_name: str = "",
@@ -518,8 +457,6 @@ def build_html_document(
     new_version: str = "",
     old_symbol_count: int | None = None,
     title: str | None = None,
-    compat_html: bool = False,
-    report_kind: str = "binary",
     *,
     show_only: str | None = None,
     show_impact: bool = False,
@@ -534,8 +471,7 @@ def build_html_document(
     ``generate_html_report`` is now a two-line wrapper over this function and
     ``report.render_html.render_html_document``: every business decision
     this module makes (show_only filtering, bucketing, compatibility
-    metrics, which sections exist, ABICC severity-band classification for
-    the ``compat_html`` layout) lives here, never in the renderer.
+    metrics, which sections exist) lives here, never in the renderer.
 
     *envelope* (ADR-061 gap C), when given, is the completed
     :class:`~abicheck.report.envelope.ReportEnvelope` this render projects.
@@ -546,10 +482,9 @@ def build_html_document(
     gate drives the CI-gate card, and its one already-resolved verdict/
     category per change drives the section rows. The bucketing and row
     layout stay HTML's own presentation; what a row *says* about a finding
-    is the envelope's. HTML's remaining facts (bucketing, the
-    ``compat_html`` layout's severity-band tables) are not shared-document
+    is the envelope's. HTML's remaining facts (bucketing) are not shared-document
     fields -- see ADR-061's Gap C status note. A direct caller with no
-    envelope (a test, ``write_html_report``) keeps the independent build.
+    envelope (a test) keeps the independent build.
     """
     shared_document = resolved_document(envelope)
     shared_disposition_audit = (
@@ -698,48 +633,10 @@ def build_html_document(
         ),
         # Codex review, P2 (Finding 4): the same declared-deployment-floor
         # digest the JSON/Markdown/SARIF/JUnit projections carry under
-        # `env_matrix_source_sha256` -- shared by both the native and
-        # compat_html layouts below, `None` when no `deployment:` contract
+        # `env_matrix_source_sha256` -- `None` when no `deployment:` contract
         # governed this run.
         "env_matrix_source_sha256": getattr(result, "env_matrix_source_sha256", None),
     }
-
-    # compat_html (ABICC-clone layout) ignores severity_config entirely and
-    # never demangles -- matching the pre-split short-circuit exactly.
-    if compat_html:
-        return ReportDocument.from_mapping(
-            {
-                **shared,
-                "mode": "compat",
-                "report_kind": report_kind,
-                # The 5-way Verdict -> ABICC's 2-way compatible/incompatible
-                # bucketing is a policy interpretation (which verdicts count
-                # as "incompatible" for ABICC-compatibility purposes), not a
-                # formatting choice, so it belongs here -- not re-derived in
-                # the renderer (Codex review, fresh evidence).
-                "compat_verdict": (
-                    "incompatible"
-                    if verdict in ("BREAKING", "API_BREAK")
-                    else "compatible"
-                ),
-                "compat": _build_compat_problem_data(
-                    changed,
-                    added,
-                    removed,
-                    getattr(result, "evidence_tiers", None) or (),
-                ),
-                # ADR-067 D3 applies to *every* projection, and the
-                # compatibility layout returned before the native branch's
-                # sole audit construction -- so a fully suppressed comparison
-                # rendered as ABICC-compatible HTML showed no raw total, no
-                # disposition counts and no coverage limitation at all, which
-                # is exactly the "looks clean" this audit exists to prevent
-                # (Codex review). Carried as its own document field rather
-                # than folded into the compat problem tables, so the required
-                # ABICC element ids are untouched.
-                "disposition_audit": shared_disposition_audit.to_dict(),
-            }
-        )
 
     # Demangle-cache prewarming is a rendering concern, not a document fact,
     # so it happens once in `render_html_document` (the function that
@@ -834,8 +731,6 @@ def generate_html_report(
     new_version: str = "",
     old_symbol_count: int | None = None,
     title: str | None = None,
-    compat_html: bool = False,
-    report_kind: str = "binary",
     *,
     show_only: str | None = None,
     show_impact: bool = False,
@@ -843,7 +738,7 @@ def generate_html_report(
     demangle: bool = True,
     envelope: ReportEnvelope | None = None,
 ) -> str:
-    """Generate a standalone ABICC-compatible HTML ABI report.
+    """Generate a standalone HTML ABI report.
 
     Args:
         result: DiffResult from checker.compare().
@@ -856,9 +751,7 @@ def generate_html_report(
         show_only: Optional --show-only filter string (display-only).
         show_impact: If True, append an impact summary table.
         demangle: Demangle C++ symbols in the native table (see ``abbr_symbol_text``).
-        severity_config: Optional severity configuration. When given (native
-            report only — the ABICC-compatible ``compat_html`` layout is left
-            unchanged), a separate "CI Gate" headline card is rendered
+        severity_config: Optional severity configuration. When given, a separate "CI Gate" headline card is rendered
             alongside "Compatibility" so a configured severity gate (e.g. an
             addition promoted to ``error``) is visible even when the
             Compatibility verdict itself reads COMPATIBLE.
@@ -875,8 +768,6 @@ def generate_html_report(
         new_version=new_version,
         old_symbol_count=old_symbol_count,
         title=title,
-        compat_html=compat_html,
-        report_kind=report_kind,
         show_only=show_only,
         show_impact=show_impact,
         severity_config=severity_config,
@@ -1021,32 +912,3 @@ def _build_sections_data(
             }
         )
     return sections
-
-
-def write_html_report(
-    result: DiffResult,
-    output_path: Path,
-    lib_name: str = "",
-    old_version: str = "",
-    new_version: str = "",
-    old_symbol_count: int | None = None,
-    title: str | None = None,
-    compat_html: bool = False,
-    report_kind: str = "binary",
-) -> None:
-    """Write HTML report to *output_path*, creating parent directories as
-    needed. ``compat check`` is its one caller; *report_kind* is ``"source"``
-    for the source-only reports it writes (``-source``,
-    ``-src-report-path``)."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    content = generate_html_report(
-        result,
-        lib_name=lib_name,
-        old_version=old_version,
-        new_version=new_version,
-        old_symbol_count=old_symbol_count,
-        title=title,
-        compat_html=compat_html,
-        report_kind=report_kind,
-    )
-    output_path.write_text(content, encoding="utf-8")

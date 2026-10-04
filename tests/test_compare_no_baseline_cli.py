@@ -731,8 +731,8 @@ def test_a_serialized_description_stays_exempt_in_every_one_of_its_shapes(
     """The complement, so the fix above cannot be 'gate everything'.
 
     Every shape `resolve_input` accepts as an already-serialized ABI
-    description is exempt — a single ``.abi.json`` file, a directory-backed
-    `ProjectSnapshot` package, and an ABICC Perl dump — because only such a
+    description is exempt — a single ``.abi.json`` file and a directory-backed
+    `ProjectSnapshot` package — because only such a
     description can already *carry* the pinned evidence. A plain directory of
     libraries is none of them, and must not be swept into the exemption.
     """
@@ -743,8 +743,6 @@ def test_a_serialized_description_stays_exempt_in_every_one_of_its_shapes(
         / "snapshot.abi.json"
     )
     package = _project_snapshot_package(tmp_path, "case143_audit_accidental_export")
-    perl_dump = tmp_path / "saved.dump"
-    perl_dump.write_text("$VAR1 = {\n  'ABI' => {}\n};\n")
     plain = tmp_path / "release"
     plain.mkdir()
     (plain / "libfoo.so").write_bytes(b"\x7fELF\x02\x01\x01\x00" + bytes(56))
@@ -753,12 +751,6 @@ def test_a_serialized_description_stays_exempt_in_every_one_of_its_shapes(
     assert candidate_is_live_artifact(package) is False, (
         "a ProjectSnapshot package is the repository's own storage-v2 form of "
         "the same stored snapshot, so it carries the same exemption"
-    )
-    assert candidate_is_live_artifact(perl_dump) is False, (
-        "an ABICC Perl dump is a pre-built, tool-produced ABI description "
-        "this run parses rather than extracts, exactly like an .abi.json; "
-        "splitting the two on serialization format alone made --depth source "
-        "exit 7 on one and 0 on the other (Codex review, P2)"
     )
     assert candidate_is_live_artifact(plain) is True, (
         "a plain directory of libraries is not a stored snapshot; exempting "

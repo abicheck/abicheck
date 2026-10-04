@@ -115,7 +115,7 @@ def test_command_tree_is_nontrivial() -> None:
     paths = {p for p, _ in _command_tree()}
     assert {"abicheck compare", "abicheck dump", "abicheck project"} <= paths
     assert any(p.startswith("abicheck project ") for p in paths)
-    assert any(p.startswith("abicheck compat ") for p in paths)
+    assert any(p.startswith("abicheck deps ") for p in paths)
 
 
 @pytest.mark.parametrize(

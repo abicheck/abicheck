@@ -382,7 +382,7 @@ def _evidence_failures(calls: list[dict], claim: dict) -> list[tuple[str, bool]]
     `not-comparable-pair` scenario that is a run which recorded no calls at
     all, made the scenario's expected answer, and passed both zero-tolerance
     dimensions — a guess that happens to match. Non-comparability is
-    *observable* (`compare` 16, `scan --against` 6, `compat check` 9), which is
+    *observable* (`compare` 16, `scan --against` 6), which is
     what makes requiring the evidence safe rather than a demand the artifact
     cannot meet.
 

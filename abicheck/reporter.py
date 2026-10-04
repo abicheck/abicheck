@@ -399,7 +399,6 @@ def _to_json_root_cause(
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
-    include_exit_decision: bool = True,
     contract_evaluation: bool = False,
 ) -> str:
     """``--report-mode root-cause`` JSON output (G29 Phase 3, ADR-052 slice 3).
@@ -526,7 +525,6 @@ def _to_json_root_cause(
         _displayed_with_scoped_only(result, changes, show_only),
         require_complete_analysis=require_complete_analysis,
         severity_config=severity_config,
-        include_exit_decision=include_exit_decision,
     )
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
@@ -1049,7 +1047,6 @@ def to_json(
     show_impact: bool = False,
     severity_config: SeverityConfig | None = None,
     require_complete_analysis: bool = False,
-    include_exit_decision: bool = True,  # exit block (2.41); see exit_decision.py
     contract_evaluation: bool = False,  # ADR-061 P2 item 5
 ) -> str:
     # A `stat` parameter used to short-circuit to `to_stat_json` here. Call
@@ -1069,7 +1066,6 @@ def to_json(
             show_only=show_only,
             severity_config=severity_config,
             require_complete_analysis=require_complete_analysis,
-            include_exit_decision=include_exit_decision,
             contract_evaluation=contract_evaluation,
         )
 
@@ -1085,7 +1081,6 @@ def to_json(
         show_impact=show_impact,
         severity_config=severity_config,
         require_complete_analysis=require_complete_analysis,
-        include_exit_decision=include_exit_decision,
         contract_evaluation=contract_evaluation,
     )
     return render_json(doc)
@@ -1476,13 +1471,6 @@ def _change_to_dict(
     }
     if reclassified_by:
         d["reclassified_by"] = reclassified_by
-    # Which library produced this finding, present only when the run compared
-    # more than one (`compat check` over a multi-library descriptor). Omitted
-    # otherwise, where the report's own top-level `library` already answers
-    # it -- so every single-library report is byte-identical to before.
-    finding_library = getattr(c, "library", None)
-    if finding_library:
-        d["library"] = finding_library
     # Two per-declaration blocks, omitted when absent (see their own field
     # docs on Change): `demangled_symbol`, a readable name for a finding whose
     # old-side declaration is export-table-only (`symbol`/`old_value` stay raw
