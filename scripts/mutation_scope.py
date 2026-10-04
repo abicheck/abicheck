@@ -258,21 +258,92 @@ def _section(doc: Mapping[str, object], keys: tuple[str, ...]) -> object:
     return node
 
 
-#: ``gen_mutation_test_selection.FULL_SELECTION``, restated: that module is a
-#: sibling script, imported lazily where the CLI needs its validator.
-_FULL_SELECTION = ("tests/",)
+def _module_names(path: str) -> set[str]:
+    """Spellings an import of the ``tests/`` module at *path* can use.
+
+    ``tests/regressions/manifest.py`` answers ``manifest`` and
+    ``regressions.manifest`` (and ``tests.regressions.manifest``); a
+    package's ``__init__.py`` answers its directory's names.
+    """
+    parts = list(PurePosixPath(path).with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return {".".join(parts[start:]) for start in range(len(parts))}
+
+
+def _imports_any(text: str, names: set[str]) -> bool:
+    """Does *text* import a module spelled as one of *names*?
+
+    Deliberately generous (a textual match on import statements, not name
+    resolution): a false positive only adds a test file to the stats pass.
+    """
+
+    def hit(mod: str) -> bool:
+        mod = mod.lstrip(".")
+        return any(mod == n or mod.endswith("." + n) for n in names)
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("from "):
+            parts = stripped.split(None, 3)
+            if len(parts) < 4 or parts[2] != "import":
+                continue
+            if hit(parts[1]):
+                return True
+            # `from pkg import helper` names the module in the import list.
+            for item in parts[3].strip("()\\ ").split(","):
+                name = item.strip().split(" as ")[0].strip()
+                if name and hit(f"{parts[1]}.{name}"):
+                    return True
+        elif stripped.startswith("import "):
+            for item in stripped[len("import ") :].split(","):
+                if hit(item.strip().split(" as ")[0].strip()):
+                    return True
+    return False
+
+
+def helper_importers(changed: Iterable[str], sources: Mapping[str, str]) -> set[str]:
+    """Test files that import a changed ``tests/`` helper, directly or not.
+
+    *sources* maps every ``tests/**/*.py`` path to its text. The closure is
+    a fixpoint over helpers importing helpers, so a test reaching a changed
+    helper through another one is found too. Only ``test_*.py`` files are
+    returned: those are what the stats-pass selection lists.
+    """
+    reached = set(changed)
+    frontier = set(changed)
+    while frontier:
+        names = set().union(*(_module_names(p) for p in frontier))
+        frontier = {
+            path
+            for path, text in sources.items()
+            if path not in reached and _imports_any(text, names)
+        }
+        reached |= frontier
+    return {p for p in reached if PurePosixPath(p).name.startswith("test_")}
 
 
 def extend_selection(
-    selection: list[str], changed: list[str], exists: Callable[[str], bool]
+    selection: list[str],
+    changed: list[str],
+    exists: Callable[[str], bool],
+    sources: Mapping[str, str] | None = None,
 ) -> list[str]:
     """The stats-pass selection for a run whose diff changed *changed* paths.
 
     Each added or changed ``tests/**/test_*.py`` that still exists joins the
     committed selection, so a PR's own new tests are never left out of its
-    measurement. A changed shared test module (``conftest.py``, a helper)
-    can change which files reach mutated code in ways no path rule can see,
-    so it widens the run back to the whole suite. Never narrows.
+    measurement. A changed shared helper module adds the test files that
+    import it (`helper_importers`, over *sources*). A changed ``conftest.py``
+    adds nothing: it supplies fixtures to files the selection already runs,
+    and the trace-based completeness check (``gen_mutation_test_selection
+    --check``, on every full run) is what catches a file that newly reaches
+    mutated code. Never narrows.
+
+    This used to widen to the whole suite for any such change. Most PRs
+    touch a helper or a conftest, so most diff-scoped runs then executed
+    ~50k tests per mutant and hit the 5h45m mutmut timeout -- a run that
+    measured nothing because it could never finish.
 
     The result is sorted and unique, like the committed file: the widened
     file is written over it before mutmut copies ``tests/``, and the stats
@@ -280,6 +351,7 @@ def extend_selection(
     appended entry out of order failed that check and aborted every shard.
     """
     out = set(selection)
+    helpers = []
     for path in changed:
         if (
             not path.startswith("tests/")
@@ -287,10 +359,13 @@ def extend_selection(
             or not exists(path)
         ):
             continue
-        if PurePosixPath(path).name.startswith("test_"):
+        name = PurePosixPath(path).name
+        if name.startswith("test_"):
             out.add(path)
-        else:
-            return list(_FULL_SELECTION)
+        elif name != "conftest.py":
+            helpers.append(path)
+    if helpers and sources is not None:
+        out |= {p for p in helper_importers(helpers, sources) if exists(p)}
     return sorted(out)
 
 
@@ -381,8 +456,14 @@ def main(argv: list[str] | None = None) -> int:
         changed = _git_changed_paths(base)
         path = Path(args.selection)
         old_sel = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln]
+        sources = {
+            p.relative_to(REPO_ROOT).as_posix(): p.read_text(
+                encoding="utf-8", errors="replace"
+            )
+            for p in (REPO_ROOT / "tests").rglob("*.py")
+        }
         new_sel = extend_selection(
-            old_sel, changed, lambda p: (REPO_ROOT / p).is_file()
+            old_sel, changed, lambda p: (REPO_ROOT / p).is_file(), sources
         )
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from gen_mutation_test_selection import selection_problems  # noqa: PLC0415
