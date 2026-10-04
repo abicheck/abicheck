@@ -1,11 +1,10 @@
 # Dead code and single owners
 
-Status: Stage A done (PR #1448); Stage B item 1 and Stage C done; Stage B
-items 2-3 continue in [usecase-path-tracing](usecase-path-tracing.md);
-Stage D's first pass done; Stage E's parameter list decided (31 parameters
-left, each kept or recorded as a known gap; five groups were dropped wiring
-and are now wired, and one removal exposed a notice-wording bug, fixed), its
-documented-API list decided too.
+Status: Stages A, C, E, F and G done; Stage D's first pass done; Stage B
+item 1 done, items 2-3 continue in
+[usecase-path-tracing](usecase-path-tracing.md). Stage H (recomputed after
+#1483) found 0 dead functions and one new dead parameter, removed. What is
+left is listed under [What is left](#what-is-left).
 
 ## Why
 
@@ -350,3 +349,39 @@ Stage G below for the decisions.
 | `evidence_depth._l5_payload_empty` | **Deleted.** It was a wrapper over `resolve_l5_source_graph`, and the callers already use that resolver directly. `layer_payload_empty`'s own L5 case reads `pack.source_graph` directly; its one caller (`cli_buildsource`) has a pack and no snapshot, so the resolver's snapshot fallback does not apply. |
 
 The names are registered in `scripts/retired_surfaces.py`.
+
+## Stage H — recomputed after #1483
+
+The same recording on `main` after #1483: **0** dead functions; 52 named
+only by an ADR or plan (the rollout map above, less what #1483 wired or
+deleted); 33 dead parameters on 21 functions and 13 on 12 documented ones.
+Every one is decided above except one, left by Stage G's move of
+`write_inputs_pack` into the tests:
+
+| Item | Decision |
+|---|---|
+| `inputs_emit.append_source_facts`'s `compress` | **Removed.** It was a second spelling of the `.gz` suffix the function already honoured, so compression is now stated once, by the filename. The test helper `tests/_inputs_pack_writer.py` maps its own `compress` to that name; ADR-038's compression bullet carries a dated amendment (it also still named `compact_inputs_pack`, long gone). |
+
+Recomputed afterwards: 32 parameters on 20 functions, each kept above or
+recorded as a known gap.
+
+## What is left
+
+Nothing on the dead list is undecided. Remaining work is owned elsewhere:
+
+- **Measurement reach** (Stage B items 2-3): Windows/macOS recordings and the
+  wider sources, in [usecase-path-tracing](usecase-path-tracing.md). Until
+  then PE/Mach-O/PDB readers read as unreached on Linux for want of a
+  recording.
+- **Rolling out** (rollout map above): the `SemanticIRIndex` consumer
+  cutover (one-semantic-pipeline Phase 6 "PR 2"), the baseline-set
+  import/export path (ADR-062 / storage-format-v2), and the storage-v2 ELF
+  symbol-occurrence producer.
+- **Known gaps recorded by Stage E**: `check_reader_compatibility`'s reader
+  generations (ADR-062 D2's drift half), `build_mode_from_signals`' raw
+  DWARF inputs (no dump sets `AbiSnapshot.build_mode`),
+  `compute_extraction_contract`'s target and depfile inputs (ADR-050), and
+  `ingest_inputs_pack`'s ADR-053 D3 attribution filter.
+- **Upkeep**: rerun `usecase_paths.py dead` (the weekly `usecase-paths.yml`
+  run publishes it) after each change that deletes callers, and decide any
+  new entry here.
