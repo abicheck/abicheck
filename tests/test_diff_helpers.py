@@ -470,7 +470,7 @@ class TestDepthAwareBareName:
         self,
     ) -> None:
         """The bracket-KIND-aware stack `iter_top_level_chars` shares with
-        `extract.semantic_normalizer_artifacts.has_unresolved_component`
+        `model.castxml_spelling_artifacts.has_unresolved_component`
         also resolves a case no round of this fix set out to close
         directly: a real `>>` shift/comparison operator inside a
         parenthesized non-type template argument (`S<(N >> 1), dep::Tag>`)

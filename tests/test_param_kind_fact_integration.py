@@ -33,9 +33,10 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import Verdict, compare
-from abicheck.diff_symbols import _check_params_change
+from abicheck.diff_symbols import _check_function_signature
 from abicheck.dumper import dump
 from abicheck.model import ParamKind
+from abicheck.model.change_catalog.kinds import ChangeKind
 
 _HEADER = """
 #ifndef LIB_H
@@ -175,15 +176,18 @@ class TestTypedefWrappedParamKindAgreesAcrossProducers:
         # redundancy removal then suppresses the sibling FUNC_PARAMS_CHANGED
         # finding as apparently caused by that typedef change -- masking
         # whether THIS fix (the parameter's own kind) actually works, in
-        # either direction. `diff_symbols._check_params_change` is the real
+        # either direction. `diff_symbols._check_function_signature` is the real
         # detector this fix touches, called directly on the real,
         # toolchain-produced `Function` objects above -- the precise,
         # unmasked oracle for this specific fix.
-        params_changed = _check_params_change(
-            "take_ref", headers_by_name["take_ref"], dwarf_by_name["take_ref"]
-        ) + _check_params_change(
-            "take_rref", headers_by_name["take_rref"], dwarf_by_name["take_rref"]
-        )
+        params_changed = [
+            c
+            for name in ("take_ref", "take_rref")
+            for c in _check_function_signature(
+                name, headers_by_name[name], dwarf_by_name[name]
+            )
+            if c.kind == ChangeKind.FUNC_PARAMS_CHANGED
+        ]
         assert params_changed == [], (
             f"typedef'd reference/rvalue-reference params manufactured: "
             f"{[(c.kind, c.symbol) for c in params_changed]}"

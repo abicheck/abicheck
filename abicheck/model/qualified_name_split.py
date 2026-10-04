@@ -133,7 +133,7 @@ def split_top_level_scopes(qualified: str) -> list[str]:
     existing use: real qualified type/function names, not arbitrary text
     that might contain an unrelated ``<``/``>`` comparison operator pair --
     a caller with that concern needs a bracket-KIND-aware scanner instead,
-    e.g. :func:`~abicheck.extract.semantic_normalizer_artifacts.
+    e.g. :func:`~abicheck.model.castxml_spelling_artifacts.
     has_unresolved_component`'s own).
 
     >>> split_top_level_scopes("ns::Map<std::pair<int, int>>::iterator")
@@ -178,7 +178,7 @@ def iter_top_level_chars(text: str) -> _Iterator[tuple[int, str]]:
     bracket nesting and outside any quoted string/character literal.
 
     Tracks a bracket-KIND-aware STACK, not a flat depth counter, mirroring
-    ``extract.semantic_normalizer_artifacts.has_unresolved_component``'s
+    ``model.castxml_spelling_artifacts.has_unresolved_component``'s
     own hardened design (see that function's docstring for the full
     account, arrived at over seven review rounds): a real ``>>`` shift/
     comparison operator sitting inside a parenthesized non-type template

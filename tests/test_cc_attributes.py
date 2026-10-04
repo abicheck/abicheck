@@ -13,13 +13,14 @@
 # limitations under the License.
 
 """Tests for :mod:`abicheck.model.cc_attributes` (ADR-061 D1, split out of
-``diff_symbols.py`` so ``extract``'s ``tu_merge.py`` can use
+``compare/function_signature.py`` so ``extract``'s ``tu_merge.py`` can use
 ``is_cc_attribute`` without a forbidden ``extract -> compare`` edge).
 """
 
 from __future__ import annotations
 
-from abicheck import diff_symbols, tu_merge
+from abicheck import tu_merge
+from abicheck.compare import function_signature
 from abicheck.model import cc_attributes
 
 
@@ -29,8 +30,8 @@ def test_is_cc_attribute_matches_known_calling_conventions() -> None:
     assert not cc_attributes.is_cc_attribute("noreturn")
 
 
-def test_diff_symbols_reexports_the_identical_function_object() -> None:
-    assert diff_symbols._is_cc_attribute is cc_attributes.is_cc_attribute
+def test_signature_cohort_uses_the_identical_function_object() -> None:
+    assert function_signature.is_cc_attribute is cc_attributes.is_cc_attribute
 
 
 def test_tu_merge_imports_the_same_function_object() -> None:

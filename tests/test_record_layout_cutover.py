@@ -32,6 +32,7 @@ from abicheck.model.semantic_ir_record_layout import (
 )
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 from abicheck.storage.semantic_ir_codec import (
+    IR_DOCUMENT_VERSION,
     semantic_ir_from_document,
     semantic_ir_to_document,
 )
@@ -184,10 +185,12 @@ def test_conflicting_records_under_one_identity_fill_nothing() -> None:
 
 
 class TestCodec:
-    def test_round_trip_writes_version_2_and_layout_only_for_records(self) -> None:
+    def test_round_trip_writes_current_version_and_layout_only_for_records(
+        self,
+    ) -> None:
         snap = _snap([_record("R", 64, 32)], with_ir=True)
         doc = semantic_ir_to_document(snap.canonical_ir, {})
-        assert doc["semantic_ir"]["version"] == 2
+        assert doc["semantic_ir"]["version"] == IR_DOCUMENT_VERSION
         entity = doc["semantic_ir"]["occurrences"][0]["entity"]
         assert entity["size_bits"]["value"] == 64
         ir, _ = semantic_ir_from_document(json.loads(json.dumps(doc)))
@@ -220,7 +223,7 @@ class TestCodec:
         doc = semantic_ir_to_document(
             _snap([_record("R", 64, 32)], with_ir=True).semantic_ir, {}
         )
-        doc["semantic_ir"]["version"] = 3
+        doc["semantic_ir"]["version"] = IR_DOCUMENT_VERSION + 1
         with pytest.raises(ValueError):
             semantic_ir_from_document(doc)
 
@@ -296,13 +299,13 @@ class TestCutoverGate:
 
 
 class TestProjectSnapshotSection:
-    def test_section_is_written_at_v2(self) -> None:
+    def test_section_is_written_at_current_version(self) -> None:
         from abicheck.storage.dto import SECTION_SCHEMA_VERSIONS, semantic_ir_to_dto
 
         dto = semantic_ir_to_dto(
             _snap([_record("R", 64, 32)], with_ir=True).semantic_ir, {}
         )
-        assert dto.section_schema_version == SECTION_SCHEMA_VERSIONS["semantic_ir"] == 2
+        assert dto.section_schema_version == SECTION_SCHEMA_VERSIONS["semantic_ir"] == 3
 
     def test_a_v1_section_migrates_and_reads_layout_as_not_recorded(self) -> None:
         from abicheck.storage.dto import SectionDTO, semantic_ir_from_dto

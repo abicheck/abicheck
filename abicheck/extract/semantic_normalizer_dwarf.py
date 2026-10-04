@@ -101,11 +101,11 @@ each function below actually needs.
 from __future__ import annotations
 
 from ..model.fact import Fact
-from ..model.semantic_ir import canonical_cv_qualification
+from ..model.semantic_ir_variable_payload import DWARF_PRODUCER as _DWARF_PRODUCER
 
 #: Producer name for this slice's DWARF caller (``dwarf_snapshot.
 #: build_snapshot_from_dwarf``, via ``dumper_elf_fallback._dwarf_semantic_ir``).
-DWARF_PRODUCER = "dwarf"
+DWARF_PRODUCER = _DWARF_PRODUCER
 
 
 def function_cv_qualification() -> Fact[tuple[str, ...]]:
@@ -113,27 +113,3 @@ def function_cv_qualification() -> Fact[tuple[str, ...]]:
     own docstring for why it is unconditionally ``Fact.not_collected()``,
     never a confirmed ``Fact.present(())``."""
     return Fact.not_collected()
-
-
-def variable_cv_qualification(is_const: bool) -> Fact[tuple[str, ...]]:
-    """A DWARF-sourced variable's ``cv_qualification``, built from its
-    already-extracted, structurally-sound ``Variable.is_const`` -- see this
-    module's own docstring for why this differs from the castxml/clang text
-    scan (and why it can only ever report ``const``, never ``volatile``).
-
-    Always ``Fact.partial(...)``, never ``Fact.present(...)`` -- including
-    when *is_const* is ``False`` (Codex review, fresh evidence): DWARF's own
-    DIE walk never extracts a volatile-qualifier fact for a variable at all
-    (no backend has an ``is_volatile`` field on ``Variable``), so even a
-    confirmed-non-const result is only ever confirmed for the "const" half
-    of this tuple's vocabulary -- volatile stays genuinely uncollected
-    regardless of what *is_const* says. ``Fact.present(())`` would
-    misrepresent that gap as "confirmed: neither qualifier applies", the
-    identical "PRESENT denotes a complete, confirmed value" mistake this
-    module's own function cv_qualification carve-out already avoids for a
-    different reason.
-    """
-    return Fact.partial(
-        canonical_cv_qualification(("const",) if is_const else ()),
-        "DWARF does not extract a volatile-qualifier fact for a variable",
-    )

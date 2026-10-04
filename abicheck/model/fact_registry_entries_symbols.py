@@ -38,7 +38,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.compare.va_list_diff:diff_va_list_params",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_function_signature:_signature_inputs",
+        ),
         notes=(
             "CastXML never populates this fact at all — its blanket "
             "False is unconditionally correct-as-not-collected, on "
@@ -328,7 +330,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_symbols:_diff_func_deprecated",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_declaration_facts:declaration_inputs",
+        ),
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
@@ -350,7 +354,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_symbols:_diff_var_deprecated",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_declaration_facts:declaration_inputs",
+        ),
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
@@ -372,7 +378,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_param_qualifiers:param_restrict_changes",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_function_signature:_signature_inputs",
+        ),
         notes=(
             "Whether the parameter is a restrict-qualified pointer. Case "
             "(a): a plain bool whose False cannot distinguish "
@@ -392,7 +400,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_symbols:_params_differ",),
+        consumed_by=("abicheck.model.semantic_ir_function_signature:_param_kind",),
         notes=(
             "value/pointer/reference/rvalue-reference. Case (a), like "
             "Variable.access below: ParamKind.VALUE is both this field's "
@@ -415,7 +423,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.diff_symbols_variables:var_access_changes",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_declaration_facts:declaration_inputs",
+        ),
         notes=(
             "public/protected/private for a static class member. Case (a), "
             "and the one registered fact whose value type is neither a "

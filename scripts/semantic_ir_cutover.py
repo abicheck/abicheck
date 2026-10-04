@@ -143,6 +143,86 @@ MIGRATED_COHORTS: tuple[MigratedCohort, ...] = (
         forbidden_attributes=frozenset({"types", "size_bits", "alignment_bits"}),
         adapter="abicheck/model/semantic_ir_legacy_adapter.py",
     ),
+    # ADR-063 6B variable cohort: VAR_TYPE_CHANGED/VAR_BECAME_CONST/
+    # VAR_LOST_CONST read CanonicalEntity.canonical_spelling/cv_qualification
+    # through each side's index; a Variable's own type facts and a snapshot's
+    # variables are off limits here. Pairing stays with the caller's
+    # SymbolIdentityIndex, and an unnamed variable is projected through the
+    # adapter's legacy_variable_occurrences.
+    MigratedCohort(
+        name="variables",
+        modules=("abicheck/compare/variables.py",),
+        forbidden_attributes=frozenset(
+            {"type", "is_const", "variables", "variable_map"}
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
+    # ADR-063 6B function-signature cohort: FUNC_RETURN_CHANGED/
+    # FUNC_PARAMS_CHANGED/FUNC_REF_QUAL_CHANGED/FUNC_VARIADIC_* read the five
+    # CanonicalEntity signature facts (semantic_ir v3, schema v57) through
+    # each side's index; a Function's own signature fields and a snapshot's
+    # functions are off limits here. An unnamed function is projected through
+    # the adapter's legacy_function_signature_occurrences.
+    MigratedCohort(
+        name="function_signature",
+        modules=("abicheck/compare/function_signature.py",),
+        # `ref_qualifier`/`is_variadic` are not listed: they are also the
+        # CanonicalEntity facts' own names, which this name-based scan cannot
+        # tell apart from the Function fields of the same name.
+        forbidden_attributes=frozenset(
+            {"return_type", "params", "functions", "function_map"}
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
+    # ADR-063 6B declaration-fact cohort: deprecation, access and declared
+    # alignment read CanonicalEntity.deprecated/access/declared_alignment_bits.
+    # `deprecated`/`access` are also the IR facts' own names, so only the
+    # declaration-side `*_fact` spellings and `alignment_bits` are scanned.
+    MigratedCohort(
+        name="declaration_facts",
+        modules=("abicheck/compare/declaration_facts.py",),
+        forbidden_attributes=frozenset(
+            {
+                "deprecated_fact",
+                "access_fact",
+                "alignment_bits",
+                "alignment_bits_fact",
+                "variables",
+                "functions",
+            }
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
+    # ADR-063 6B parameter cohort: defaults, renames, pointer levels,
+    # restrict, va_list and override read the per-parameter CanonicalEntity
+    # facts; snapshot-level producer gates stay with the caller.
+    MigratedCohort(
+        name="parameter_facts",
+        modules=("abicheck/compare/parameter_facts.py",),
+        forbidden_attributes=frozenset(
+            {
+                "params",
+                "default",
+                "pointer_depth",
+                "return_pointer_depth",
+                "is_restrict_fact",
+                "is_va_list_fact",
+                "functions",
+                "function_map",
+            }
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
+    # ADR-063 6B function-lifecycle cohort: inline transitions, deletion and
+    # the converting-constructor test read the function occurrence's facts.
+    MigratedCohort(
+        name="function_lifecycle",
+        modules=("abicheck/compare/function_lifecycle.py",),
+        forbidden_attributes=frozenset(
+            {"is_inline", "deleted_from_dwarf", "params", "functions", "function_map"}
+        ),
+        adapter="abicheck/model/semantic_ir_legacy_adapter.py",
+    ),
     # `functions` is deliberately NOT registered here yet. A first attempt
     # (abicheck/compare/functions.py's function_identity_index) built a
     # SemanticIRIndex per comparison but only ever looked up a function's
