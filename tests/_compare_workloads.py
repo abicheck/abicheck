@@ -20,7 +20,9 @@ Shared by the deterministic call-count complexity gate
 exponents (``test_compare_scaling_shapes.py``, ``slow`` lane), so both
 measure the *same* shapes. Each builder returns an ``(old, new)`` pair whose
 entity count grows linearly in ``n`` and in which **every** entity changes,
-so a run cannot shortcut past the detectors under test.
+so a run cannot shortcut past the detectors under test. Declarations carry
+the v46 surface facts a real header-AST dump records (``_stamp_header_facts``);
+``legacy_signature_churn`` keeps the pre-v46 fallback path measured too.
 
 ``tag`` salts every symbol/type name. Several helpers on the compare path
 keep process-wide caches (demangling, canonical spellings); without a salt a
@@ -48,6 +50,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from abicheck.extract.surface_fact_producers import header_ast_surface_facts
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -74,11 +77,30 @@ def _fn(
     )
 
 
-def _pair(old: dict, new: dict) -> tuple[AbiSnapshot, AbiSnapshot]:
-    return (
+def _stamp_header_facts(snap: AbiSnapshot) -> AbiSnapshot:
+    """Give every function/variable the v46 surface facts a real header-AST
+    dump records (``extract.surface_fact_producers.header_ast_surface_facts``,
+    exported through the dynamic table), so a workload exercises the path a
+    fresh dump takes rather than the legacy ``visibility`` fallback."""
+    snap.from_headers = True
+    for decl in (*snap.declarations.functions, *snap.declarations.variables):
+        for name, value in header_ast_surface_facts(
+            exported=True, producer="castxml"
+        ).items():
+            setattr(decl, name, value)
+    return snap
+
+
+def _pair(
+    old: dict, new: dict, *, legacy: bool = False
+) -> tuple[AbiSnapshot, AbiSnapshot]:
+    pair = (
         AbiSnapshot(library="libshape.so", version="1.0", **old),
         AbiSnapshot(library="libshape.so", version="2.0", **new),
     )
+    if legacy:
+        return pair
+    return _stamp_header_facts(pair[0]), _stamp_header_facts(pair[1])
 
 
 def signature_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -101,6 +123,19 @@ def signature_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
         for i in range(n)
     ]
     return _pair({"functions": old}, {"functions": new})
+
+
+def legacy_signature_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    """:func:`signature_churn` without v46 facts: the pre-v46 / hand-built
+    declaration path through the legacy ``visibility`` fallback."""
+    old, new = signature_churn(n, tag)
+    for snap in (old, new):
+        snap.from_headers = False
+        for decl in snap.declarations.functions:
+            decl.declared_in_headers_fact = decl.in_public_contract_fact = (
+                decl.binary_exported_fact
+            ) = None
+    return old, new
 
 
 def rename_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -157,21 +192,29 @@ def variable_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
 
 
 def nested_type_churn(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
+    """A chain ``S_i { int x; S_{i-1} inner; }`` whose innermost record grows
+    by one ``int``: every record embedding it by value grows too, so the
+    change propagates through the whole chain (one size finding per link)."""
     k = max(4, n // 4)
 
     def types(grow: bool) -> list[RecordType]:
         out = []
+        inner_bits = 0
         for i in range(k):
             fields = [TypeField(name="x", type="int", offset_bits=0)]
-            if i > 0:
+            if i == 0:
+                if grow:
+                    fields.append(TypeField(name="z", type="int", offset_bits=32))
+                size = 64 if grow else 32
+            else:
                 fields.append(
                     TypeField(name="inner", type=f"{tag}S{i - 1}", offset_bits=32)
                 )
-            if grow and i == 0:
-                fields.append(TypeField(name="z", type="int", offset_bits=96))
+                size = 32 + inner_bits
+            inner_bits = size
             out.append(
                 RecordType(
-                    name=f"{tag}S{i}", kind="struct", size_bits=64, fields=fields
+                    name=f"{tag}S{i}", kind="struct", size_bits=size, fields=fields
                 )
             )
         return out
@@ -244,6 +287,7 @@ def add_remove(n: int, tag: str = "") -> tuple[AbiSnapshot, AbiSnapshot]:
 
 WORKLOADS: dict[str, Workload] = {
     "signature_churn": signature_churn,
+    "legacy_signature_churn": legacy_signature_churn,
     "rename_churn": rename_churn,
     "enum_churn": enum_churn,
     "variable_churn": variable_churn,
