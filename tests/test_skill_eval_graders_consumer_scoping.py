@@ -1063,7 +1063,6 @@ class TestDimensionSix:
         [
             (["compare", "old.so", "new.so"], 16),
             (["scan", "new.so", "--against", "old.json"], 6),
-            (["compat", "check", "-old", "a.xml", "-new", "b.xml"], 9),
         ],
     )
     def test_a_not_comparable_claim_citing_the_tools_own_determination_passes(

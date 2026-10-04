@@ -383,6 +383,8 @@ on the report builders, and the per-finding `library` field with the kind
 rollup's per-library counts. `CLI_CONTRACT_ALLOWLIST` is empty as a result.
 
 
+## What is left
+
 Nothing on the dead list is undecided. Remaining work is owned elsewhere:
 
 - **Measurement reach** (Stage B items 2-3): Windows/macOS recordings and the
