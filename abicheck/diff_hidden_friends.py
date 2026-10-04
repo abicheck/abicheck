@@ -30,7 +30,6 @@ from .compare.function_signature import (
     FunctionSignatureIndex,
     function_signature_index,
     hidden_friend_changes,
-    signature_of,
 )
 from .diff_helpers import make_change
 from .model import Function
@@ -82,7 +81,7 @@ def diff_inline_hidden_friends(
     old_index, new_index = signatures
 
     def facts(index: FunctionSignatureIndex, fn: Function) -> FunctionSignature:
-        return signature_of(index.entity_for(fn))
+        return index.signature_for(fn)
 
     changes: list[Change] = []
     for mangled, f_old in old_all.items():

@@ -228,4 +228,5 @@ def variable_type_index_for(
         snap.canonical_ir,
         variables,
         lambda var: variable_canonical_entity(var, producer),
+        projection_key=producer,
     )

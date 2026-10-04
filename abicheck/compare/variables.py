@@ -56,25 +56,24 @@ stays with the caller's ``SymbolIdentityIndex``; the displayed ``old``/
 
 from __future__ import annotations
 
-import dataclasses
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING
 
 from ..diff_helpers import bool_transition, make_change
 from ..model.change_catalog.kinds import ChangeKind
-from ..model.fact import Fact
-from ..model.identity import EntityKind
+from ..model.identity import EntityId, EntityKind
 from ..model.semantic_ir import CanonicalEntity, SemanticIR
 from ..model.semantic_ir_function_signature import overlay_established_facts
 from ..model.semantic_ir_index import SemanticIRIndex
 from ..model.semantic_ir_legacy_adapter import (
-    legacy_variable_occurrences,
     semantic_ir_covers_kind,
 )
 from ..name_classification import _find_matching_close, func_signature_cv_only_differ
 from .declined_comparisons import record_declined
+from .detection_memo import memoized
 
 if TYPE_CHECKING:
     from ..checker_types import Change
@@ -105,47 +104,69 @@ class VariableTypeIndex:
         return self.index.entity(var.entity_id)
 
 
+#: One shared empty IR, so a side without variable occurrences memoizes
+#: under one key rather than a fresh object per index.
+_EMPTY_IR = SemanticIR()
+
+
+def _named_variable_entities(ir: SemanticIR) -> dict[EntityId, CanonicalEntity]:
+    return dict(SemanticIRIndex(ir).entities_of_kind(EntityKind.VARIABLE))
+
+
+def _project_variable(
+    var: Variable,
+    named: Mapping[EntityId, CanonicalEntity],
+    project: Callable[[Variable], CanonicalEntity],
+) -> CanonicalEntity:
+    """*var*'s entity: its named occurrence with the declaration re-projected
+    over it (a named occurrence's facts are a boundary copy of its
+    declaration's, so an edit of a loaded snapshot's ``Variable`` would
+    otherwise be masked), or the projection itself when the IR cannot name
+    it."""
+    fresh = project(var)
+    entity = named.get(var.entity_id) if var.entity_id is not None else None
+    if entity is None:
+        return fresh
+    return overlay_established_facts(entity, dict(fresh.fact_items()))
+
+
 def variable_type_index(
     semantic_ir: SemanticIR | None,
     variables: Iterable[Variable],
     project: Callable[[Variable], CanonicalEntity],
+    *,
+    projection_key: Hashable = None,
 ) -> VariableTypeIndex:
     """One side's index -- see the module docstring for the rule.
 
     *variables* are the objects the caller will pair (the adapter half is
     keyed by object); *project* is the normalizer's payload formula
     (``extract.semantic_normalizer.variable_canonical_entity`` bound to the
-    side's producer), used only for variables the IR cannot name.
+    side's producer). Inside a ``detection_memo_scope`` each variable's
+    entity is projected once per (IR, *projection_key*); *projection_key*
+    must identify *project* (e.g. its producer), and ``None`` disables the
+    memo.
     """
-    variables = list(variables)
     covered = semantic_ir is not None and semantic_ir_covers_kind(
         semantic_ir, EntityKind.VARIABLE
     )
-    index = SemanticIRIndex(
-        semantic_ir if covered and semantic_ir is not None else SemanticIR()
+    ir_used = semantic_ir if covered and semantic_ir is not None else _EMPTY_IR
+    named = memoized(
+        "variable_type_named", ir_used, None, partial(_named_variable_entities, ir_used)
     )
-    named = index.entities_of_kind(EntityKind.VARIABLE) if covered else {}
-    unnamed = [v for v in variables if v.entity_id is None or v.entity_id not in named]
-    ir, order = legacy_variable_occurrences(unnamed, project)
-    projected = {
-        id(v): ir.occurrences[occ] for v, occ in zip(unnamed, order, strict=True)
-    }
-    # Same staleness rule as ``function_signature_index``: a named
-    # occurrence's facts are a boundary copy of its declaration's, so an
-    # edit of a loaded snapshot's ``Variable`` is re-projected over it.
+    seen: dict[int, tuple[Variable, CanonicalEntity]] = (
+        {}
+        if projection_key is None
+        else memoized("variable_type_entities", ir_used, projection_key, dict)
+    )
+    projected: dict[int, CanonicalEntity] = {}
     for v in variables:
-        entity = named.get(v.entity_id) if v.entity_id is not None else None
-        if entity is not None:
-            fresh = project(v)
-            projected[id(v)] = overlay_established_facts(
-                entity,
-                {
-                    f.name: getattr(fresh, f.name)
-                    for f in dataclasses.fields(fresh)
-                    if isinstance(getattr(fresh, f.name), Fact)
-                },
-            )
-    return VariableTypeIndex(index=index, projected=projected)
+        hit = seen.get(id(v))
+        if hit is None or hit[0] is not v:
+            hit = (v, _project_variable(v, named, project))
+            seen[id(v)] = hit
+        projected[id(v)] = hit[1]
+    return VariableTypeIndex(index=SemanticIRIndex(ir_used), projected=projected)
 
 
 def variable_type_facts(

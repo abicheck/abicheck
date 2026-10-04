@@ -347,3 +347,63 @@ def test_editing_a_loaded_declaration_is_not_masked_by_its_ir_copy(edit) -> None
         nv.type = "long"
         expected = ChangeKind.VAR_TYPE_CHANGED
     assert expected in {c.kind for c in _compare(old, new).changes}
+
+
+_OPT_BOOL = st.sampled_from([None, False, True])
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    ret=st.sampled_from(["int", "void", "?", "const char *", ""]),
+    params=st.lists(
+        st.tuples(
+            st.sampled_from(["", "a"]),
+            st.sampled_from(["int", "int *", "?", ""]),
+            st.sampled_from([None, "", "0"]),
+            _OPT_BOOL,
+            _OPT_BOOL,
+        ),
+        max_size=3,
+    ),
+    flags=st.tuples(_OPT_BOOL, _OPT_BOOL, _OPT_BOOL, _OPT_BOOL),
+    vtable=st.sampled_from([None, 0, 3]),
+    owner=st.sampled_from([None, "", "Point"]),
+    attrs=st.sampled_from([None, [], ["pre"]]),
+)
+def test_the_trusted_projection_always_passes_validation(
+    ret, params, flags, vtable, owner, attrs
+) -> None:
+    """The adapter builds its entity with ``_trusted=True`` (no per-function
+    validation). The oracle is ``CanonicalEntity``'s own validation, run on
+    the same facts: every projection must pass it."""
+    from abicheck.model.semantic_ir_legacy_adapter import (
+        legacy_function_signature_entity,
+    )
+
+    explicit, override, variadic, friend = flags
+    fn = Function(
+        name="f",
+        mangled="_Z1fv",
+        return_type=ret,
+        params=[
+            Param(
+                name=n,
+                type=t,
+                default=d,
+                pointer_depth=t.count("*"),
+                is_restrict_fact=Fact.not_collected() if r is None else Fact.present(r),
+                is_va_list_fact=Fact.not_collected() if v is None else Fact.present(v),
+            )
+            for n, t, d, r, v in params
+        ],
+        is_explicit=explicit,
+        is_override=override,
+        is_variadic=variadic,
+        is_hidden_friend=friend,
+        hidden_friend_owner=owner,
+        vtable_index=vtable,
+        contract_attributes=attrs,
+    )
+    trusted = legacy_function_signature_entity(fn)
+    validated = CanonicalEntity(**dict(trusted.fact_items()), producer=trusted.producer)
+    assert validated == trusted

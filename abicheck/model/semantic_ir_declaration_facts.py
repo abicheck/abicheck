@@ -44,6 +44,8 @@ from .fact import Fact
 __all__ = [
     "DECLARATION_FIELDS",
     "declaration_facts",
+    "declaration_facts_from_inputs",
+    "declaration_inputs",
 ]
 
 #: The ``CanonicalEntity`` fields this cohort owns.
@@ -54,8 +56,10 @@ def _access_value(value: Any) -> str:
     return str(getattr(value, "value", value))
 
 
-def declaration_facts(decl: Function | Variable) -> dict[str, Any]:
-    """The :data:`DECLARATION_FIELDS` facts for *decl*."""
+def declaration_inputs(decl: Function | Variable) -> tuple[Any, ...]:
+    """*decl*'s declaration facts as a hashable tuple, in
+    :data:`DECLARATION_FIELDS` order (:func:`declaration_facts_from_inputs`
+    sees only this, which is what lets a caller cache on it)."""
 
     def _respell(fact: Fact[Any] | None, spell: Any) -> Fact[Any]:
         """*fact* with its value re-spelled by *spell*, status and diagnostics
@@ -75,10 +79,15 @@ def declaration_facts(decl: Function | Variable) -> dict[str, Any]:
     else:
         access = _respell(decl.access_fact, _access_value)
         alignment = _respell(decl.alignment_bits_fact, lambda v: v)
-    return {
-        "deprecated": _respell(
-            decl.deprecated_fact, lambda v: () if v is None else (v,)
-        ),
-        "access": access,
-        "declared_alignment_bits": alignment,
-    }
+    deprecated = _respell(decl.deprecated_fact, lambda v: () if v is None else (v,))
+    return (deprecated, access, alignment)
+
+
+def declaration_facts_from_inputs(inputs: tuple[Any, ...]) -> dict[str, Any]:
+    """The :data:`DECLARATION_FIELDS` facts for :func:`declaration_inputs`."""
+    return dict(zip(DECLARATION_FIELDS, inputs, strict=True))
+
+
+def declaration_facts(decl: Function | Variable) -> dict[str, Any]:
+    """The :data:`DECLARATION_FIELDS` facts for *decl*."""
+    return declaration_facts_from_inputs(declaration_inputs(decl))

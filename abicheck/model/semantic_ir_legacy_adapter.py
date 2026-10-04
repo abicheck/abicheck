@@ -114,7 +114,9 @@ from .identity import (
 )
 from .occurrence import OccurrenceId
 from .semantic_ir import CanonicalEntity, SemanticIR
-from .semantic_ir_function_signature import function_signature_facts
+from .semantic_ir_function_signature import (
+    function_signature_entity,
+)
 from .semantic_ir_record_layout import record_layout_facts, sync_snapshot_record_layout
 
 if TYPE_CHECKING:
@@ -482,10 +484,7 @@ def legacy_function_signature_occurrences(
 def legacy_function_signature_entity(fn: Function) -> CanonicalEntity:
     """One function's :func:`legacy_function_signature_occurrences` payload,
     without the ``SemanticIR`` around it."""
-    return CanonicalEntity(
-        canonical_spelling=Fact.not_collected(),
-        **function_signature_facts(fn),
-    )
+    return function_signature_entity(fn)
 
 
 def legacy_function_ir(functions: Mapping[str, Function]) -> SemanticIR:

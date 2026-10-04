@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import InitVar, dataclass, field, fields
 from typing import Any
 
 from .declaration_store import Declarations
@@ -230,8 +230,17 @@ class CanonicalEntity:
     access: Fact[str] = _NOT_COLLECTED
     declared_alignment_bits: Fact[int] = _NOT_COLLECTED
     producer: str = ""
+    #: Skip :meth:`__post_init__`'s shape validation. Only for an entity
+    #: built by ``semantic_ir_function_signature.function_signature_entity``
+    #: from a parsed declaration: the comparison projects every paired
+    #: function, and that formula's output is pinned valid by
+    #: ``tests/test_function_signature_cutover.py`` rather than rechecked per
+    #: function. Every decoded or producer-built entity is validated.
+    _trusted: InitVar[bool] = False
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, _trusted: bool = False) -> None:
+        if _trusted:
+            return
         # A usable fact must actually carry its declared value. These fields
         # are `Fact[str]`/`Fact[tuple[str, ...]]`, and their own docstrings
         # name the confirmed-absence spelling for each: `Fact.present(())`

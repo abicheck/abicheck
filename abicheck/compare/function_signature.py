@@ -73,6 +73,7 @@ from ..name_classification import (
 )
 from .declined_comparisons import record_declined
 from .detection_memo import memoized
+from .parameter_facts import ParameterView, parameter_view
 
 if TYPE_CHECKING:
     from ..checker_types import Change
@@ -150,12 +151,39 @@ class FunctionSignatureIndex:
 
     index: SemanticIRIndex
     projected: dict[int, CanonicalEntity] = field(default_factory=dict)
+    #: ``id(entity) -> (entity, signature, parameter view)``, shared by every
+    #: index built in one ``detection_memo_scope`` so ~20 detectors read each
+    #: function's views once; the entity is held so its ``id`` stays unique.
+    views: dict[int, list[Any]] = field(default_factory=dict)
 
     def entity_for(self, fn: Function) -> CanonicalEntity | None:
         entity = self.projected.get(id(fn))
         if entity is not None or fn.entity_id is None:
             return entity
         return self.index.entity(fn.entity_id)
+
+    def _views_for(self, fn: Function) -> list[Any]:
+        entity = self.entity_for(fn)
+        entry = self.views.get(id(entity))
+        if entry is None or entry[0] is not entity:
+            entry = self.views[id(entity)] = [entity, None, None]
+        return entry
+
+    def signature_for(self, fn: Function) -> FunctionSignature:
+        """``signature_of(self.entity_for(fn))``, built once per entity."""
+        entry = self._views_for(fn)
+        if entry[1] is None:
+            entry[1] = signature_of(entry[0])
+        sig: FunctionSignature = entry[1]
+        return sig
+
+    def parameters_for(self, fn: Function) -> ParameterView:
+        """``parameter_view(self.entity_for(fn))``, built once per entity."""
+        entry = self._views_for(fn)
+        if entry[2] is None:
+            entry[2] = parameter_view(entry[0])
+        view: ParameterView = entry[2]
+        return view
 
 
 #: One shared empty IR, so a side without function occurrences memoizes
@@ -228,7 +256,12 @@ def function_signature_index(
         for f, entity in zip(missing, _project(missing, named), strict=True):
             seen[id(f)] = (f, entity)
     projected = {id(f): seen[id(f)][1] for f in functions}
-    return FunctionSignatureIndex(index=SemanticIRIndex(ir_used), projected=projected)
+    views: dict[int, list[Any]] = memoized(
+        "function_signature_views", ir_used, None, dict
+    )
+    return FunctionSignatureIndex(
+        index=SemanticIRIndex(ir_used), projected=projected, views=views
+    )
 
 
 def _decline(mangled: str, what: str, both: bool) -> None:
@@ -703,8 +736,8 @@ def hidden_friend_changes(
 def function_signature_changes(
     mangled: str,
     name: str,
-    old_entity: CanonicalEntity | None,
-    new_entity: CanonicalEntity | None,
+    old_entity: CanonicalEntity | FunctionSignature | None,
+    new_entity: CanonicalEntity | FunctionSignature | None,
     *,
     entity_id: EntityId | None,
     params_unconfirmed: bool = False,
@@ -714,7 +747,16 @@ def function_signature_changes(
     order the findings were historically emitted (return, params,
     ref-qualifier, linkage, noexcept, virtual, hidden friend, explicit,
     variadic, contract attributes, exception spec, vtable slot)."""
-    old, new = signature_of(old_entity), signature_of(new_entity)
+    old = (
+        old_entity
+        if isinstance(old_entity, FunctionSignature)
+        else signature_of(old_entity)
+    )
+    new = (
+        new_entity
+        if isinstance(new_entity, FunctionSignature)
+        else signature_of(new_entity)
+    )
     changes = _return_changes(mangled, name, old, new, entity_id, is_llp64)
     changes += _params_changes(
         mangled, name, old, new, entity_id, params_unconfirmed, is_llp64

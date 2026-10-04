@@ -324,7 +324,7 @@ def _entity_from_dict(
     """Rebuild a ``CanonicalEntity``, requiring every fact field the writer
     emits — see :data:`_FACT_FIELDS` and :data:`_LAYOUT_FACTS`."""
     data = _mapping(raw, "semantic_ir entity")
-    facts: dict[str, Fact[Any]] = {}
+    facts: dict[str, Any] = {}
     for name in _FACT_FIELDS:
         if name in _LAYOUT_FACTS and not (is_record and version >= 2):
             if name in data:

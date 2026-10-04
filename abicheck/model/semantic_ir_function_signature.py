@@ -42,12 +42,16 @@ from .availability import FactStatus
 from .declarations import Function
 from .fact import Fact
 from .semantic_ir import CanonicalEntity
-from .semantic_ir_declaration_facts import declaration_facts
+from .semantic_ir_declaration_facts import (
+    declaration_facts_from_inputs,
+    declaration_inputs,
+)
 
 __all__ = [
     "LEGACY_SIGNATURE_DIAGNOSTIC",
     "overlay_established_facts",
     "SIGNATURE_FIELDS",
+    "function_signature_entity",
     "function_signature_facts",
     "with_declaration_signature",
 ]
@@ -123,57 +127,155 @@ def _optional(value: Any) -> Fact[Any]:
     return Fact.not_collected() if value is None else _present(value)
 
 
-def function_signature_facts(fn: Function) -> dict[str, Any]:
-    """Every :data:`SIGNATURE_FIELDS` fact for *fn*, keyed by field name."""
+def _signature_inputs(fn: Function) -> tuple[Any, ...]:
+    """Every value of *fn* the signature facts are built from, already
+    reduced to plain hashable data, in :func:`_facts_from_inputs`' order.
+
+    The split is what makes caching exact: :func:`_facts_from_inputs` sees
+    nothing but this tuple, so two functions with equal inputs have equal
+    facts by construction. Each position has one value type (never ``bool``
+    in one function and ``int`` in another), so tuple equality cannot
+    conflate ``True`` with ``1``."""
 
     def _flag(fact: Any) -> str:
         """A per-parameter ``Fact[bool]`` as ``"true"``/``"false"``, or ``""``
-        when its producer did not establish it (``compare_facts``' non-available
-        sides)."""
+        when its producer did not establish it (``compare_facts``'
+        non-available sides)."""
         if fact is None or fact.status not in (FactStatus.PRESENT, FactStatus.PARTIAL):
             return ""
         return "true" if fact.value else "false"
 
+    params = fn.params
     attrs = fn.contract_attributes
+    return (
+        declaration_inputs(fn),
+        bool(fn.is_extern_c),
+        bool(fn.is_noexcept),
+        bool(fn.is_virtual),
+        fn.is_explicit,
+        fn.is_hidden_friend,
+        fn.hidden_friend_owner,
+        None if attrs is None else tuple(attrs),
+        fn.exception_spec,
+        fn.vtable_index,
+        fn.is_override,
+        bool(fn.is_inline),
+        bool(fn.is_deleted),
+        bool(fn.deleted_from_dwarf),
+        tuple(p.name or "" for p in params),
+        tuple(p.default for p in params),
+        tuple(int(p.pointer_depth) for p in params),
+        tuple(_flag(p.is_restrict_fact) for p in params),
+        tuple(_flag(p.is_va_list_fact) for p in params),
+        int(fn.return_pointer_depth),
+        fn.return_type,
+        tuple(p.type for p in params),
+        tuple(_param_kind(p) for p in params),
+        fn.ref_qualifier or "",
+        None if fn.is_variadic is None else bool(fn.is_variadic),
+    )
+
+
+def _facts_from_inputs(inputs: tuple[Any, ...]) -> dict[str, Any]:
+    (
+        decl,
+        extern_c,
+        noexcept,
+        virtual,
+        explicit,
+        hidden_friend,
+        friend_owner,
+        attrs,
+        exception_spec,
+        vtable_index,
+        override,
+        inline,
+        deleted,
+        deleted_from_dwarf,
+        names,
+        defaults,
+        depths,
+        restrict,
+        va_list,
+        return_depth,
+        return_type,
+        types,
+        kinds,
+        ref_qualifier,
+        variadic,
+    ) = inputs
     return {
         # Declaration facts every function also carries (deprecation,
-        # access) -- one fill writes both groups.
-        **declaration_facts(fn),
-        "is_extern_c": _present(bool(fn.is_extern_c)),
-        "is_noexcept": _present(bool(fn.is_noexcept)),
-        "is_virtual": _present(bool(fn.is_virtual)),
-        "is_explicit": _optional(fn.is_explicit),
-        "is_hidden_friend": _optional(fn.is_hidden_friend),
-        "hidden_friend_owner": _optional(fn.hidden_friend_owner),
-        "contract_attributes": _optional(None if attrs is None else tuple(attrs)),
-        "exception_spec": _optional(fn.exception_spec),
-        "vtable_index": _optional(fn.vtable_index),
-        "is_override": _optional(fn.is_override),
-        "is_inline": _present(bool(fn.is_inline)),
-        "is_deleted": _present(bool(fn.is_deleted)),
-        "deleted_from_dwarf": _present(bool(fn.deleted_from_dwarf)),
-        "parameter_names": _present(tuple(p.name or "" for p in fn.params)),
-        "parameter_defaults": _present(tuple(p.default for p in fn.params)),
-        "parameter_pointer_depths": _present(
-            tuple(int(p.pointer_depth) for p in fn.params)
-        ),
-        "parameter_restrict": _present(
-            tuple(_flag(p.is_restrict_fact) for p in fn.params)
-        ),
-        "parameter_va_list": _present(
-            tuple(_flag(p.is_va_list_fact) for p in fn.params)
-        ),
-        "return_pointer_depth": _present(int(fn.return_pointer_depth)),
-        "return_type_spelling": _present(fn.return_type),
-        "parameter_type_spellings": _present(tuple(p.type for p in fn.params)),
-        "parameter_kinds": _present(tuple(_param_kind(p) for p in fn.params)),
-        "ref_qualifier": _present(fn.ref_qualifier or ""),
-        "is_variadic": (
-            Fact.not_collected()
-            if fn.is_variadic is None
-            else _present(bool(fn.is_variadic))
-        ),
+        # access).
+        **declaration_facts_from_inputs(decl),
+        "is_extern_c": _present(extern_c),
+        "is_noexcept": _present(noexcept),
+        "is_virtual": _present(virtual),
+        "is_explicit": _optional(explicit),
+        "is_hidden_friend": _optional(hidden_friend),
+        "hidden_friend_owner": _optional(friend_owner),
+        "contract_attributes": _optional(attrs),
+        "exception_spec": _optional(exception_spec),
+        "vtable_index": _optional(vtable_index),
+        "is_override": _optional(override),
+        "is_inline": _present(inline),
+        "is_deleted": _present(deleted),
+        "deleted_from_dwarf": _present(deleted_from_dwarf),
+        "parameter_names": _present(names),
+        "parameter_defaults": _present(defaults),
+        "parameter_pointer_depths": _present(depths),
+        "parameter_restrict": _present(restrict),
+        "parameter_va_list": _present(va_list),
+        "return_pointer_depth": _present(return_depth),
+        "return_type_spelling": _present(return_type),
+        "parameter_type_spellings": _present(types),
+        "parameter_kinds": _present(kinds),
+        "ref_qualifier": _present(ref_qualifier),
+        "is_variadic": _optional(variadic),
     }
+
+
+@functools.lru_cache(maxsize=16384)
+def _cached_facts(inputs: tuple[Any, ...]) -> tuple[tuple[str, Any], ...]:
+    return tuple(_facts_from_inputs(inputs).items())
+
+
+@functools.lru_cache(maxsize=16384)
+def _cached_entity(inputs: tuple[Any, ...]) -> CanonicalEntity:
+    return CanonicalEntity(
+        canonical_spelling=Fact.not_collected(),
+        **dict(_cached_facts(inputs)),
+        _trusted=True,
+    )
+
+
+def function_signature_entity(fn: Function) -> CanonicalEntity:
+    """*fn*'s projected signature entity (the legacy adapter's payload),
+    shared across functions with equal :func:`_signature_inputs`: an entity
+    is frozen and carries no identity of its own."""
+    inputs = _signature_inputs(fn)
+    try:
+        return _cached_entity(inputs)
+    except TypeError:
+        return CanonicalEntity(
+            canonical_spelling=Fact.not_collected(),
+            **_facts_from_inputs(inputs),
+            _trusted=True,
+        )
+
+
+def function_signature_facts(fn: Function) -> dict[str, Any]:
+    """Every :data:`SIGNATURE_FIELDS` fact for *fn*, keyed by field name.
+
+    Built once per distinct :func:`_signature_inputs` tuple: a library's
+    functions repeat signatures heavily, and ``Fact`` is frozen, so equal
+    inputs share instances. An unhashable input (a producer that left a
+    list where a value belongs) is built uncached."""
+    inputs = _signature_inputs(fn)
+    try:
+        return dict(_cached_facts(inputs))
+    except TypeError:
+        return _facts_from_inputs(inputs)
 
 
 def with_declaration_signature(

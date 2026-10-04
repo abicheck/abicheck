@@ -39,7 +39,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
         consumed_by=(
-            "abicheck.model.semantic_ir_function_signature:function_signature_facts",
+            "abicheck.model.semantic_ir_function_signature:_signature_inputs",
         ),
         notes=(
             "CastXML never populates this fact at all — its blanket "
@@ -330,7 +330,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.model.semantic_ir_declaration_facts:declaration_facts",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_declaration_facts:declaration_inputs",
+        ),
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
@@ -352,7 +354,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.model.semantic_ir_declaration_facts:declaration_facts",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_declaration_facts:declaration_inputs",
+        ),
         notes=(
             "[[deprecated]] message string. Case (a): None is a real "
             'value here ("not deprecated"), so availability is carried '
@@ -375,7 +379,7 @@ SYMBOL_FACTS: list[FactDefinition] = [
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
         consumed_by=(
-            "abicheck.model.semantic_ir_function_signature:function_signature_facts",
+            "abicheck.model.semantic_ir_function_signature:_signature_inputs",
         ),
         notes=(
             "Whether the parameter is a restrict-qualified pointer. Case "
@@ -419,7 +423,9 @@ SYMBOL_FACTS: list[FactDefinition] = [
         suppressible=False,
         reportable=True,
         lifecycle=FactLifecycle.CONSUMED,
-        consumed_by=("abicheck.model.semantic_ir_declaration_facts:declaration_facts",),
+        consumed_by=(
+            "abicheck.model.semantic_ir_declaration_facts:declaration_inputs",
+        ),
         notes=(
             "public/protected/private for a static class member. Case (a), "
             "and the one registered fact whose value type is neither a "

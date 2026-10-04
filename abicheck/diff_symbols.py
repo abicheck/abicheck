@@ -48,7 +48,6 @@ from .compare.parameter_facts import (
     override_changes,
     parameter_default_changes,
     parameter_rename_changes,
-    parameter_view,
     pointer_level_changes,
     restrict_changes,
     va_list_changes,
@@ -454,8 +453,8 @@ def _check_function_signature(
     changes = function_signature_changes(
         mangled,
         f_old.name,
-        signatures[0].entity_for(f_old),
-        signatures[1].entity_for(f_new),
+        signatures[0].signature_for(f_old),
+        signatures[1].signature_for(f_new),
         entity_id=f_old.entity_id or f_new.entity_id,
         params_unconfirmed=params_unconfirmed,
         is_llp64=is_llp64,
@@ -964,8 +963,8 @@ def _parameter_view_pairs(
             mangled,
             f_old,
             f_new,
-            parameter_view(old_index.entity_for(f_old)),
-            parameter_view(new_index.entity_for(f_new)),
+            old_index.parameters_for(f_old),
+            new_index.parameters_for(f_new),
         )
 
 
@@ -1358,8 +1357,8 @@ def _diff_func_override_specifier(old: AbiSnapshot, new: AbiSnapshot) -> list[Ch
         changes += override_changes(
             mangled,
             f_old.name,
-            parameter_view(old_index.entity_for(f_old)),
-            parameter_view(new_index.entity_for(f_new)),
+            old_index.parameters_for(f_old),
+            new_index.parameters_for(f_new),
             entity_id=f_old.entity_id or f_new.entity_id,
         )
     return changes
