@@ -32,6 +32,19 @@ work per item, when it sits inside a loop or comprehension:
 * ``subprocess-in-loop`` -- ``subprocess.run``/``Popen``/``check_output``/
   ``check_call``/``call`` per iteration: sequential process spawns (batch
   them, as the demangler does).
+* ``sort-in-loop`` -- ``sorted(x)`` / ``x.sort()`` inside a ``for``/``while``
+  body, where ``x`` is a plain name the loop never rebinds, mutates or
+  iterates as its target: the same loop-invariant collection re-sorted every
+  iteration. Sort it once before the loop. (Sorting a small per-item value
+  for deterministic output -- ``", ".join(sorted(item.names))`` -- is not
+  this shape and is not flagged.)
+* ``str-concat-in-loop`` -- ``s += ...`` on a name the function bound to a
+  string: each step copies the whole string so far. Collect parts and
+  ``"".join`` them.
+
+``parse-or-copy-in-loop`` also covers ``copy.copy`` and
+``dataclasses.replace`` -- but only of a loop-invariant name (the same object
+copied every iteration), since copying each item once is linear.
 
 A comprehension counts as a loop for everything evaluated per element; its
 first iterable is evaluated once and does not.
@@ -144,6 +157,40 @@ def _list_names(func: ast.AST) -> set[str]:
     return listy - other
 
 
+def _is_str_value(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ) or isinstance(node, ast.JoinedStr)
+
+
+def _str_names(func: ast.AST) -> set[str]:
+    """Names bound in *func* to a string literal/f-string and to nothing
+    else -- the same conservative rule as :func:`_list_names`."""
+    strs: set[str] = set()
+    other: set[str] = set()
+    for node in ast.walk(func):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    (strs if _is_str_value(node.value) else other).add(t.id)
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+        ):
+            (strs if _is_str_value(node.value) else other).add(node.target.id)
+        elif isinstance(node, (ast.For, ast.comprehension)):
+            other.update(n.id for n in ast.walk(node.target) if isinstance(n, ast.Name))
+    if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        a = func.args
+        other.update(
+            arg.arg
+            for arg in [*a.posonlyargs, *a.args, *a.kwonlyargs, a.vararg, a.kwarg]
+            if arg is not None
+        )
+    return strs - other
+
+
 def _grows_itself(node: ast.Assign) -> bool:
     if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
         return False
@@ -175,6 +222,53 @@ def _grows_itself(node: ast.Assign) -> bool:
     )
 
 
+_MUTATORS = frozenset(
+    {
+        "append",
+        "add",
+        "extend",
+        "update",
+        "insert",
+        "remove",
+        "discard",
+        "pop",
+        "clear",
+        "setdefault",
+    }
+)
+
+
+def _varying_in(loop: ast.For | ast.AsyncFor | ast.While) -> set[str]:
+    """Names whose value can differ between iterations of *loop*: assigned,
+    augmented, used as a loop/comprehension target, or mutated through a
+    method in its body (plus the loop's own target)."""
+    out: set[str] = set()
+    if not isinstance(loop, ast.While):
+        out.update(n.id for n in ast.walk(loop.target) if isinstance(n, ast.Name))
+    for stmt in loop.body:
+        for node in ast.walk(stmt):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                for t in targets:
+                    out.update(n.id for n in ast.walk(t) if isinstance(n, ast.Name))
+            elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+                out.update(
+                    n.id for n in ast.walk(node.target) if isinstance(n, ast.Name)
+                )
+            elif isinstance(node, ast.NamedExpr):
+                out.add(node.target.id)
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in _MUTATORS
+                and isinstance(node.func.value, ast.Name)
+            ):
+                out.add(node.func.value.id)
+    return out
+
+
 def _rebound_in(body: list[ast.stmt]) -> set[str]:
     """Names a statement in *body* binds other than by growing itself."""
     out: set[str] = set()
@@ -192,17 +286,25 @@ class _Visitor(ast.NodeVisitor):
         self.path = path
         self.scope: list[str] = []
         self.list_names: list[set[str]] = [set()]
+        self.str_names: list[set[str]] = [set()]
         self.loop_depth = 0
         # Per enclosing loop: names some *other* statement in the loop body
         # rebinds. ``key = key + (x,)`` after ``key = (...)`` in the same
         # body builds a fresh value each iteration; it accumulates nothing.
         self.rebound: list[set[str]] = []
+        # Per enclosing *statement* loop: names that vary between iterations.
+        # ``None`` marks a comprehension, where the sort rule does not apply.
+        self.varying: list[set[str] | None] = []
+        # Inside a ``raise``: an error path runs at most once, so nothing in
+        # it can repeat per iteration (``sorted(ALLOWED_KEYS)`` in a message).
+        self.raise_depth = 0
         self.sites: list[Site] = []
 
     # -- scopes ---------------------------------------------------------
     def _enter_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         self.scope.append(node.name)
         self.list_names.append(_list_names(node))
+        self.str_names.append(_str_names(node))
         saved, self.loop_depth = (
             self.loop_depth,
             0,
@@ -210,6 +312,7 @@ class _Visitor(ast.NodeVisitor):
         self.generic_visit(node)
         self.loop_depth = saved
         self.list_names.pop()
+        self.str_names.pop()
         self.scope.pop()
 
     visit_FunctionDef = _enter_function
@@ -229,8 +332,10 @@ class _Visitor(ast.NodeVisitor):
             self.visit(node.target)
         self.loop_depth += 1
         self.rebound.append(_rebound_in(node.body))
+        self.varying.append(_varying_in(node))
         for stmt in [*node.body, *node.orelse]:
             self.visit(stmt)
+        self.varying.pop()
         self.rebound.pop()
         self.loop_depth -= 1
 
@@ -244,6 +349,7 @@ class _Visitor(ast.NodeVisitor):
         first, *rest = node.generators
         self.visit(first.iter)  # the outermost iterable is evaluated once
         self.loop_depth += 1
+        self.varying.append(None)
         self.visit(first.target)
         for cond in first.ifs:
             self.visit(cond)
@@ -254,6 +360,7 @@ class _Visitor(ast.NodeVisitor):
             self.visit(node.value)
         else:
             self.visit(node.elt)
+        self.varying.pop()
         self.loop_depth -= 1
 
     visit_ListComp = _comprehension
@@ -262,7 +369,14 @@ class _Visitor(ast.NodeVisitor):
     visit_DictComp = _comprehension
 
     # -- rules ----------------------------------------------------------
+    def visit_Raise(self, node: ast.Raise) -> None:
+        self.raise_depth += 1
+        self.generic_visit(node)
+        self.raise_depth -= 1
+
     def _hit(self, node: ast.AST, rule: str) -> None:
+        if self.raise_depth:
+            return
         self.sites.append(
             Site(
                 self.path,
@@ -295,13 +409,54 @@ class _Visitor(ast.NodeVisitor):
                 self._hit(node, "list-membership-in-loop")
             elif name == "re.compile":
                 self._hit(node, "regex-compile-in-loop")
-            elif name in {"json.loads", "copy.deepcopy", "deepcopy"}:
+            elif name in {"json.loads", "copy.deepcopy", "deepcopy"} or (
+                name in {"copy.copy", "dataclasses.replace"}
+                and self._loop_invariant_first_arg(node)
+            ):
                 self._hit(node, "parse-or-copy-in-loop")
             elif (
                 name.startswith("subprocess.")
                 and name.split(".", 1)[1] in _SUBPROCESS_CALLS
             ):
                 self._hit(node, "subprocess-in-loop")
+            elif self._sorts_loop_invariant(node, name):
+                self._hit(node, "sort-in-loop")
+        self.generic_visit(node)
+
+    def _loop_invariant_first_arg(self, node: ast.Call) -> bool:
+        varying = self.varying[-1] if self.varying else None
+        return (
+            varying is not None
+            and bool(node.args)
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id not in varying
+        )
+
+    def _sorts_loop_invariant(self, node: ast.Call, name: str) -> bool:
+        varying = self.varying[-1] if self.varying else None
+        if varying is None:
+            return False
+        if name == "sorted" and node.args and isinstance(node.args[0], ast.Name):
+            target = node.args[0].id
+        elif (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "sort"
+            and not node.args
+            and isinstance(node.func.value, ast.Name)
+        ):
+            target = node.func.value.id
+        else:
+            return False
+        return target not in varying
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        if (
+            self.loop_depth
+            and isinstance(node.op, ast.Add)
+            and isinstance(node.target, ast.Name)
+            and node.target.id in self.str_names[-1]
+        ):
+            self._hit(node, "str-concat-in-loop")
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:

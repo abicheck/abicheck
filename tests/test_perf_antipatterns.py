@@ -89,6 +89,23 @@ def _rules(src: str) -> list[str]:
             "import subprocess\ndef f(xs):\n    for x in xs:\n        subprocess.run(['echo', x])\n",
             "subprocess-in-loop",
         ),
+        (
+            "def f(xs, pool):\n    for x in xs:\n        y = sorted(pool)\n",
+            "sort-in-loop",
+        ),
+        ("def f(xs, pool):\n    for x in xs:\n        pool.sort()\n", "sort-in-loop"),
+        (
+            "def f(xs):\n    out = ''\n    for x in xs:\n        out += x\n",
+            "str-concat-in-loop",
+        ),
+        (
+            "import copy\ndef f(xs, base):\n    for x in xs:\n        copy.copy(base)\n",
+            "parse-or-copy-in-loop",
+        ),
+        (
+            "import dataclasses\ndef f(xs, base):\n    for x in xs:\n        dataclasses.replace(base, v=x)\n",
+            "parse-or-copy-in-loop",
+        ),
     ],
 )
 def test_rule_fires_on_its_shape(src: str, rule: str) -> None:
@@ -116,6 +133,19 @@ def test_rule_fires_on_its_shape(src: str, rule: str) -> None:
         "def f(cs):\n    for c in cs:\n        key = (c,)\n        key = key + (1,)\n",
         # in-place growth is amortized O(1)
         "def f(xs):\n    acc = []\n    for x in xs:\n        acc += [x]\n        acc.append(x)\n",
+        # sorting each item's own small value, for deterministic output
+        "def f(items):\n    for it in items:\n        ', '.join(sorted(it.names))\n",
+        # the sorted collection changes every iteration
+        "def f(xs):\n    acc = []\n    for x in xs:\n        acc.append(x)\n        top = sorted(acc)\n",
+        # sorted in a comprehension element is per-element by construction
+        "def f(groups):\n    return [sorted(g) for g in groups]\n",
+        # an error path runs at most once
+        "def f(xs, known):\n    for x in xs:\n        if x not in known:\n            raise ValueError(sorted(known))\n",
+        # += on a number is not string concatenation
+        "def f(xs):\n    total = 0\n    for x in xs:\n        total += x\n",
+        # each item copied once is linear
+        "import dataclasses\ndef f(xs):\n    return [dataclasses.replace(x, v=1) for x in xs]\n",
+        "import copy\ndef f(xs):\n    for x in xs:\n        copy.copy(x)\n",
         # module-level hoisted compile
         "import re\nPAT = re.compile('x')\ndef f(xs):\n    return [PAT.match(x) for x in xs]\n",
     ],
